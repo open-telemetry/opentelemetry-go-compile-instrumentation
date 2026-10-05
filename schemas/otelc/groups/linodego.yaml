@@ -1,0 +1,56 @@
+groups:
+  # ---------------------------------------------------------------------------
+  # linodego (v2) instrumentation emission contract.
+  #
+  # Source of truth for this file:
+  #   instrumentation/github.com/linode/linodego/v2/hook.go
+  #   instrumentation/github.com/linode/linodego/v2/public_method.go
+  #   instrumentation/github.com/linode/linodego/v2/semconv/client.go
+  #
+  # Two CLIENT span layers:
+  #   - Public *Client methods (GetInstance, …): span name linodego.<Method>
+  #   - (*Client).doRequest: span name "{METHOD} {endpoint}"
+  #
+  # Metrics: public API latency histogram with moderate-cardinality labels
+  # (operation name, status code, server). Raw paths with resource IDs are
+  # not used as metric labels — those stay on spans only.
+  # ---------------------------------------------------------------------------
+
+  - id: span.otelc.linodego.client.request
+    type: span
+    span_kind: client
+    stability: development
+    brief: linodego HTTP request span (doRequest), one per underlying HTTP call.
+    attributes:
+      - ref: http.request.method
+      - ref: url.path
+      - ref: server.address
+      # code.function.name is intentionally omitted: public API identity lives on
+      # operation spans (linodego.<Method>), not on every doRequest span.
+      - ref: http.response.status_code
+      - ref: error.type
+
+  - id: span.otelc.linodego.client.operation
+    type: span
+    span_kind: client
+    stability: development
+    brief: linodego public Client API operation span, one per exported method call.
+    attributes:
+      - ref: server.address
+      - ref: code.function.name
+      - ref: http.response.status_code
+      - ref: error.type
+
+  - id: metric.otelc.linodego.client.operation.duration
+    type: metric
+    metric_name: linodego.client.operation.duration
+    instrument: histogram
+    unit: s
+    stability: development
+    brief: >
+      Duration of linodego public Client API operations. Labeled by operation name and HTTP status when known; not by URL
+      paths that embed resource IDs.
+    attributes:
+      - ref: server.address
+      - ref: code.function.name
+      - ref: http.response.status_code

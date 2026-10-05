@@ -1,7 +1,7 @@
 <div align="center">
   <img src="./docs/assets/otel-logo.png" alt="OpenTelemetry Logo" width="500" />
   <br />
-  <img src="https://img.shields.io/badge/Go-1.25%2B-4A90E2?style=flat&logo=go" alt="Go" />
+  <img src="https://img.shields.io/badge/Go-1.26%2B-4A90E2?style=flat&logo=go" alt="Go" />
   <img src="https://img.shields.io/badge/License-Apache%202.0-4A90E2?style=flat&logo=apache" alt="License" />
   <img src="https://img.shields.io/badge/Status-Stable-4A90E2?style=flat&logo=github" alt="Status" />
   <img src="https://img.shields.io/badge/Slack-CNCF-FF6B35?style=flat&logo=slack" alt="Slack" />
@@ -14,7 +14,7 @@ It modifies the Go build process to inject OpenTelemetry code into the applicati
 
 Highlights:
 
-- **Zero Runtime Overhead** - Instrumentation is baked into your binary at compile time
+- **Zero Runtime Overhead[^1]** - Instrumentation is baked into your binary at compile time
 - **Zero Code Changes** - Automatically instrument entire applications and dependencies
 - **Third-Party Library Support** - Instrument libraries you don't control
 - **Complete Decoupling** - Keep your codebase free from instrumentation concerns
@@ -75,19 +75,20 @@ make test
 - [GitHub Discussions](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/discussions) - Ask questions
 - [GitHub Issues](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues) - Report bugs
 - [Slack Channel](https://cloud-native.slack.com/archives/C088D8GSSSF) - Real-time chat
-- [Calendar](https://github.com/open-telemetry/community/#sig-go-compile-instrumentation) - Community meetings (Thursdays, UTC: 08:00 – 09:00)
+- [Calendar](https://github.com/open-telemetry/community/#sig-go-compile-instrumentation) - Community meetings (Thursdays, UTC: 09:30 – 10:30)
 
 ## Contributing
 
 We welcome contributions! See our [contributing guide](CONTRIBUTING.md) and [development docs](./docs/).
 
 This project follows the [OpenTelemetry Code of Conduct](https://github.com/open-telemetry/community/blob/main/code-of-conduct.md).
-Please also review our [AI usage policy](AI_POLICY.md) if you use AI tools in your workflow.
+Please also review our [AI usage policy](docs/AI_POLICY.md) if you use AI tools in your workflow.
 
 Here is a list of community roles with current and previous members:
 
 ### Maintainers
 
+- [Azhar Momin](https://github.com/amazingakai), Independent
 - [Dario Castañe](https://github.com/darccio), Datadog
 - [Haibin Zhang](https://github.com/NameHaibinZhang), Alibaba
 - [Huxing Zhang](https://github.com/ralf0131), Alibaba
@@ -99,8 +100,6 @@ Here is a list of community roles with current and previous members:
 For more information about the maintainer role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#maintainer).
 
 ### Approvers
-
-- [Azhar Momin](https://github.com/amazingakai), Independent
 
 For more information about the approver role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#approver).
 
@@ -119,3 +118,5 @@ For more information about the emeritus role, see the
 <a href="https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/graphs/contributors">
   <img alt="Repo contributors" src="https://contrib.rocks/image?repo=open-telemetry/opentelemetry-go-compile-instrumentation" />
 </a>
+
+[^1]: No additional overhead from the instrumentation tool itself, on top of the overhead incurred by the injected [OpenTelemetry SDK](https://github.com/open-telemetry/opentelemetry-go/tree/736a14fcdca28b8cf5237e6b9b166ec6ed832bf7/sdk) code.

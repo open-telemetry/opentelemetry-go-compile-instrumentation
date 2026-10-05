@@ -70,7 +70,7 @@ automatically, instrumented binaries emit telemetry by default. If spans do not 
 your backend, the issue is typically exporter configuration, not instrumentation:
 
 - Verify the exporter endpoint: `OTEL_EXPORTER_OTLP_ENDPOINT`
-- Verify the exporter protocol: `OTEL_EXPORTER_OTLP_PROTOCOL` (default: `grpc`)
+- Verify the exporter protocol: `OTEL_EXPORTER_OTLP_PROTOCOL` (default: `http/protobuf`)
 - Check sampler settings: `OTEL_TRACES_SAMPLER` (default: `parentbased_always_on`)
 
 The [OTel SDK environment variables](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/)

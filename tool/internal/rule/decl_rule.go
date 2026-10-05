@@ -4,10 +4,12 @@
 package rule
 
 import (
+	"go/parser"
 	"strings"
 
+	"github.com/valyala/fasttemplate"
 	"go.opentelemetry.io/otelc/tool/ex"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // InstDeclRule represents a rule that matches a named top-level declaration
@@ -36,22 +38,10 @@ import (
 type InstDeclRule struct {
 	InstBaseRule `yaml:",inline"`
 
-	// Kind optionally constrains the kind of declaration to match.
-	// Valid values: "func", "var", "const", "type", or "" (match any).
-	Kind string `json:"kind" yaml:"kind"` // empty = matches any kind
-
-	// Identifier is the name of the top-level declaration to match.
-	Identifier string `json:"identifier" yaml:"identifier"`
-
-	// Replace is a Go expression to assign as the value of the matched var or
-	// const declaration. Mutually exclusive with Wrap.
-	Replace string `json:"replace" yaml:"replace"`
-
-	// Wrap wraps the existing initializer of the matched var or const
-	// declaration using a template. {{ . }} is substituted with the original
-	// expression. Mutually exclusive with Replace. An error is returned at
-	// instrumentation time if the declaration has no initializer.
-	Wrap string `json:"wrap,omitempty" yaml:"wrap,omitempty"`
+	Kind       string `json:"kind"           yaml:"kind"`
+	Identifier string `json:"identifier"     yaml:"identifier"`
+	Replace    string `json:"replace"        yaml:"replace"`
+	Wrap       string `json:"wrap,omitempty" yaml:"wrap,omitempty"`
 }
 
 // NewInstDeclRule loads and validates an InstDeclRule from YAML data.
@@ -106,11 +96,24 @@ func (r *InstDeclRule) validate() error {
 		return ex.Newf("replace and wrap are mutually exclusive")
 	}
 
+	if hasReplace {
+		if _, err := parser.ParseExpr(r.Replace); err != nil {
+			return ex.Wrapf(err, "invalid replace expression syntax: %q", r.Replace)
+		}
+	}
+
 	if hasWrap {
 		if !replacePlaceholderPattern.MatchString(r.Wrap) {
 			return ex.Newf(
 				"wrap template must contain {{ . }} placeholder (also accepts {{.}}, {{- . -}}, etc.)",
 			)
+		}
+		if _, err := fasttemplate.NewTemplate(r.Wrap, "{{", "}}"); err != nil {
+			return ex.Wrapf(err, "invalid wrap template syntax: %q", r.Wrap)
+		}
+		dummyExpr := replacePlaceholderPattern.ReplaceAllString(r.Wrap, "__otelc_orig__")
+		if _, err := parser.ParseExpr(dummyExpr); err != nil {
+			return ex.Wrapf(err, "invalid wrap expression syntax: %q", r.Wrap)
 		}
 	}
 

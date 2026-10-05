@@ -37,12 +37,15 @@ func (d *Dependency) String() string {
 
 // parseCdDir extracts the directory path from a "cd" command line.
 func parseCdDir(line string) (string, bool) {
-	if !strings.HasPrefix(strings.ToLower(line), "cd") {
+	const prefix = "cd "
+	if !strings.HasPrefix(strings.ToLower(line), prefix) {
 		return "", false
 	}
-	const cdCommandSplitLimit = 2 // Split "cd dir" into [dir, rest] to ignore trailing comments
-	parts := strings.SplitN(line[3:], " ", cdCommandSplitLimit)
-	return strings.TrimSpace(parts[0]), true
+	dir := strings.TrimSpace(line[len(prefix):])
+	if dir == "" {
+		return "", false
+	}
+	return dir, true
 }
 
 // findCommands scans the build plan log and returns relevant commands
@@ -72,6 +75,20 @@ func findCommands(buildPlanLog *os.File) ([]string, error) {
 	return commands, nil
 }
 
+// disableJSONOutput keeps the build plan on stderr as shell commands.
+// Retain the flag position: removing a flag after go test's package list
+// could turn a test-binary argument into another package target.
+func disableJSONOutput(subcommand string, args []string) []string {
+	out := make([]string, len(args))
+	copy(out, args)
+	for _, arg := range classifyArgs(subcommand, args) {
+		if arg.Kind == ArgBuildFlag && arg.FlagName == flagJSON {
+			out[arg.Index] = "-json=false"
+		}
+	}
+	return out
+}
+
 // listBuildPlan lists the build plan by running `go build -a -x -n`
 // and then filtering the commands (cd, cgo, compile) from the build plan log.
 func listBuildPlan(ctx context.Context, subcommand string, cmdArgs []string) ([]string, error) {
@@ -93,11 +110,12 @@ func listBuildPlan(ctx context.Context, subcommand string, cmdArgs []string) ([]
 	if subcommand == subcmdTest {
 		planVerb = subcmdTest
 	}
-	// The full command is: "go build/test -a -x -n {...}"
-	prefix := []string{planVerb, "-a", "-x", "-n"}
-	args := make([]string, 0, len(prefix)+len(cmdArgs))
-	args = append(args, prefix...)
-	args = append(args, cmdArgs...) // args from original build/install or setup command
+	// The full command is: "go build/test [-C dir] -a -x -n {...}"
+	planArgs := disableJSONOutput(subcommand, cmdArgs)
+	planFlags := []string{"-a", "-x", "-n"}
+	args := make([]string, 0, len(planArgs)+len(planFlags)+1)
+	args = append(args, planVerb)
+	args = append(args, addBuildFlags(planArgs, planFlags...)...)
 	logger.InfoContext(ctx, "go build command", "args", args)
 
 	cmd := execCommandContext(ctx, "go", args...)
@@ -147,7 +165,7 @@ func resolveCgoFile(cgoFile, sourceDir string) (string, error) {
 	return abs, nil
 }
 
-var versionRegexp = regexp.MustCompile(`@v\d+\.\d+\.\d+(-.*?)?/`)
+var versionRegexp = regexp.MustCompile(`@v\d+\.\d+\.\d+([-+][^/]*)?/`)
 
 func findModVersion(path string) string {
 	version := versionRegexp.FindString(filepath.ToSlash(path))

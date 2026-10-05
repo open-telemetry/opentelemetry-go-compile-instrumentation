@@ -14,6 +14,8 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -116,6 +118,87 @@ func compactHandler(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("ok"))
 }
 
+// liveCapHandler exercises the per-goroutine OTEL_GLS_MAX_SPANS cap when the
+// stack is full of genuinely live (unended) spans, unlike compactHandler
+// where ended spans below the top get compacted away to make room.
+//
+// The handler goroutine does not start empty: the net/http server
+// instrumentation has already pushed its own span for this request. So the cap
+// has to be OTEL_GLS_MAX_SPANS=2 for this scenario to be about "live-second" —
+// the server span plus "live-first" fill the stack, and "live-second" is the
+// one that can never be admitted. Implicit lookups must then keep returning
+// "live-first" (stale but observable) rather than something undefined, and the
+// drop must be logged instead of silent.
+//
+// At OTEL_GLS_MAX_SPANS=1 the server span alone already fills the stack, so
+// both spans below are dropped and the lookup returns the server span instead.
+func liveCapHandler(w http.ResponseWriter, r *http.Request) {
+	_, first := otel.Tracer("livecap").Start(context.Background(), "live-first")
+	_, second := otel.Tracer("livecap").Start(context.Background(), "live-second")
+
+	active := trace.SpanFromContext(context.Background())
+	staleParent := active.SpanContext().IsValid() && active.SpanContext().SpanID() == first.SpanContext().SpanID()
+	fmt.Printf("OTEL_SDK_LIVECAP: stale-parent-is-first=%t\n", staleParent)
+
+	second.End()
+	first.End()
+
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok"))
+}
+
+// evictionHandler exercises the shared spanStates eviction bound
+// (OTEL_GLS_MAX_SPAN_STATES=2). "span-a" is started first on this goroutine
+// and deliberately never ended here, standing in for a span that is still
+// genuinely in flight elsewhere. "span-b" and "span-c" are then started on a
+// second goroutine, which pushes the shared state map over the limit and
+// forces an eviction. Eviction must always drop the oldest entry
+// ("span-a") deterministically; it must never touch "span-b", which is
+// younger and still live.
+func evictionHandler(w http.ResponseWriter, r *http.Request) {
+	_, spanA := otel.Tracer("eviction").Start(context.Background(), "span-a")
+	spanAValidBefore := trace.SpanFromContext(context.Background()).SpanContext().IsValid()
+	fmt.Printf("OTEL_SDK_EVICT: span-a valid before eviction=%t\n", spanAValidBefore && spanA.SpanContext().IsValid())
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, spanB := otel.Tracer("eviction").Start(context.Background(), "span-b")
+		_, spanC := otel.Tracer("eviction").Start(context.Background(), "span-c")
+		spanC.End()
+
+		// span-c ended and was spliced out, so the local stack's tail is
+		// span-b, unless span-b was wrongly evicted alongside span-a.
+		survivor := trace.SpanFromContext(context.Background())
+		spanBSurvived := survivor.SpanContext().IsValid() && survivor.SpanContext().SpanID() == spanB.SpanContext().SpanID()
+		fmt.Printf("OTEL_SDK_EVICT: span-b survived=%t\n", spanBSurvived)
+		spanB.End()
+	}()
+	<-done
+
+	// span-a was never ended by this handler, but the eviction triggered by
+	// span-b/span-c above should have marked it ended for every goroutine
+	// still holding it, including this one.
+	afterEviction := trace.SpanFromContext(context.Background())
+	fmt.Printf("OTEL_SDK_EVICT: span-a evicted=%t\n", !afterEviction.SpanContext().IsValid())
+
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok"))
+}
+
+// requestedPaths returns the endpoints to exercise, controlled by the
+// OTELSDK_PATHS env var (comma-separated). It defaults to the original
+// scenario set. livecap and evict tune OTEL_GLS_MAX_SPANS /
+// OTEL_GLS_MAX_SPAN_STATES to values that would break the other scenarios in
+// the same process, so tests that need them run this binary with a separate
+// OTELSDK_PATHS selection instead of mixing them into one run.
+func requestedPaths() []string {
+	if v := os.Getenv("OTELSDK_PATHS"); v != "" {
+		return strings.Split(v, ",")
+	}
+	return []string{"otel", "worker", "compact"}
+}
+
 func main() {
 	flag.Parse()
 	addr := fmt.Sprintf(":%s", *port)
@@ -126,6 +209,8 @@ func main() {
 	http.HandleFunc("/otel", otelHandler)       // cross-goroutine propagation via GLS clone
 	http.HandleFunc("/worker", workerHandler)   // ended span is invisible on a reused goroutine
 	http.HandleFunc("/compact", compactHandler) // ended spans don't count against OTEL_GLS_MAX_SPANS
+	http.HandleFunc("/livecap", liveCapHandler) // live spans past OTEL_GLS_MAX_SPANS are dropped, not admitted
+	http.HandleFunc("/evict", evictionHandler)  // spanStates eviction always drops the oldest entry
 
 	// End the /otel span on a goroutine that never held it in GLS, so removal
 	// happens only through the shared ended flag (see otelHandler).
@@ -145,7 +230,7 @@ func main() {
 		}
 	}()
 
-	for _, path := range []string{"otel", "worker", "compact"} {
+	for _, path := range requestedPaths() {
 		resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%s/%s", *port, path))
 		if err != nil {
 			log.Fatalf("request to %s failed: %v", path, err)

@@ -4,7 +4,6 @@
 package k8s_client_go
 
 import (
-	"context"
 	"sync"
 	"testing"
 
@@ -152,7 +151,7 @@ func TestGetObjectInfo(t *testing.T) {
 }
 
 func TestNewK8SOtelHandler(t *testing.T) {
-	handler := newK8SOtelEventHandler(cache.ResourceEventHandlerFuncs{}, context.TODO())
+	handler := newK8SOtelEventHandler(cache.ResourceEventHandlerFuncs{}, t.Context())
 	assert.NotNil(t, handler)
 }
 
@@ -161,7 +160,7 @@ func TestOnAdd(t *testing.T) {
 	sr, _ := setupTestTracer(t)
 	initInstrumentation()
 
-	handler := newK8SOtelEventHandler(cache.ResourceEventHandlerFuncs{}, context.TODO())
+	handler := newK8SOtelEventHandler(cache.ResourceEventHandlerFuncs{}, t.Context())
 	handler.OnAdd(&corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-pod",
@@ -197,7 +196,7 @@ func TestOnUpdate(t *testing.T) {
 	sr, _ := setupTestTracer(t)
 	initInstrumentation()
 
-	handler := newK8SOtelEventHandler(cache.ResourceEventHandlerFuncs{}, context.TODO())
+	handler := newK8SOtelEventHandler(cache.ResourceEventHandlerFuncs{}, t.Context())
 	handler.OnUpdate(&corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-pod",
@@ -242,7 +241,7 @@ func TestOnDelete(t *testing.T) {
 	sr, _ := setupTestTracer(t)
 	initInstrumentation()
 
-	handler := newK8SOtelEventHandler(cache.ResourceEventHandlerFuncs{}, context.TODO())
+	handler := newK8SOtelEventHandler(cache.ResourceEventHandlerFuncs{}, t.Context())
 	handler.OnDelete(&corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-pod",
@@ -271,4 +270,55 @@ func TestOnDelete(t *testing.T) {
 	assert.Equal(t, "test-node", attrMap["k8s.node.name"])
 	assert.Equal(t, "v1", attrMap["k8s.object.api_version"])
 	assert.Equal(t, "Pod", attrMap["k8s.object.kind"])
+}
+
+// TestOnDelete_TombstoneForwardsWrappedObject verifies that when client-go
+// delivers a DeletedFinalStateUnknown tombstone (a missed watch event during
+// a resync, so the delete is inferred rather than confirmed), the wrapper is
+// still what reaches the user's own handler. The unwrapped object is only
+// used locally to build span attributes; forwarding the unwrapped value
+// would silently hide the tombstone from application code that specifically
+// checks for it.
+func TestOnDelete_TombstoneForwardsWrappedObject(t *testing.T) {
+	initOnce = *new(sync.Once)
+	sr, _ := setupTestTracer(t)
+	initInstrumentation()
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			UID:       "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+			Namespace: corev1.NamespaceDefault,
+		},
+		Spec: corev1.PodSpec{
+			NodeName: "test-node",
+		},
+	}
+	tombstone := cache.DeletedFinalStateUnknown{Key: "default/test-pod", Obj: pod}
+
+	var forwarded any
+	inner := cache.ResourceEventHandlerFuncs{
+		DeleteFunc: func(obj any) {
+			forwarded = obj
+		},
+	}
+
+	handler := newK8SOtelEventHandler(inner, t.Context())
+	handler.OnDelete(tombstone)
+
+	gotTombstone, ok := forwarded.(cache.DeletedFinalStateUnknown)
+	require.True(t, ok, "wrapped handler should receive the DeletedFinalStateUnknown wrapper, got %T", forwarded)
+	assert.Same(t, pod, gotTombstone.Obj)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	span := spans[0]
+	assert.Equal(t, "k8s.informer.pod.delete", span.Name())
+
+	attrMap := make(map[string]any)
+	for _, attr := range span.Attributes() {
+		attrMap[string(attr.Key)] = attr.Value.AsInterface()
+	}
+	assert.Equal(t, "test-pod", attrMap["k8s.pod.name"], "span attributes should still reflect the unwrapped object")
+	assert.Equal(t, "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", attrMap["k8s.pod.uid"])
 }

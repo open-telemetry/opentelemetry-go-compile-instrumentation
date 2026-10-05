@@ -5,18 +5,23 @@ package anthropic
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	otelsemconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 	"go.opentelemetry.io/otel/trace"
 
 	"go.opentelemetry.io/otelc/instrumentation/github.com/anthropics/anthropic-sdk-go/semconv"
+	"go.opentelemetry.io/otelc/pkg/netutil"
 	"go.opentelemetry.io/otelc/pkg/runtime"
 )
 
@@ -46,13 +51,16 @@ type operationType int
 
 const (
 	opMessages operationType = iota
+	opCountTokens
 	opUnknown
 )
 
-// classifyOperation maps a request path to an operation. Only the Messages API
-// (POST /v1/messages) is instrumented; the suffix match excludes
-// /v1/messages/count_tokens and /v1/messages/batches.
+// classifyOperation maps a request path to an operation.
+// /v1/messages/batches stays uninstrumented.
 func classifyOperation(path string) operationType {
+	if strings.HasSuffix(path, "/messages/count_tokens") {
+		return opCountTokens
+	}
 	if strings.HasSuffix(path, "/messages") {
 		return opMessages
 	}
@@ -62,6 +70,10 @@ func classifyOperation(path string) operationType {
 func operationName(op operationType) string {
 	if op == opMessages {
 		return "chat"
+	}
+	if op == opCountTokens {
+		// GenAI semconv has no standard name for token counting yet.
+		return "count_tokens"
 	}
 	return ""
 }
@@ -99,6 +111,15 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 
 		model, isStream, spanAttrs := parseMessagesRequest(bodyBytes)
 
+		// An empty model means the body was not valid JSON (e.g. truncated by
+		// maxRequestBodySize) or omitted the field entirely. Either way there
+		// is nothing meaningful to attach to a span, so pass the request
+		// through rather than emit a "chat " span with an empty
+		// gen_ai.request.model.
+		if model == "" {
+			return next(req)
+		}
+
 		// Streaming responses need event accumulation before their spans carry
 		// usage data; until that lands (#679, follow-up PR), pass streaming
 		// requests through uninstrumented rather than emit incomplete spans.
@@ -114,6 +135,13 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 			semconv.GenAIProviderName(provider),
 		}
 		spanAttrs = append(baseAttrs, spanAttrs...)
+		serverAddress, serverPort := netutil.HTTPServerEndpoint(req.URL)
+		if serverAddress != "" && serverPort > 0 {
+			spanAttrs = append(spanAttrs,
+				otelsemconv.ServerAddress(serverAddress),
+				otelsemconv.ServerPort(serverPort),
+			)
+		}
 
 		ctx := req.Context()
 		ctx, span := tracer.Start(ctx, spanName,
@@ -123,43 +151,58 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 		ctx = runtime.SuppressHTTPClientInstrumentation(ctx)
 		req = req.WithContext(ctx)
 
+		// Record the operation duration on every exit path below (success,
+		// transport error, HTTP error, or SSE fallback). Registered here so it
+		// only fires once a span exists, never for the pass-through returns
+		// above. errorAttrs holds the error.type attribute on error paths and
+		// is empty on success.
+		var errorAttrs []attribute.KeyValue
+		defer func() {
+			if operationDuration != nil {
+				attrs := slices.Concat(baseAttrs, errorAttrs)
+				operationDuration.Record(ctx, time.Since(start).Seconds(),
+					metric.WithAttributes(attrs...))
+			}
+		}()
+
 		resp, err := next(req)
 		if err != nil {
+			errorTypeAttr := otelsemconv.ErrorType(err)
 			span.SetStatus(codes.Error, err.Error())
 			span.RecordError(err)
+			span.SetAttributes(errorTypeAttr)
 			span.End()
+			errorAttrs = []attribute.KeyValue{errorTypeAttr}
 			return resp, err
 		}
 
 		if resp.StatusCode >= 400 {
+			errorTypeAttr := otelsemconv.ErrorTypeKey.String(strconv.Itoa(resp.StatusCode))
+			span.RecordError(errors.New(resp.Status))
 			span.SetStatus(codes.Error, resp.Status)
-			span.SetAttributes(attribute.String("error.type", resp.Status))
+			span.SetAttributes(errorTypeAttr)
 			span.End()
+			errorAttrs = []attribute.KeyValue{errorTypeAttr}
 			return resp, nil
 		}
 
 		// Streaming requests were already passed through above; if the server
 		// still answers with SSE, end the span without response attributes
 		// rather than hold it open on a body we do not accumulate yet.
-		contentType := resp.Header.Get("Content-Type")
-		if strings.HasPrefix(contentType, "text/event-stream") {
+		contentType := strings.TrimSpace(strings.SplitN(resp.Header.Get("Content-Type"), ";", 2)[0])
+		if strings.EqualFold(contentType, "text/event-stream") {
 			span.SetAttributes(semconv.GenAIRequestIsStream(true))
 			span.End()
 			return resp, nil
 		}
 
-		handleNonStreamingResponse(ctx, resp, span, start)
+		handleNonStreamingResponse(resp, span, op)
 
 		return resp, nil
 	}
 }
 
-func handleNonStreamingResponse(
-	_ context.Context,
-	resp *http.Response,
-	span trace.Span,
-	_ time.Time,
-) {
+func handleNonStreamingResponse(resp *http.Response, span trace.Span, op operationType) {
 	defer span.End()
 
 	if resp.Body == nil {
@@ -179,7 +222,21 @@ func handleNonStreamingResponse(
 		return
 	}
 
+	if op == opCountTokens {
+		parseCountTokensResponse(bodyBytes, span)
+		return
+	}
 	parseMessagesResponse(bodyBytes, span)
+}
+
+func parseCountTokensResponse(body []byte, span trace.Span) {
+	var resp struct {
+		InputTokens int64 `json:"input_tokens"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return
+	}
+	span.SetAttributes(semconv.GenAIUsageInputTokens(resp.InputTokens))
 }
 
 func parseMessagesRequest(body []byte) (string, bool, []attribute.KeyValue) {

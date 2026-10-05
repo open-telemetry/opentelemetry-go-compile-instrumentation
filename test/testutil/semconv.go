@@ -106,6 +106,26 @@ func RequireGRPCServerSemconv(t *testing.T, span ptrace.Span, rpcService, rpcMet
 	RequireAttribute(t, span, string(semconv.RPCGRPCStatusCodeKey), grpcStatusCode)
 }
 
+// RequireElasticsearchClientSemconv verifies that an Elasticsearch client span
+// follows semantic conventions.
+// Reference: https://opentelemetry.io/docs/specs/semconv/database/elasticsearch/
+func RequireElasticsearchClientSemconv(
+	t *testing.T,
+	span ptrace.Span,
+	operationName, index, method, urlPath string,
+	statusCode int64,
+) {
+	RequireAttribute(t, span, string(semconv.DBSystemNameKey), "elasticsearch")
+	RequireAttribute(t, span, string(semconv.DBOperationNameKey), operationName)
+	if index != "" {
+		RequireAttribute(t, span, string(semconv.DBCollectionNameKey), index)
+	}
+	RequireAttribute(t, span, string(semconv.NetworkTransportKey), "tcp")
+	RequireAttribute(t, span, string(semconv.HTTPRequestMethodKey), method)
+	RequireAttribute(t, span, string(semconv.URLPathKey), urlPath)
+	RequireAttribute(t, span, string(semconv.DBResponseStatusCodeKey), strconv.FormatInt(statusCode, 10))
+}
+
 // RequireRedisClientSemconv verifies that a Redis client span follows semantic conventions.
 // Reference: https://opentelemetry.io/docs/specs/semconv/database/redis/
 func RequireRedisClientSemconv(
@@ -136,17 +156,29 @@ func RequireRedisClientSemconv(
 func RequireGenAIClientSemconv(
 	t *testing.T,
 	span ptrace.Span,
-	system, operationName, requestModel, providerName string,
+	system, operationName, requestModel, providerName, serverEndpoint string,
 	responseID, responseModel string,
 	finishReasons []string,
 	inputTokens, outputTokens, totalTokens int64,
 ) {
+	serverAddress, portText, err := net.SplitHostPort(serverEndpoint)
+	if err != nil {
+		t.Fatalf("split GenAI server endpoint %q: %v", serverEndpoint, err)
+	}
+	serverPort, err := strconv.ParseInt(portText, 10, 64)
+	if err != nil {
+		t.Fatalf("parse GenAI server port %q: %v", portText, err)
+	}
+
 	// Required attributes
 	RequireAttribute(t, span, "gen_ai.system", system)
 	RequireAttribute(t, span, "gen_ai.operation.name", operationName)
 	RequireAttribute(t, span, "gen_ai.request.model", requestModel)
 	// Recommended attributes
 	RequireAttribute(t, span, "gen_ai.provider.name", providerName)
+	RequireAttribute(t, span, string(semconv.ServerAddressKey), serverAddress)
+	// Conditionally required whenever server.address is set.
+	RequireAttribute(t, span, string(semconv.ServerPortKey), serverPort)
 	RequireAttribute(t, span, "gen_ai.response.id", responseID)
 	RequireAttribute(t, span, "gen_ai.response.model", responseModel)
 	if len(finishReasons) > 0 {
@@ -174,4 +206,17 @@ func RequireK8SClientSemconv(
 	RequireAttribute(t, span, string(semconv.K8SNamespaceNameKey), "default")
 	RequireAttribute(t, span, "k8s.object.kind", "Pod")
 	RequireAttribute(t, span, "k8s.object.api_version", "v1")
+}
+
+// RequireAWSClientSemconv verifies that an AWS SDK client span follows semantic conventions.
+// Reference: https://opentelemetry.io/docs/specs/semconv/cloud-providers/aws-sdk/
+func RequireAWSClientSemconv(
+	t *testing.T,
+	span ptrace.Span,
+	requestID string,
+) {
+	// Required attributes
+	RequireAttribute(t, span, "rpc.system.name", "aws-api")
+	// Recommended attributes
+	RequireAttribute(t, span, "aws.request_id", requestID)
 }

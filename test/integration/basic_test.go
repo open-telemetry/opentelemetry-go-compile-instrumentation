@@ -24,7 +24,7 @@ func TestBasic(t *testing.T) {
 	testutil.Build(t, appsDir, "basic", "go", "build", "-a")
 	output := testutil.Run(t, appsDir, "basic", nil)
 	expect := []string{
-		"Every1",
+		"Every2",
 		"Every3",
 		"MyStruct.Example",
 		"MyStruct.Example2",

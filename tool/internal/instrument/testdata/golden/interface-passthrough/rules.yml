@@ -1,0 +1,9 @@
+hook_interface_passthrough:
+  target: main
+  where:
+    func: InterfacePassthrough
+  do:
+    - inject_hooks:
+        before: H15InterfaceBefore
+        after: H15InterfaceAfter
+        path: testdata/golden/interface-passthrough

@@ -22,6 +22,7 @@ func TestKafkaClient(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("kafka testcontainer not supported on windows")
 	}
+	testcontainers.SkipIfProviderIsNotHealthy(t)
 
 	t.Parallel()
 	testutil.Build(t, "", "kafkaproducer", "go", "build", "-a")

@@ -7,8 +7,10 @@ import (
 	"bytes"
 	"go/parser"
 	"go/token"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/dave/dst"
 	"github.com/dave/dst/decorator"
@@ -58,13 +60,13 @@ func (ap *AstParser) Parse(filePath string, mode parser.Mode) (*dst.File, error)
 
 // ParseSnippet parses the AST from incomplete source code snippet.
 func (ap *AstParser) ParseSnippet(source string) ([]dst.Stmt, error) {
-	if source == "" {
+	if strings.TrimSpace(source) == "" {
 		return nil, ex.New("empty source")
 	}
-	snippet := "package main; func _() {" + source + "}"
+	snippet := "package main; func _() {" + source + "\n}"
 	file, err := decorator.ParseFile(ap.fset, "", snippet, 0)
 	if err != nil {
-		return nil, ex.Wrap(err)
+		return nil, ex.Wrapf(err, "can not parse snippet %s", source)
 	}
 	funcDecl := util.AssertType[*dst.FuncDecl](file.Decls[0])
 	return funcDecl.Body.List, nil
@@ -83,10 +85,11 @@ func (ap *AstParser) ParseSource(source string) (*dst.File, error) {
 }
 
 // FindPosition finds the source position of a node in the AST.
+// It returns a zero-value token.Position{} when the node is unmapped.
 func (ap *AstParser) FindPosition(node dst.Node) token.Position {
 	astNode := ap.dec.Ast.Nodes[node]
 	if astNode == nil {
-		return token.Position{Filename: "", Line: -1, Column: -1} // Invalid
+		return token.Position{}
 	}
 	return ap.fset.Position(astNode.Pos())
 }
@@ -97,25 +100,45 @@ func WriteFile(filePath string, root *dst.File) error {
 	if err != nil {
 		return ex.Wrapf(err, "failed to create file %s", filePath)
 	}
-	defer file.Close()
+	return writeFile(file, filePath, root)
+}
+
+func writeFile(w io.WriteCloser, filePath string, root *dst.File) (retErr error) {
+	// The deferred close runs on every return path, including a panic during the write.
+	// The deferred close reports an error only when the write succeeds, so the write error takes priority.
+	defer func() {
+		if closeErr := w.Close(); closeErr != nil && retErr == nil {
+			retErr = ex.Wrapf(closeErr, "failed to close file %s", filePath)
+		}
+	}()
+
 	r := decorator.NewRestorer()
-	err = r.Fprint(file, root)
-	if err != nil {
+	if err := r.Fprint(w, root); err != nil {
 		return ex.Wrapf(err, "failed to write to file %s", filePath)
 	}
 	return nil
 }
 
-// WriteFileAtomic writes the AST to a file atomically.
-func WriteFileAtomic(filePath string, root *dst.File) error {
+// PrintFile renders the AST to source bytes without writing it anywhere.
+func PrintFile(root *dst.File) ([]byte, error) {
 	var buf bytes.Buffer
 
 	r := decorator.NewRestorer()
 	if err := r.Fprint(&buf, root); err != nil {
-		return ex.Wrapf(err, "failed to restore AST for file %s", filePath)
+		return nil, ex.Wrapf(err, "failed to restore AST")
 	}
 
-	return util.WriteFileAtomic(filePath, buf.Bytes())
+	return buf.Bytes(), nil
+}
+
+// WriteFileAtomic writes the AST to a file atomically.
+func WriteFileAtomic(filePath string, root *dst.File) error {
+	data, err := PrintFile(root)
+	if err != nil {
+		return ex.Wrapf(err, "for file %s", filePath)
+	}
+
+	return util.WriteFileAtomic(filePath, data)
 }
 
 // ParsePackageName parses only the package name from a file, skipping

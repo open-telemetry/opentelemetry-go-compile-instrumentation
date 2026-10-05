@@ -44,19 +44,58 @@ func TestOpenAIClient(t *testing.T) {
 			testutil.RequireGenAIClientSemconv(
 				t,
 				span,
-				"openai",            // system
-				"chat",              // operationName
-				tc.model,            // requestModel
-				"local",             // providerName (localhost maps to "local")
-				"chatcmpl-test-123", // responseID
-				tc.model,            // responseModel
-				[]string{"stop"},    // finishReasons
-				10,                  // inputTokens
-				20,                  // outputTokens
-				30,                  // totalTokens
+				"openai",                        // system
+				"chat",                          // operationName
+				tc.model,                        // requestModel
+				"local",                         // providerName (localhost maps to "local")
+				server.Listener.Addr().String(), // serverEndpoint
+				"chatcmpl-test-123",             // responseID
+				tc.model,                        // responseModel
+				[]string{"stop"},                // finishReasons
+				10,                              // inputTokens
+				20,                              // outputTokens
+				30,                              // totalTokens
 			)
 		})
 	}
+}
+
+// TestOpenAIClientV2 exercises the openai-go/v2 instrumentation package end
+// to end via otelc go build, rather than only unit-testing it in isolation.
+// v1 and v3 are otherwise identical shares of the same internal/streaming
+// module (a sibling of v2/v3 nested under v1's own directory in the repo,
+// not a descendant of either), so this is the only integration coverage of
+// the tool actually resolving that shared module for a consumer that never
+// imports v1 at all.
+func TestOpenAIClientV2(t *testing.T) {
+	t.Parallel()
+	testutil.Build(t, "", "openaiclientv2", "go", "build", "-a")
+
+	f := testutil.NewTestFixture(t)
+	server := startMockOpenAIServer(t)
+
+	f.Run("openaiclientv2",
+		fmt.Sprintf("-addr=%s/v1", server.URL),
+		"-api-key=test-key",
+		"-model=gpt-4",
+	)
+
+	span := f.RequireSingleSpan()
+	testutil.RequireGenAIClientSemconv(
+		t,
+		span,
+		"openai",                        // system
+		"chat",                          // operationName
+		"gpt-4",                         // requestModel
+		"local",                         // providerName (localhost maps to "local")
+		server.Listener.Addr().String(), // serverEndpoint
+		"chatcmpl-test-123",             // responseID
+		"gpt-4",                         // responseModel
+		[]string{"stop"},                // finishReasons
+		10,                              // inputTokens
+		20,                              // outputTokens
+		30,                              // totalTokens
+	)
 }
 
 // startMockOpenAIServer creates a mock OpenAI API server for testing.

@@ -5,6 +5,7 @@ package imports
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"strings"
 
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // ImportConfig represents the parsed contents of an importcfg (or importcfg.link) file,
@@ -29,17 +31,27 @@ type ImportConfig struct {
 func ParseImportCfg(filename string) (ImportConfig, error) {
 	file, err := os.Open(filename)
 	if err != nil {
-		return ImportConfig{}, err
+		return ImportConfig{}, ex.Wrapf(err, "opening importcfg file %s", filename)
 	}
 	defer file.Close()
 
 	return parse(file)
 }
 
+// maxImportCfgLineSize is the maximum accepted length of a single importcfg
+// line. bufio.Scanner's default limit is bufio.MaxScanTokenSize (64 KiB),
+// which is too small for large build configurations.
+const maxImportCfgLineSize = 10 << 20 // 10 MiB
+
 // parse parses the importcfg data from the provided reader.
 func parse(r io.Reader) (ImportConfig, error) {
 	var reg ImportConfig
 	scanner := bufio.NewScanner(r)
+	// Allow importcfg lines larger than bufio.MaxScanTokenSize (64 KiB), which
+	// can occur in large build configurations with long package import paths
+	// or complex import maps. Without this, scanning fails with
+	// bufio.ErrTooLong ("token too long").
+	scanner.Buffer(make([]byte, bufio.MaxScanTokenSize), maxImportCfgLineSize)
 	scanner.Split(bufio.ScanLines)
 
 	for scanner.Scan() {
@@ -95,13 +107,26 @@ func parse(r io.Reader) (ImportConfig, error) {
 // WriteFile writes the content of the ImportConfig to the provided file,
 // in the format expected by the Go toolchain commands.
 func (r *ImportConfig) WriteFile(filename string) error {
-	file, err := os.Create(filename)
-	if err != nil {
-		return err
+	var buf bytes.Buffer
+	if err := r.write(&buf); err != nil {
+		return ex.Wrapf(err, "failed to render importcfg for %s", filename)
 	}
-	defer file.Close()
+	return util.WriteFileAtomic(filename, buf.Bytes())
+}
 
-	return r.write(file)
+func (r *ImportConfig) writeFile(w io.WriteCloser, filename string) (retErr error) {
+	// The deferred close runs on every return path, including a panic during the write.
+	// The deferred close reports an error only when the write succeeds, so the write error takes priority.
+	defer func() {
+		if closeErr := w.Close(); closeErr != nil && retErr == nil {
+			retErr = ex.Wrapf(closeErr, "failed to close file %s", filename)
+		}
+	}()
+
+	if err := r.write(w); err != nil {
+		return ex.Wrapf(err, "failed to write to file %s", filename)
+	}
+	return nil
 }
 
 // write writes the content of the ImportConfig to the provided writer,

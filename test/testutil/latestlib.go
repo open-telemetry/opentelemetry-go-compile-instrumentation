@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -36,7 +36,7 @@ type yamlRule struct {
 	Version string `yaml:"version"`
 }
 
-// InstrumentedTargets walks rulesRoot, parses every *.yaml file as an
+// InstrumentedTargets walks rulesRoot, parses every otelc rule file as an
 // instrumentation rule set, and returns instrumented targets mapped
 // to their supported version ranges.
 func InstrumentedTargets(t *testing.T, rulesRoot string) map[string][]string {
@@ -45,16 +45,19 @@ func InstrumentedTargets(t *testing.T, rulesRoot string) map[string][]string {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() || filepath.Ext(path) != ".yaml" {
+		if d.IsDir() || !util.IsRuleFile(d.Name()) {
 			return nil
 		}
 		data, readErr := os.ReadFile(path) //nolint:gosec
 		require.NoError(t, readErr, "read rule file %s", path)
 
-		var rules map[string]yamlRule
-		require.NoError(t, yaml.Unmarshal(data, &rules), "parse rule file %s", path)
+		var entries map[string]yaml.Node
+		require.NoError(t, yaml.Unmarshal(data, &entries), "parse rule file %s", path)
+		delete(entries, "version")
 
-		for _, r := range rules {
+		for name, node := range entries {
+			var r yamlRule
+			require.NoError(t, node.Decode(&r), "parse rule %s in %s", name, path)
 			if r.Target != "" {
 				targets[r.Target] = append(targets[r.Target], r.Version)
 			}

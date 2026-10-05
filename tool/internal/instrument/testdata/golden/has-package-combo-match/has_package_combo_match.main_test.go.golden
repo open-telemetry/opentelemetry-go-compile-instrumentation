@@ -11,11 +11,11 @@ import _ "unsafe"
 // has_package: main_test]. This is the realistic discriminating case: the
 // external test package compiles at import path main_test, the internal test
 // package at main — has_package selects one when the glob matches both.
-func ExternalHelper() (_unnamedRetVal0 error) {
+func ExternalHelper() (_unnamedRetVal_2215449730_0 error) {
 	//line <generated>:1
 	if hookContext2215449730, _ := OtelBeforeTrampoline_ExternalHelper2215449730(); false {
 	} else {
-		defer OtelAfterTrampoline_ExternalHelper2215449730(hookContext2215449730, &_unnamedRetVal0)
+		defer OtelAfterTrampoline_ExternalHelper2215449730(hookContext2215449730, &_unnamedRetVal_2215449730_0)
 	}
 	//line main_test.go:13:2
 	println("external helper")
@@ -38,25 +38,27 @@ func (c *HookContextImpl2215449730) IsSkipCall() bool         { return c.skipCal
 func (c *HookContextImpl2215449730) SetData(data interface{}) { c.data = data }
 func (c *HookContextImpl2215449730) GetData() interface{}     { return c.data }
 func (c *HookContextImpl2215449730) GetKeyData(key string) interface{} {
-	if c.data == nil {
-		return nil
+	if m, ok := c.data.(map[string]interface{}); ok {
+		return m[key]
 	}
-	return c.data.(map[string]interface{})[key]
+	return nil
 }
 
 func (c *HookContextImpl2215449730) SetKeyData(key string, val interface{}) {
-	if c.data == nil {
-		c.data = make(map[string]interface{})
+	m, ok := c.data.(map[string]interface{})
+	if !ok || m == nil {
+		m = make(map[string]interface{})
+		c.data = m
 	}
-	c.data.(map[string]interface{})[key] = val
+	m[key] = val
 }
 
 func (c *HookContextImpl2215449730) HasKeyData(key string) bool {
-	if c.data == nil {
-		return false
+	if m, ok := c.data.(map[string]interface{}); ok {
+		_, ok := m[key]
+		return ok
 	}
-	_, ok := c.data.(map[string]interface{})[key]
-	return ok
+	return false
 }
 
 func (c *HookContextImpl2215449730) GetParam(idx int) interface{} {
@@ -66,10 +68,6 @@ func (c *HookContextImpl2215449730) GetParam(idx int) interface{} {
 }
 
 func (c *HookContextImpl2215449730) SetParam(idx int, val interface{}) {
-	if val == nil {
-		c.params[idx] = nil
-		return
-	}
 	switch idx {
 	}
 }
@@ -83,13 +81,13 @@ func (c *HookContextImpl2215449730) GetReturnVal(idx int) interface{} {
 }
 
 func (c *HookContextImpl2215449730) SetReturnVal(idx int, val interface{}) {
-	if val == nil {
-		c.returnVals[idx] = nil
-		return
-	}
 	switch idx {
 	case 0:
-		*(c.returnVals[0].(*error)) = val.(error)
+		if val == nil {
+			*(c.returnVals[0].(*error)) = *new(error)
+		} else {
+			*(c.returnVals[0].(*error)) = val.(error)
+		}
 	}
 }
 func (c *HookContextImpl2215449730) GetParamCount() int     { return len(c.params) }

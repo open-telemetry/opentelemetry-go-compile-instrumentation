@@ -1,0 +1,11 @@
+wrap_println:
+  target: main
+  where:
+    function_call: fmt.Println
+  do:
+    - wrap_call:
+        replace: |-
+          (func() (int, error) {
+            println("handler recv:", {{ .Receiver }})
+            return {{ . }}
+          })()

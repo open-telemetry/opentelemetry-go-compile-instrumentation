@@ -33,54 +33,161 @@ func TestGetRedisV9Statement(t *testing.T) {
 	tests := []struct {
 		name     string
 		cmd      redis.Cmder
-		contains string
+		expected string
 	}{
 		{
 			name:     "GET command",
 			cmd:      redis.NewCmd(context.Background(), "get", "mykey"),
-			contains: "get mykey",
+			expected: "get mykey",
 		},
 		{
 			name:     "SET command with value",
 			cmd:      redis.NewCmd(context.Background(), "set", "mykey", "myvalue"),
-			contains: "set mykey myvalue",
+			expected: "set mykey myvalue",
 		},
 		{
 			name:     "HSET command",
 			cmd:      redis.NewCmd(context.Background(), "hset", "myhash", "field1", "value1"),
-			contains: "hset myhash field1 value1",
+			expected: "hset myhash field1 value1",
 		},
 		{
 			name:     "DEL command",
 			cmd:      redis.NewCmd(context.Background(), "del", "key1", "key2"),
-			contains: "del key1 key2",
+			expected: "del key1 key2",
 		},
 		{
 			name:     "command with nil arg",
 			cmd:      redis.NewCmd(context.Background(), "set", nil),
-			contains: "set <nil>",
+			expected: "set <nil>",
 		},
 		{
 			name:     "command with int arg",
 			cmd:      redis.NewCmd(context.Background(), "expire", "mykey", 60),
-			contains: "expire mykey 60",
+			expected: "expire mykey 60",
 		},
 		{
 			name:     "command with bool arg true",
 			cmd:      redis.NewCmd(context.Background(), "set", "mykey", true),
-			contains: "set mykey true",
+			expected: "set mykey true",
 		},
 		{
 			name:     "command with bool arg false",
 			cmd:      redis.NewCmd(context.Background(), "set", "mykey", false),
-			contains: "set mykey false",
+			expected: "set mykey false",
+		},
+		{
+			name:     "AUTH password",
+			cmd:      redis.NewCmd(context.Background(), "auth", "s3cret"),
+			expected: "auth ?",
+		},
+		{
+			name:     "AUTH username password",
+			cmd:      redis.NewCmd(context.Background(), "auth", "default", "s3cret"),
+			expected: "auth ? ?",
+		},
+		{
+			name:     "AUTH mixed case with byte password",
+			cmd:      redis.NewCmd(context.Background(), "AUTH", []byte("s3cret")),
+			expected: "AUTH ?",
+		},
+		{
+			name:     "HELLO without AUTH",
+			cmd:      redis.NewCmd(context.Background(), "hello", 3),
+			expected: "hello 3",
+		},
+		{
+			name:     "HELLO AUTH password",
+			cmd:      redis.NewCmd(context.Background(), "hello", 3, "auth", "default", "s3cret"),
+			expected: "hello 3 auth ? ?",
+		},
+		{
+			name:     "HELLO AUTH then SETNAME",
+			cmd:      redis.NewCmd(context.Background(), "hello", 3, "AUTH", "user", "s3cret", "SETNAME", "myclient"),
+			expected: "hello 3 AUTH ? ? SETNAME myclient",
+		},
+		{
+			name:     "HELLO SETNAME then AUTH",
+			cmd:      redis.NewCmd(context.Background(), "hello", 3, "setname", "myclient", "auth", "user", "s3cret"),
+			expected: "hello 3 setname myclient auth ? ?",
+		},
+		{
+			name:     "HELLO SETNAME client named auth then AUTH",
+			cmd:      redis.NewCmd(context.Background(), "hello", 3, "setname", "auth", "auth", "user", "s3cret"),
+			expected: "hello 3 setname auth auth ? ?",
+		},
+		{
+			name:     "AUTH StatusCmd as Auth() sends",
+			cmd:      redis.NewStatusCmd(context.Background(), "auth", "s3cret"),
+			expected: "auth ?",
+		},
+		{
+			name:     "HELLO MapStringInterfaceCmd as Hello() sends",
+			cmd:      redis.NewMapStringInterfaceCmd(context.Background(), "hello", 3, "auth", "default", "s3cret"),
+			expected: "hello 3 auth ? ?",
+		},
+		{
+			name:     "HELLO AUTH truncated (missing password)",
+			cmd:      redis.NewCmd(context.Background(), "hello", 3, "auth", "user"),
+			expected: "hello 3 auth ?",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := getRedisV9Statement(tt.cmd)
-			assert.Contains(t, result, tt.contains)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestGetRedisV9Statement_RedactsCredentials(t *testing.T) {
+	tests := []struct {
+		name     string
+		cmd      redis.Cmder
+		expected string
+	}{
+		{
+			name:     "AUTH with password only",
+			cmd:      redis.NewCmd(context.Background(), "auth", "s3cret"),
+			expected: "auth ?",
+		},
+		{
+			name:     "AUTH with username and password",
+			cmd:      redis.NewCmd(context.Background(), "auth", "default", "s3cret"),
+			expected: "auth ? ?",
+		},
+		{
+			name:     "AUTH uppercase",
+			cmd:      redis.NewCmd(context.Background(), "AUTH", "s3cret"),
+			expected: "AUTH ?",
+		},
+		{
+			name:     "HELLO handshake with AUTH",
+			cmd:      redis.NewCmd(context.Background(), "hello", 3, "auth", "default", "s3cret"),
+			expected: "hello 3 auth ? ?",
+		},
+		{
+			name:     "HELLO keeps SETNAME visible",
+			cmd:      redis.NewCmd(context.Background(), "hello", 3, "auth", "default", "s3cret", "setname", "myapp"),
+			expected: "hello 3 auth ? ? setname myapp",
+		},
+		{
+			name:     "HELLO without AUTH is untouched",
+			cmd:      redis.NewCmd(context.Background(), "hello", 3),
+			expected: "hello 3",
+		},
+		{
+			name:     "key literally named auth is not a credential",
+			cmd:      redis.NewCmd(context.Background(), "get", "auth", "token"),
+			expected: "get auth token",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := getRedisV9Statement(tt.cmd)
+			assert.Equal(t, tt.expected, result)
+			assert.NotContains(t, result, "s3cret", "the password must never reach db.query.text")
 		})
 	}
 }
@@ -184,6 +291,58 @@ func TestProcessHook_CreatesSpan(t *testing.T) {
 	assert.Equal(t, int64(6379), attrMap["server.port"])
 }
 
+func TestProcessHook_RedactsAuthCredentials(t *testing.T) {
+	tests := []struct {
+		name      string
+		cmd       redis.Cmder
+		spanName  string
+		wantQuery string
+	}{
+		{
+			name:      "AUTH",
+			cmd:       redis.NewCmd(context.Background(), "auth", "s3cret"),
+			spanName:  "auth",
+			wantQuery: "auth ?",
+		},
+		{
+			name:      "HELLO AUTH",
+			cmd:       redis.NewCmd(context.Background(), "hello", 3, "auth", "default", "s3cret"),
+			spanName:  "hello",
+			wantQuery: "hello 3 auth ? ?",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			initOnce = *new(sync.Once)
+			t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "redis")
+
+			sr := setupTestTracer(t)
+			hook := newOtelRedisHook("localhost:6379")
+			processHook := hook.ProcessHook(func(ctx context.Context, cmd redis.Cmder) error {
+				return nil
+			})
+
+			err := processHook(context.Background(), tt.cmd)
+			assert.NoError(t, err)
+
+			spans := sr.Ended()
+			require.Len(t, spans, 1)
+			assert.Equal(t, tt.spanName, spans[0].Name())
+
+			queryText := ""
+			for _, attr := range spans[0].Attributes() {
+				if string(attr.Key) == "db.query.text" {
+					queryText = attr.Value.AsString()
+					break
+				}
+			}
+			assert.Equal(t, tt.wantQuery, queryText)
+			assert.NotContains(t, queryText, "s3cret")
+		})
+	}
+}
+
 func TestProcessHook_RecordsError(t *testing.T) {
 	initOnce = *new(sync.Once)
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "redis")
@@ -206,6 +365,11 @@ func TestProcessHook_RecordsError(t *testing.T) {
 	span := spans[0]
 	assert.Equal(t, codes.Error, span.Status().Code)
 	assert.Contains(t, span.Status().Description, "connection refused")
+
+	// Check that error was recorded
+	events := span.Events()
+	require.Len(t, events, 1)
+	assert.Equal(t, "exception", events[0].Name)
 }
 
 func TestProcessHook_RedisNilNotError(t *testing.T) {
@@ -331,6 +495,11 @@ func TestProcessPipelineHook_RecordsError(t *testing.T) {
 
 	span := spans[0]
 	assert.Equal(t, codes.Error, span.Status().Code)
+
+	// Check that error was recorded
+	events := span.Events()
+	require.Len(t, events, 1)
+	assert.Equal(t, "exception", events[0].Name)
 }
 
 func TestProcessPipelineHook_Disabled(t *testing.T) {

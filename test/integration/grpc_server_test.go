@@ -9,9 +9,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
+	"syscall"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	semconv "go.opentelemetry.io/otel/semconv/v1.20.0"
@@ -58,46 +57,53 @@ func TestGRPCServer(t *testing.T) {
 
 			client := NewGRPCClient(t, addr)
 			tc.exercise(t, client)
-			testutil.WaitForSpanFlush(t)
+			f.WaitForSpans(1)
 
 			span := f.RequireSingleSpan()
 			testutil.RequireGRPCServerSemconv(t, span, "greeter.Greeter", tc.method, 0)
 		})
 	}
 
-	// This test verifies that telemetry is properly flushed
-	// when the server receives SIGINT, using the batch span processor.
-	// This test validates that the signal-based shutdown handler in the instrumentation
-	// layer correctly triggers a flush before exit.
-	t.Run("telemetry flush on signal", func(t *testing.T) {
-		if util.IsWindows() {
-			t.Skip("SIGINT is not supported on windows")
-		}
+	// These tests verify that telemetry is properly flushed when the server
+	// receives SIGINT or SIGTERM, using the batch span processor.
+	for _, tc := range []struct {
+		name string
+		sig  os.Signal
+	}{
+		{name: "SIGINT", sig: os.Interrupt},
+		{name: "SIGTERM", sig: syscall.SIGTERM},
+	} {
+		t.Run("telemetry flush on "+tc.name, func(t *testing.T) {
+			if util.IsWindows() {
+				t.Skip("Unix signals are not supported on windows")
+			}
 
-		f := testutil.NewTestFixture(t)
-		f.SetEnv("OTEL_GO_SIMPLE_SPAN_PROCESSOR", "false")
+			f := testutil.NewTestFixture(t)
+			f.SetEnv("OTEL_GO_SIMPLE_SPAN_PROCESSOR", "false")
 
-		port := testutil.FreePort(t)
-		addr := fmt.Sprintf("localhost:%d", port)
-		srv := f.Start("grpcserver", fmt.Sprintf("-port=%d", port))
-		testutil.WaitForTCP(t, addr)
+			port := testutil.FreePort(t)
+			addr := fmt.Sprintf("localhost:%d", port)
+			srv := f.Start("grpcserver", fmt.Sprintf("-port=%d", port))
+			testutil.WaitForTCP(t, addr)
 
-		client := NewGRPCClient(t, addr)
-		client.SayHello(t, "ShutdownTest")
+			client := NewGRPCClient(t, addr)
+			client.SayHello(t, "ShutdownTest")
 
-		require.NoError(t, srv.Cmd.Process.Signal(os.Interrupt))
-		waitForProcessExit(t, srv.Cmd, 10*time.Second)
-		testutil.WaitForSpanFlush(t)
+			// Instrumentation flushes buffered telemetry on the signal but must not
+			// terminate the process — the app owns its exit. Wait for the flushed
+			// span, then confirm the process is still alive (fixture kills it later).
+			require.NoError(t, srv.Cmd.Process.Signal(tc.sig))
+			f.WaitForSpans(1)
+			require.NoError(t, srv.Cmd.Process.Signal(syscall.Signal(0)),
+				"instrumentation must not terminate the process on %s", tc.name)
 
-		spans := testutil.AllSpans(f.Traces())
-		require.NotEmpty(t, spans, "expected spans to be flushed on SIGINT shutdown")
-
-		serverSpan := testutil.RequireSpan(t, f.Traces(),
-			testutil.IsServer,
-			testutil.HasAttribute(string(semconv.RPCSystemKey), "grpc"),
-		)
-		testutil.RequireGRPCServerSemconv(t, serverSpan, "greeter.Greeter", "SayHello", 0)
-	})
+			serverSpan := testutil.RequireSpan(t, f.Traces(),
+				testutil.IsServer,
+				testutil.HasAttribute(string(semconv.RPCSystemKey), "grpc"),
+			)
+			testutil.RequireGRPCServerSemconv(t, serverSpan, "greeter.Greeter", "SayHello", 0)
+		})
+	}
 }
 
 // GRPCClient wraps a test gRPC client connection.
@@ -148,20 +154,4 @@ func (c *GRPCClient) SayHelloStream(t *testing.T, name string, count int) {
 		responseCount++
 	}
 	require.Equal(t, count, responseCount, "Should receive %d responses", count)
-}
-
-// waitForProcessExit waits for a process to exit within the given timeout.
-func waitForProcessExit(t *testing.T, cmd *exec.Cmd, timeout time.Duration) {
-	t.Helper()
-
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(timeout):
-		t.Fatal("process did not exit within timeout")
-	}
 }

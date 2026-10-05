@@ -5,7 +5,11 @@ package util
 
 import (
 	"context"
+	"log/slog"
+	"os"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 type closerFunc func() error
@@ -37,5 +41,17 @@ func TestLogWriterFromContext(t *testing.T) {
 		if !closed {
 			t.Error("expected stored writer to be closed")
 		}
+	})
+}
+
+func TestContextLogger(t *testing.T) {
+	t.Run("round-trips a stored logger", func(t *testing.T) {
+		logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+		ctx := ContextWithLogger(context.Background(), logger)
+		assert.Same(t, logger, LoggerFromContext(ctx))
+	})
+
+	t.Run("returns default logger when absent", func(t *testing.T) {
+		assert.Same(t, slog.Default(), LoggerFromContext(context.Background()))
 	})
 }

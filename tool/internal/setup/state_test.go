@@ -67,7 +67,7 @@ func TestLoadStateManager(t *testing.T) {
 				tt.setup(t)
 			}
 
-			stateManager, err := LoadStateManager()
+			stateManager, err := loadStateManager()
 			if tt.wantErr {
 				require.Error(t, err)
 				return
@@ -87,17 +87,17 @@ func TestLoadStateManager(t *testing.T) {
 
 func TestStateManagerFromContext(t *testing.T) {
 	t.Run("manager exists in context", func(t *testing.T) {
-		expected := NewStateManager()
+		expected := newStateManager()
 
-		ctx := ContextWithStateManager(t.Context(), expected)
-		actual, found := StateManagerFromContext(ctx)
+		ctx := contextWithStateManager(t.Context(), expected)
+		actual, found := stateManagerFromContext(ctx)
 
 		require.True(t, found)
 		require.Same(t, expected, actual)
 	})
 
 	t.Run("manager missing from context", func(t *testing.T) {
-		actual, found := StateManagerFromContext(t.Context())
+		actual, found := stateManagerFromContext(t.Context())
 
 		require.False(t, found)
 		require.NotNil(t, actual)
@@ -118,7 +118,7 @@ func TestGetBackupFiles(t *testing.T) {
 
 				mustWriteFile(t, filepath.Join(moduleDir, "go.mod"), "module example.com")
 				mustWriteFile(t, filepath.Join(moduleDir, "go.sum"), "sum")
-				mustWriteFile(t, filepath.Join(moduleDir, ToolFileCanonical), "//go:build tools\npackage tools")
+				mustWriteFile(t, filepath.Join(moduleDir, toolFileCanonical), "//go:build tools\npackage tools")
 
 				mustWriteFile(t, filepath.Join(tmp, "go.work"), "go 1.24")
 				mustWriteFile(t, filepath.Join(tmp, "go.work.sum"), "worksum")
@@ -129,7 +129,7 @@ func TestGetBackupFiles(t *testing.T) {
 				return []string{
 					filepath.Join(moduleDir, "go.mod"),
 					filepath.Join(moduleDir, "go.sum"),
-					filepath.Join(moduleDir, ToolFileCanonical),
+					filepath.Join(moduleDir, toolFileCanonical),
 					filepath.Join(tmp, "go.work.sum"),
 				}
 			},
@@ -148,7 +148,7 @@ func TestGetBackupFiles(t *testing.T) {
 				return []string{
 					filepath.Join(moduleDir, "go.mod"),
 					filepath.Join(moduleDir, "go.sum"),
-					filepath.Join(moduleDir, ToolFileCanonical),
+					filepath.Join(moduleDir, toolFileCanonical),
 					filepath.Join(tmp, "go.work.sum"),
 				}
 			},
@@ -164,7 +164,7 @@ func TestGetBackupFiles(t *testing.T) {
 				return []string{
 					filepath.Join(moduleDir, "go.mod"),
 					filepath.Join(moduleDir, "go.sum"),
-					filepath.Join(moduleDir, ToolFileCanonical),
+					filepath.Join(moduleDir, toolFileCanonical),
 				}
 			},
 		},
@@ -182,14 +182,30 @@ func TestGetBackupFiles(t *testing.T) {
 			setup: func(t *testing.T, tmp string) string {
 				moduleDir := filepath.Join(tmp, "mod")
 				mustWriteFile(t, filepath.Join(moduleDir, "go.mod"), "module example.com")
-				mustWriteFile(t, filepath.Join(moduleDir, ToolFileAlias), "")
+				mustWriteFile(t, filepath.Join(moduleDir, toolFileAlias), "")
 				return moduleDir
 			},
 			wantFiles: func(_, moduleDir string) []string {
 				return []string{
 					filepath.Join(moduleDir, "go.mod"),
 					filepath.Join(moduleDir, "go.sum"),
-					filepath.Join(moduleDir, ToolFileAlias),
+					filepath.Join(moduleDir, toolFileAlias),
+				}
+			},
+		},
+		{
+			name: "GOWORK=off does not track go.work.sum",
+			setup: func(t *testing.T, tmp string) string {
+				t.Setenv("GOWORK", "off")
+				moduleDir := filepath.Join(tmp, "mod")
+				mustWriteFile(t, filepath.Join(moduleDir, "go.mod"), "module example.com")
+				return moduleDir
+			},
+			wantFiles: func(_, moduleDir string) []string {
+				return []string{
+					filepath.Join(moduleDir, "go.mod"),
+					filepath.Join(moduleDir, "go.sum"),
+					filepath.Join(moduleDir, toolFileCanonical),
 				}
 			},
 		},
@@ -253,7 +269,7 @@ func TestStateManagerTrack(t *testing.T) {
 
 			path := tt.setup(t, tmp)
 
-			stateManager := NewStateManager()
+			stateManager := newStateManager()
 
 			require.NoError(t, stateManager.Track(path))
 			require.Equal(t, tt.existed, stateManager.files[path])
@@ -271,7 +287,7 @@ func TestStateManagerTrack_Duplicate(t *testing.T) {
 	path := filepath.Join(tmp, "go.mod")
 	mustWriteFile(t, path, "original")
 
-	stateManager := NewStateManager()
+	stateManager := newStateManager()
 	require.NoError(t, stateManager.Track(path))
 
 	// Modify the original file after it has been tracked.
@@ -295,11 +311,11 @@ func TestStateManagerTrackPersistsBeforeMutation(t *testing.T) {
 
 	goMod := filepath.Join(tmp, "go.mod")
 	mustWriteFile(t, goMod, "module example.com/app\n\ngo 1.25.0\n")
-	runtimeFile := filepath.Join(tmp, OtelcRuntimeFile)
+	runtimeFile := filepath.Join(tmp, otelcRuntimeFile)
 
 	// The "build" process tracks, mutates, and dies without any explicit
 	// Commit, exactly the `otelc go build` path.
-	dying := NewStateManager()
+	dying := newStateManager()
 	require.NoError(t, dying.Track(goMod))
 	require.NoError(t, dying.Track(runtimeFile))
 	mustWriteFile(t, goMod, "module example.com/app\n\ngo 1.25.0\n\nreplace x => ./.otelc-build/x\n")
@@ -307,7 +323,7 @@ func TestStateManagerTrackPersistsBeforeMutation(t *testing.T) {
 	// (process dies here)
 
 	// A fresh process recovers from the manifest alone.
-	recovered, err := LoadStateManager()
+	recovered, err := loadStateManager()
 	require.NoError(t, err)
 	require.NotNil(t, recovered, "manifest must exist without an explicit Commit")
 	require.NoError(t, recovered.Revert())
@@ -327,7 +343,7 @@ func TestStateManagerTrackAll(t *testing.T) {
 
 	mustWriteFile(t, a, "a")
 
-	stateManager := NewStateManager()
+	stateManager := newStateManager()
 	require.NoError(t, stateManager.TrackAll(a, b))
 
 	require.Equal(t, map[string]bool{
@@ -341,11 +357,11 @@ func TestStateManagerCommit(t *testing.T) {
 	t.Chdir(tmp)
 
 	existing := filepath.Join(tmp, "go.mod")
-	generated := filepath.Join(tmp, OtelcRuntimeFile)
+	generated := filepath.Join(tmp, otelcRuntimeFile)
 
 	mustWriteFile(t, existing, "module example")
 
-	stateManager := NewStateManager()
+	stateManager := newStateManager()
 
 	require.NoError(t, stateManager.Track(existing))
 	require.NoError(t, stateManager.Track(generated))
@@ -368,11 +384,11 @@ func TestStateManagerRevert(t *testing.T) {
 	t.Chdir(tmp)
 
 	existing := filepath.Join(tmp, "go.mod")
-	generated := filepath.Join(tmp, OtelcRuntimeFile)
+	generated := filepath.Join(tmp, otelcRuntimeFile)
 
 	mustWriteFile(t, existing, "original")
 
-	stateManager := NewStateManager()
+	stateManager := newStateManager()
 
 	require.NoError(t, stateManager.Track(existing))
 	require.NoError(t, stateManager.Track(generated))
@@ -394,11 +410,11 @@ func TestStateManagerRoundTrip(t *testing.T) {
 	t.Chdir(tmp)
 
 	original := filepath.Join(tmp, "go.mod")
-	generated := filepath.Join(tmp, OtelcRuntimeFile)
+	generated := filepath.Join(tmp, otelcRuntimeFile)
 
 	mustWriteFile(t, original, "module original")
 
-	stateManager := NewStateManager()
+	stateManager := newStateManager()
 
 	require.NoError(t, stateManager.Track(original))
 	require.NoError(t, stateManager.Track(generated))
@@ -408,7 +424,7 @@ func TestStateManagerRoundTrip(t *testing.T) {
 	mustWriteFile(t, original, "module modified")
 	mustWriteFile(t, generated, "package main")
 
-	loaded, err := LoadStateManager()
+	loaded, err := loadStateManager()
 	require.NoError(t, err)
 	require.NotNil(t, loaded)
 
@@ -429,7 +445,7 @@ func TestStateManagerCommitIsAtomicAndSorted(t *testing.T) {
 	a := filepath.Join(tmp, "a.txt")
 	mustWriteFile(t, a, "a")
 
-	s := NewStateManager()
+	s := newStateManager()
 	require.NoError(t, s.Track(b)) // missing file, tracked first
 	require.NoError(t, s.Track(a))
 
@@ -440,4 +456,77 @@ func TestStateManagerCommitIsAtomicAndSorted(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, string(first), string(second), "manifest serialization must be deterministic")
 	assert.False(t, util.PathExists(util.GetBuildTemp(stateFileName)+".tmp"), "no temp file left behind")
+}
+
+func TestGetBackupFiles_DeterministicOrder(t *testing.T) {
+	tmp := t.TempDir()
+	modA := filepath.Join(tmp, "dirA")
+	modB := filepath.Join(tmp, "dirB")
+	modC := filepath.Join(tmp, "dirC")
+
+	require.NoError(t, os.MkdirAll(modA, 0o755))
+	require.NoError(t, os.MkdirAll(modB, 0o755))
+	require.NoError(t, os.MkdirAll(modC, 0o755))
+
+	mustWriteFile(t, filepath.Join(modA, "go.mod"), "module dirA")
+	mustWriteFile(t, filepath.Join(modB, "go.mod"), "module dirB")
+	mustWriteFile(t, filepath.Join(modC, "go.mod"), "module dirC")
+
+	moduleDirs := map[string]bool{
+		modC: true,
+		modA: true,
+		modB: true,
+	}
+
+	var firstResult []string
+	for range 20 {
+		files, err := getBackupFiles(t.Context(), moduleDirs)
+		require.NoError(t, err)
+
+		if firstResult == nil {
+			firstResult = files
+		} else {
+			assert.Equal(t, firstResult, files, "getBackupFiles output must be deterministic across multiple calls")
+		}
+	}
+}
+
+func TestStateManagerDiscard(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	s := newStateManager()
+
+	// Track a non-existent path so Commit writes a manifest, then Discard must
+	// remove the manifest and the snapshot directory.
+	require.NoError(t, s.Track(util.GetBuildTemp("ghost.txt")))
+	require.FileExists(t, util.GetBuildTemp(stateFileName))
+
+	require.NoError(t, s.Discard())
+
+	_, err := os.Stat(util.GetBuildTemp(stateFileName))
+	assert.True(t, os.IsNotExist(err), "manifest must be removed")
+}
+
+func TestStateManagerDiscardEmpty(t *testing.T) {
+	// Discarding an empty state manager is a no-op.
+	require.NoError(t, newStateManager().Discard())
+}
+
+func TestStateManagerTrack_CopyFails(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	src := filepath.Join(tmp, "go.mod")
+	mustWriteFile(t, src, "module example.com")
+
+	// Make stateDir a regular file so CopyFile fails on all platforms (including Windows)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	snapshotDir := util.GetBuildTemp(stateDir)
+	_ = os.RemoveAll(snapshotDir)
+	require.NoError(t, os.WriteFile(snapshotDir, []byte("file"), 0o644))
+
+	sm := newStateManager()
+	err := sm.Track(src)
+	require.Error(t, err)
 }

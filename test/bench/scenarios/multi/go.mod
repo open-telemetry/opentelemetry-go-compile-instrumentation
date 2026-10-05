@@ -7,7 +7,7 @@ go 1.25.0
 
 require (
 	github.com/redis/go-redis/v9 v9.21.0
-	google.golang.org/grpc v1.82.0
+	google.golang.org/grpc v1.82.1
 	k8s.io/client-go v0.34.0
 )
 

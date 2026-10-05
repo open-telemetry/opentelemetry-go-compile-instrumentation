@@ -30,7 +30,7 @@ replace: '"replaced"'
 			ruleName: "assign_global_var",
 			check: func(t *testing.T, r *InstDeclRule) {
 				assert.Equal(t, "assign_global_var", r.Name)
-				assert.Equal(t, "example.com/pkg", r.Target)
+				assert.Equal(t, "example.com/pkg", r.Target.String())
 				assert.Equal(t, "var", r.Kind)
 				assert.Equal(t, "GlobalVar", r.Identifier)
 				assert.Equal(t, `"replaced"`, r.Replace)
@@ -239,6 +239,65 @@ replace: "int"
 			ruleName:    "bad_rule",
 			wantErr:     true,
 			errContains: "replace is not valid when kind is",
+		},
+		{
+			name: "invalid replace expression syntax",
+			yaml: `
+target: example.com/pkg
+identifier: SomeDecl
+replace: "&http.Transport{MaxIdleConns: "
+`,
+			ruleName:    "bad_rule",
+			wantErr:     true,
+			errContains: "invalid replace expression syntax",
+		},
+		{
+			name: "invalid wrap expression syntax",
+			yaml: `
+target: example.com/pkg
+identifier: SomeDecl
+wrap: "func( { {{ . }} "
+`,
+			ruleName:    "bad_rule",
+			wantErr:     true,
+			errContains: "invalid wrap expression syntax",
+		},
+		{
+			name: "invalid wrap template syntax",
+			yaml: `
+target: example.com/pkg
+identifier: SomeDecl
+wrap: "wrapper({{ . }}) {{"
+`,
+			ruleName:    "bad_rule",
+			wantErr:     true,
+			errContains: "invalid wrap template syntax",
+		},
+		{
+			name: "valid complex replace expression",
+			yaml: `
+target: net/http
+kind: var
+identifier: DefaultTransport
+replace: "&http.Transport{MaxIdleConns: 100}"
+`,
+			ruleName: "valid_replace",
+			check: func(t *testing.T, r *InstDeclRule) {
+				assert.Equal(t, "&http.Transport{MaxIdleConns: 100}", r.Replace)
+			},
+		},
+		{
+			name: "valid complex wrap expression",
+			yaml: `
+target: net/http
+kind: var
+identifier: DefaultTransport
+wrap: "(func(t *http.Transport) *http.Transport { return t })({{ . }})"
+`,
+			ruleName: "valid_wrap",
+			check: func(t *testing.T, r *InstDeclRule) {
+				assert.Equal(t, "(func(t *http.Transport) *http.Transport { return t })({{ . }})", r.Wrap)
+			},
 		},
 		{
 			name:     "invalid yaml",

@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"reflect"
 	"strconv"
-	"strings"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -221,18 +220,7 @@ func (HTTPClient) ErrorType(err error) attribute.KeyValue {
 
 // method returns the HTTP method attribute and optional original method attribute.
 func (HTTPClient) method(method string) (attribute.KeyValue, attribute.KeyValue) {
-	if method == "" {
-		return semconv.HTTPRequestMethodGet, attribute.KeyValue{}
-	}
-	if attr, ok := MethodLookup[method]; ok {
-		return attr, attribute.KeyValue{}
-	}
-
-	orig := semconv.HTTPRequestMethodOriginal(method)
-	if attr, ok := MethodLookup[strings.ToUpper(method)]; ok {
-		return attr, orig
-	}
-	return semconv.HTTPRequestMethodGet, orig
+	return requestMethodAttrs(method)
 }
 
 // MetricAttributes returns attributes for HTTP client metrics.
@@ -377,4 +365,10 @@ func HTTPClientStatus(code int) (codes.Code, string) {
 // HTTPClientErrorType returns the error.type attribute for a given error.
 func HTTPClientErrorType(err error) attribute.KeyValue {
 	return defaultHTTPClient.ErrorType(err)
+}
+
+// HTTPClientSpanName returns the span name for an HTTP client request.
+// Unknown methods use "HTTP" so names stay low-cardinality and match semconv.
+func HTTPClientSpanName(method string) string {
+	return SpanMethod(method)
 }

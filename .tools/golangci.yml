@@ -70,6 +70,7 @@ linters:
     - mirror  # reports wrong mirror patterns of bytes/strings usage
     - misspell  # finds commonly misspelled English words in comments
     - mnd  # detects magic numbers
+    - modernize  # suggests simplifications to Go code using modern language and library features
     - musttag  # enforces field tags in (un)marshaled structs
     - nakedret  # finds naked returns in functions greater than a specified function length
     - nestif  # reports deeply nested if statements
@@ -243,6 +244,15 @@ linters:
       # Minimal code complexity to report.
       # Default: 30 (but we recommend 10-20)
       min-complexity: 30
+
+    goconst:
+      # golangci-lint v2.12+ counts string literals in tests toward the
+      # occurrence threshold. Restore the previous default so repeated CLI
+      # flags and fixture strings in _test.go files are not treated as
+      # production duplication. The path exclusion for _test.go only
+      # suppresses issues reported in those files; it does not stop goconst
+      # from counting them.
+      ignore-tests: true
 
     gocritic:
       # Settings passed to gocritic.

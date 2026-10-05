@@ -1,35 +1,3 @@
-<!--
-Thank you for contributing to OpenTelemetry Go Compile Instrumentation!
-
-INSTRUCTIONS:
-1. Fill in the description and motivation sections below
-2. Complete the checklist before submitting
-3. Ensure PR title follows conventional commits format (enforced by CI)
-
-PR TITLE FORMAT (required):
-  type(scope): description
-
-  Types: chore, doc, docs, feat, fix, release, refactor, test
-  Scopes: tool, pkg, demo, test, docs
-
-  Examples:
-  - feat(pkg): add gRPC client instrumentation
-  - fix(tool): resolve hook signature matching issue
-  - docs(api): update instrumenter interface documentation
-  - refactor(pkg): simplify attribute extractor composition
-
-BEFORE SUBMITTING:
-  make format  # Format Go code and YAML files
-  make lint    # Run all linters
-  make test    # Run all tests (unit + integration + e2e)
-
-If your PR adds a new user-facing instrumentation, please also submit a corresponding OpenTelemetry Registry PR:
-https://opentelemetry.io/ecosystem/registry/adding/
-
-For detailed contribution guidelines, see CONTRIBUTING.md
-For available make targets, run: make help
--->
-
 ## Description
 
 <!-- What changes does this PR introduce? -->
@@ -38,17 +6,4 @@ For available make targets, run: make help
 
 <!-- Why is this change needed? What problem does it solve? -->
 
-Fixes #<!-- issue number -->
-
----
-
-## Checklist
-
-- [ ] PR title follows [conventional commits](https://www.conventionalcommits.org/) format
-- [ ] Code formatted: `make format`
-- [ ] Linters pass: `make lint`
-- [ ] Tests pass: `make test`
-- [ ] Tests added for new functionality
-- [ ] Tests follow [testing guidelines](docs/testing.md)
-- [ ] Documentation updated (if applicable)
-- [ ] OpenTelemetry Registry updated (if applicable, see [registry guide](docs/instrument-guide.md#4-register-the-instrumentation))
+Fixes #issue or Related #issue

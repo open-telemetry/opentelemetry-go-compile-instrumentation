@@ -24,11 +24,11 @@ import (
 
 const (
 	// Allowed names for the instrumentation config file.
-	ToolFileCanonical = "otel.instrumentation.go"
-	ToolFileAlias     = "otelc.tool.go"
+	toolFileCanonical = "otel.instrumentation.go"
+	toolFileAlias     = "otelc.tool.go"
 )
 
-type InstrumentationConfig struct {
+type instrumentationConfig struct {
 	ImportPath string
 	ToolFile   string
 	RuleFiles  []string
@@ -36,11 +36,11 @@ type InstrumentationConfig struct {
 }
 
 //nolint:forbidigo // sentinel error; must not carry mutable stack state
-var ErrNotInstrumentation = errors.New("not an instrumentation package")
+var errNotInstrumentation = errors.New("not an instrumentation package")
 
 func findToolFile(moduleDir string) (string, error) {
-	canonical := filepath.Join(moduleDir, ToolFileCanonical)
-	alias := filepath.Join(moduleDir, ToolFileAlias)
+	canonical := filepath.Join(moduleDir, toolFileCanonical)
+	alias := filepath.Join(moduleDir, toolFileAlias)
 
 	canonicalExists := util.PathExists(canonical)
 	aliasExists := util.PathExists(alias)
@@ -49,8 +49,8 @@ func findToolFile(moduleDir string) (string, error) {
 	case canonicalExists && aliasExists:
 		return "", ex.Newf(
 			"both %q and %q exist; only one instrumentation config file is allowed",
-			ToolFileCanonical,
-			ToolFileAlias,
+			toolFileCanonical,
+			toolFileAlias,
 		)
 	case canonicalExists:
 		return canonical, nil
@@ -86,7 +86,7 @@ func resolveInstrumentationConfigs(
 	ctx context.Context,
 	dir string,
 	importPaths []string,
-) (map[string]*InstrumentationConfig, error) {
+) (map[string]*instrumentationConfig, error) {
 	if len(importPaths) == 0 {
 		return nil, nil
 	}
@@ -103,14 +103,14 @@ func resolveInstrumentationConfigs(
 		return nil, ex.Wrapf(loadErr, "failed to load instrumentation packages")
 	}
 
-	cfgs := make(map[string]*InstrumentationConfig, len(importPaths))
+	cfgs := make(map[string]*instrumentationConfig, len(importPaths))
 	for _, pkg := range pkgs {
 		importPath := pkg.PkgPath
 		if importPath == "" {
 			continue
 		}
 
-		cfgs[importPath] = &InstrumentationConfig{
+		cfgs[importPath] = &instrumentationConfig{
 			ImportPath: importPath,
 		}
 
@@ -150,10 +150,10 @@ func resolveInstrumentationConfigs(
 
 		if toolFile == "" && len(ruleFiles) == 0 {
 			err := ex.Wrapf(
-				ErrNotInstrumentation,
+				errNotInstrumentation,
 				"instrumentation package %s contains neither %s nor any rule files",
 				importPath,
-				ToolFileCanonical,
+				toolFileCanonical,
 			)
 
 			if len(pkg.Errors) > 0 {
@@ -175,12 +175,12 @@ func resolveInstrumentationConfigs(
 	return cfgs, nil
 }
 
-type InstrumentationVisit struct {
-	Config   *InstrumentationConfig
+type instrumentationVisit struct {
+	Config   *instrumentationConfig
 	ToolFile string
 }
 
-type InstrumentationVisitor func(visit *InstrumentationVisit) (recurse bool, err error)
+type instrumentationVisitor func(visit *instrumentationVisit) (recurse bool, err error)
 
 func collectImports(toolFile string, f *dst.File, seenImports map[string]bool) ([]string, error) {
 	importPaths := make([]string, 0, len(f.Imports))
@@ -224,7 +224,7 @@ func collectImports(toolFile string, f *dst.File, seenImports map[string]bool) (
 }
 
 // walkInstrumentation walks the instrumentation tool files and calls the visitor function for each.
-func walkInstrumentation(ctx context.Context, toolFiles []string, visit InstrumentationVisitor) error {
+func walkInstrumentation(ctx context.Context, toolFiles []string, visit instrumentationVisitor) error {
 	queue := append([]string(nil), toolFiles...)
 	seenImports := make(map[string]bool)
 	seenToolFiles := make(map[string]bool, len(toolFiles))
@@ -258,7 +258,7 @@ func walkInstrumentation(ctx context.Context, toolFiles []string, visit Instrume
 				continue
 			}
 
-			v := &InstrumentationVisit{
+			v := &instrumentationVisit{
 				Config:   cfg,
 				ToolFile: toolFile,
 			}

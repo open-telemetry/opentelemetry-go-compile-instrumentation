@@ -8,7 +8,7 @@ repo for information on this and other SIGs.
 See the [public meeting
 notes](https://docs.google.com/document/d/1XkVahJfhf482d3WVHsvUUDaGzHc8TO3sqQlSS80mpGY/edit)
 for a summary description of past meetings. You can also get in touch on slack channel
-[#otel-go-compt-instr-sig](https://cloud-native.slack.com/archives/C088D8GSSSF)
+[#otel-go-compile-instrumentation](https://cloud-native.slack.com/archives/C088D8GSSSF)
 
 ## Development
 
@@ -16,11 +16,21 @@ for a summary description of past meetings. You can also get in touch on slack c
 
 This project uses several tools for development. Most tools will be automatically installed when you first run the corresponding `make` target. However, you need to have:
 
-- [Go](https://golang.org/dl/) 1.25 or later
+- [Go](https://golang.org/dl/) 1.26 or later
 - [Git](https://git-scm.com/)
 - Make (usually pre-installed on macOS and Linux)
 
 ### Getting Started
+
+> **Windows/WSL contributors:** make sure `core.autocrlf` is `false` before
+> cloning (`git config --global core.autocrlf false`). CI runs on Windows as
+> well as Linux and macOS, and a clone with `core.autocrlf` enabled checks out
+> source files with CRLF line endings. That changes how blank lines are
+> preserved when the AST-based code generator writes output, which then fails
+> to match the (LF) golden files under `testdata/golden`, even though the
+> generated code is correct. If you already cloned with `autocrlf` on, re-clone
+> after changing the setting rather than trying to fix the line endings of an
+> existing checkout.
 
 1. Clone the repository:
 
@@ -29,13 +39,25 @@ This project uses several tools for development. Most tools will be automaticall
    cd opentelemetry-go-compile-instrumentation
    ```
 
-2. Build the project:
+2. Configure the git merge driver for the instrumentation bundle (run once per clone):
+
+   ```sh
+   make setup-git
+   ```
+
+   `tool/data/otelc-bundle.tgz` is a binary archive generated from `pkg/` and
+   `instrumentation/`, so git cannot merge it and it conflicts on almost every
+   rebase. This registers a merge driver that keeps the current bundle instead
+   of stopping the rebase/merge; you then refresh it with `make package`. See
+   [Keeping the bundle in sync](#keeping-the-bundle-in-sync).
+
+3. Build the project:
 
    ```sh
    make build
    ```
 
-3. Run tests:
+4. Run tests:
 
    ```sh
    make test
@@ -61,22 +83,22 @@ make help
 - `make format` - Format all code (Go + YAML + License Headers)
   - `make format/go` - Format Go code only using golangci-lint
   - `make format/yaml` - Format YAML files only using yamlfmt
-  - `make format/license` - Apply license headers to Go files
 - `make lint` - Run all linters (Go, YAML, GitHub Actions, Makefile)
   - `make lint/go` - Run golangci-lint on Go code
   - `make lint/yaml` - Lint YAML formatting
   - `make lint/action` - Lint GitHub Actions workflows
   - `make lint/makefile` - Lint Makefile
-  - `make lint/license` - Check license headers (has dedicated CI workflow)
+  - `make lint/license-header` - Check license headers (has dedicated CI workflow)
+  - `make lint/license-header/fix` - Apply license headers to Go and shell files
 
 #### License Headers
 
-All Go files must include the proper license header. The license header configuration is defined in `license.yml` which handles exclusions for vendor directories, temporary files, and generated code.
+All Go and shell files must include the proper license header. The required headers and path exclusions are managed in `.github/scripts/license-check.sh`.
 
 To check and fix license headers:
 
-- **Check license headers**: `make lint/license`
-- **Apply license headers**: `make format/license`
+- **Check license headers**: `make lint/license-header`
+- **Apply license headers**: `make lint/license-header/fix`
 
 The license header checker has a dedicated CI workflow (`check-license-headers.yaml`) that runs automatically on pull requests and pushes when Go files or the license configuration change.
 
@@ -99,7 +121,7 @@ Test results are saved to `gotest-unit.log` and `gotest-integration.log` for rev
 
 - `make weaver-install` - Install OTel Weaver if not present
 - `make lint/semantic-conventions` - Validate semantic convention registry
-- `make registry-diff` - Generate diff between two versions of semantic convention registry
+- `make semantic-conventions/diff` - Generate diff between two versions of semantic convention registry
 - `make semantic-conventions/resolve` - Resolve semantic convention registry schema
 
 For detailed information on managing semantic conventions, see [docs/semantic-conventions.md](docs/semantic-conventions.md).
@@ -131,6 +153,43 @@ make all
 ```
 
 This will run: `build`, `format`, `lint`, and `test` in sequence.
+
+### Keeping the bundle in sync
+
+`tool/data/otelc-bundle.tgz` is a reproducible archive of `pkg/` and
+`instrumentation/` that is embedded into `otelc` via `//go:embed`. It must stay
+committed so that `go install go.opentelemetry.io/otelc/tool/cmd/otelc@latest`
+works, but because it is binary, git cannot 3-way merge it — so any branch that
+touches the sources conflicts with `main` on this file.
+
+To make this painless, run `make setup-git` once per clone (see
+[Getting Started](#getting-started)). It registers a custom merge driver
+(defined in `.gitattributes` + `.github/scripts/merge-bundle.sh`) that keeps the
+current ("ours") bundle on conflict so the rebase/merge runs to completion
+without stopping. You then regenerate the bundle from the fully-merged sources:
+
+```sh
+git fetch origin main
+git rebase origin/main   # no longer halts on the bundle
+make package             # regenerate tool/data/otelc-bundle.tgz from merged sources
+git add tool/data/otelc-bundle.tgz && git commit --amend --no-edit
+git push --force-with-lease
+```
+
+Why the driver doesn't regenerate the bundle for you: when git invokes a merge
+driver it has not yet written the *other* merged source files to the working
+tree, so running `make package` at that moment would embed stale sources and
+miss the incoming changes. Regenerating after the rebase/merge completes is the
+only reliable point, hence the explicit `make package` step above.
+
+Notes:
+
+- GitHub's "This branch has conflicts" indicator is computed server-side and
+  does **not** use your local merge driver. Rebase locally as above and push;
+  the conflict disappears once your branch is up to date.
+- The `verify-bundle` CI guarantees the committed bundle matches the sources, so
+  a forgotten `make package` fails CI rather than shipping a stale bundle.
+  Maintainers can also comment `/regenerate-bundle` on a PR to auto-fix it.
 
 ### Tools
 
@@ -168,7 +227,7 @@ make adr-list
 
 ## AI Usage
 
-This project welcomes the use of AI tools. Please read the [AI Usage Policy](AI_POLICY.md) before
+This project welcomes the use of AI tools. Please read the [AI Usage Policy](docs/AI_POLICY.md) before
 contributing. The critical rule is: **you must understand every line of code you submit.**
 Contributors using AI tools are held to the same quality standards as any other contribution.
 
@@ -186,7 +245,7 @@ format:
 ╰─┬──╯╰───┬───╯│  ╰─────┬─────╯
   │       │    │        ╰─ Short description of the change (see below)
   │       │    ╰─ If, and only if the PR contains breaking changes
-  │       ╰─ Optional: change scope (e.g, 'cmd/gotel', `pkg/weaver`, ...)
+  │       ╰─ Optional: change scope (e.g, 'cmd/otelc', `pkg/weaver`, ...)
   ╰─ Required: commit type (see below for accepted values)
 ```
 
@@ -221,7 +280,7 @@ Here are some examples for the various supported commit types:
 - `feat`:
   - :information_source:  What feature is being introduced specifically? A user might decide if this
     is useful to them or not based on this.
-  - :white_check_mark: `feat(cmd/gotel): -log-level flag to configure log verbosity`
+  - :white_check_mark: `feat(cmd/otelc): -log-level flag to configure log verbosity`
   - :x: `feat: logging`
 - `fix`:
   - :information_source: What bug is being fixed? Refer to the symptoms of the fixed issue, not to
@@ -265,20 +324,18 @@ Enter the newly created directory and add your fork as a new remote:
 git remote add <YOUR_FORK> git@github.com:<YOUR_GITHUB_USERNAME>/opentelemetry-go-compile-instrumentation
 ```
 
-Check out a new branch, make modifications, run linters and tests, update
-`CHANGELOG.md`, and push the branch to your fork:
+Check out a new branch, make modifications, run linters and tests, and push
+the branch to your fork:
 
 ```sh
 git checkout -b <YOUR_BRANCH_NAME>
 # edit files
-# update changelog
 git add -p
 git commit
 git push <YOUR_FORK> <YOUR_BRANCH_NAME>
 ```
 
 Open a pull request against the main `opentelemetry-go-compile-instrumentation` repo.
-Be sure to add the pull request ID to the entry you added to `CHANGELOG.md`.
 
 Avoid rebasing and force-pushing to your branch to facilitate reviewing the pull request.
 Rewriting Git history makes it difficult to keep track of iterations during code review.
@@ -348,5 +405,5 @@ Any [Maintainer] can merge the PR once the above criteria have been met.
 
 ## Release Process
 
-See [RELEASE.md](RELEASE.md) for the full release process, including release
+See [docs/RELEASE.md](docs/RELEASE.md) for the full release process, including release
 cadence, tagging conventions, cross-compilation targets, and hotfix guidance.

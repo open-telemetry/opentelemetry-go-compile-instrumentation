@@ -4,28 +4,55 @@
 package dsnparse
 
 import (
+	"net"
 	nurl "net/url"
 	"strings"
 	"sync"
 )
 
 // DSNInfo holds the parsed server address components and database name from a
-// data source name.
+// data source name. Host is the bare host: IPv6 literals are stored without
+// their surrounding brackets, matching the `server.address` semantic
+// convention.
 type DSNInfo struct {
 	Host   string
 	Port   string
 	DBName string
 }
 
-// Addr returns the host:port pair. When Port is empty only the host is returned.
+// Addr returns the host:port pair. When Port is empty only the host is
+// returned.
+//
+// The result is consumed by semconv helpers that split it back apart with
+// net.SplitHostPort, so an IPv6 host has to be bracketed or the round trip
+// loses both attributes: "::1"+"3306" joined naively gives "::1:3306", which
+// is itself a valid IPv6 address, leaving no way to tell the port back out.
+// net.JoinHostPort brackets only when it needs to.
+//
+// The host is normalised here rather than trusted, because DSNInfo is exported
+// and parsers registered through RegisterDSNParser may hand back a host that
+// still has its brackets (net/url's u.Host does, u.Hostname() does not).
 func (d DSNInfo) Addr() string {
-	if d.Host == "" {
+	host := trimHostBrackets(d.Host)
+	if host == "" {
 		return ""
 	}
 	if d.Port == "" {
-		return d.Host
+		return host
 	}
-	return d.Host + ":" + d.Port
+	return net.JoinHostPort(host, d.Port)
+}
+
+// trimHostBrackets removes the surrounding brackets from an IPv6 literal so
+// Host stays bare regardless of which DSN dialect it came from. Parsers built
+// on net/url get this from u.Hostname(); the hand-rolled key=value and Oracle
+// paths call it explicitly. A host never legitimately carries brackets
+// otherwise, so this is safe to apply unconditionally.
+func trimHostBrackets(host string) string {
+	if len(host) > 1 && host[0] == '[' && host[len(host)-1] == ']' {
+		return host[1 : len(host)-1]
+	}
+	return host
 }
 
 // DSNParser parses a driver-specific data source name into structured
@@ -238,7 +265,7 @@ func parseLibpqKV(dsn string) DSNInfo {
 	nextKV:
 		switch key {
 		case "host":
-			info.Host = val
+			info.Host = trimHostBrackets(val)
 		case "port":
 			info.Port = val
 		case "dbname":
@@ -283,7 +310,20 @@ func parseMySQLDSN(dsn string) DSNInfo {
 	} else {
 		// Non-standard: no parentheses around the address.
 		// Locate the '/' that separates the address from the database name.
-		if sl := strings.IndexByte(rest, '/'); sl >= 0 {
+		// A unix-socket address is itself an absolute filesystem path and so
+		// contains '/' before the database name does, meaning the first '/'
+		// belongs to the address, not the separator. Every other form here
+		// (tcp, bare host, bare port) has no '/' in the address at all, so
+		// using the last '/' there gives the same split as the first.
+		sep := strings.IndexByte
+		searchIn := rest
+		if isMySQLUnixAddr(rest) {
+			sep = strings.LastIndexByte
+			if q := strings.IndexByte(rest, '?'); q >= 0 {
+				searchIn = rest[:q]
+			}
+		}
+		if sl := sep(searchIn, '/'); sl >= 0 {
 			addrStr = rest[:sl]
 			dbPart = rest[sl:]
 		} else {
@@ -295,6 +335,14 @@ func parseMySQLDSN(dsn string) DSNInfo {
 	host, port := mysqlSplitAddr(addrStr)
 	dbName := mysqlDBName(dbPart)
 	return DSNInfo{Host: host, Port: port, DBName: dbName}
+}
+
+// isMySQLUnixAddr reports whether a non-parenthesized MySQL address begins
+// with the "unix:" protocol keyword, meaning what follows the colon is a
+// filesystem path rather than a host[:port].
+func isMySQLUnixAddr(addr string) bool {
+	colon := strings.IndexByte(addr, ':')
+	return colon >= 0 && addr[:colon] == "unix"
 }
 
 // mysqlKnownProtocols lists the transport keywords used by go-sql-driver/mysql.
@@ -458,6 +506,7 @@ func parseSQLServerKV(dsn string) DSNInfo {
 			} else {
 				host = val
 			}
+			host = trimHostBrackets(host)
 		case "port":
 			port = val
 		case "database", "initial catalog":
@@ -530,6 +579,17 @@ func parseOracleDSN(dsn string) DSNInfo {
 }
 
 func oracleSplitHostPort(hp string) (host, port string) {
+	// A bracketed IPv6 literal has colons inside the brackets, so the port
+	// separator is only the colon that follows the closing bracket.
+	if strings.HasPrefix(hp, "[") {
+		if rb := strings.LastIndexByte(hp, ']'); rb >= 0 {
+			host = hp[1:rb]
+			if rest := hp[rb+1:]; strings.HasPrefix(rest, ":") {
+				return host, rest[1:]
+			}
+			return host, "1521"
+		}
+	}
 	if i := strings.LastIndexByte(hp, ':'); i >= 0 {
 		return hp[:i], hp[i+1:]
 	}

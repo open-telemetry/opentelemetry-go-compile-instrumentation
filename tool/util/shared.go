@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"go.opentelemetry.io/otelc/tool/ex"
 	"golang.org/x/mod/semver"
 )
 
@@ -26,14 +27,26 @@ const (
 	// EnvOtelcNestedToolexec marks toolexec invocations spawned by a go
 	// command otelc itself ran (e.g. `go list -export`).
 	EnvOtelcNestedToolexec = "OTELC_NESTED_TOOLEXEC"
-	BuildTempDir           = ".otelc-build"
-	BuildLockFile          = BuildTempDir + ".lock"
-	OtelcRoot              = "go.opentelemetry.io/otelc"
-	OtelcPkgRoot           = OtelcRoot + "/pkg"
-	OtelcInstRoot          = OtelcRoot + "/instrumentation"
-	OtelcToolCmdRoot       = OtelcRoot + "/tool/cmd/otelc"
-	OtelcToolExe           = "otelc"
+	// EnvOtelcNestedResolving lists, outermost first, the compiles waiting on
+	// a nested build to resolve an import a rule added, as comma-separated
+	// "package>added import" entries.
+	EnvOtelcNestedResolving = "OTELC_NESTED_RESOLVING"
+	BuildTempDir            = ".otelc-build"
+	BuildLockFile           = BuildTempDir + ".lock"
+	OtelcRoot               = "go.opentelemetry.io/otelc"
+	OtelcPkgRoot            = OtelcRoot + "/pkg"
+	OtelcInstRoot           = OtelcRoot + "/instrumentation"
+	OtelcToolCmdRoot        = OtelcRoot + "/tool/cmd/otelc"
+	OtelcToolExe            = "otelc"
 )
+
+// IsRuleFile reports whether name identifies an otelc rule file.
+func IsRuleFile(name string) bool {
+	return name == "otelc.yml" ||
+		name == "otelc.yaml" ||
+		strings.HasSuffix(name, ".otelc.yml") ||
+		strings.HasSuffix(name, ".otelc.yaml")
+}
 
 func GetMatchedRuleFile() string {
 	const matchedRuleFile = "matched.json"
@@ -53,11 +66,19 @@ func GetAddedImportsPattern() string {
 	return GetBuildTemp("added_imports.*.json")
 }
 
+// GetOtelcWorkDir returns the otelc working directory. It first checks the
+// OTELC_WORK_DIR environment variable; if unset, it falls back to the current
+// working directory. If the working directory cannot be determined, the process
+// exits via ex.Fatalf, since otelc cannot safely place build artifacts without
+// a known base path.
 func GetOtelcWorkDir() string {
 	wd := os.Getenv(EnvOtelcWorkDir)
 	if wd == "" {
-		wd, _ = os.Getwd()
-		return wd
+		var err error
+		wd, err = os.Getwd()
+		if err != nil {
+			ex.Fatalf("failed to get working directory: %v", err)
+		}
 	}
 	return wd
 }
@@ -85,7 +106,8 @@ func DiscoverWorkDir(dir string) string {
 	}
 }
 
-// GetBuildTemp returns the path to the build temp directory $BUILD_TEMP/name
+// GetBuildTempDir returns the path to the build temp directory,
+// $OTELC_WORK_DIR/.otelc-build.
 func GetBuildTempDir() string {
 	return filepath.Join(GetOtelcWorkDir(), BuildTempDir)
 }
@@ -122,6 +144,41 @@ func EncodeBuildFlags(flags []string) string {
 		return ""
 	}
 	return string(encoded)
+}
+
+// ValidateVersionRange validates the supported rule version syntax.
+//
+// Supported forms:
+//   - "" (empty string): match all versions
+//   - "v1.2.3": minimal supported version (>= v1.2.3)
+//   - "v1.2.3,v2.0.0": half-open range [v1.2.3, v2.0.0)
+func ValidateVersionRange(versionRange string) error {
+	if versionRange == "" {
+		return nil
+	}
+
+	if strings.Count(versionRange, ",") > 1 {
+		return ex.Newf("version %q must contain at most one comma", versionRange)
+	}
+
+	if startInclusive, endExclusive, ok := strings.Cut(versionRange, ","); ok {
+		if strings.TrimSpace(startInclusive) == "" || strings.TrimSpace(endExclusive) == "" {
+			return ex.Newf("version %q must use non-empty start and end bounds", versionRange)
+		}
+		if !semver.IsValid(startInclusive) || !semver.IsValid(endExclusive) {
+			return ex.Newf("version %q must use valid semantic versions", versionRange)
+		}
+		if semver.Compare(startInclusive, endExclusive) >= 0 {
+			return ex.Newf("version %q must have a lower bound below the upper bound", versionRange)
+		}
+		return nil
+	}
+
+	if !semver.IsValid(versionRange) {
+		return ex.Newf("version %q must be a valid semantic version", versionRange)
+	}
+
+	return nil
 }
 
 // VersionInRange checks if a given version is within a specified version range.

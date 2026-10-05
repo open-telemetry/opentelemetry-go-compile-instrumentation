@@ -107,6 +107,41 @@ func TestExtract_TruncatesExistingFile(t *testing.T) {
 	require.Equal(t, string(newContent), string(bs))
 }
 
+func TestExtract_ClosesFileOnCopyError(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	targetPath := filepath.Join(tmpDir, "rules.yaml")
+
+	// build a tar header that promises more bytes than the tar stream
+	// actually contains, so io.CopyN fails partway through the copy.
+	var tarBuf bytes.Buffer
+	tw := tar.NewWriter(&tarBuf)
+
+	err := tw.WriteHeader(&tar.Header{
+		Name:     "rules.yaml",
+		Mode:     0o644,
+		Size:     100,
+		Typeflag: tar.TypeReg,
+	})
+	require.NoError(t, err)
+
+	_, err = tw.Write([]byte("short"))
+	require.NoError(t, err)
+
+	tr := tar.NewReader(bytes.NewReader(tarBuf.Bytes()))
+
+	header, err := tr.Next()
+	require.NoError(t, err)
+
+	err = extract(tr, header, targetPath)
+	require.Error(t, err)
+
+	// If extract() left the destination file open, removing it here
+	// fails on Windows (the OS refuses to delete a file that still has
+	// an open handle in this process).
+	require.NoError(t, os.Remove(targetPath))
+}
+
 func TestExtract_Directory(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -275,4 +310,44 @@ func TestExtractGZip_SkipsZipSlip(t *testing.T) {
 			require.True(t, os.IsNotExist(err))
 		})
 	}
+}
+
+func TestExtractGZip_InvalidGzip(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	corrupted := bytes.NewReader([]byte("not gzip data"))
+
+	err := extractGZip(corrupted, tmpDir)
+	require.Error(t, err)
+}
+
+func TestExtractGZip_MkdirAllError(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "file")
+	err := os.WriteFile(filePath, []byte("content"), 0o644)
+	require.NoError(t, err)
+
+	// Passing an existing file path as targetDir causes os.MkdirAll to fail
+	err = extractGZip(bytes.NewReader(nil), filePath)
+	require.Error(t, err)
+}
+
+func TestExtractGZip_CloseError(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	_, err := gw.Write([]byte("test data for gzip stream"))
+	require.NoError(t, err)
+	require.NoError(t, gw.Close())
+
+	// Truncate the gzip trailer to trigger a gzip.Reader.Close error
+	truncated := buf.Bytes()[:len(buf.Bytes())-4]
+
+	tmpDir := t.TempDir()
+	err = extractGZip(bytes.NewReader(truncated), tmpDir)
+	require.Error(t, err)
 }

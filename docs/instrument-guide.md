@@ -28,6 +28,8 @@ instrumentation/google.golang.org/grpc/client/client.otelc.yaml
 Below is an example configuration for instrumenting a function `NewServer`:
 
 ```yaml
+version: "v1.0.0"
+
 inject_to_grpc_newserver:
   target: google.golang.org/grpc
   version: v1.63.0,v1.70.0
@@ -40,8 +42,9 @@ inject_to_grpc_newserver:
         path: go.opentelemetry.io/otelc/instrumentation/google.golang.org/grpc/server
 ```
 
+- Top-level `version`: Minimum released `otelc` version required to read this file.
 - `target`: Import path of the package to instrument.
-- `version`: Version range to match. The left bound is inclusive, the right bound is exclusive. If version is not specified, the rule is applicable to all versions.
+- Rule-level `version`: Target package version range to match. The left bound is inclusive, the right bound is exclusive. If it is not specified, the rule is applicable to all versions.
 - `where`: Non-package selectors. `func` names the function to hook.
 - `do`: Ordered list of modifiers. `inject_hooks` declares this rule type and carries:
   - `before` / `after`: names of the hook functions.
@@ -90,6 +93,56 @@ func AfterNewServer(ictx hook.HookContext, server *grpc.Server) {
 
 If we cannot import a specific type (e.g., it is unexported), we can use `interface{}` in the hook signature.
 
+### Runtime Enable/Disable Gate
+
+Every instrumentation must be switchable at runtime through
+`OTEL_GO_ENABLED_INSTRUMENTATIONS` / `OTEL_GO_DISABLED_INSTRUMENTATIONS` (see
+[Configuration](configuration.md)). This is not automatic: the hooks are always woven into
+the binary at build time, so each instrumentation is responsible for checking whether it is
+enabled before doing any work.
+
+Declare an `instrumentationKey` and an enabler in the instrumentation package:
+
+```go
+const instrumentationKey = "GRPC"
+
+type grpcServerEnabler struct{}
+
+func (g grpcServerEnabler) Enable() bool {
+	return runtime.Instrumented(instrumentationKey)
+}
+
+var serverEnabler = grpcServerEnabler{}
+```
+
+Then return early from **every** exported hook before it touches any state:
+
+```go
+func BeforeNewServer(ictx hook.HookContext, opts ...grpc.ServerOption) {
+	if !serverEnabler.Enable() {
+		return
+	}
+	// ...
+}
+```
+
+Notes:
+
+- The key is matched case-insensitively, so `instrumentationKey = "GRPC"` is written as
+  `grpc` in the environment variable.
+- Packages that instrument two sides of the same library share one key. `grpc/client` and
+  `grpc/server` are both `GRPC`; `kafka-go/producer` and `kafka-go/consumer` are both
+  `KAFKA`.
+- Gate paired before/after hooks at the same point, so any bookkeeping they share (depth
+  counters, `ictx.SetData` values) stays balanced when the instrumentation is disabled.
+- When a before/after pair shares one `hook.HookContext` (one call in, one call out), have
+  the before hook store its `Enable()` result via `ictx.SetKeyData` and have the after hook
+  read it back instead of calling `Enable()` again. Otherwise a call whose environment
+  variable changes mid-flight sees the before hook and after hook disagree, desyncing
+  whatever they gate together.
+- Cover the gate in unit tests with `t.Setenv`, asserting both that a disabled
+  instrumentation emits nothing and that an explicitly enabled one still works.
+
 ### Limitations
 
 The constraints below apply to hook implementations. For runtime symptoms (spans not
@@ -104,7 +157,24 @@ When implementing hooks, we must adhere to certain limitations:
 
    Importing other third-party libraries is not allowed.
 
-2. **Generic Functions**: If the target function is generic, we cannot use `HookContext` APIs to modify parameters or return values (e.g., `SetParam`, `SetReturnVal`).
+2. **Generic Functions**: If the target function or method receiver is generic, we cannot use the `HookContext` parameter and return value APIs.
+
+   `GetParam`, `SetParam`, `GetReturnVal`, and `SetReturnVal` are each replaced with a body
+   that panics, so reading panics just as writing does. Instead, we read the values from the
+   hook's own parameters, which already receive them positionally:
+
+   ```go
+   // Target: func GenericFunc[T any](p1 T, p2 int) (T, error)
+
+   // We read p1 and p2 from the hook's parameters, never through ictx.GetParam.
+   func GenericFuncBefore(ictx hook.HookContext, p1 interface{}, p2 int) {}
+
+   // The after hook likewise reads the return values from its own parameters.
+   func GenericFuncAfter(ictx hook.HookContext, r1 interface{}, r2 error) {}
+   ```
+
+   Nothing catches this at build time: a hook that calls one of these four methods on a
+   generic target compiles cleanly, and only panics once the instrumented function runs.
 
 ### GLS Operation for OTel SDK Instrumentation
 
@@ -156,6 +226,18 @@ The max chain size is configurable:
 - env var: `OTEL_GLS_MAX_SPANS`
 - default: `1000`
 - invalid or non-positive values are ignored (default remains in effect)
+- once a goroutine's live (unended) span count reaches this limit, new spans are not tracked for
+  implicit propagation; `SpanFromContext(context.Background())` on that goroutine keeps returning
+  whatever was already on top of the stack. This is logged at debug level
+  (`OTEL_LOG_LEVEL=debug`) rather than failing silently.
+
+Span end-state is tracked in a map shared across all goroutines (so a span ended on one goroutine
+is recognized as ended by any other goroutine holding a GLS clone of it), bounded separately:
+
+- env var: `OTEL_GLS_MAX_SPAN_STATES`
+- default: `100000`
+- once full, the oldest tracked entry is evicted (also logged at debug level) to make room for
+  new spans; eviction always targets the oldest entry deterministically, never an arbitrary one.
 
 ##### 3) Hook integration points
 

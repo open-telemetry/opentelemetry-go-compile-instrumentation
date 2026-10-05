@@ -1,0 +1,16 @@
+version: "v1.0.0"
+
+# (*Client).PerformRequest is the shared HTTP path for Search, Index, Bulk,
+# Delete, and the rest of the public olivere/elastic v7 API.
+# NewClient sniff/healthcheck call http.Client.Do and are not hooked here.
+elastic_hook_perform_request:
+  target: github.com/olivere/elastic/v7
+  version: v7.0.0
+  where:
+    func: PerformRequest
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforePerformRequest
+        after: AfterPerformRequest
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/olivere/elastic/v7"

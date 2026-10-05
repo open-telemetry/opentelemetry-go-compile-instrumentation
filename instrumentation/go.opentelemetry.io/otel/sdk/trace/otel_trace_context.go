@@ -6,6 +6,8 @@
 package trace
 
 import (
+	"container/list"
+	"log/slog"
 	"os"
 	"runtime"
 	"strconv"
@@ -22,23 +24,52 @@ func registerTraceAndSpanIDFunc(f func() (string, string))
 //go:linkname registerSpanFromGLSFunc go.opentelemetry.io/otelc/pkg/runtime.RegisterSpanFromGLSFunc
 func registerSpanFromGLSFunc(f func() trace.Span)
 
+// otelcLogger is reached by linkname, like the register funcs above, rather than
+// by importing pkg/runtime: that package imports go.opentelemetry.io/otel/sdk/trace,
+// so an import edge from this injected file closes a cycle and the build fails at
+// link time with a pkg/runtime fingerprint mismatch.
+//
+// Call it at each use site rather than caching it in a package var. Without an
+// import edge Go does not order pkg/runtime's init() before this package's, so a
+// var initializer would run first, latch the slog.Default() fallback, and silently
+// discard OTEL_LOG_LEVEL=debug output.
+//
+//go:linkname otelcLogger go.opentelemetry.io/otelc/pkg/runtime.Logger
+func otelcLogger() *slog.Logger
+
 const defaultGLSMaxSpans = 1000
 
-// maxSpanStates bounds lifecycle bookkeeping. Evicted states are marked ended,
-// so reaching the limit drops implicit propagation instead of retaining a stale parent.
-const maxSpanStates = 100_000
+// defaultMaxSpanStates bounds lifecycle bookkeeping. Evicted states are marked
+// ended, so reaching the limit drops implicit propagation for the evicted span
+// instead of retaining a stale parent for it.
+const defaultMaxSpanStates = 100_000
 
-var otelGLSMaxSpans = defaultGLSMaxSpans
+var (
+	otelGLSMaxSpans = defaultGLSMaxSpans
+	maxSpanStates   = defaultMaxSpanStates
+)
 
 func init() {
-	ms := os.Getenv("OTEL_GLS_MAX_SPANS")
-	if ms != "" {
-		if parsed, err := strconv.Atoi(ms); err == nil && parsed > 0 {
-			otelGLSMaxSpans = parsed
-		}
+	if parsed, ok := positiveIntEnv("OTEL_GLS_MAX_SPANS"); ok {
+		otelGLSMaxSpans = parsed
+	}
+	if parsed, ok := positiveIntEnv("OTEL_GLS_MAX_SPAN_STATES"); ok {
+		maxSpanStates = parsed
 	}
 	registerTraceAndSpanIDFunc(GetTraceAndSpanID)
 	registerSpanFromGLSFunc(spanFromGLS)
+}
+
+func positiveIntEnv(name string) (int, bool) {
+	v := os.Getenv(name)
+	if v == "" {
+		return 0, false
+	}
+	parsed, err := strconv.Atoi(v)
+	if err != nil || parsed <= 0 {
+		return 0, false
+	}
+	return parsed, true
 }
 
 type traceContext struct {
@@ -58,10 +89,45 @@ type spanKey struct {
 	spanID  trace.SpanID
 }
 
+// spanStateEntry pairs a span's ended flag with its position in the
+// insertion-order eviction list.
+type spanStateEntry struct {
+	state *atomic.Bool
+	elem  *list.Element
+}
+
+// spanStates bounds shared lifecycle bookkeeping across goroutines. order
+// tracks insertion order (oldest at the front) so that once the map hits
+// maxSpanStates, eviction always drops the oldest entry rather than an
+// arbitrary one — Go map iteration order is randomized, so iterating the map
+// itself to pick a victim can evict a span that is still genuinely in flight
+// on an unrelated goroutine.
 var spanStates = struct {
 	sync.Mutex
-	states map[spanKey]*atomic.Bool
-}{states: make(map[spanKey]*atomic.Bool)}
+	states map[spanKey]*spanStateEntry
+	order  *list.List
+}{
+	states: make(map[spanKey]*spanStateEntry),
+	order:  list.New(),
+}
+
+// evictOldestLocked drops the oldest tracked span state, marking it ended so
+// any goroutine still holding it stops treating it as a live parent. Callers
+// must hold spanStates.Mutex.
+func evictOldestLocked() {
+	front := spanStates.order.Front()
+	if front == nil {
+		return
+	}
+	key, _ := front.Value.(spanKey)
+	if entry, ok := spanStates.states[key]; ok {
+		entry.state.Store(true)
+		delete(spanStates.states, key)
+	}
+	spanStates.order.Remove(front)
+	otelcLogger().Debug("GLS span state tracker at capacity, evicting oldest entry",
+		"limit", maxSpanStates)
+}
 
 func stateForSpan(span trace.Span) *atomic.Bool {
 	sc := span.SpanContext()
@@ -71,18 +137,15 @@ func stateForSpan(span trace.Span) *atomic.Bool {
 	key := spanKey{sc.TraceID(), sc.SpanID()}
 	spanStates.Lock()
 	defer spanStates.Unlock()
-	if state, ok := spanStates.states[key]; ok {
-		return state
+	if entry, ok := spanStates.states[key]; ok {
+		return entry.state
 	}
 	if len(spanStates.states) >= maxSpanStates {
-		for key, state := range spanStates.states {
-			state.Store(true)
-			delete(spanStates.states, key)
-			break
-		}
+		evictOldestLocked()
 	}
 	state := &atomic.Bool{}
-	spanStates.states[key] = state
+	elem := spanStates.order.PushBack(key)
+	spanStates.states[key] = &spanStateEntry{state: state, elem: elem}
 	return state
 }
 
@@ -94,9 +157,10 @@ func markSpanEnded(span trace.Span) {
 	key := spanKey{sc.TraceID(), sc.SpanID()}
 	spanStates.Lock()
 	defer spanStates.Unlock()
-	if state, ok := spanStates.states[key]; ok {
-		state.Store(true)
+	if entry, ok := spanStates.states[key]; ok {
+		entry.state.Store(true)
 		delete(spanStates.states, key)
+		spanStates.order.Remove(entry.elem)
 	}
 }
 
@@ -120,6 +184,13 @@ func (tc *traceContext) add(span trace.Span) bool {
 	if tc.n >= otelGLSMaxSpans {
 		tc.compact()
 		if tc.n >= otelGLSMaxSpans {
+			// The new span is dropped from GLS: it won't be reachable via
+			// implicit propagation, and any span.SpanFromContext(context.Background())
+			// lookup on this goroutine keeps returning whatever was already
+			// on top of the stack until it compacts below the limit. Surface
+			// that instead of dropping it silently.
+			otelcLogger().Debug("GLS span stack at capacity, span not tracked for implicit propagation",
+				"limit", otelGLSMaxSpans)
 			return false
 		}
 	}

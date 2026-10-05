@@ -4,6 +4,7 @@
 package log
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -154,6 +155,101 @@ func TestBeforeLogOutput_AlreadyContainsTraceID(t *testing.T) {
 	assert.NotContains(t, result, "trace_id=abc123")
 }
 
+func TestBeforeLogOutput_TraceIDMention(t *testing.T) {
+	runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
+		return "abc123", "def456"
+	})
+	t.Cleanup(func() {
+		runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
+			return "", ""
+		})
+	})
+
+	ictx := hooktest.NewMockHookContext()
+	originalAppend := func(b []byte) []byte {
+		return append(b, []byte("could not parse trace_id header\n")...)
+	}
+	BeforeLogOutput(ictx, nil, 0, 0, originalAppend)
+
+	wrappedFn := ictx.GetParam(3)
+	wrapped := wrappedFn.(func([]byte) []byte)
+	result := string(wrapped([]byte{}))
+	assert.Contains(t, result, "could not parse trace_id header")
+	assert.Contains(t, result, "trace_id=abc123")
+	assert.Contains(t, result, "span_id=def456")
+}
+
+func TestBeforeLogOutput_OtherTraceIDPrefix(t *testing.T) {
+	runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
+		return "abc123", "def456"
+	})
+	t.Cleanup(func() {
+		runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
+			return "", ""
+		})
+	})
+
+	ictx := hooktest.NewMockHookContext()
+	originalAppend := func(b []byte) []byte {
+		return append(b, []byte("msg other_trace_id=custom123\n")...)
+	}
+	BeforeLogOutput(ictx, nil, 0, 0, originalAppend)
+
+	wrappedFn := ictx.GetParam(3)
+	wrapped := wrappedFn.(func([]byte) []byte)
+	result := string(wrapped([]byte{}))
+	assert.Contains(t, result, "other_trace_id=custom123")
+	assert.Contains(t, result, "trace_id=abc123")
+	assert.Contains(t, result, "span_id=def456")
+}
+
+func TestBeforeLogOutput_BracketedTraceID(t *testing.T) {
+	runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
+		return "abc123", "def456"
+	})
+	t.Cleanup(func() {
+		runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
+			return "", ""
+		})
+	})
+
+	ictx := hooktest.NewMockHookContext()
+	originalAppend := func(b []byte) []byte {
+		return append(b, []byte("[trace_id=existing] user logged in\n")...)
+	}
+	BeforeLogOutput(ictx, nil, 0, 0, originalAppend)
+
+	wrappedFn := ictx.GetParam(3)
+	wrapped := wrappedFn.(func([]byte) []byte)
+	result := string(wrapped([]byte{}))
+	assert.Contains(t, result, "[trace_id=existing]")
+	assert.Contains(t, result, "trace_id=abc123")
+	assert.Contains(t, result, "span_id=def456")
+}
+
+func TestBeforeLogOutput_LeadingTraceID(t *testing.T) {
+	runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
+		return "abc123", "def456"
+	})
+	t.Cleanup(func() {
+		runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
+			return "", ""
+		})
+	})
+
+	ictx := hooktest.NewMockHookContext()
+	originalAppend := func(b []byte) []byte {
+		return append(b, []byte("trace_id=existing message\n")...)
+	}
+	BeforeLogOutput(ictx, nil, 0, 0, originalAppend)
+
+	wrappedFn := ictx.GetParam(3)
+	wrapped := wrappedFn.(func([]byte) []byte)
+	result := string(wrapped([]byte{}))
+	assert.Contains(t, result, "trace_id=existing message")
+	assert.NotContains(t, result, "trace_id=abc123")
+}
+
 func TestBeforeLogOutput_EmptyOutput(t *testing.T) {
 	runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
 		return "abc123", "def456"
@@ -172,21 +268,64 @@ func TestBeforeLogOutput_EmptyOutput(t *testing.T) {
 	assert.Empty(t, result)
 }
 
-func TestBeforeLogOutput_PreservesNewline(t *testing.T) {
-	runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
-		return "abc123", "def456"
-	})
-	defer runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
-		return "", ""
-	})
+func TestBeforeLogOutput_PreservesLineEnding(t *testing.T) {
+	tests := []struct {
+		name        string
+		lineEnding  string
+		wantContain string
+	}{
+		{
+			name:        "LF",
+			lineEnding:  "\n",
+			wantContain: "msg trace_id=abc123 span_id=def456\n",
+		},
+		{
+			name:        "CRLF",
+			lineEnding:  "\r\n",
+			wantContain: "msg trace_id=abc123 span_id=def456\r\n",
+		},
+	}
 
-	ictx := hooktest.NewMockHookContext()
-	originalAppend := func(b []byte) []byte { return append(b, []byte("msg\n")...) }
-	BeforeLogOutput(ictx, nil, 0, 0, originalAppend)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
+				return "abc123", "def456"
+			})
+			t.Cleanup(func() {
+				runtime.RegisterTraceAndSpanIDFunc(func() (string, string) {
+					return "", ""
+				})
+			})
 
-	wrappedFn := ictx.GetParam(3)
-	wrapped := wrappedFn.(func([]byte) []byte)
-	result := string(wrapped([]byte{}))
-	assert.True(t, result[len(result)-1] == '\n')
-	assert.Contains(t, result, "trace_id=abc123")
+			ictx := hooktest.NewMockHookContext()
+			originalAppend := func(b []byte) []byte { return append(b, []byte("msg"+tt.lineEnding)...) }
+			BeforeLogOutput(ictx, nil, 0, 0, originalAppend)
+
+			wrappedFn := ictx.GetParam(3)
+			wrapped := wrappedFn.(func([]byte) []byte)
+			result := string(wrapped([]byte{}))
+			assert.True(t, strings.HasSuffix(result, tt.lineEnding))
+			assert.Contains(t, result, tt.wantContain)
+		})
+	}
+}
+
+func TestHasTraceID_ZeroAllocs(t *testing.T) {
+	msg := []byte("2026/09/18 10:00:00 standard log message without trace id\n")
+	allocs := testing.AllocsPerRun(1000, func() {
+		_ = hasTraceID(msg)
+	})
+	assert.Equal(t, float64(0), allocs)
+
+	matchMsg := []byte("2026/09/18 10:00:00 standard log message trace_id=abcdef123456\n")
+	matchAllocs := testing.AllocsPerRun(1000, func() {
+		_ = hasTraceID(matchMsg)
+	})
+	assert.Equal(t, float64(0), matchAllocs)
+
+	leadingMsg := []byte("trace_id=abcdef123456 standard log message\n")
+	leadingAllocs := testing.AllocsPerRun(1000, func() {
+		_ = hasTraceID(leadingMsg)
+	})
+	assert.Equal(t, float64(0), leadingAllocs)
 }

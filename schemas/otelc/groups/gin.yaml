@@ -1,0 +1,32 @@
+groups:
+  # ---------------------------------------------------------------------------
+  # gin-gonic/gin instrumentation emission contract.
+  #
+  # Source of truth for this file:
+  #   instrumentation/github.com/gin-gonic/gin/context_hook.go (BeforeNext / AfterNext)
+  #
+  # The gin instrumentation creates no spans and records no metrics of its own.
+  # A gin application is served through `net/http`, so the server span already
+  # exists by the time gin's router runs (see `groups/http.yaml` for the
+  # `net/http` contract). This instrumentation only *enriches* that existing
+  # `net/http` server span, once per request, after the router has matched a
+  # route:
+  #
+  #   - it renames the span from `<METHOD>` to `<METHOD> <route pattern>`
+  #   - it sets `http.route` to the matched route pattern
+  #   - it sets the span status to Error and records the accumulated
+  #     `c.Errors` as span exceptions when the handler chain reported any
+  #
+  # Nothing is set when no route matches (e.g. a 404) or when the span is not
+  # recording. Span status and recorded exceptions are span fields rather than
+  # attributes, so `http.route` below is the instrumentation's whole attribute
+  # surface. It is a standard upstream attribute, referenced with `ref:`.
+  # ---------------------------------------------------------------------------
+
+  - id: registry.otelc.gin
+    type: attribute_group
+    display_name: otelc gin attributes
+    brief: >
+      Attributes the gin instrumentation adds to the enclosing `net/http` server span once gin's router has matched a route.
+    attributes:
+      - ref: http.route

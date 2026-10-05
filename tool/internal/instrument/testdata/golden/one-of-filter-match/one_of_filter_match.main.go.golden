@@ -11,11 +11,11 @@ import _ "unsafe"
 
 type PostgresDriver struct{}
 
-func Open(dsn string) (_unnamedRetVal0 error) {
+func Open(dsn string) (_unnamedRetVal_2733714658_0 error) {
 	//line <generated>:1
 	if hookContext2733714658, _ := OtelBeforeTrampoline_Open2733714658(&dsn); false {
 	} else {
-		defer OtelAfterTrampoline_Open2733714658(hookContext2733714658, &_unnamedRetVal0)
+		defer OtelAfterTrampoline_Open2733714658(hookContext2733714658, &_unnamedRetVal_2733714658_0)
 	}
 	//line main.go:13:2
 	println("opening " + dsn)
@@ -38,25 +38,27 @@ func (c *HookContextImpl2733714658) IsSkipCall() bool         { return c.skipCal
 func (c *HookContextImpl2733714658) SetData(data interface{}) { c.data = data }
 func (c *HookContextImpl2733714658) GetData() interface{}     { return c.data }
 func (c *HookContextImpl2733714658) GetKeyData(key string) interface{} {
-	if c.data == nil {
-		return nil
+	if m, ok := c.data.(map[string]interface{}); ok {
+		return m[key]
 	}
-	return c.data.(map[string]interface{})[key]
+	return nil
 }
 
 func (c *HookContextImpl2733714658) SetKeyData(key string, val interface{}) {
-	if c.data == nil {
-		c.data = make(map[string]interface{})
+	m, ok := c.data.(map[string]interface{})
+	if !ok || m == nil {
+		m = make(map[string]interface{})
+		c.data = m
 	}
-	c.data.(map[string]interface{})[key] = val
+	m[key] = val
 }
 
 func (c *HookContextImpl2733714658) HasKeyData(key string) bool {
-	if c.data == nil {
-		return false
+	if m, ok := c.data.(map[string]interface{}); ok {
+		_, ok := m[key]
+		return ok
 	}
-	_, ok := c.data.(map[string]interface{})[key]
-	return ok
+	return false
 }
 
 func (c *HookContextImpl2733714658) GetParam(idx int) interface{} {
@@ -68,13 +70,13 @@ func (c *HookContextImpl2733714658) GetParam(idx int) interface{} {
 }
 
 func (c *HookContextImpl2733714658) SetParam(idx int, val interface{}) {
-	if val == nil {
-		c.params[idx] = nil
-		return
-	}
 	switch idx {
 	case 0:
-		*(c.params[0].(*string)) = val.(string)
+		if val == nil {
+			*(c.params[0].(*string)) = *new(string)
+		} else {
+			*(c.params[0].(*string)) = val.(string)
+		}
 	}
 }
 
@@ -87,13 +89,13 @@ func (c *HookContextImpl2733714658) GetReturnVal(idx int) interface{} {
 }
 
 func (c *HookContextImpl2733714658) SetReturnVal(idx int, val interface{}) {
-	if val == nil {
-		c.returnVals[idx] = nil
-		return
-	}
 	switch idx {
 	case 0:
-		*(c.returnVals[0].(*error)) = val.(error)
+		if val == nil {
+			*(c.returnVals[0].(*error)) = *new(error)
+		} else {
+			*(c.returnVals[0].(*error)) = val.(error)
+		}
 	}
 }
 func (c *HookContextImpl2733714658) GetParamCount() int     { return len(c.params) }

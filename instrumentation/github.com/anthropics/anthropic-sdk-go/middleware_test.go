@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/iotest"
@@ -18,6 +19,9 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
@@ -29,7 +33,8 @@ func TestClassifyOperation(t *testing.T) {
 	}{
 		{"/v1/messages", opMessages},
 		{"/anthropic/v1/messages", opMessages},
-		{"/v1/messages/count_tokens", opUnknown},
+		{"/v1/messages/count_tokens", opCountTokens},
+		{"/anthropic/v1/messages/count_tokens", opCountTokens},
 		{"/v1/messages/batches", opUnknown},
 		{"/v1/models", opUnknown},
 	}
@@ -61,6 +66,7 @@ func TestGetProviderName(t *testing.T) {
 
 func TestOperationName(t *testing.T) {
 	assert.Equal(t, "chat", operationName(opMessages))
+	assert.Equal(t, "count_tokens", operationName(opCountTokens))
 	assert.Equal(t, "", operationName(opUnknown))
 }
 
@@ -98,6 +104,159 @@ func setupTestTracer(t *testing.T) *tracetest.SpanRecorder {
 	return sr
 }
 
+// setupTestMeter wires the package-level operationDuration histogram to a
+// manual reader so tests can assert what was recorded.
+func setupTestMeter(t *testing.T) *sdkmetric.ManualReader {
+	t.Helper()
+	setupTestTracer(t)
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	otel.SetMeterProvider(mp)
+	var err error
+	operationDuration, err = mp.Meter("test").Float64Histogram(
+		"gen_ai.client.operation.duration", metric.WithUnit("s"))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = mp.Shutdown(context.Background())
+		operationDuration = nil
+	})
+	return reader
+}
+
+// durationCount collects the recorded gen_ai.client.operation.duration
+// histogram and returns the total number of measurements across data points.
+func durationCount(t *testing.T, reader *sdkmetric.ManualReader) uint64 {
+	t.Helper()
+	var rm metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &rm))
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != "gen_ai.client.operation.duration" {
+				continue
+			}
+			hist, ok := m.Data.(metricdata.Histogram[float64])
+			require.True(t, ok, "gen_ai.client.operation.duration must be a float64 histogram")
+			var count uint64
+			for _, dp := range hist.DataPoints {
+				count += dp.Count
+			}
+			return count
+		}
+	}
+	return 0
+}
+
+// durationDataPoints returns all data points for gen_ai.client.operation.duration.
+func durationDataPoints(t *testing.T, reader *sdkmetric.ManualReader) []metricdata.HistogramDataPoint[float64] {
+	t.Helper()
+	var rm metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &rm))
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != "gen_ai.client.operation.duration" {
+				continue
+			}
+			hist, ok := m.Data.(metricdata.Histogram[float64])
+			require.True(t, ok, "gen_ai.client.operation.duration must be a float64 histogram")
+			return hist.DataPoints
+		}
+	}
+	return nil
+}
+
+// TestOtelMiddleware_RecordsDuration verifies a successful Messages call emits
+// exactly one gen_ai.client.operation.duration measurement.
+func TestOtelMiddleware_RecordsDuration(t *testing.T) {
+	setupTestTracer(t)
+	reader := setupTestMeter(t)
+
+	middleware := OtelMiddleware()
+
+	req, _ := http.NewRequest(
+		http.MethodPost,
+		"http://api.anthropic.com/v1/messages",
+		io.NopCloser(bytes.NewReader([]byte(`{"model":"claude-sonnet-4-5","max_tokens":10}`))),
+	)
+	next := func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(strings.NewReader(
+				`{"id":"msg_1","model":"claude-sonnet-4-5","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":2}}`,
+			)),
+		}, nil
+	}
+
+	_, err := middleware(req, next)
+	require.NoError(t, err)
+
+	assert.Equal(t, uint64(1), durationCount(t, reader), "duration should be recorded once on success")
+}
+
+// TestOtelMiddleware_RecordsDurationOnError verifies the duration is recorded
+// even when the call fails, so error latency is observable too. It also
+// verifies that error.type is set on the metric as a numeric status code.
+func TestOtelMiddleware_RecordsDurationOnError(t *testing.T) {
+	setupTestTracer(t)
+	reader := setupTestMeter(t)
+
+	middleware := OtelMiddleware()
+
+	req, _ := http.NewRequest(
+		http.MethodPost,
+		"http://api.anthropic.com/v1/messages",
+		io.NopCloser(bytes.NewReader([]byte(`{"model":"claude-sonnet-4-5","max_tokens":10}`))),
+	)
+	next := func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusTooManyRequests,
+			Status:     "429 Too Many Requests",
+			Header:     http.Header{},
+			Body:       io.NopCloser(strings.NewReader("")),
+		}, nil
+	}
+
+	_, err := middleware(req, next)
+	require.NoError(t, err)
+
+	dps := durationDataPoints(t, reader)
+	require.Len(t, dps, 1, "duration should be recorded once on HTTP error")
+	assert.Equal(t, uint64(1), dps[0].Count)
+	// error.type on the metric must be the numeric status code.
+	val, ok := dps[0].Attributes.Value(attribute.Key("error.type"))
+	require.True(t, ok, "error.type must be present on the metric data point")
+	assert.Equal(t, "429", val.AsString())
+}
+
+// TestOtelMiddleware_RecordsDurationOnTransportError verifies the duration is
+// recorded and error.type is set when next() returns an error.
+func TestOtelMiddleware_RecordsDurationOnTransportError(t *testing.T) {
+	setupTestTracer(t)
+	reader := setupTestMeter(t)
+
+	middleware := OtelMiddleware()
+
+	req, _ := http.NewRequest(
+		http.MethodPost,
+		"http://api.anthropic.com/v1/messages",
+		io.NopCloser(bytes.NewReader([]byte(`{"model":"claude-sonnet-4-5","max_tokens":10}`))),
+	)
+	wantErr := errors.New("connection refused")
+	next := func(r *http.Request) (*http.Response, error) {
+		return nil, wantErr
+	}
+
+	_, err := middleware(req, next)
+	require.ErrorIs(t, err, wantErr)
+
+	dps := durationDataPoints(t, reader)
+	require.Len(t, dps, 1, "duration should be recorded once on transport error")
+	assert.Equal(t, uint64(1), dps[0].Count)
+	// error.type on the metric should reflect the Go error type.
+	_, ok := dps[0].Attributes.Value(attribute.Key("error.type"))
+	require.True(t, ok, "error.type must be present on the metric data point")
+}
+
 // TestOtelMiddleware_Messages defines the expected span shape for a
 // non-streaming Messages API call (POST /v1/messages).
 func TestOtelMiddleware_Messages(t *testing.T) {
@@ -108,7 +267,7 @@ func TestOtelMiddleware_Messages(t *testing.T) {
 	reqBody := `{"model":"claude-sonnet-4-5","max_tokens":1024,"temperature":0.7,"top_p":0.9,"top_k":40,"messages":[{"role":"user","content":"Hello"}]}`
 	req, _ := http.NewRequest(
 		"POST",
-		"http://api.anthropic.com/v1/messages",
+		"https://api.anthropic.com/v1/messages",
 		io.NopCloser(bytes.NewReader([]byte(reqBody))),
 	)
 
@@ -136,6 +295,8 @@ func TestOtelMiddleware_Messages(t *testing.T) {
 	assertAttribute(t, attrs, "gen_ai.operation.name", "chat")
 	assertAttribute(t, attrs, "gen_ai.request.model", "claude-sonnet-4-5")
 	assertAttribute(t, attrs, "gen_ai.provider.name", "anthropic")
+	assertAttribute(t, attrs, "server.address", "api.anthropic.com")
+	assertInt64Attribute(t, attrs, "server.port", 443)
 	assertInt64Attribute(t, attrs, "gen_ai.request.max_tokens", 1024)
 	assertFloat64Attribute(t, attrs, "gen_ai.request.temperature", 0.7)
 	assertFloat64Attribute(t, attrs, "gen_ai.request.top_p", 0.9)
@@ -162,7 +323,7 @@ func TestOtelMiddleware_Messages_NoCacheUsage(t *testing.T) {
 	reqBody := `{"model":"claude-sonnet-4-5","max_tokens":1024,"messages":[{"role":"user","content":"Hello"}]}`
 	req, _ := http.NewRequest(
 		"POST",
-		"http://api.anthropic.com/v1/messages",
+		"https://custom-proxy.example.com:8443/v1/messages",
 		io.NopCloser(bytes.NewReader([]byte(reqBody))),
 	)
 
@@ -182,13 +343,15 @@ func TestOtelMiddleware_Messages_NoCacheUsage(t *testing.T) {
 	require.Len(t, spans, 1)
 
 	attrs := spans[0].Attributes()
+	assertAttribute(t, attrs, "server.address", "custom-proxy.example.com")
+	assertInt64Attribute(t, attrs, "server.port", 8443)
 	_, found := findAttribute(attrs, "gen_ai.usage.cache_read.input_tokens")
 	assert.False(t, found, "cache_read attribute should be omitted when zero")
 	_, found = findAttribute(attrs, "gen_ai.usage.cache_creation.input_tokens")
 	assert.False(t, found, "cache_creation attribute should be omitted when zero")
 }
 
-func TestOtelMiddleware_SkipsCountTokens(t *testing.T) {
+func TestOtelMiddleware_CountTokens(t *testing.T) {
 	sr := setupTestTracer(t)
 
 	middleware := OtelMiddleware()
@@ -196,7 +359,9 @@ func TestOtelMiddleware_SkipsCountTokens(t *testing.T) {
 	req, _ := http.NewRequest(
 		"POST",
 		"http://api.anthropic.com/v1/messages/count_tokens",
-		io.NopCloser(bytes.NewReader([]byte(`{"model":"claude-sonnet-4-5"}`))),
+		io.NopCloser(
+			bytes.NewReader([]byte(`{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"Hello"}]}`)),
+		),
 	)
 
 	next := func(r *http.Request) (*http.Response, error) {
@@ -210,7 +375,82 @@ func TestOtelMiddleware_SkipsCountTokens(t *testing.T) {
 	resp, err := middleware(req, next)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	assert.Empty(t, sr.Ended())
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	assert.Equal(t, "count_tokens claude-sonnet-4-5", spans[0].Name())
+
+	attrs := spans[0].Attributes()
+	assertAttribute(t, attrs, "gen_ai.system", "anthropic")
+	assertAttribute(t, attrs, "gen_ai.operation.name", "count_tokens")
+	assertAttribute(t, attrs, "gen_ai.request.model", "claude-sonnet-4-5")
+	assertAttribute(t, attrs, "gen_ai.provider.name", "anthropic")
+	assertInt64Attribute(t, attrs, "gen_ai.usage.input_tokens", 5)
+	_, found := findAttribute(attrs, "gen_ai.usage.output_tokens")
+	assert.False(t, found, "count_tokens has no output tokens")
+}
+
+// TestOtelMiddleware_InvalidRequestJSON verifies that a request body which
+// fails to parse (e.g. truncated by maxRequestBodySize) is passed through
+// uninstrumented rather than producing a span with an empty
+// gen_ai.request.model.
+func TestOtelMiddleware_InvalidRequestJSON(t *testing.T) {
+	sr := setupTestTracer(t)
+
+	middleware := OtelMiddleware()
+
+	req, _ := http.NewRequest(
+		"POST",
+		"http://api.anthropic.com/v1/messages",
+		io.NopCloser(bytes.NewReader([]byte("not json"))),
+	)
+
+	called := false
+	next := func(r *http.Request) (*http.Response, error) {
+		called = true
+		return &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader("")),
+		}, nil
+	}
+
+	resp, err := middleware(req, next)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.True(t, called)
+	assert.Empty(t, sr.Ended(), "no span should be created for an unparsable request body")
+}
+
+// TestOtelMiddleware_MissingModel verifies that a well-formed request body
+// which simply omits the model field is passed through uninstrumented rather
+// than producing a span named "chat " with an empty gen_ai.request.model.
+func TestOtelMiddleware_MissingModel(t *testing.T) {
+	sr := setupTestTracer(t)
+
+	middleware := OtelMiddleware()
+
+	req, _ := http.NewRequest(
+		"POST",
+		"http://api.anthropic.com/v1/messages",
+		io.NopCloser(bytes.NewReader([]byte(`{"max_tokens":10}`))),
+	)
+
+	called := false
+	next := func(r *http.Request) (*http.Response, error) {
+		called = true
+		return &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader("")),
+		}, nil
+	}
+
+	resp, err := middleware(req, next)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.True(t, called)
+	assert.Empty(t, sr.Ended(), "no span should be created when the request omits a model")
 }
 
 // TestOtelMiddleware_StreamingRequestPassThrough verifies that streaming
@@ -266,7 +506,7 @@ func TestOtelMiddleware_SSEResponseFallback(t *testing.T) {
 	next := func(r *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: 200,
-			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Header:     http.Header{"Content-Type": []string{"Text/Event-Stream; badparam"}},
 			Body:       io.NopCloser(strings.NewReader(sse)),
 		}, nil
 	}
@@ -283,6 +523,34 @@ func TestOtelMiddleware_SSEResponseFallback(t *testing.T) {
 	got, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	assert.Equal(t, sse, string(got))
+}
+
+func TestOtelMiddleware_NonStreamingContentTypeWithSSEPrefix(t *testing.T) {
+	sr := setupTestTracer(t)
+
+	middleware := OtelMiddleware()
+
+	req, _ := http.NewRequest(
+		http.MethodPost,
+		"http://api.anthropic.com/v1/messages",
+		io.NopCloser(bytes.NewReader([]byte(`{"model":"claude-sonnet-4-5","max_tokens":10}`))),
+	)
+	next := func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-streaming"}},
+			Body: io.NopCloser(strings.NewReader(
+				`{"id":"msg_test_123","model":"claude-sonnet-4-5","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":2}}`,
+			)),
+		}, nil
+	}
+
+	_, err := middleware(req, next)
+	require.NoError(t, err)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	assertAttribute(t, spans[0].Attributes(), "gen_ai.response.id", "msg_test_123")
 }
 
 // TestOtelMiddleware_RequestBodyReadError verifies that a failing request body
@@ -380,33 +648,52 @@ func TestOtelMiddleware_ResponseBodyReadError(t *testing.T) {
 }
 
 func TestOtelMiddleware_HTTPError(t *testing.T) {
-	sr := setupTestTracer(t)
-
-	middleware := OtelMiddleware()
-
-	req, _ := http.NewRequest(
-		"POST",
-		"http://api.anthropic.com/v1/messages",
-		io.NopCloser(bytes.NewReader([]byte(`{"model":"claude-sonnet-4-5","max_tokens":10}`))),
-	)
-
-	next := func(r *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: 429,
-			Status:     "429 Too Many Requests",
-			Header:     http.Header{},
-			Body:       io.NopCloser(strings.NewReader("")),
-		}, nil
+	tests := []struct {
+		name        string
+		statusCode  int
+		status      string
+		contentType string
+	}{
+		{"rate limit", 429, "429 Too Many Requests", "application/json"},
+		{"server error", 500, "500 Internal Server Error", "application/json"},
+		{"streaming error", 500, "500 Internal Server Error", "text/event-stream"},
 	}
 
-	resp, err := middleware(req, next)
-	require.NoError(t, err)
-	require.NotNil(t, resp)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sr := setupTestTracer(t)
 
-	spans := sr.Ended()
-	require.Len(t, spans, 1)
-	assertAttribute(t, spans[0].Attributes(), "error.type", "429 Too Many Requests")
-	assert.Equal(t, codes.Error, spans[0].Status().Code)
+			middleware := OtelMiddleware()
+
+			req, _ := http.NewRequest(
+				"POST",
+				"http://api.anthropic.com/v1/messages",
+				io.NopCloser(bytes.NewReader([]byte(`{"model":"claude-sonnet-4-5","max_tokens":10}`))),
+			)
+
+			next := func(r *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: tt.statusCode,
+					Status:     tt.status,
+					Header:     http.Header{"Content-Type": []string{tt.contentType}},
+					Body:       io.NopCloser(strings.NewReader("")),
+				}, nil
+			}
+
+			resp, err := middleware(req, next)
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+
+			spans := sr.Ended()
+			require.Len(t, spans, 1)
+			assertAttribute(t, spans[0].Attributes(), "error.type", strconv.Itoa(tt.statusCode))
+			assert.Equal(t, codes.Error, spans[0].Status().Code)
+
+			events := spans[0].Events()
+			require.Len(t, events, 1, "expected exception event for HTTP error status")
+			assert.Equal(t, "exception", events[0].Name)
+		})
+	}
 }
 
 func TestOtelMiddleware_TransportError(t *testing.T) {
@@ -432,6 +719,12 @@ func TestOtelMiddleware_TransportError(t *testing.T) {
 	spans := sr.Ended()
 	require.Len(t, spans, 1)
 	assert.Equal(t, codes.Error, spans[0].Status().Code)
+
+	events := spans[0].Events()
+	require.Len(t, events, 1, "expected exception event for transport error")
+	assert.Equal(t, "exception", events[0].Name)
+
+	assertAttribute(t, spans[0].Attributes(), "error.type", "*errors.errorString")
 }
 
 func TestOtelMiddleware_SkipsNilBody(t *testing.T) {

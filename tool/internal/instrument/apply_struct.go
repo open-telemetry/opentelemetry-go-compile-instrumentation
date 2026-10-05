@@ -13,10 +13,10 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
-func (ip *InstrumentPhase) applyStructRule(ctx context.Context, rule *rule.InstStructRule, root *dst.File) error {
-	structDecl := ast.FindStructDecl(root, rule.Struct)
-	if structDecl == nil {
-		return ex.Newf("can not find struct %s", rule.Struct)
+func (ip *instrumentPhase) applyStructRule(ctx context.Context, rule *rule.InstStructRule, root *dst.File) error {
+	structType := ast.FindStructType(root, rule.Struct)
+	if structType == nil {
+		return ex.Newf("can not find struct %q (missing, or not a struct type)", rule.Struct)
 	}
 
 	// Handle imports if specified in the rule
@@ -25,7 +25,7 @@ func (ip *InstrumentPhase) applyStructRule(ctx context.Context, rule *rule.InstS
 	}
 
 	for _, field := range rule.NewField {
-		ast.AddStructField(structDecl, field.Name, field.Type)
+		ast.AddStructField(structType, field.Name, field.Type)
 	}
 	ip.Info("Apply struct rule", "rule", rule)
 	return nil

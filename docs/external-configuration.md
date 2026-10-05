@@ -80,12 +80,14 @@ Rules:
 - **Every import must be a blank import** (`_ "path"`). Named imports and dot imports are
   rejected at load time.
 
-**Planned — `otelc pin`:** an upcoming `otelc pin` subcommand (#655) will create or update
-the tool file automatically, discover applicable instrumentation packages, and run
-`go mod tidy`. Until #655 lands, create the file manually as shown above.
+`otelc pin` can create or update the tool file automatically, discover applicable
+instrumentation packages, and run `go mod tidy`.
 
-After creating or editing the tool file, run `go mod tidy` to record the new dependencies
-in `go.mod` and `go.sum`.
+After creating or editing the tool file manually, run `go mod tidy` to record the new
+dependencies in `go.mod` and `go.sum`.
+
+For current limitations around committing generated instrumentation files, see
+[Managing Instrumentations](getting-started.md#managing-instrumentations).
 
 ### Module scope
 
@@ -118,6 +120,22 @@ package directory. `otelc` recognizes the following filenames:
 Rule files are discovered in the **package directory** (not the module root), and the walk
 skips any subdirectory that contains its own `go.mod` — so sub-modules are not accidentally
 included. The rule schema is documented in [Instrumentation Rules](rules.md).
+
+Each rule file should declare its minimum required `otelc` version with the reserved
+top-level `version` key:
+
+```yaml
+version: "v1.0.0"
+
+my_rule:
+  target: example.com/package
+  # ...
+```
+
+The requirement is evaluated per file. If a package contains multiple rule files, the
+highest declared minimum is the package's effective requirement. This also keeps standalone
+files supplied through `--rules` self-contained. For compatibility, an unversioned file is
+currently treated as requiring `v1.0.0` and produces a warning.
 
 ## Discovery and Resolution Protocol
 

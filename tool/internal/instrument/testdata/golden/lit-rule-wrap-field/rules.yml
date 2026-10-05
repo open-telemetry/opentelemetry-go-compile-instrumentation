@@ -1,0 +1,14 @@
+wrap_limited_readers:
+  target: main
+  where:
+    struct_literal: io.LimitedReader
+  do:
+    - set_fields:
+        # R is wrapped where the literal sets it, and filled where it does not.
+        # N is wrap-only, so a literal omitting N is left without it.
+        field:
+          - name: R
+            wrap: "counting({{ . }})"
+            value: "counting(nil)"
+          - name: N
+            wrap: "({{ . }}) * 2"

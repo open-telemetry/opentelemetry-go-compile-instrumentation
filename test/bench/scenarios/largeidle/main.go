@@ -73,7 +73,7 @@ import (
 	"golang.org/x/exp/maps"
 	"golang.org/x/text/language"
 	"golang.org/x/text/unicode/norm"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 func main() {
@@ -200,7 +200,7 @@ func main() {
 	_ = language.English
 	_ = norm.NFC.String("bench")
 
-	// third-party: gopkg.in/yaml.v3
+	// third-party: go.yaml.in/yaml/v3
 	var yamlVal any
 	_ = yaml.Unmarshal([]byte("key: val"), &yamlVal)
 

@@ -106,6 +106,23 @@ func (g grpcClientEnabler) Enable() bool {
 
 var clientEnabler = grpcClientEnabler{}
 
+type clientStatsHandlerInjected struct {
+	grpc.EmptyDialOption
+}
+
+func withClientStatsHandler(opts []grpc.DialOption) []grpc.DialOption {
+	for _, opt := range opts {
+		if _, ok := opt.(clientStatsHandlerInjected); ok {
+			return opts
+		}
+	}
+
+	return append([]grpc.DialOption{
+		clientStatsHandlerInjected{},
+		grpc.WithStatsHandler(newClientStatsHandler()),
+	}, opts...)
+}
+
 // BeforeNewClient hooks before grpc.NewClient (v1.63+)
 func BeforeNewClient(ictx hook.HookContext, target string, opts ...grpc.DialOption) {
 	if !clientEnabler.Enable() {
@@ -117,10 +134,7 @@ func BeforeNewClient(ictx hook.HookContext, target string, opts ...grpc.DialOpti
 
 	logger.Debug("BeforeNewClient called", "target", target)
 
-	// Create and inject stats handler
-	handler := newClientStatsHandler()
-	newOpts := append([]grpc.DialOption{grpc.WithStatsHandler(handler)}, opts...)
-	ictx.SetParam(newClientOptionsParamIndex, newOpts)
+	ictx.SetParam(newClientOptionsParamIndex, withClientStatsHandler(opts))
 }
 
 // AfterNewClient hooks after grpc.NewClient
@@ -146,10 +160,7 @@ func BeforeDialContext(ictx hook.HookContext, ctx context.Context, target string
 
 	logger.Debug("BeforeDialContext called", "target", target)
 
-	// Create and inject stats handler
-	handler := newClientStatsHandler()
-	newOpts := append([]grpc.DialOption{grpc.WithStatsHandler(handler)}, opts...)
-	ictx.SetParam(dialOptionsParamIndex, newOpts)
+	ictx.SetParam(dialOptionsParamIndex, withClientStatsHandler(opts))
 }
 
 // AfterDialContext hooks after grpc.DialContext
@@ -211,25 +222,28 @@ func (h *clientStatsHandler) TagRPC(ctx context.Context, info *stats.RPCTagInfo)
 
 // HandleRPC processes RPC stats events
 func (h *clientStatsHandler) HandleRPC(ctx context.Context, rs stats.RPCStats) {
-	span := trace.SpanFromContext(ctx)
+	// gctx is set only when TagRPC instrumented this RPC. A nil gctx means TagRPC
+	// opted out (e.g. OTLP export path). Returning early prevents us from touching
+	// whatever span happens to be on the caller's context.
 	gctx, _ := ctx.Value(gRPCContextKey{}).(*gRPCContext)
+	if gctx == nil {
+		return
+	}
+
+	span := trace.SpanFromContext(ctx)
 
 	switch rs := rs.(type) {
 	case *stats.Begin:
 		// RPC started
 	case *stats.OutPayload:
-		if gctx != nil {
-			atomic.AddInt64(&gctx.outMessages, 1)
-			if clientRequestSize != nil {
-				clientRequestSize.RecordSet(ctx, int64(rs.Length), gctx.metricAttrSet)
-			}
+		atomic.AddInt64(&gctx.outMessages, 1)
+		if clientRequestSize != nil {
+			clientRequestSize.RecordSet(ctx, int64(rs.Length), gctx.metricAttrSet)
 		}
 	case *stats.InPayload:
-		if gctx != nil {
-			atomic.AddInt64(&gctx.inMessages, 1)
-			if clientResponseSize != nil {
-				clientResponseSize.RecordSet(ctx, int64(rs.Length), gctx.metricAttrSet)
-			}
+		atomic.AddInt64(&gctx.inMessages, 1)
+		if clientResponseSize != nil {
+			clientResponseSize.RecordSet(ctx, int64(rs.Length), gctx.metricAttrSet)
 		}
 	case *stats.OutHeader:
 		// Add server address attributes
@@ -255,29 +269,30 @@ func (h *clientStatsHandler) HandleRPC(ctx context.Context, rs stats.RPCStats) {
 				code, msg := grpcsemconv.ClientStatus(s)
 				span.SetStatus(code, msg)
 			}
+			if rs.Error != nil {
+				span.RecordError(rs.Error)
+			}
 			span.SetAttributes(statusAttr)
 			span.End()
 		}
 
 		// Record metrics
-		if gctx != nil {
-			metricAttrs := make([]attribute.KeyValue, 0, len(gctx.metricAttrs)+1)
-			metricAttrs = append(metricAttrs, gctx.metricAttrs...)
-			metricAttrs = append(metricAttrs, statusAttr)
-			recordOpts := []metric.RecordOption{metric.WithAttributeSet(attribute.NewSet(metricAttrs...))}
+		metricAttrs := make([]attribute.KeyValue, 0, len(gctx.metricAttrs)+1)
+		metricAttrs = append(metricAttrs, gctx.metricAttrs...)
+		metricAttrs = append(metricAttrs, statusAttr)
+		recordOpts := []metric.RecordOption{metric.WithAttributeSet(attribute.NewSet(metricAttrs...))}
 
-			// Use floating point division for higher precision (instead of Milliseconds method)
-			duration := float64(rs.EndTime.Sub(rs.BeginTime)) / float64(time.Millisecond)
+		// Use floating point division for higher precision (instead of Milliseconds method)
+		duration := float64(rs.EndTime.Sub(rs.BeginTime)) / float64(time.Millisecond)
 
-			if clientDuration.Inst() != nil {
-				clientDuration.Inst().Record(ctx, duration, recordOpts...)
-			}
-			if clientRequestsPerRPC.Inst() != nil {
-				clientRequestsPerRPC.Inst().Record(ctx, atomic.LoadInt64(&gctx.outMessages), recordOpts...)
-			}
-			if clientResponsesPerRPC.Inst() != nil {
-				clientResponsesPerRPC.Inst().Record(ctx, atomic.LoadInt64(&gctx.inMessages), recordOpts...)
-			}
+		if clientDuration.Inst() != nil {
+			clientDuration.Inst().Record(ctx, duration, recordOpts...)
+		}
+		if clientRequestsPerRPC.Inst() != nil {
+			clientRequestsPerRPC.Inst().Record(ctx, atomic.LoadInt64(&gctx.outMessages), recordOpts...)
+		}
+		if clientResponsesPerRPC.Inst() != nil {
+			clientResponsesPerRPC.Inst().Record(ctx, atomic.LoadInt64(&gctx.inMessages), recordOpts...)
 		}
 	}
 }

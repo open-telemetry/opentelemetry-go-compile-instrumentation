@@ -58,7 +58,7 @@ func IsWindows() bool {
 	return runtime.GOOS == "windows"
 }
 
-func IsUnix() bool {
+func isUnix() bool {
 	return runtime.GOOS == "linux" || runtime.GOOS == "darwin"
 }
 
@@ -142,25 +142,6 @@ func ListFiles(dir string) ([]string, error) {
 		return nil, ex.Wrap(err)
 	}
 	return files, nil
-}
-
-func WriteFile(filePath, content string) error {
-	file, err := os.Create(filePath)
-	if err != nil {
-		return ex.Wrap(err)
-	}
-	defer func(file *os.File) {
-		err = file.Close()
-		if err != nil {
-			ex.Fatal(err)
-		}
-	}(file)
-
-	_, err = file.WriteString(content)
-	if err != nil {
-		return ex.Wrap(err)
-	}
-	return nil
 }
 
 // WriteFileAtomic writes data to a file atomically by first writing to a temporary file and then renaming it.

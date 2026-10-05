@@ -29,10 +29,10 @@ func Cleanup(ctx context.Context, cleanAll bool) error {
 
 func cleanupLocked(ctx context.Context, cleanAll bool) error {
 	logger := util.LoggerFromContext(ctx)
-	stateManager, found := StateManagerFromContext(ctx)
+	stateManager, found := stateManagerFromContext(ctx)
 	if !found {
 		var err error
-		stateManager, err = LoadStateManager()
+		stateManager, err = loadStateManager()
 		if err != nil {
 			return err
 		}

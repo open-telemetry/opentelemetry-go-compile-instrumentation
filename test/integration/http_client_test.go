@@ -83,6 +83,51 @@ func TestHTTPClient(t *testing.T) {
 
 		f.RequireSingleSpan()
 	})
+
+	t.Run("instrumentation_controls_env", func(t *testing.T) {
+		tests := []struct {
+			name         string
+			enabled      string
+			disabled     string
+			expectedSpan bool
+		}{
+			{
+				name:         "allow listed",
+				enabled:      "nethttp",
+				expectedSpan: true,
+			},
+			{
+				name:    "not allow listed",
+				enabled: "grpc",
+			},
+			{
+				name:     "deny listed",
+				disabled: "nethttp",
+			},
+			{
+				name:     "deny list overrides allow list",
+				enabled:  "nethttp",
+				disabled: "nethttp",
+			},
+		}
+
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				f := testutil.NewTestFixture(t)
+				f.SetEnv("OTEL_GO_ENABLED_INSTRUMENTATIONS", tc.enabled)
+				f.SetEnv("OTEL_GO_DISABLED_INSTRUMENTATIONS", tc.disabled)
+				server := StartHTTPServerWithResponse(t, http.StatusOK, `{"message":"Hello"}`)
+
+				f.Run("httpclient", "-addr="+server.URL, "-name=world")
+
+				if tc.expectedSpan {
+					f.RequireSingleSpan()
+				} else {
+					f.RequireTraceCount(0)
+				}
+			})
+		}
+	})
 }
 
 // HTTPServer wraps a test HTTP server.

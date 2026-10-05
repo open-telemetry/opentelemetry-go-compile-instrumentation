@@ -6,3 +6,9 @@ extend-exclude = [
     "go.mod",
     "go.sum",
   ]
+
+[default.extend-words]
+# Linode product / API acronyms (not misspellings of "like").
+LKE = "LKE"
+# Common Go abbreviation for "type" (e.g. AST type expressions).
+typ = "typ"

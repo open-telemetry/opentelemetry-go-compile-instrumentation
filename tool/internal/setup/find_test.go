@@ -5,6 +5,7 @@ package setup
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +16,20 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otelc/tool/util"
 )
+
+func TestHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		return
+	}
+	plan := os.Getenv("GO_HELPER_BUILD_PLAN")
+	if plan != "" {
+		fmt.Fprintln(os.Stderr, plan)
+	}
+	if os.Getenv("GO_HELPER_BUILD_FAILS") == "1" {
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
 
 func TestParseCdDir(t *testing.T) {
 	tests := []struct {
@@ -30,9 +45,15 @@ func TestParseCdDir(t *testing.T) {
 			expectedOk:  true,
 		},
 		{
-			name:        "cd command with comment",
+			name:        "cd command with spaces",
+			line:        "cd /tmp/test project with spaces",
+			expectedDir: "/tmp/test project with spaces",
+			expectedOk:  true,
+		},
+		{
+			name:        "cd command with hash in path",
 			line:        "cd /home/user/project # build comment",
-			expectedDir: "/home/user/project",
+			expectedDir: "/home/user/project # build comment",
 			expectedOk:  true,
 		},
 		{
@@ -42,10 +63,31 @@ func TestParseCdDir(t *testing.T) {
 			expectedOk:  true,
 		},
 		{
-			name:        "cd with Windows path",
-			line:        "cd C:\\Users\\test\\project",
-			expectedDir: "C:\\Users\\test\\project",
+			name:        "cd with Windows path containing spaces",
+			line:        "cd C:\\Users\\test user\\project",
+			expectedDir: "C:\\Users\\test user\\project",
 			expectedOk:  true,
+		},
+		{
+			name:        "cd with trailing whitespace",
+			line:        "cd /home/user/project  \r",
+			expectedDir: "/home/user/project",
+			expectedOk:  true,
+		},
+		{
+			name:       "cd without directory",
+			line:       "cd",
+			expectedOk: false,
+		},
+		{
+			name:       "cd with empty directory",
+			line:       "cd   ",
+			expectedOk: false,
+		},
+		{
+			name:       "command beginning with cd",
+			line:       "cdrom /home/user/project",
+			expectedOk: false,
 		},
 		{
 			name:        "not a cd command",
@@ -187,6 +229,29 @@ cd /home/user/project/pkg/cgopkg
 			},
 		},
 		{
+			name: "cd path with spaces included",
+			buildPlanContent: `
+cd /tmp/test project with spaces
+/usr/local/go/pkg/tool/darwin_arm64/cgo -objdir /tmp/go-build123/b001 -importpath github.com/example/cgopkg
+/usr/local/go/pkg/tool/darwin_arm64/compile.exe -o /tmp/go-build123/b001/out.a -p github.com/example/cgopkg -buildid xyz file.cgo1.go
+`,
+			expectedCommands: []string{
+				"cd /tmp/test project with spaces",
+				"/usr/local/go/pkg/tool/darwin_arm64/cgo -objdir /tmp/go-build123/b001 -importpath github.com/example/cgopkg",
+				"/usr/local/go/pkg/tool/darwin_arm64/compile.exe -o /tmp/go-build123/b001/out.a -p github.com/example/cgopkg -buildid xyz file.cgo1.go",
+			},
+		},
+		{
+			name: "malformed cd commands ignored",
+			buildPlanContent: `
+cd
+` + "cd   \n" + `
+cdrom
+cdrom /project/src
+`,
+			expectedCommands: nil,
+		},
+		{
 			name: "multiple cgo packages",
 			buildPlanContent: `
 cd /project/pkg/cgo1
@@ -273,6 +338,66 @@ C:/Go/pkg/tool/windows_amd64/compile.exe -o C:/tmp/out.a -p main -buildid abc ma
 	}
 }
 
+func TestFindDepsResolvesCgoSourceFromSpacedDirectory(t *testing.T) {
+	oldExec := execCommandContext
+	t.Cleanup(func() {
+		execCommandContext = oldExec
+	})
+
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	sourceDir := filepath.Join(workDir, "source with spaces")
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	sourceFile := filepath.Join(sourceDir, "sample.go")
+	require.NoError(t, os.WriteFile(sourceFile, []byte("package sample\n"), 0o644))
+
+	objDir := filepath.Join(workDir, "go-build", "b001")
+	generatedFile := filepath.Join(objDir, "sample.cgo1.go")
+	buildPlan := fmt.Sprintf(`
+cd %s
+.../cgo -objdir "%s" -importpath example.com/sample
+.../compile -o "%s" -p example.com/sample -buildid test "%s"
+`,
+		filepath.ToSlash(sourceDir),
+		filepath.ToSlash(objDir),
+		filepath.ToSlash(filepath.Join(objDir, "_pkg_.a")),
+		filepath.ToSlash(generatedFile),
+	)
+
+	exe, err := os.Executable()
+	require.NoError(t, err)
+	execCommandContext = func(
+		ctx context.Context,
+		name string,
+		args ...string,
+	) *exec.Cmd {
+		assert.Equal(t, "go", name)
+		assert.Equal(t, []string{"build", "-a", "-x", "-n", "./..."}, args)
+
+		cmd := exec.CommandContext(ctx, exe, "-test.run=^TestHelperProcess$")
+		cmd.Env = append(os.Environ(),
+			"GO_WANT_HELPER_PROCESS=1",
+			"GO_HELPER_BUILD_PLAN="+buildPlan,
+		)
+		return cmd
+	}
+
+	deps, err := findDeps(t.Context(), subcmdBuild, []string{"./..."})
+	require.NoError(t, err)
+	require.Len(t, deps, 1)
+	assert.Equal(t, "example.com/sample", deps[0].ImportPath)
+	require.Len(t, deps[0].Sources, 1)
+
+	expectedSource, err := filepath.EvalSymlinks(sourceFile)
+	require.NoError(t, err)
+	actualSource, err := filepath.EvalSymlinks(deps[0].Sources[0])
+	require.NoError(t, err)
+	assert.Equal(t, expectedSource, actualSource)
+	assert.Equal(t, "sample.cgo1.go", deps[0].CgoFiles[deps[0].Sources[0]])
+}
+
 func TestListBuildPlan(t *testing.T) {
 	oldExec := execCommandContext
 	defer func() {
@@ -323,6 +448,19 @@ echo ignored
 			},
 		},
 		{
+			name: "keeps change directory first",
+			buildPlan: `
+.../compile -o /tmp/out.a -buildid abc -p main main.go
+`,
+			args: []string{"-C", "app", "."},
+			expected: []string{
+				".../compile -o /tmp/out.a -buildid abc -p main main.go",
+			},
+			expectedGoCmd: []string{
+				"build", "-C", "app", "-a", "-x", "-n", ".",
+			},
+		},
+		{
 			name: "returns build failure",
 			buildPlan: `
 go: module example.com missing
@@ -355,6 +493,33 @@ echo nothing useful
 			expectedGoCmd: []string{"build", "-a", "-x", "-n", "./..."},
 		},
 		{
+			// -json makes `go test` write the plan to stdout as JSON events
+			// instead of to stderr as shell commands, which leaves the plan
+			// empty. The dry run must disable it.
+			name:       "disables JSON output in a go test plan",
+			subcommand: "test",
+			buildPlan: `
+.../compile -o /tmp/out.a -buildid abc -p main main.go
+`,
+			args: []string{"-json", "-count=1", "./..."},
+			expected: []string{
+				".../compile -o /tmp/out.a -buildid abc -p main main.go",
+			},
+			expectedGoCmd: []string{"test", "-a", "-x", "-n", "-json=false", "-count=1", "./..."},
+		},
+		{
+			// `go build -json` reports build output as JSON events too.
+			name: "disables JSON output in a go build plan",
+			buildPlan: `
+.../compile -o /tmp/out.a -buildid abc -p main main.go
+`,
+			args: []string{"-json", "./cmd"},
+			expected: []string{
+				".../compile -o /tmp/out.a -buildid abc -p main main.go",
+			},
+			expectedGoCmd: []string{"build", "-a", "-x", "-n", "-json=false", "./cmd"},
+		},
+		{
 			// The test subcommand must list a `go test` plan, which surfaces the
 			// test-augmented, external test, and test-main compiles that is_test
 			// gates on. A `go build` plan would never contain them.
@@ -379,20 +544,26 @@ echo nothing useful
 
 			t.Setenv(util.EnvOtelcWorkDir, tempDir)
 
+			exe, err := os.Executable()
+			require.NoError(t, err)
+
 			execCommandContext = func(
-				_ context.Context,
+				ctx context.Context,
 				name string,
 				args ...string,
 			) *exec.Cmd {
 				assert.Equal(t, "go", name)
 				assert.Equal(t, tt.expectedGoCmd, args)
 
-				script := "cat <<'EOF' >&2\n" + tt.buildPlan + "\nEOF\n"
+				cmd := exec.CommandContext(ctx, exe, "-test.run=^TestHelperProcess$")
+				cmd.Env = append(os.Environ(),
+					"GO_WANT_HELPER_PROCESS=1",
+					"GO_HELPER_BUILD_PLAN="+tt.buildPlan,
+				)
 				if tt.buildFails {
-					script += "\nexit 1\n"
+					cmd.Env = append(cmd.Env, "GO_HELPER_BUILD_FAILS=1")
 				}
-
-				return exec.Command("sh", "-c", script)
+				return cmd
 			}
 
 			subcommand := tt.subcommand
@@ -409,6 +580,337 @@ echo nothing useful
 				require.NoError(t, err)
 				assert.Equal(t, tt.expected, buildPlan)
 			}
+		})
+	}
+}
+
+func TestDisableJSONOutput(t *testing.T) {
+	tests := []struct {
+		name       string
+		subcommand string
+		args       []string
+		expected   []string
+	}{
+		{
+			name:       "no flags",
+			subcommand: subcmdBuild,
+			args:       []string{"./..."},
+			expected:   []string{"./..."},
+		},
+		{
+			name:       "nil args",
+			subcommand: subcmdBuild,
+			args:       nil,
+			expected:   []string{},
+		},
+		{
+			name:       "disables -json",
+			subcommand: subcmdBuild,
+			args:       []string{"-json", "./..."},
+			expected:   []string{"-json=false", "./..."},
+		},
+		{
+			name:       "disables --json",
+			subcommand: subcmdBuild,
+			args:       []string{"--json", "./..."},
+			expected:   []string{"-json=false", "./..."},
+		},
+		{
+			name:       "disables -json=true",
+			subcommand: subcmdBuild,
+			args:       []string{"-json=true", "./..."},
+			expected:   []string{"-json=false", "./..."},
+		},
+		{
+			// An explicitly disabled flag keeps its position too.
+			name:       "keeps -json=false",
+			subcommand: subcmdBuild,
+			args:       []string{"-json=false", "./..."},
+			expected:   []string{"-json=false", "./..."},
+		},
+		{
+			name:       "keeps other flags",
+			subcommand: subcmdBuild,
+			args:       []string{"-tags=integration", "-json", "-race", "./cmd"},
+			expected:   []string{"-tags=integration", "-json=false", "-race", "./cmd"},
+		},
+		{
+			name:       "keeps a separated flag value that follows -json",
+			subcommand: subcmdTest,
+			args:       []string{"-json", "-run", "TestX", "./..."},
+			expected:   []string{"-json=false", "-run", "TestX", "./..."},
+		},
+		{
+			name:       "keeps a separated -test.run flag value that follows -json",
+			subcommand: subcmdTest,
+			args:       []string{"-json", "-test.run", "TestX", "./..."},
+			expected:   []string{"-json=false", "-test.run", "TestX", "./..."},
+		},
+		{
+			name:       "keeps joined -test.run flag value",
+			subcommand: subcmdTest,
+			args:       []string{"-json", "-test.run=TestX", "./..."},
+			expected:   []string{"-json=false", "-test.run=TestX", "./..."},
+		},
+		{
+			name:       "keeps separated --test.run flag value",
+			subcommand: subcmdTest,
+			args:       []string{"-json", "--test.run", "TestX", "./..."},
+			expected:   []string{"-json=false", "--test.run", "TestX", "./..."},
+		},
+		{
+			name:       "keeps -json when it is the value of -test.run",
+			subcommand: subcmdTest,
+			args:       []string{"-test.run", "-json", "./..."},
+			expected:   []string{"-test.run", "-json", "./..."},
+		},
+		{
+			// `-o -json` names an output file called "-json"; it is a value,
+			// not a flag.
+			name:       "keeps -json as the value of another flag",
+			subcommand: subcmdBuild,
+			args:       []string{"-o", "-json", "./cmd"},
+			expected:   []string{"-o", "-json", "./cmd"},
+		},
+		{
+			// Everything after -args belongs to the test binary.
+			name:       "keeps -json after -args",
+			subcommand: subcmdTest,
+			args:       []string{"./...", "-args", "-json", "-v"},
+			expected:   []string{"./...", "-args", "-json", "-v"},
+		},
+		{
+			name:       "disables -json before -args and keeps it after",
+			subcommand: subcmdTest,
+			args:       []string{"-json", "./...", "-args", "-json"},
+			expected:   []string{"-json=false", "./...", "-args", "-json"},
+		},
+		{
+			name:       "tolerates a trailing value flag with no value",
+			subcommand: subcmdTest,
+			args:       []string{"-json", "./...", "-run"},
+			expected:   []string{"-json=false", "./...", "-run"},
+		},
+		{
+			name:       "tolerates a trailing -test.run flag with no value",
+			subcommand: subcmdTest,
+			args:       []string{"-json", "./...", "-test.run"},
+			expected:   []string{"-json=false", "./...", "-test.run"},
+		},
+		{
+			// go test ./pkg -- -test.run TestName input.go
+			// The output should preserve the delimiter and every trailing argument exactly and in order.
+			name:       "go test exact preservation after delimiter --",
+			subcommand: subcmdTest,
+			args:       []string{"./pkg", "--", "-test.run", "TestName", "input.go"},
+			expected:   []string{"./pkg", "--", "-test.run", "TestName", "input.go"},
+		},
+		{
+			name:       "go test disables -json before -- and preserves after --",
+			subcommand: subcmdTest,
+			args:       []string{"-json", "./pkg", "--", "-json", "input.go"},
+			expected:   []string{"-json=false", "./pkg", "--", "-json", "input.go"},
+		},
+		{
+			name:       "go test disables -json before --args and preserves after --args",
+			subcommand: subcmdTest,
+			args:       []string{"-json", "./pkg", "--args", "-json", "input.go"},
+			expected:   []string{"-json=false", "./pkg", "--args", "-json", "input.go"},
+		},
+		{
+			name:       "go test preserves empty delimiter --",
+			subcommand: subcmdTest,
+			args:       []string{"-json", "./pkg", "--"},
+			expected:   []string{"-json=false", "./pkg", "--"},
+		},
+		{
+			name:       "go test preserves repeated delimiter -- --",
+			subcommand: subcmdTest,
+			args:       []string{"-json", "./pkg", "--", "--", "-json"},
+			expected:   []string{"-json=false", "./pkg", "--", "--", "-json"},
+		},
+		{
+			name:       "go build -- closes flag parsing and preserves positional -json",
+			subcommand: subcmdBuild,
+			args:       []string{"-json", "./pkg", "--", "-json", "main.go"},
+			expected:   []string{"-json=false", "./pkg", "--", "-json", "main.go"},
+		},
+		{
+			name:       "go test preserves -json after positional test-argv boundary",
+			subcommand: subcmdTest,
+			args:       []string{"-json", "./pkg", "-custom=x", "positional", "-json"},
+			expected:   []string{"-json=false", "./pkg", "-custom=x", "positional", "-json"},
+		},
+		{
+			name:       "go test preserves full tail untouched after positional test-argv boundary",
+			subcommand: subcmdTest,
+			args: []string{
+				"-json",
+				"./pkg",
+				"-custom=x",
+				"positional",
+				"-race",
+				"-mod=vendor",
+				"-tags=x",
+				"./other",
+			},
+			expected: []string{
+				"-json=false",
+				"./pkg",
+				"-custom=x",
+				"positional",
+				"-race",
+				"-mod=vendor",
+				"-tags=x",
+				"./other",
+			},
+		},
+		{
+			name:       "go test preserves -json in the positional tail",
+			subcommand: subcmdTest,
+			args:       []string{"-json", "./pkg", "-run", "TestX", "math", "-json"},
+			expected:   []string{"-json=false", "./pkg", "-run", "TestX", "math", "-json"},
+		},
+		{
+			name:       "JSON flag ends the package list",
+			subcommand: subcmdTest,
+			args:       []string{"./pkg", "-json", "./missing", "-json"},
+			expected:   []string{"./pkg", "-json=false", "./missing", "-json"},
+		},
+		{
+			name:       "JSON flag separates an unknown flag from its positional tail",
+			subcommand: subcmdTest,
+			args:       []string{"./pkg", "-custom", "-json", "positional", "-race"},
+			expected:   []string{"./pkg", "-custom", "-json=false", "positional", "-race"},
+		},
+		{
+			name:       "disables every JSON flag",
+			subcommand: subcmdTest,
+			args:       []string{"-json", "./pkg", "--json=true", "./missing"},
+			expected:   []string{"-json=false", "./pkg", "-json=false", "./missing"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, disableJSONOutput(tt.subcommand, tt.args))
+		})
+	}
+}
+
+func TestFlagName(t *testing.T) {
+	tests := []struct {
+		arg      string
+		expected string
+	}{
+		{arg: "-json", expected: "-json"},
+		{arg: "--json", expected: "-json"},
+		{arg: "-json=false", expected: "-json"},
+		{arg: "--tags=integration", expected: "-tags"},
+		{arg: "./...", expected: "./..."},
+		{arg: "-", expected: "-"},
+		{arg: "--", expected: "-"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.arg, func(t *testing.T) {
+			assert.Equal(t, tt.expected, flagName(tt.arg))
+		})
+	}
+}
+
+func TestFindModVersion(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{
+			name: "module cache path",
+			path: "/go/pkg/mod/github.com/foo/bar@v1.2.3/pkg/foo.go",
+			want: "v1.2.3",
+		},
+		{
+			name: "module cache path with pre-release",
+			path: "/go/pkg/mod/github.com/foo/bar@v1.2.3-rc.1/pkg/foo.go",
+			want: "v1.2.3-rc.1",
+		},
+		{
+			name: "module cache path with incompatible suffix",
+			path: "/go/pkg/mod/github.com/evanphx/json-patch@v5.9.11+incompatible/pkg/foo.go",
+			want: "v5.9.11+incompatible",
+		},
+		{
+			name: "module cache path with incompatible suffix and custom host",
+			path: "/go/pkg/mod/gotest.tools@v2.2.0+incompatible/pkg/foo.go",
+			want: "v2.2.0+incompatible",
+		},
+		{
+			name: "windows-style module cache path",
+			// Use /-separated form so this exercises the same path shape
+			// filepath.ToSlash produces on Windows, without depending on GOOS
+			// (filepath.ToSlash is a no-op when the host separator is already /).
+			path: "C:/go/pkg/mod/github.com/foo/bar@v9.0.0/client.go",
+			want: "v9.0.0",
+		},
+		{
+			name: "local path has no version",
+			path: "/home/user/projects/bar/pkg/foo.go",
+			want: "",
+		},
+		{
+			name: "vendor path has no version",
+			path: "/tmp/myapp/vendor/github.com/foo/bar/pkg/foo.go",
+			want: "",
+		},
+		{
+			name: "empty path",
+			path: "",
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, findModVersion(tt.path))
+		})
+	}
+}
+
+func TestFindGoSources(t *testing.T) {
+	dir := t.TempDir()
+	srcA := filepath.Join(dir, "a.go")
+	srcB := filepath.Join(dir, "b.go")
+	require.NoError(t, os.WriteFile(srcA, []byte("package p\n"), 0o644))
+	require.NoError(t, os.WriteFile(srcB, []byte("package p\n"), 0o644))
+
+	args := []string{"-p", "example.com/p", srcA, srcB}
+	dep, err := findGoSources(context.Background(), args, map[string]string{})
+	require.NoError(t, err)
+	require.NotNil(t, dep)
+
+	assert.Equal(t, "example.com/p", dep.ImportPath)
+	require.Len(t, dep.Sources, 2)
+	for _, s := range dep.Sources {
+		assert.True(t, filepath.IsAbs(s), "source path must be absolute: %s", s)
+	}
+}
+
+func TestListBuildPlan_JSONPreservesPackageBoundary(t *testing.T) {
+	setupTestModule(t, []string{"a"})
+	t.Setenv("GOWORK", "off")
+	t.Setenv("GOFLAGS", "")
+	dir, err := os.Getwd()
+	require.NoError(t, err)
+	t.Setenv(util.EnvOtelcWorkDir, dir)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join("a", "main.go"), []byte("package a\n"), 0o644))
+	for _, flag := range []string{"-json", "--json", "-json=true", "-json=false"} {
+		t.Run(flag, func(t *testing.T) {
+			// ./missing is a test-binary argument. Loading it as a package would fail.
+			plan, planErr := listBuildPlan(t.Context(), subcmdTest, []string{"./a", flag, "./missing"})
+			require.NoError(t, planErr)
+			assert.Contains(t, strings.Join(plan, "\n"), "-p testmodule/a ")
 		})
 	}
 }
