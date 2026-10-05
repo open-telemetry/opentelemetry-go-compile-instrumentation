@@ -190,6 +190,17 @@ func TestApplyCallRule_AppendArgs(t *testing.T) {
 	assert.True(t, fileImportsPath(file, "fmt"), "import must be added for the append_args-only match")
 }
 
+func TestApplyCallRule_InvalidAppendArgs(t *testing.T) {
+	file := makeCallFile(httpGetCall())
+	r := httpGetRule("")
+	r.AppendArgs = []string{"func("}
+
+	err := newTestPhase().applyCallRule(context.Background(), r, file)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `append_args entry "func("`)
+}
+
 func TestApplyCallRule_AppendArgsWithoutMatch(t *testing.T) {
 	// No matching call site: applyCallRule must no-op, including skipping
 	// import injection, even though Imports is set on the rule.
@@ -1010,8 +1021,9 @@ func TestApplyCallAppendArgs_NoMatchReturnsFalse(t *testing.T) {
 
 	ip := newTestPhase()
 	importAliases := ast.ImportAliasMap(file)
-	result := ip.applyCallAppendArgs(r, file, importAliases)
+	result, err := ip.applyCallAppendArgs(r, file, importAliases)
 
+	require.NoError(t, err)
 	assert.False(t, result, "applyCallAppendArgs must return false when no calls match")
 }
 

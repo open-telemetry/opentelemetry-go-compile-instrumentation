@@ -20,7 +20,10 @@ import (
 func (ip *instrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRule, root *dst.File) error {
 	importAliases := ast.ImportAliasMap(root)
 
-	appendModified := ip.applyCallAppendArgs(r, root, importAliases)
+	appendModified, err := ip.applyCallAppendArgs(r, root, importAliases)
+	if err != nil {
+		return err
+	}
 
 	replaceModified := false
 	if r.Replace != "" {
@@ -35,7 +38,7 @@ func (ip *instrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRu
 		return nil
 	}
 
-	if err := ip.addRuleImports(ctx, root, usedRuleImports(root, r.Imports), r.Name); err != nil {
+	if err = ip.addRuleImports(ctx, root, usedRuleImports(root, r.Imports), r.Name); err != nil {
 		return err
 	}
 	ip.Info("Apply call rule", "rule", r)
@@ -158,13 +161,18 @@ func (*instrumentPhase) applyCallReplace(
 	return true, nil
 }
 
-func (ip *instrumentPhase) applyCallAppendArgs(
+func (*instrumentPhase) applyCallAppendArgs(
 	r *rule.InstCallRule,
 	root *dst.File,
 	importAliases map[string]string,
-) bool {
+) (bool, error) {
 	if len(r.AppendArgs) == 0 {
-		return false
+		return false, nil
+	}
+
+	newArgs, err := parseAppendArgs(r.AppendArgs)
+	if err != nil {
+		return false, err
 	}
 
 	var matchingCalls []*dst.CallExpr
@@ -179,30 +187,44 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 		return true
 	})
 	for _, call := range matchingCalls {
-		if _, err := appendCallArgs(call, r); err != nil {
-			ip.Warn("Failed to append args to call", "error", err)
+		callArgs := make([]dst.Expr, len(newArgs))
+		for i, arg := range newArgs {
+			callArgs[i] = util.AssertType[dst.Expr](dst.Clone(arg))
+		}
+		if _, err = appendParsedCallArgs(call, r, callArgs); err != nil {
+			return false, err
 		}
 	}
 
-	return len(matchingCalls) > 0
+	return len(matchingCalls) > 0, nil
 }
 
 // appendCallArgs appends the expressions from r.AppendArgs to the call's argument list.
 // For ellipsis calls, an IIFE wrapper is generated using r.VariadicType.
 // Returns (true, nil) if the call was modified, (false, nil) if AppendArgs is empty.
 func appendCallArgs(call *dst.CallExpr, r *rule.InstCallRule) (bool, error) {
-	if len(r.AppendArgs) == 0 {
-		return false, nil
+	newArgs, err := parseAppendArgs(r.AppendArgs)
+	if err != nil {
+		return false, err
 	}
+	return appendParsedCallArgs(call, r, newArgs)
+}
 
-	// Parse all new argument expressions
-	newArgs := make([]dst.Expr, 0, len(r.AppendArgs))
-	for _, argStr := range r.AppendArgs {
+func parseAppendArgs(args []string) ([]dst.Expr, error) {
+	newArgs := make([]dst.Expr, 0, len(args))
+	for _, argStr := range args {
 		argExpr, err := parseGoExpression(argStr)
 		if err != nil {
-			return false, ex.Wrapf(err, "failed to parse append_args entry %q", argStr)
+			return nil, ex.Wrapf(err, "failed to parse append_args entry %q", argStr)
 		}
 		newArgs = append(newArgs, argExpr)
+	}
+	return newArgs, nil
+}
+
+func appendParsedCallArgs(call *dst.CallExpr, r *rule.InstCallRule, newArgs []dst.Expr) (bool, error) {
+	if len(newArgs) == 0 {
+		return false, nil
 	}
 
 	if !call.Ellipsis {
