@@ -50,28 +50,41 @@ func addRulesToMap[T rule.InstRule](
 	}
 }
 
-// applyOneRule applies a single rule to the target file and reports whether the
-// rule injected code that depends on the globals file (i.e. whether a globals
-// file is needed).
-func (ip *instrumentPhase) applyOneRule(ctx context.Context, r rule.InstRule, root *dst.File) (bool, error) {
+// ruleResult is what applying one rule to a file did.
+type ruleResult struct {
+	// needsGlobals reports whether the rule injected code that depends on the
+	// globals file.
+	needsGlobals bool
+	// modified reports whether the rule changed the file. Call and literal
+	// rules are attached to every file of a target package and change only the
+	// files that contain a match; the other rule kinds only reach files setup
+	// already matched.
+	modified bool
+}
+
+// applyOneRule applies a single rule to the target file.
+func (ip *instrumentPhase) applyOneRule(ctx context.Context, r rule.InstRule, root *dst.File) (ruleResult, error) {
 	switch rt := r.(type) {
 	case *rule.InstFuncRule:
-		return true, ip.applyFuncRule(ctx, rt, root)
+		return ruleResult{needsGlobals: true, modified: true}, ip.applyFuncRule(ctx, rt, root)
 	case *rule.InstStructRule:
-		return false, ip.applyStructRule(ctx, rt, root)
+		return ruleResult{needsGlobals: false, modified: true}, ip.applyStructRule(ctx, rt, root)
 	case *rule.InstDeclRule:
-		return false, ip.applyDeclRule(ctx, rt, root)
+		return ruleResult{needsGlobals: false, modified: true}, ip.applyDeclRule(ctx, rt, root)
 	case *rule.InstRawRule:
-		return true, ip.applyRawRule(ctx, rt, root)
+		return ruleResult{needsGlobals: true, modified: true}, ip.applyRawRule(ctx, rt, root)
 	case *rule.InstCallRule:
-		return false, ip.applyCallRule(ctx, rt, root)
+		modified, err := ip.applyCallRule(ctx, rt, root)
+		return ruleResult{needsGlobals: false, modified: modified}, err
 	case *rule.InstLitRule:
-		return false, ip.applyLitRule(ctx, rt, root)
+		modified, err := ip.applyLitRule(ctx, rt, root)
+		return ruleResult{needsGlobals: false, modified: modified}, err
 	case *rule.InstDirectiveRule:
-		return ip.applyDirectiveRule(ctx, rt, root)
+		needsGlobals, err := ip.applyDirectiveRule(ctx, rt, root)
+		return ruleResult{needsGlobals: needsGlobals, modified: true}, err
 	default:
 		util.ShouldNotReachHere()
-		return false, nil
+		return ruleResult{needsGlobals: false, modified: false}, nil
 	}
 }
 
@@ -95,12 +108,23 @@ func (ip *instrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSe
 		}
 
 		// Apply the rules to the target file
+		modified := false
 		for _, r := range rules {
-			funcRule, err1 := ip.applyOneRule(ctx, r, root)
+			res, err1 := ip.applyOneRule(ctx, r, root)
 			if err1 != nil {
 				return ex.Wrapf(err1, "applying rule %s", r.GetName())
 			}
-			hasFuncRule = hasFuncRule || funcRule
+			hasFuncRule = hasFuncRule || res.needsGlobals
+			modified = modified || res.modified
+		}
+		// Leave a file no rule changed out of the compile command. A glob
+		// target attaches call and literal rules to every file of every
+		// package it matches, and rewriting those would needlessly reprint
+		// them, including cgo and standard library files.
+		if !modified {
+			// Phase state (target, parser, tjumps) still describes this file.
+			// Nothing reads it past this point, and the next parseFile resets it.
+			continue
 		}
 		// Since trampoline-jump-if is performance-critical, perform AST level
 		// optimization for them before writing to file
