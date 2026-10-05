@@ -34,9 +34,10 @@ type instrumentPhase struct {
 	importConfig imports.ImportConfig
 	// The path to the importcfg file
 	importConfigPath string
-	// The target file to be instrumented
+	// The most recently parsed file. Not necessarily instrumented: files no
+	// rule changed are skipped after parsing.
 	target *dst.File
-	// The parser for the target file
+	// The parser for the most recently parsed file.
 	parser *ast.AstParser
 	// The compiling arguments for the target file
 	compileArgs []string

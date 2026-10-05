@@ -122,6 +122,8 @@ func (ip *instrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSe
 		// package it matches, and rewriting those would needlessly reprint
 		// them, including cgo and standard library files.
 		if !modified {
+			// Phase state (target, parser, tjumps) still describes this file.
+			// Nothing reads it past this point, and the next parseFile resets it.
 			continue
 		}
 		// Since trampoline-jump-if is performance-critical, perform AST level
