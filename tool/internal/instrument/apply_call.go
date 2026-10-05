@@ -27,7 +27,6 @@ func (ip *instrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRu
 
 	replaceModified := false
 	if r.Replace != "" {
-		var err error
 		replaceModified, err = ip.applyCallReplace(r, root, importAliases, aliasOverrides)
 		if err != nil {
 			return false, err
@@ -131,7 +130,7 @@ func (*instrumentPhase) applyCallReplace(
 	return true, nil
 }
 
-func (ip *instrumentPhase) applyCallAppendArgs(
+func (*instrumentPhase) applyCallAppendArgs(
 	r *rule.InstCallRule,
 	root *dst.File,
 	importAliases map[string]string,
@@ -165,8 +164,7 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 		}
 		ok, appendErr := appendParsedCallArgs(call, r, callArgs, aliasOverrides)
 		if appendErr != nil {
-			ip.Warn("Failed to append args to call", "error", appendErr)
-			continue
+			return false, appendErr
 		}
 		modified = modified || ok
 	}
@@ -177,12 +175,12 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 // appendCallArgs appends the expressions from r.AppendArgs to the call's argument list.
 // For ellipsis calls, an IIFE wrapper is generated using r.VariadicType.
 // Returns (true, nil) if the call was modified, (false, nil) if AppendArgs is empty.
-func appendCallArgs(call *dst.CallExpr, r *rule.InstCallRule, aliasOverrides map[string]string) (bool, error) {
-	newArgs, err := parseAppendArgs(r.AppendArgs, aliasOverrides)
+func appendCallArgs(call *dst.CallExpr, r *rule.InstCallRule) (bool, error) {
+	newArgs, err := parseAppendArgs(r.AppendArgs, nil)
 	if err != nil {
 		return false, err
 	}
-	return appendParsedCallArgs(call, r, newArgs, aliasOverrides)
+	return appendParsedCallArgs(call, r, newArgs, nil)
 }
 
 func parseAppendArgs(args []string, aliasOverrides map[string]string) ([]dst.Expr, error) {

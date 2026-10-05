@@ -228,7 +228,7 @@ func TestApplyCallRule_AppendArgsWithoutMatch(t *testing.T) {
 
 func TestApplyCallRule_AppendArgsFailureIsUnmodified(t *testing.T) {
 	// The call matches, but append_args on an ellipsis call needs
-	// variadic_type, so the append fails and the call is left unchanged.
+	// variadic_type, so the rule fails and leaves the call unchanged.
 	call := httpGetCall()
 	call.Ellipsis = true
 	file := makeCallFile(call)
@@ -238,8 +238,9 @@ func TestApplyCallRule_AppendArgsFailureIsUnmodified(t *testing.T) {
 
 	modified, err := newTestPhase().applyCallRule(context.Background(), r, file)
 
-	require.NoError(t, err)
-	require.False(t, modified, "a rule that matched nothing or failed must not report a change")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "variadic_type")
+	require.False(t, modified, "a failed rule must not report a change")
 	assert.Len(t, call.Args, 1)
 	assert.False(t, fileImportsPath(file, "example.com/traced"))
 }
@@ -794,7 +795,7 @@ func TestAppendCallArgs_Empty(t *testing.T) {
 	r := &rule.InstCallRule{}
 	call := &dst.CallExpr{Fun: &dst.Ident{Name: "f"}}
 
-	modified, err := appendCallArgs(call, r, nil)
+	modified, err := appendCallArgs(call, r)
 
 	require.NoError(t, err)
 	assert.False(t, modified)
@@ -810,7 +811,7 @@ func TestAppendCallArgs_SimpleAppend(t *testing.T) {
 		Args: []dst.Expr{&dst.Ident{Name: "a"}},
 	}
 
-	modified, err := appendCallArgs(call, r, nil)
+	modified, err := appendCallArgs(call, r)
 
 	require.NoError(t, err)
 	assert.True(t, modified)
@@ -827,7 +828,7 @@ func TestAppendCallArgs_EllipsisNoVariadicType(t *testing.T) {
 		Ellipsis: true,
 	}
 
-	modified, err := appendCallArgs(call, r, nil)
+	modified, err := appendCallArgs(call, r)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "variadic_type")
@@ -845,7 +846,7 @@ func TestAppendCallArgs_EllipsisWithVariadicType(t *testing.T) {
 		Ellipsis: true,
 	}
 
-	modified, err := appendCallArgs(call, r, nil)
+	modified, err := appendCallArgs(call, r)
 
 	require.NoError(t, err)
 	assert.True(t, modified)
@@ -871,7 +872,7 @@ func TestAppendCallArgs_EllipsisNoArgs(t *testing.T) {
 		Ellipsis: true,
 	}
 
-	modified, err := appendCallArgs(call, r, nil)
+	modified, err := appendCallArgs(call, r)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no arguments")
@@ -889,7 +890,7 @@ func TestAppendCallArgs_InvalidVariadicType(t *testing.T) {
 		Ellipsis: true,
 	}
 
-	modified, err := appendCallArgs(call, r, nil)
+	modified, err := appendCallArgs(call, r)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse variadic_type")
@@ -902,7 +903,7 @@ func TestAppendCallArgs_InvalidExpr(t *testing.T) {
 	}
 	call := &dst.CallExpr{Fun: &dst.Ident{Name: "f"}}
 
-	modified, err := appendCallArgs(call, r, nil)
+	modified, err := appendCallArgs(call, r)
 
 	require.Error(t, err)
 	assert.False(t, modified)
