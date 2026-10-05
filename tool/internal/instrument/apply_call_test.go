@@ -1114,6 +1114,47 @@ func writeTempGoFile(t *testing.T, dir, name, content string) string {
 	return path
 }
 
+func TestPackageSourceFiles(t *testing.T) {
+	dir := t.TempDir()
+	goFile := writeTempGoFile(t, dir, "main.go", "package main\n")
+
+	compileArgs := []string{
+		"compile",
+		"-p", "main",
+		"-o", filepath.Join(dir, "main.a"),
+		goFile,
+		"not_a_go_file.txt",
+	}
+
+	files := packageSourceFiles(compileArgs)
+
+	wantAbs, err := filepath.Abs(goFile)
+	require.NoError(t, err)
+	assert.Equal(t, []string{wantAbs}, files,
+		"flags, their values, and non-Go-file args must all be skipped")
+}
+
+func TestPackageSourceFiles_NoGoFiles(t *testing.T) {
+	compileArgs := []string{"compile", "-p", "main", "-complete"}
+
+	files := packageSourceFiles(compileArgs)
+
+	assert.Empty(t, files)
+}
+
+func TestPackageSourceFiles_RelativePathIsResolvedToAbsolute(t *testing.T) {
+	dir := t.TempDir()
+	writeTempGoFile(t, dir, "rel.go", "package main\n")
+
+	t.Chdir(dir)
+
+	files := packageSourceFiles([]string{"compile", "rel.go"})
+
+	require.Len(t, files, 1)
+	assert.True(t, filepath.IsAbs(files[0]), "relative source paths must be resolved to absolute")
+	assert.Equal(t, "rel.go", filepath.Base(files[0]))
+}
+
 // selectorPosition returns the line and column, in that order, of the
 // occurrence-th (1-indexed) "x.name(...)" selector it finds.
 //
