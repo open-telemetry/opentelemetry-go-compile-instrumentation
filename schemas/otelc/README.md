@@ -22,6 +22,7 @@ schemas/otelc/
 │   ├── mongo.yaml           # go.mongodb.org/mongo-driver client spans
 │   ├── elasticsearch.yaml   # olivere/elastic (v7) client spans
 │   ├── gin.yaml             # gin-gonic/gin server-span enrichment
+│   ├── mux.yaml             # gorilla/mux server-span enrichment
 │   ├── linodego.yaml        # linode/linodego (v2) client spans + operation-duration metric
 │   ├── stripe.yaml          # stripe/stripe-go (v81/v82) client spans + request metric
 │   ├── otel-sdk.yaml        # go.opentelemetry.io/otel* — Go runtime metrics
@@ -59,6 +60,7 @@ signals an undeclared instrumentation.
 | `go.mongodb.org/mongo-driver/v2/mongo`              | `mongo.yaml`        | DB client spans                                                        |
 | `github.com/olivere/elastic/v7`                     | `elasticsearch.yaml` | DB client spans                                                        |
 | `github.com/gin-gonic/gin`                          | `gin.yaml`          | `http.route` on the enclosing `net/http` server span                   |
+| `github.com/gorilla/mux`                            | `mux.yaml`          | `http.route` on the enclosing `net/http` server span                   |
 | `github.com/linode/linodego/v2`                     | `linodego.yaml`     | HTTP client spans + operation-duration metric                          |
 | `github.com/stripe/stripe-go` (v81/v82)             | `stripe.yaml`       | Stripe API client spans + request-duration metric                      |
 | `go.opentelemetry.io/otel/init`                     | `otel-sdk.yaml`     | Go runtime metrics (`go.*`)                                            |
