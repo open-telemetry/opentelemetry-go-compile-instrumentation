@@ -1369,6 +1369,8 @@ func TestGenerateRuntimePerPackageSkipsSelfImportForFileTargets(t *testing.T) {
 	moduleDir := t.TempDir()
 	sp := newTestSetupPhase()
 	sp.buildFlags = []string{"-C", moduleDir}
+	t.Setenv(util.EnvOtelcWorkDir, moduleDir)
+	t.Setenv(util.EnvOtelcDebug, "1")
 	hooksDir := filepath.Join(moduleDir, "hooks")
 	mustWriteFile(t, filepath.Join(moduleDir, "go.mod"), "module example.com/app\n\ngo 1.25.0\n")
 	mustWriteFile(t, filepath.Join(moduleDir, "answer.go"), "package app\n")
@@ -1392,6 +1394,24 @@ func TestGenerateRuntimePerPackageSkipsSelfImportForFileTargets(t *testing.T) {
 	// A skip for any other reason also writes no file, so assert the resolved path too.
 	assert.Equal(t, "example.com/app/hooks", sp.runtimeImportPath(t.Context(), pkgs[0], hooksDir))
 	assert.NoFileExists(t, filepath.Join(hooksDir, otelcRuntimeFile))
+
+	// A file target keeps the compiler's synthetic package path for artifacts,
+	// even though setup resolves the real import path for self-import checks.
+	appPackage := &packages.Package{
+		PkgPath: pkgload.CommandLineArgumentsPackage,
+		Name:    "app",
+		GoFiles: []string{filepath.Join(moduleDir, "answer.go")},
+	}
+	externalRule := newTestRuleSet(
+		"example.com/app",
+		[]*rule.InstFuncRule{newTestFuncRule("example.com/hooks", "example.com/app")},
+		nil,
+	)
+	require.NoError(
+		t,
+		sp.generateRuntimePerPackage(t.Context(), []*packages.Package{appPackage}, []*rule.InstRuleSet{externalRule}),
+	)
+	assert.FileExists(t, filepath.Join(setupDebugDir(pkgload.CommandLineArgumentsPackage), otelcRuntimeFile))
 }
 
 // TestRuntimeImportPathFallsBackWhenResolveFails verifies that a file target
@@ -1598,6 +1618,35 @@ func TestSetupLocked_FindModuleDirsError(t *testing.T) {
 	}
 	err := cmd.Run(t.Context(), []string{"setup", mainFile})
 	require.Error(t, err)
+}
+
+func TestSetupDebugDir_EmptyPkgPath(t *testing.T) {
+	dir := setupDebugDir("")
+	assert.True(t, strings.HasSuffix(dir, "main"))
+}
+
+func TestKeepForDebug_Fallbacks(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	srcInWorkDir := filepath.Join(workDir, "root.go")
+	require.NoError(t, os.WriteFile(srcInWorkDir, []byte("package main"), 0o644))
+
+	srcInSubDir := filepath.Join(workDir, "sub", "sub.go")
+	require.NoError(t, os.MkdirAll(filepath.Dir(srcInSubDir), 0o755))
+	require.NoError(t, os.WriteFile(srcInSubDir, []byte("package sub"), 0o644))
+
+	// Case 1: Explicit pkgPath
+	keepForDebug(t.Context(), srcInSubDir, "example.com/explicit")
+	assert.FileExists(t, filepath.Join(setupDebugDir("example.com/explicit"), "sub.go"))
+
+	// Case 2: In root workdir
+	keepForDebug(t.Context(), srcInWorkDir, "")
+	assert.FileExists(t, filepath.Join(setupDebugDir("main"), "root.go"))
+
+	// Case 3: Default fallback
+	keepForDebug(t.Context(), srcInSubDir, "")
+	assert.FileExists(t, filepath.Join(setupDebugDir("sub"), "sub.go"))
 }
 
 func TestGetBuildPackages_TestWithoutTargets(t *testing.T) {
