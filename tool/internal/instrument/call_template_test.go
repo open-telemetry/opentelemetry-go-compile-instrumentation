@@ -648,10 +648,10 @@ func TestCompileExpression_CallArgumentSameIndexTwice(t *testing.T) {
 	require.Len(t, resultCall.Args, 2)
 
 	for i, arg := range resultCall.Args {
-		call, ok := arg.(*dst.CallExpr)
-		require.True(t, ok, "expected *dst.CallExpr for arg %d, got %T", i, arg)
-		fun, ok := call.Fun.(*dst.Ident)
-		require.True(t, ok, "expected *dst.Ident, got %T", call.Fun)
+		call, callOk := arg.(*dst.CallExpr)
+		require.True(t, callOk, "expected *dst.CallExpr for arg %d, got %T", i, arg)
+		fun, funOk := call.Fun.(*dst.Ident)
+		require.True(t, funOk, "expected *dst.Ident, got %T", call.Fun)
 		assert.Equal(t, "innerArg", fun.Name)
 		assert.NotSame(t, originalArg, call,
 			"each occurrence must receive its own AST copy")

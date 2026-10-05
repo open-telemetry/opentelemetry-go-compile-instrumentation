@@ -121,7 +121,13 @@ func lastFileTargetIndex(subcommand string, args []string) int {
 //   - args ["-a", "cmd"] returns packages for the "cmd" package in the module
 //   - args ["-a", ".", "./cmd"] returns packages for both "." and "./cmd"
 //   - args [] returns packages for "."
-func getBuildPackages(ctx context.Context, subcommand string, args []string) ([]*packages.Package, []*packages.Package, error) {
+//
+//nolint:revive // needed to balance confusing-results and nonamedreturns linters
+func getBuildPackages(
+	ctx context.Context,
+	subcommand string,
+	args []string,
+) ([]*packages.Package, []*packages.Package, error) {
 	logger := util.LoggerFromContext(ctx)
 	// NeedForTest marks the test packages, so the loop below can split them
 	// from the real build packages.
