@@ -89,7 +89,7 @@ func exprString(t *testing.T, expr dst.Expr) string {
 	}
 }
 
-// --- walkLitsWithEnclosingFunc tests ---
+// --- walkLiteralsWithEnclosingFunc tests ---
 
 // requireModified takes an apply function's results and requires that it
 // changed the file without error.
@@ -113,7 +113,7 @@ func requireUnmodified(t *testing.T) func(bool, error) {
 	}
 }
 
-func TestWalkLitsWithEnclosingFunc_TracksEnclosingFunc(t *testing.T) {
+func TestWalkLiteralsWithEnclosingFunc_TracksEnclosingFunc(t *testing.T) {
 	root := parseFile(t, `package main
 
 type T struct{}
@@ -131,7 +131,7 @@ func B() {
 `)
 
 	var enclosingNames []string
-	walkLitsWithEnclosingFunc(root, func(_ *dst.CompositeLit, enclosing *dst.FuncDecl) bool {
+	walkLiteralsWithEnclosingFunc(root, func(_ *dst.CompositeLit, enclosing *dst.FuncDecl) bool {
 		name := "<none>"
 		if enclosing != nil {
 			name = enclosing.Name.Name
@@ -143,7 +143,7 @@ func B() {
 	assert.Equal(t, []string{"<none>", "A", "A", "B"}, enclosingNames)
 }
 
-func TestWalkLitsWithEnclosingFunc_StopsOnFirstDecline(t *testing.T) {
+func TestWalkLiteralsWithEnclosingFunc_StopsOnFirstDecline(t *testing.T) {
 	root := parseFile(t, `package main
 
 type T struct{}
@@ -161,7 +161,7 @@ func B() {
 `)
 
 	visited := 0
-	walkLitsWithEnclosingFunc(root, func(_ *dst.CompositeLit, _ *dst.FuncDecl) bool {
+	walkLiteralsWithEnclosingFunc(root, func(_ *dst.CompositeLit, _ *dst.FuncDecl) bool {
 		visited++
 		return false
 	})

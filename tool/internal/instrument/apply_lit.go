@@ -25,7 +25,7 @@ func (ip *instrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule
 	}
 
 	var matched []litWithEnclosingFunc
-	walkLitsWithEnclosingFunc(root, func(lit *dst.CompositeLit, enclosing *dst.FuncDecl) bool {
+	walkLiteralsWithEnclosingFunc(root, func(lit *dst.CompositeLit, enclosing *dst.FuncDecl) bool {
 		if matchesLitRule(lit, r, importAliases) {
 			matched = append(matched, litWithEnclosingFunc{lit: lit, enclosing: enclosing})
 		}
@@ -76,11 +76,11 @@ type litWithEnclosingFunc struct {
 	enclosing *dst.FuncDecl
 }
 
-// walkLitsWithEnclosingFunc visits every *dst.CompositeLit in root and invokes
+// walkLiteralsWithEnclosingFunc visits every *dst.CompositeLit in root and invokes
 // fn with the literal and the top-level *dst.FuncDecl that contains it. Returns
 // nil for literals outside any function body, e.g. an element of a package-level
 // variable initializer.
-func walkLitsWithEnclosingFunc(root *dst.File, fn func(lit *dst.CompositeLit, enclosing *dst.FuncDecl) bool) {
+func walkLiteralsWithEnclosingFunc(root *dst.File, fn func(lit *dst.CompositeLit, enclosing *dst.FuncDecl) bool) {
 	stopped := false
 	for _, decl := range root.Decls {
 		if stopped {
