@@ -102,9 +102,6 @@ func verifyGenericHookContextLogs(t *testing.T, output string) {
 	}
 }
 
-// verifyQueryHookContextLogs asserts that GetParam/GetReturnVal succeed for
-// ordinary (non-type-parameter) slots on a generic function, and still panic
-// for the slot whose type is the type parameter itself.
 func verifyQueryHookContextLogs(t *testing.T, output string) {
 	expectedQueryLogs := []string{
 		"[Query] GetParam(1): SELECT 1",

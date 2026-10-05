@@ -1211,11 +1211,8 @@ func (ip *instrumentPhase) rewriteHookContextMethods() {
 		}
 	}
 
-	// Generic type parameters (e.g. [T any]) aren't in scope in these methods,
-	// which are declared on a plain, non-generic HookContextImpl. A parameter or
-	// return value whose type mentions one can't be safely type-asserted here, so
-	// its case panics instead (see rewriteParamMethods/rewriteReturnValMethods);
-	// every other index is generated normally, generic function or not.
+	// Type parameters aren't in scope in the non-generic HookContextImpl methods.
+	// Only slots that reference them must panic.
 	genericTypes := findTargetGenericType(ip.target, ip.targetFunc)
 
 	// nil handling now lives inside each case, so the type switch is always the
@@ -1238,8 +1235,7 @@ func (ip *instrumentPhase) rewriteHookContextMethods() {
 	}
 }
 
-// panicClause returns a switch case for idx whose body unconditionally panics
-// with message.
+// panicClause returns a switch case that panics with message.
 func panicClause(idx int, message string) *dst.CaseClause {
 	panicStmt := ast.ExprStmt(
 		ast.CallTo("panic", nil, []dst.Expr{
@@ -1335,16 +1331,8 @@ func isTypeParameter(t dst.Expr, typeParams *dst.FieldList) bool {
 	return false
 }
 
-// referencesTypeParameter reports whether t mentions any of typeParams anywhere
-// in its structure: a bare parameter, or nested in a composite type such as
-// []T, map[string]T, or a generic-instantiated receiver like GenStruct[T].
-//
-// This mirrors replaceTypeParamsWithAny's recursion (same cases, same child
-// expressions) rather than a dst.Inspect walk. dst.Walk's *Field case visits
-// Field.Names before Field.Type, so a generic dst.Inspect would also match a
-// parameter *name* that happens to collide with the type parameter (e.g. cb
-// func(T int), where the inner T merely names an int parameter) and wrongly
-// treat it as a reference.
+// referencesTypeParameter checks type expressions without matching parameter
+// or field names that happen to share a type parameter's name.
 func referencesTypeParameter(t dst.Expr, typeParams *dst.FieldList) bool {
 	return containsTypeParameter(t, typeParams)
 }

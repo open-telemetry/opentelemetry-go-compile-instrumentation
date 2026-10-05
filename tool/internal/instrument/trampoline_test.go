@@ -789,9 +789,7 @@ func TestReferencesTypeParameter(t *testing.T) {
 	assert.False(t, referencesTypeParameter(dst.NewIdent("T"), nil), "nil typeParams")
 	assert.False(t, referencesTypeParameter(nil, tp), "nil type expression")
 
-	// func(T int): the inner field's *name* happens to collide with the outer
-	// type parameter, but its type (int) doesn't reference it. A parameter-name
-	// match must not be treated as a type reference.
+	// In func(T int), T names a parameter rather than its type.
 	funcTypeWithCollidingParamName := &dst.FuncType{
 		Params: &dst.FieldList{List: []*dst.Field{
 			{Names: []*dst.Ident{dst.NewIdent("T")}, Type: dst.NewIdent("int")},
@@ -808,8 +806,6 @@ func TestReferencesTypeParameter(t *testing.T) {
 	assert.True(t, referencesTypeParameter(funcTypeWithRealReference, tp),
 		"func parameter whose type is the type parameter")
 
-	// interface{ Get() T }: the interface itself isn't the type parameter, but
-	// one of its methods' signatures references it.
 	interfaceWithGenericMethod := &dst.InterfaceType{
 		Methods: &dst.FieldList{List: []*dst.Field{
 			{
@@ -832,8 +828,7 @@ func TestReferencesTypeParameter(t *testing.T) {
 	assert.False(t, referencesTypeParameter(interfaceWithoutGenericMethod, tp),
 		"interface literal with no method referencing the type parameter")
 
-	// *testing.T: the selector's own name happens to collide with the type
-	// parameter, but it's a package-qualified identifier, not a reference.
+	// The T in testing.T belongs to the imported package.
 	testingT := &dst.StarExpr{X: &dst.SelectorExpr{X: dst.NewIdent("testing"), Sel: dst.NewIdent("T")}}
 	assert.False(t, referencesTypeParameter(testingT, tp),
 		"*testing.T is not a reference despite the selector name colliding with T")

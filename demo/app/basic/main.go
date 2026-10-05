@@ -58,10 +58,8 @@ func GenericExample[K comparable, V any](key K, value V) V {
 	return value
 }
 
-// Query has params and one return value whose types don't mention T, alongside
-// a T return value that does. It exercises GetParam/GetReturnVal on those
-// ordinary slots for a generic function, not just the positional parameters
-// the hooks otherwise rely on.
+// Query exercises HookContext accessors for concrete slots alongside a
+// generic return value.
 func Query[T any](ctx context.Context, query string) (T, error) {
 	fmt.Println("Query:", query)
 	var zero T

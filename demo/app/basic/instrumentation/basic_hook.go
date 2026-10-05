@@ -101,11 +101,6 @@ func MyHookGenericAfter(ictx hook.HookContext, _ interface{}) {
 	ictx.SetReturnVal(0, 999)
 }
 
-// MyHookQueryBefore/MyHookQueryAfter target Query[T any](ctx context.Context,
-// query string) (T, error): a generic function whose ctx/query params and
-// error return don't mention T. GetParam/GetReturnVal must work on those
-// ordinary slots instead of panicking just because the function is generic,
-// while the slot that does mention T (return index 0) must still panic.
 func MyHookQueryBefore(ictx hook.HookContext, _ context.Context, _ string) {
 	println("Query before hook")
 	fmt.Printf("[Query] GetParam(0): %v\n", ictx.GetParam(0))
