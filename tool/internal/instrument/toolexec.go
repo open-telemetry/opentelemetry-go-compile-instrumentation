@@ -34,9 +34,10 @@ type instrumentPhase struct {
 	importConfig imports.ImportConfig
 	// The path to the importcfg file
 	importConfigPath string
-	// The target file to be instrumented
+	// The most recently parsed file. Not necessarily instrumented: files no
+	// rule changed are skipped after parsing.
 	target *dst.File
-	// The parser for the target file
+	// The parser for the most recently parsed file.
 	parser *ast.AstParser
 	// The compiling arguments for the target file
 	compileArgs []string
@@ -61,6 +62,11 @@ type instrumentPhase struct {
 	// whole package because HookContext declarations accumulate into one globals
 	// file across all instrumented source files.
 	appliedFuncIdentities map[string]struct{}
+	// importNames maps an import path to a package name, resolved
+	// during setup instead of guessed from the import path. importNames
+	// has no entries when the table is unavailable, such as after an
+	// older setup run.
+	importNames map[string]string
 	// Hook files already parsed via parseHookFileCached, keyed by absolute
 	// file path. A hook package directory is typically shared by many func
 	// rules (one file implementing dozens of before/after pairs), so caching
@@ -124,6 +130,13 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 
 	// Load matched hook rules from setup phase
 	allSet, err := ip.load()
+	if err != nil {
+		return nil, err
+	}
+
+	// Load the import name table, if one exists. A missing table is
+	// not fatal.
+	ip.importNames, err = loadImportNames()
 	if err != nil {
 		return nil, err
 	}

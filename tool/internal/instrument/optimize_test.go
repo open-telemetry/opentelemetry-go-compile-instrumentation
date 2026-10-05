@@ -27,7 +27,7 @@ func parseFuncWithImports(t *testing.T, source string) (*dst.FuncDecl, map[strin
 	file := parseFile(t, source)
 	for _, decl := range file.Decls {
 		if funcDecl, ok := decl.(*dst.FuncDecl); ok {
-			return funcDecl, ast.ImportAliasMap(file)
+			return funcDecl, ast.ImportAliasMap(file, nil)
 		}
 	}
 	require.Fail(t, "no function declaration found in source")

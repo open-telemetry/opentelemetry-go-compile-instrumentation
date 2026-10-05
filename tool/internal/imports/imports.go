@@ -19,20 +19,26 @@ import (
 
 // importMapping holds bidirectional import mappings for a file.
 type importMapping struct {
-	AliasToPath   map[string]string // alias -> import path
-	PathToAlias   map[string]string // import path -> alias
-	ExplicitAlias map[string]bool   // import path -> true if alias was explicitly set
+	AliasToPath   map[string]string   // alias -> import path
+	PathToAlias   map[string]string   // import path -> one alias (last spec wins)
+	PathToAliases map[string][]string // import path -> every alias, sorted
+	ExplicitAlias map[string]bool     // import path -> true if alias was explicitly set
 }
 
 // Resolution contains the result of analyzing which imports need to be added.
 type Resolution struct {
-	NewImports      map[string]string // Imports to add (alias -> path)
-	ExistingAliases map[string]string // Existing imports in file (path -> alias)
-	ExplicitAliases map[string]bool   // path -> true if the existing alias was explicitly set
+	NewImports        map[string]string   // Imports to add (alias -> path)
+	ExistingAliases   map[string]string   // Existing imports in file (path -> one alias)
+	ExistingAliasSets map[string][]string // Existing imports in file (path -> every alias, sorted)
+	ExplicitAliases   map[string]bool     // path -> true if the existing alias was explicitly set
 }
 
 // parseFile extracts all imports from a file into bidirectional maps.
 // This avoids multiple AST traversals when checking import conflicts.
+//
+// A file may import one path under multiple aliases. PathToAlias keeps one
+// alias per path (the last spec wins); PathToAliases keeps every alias,
+// sorted, so callers can check set membership.
 //
 // For imports without explicit aliases, the alias is resolved using pkgload.ResolvePackageName(),
 // which uses the go/packages API to get the actual package name. The ExplicitAlias map tracks
@@ -41,6 +47,7 @@ func parseFile(ctx context.Context, root *dst.File, buildFlags ...string) import
 	maps := importMapping{
 		AliasToPath:   make(map[string]string),
 		PathToAlias:   make(map[string]string),
+		PathToAliases: make(map[string][]string),
 		ExplicitAlias: make(map[string]bool),
 	}
 
@@ -66,7 +73,11 @@ func parseFile(ctx context.Context, root *dst.File, buildFlags ...string) import
 
 			maps.AliasToPath[alias] = importPath
 			maps.PathToAlias[importPath] = alias
+			maps.PathToAliases[importPath] = append(maps.PathToAliases[importPath], alias)
 		}
+	}
+	for _, aliases := range maps.PathToAliases {
+		slices.Sort(aliases)
 	}
 	return maps
 }
@@ -75,9 +86,10 @@ func parseFile(ctx context.Context, root *dst.File, buildFlags ...string) import
 // It returns both the new imports to add and the existing aliases for conflict detection.
 func FindNew(ctx context.Context, root *dst.File, ruleImports map[string]string, buildFlags ...string) Resolution {
 	result := Resolution{
-		NewImports:      make(map[string]string),
-		ExistingAliases: make(map[string]string),
-		ExplicitAliases: make(map[string]bool),
+		NewImports:        make(map[string]string),
+		ExistingAliases:   make(map[string]string),
+		ExistingAliasSets: make(map[string][]string),
+		ExplicitAliases:   make(map[string]bool),
 	}
 
 	if len(ruleImports) == 0 {
@@ -86,6 +98,7 @@ func FindNew(ctx context.Context, root *dst.File, ruleImports map[string]string,
 
 	existing := parseFile(ctx, root, buildFlags...)
 	result.ExistingAliases = existing.PathToAlias
+	result.ExistingAliasSets = existing.PathToAliases
 	result.ExplicitAliases = existing.ExplicitAlias
 
 	for alias, importPath := range ruleImports {
