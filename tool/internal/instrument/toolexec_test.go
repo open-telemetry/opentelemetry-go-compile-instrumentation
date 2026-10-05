@@ -915,3 +915,61 @@ func TestToolVersionLineMatchesCachePattern(t *testing.T) {
 	assert.Regexp(t, versionMarkerPattern, toolVersionLine("compile version go1.26.5", ""))
 	assert.Regexp(t, versionMarkerPattern, toolVersionLine("compile version go1.26.5", "0123456789abcdef"))
 }
+
+func TestUpdateImportConfigStopsAddedImportCycle(t *testing.T) {
+	// The outer build compiles example.com/p and resolves example.com/q, an
+	// import a rule added to it. The nested build compiles example.com/d, a
+	// dependency of q, and a rule adds an import of p to it. Resolving p would
+	// compile p again, add q again, and never end.
+	t.Setenv(util.EnvOtelcNestedResolving, "example.com/p>example.com/q")
+	cfgPath := filepath.Join(t.TempDir(), "importcfg")
+	require.NoError(t, os.WriteFile(cfgPath, []byte("packagefile fmt=/path/to/fmt.a\n"), 0o644))
+	ip := &instrumentPhase{
+		importConfigPath: cfgPath,
+		compileArgs:      []string{"compile", "-p", "example.com/d"},
+	}
+
+	err := ip.updateImportConfig(t.Context(), map[string]string{"p": "example.com/p"})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(),
+		"rules add an import cycle: example.com/p adds example.com/q; example.com/d adds example.com/p")
+}
+
+func TestEnterNestedResolution(t *testing.T) {
+	t.Run("extends the chain for the nested build and restores it", func(t *testing.T) {
+		t.Setenv(util.EnvOtelcNestedResolving, "example.com/p>example.com/q")
+		ip := &instrumentPhase{compileArgs: []string{"compile", "-p", "example.com/d"}}
+
+		restore, err := ip.enterNestedResolution("example.com/x")
+		require.NoError(t, err)
+		assert.Equal(t, "example.com/p>example.com/q,example.com/d>example.com/x",
+			os.Getenv(util.EnvOtelcNestedResolving))
+
+		restore()
+		assert.Equal(t, "example.com/p>example.com/q", os.Getenv(util.EnvOtelcNestedResolving))
+	})
+
+	t.Run("unsets the chain after the outermost resolution", func(t *testing.T) {
+		t.Setenv(util.EnvOtelcNestedResolving, "")
+		require.NoError(t, os.Unsetenv(util.EnvOtelcNestedResolving))
+		ip := &instrumentPhase{compileArgs: []string{"compile", "-p", "example.com/p"}}
+
+		restore, err := ip.enterNestedResolution("example.com/q")
+		require.NoError(t, err)
+		assert.Equal(t, "example.com/p>example.com/q", os.Getenv(util.EnvOtelcNestedResolving))
+
+		restore()
+		_, set := os.LookupEnv(util.EnvOtelcNestedResolving)
+		assert.False(t, set)
+	})
+
+	t.Run("a package adding itself is a cycle", func(t *testing.T) {
+		t.Setenv(util.EnvOtelcNestedResolving, "")
+		ip := &instrumentPhase{compileArgs: []string{"compile", "-p", "example.com/p"}}
+
+		_, err := ip.enterNestedResolution("example.com/p")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "rules add an import cycle: example.com/p adds example.com/p")
+	})
+}
