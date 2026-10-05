@@ -109,8 +109,8 @@ func TestFindToolFiles(t *testing.T) {
 		assert.Empty(t, got)
 	})
 
-	t.Run("collects, deduplicates, and sorts tool files", func(t *testing.T) {
-		input := []string{dirC, dirB, dirA, dirB, dirA}
+	t.Run("collects and sorts tool files", func(t *testing.T) {
+		input := []string{dirC, dirB, dirA}
 		inputOrig := append([]string(nil), input...)
 
 		got, err := findToolFiles(input)

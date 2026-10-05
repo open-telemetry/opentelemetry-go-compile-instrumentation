@@ -2029,7 +2029,7 @@ func TestLoadRules_FindToolFilesError(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestLoadRules_EmptyModuleDirs(t *testing.T) {
+func TestLoadRules_NoRulesAvailable(t *testing.T) {
 	t.Setenv(util.EnvOtelcRules, "")
 	sp := newTestSetupPhase()
 	rules, err := sp.loadRules(t.Context(), []string{})

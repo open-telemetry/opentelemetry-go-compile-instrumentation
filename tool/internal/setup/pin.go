@@ -621,7 +621,7 @@ func generatePinnedProjects(ctx context.Context, moduleDirs []string, opts PinOp
 
 	// Generate otel.instrumentation.go file with imports for all matched rules.
 	f := generateOtelInstrumentationGo(imports, opts)
-	for _, moduleDir := range moduleDirs {
+	for _, moduleDir := range normalizeModuleDirs(moduleDirs) {
 		path := filepath.Join(moduleDir, toolFileCanonical)
 		if writeErr := ast.WriteFileAtomic(path, f); writeErr != nil {
 			return nil, ex.Wrapf(writeErr, "writing %s", path)
@@ -663,17 +663,6 @@ func prepareVendoredBuild(
 	return rewriteModVendor(subcommand, args), nil
 }
 
-// normalizeModuleDirs returns a cloned, sorted, and deduplicated copy of dirs.
-// If dirs is empty, it returns an empty non-nil slice. The caller's slice is never mutated.
-func normalizeModuleDirs(dirs []string) []string {
-	if len(dirs) == 0 {
-		return []string{}
-	}
-	res := slices.Clone(dirs)
-	slices.Sort(res)
-	return slices.Compact(res)
-}
-
 type PinOptions struct {
 	// Whether to prune invalid imports within otel.instrumentation.go
 	Prune bool
@@ -685,8 +674,9 @@ type PinOptions struct {
 	Args []string
 	// Subcommand passed to go in findDeps (defaults to "build")
 	Subcommand string
-	// ModuleDirs is the set of module directories to search for tool files
-	// If empty, module directories will be found using opts.Args
+	// ModuleDirs lists the module directories to search for tool files.
+	// The list may hold duplicates and entries in any order; Pin normalizes it.
+	// If the list is empty, Pin finds the module directories with opts.Args.
 	ModuleDirs []string
 }
 

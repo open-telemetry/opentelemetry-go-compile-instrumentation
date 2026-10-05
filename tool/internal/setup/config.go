@@ -72,9 +72,9 @@ func findToolFiles(moduleDirs []string) ([]string, error) {
 			toolFiles = append(toolFiles, toolFile)
 		}
 	}
-	// Sort and compact for deterministic, deduplicated rule loading.
+	// Sort for deterministic rule loading.
 	slices.Sort(toolFiles)
-	return slices.Compact(toolFiles), nil
+	return toolFiles, nil
 }
 
 const packagesLoadTimeout = 30 * time.Second

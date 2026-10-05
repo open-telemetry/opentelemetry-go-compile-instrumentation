@@ -1858,24 +1858,3 @@ func TestUpdateToolFile_RemoveImportsError(t *testing.T) {
 	err := updateToolFile(t.Context(), toolFile, map[string]bool{"foo": true}, PinOptions{})
 	require.Error(t, err)
 }
-
-func TestNormalizeModuleDirs(t *testing.T) {
-	t.Run("empty slice returns empty non-nil slice", func(t *testing.T) {
-		got := normalizeModuleDirs(nil)
-		assert.NotNil(t, got)
-		assert.Empty(t, got)
-
-		got = normalizeModuleDirs([]string{})
-		assert.NotNil(t, got)
-		assert.Empty(t, got)
-	})
-
-	t.Run("sorts and compacts without mutating caller slice", func(t *testing.T) {
-		dirs := []string{"/dir/c", "/dir/a", "/dir/b", "/dir/a", "/dir/c"}
-		dirsOrig := append([]string(nil), dirs...)
-
-		got := normalizeModuleDirs(dirs)
-		assert.Equal(t, []string{"/dir/a", "/dir/b", "/dir/c"}, got)
-		assert.Equal(t, dirsOrig, dirs, "caller slice must not be mutated")
-	})
-}
