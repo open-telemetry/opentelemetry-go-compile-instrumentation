@@ -133,7 +133,8 @@ func SplitGoflags(goflags string) []string {
 // drop-in mode the go commands otelc spawns would inherit the flag and
 // recursively re-invoke otelc; stripping it lets each command choose its
 // children's toolexec: none for setup discovery, an explicit CLI flag for
-// `otelc go build`, and nested version-only mode during instrumentation.
+// `otelc go build`, and nested mode, which instruments compiles, during
+// instrumentation.
 func StripToolexecFromGoflags(goflags string) string {
 	tokens := SplitGoflags(goflags)
 	kept := make([]string, 0, len(tokens))
