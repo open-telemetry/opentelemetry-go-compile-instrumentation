@@ -11,6 +11,9 @@ ignored:
   # We intentionally separate RUN commands for different build phases to optimize
   # Docker layer caching and improve readability.
   - DL3059
+  # DL3066: Non-numeric user-id.
+  # Demo images create and use a dedicated non-root 'appuser' with explicit UID 1000.
+  - DL3066
 
 # Trusted registries for base images
 trustedRegistries:
