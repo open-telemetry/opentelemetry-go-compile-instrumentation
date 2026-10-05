@@ -16,8 +16,9 @@ import (
 )
 
 // applyCallRule transforms function calls at call sites by wrapping them with
-// instrumentation code according to the provided replacement template.
-func (ip *instrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRule, root *dst.File) error {
+// instrumentation code according to the provided replacement template. It
+// reports whether it changed root.
+func (ip *instrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRule, root *dst.File) (bool, error) {
 	importAliases := ast.ImportAliasMap(root)
 
 	appendModified := ip.applyCallAppendArgs(r, root, importAliases)
@@ -27,20 +28,20 @@ func (ip *instrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRu
 		var err error
 		replaceModified, err = ip.applyCallReplace(r, root, importAliases)
 		if err != nil {
-			return err
+			return false, err
 		}
 	}
 
 	if !appendModified && !replaceModified {
-		return nil
+		return false, nil
 	}
 
 	if err := ip.addRuleImports(ctx, root, usedRuleImports(root, r.Imports), r.Name); err != nil {
-		return err
+		return false, err
 	}
 	ip.Info("Apply call rule", "rule", r)
 
-	return nil
+	return true, nil
 }
 
 // usedRuleImports returns the subset of ruleImports whose alias is actually
@@ -178,13 +179,17 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 		}
 		return true
 	})
+	modified := false
 	for _, call := range matchingCalls {
-		if _, err := appendCallArgs(call, r); err != nil {
+		ok, err := appendCallArgs(call, r)
+		if err != nil {
 			ip.Warn("Failed to append args to call", "error", err)
+			continue
 		}
+		modified = modified || ok
 	}
 
-	return len(matchingCalls) > 0
+	return modified
 }
 
 // appendCallArgs appends the expressions from r.AppendArgs to the call's argument list.

@@ -16,13 +16,13 @@ import (
 )
 
 // applyLitRule sets fields on every composite literal of the rule's type found
-// in the target file.
-func (ip *instrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule, root *dst.File) error {
+// in the target file. It reports whether it changed root.
+func (ip *instrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule, root *dst.File) (bool, error) {
 	importAliases := ast.ImportAliasMap(root)
 
 	setters, err := newLitFieldSetters(r)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	var matched []*dst.CompositeLit
@@ -51,21 +51,21 @@ func (ip *instrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule
 		}
 		litModified, setErr := ip.setLitFields(lit, setters, r)
 		if setErr != nil {
-			return setErr
+			return false, setErr
 		}
 		modified = modified || litModified
 	}
 
 	if !modified {
-		return nil
+		return false, nil
 	}
 
 	if err = ip.addRuleImports(ctx, root, r.Imports, r.Name); err != nil {
-		return err
+		return false, err
 	}
 	ip.Info("Apply literal rule", "rule", r)
 
-	return nil
+	return true, nil
 }
 
 // litFieldSetter holds a field's parsed instructions, built once per rule.

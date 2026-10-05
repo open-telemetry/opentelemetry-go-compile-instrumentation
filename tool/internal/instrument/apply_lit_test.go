@@ -181,7 +181,7 @@ func TestApplyLitRule_SetsFieldOnEmptyLiteral(t *testing.T) {
 	r := transportRule(&rule.InstLitField{Name: "Internal", Value: "true"})
 
 	ip := newTestPhase()
-	require.NoError(t, ip.applyLitRule(context.Background(), r, file))
+	requireModified(t)(ip.applyLitRule(context.Background(), r, file))
 
 	assert.Equal(t, [][2]string{{"Internal", "true"}}, litKeys(t, lit))
 }
@@ -192,7 +192,7 @@ func TestApplyLitRule_PreservesExistingElements(t *testing.T) {
 	r := transportRule(&rule.InstLitField{Name: "Internal", Value: "true"})
 
 	ip := newTestPhase()
-	require.NoError(t, ip.applyLitRule(context.Background(), r, file))
+	requireModified(t)(ip.applyLitRule(context.Background(), r, file))
 
 	// The new field is prepended; the literal's own element is untouched.
 	assert.Equal(t, [][2]string{{"Internal", "true"}, {"MaxIdleConns", "100"}}, litKeys(t, lit))
@@ -204,7 +204,7 @@ func TestApplyLitRule_OverridesExistingFieldInPlace(t *testing.T) {
 	r := transportRule(&rule.InstLitField{Name: "Internal", Value: "true"})
 
 	ip := newTestPhase()
-	require.NoError(t, ip.applyLitRule(context.Background(), r, file))
+	requireModified(t)(ip.applyLitRule(context.Background(), r, file))
 
 	// Overriding keeps the field where it was rather than moving it to the front.
 	assert.Equal(t, [][2]string{{"MaxIdleConns", "100"}, {"Internal", "true"}}, litKeys(t, lit))
@@ -219,7 +219,7 @@ func TestApplyLitRule_SetsMultipleFields(t *testing.T) {
 	)
 
 	ip := newTestPhase()
-	require.NoError(t, ip.applyLitRule(context.Background(), r, file))
+	requireModified(t)(ip.applyLitRule(context.Background(), r, file))
 
 	assert.Equal(t, [][2]string{{"Internal", "true"}, {"MaxIdleConns", "50"}}, litKeys(t, lit))
 }
@@ -232,7 +232,7 @@ func TestApplyLitRule_SkipsPositionalLiteral(t *testing.T) {
 	r := transportRule(&rule.InstLitField{Name: "Internal", Value: "true"})
 
 	ip := newTestPhase()
-	require.NoError(t, ip.applyLitRule(context.Background(), r, file))
+	requireUnmodified(t)(ip.applyLitRule(context.Background(), r, file))
 
 	require.Len(t, lit.Elts, 1)
 	assert.IsType(t, &dst.BasicLit{}, lit.Elts[0])
@@ -249,7 +249,7 @@ func TestApplyLitRule_NoMatchIsNoOp(t *testing.T) {
 	r := transportRule(&rule.InstLitField{Name: "Internal", Value: "true"})
 
 	ip := newTestPhase()
-	require.NoError(t, ip.applyLitRule(context.Background(), r, file))
+	requireUnmodified(t)(ip.applyLitRule(context.Background(), r, file))
 
 	assert.Empty(t, lit.Elts)
 }
@@ -274,7 +274,7 @@ func TestApplyLitRule_WrapsExistingFieldValue(t *testing.T) {
 	r := transportRule(&rule.InstLitField{Name: "Proxy", Wrap: "wrapProxy({{ . }})"})
 
 	ip := newTestPhase()
-	require.NoError(t, ip.applyLitRule(context.Background(), r, file))
+	requireModified(t)(ip.applyLitRule(context.Background(), r, file))
 
 	require.Len(t, lit.Elts, 1)
 	kv, ok := lit.Elts[0].(*dst.KeyValueExpr)
@@ -290,7 +290,7 @@ func TestApplyLitRule_WrapOnlySkipsAbsentField(t *testing.T) {
 	r := transportRule(&rule.InstLitField{Name: "Proxy", Wrap: "wrapProxy({{ . }})"})
 
 	ip := newTestPhase()
-	require.NoError(t, ip.applyLitRule(context.Background(), r, file))
+	requireUnmodified(t)(ip.applyLitRule(context.Background(), r, file))
 
 	assert.Empty(t, lit.Elts)
 }
@@ -305,7 +305,7 @@ func TestApplyLitRule_ValueFillsAbsentFieldAlongsideWrap(t *testing.T) {
 	})
 
 	ip := newTestPhase()
-	require.NoError(t, ip.applyLitRule(context.Background(), r, file))
+	requireModified(t)(ip.applyLitRule(context.Background(), r, file))
 
 	assert.Equal(t, [][2]string{{"Proxy", "defaultProxy"}}, litKeys(t, lit))
 }
@@ -320,7 +320,7 @@ func TestApplyLitRule_WrapTakesPrecedenceOverValueWhenPresent(t *testing.T) {
 	})
 
 	ip := newTestPhase()
-	require.NoError(t, ip.applyLitRule(context.Background(), r, file))
+	requireModified(t)(ip.applyLitRule(context.Background(), r, file))
 
 	require.Len(t, lit.Elts, 1)
 	kv, ok := lit.Elts[0].(*dst.KeyValueExpr)
@@ -344,7 +344,7 @@ func TestApplyLitRule_WrapInstrumentsNestedMatchedLiteral(t *testing.T) {
 	)
 
 	ip := newTestPhase()
-	require.NoError(t, ip.applyLitRule(context.Background(), r, file))
+	requireModified(t)(ip.applyLitRule(context.Background(), r, file))
 
 	// Read the literals back out of the file, not through the nodes handed in,
 	// so a nested literal detached from the tree cannot pass this test.
@@ -392,8 +392,9 @@ func TestApplyLitRule_InvalidWrapTemplate(t *testing.T) {
 	r := transportRule(&rule.InstLitField{Name: "Proxy", Wrap: "wrapProxy({{ . }}"})
 
 	ip := newTestPhase()
-	err := ip.applyLitRule(context.Background(), r, file)
+	modified, err := ip.applyLitRule(context.Background(), r, file)
 	require.Error(t, err)
+	require.False(t, modified, "a rule that matched nothing or failed must not report a change")
 }
 
 func TestApplyLitRule_InvalidValueExpression(t *testing.T) {
@@ -401,7 +402,52 @@ func TestApplyLitRule_InvalidValueExpression(t *testing.T) {
 	r := transportRule(&rule.InstLitField{Name: "Internal", Value: "func("})
 
 	ip := newTestPhase()
-	err := ip.applyLitRule(context.Background(), r, file)
+	modified, err := ip.applyLitRule(context.Background(), r, file)
 	require.Error(t, err)
+	require.False(t, modified, "a rule that matched nothing or failed must not report a change")
 	assert.Contains(t, err.Error(), "failed to parse value")
+}
+
+func TestApplyLitRule_ImportAliasMismatch(t *testing.T) {
+	file := parseFile(t, `package main
+
+import (
+	f "fmt"
+	"net/http"
+)
+
+func Run() {
+	_ = &http.Transport{}
+}
+`)
+	r := transportRule(&rule.InstLitField{Name: "Internal", Value: "true"})
+	r.Imports = map[string]string{"traced": "fmt"}
+
+	modified, err := newTestPhase().applyLitRule(context.Background(), r, file)
+
+	require.Error(t, err)
+	require.False(t, modified, "a rule that matched nothing or failed must not report a change")
+	assert.Contains(t, err.Error(), "import alias mismatch")
+}
+
+// requireModified takes an apply function's results and requires that it
+// changed the file without error.
+func requireModified(t *testing.T) func(bool, error) {
+	t.Helper()
+	return func(modified bool, err error) {
+		t.Helper()
+		require.NoError(t, err)
+		require.True(t, modified, "the rule should have changed the file")
+	}
+}
+
+// requireUnmodified takes an apply function's results and requires that it
+// left the file unchanged without error.
+func requireUnmodified(t *testing.T) func(bool, error) {
+	t.Helper()
+	return func(modified bool, err error) {
+		t.Helper()
+		require.NoError(t, err)
+		require.False(t, modified, "the rule should have left the file unchanged")
+	}
 }
