@@ -408,6 +408,28 @@ func TestApplyLitRule_InvalidValueExpression(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to parse value")
 }
 
+func TestApplyLitRule_ImportAliasMismatch(t *testing.T) {
+	file := parseFile(t, `package main
+
+import (
+	f "fmt"
+	"net/http"
+)
+
+func Run() {
+	_ = &http.Transport{}
+}
+`)
+	r := transportRule(&rule.InstLitField{Name: "Internal", Value: "true"})
+	r.Imports = map[string]string{"traced": "fmt"}
+
+	modified, err := newTestPhase().applyLitRule(context.Background(), r, file)
+
+	require.Error(t, err)
+	require.False(t, modified, "a rule that matched nothing or failed must not report a change")
+	assert.Contains(t, err.Error(), "import alias mismatch")
+}
+
 // requireModified takes an apply function's results and requires that it
 // changed the file without error.
 func requireModified(t *testing.T) func(bool, error) {
