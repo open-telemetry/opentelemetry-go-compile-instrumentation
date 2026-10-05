@@ -151,6 +151,18 @@ func TestRedisClientRequestTraceAttrs_ContainsDBSystemRedis(t *testing.T) {
 	assert.True(t, found, "should contain db.system.name=redis attribute")
 }
 
+func TestRedisClientRequestTraceAttrs_DoesNotGrowWhenPortPresent(t *testing.T) {
+	attrs := RedisClientRequestTraceAttrs(RedisRequest{
+		Endpoint:  "localhost:6379",
+		FullName:  "get",
+		Statement: "get key",
+	})
+
+	require.Len(t, attrs, 6)
+	assert.Equal(t, redisClientRequestAttrCap, cap(attrs),
+		"a 5-element literal that then appends server.port grows the slice")
+}
+
 func TestRedisClientRequestTraceAttrs_ContainsNetworkTransportTCP(t *testing.T) {
 	req := RedisRequest{
 		Endpoint:  "localhost:6379",
