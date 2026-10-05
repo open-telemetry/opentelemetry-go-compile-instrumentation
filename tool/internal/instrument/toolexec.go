@@ -331,6 +331,14 @@ func CleanupImportTrackingFiles() {
 	}
 }
 
+// CleanupDebugArtifacts removes debug artifacts from previous builds.
+// Should be called at the start of a build under debug mode to clean up
+// stale diffs and debug files from prior runs.
+// This is exported for use by the setup phase.
+func CleanupDebugArtifacts() error {
+	return os.RemoveAll(util.GetBuildTemp("debug"))
+}
+
 // loadAddedImports discovers and merges all per-process import tracking files.
 func loadAddedImports(ctx context.Context) (map[string]string, error) {
 	logger := util.LoggerFromContext(ctx)

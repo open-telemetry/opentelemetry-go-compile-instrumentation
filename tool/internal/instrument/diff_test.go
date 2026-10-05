@@ -620,6 +620,20 @@ func TestWriteAddedSourceDiffForDebugSkipsWhenDebugOff(t *testing.T) {
 	}
 }
 
+func TestCleanupDebugArtifacts(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	debugDir := util.GetBuildTemp("debug")
+	pkgDir := filepath.Join(debugDir, "some_pkg")
+	require.NoError(t, os.MkdirAll(pkgDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "file.go.diff"), []byte("diff content"), 0o644))
+
+	require.DirExists(t, debugDir)
+	require.NoError(t, CleanupDebugArtifacts())
+	assert.NoDirExists(t, debugDir)
+}
+
 func TestApplyRulesCapturingDiffsTracksGlobalsContributors(t *testing.T) {
 	t.Setenv(util.EnvOtelcDebug, "1")
 	ruleX := &rule.InstRawRule{

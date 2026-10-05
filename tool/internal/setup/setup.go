@@ -47,6 +47,13 @@ func setupDebugDir(pkgPath string) string {
 	return filepath.Join(util.GetBuildTemp("debug"), util.EscapePackagePath(pkgPath))
 }
 
+func cleanupDebugArtifacts() error {
+	if !instrument.DiffDebugEnabled() {
+		return nil
+	}
+	return instrument.CleanupDebugArtifacts()
+}
+
 // keepForDebug copies the file to the build temp directory for debugging.
 // Error is tolerated as it's not critical.
 func keepForDebug(ctx context.Context, srcPath, pkgPath string) {
@@ -356,7 +363,14 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	if cmd.Name == "go" {
 		subcommand = cmd.Args().First() // build / install / test
 		args = cmd.Args().Tail()        // trim the subcommand
-
+	} else {
+		// Clean up debug artifacts from previous runs for standalone `otelc setup`,
+		// as it prepares the environment for a subsequent toolexec build.
+		// For `otelc go ...`, runGoBuild already performed this cleanup at its
+		// lifecycle boundary before invoking Setup.
+		if err := cleanupDebugArtifacts(); err != nil {
+			return ex.Wrapf(err, "cleaning debug artifacts")
+		}
 	}
 
 	logger := util.LoggerFromContext(ctx)
@@ -719,6 +733,9 @@ func runGoBuild(ctx context.Context, cmd *cli.Command) error {
 	// Clean up import tracking files from previous builds at the start
 	// to prevent stale data from affecting this build.
 	instrument.CleanupImportTrackingFiles()
+	if err := cleanupDebugArtifacts(); err != nil {
+		return ex.Wrapf(err, "cleaning debug artifacts")
+	}
 
 	defer func() {
 		// Restore backed-up go.mod/go.sum but keep .otelc-build/ for debugging.
