@@ -84,6 +84,8 @@ jobs:
           disable_search: true
           flags: tool
           fail_ci_if_error: true
+          use_pypi: true
+          version: 11.3.1
       - name: Upload pkg coverage report
         if: needs.changes.outputs.pkg == 'true'
         uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac  # v5.5.5
@@ -92,6 +94,8 @@ jobs:
           disable_search: true
           flags: pkg
           fail_ci_if_error: true
+          use_pypi: true
+          version: 11.3.1
 
   test-unit:
     name: Unit Tests (go ${{ matrix.platform.os }} ${{ matrix.platform.arch }})
