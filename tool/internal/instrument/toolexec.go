@@ -82,6 +82,9 @@ type instrumentPhase struct {
 	// methodCallInfo is built lazily by ensureMethodCallInfo.
 	methodCallInfo       *methodCallPackageInfo
 	methodCallInfoLoaded bool
+	// Rules whose application required globals, recorded in application order
+	// so writeGlobals can attribute the generated globals file to its contributors.
+	globalsContributors []string
 }
 
 func (ip *instrumentPhase) Info(msg string, args ...any)  { ip.logger.Info(msg, args...) }
