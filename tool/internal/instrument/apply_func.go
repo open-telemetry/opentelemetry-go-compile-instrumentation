@@ -165,7 +165,7 @@ func createTrampArgs(names []string) []dst.Expr {
 	return exprs
 }
 
-func createTJumpIf(t *rule.InstFuncRule, funcDecl *dst.FuncDecl,
+func createTJumpIf(file *dst.File, t *rule.InstFuncRule, funcDecl *dst.FuncDecl,
 	args, retVals []string,
 ) *dst.IfStmt {
 	funcSuffix := t.Identity()
@@ -175,8 +175,9 @@ func createTJumpIf(t *rule.InstFuncRule, funcDecl *dst.FuncDecl,
 	argsToAfter = append([]dst.Expr{argHookContext}, argsToAfter...)
 	beforeCallName := makeName(t, funcDecl, true)
 	afterCallName := makeName(t, funcDecl, false)
-	beforeCall := ast.CallTo(beforeCallName, funcDecl.Type.TypeParams, argsToBefore)
-	afterCall := ast.CallTo(afterCallName, funcDecl.Type.TypeParams, argsToAfter)
+	typeParams := findTargetGenericType(file, funcDecl)
+	beforeCall := ast.CallTo(beforeCallName, typeParams, argsToBefore)
+	afterCall := ast.CallTo(afterCallName, typeParams, argsToAfter)
 	tjumpInit := ast.DefineStmts(
 		ast.Exprs(
 			ast.Ident(trampolineHookContextName+funcSuffix),
@@ -271,7 +272,7 @@ func (ip *instrumentPhase) insertTJump(t *rule.InstFuncRule, funcDecl *dst.FuncD
 	// the context, handles exceptions, etc, and ultimately jumps to the real
 	// hook code. By inserting trampoline-jump-if at the target function entry,
 	// we can intercept the original function and execute before/after hooks.
-	tjump := createTJumpIf(t, funcDecl, args, retVals)
+	tjump := createTJumpIf(ip.target, t, funcDecl, args, retVals)
 
 	// Record the trampoline-jump-if as they can be optimized later, they are
 	// performance-critical
@@ -390,7 +391,7 @@ func (ip *instrumentPhase) parseFile(file string) (*dst.File, error) {
 }
 
 func (ip *instrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFuncRule, root *dst.File) error {
-	funcDecl, ok, err := ast.FindFuncDecl(root, rule)
+	funcDecl, ok, err := ast.FindFuncDecl(root, rule, ip.importNames)
 	if err != nil {
 		return err
 	}
@@ -401,7 +402,7 @@ func (ip *instrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFun
 	// Apply imports for every matching rule, including ones de-duplicated below:
 	// two rules with the same content identity may still declare different
 	// imports, and skipping them could drop an import the hook code needs.
-	if err = ip.addRuleImports(ctx, root, rule.Imports, rule.Name); err != nil {
+	if err = ip.addRuleImports(ctx, root, usedRuleImports(root, rule.Imports, nil), rule.Name); err != nil {
 		return err
 	}
 

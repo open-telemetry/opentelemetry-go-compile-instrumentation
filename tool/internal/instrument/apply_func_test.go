@@ -47,6 +47,83 @@ func Target(value string) error { return nil }
 	assert.Contains(t, err.Error(), "can not find function Target")
 }
 
+func TestApplyFuncRule_ImportAliasMismatchDoesNotError(t *testing.T) {
+	root := parseFile(t, `package main
+
+import (
+	f "fmt"
+)
+
+func Target(value string) error { return nil }
+`)
+	r := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "mismatch",
+			Imports: map[string]string{"traced": "fmt"},
+		},
+		Func:   "Target",
+		Before: "BeforeTarget",
+		Path:   "example.com/hook",
+	}
+
+	ip := newTestPhase()
+	ip.appliedFuncIdentities = map[string]struct{}{r.Identity(): {}}
+
+	err := ip.applyFuncRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, countImportSpecs(root),
+		"must not add a redundant import for an alias never referenced by generated code")
+}
+
+func TestApplyFuncRule_BlankImportKept(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Target(value string) error { return nil }
+`)
+	r := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "side-effect-driver",
+			Imports: map[string]string{"_": "net/http/pprof"},
+		},
+		Func:   "Target",
+		Before: "BeforeTarget",
+		Path:   "example.com/hook",
+	}
+
+	ip := newTestPhase()
+	ip.appliedFuncIdentities = map[string]struct{}{r.Identity(): {}}
+
+	err := ip.applyFuncRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	assert.True(t, fileImportsPath(root, "net/http/pprof"),
+		"blank import must still be added for a de-duplicated rule")
+}
+
+func TestApplyFuncRule_DotImportConflictStillErrors(t *testing.T) {
+	root := parseFile(t, `package main
+
+import rt "runtime"
+
+func Target(value string) error { return nil }
+`)
+	r := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "dot-conflict",
+			Imports: map[string]string{".": "runtime"},
+		},
+		Func:   "Target",
+		Before: "BeforeTarget",
+		Path:   "example.com/hook",
+	}
+
+	err := newTestPhase().applyFuncRule(context.Background(), r, root)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dot-import conflict")
+}
+
 // testHash stands in for InstFuncRule.Identity() in these unit tests, since
 // they exercise collectArguments/collectReturnValues without a real rule.
 const testHash = "42"
@@ -458,4 +535,76 @@ func TestInstrument_WriteInstrumentedError(t *testing.T) {
 
 	err := ip.instrument(context.Background(), rset)
 	require.Error(t, err)
+}
+
+func TestCreateTJumpIfGenericReceiverTypeArgs(t *testing.T) {
+	file, funcDecl := parseFileFunc(t, `package main
+type GenStruct[T any] struct{}
+func (g *GenStruct[T]) Reset() error { return nil }
+`)
+
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "reset-rule"},
+		Func:         "Reset",
+		Before:       "BeforeReset",
+		After:        "AfterReset",
+		Path:         "example.com/hook",
+	}
+
+	retVals := collectReturnValues(funcDecl, funcRule.Identity())
+	args := collectArguments(funcDecl, funcRule.Identity())
+	tjump := createTJumpIf(file, funcRule, funcDecl, args, retVals)
+	require.NotNil(t, tjump)
+
+	// Verify beforeCall contains type argument [T]
+	assignStmt, ok := tjump.Init.(*dst.AssignStmt)
+	require.True(t, ok)
+	require.Len(t, assignStmt.Rhs, 1)
+	beforeCall, ok := assignStmt.Rhs[0].(*dst.CallExpr)
+	require.True(t, ok)
+	beforeIndex, ok := beforeCall.Fun.(*dst.IndexExpr)
+	require.True(t, ok, "beforeCall should be an IndexExpr with type argument")
+	assert.Equal(t, "T", beforeIndex.Index.(*dst.Ident).Name)
+
+	// Verify afterCall contains type argument [T]
+	elseBlock, ok := tjump.Else.(*dst.BlockStmt)
+	require.True(t, ok)
+	require.Len(t, elseBlock.List, 1)
+	deferStmt, ok := elseBlock.List[0].(*dst.DeferStmt)
+	require.True(t, ok)
+	afterCall := deferStmt.Call
+	afterIndex, ok := afterCall.Fun.(*dst.IndexExpr)
+	require.True(t, ok, "afterCall should be an IndexExpr with type argument")
+	assert.Equal(t, "T", afterIndex.Index.(*dst.Ident).Name)
+}
+
+func TestCreateTJumpIfMultipleGenericReceiverTypeArgs(t *testing.T) {
+	file, funcDecl := parseFileFunc(t, `package main
+type GenStruct[K comparable, V any] struct{}
+func (g *GenStruct[K, V]) Clear() error { return nil }
+`)
+
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "clear-rule"},
+		Func:         "Clear",
+		Before:       "BeforeClear",
+		After:        "AfterClear",
+		Path:         "example.com/hook",
+	}
+
+	retVals := collectReturnValues(funcDecl, funcRule.Identity())
+	args := collectArguments(funcDecl, funcRule.Identity())
+	tjump := createTJumpIf(file, funcRule, funcDecl, args, retVals)
+	require.NotNil(t, tjump)
+
+	elseBlock, ok := tjump.Else.(*dst.BlockStmt)
+	require.True(t, ok)
+	deferStmt, ok := elseBlock.List[0].(*dst.DeferStmt)
+	require.True(t, ok)
+	afterCall := deferStmt.Call
+	afterIndexList, ok := afterCall.Fun.(*dst.IndexListExpr)
+	require.True(t, ok, "afterCall should be an IndexListExpr with type arguments")
+	require.Len(t, afterIndexList.Indices, 2)
+	assert.Equal(t, "K", afterIndexList.Indices[0].(*dst.Ident).Name)
+	assert.Equal(t, "V", afterIndexList.Indices[1].(*dst.Ident).Name)
 }

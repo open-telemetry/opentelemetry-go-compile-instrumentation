@@ -482,6 +482,23 @@ func TestInterceptCompileImportCfgParseError(t *testing.T) {
 	assert.Contains(t, err.Error(), "importcfg")
 }
 
+func TestInterceptCompileImportNamesLoadError(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), []byte(`[]`), 0o644))
+	require.NoError(t, os.WriteFile(util.GetImportNamesFile(), []byte("not json"), 0o644))
+
+	ctx := util.ContextWithLogger(t.Context(), slog.Default())
+	args := []string{
+		"compile",
+		"-o", filepath.Join(t.TempDir(), "out.a"),
+		"-p", "main",
+	}
+	_, err := interceptCompile(ctx, args)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unmarshal")
+}
+
 func TestUpdateImportConfigAddsResolvedImport(t *testing.T) {
 	workDir := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, workDir)
@@ -539,7 +556,7 @@ func TestUpdateImportConfigWriteError(t *testing.T) {
 	}
 	err := ip.updateImportConfig(t.Context(), map[string]string{"fmt": "fmt"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to create file")
+	assert.Contains(t, err.Error(), "failed to create temporary file")
 }
 
 func TestUpdateImportConfigTrackError(t *testing.T) {
@@ -682,22 +699,29 @@ func TestInterceptLinkAllImportsPresent(t *testing.T) {
 }
 
 func TestInterceptLinkWriteError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod permissions are not enforced consistently on Windows")
+	}
+
 	ctx := util.ContextWithLogger(t.Context(), slog.Default())
 	workDir := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, workDir)
 	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
 	writeAddedImports(t, map[string]string{"fmt": "/new/fmt.a"})
 
-	linkCfg := filepath.Join(workDir, "importcfg.link")
+	cfgDir := filepath.Join(workDir, "linkcfg")
+	require.NoError(t, os.Mkdir(cfgDir, 0o755))
+	linkCfg := filepath.Join(cfgDir, "importcfg.link")
 	require.NoError(t, os.WriteFile(linkCfg, []byte("packagefile context=/old/context.a\n"), 0o644))
-	// Make the file read-only so the rewrite fails.
-	require.NoError(t, os.Chmod(linkCfg, 0o444))
-	t.Cleanup(func() { _ = os.Chmod(linkCfg, 0o600) })
+	// The rewrite is atomic, so it needs to create a temporary file alongside
+	// the target. Make the directory read-only so that creation fails.
+	require.NoError(t, os.Chmod(cfgDir, 0o555))
+	t.Cleanup(func() { _ = os.Chmod(cfgDir, 0o755) })
 
 	args := []string{"link", "-o", "exe", "-buildid", "id", "-importcfg", linkCfg}
 	_, err := interceptLink(ctx, args)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to create file")
+	assert.Contains(t, err.Error(), "failed to create temporary file")
 }
 
 func TestInterceptToolVersionWriteError(t *testing.T) {
@@ -764,6 +788,11 @@ func TestEnableNestedToolexec(t *testing.T) {
 	exe, err := os.Executable()
 	require.NoError(t, err)
 
+	// Built rather than hardcoded: the quoting depends on whether the test
+	// binary's own path contains a space, which varies by machine.
+	wantToken, err := nestedToolexecGoflagsToken(exe)
+	require.NoError(t, err)
+
 	t.Run("appends to existing GOFLAGS and sets the nested marker", func(t *testing.T) {
 		t.Setenv("GOFLAGS", "-mod=mod")
 		t.Setenv(util.EnvOtelcNestedToolexec, "")
@@ -772,7 +801,7 @@ func TestEnableNestedToolexec(t *testing.T) {
 
 		goflags := os.Getenv("GOFLAGS")
 		assert.Contains(t, goflags, "-mod=mod", "existing flags are preserved")
-		assert.Contains(t, goflags, "'-toolexec="+exe+" toolexec'", "otelc is added as the toolexec")
+		assert.Contains(t, goflags, wantToken, "otelc is added as the toolexec")
 		assert.Equal(t, "1", os.Getenv(util.EnvOtelcNestedToolexec))
 	})
 
@@ -782,8 +811,117 @@ func TestEnableNestedToolexec(t *testing.T) {
 
 		require.NoError(t, EnableNestedToolexec())
 
-		assert.Equal(t, "'-toolexec="+exe+" toolexec'", os.Getenv("GOFLAGS"))
+		assert.Equal(t, wantToken, os.Getenv("GOFLAGS"))
 	})
+
+	t.Run("GOFLAGS survives both splits cmd/go performs", func(t *testing.T) {
+		t.Setenv("GOFLAGS", "")
+		t.Setenv(util.EnvOtelcNestedToolexec, "")
+
+		require.NoError(t, EnableNestedToolexec())
+
+		assert.Equal(t, []string{exe, "toolexec"}, parseToolexecFromGoflags(t, os.Getenv("GOFLAGS")))
+	})
+
+	t.Run("a spaced executable path survives both splits", func(t *testing.T) {
+		// EnableNestedToolexec resolves its own path, so the spaced case is
+		// exercised by calling the extracted helper directly and parsing the
+		// result back the way cmd/go would.
+		spaced := filepath.Join(string(filepath.Separator)+"opt", "my tools", "otelc")
+		token, tokenErr := nestedToolexecGoflagsToken(spaced)
+		require.NoError(t, tokenErr)
+
+		assert.Equal(t, []string{spaced, "toolexec"}, parseToolexecFromGoflags(t, token))
+	})
+
+	t.Run("a spaced path carrying either quote is rejected", func(t *testing.T) {
+		// Whitespace forces the inner quoting to pick one quote character, and
+		// a quote already in the path supplies the other. Either kind gets us
+		// there, so the rejection is not specific to single quotes.
+		for _, path := range []string{`/home/it's me/otelc`, `/home/my "tools"/otelc`} {
+			_, tokenErr := nestedToolexecGoflagsToken(path)
+			require.Error(t, tokenErr, "%q should not be representable in GOFLAGS", path)
+			assert.Contains(t, tokenErr.Error(), "cannot be passed to nested go commands through GOFLAGS")
+		}
+	})
+
+	t.Run("a spaced path already carrying both quotes fails building the inner flag", func(t *testing.T) {
+		// Distinct from the case above: here execPath itself has both quote
+		// characters plus whitespace, so BuildToolexecFlag's own quoting of
+		// execPath fails before the inner/outer nesting is even attempted.
+		// nestedToolexecGoflagsToken adds no message of its own for this one,
+		// BuildToolexecFlag's error already names execPath, so this asserts on
+		// its wording rather than anything added downstream.
+		_, tokenErr := nestedToolexecGoflagsToken(`/home/it's "here"/otelc`)
+		require.Error(t, tokenErr)
+		assert.Contains(t, tokenErr.Error(), "quoting otelc executable path for -toolexec")
+	})
+
+	t.Run("a path with an interior quote but no space survives both splits", func(t *testing.T) {
+		// quoted.Split reads an interior quote literally, so this path needs no
+		// quoting and must keep working rather than being rejected.
+		quoted := "/opt/it's/otelc"
+		token, tokenErr := nestedToolexecGoflagsToken(quoted)
+		require.NoError(t, tokenErr)
+
+		assert.Equal(t, []string{quoted, "toolexec"}, parseToolexecFromGoflags(t, token))
+	})
+
+	t.Run("returns error when executable path cannot be quoted in GOFLAGS", func(t *testing.T) {
+		originalExe := executablePath
+		t.Cleanup(func() { executablePath = originalExe })
+		executablePath = func() (string, error) {
+			return `/home/it's "here"/otelc`, nil
+		}
+
+		enableErr := EnableNestedToolexec()
+		require.Error(t, enableErr)
+	})
+}
+
+// splitQuoted mirrors cmd/internal/quoted.Split, which is what cmd/go uses for
+// both GOFLAGS and the -toolexec value: whitespace-separated, with `'` or `"`
+// grouping, and no unescaping inside a quoted run. Reimplemented here rather
+// than reusing the production helpers so the tests below check the round trip
+// against the real format instead of against otelc's own encoder.
+func splitQuoted(t *testing.T, s string) []string {
+	t.Helper()
+	isSpace := func(c byte) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r' }
+	var out []string
+	for len(s) > 0 {
+		for len(s) > 0 && isSpace(s[0]) {
+			s = s[1:]
+		}
+		if len(s) == 0 {
+			break
+		}
+		if q := s[0]; q == '"' || q == '\'' {
+			s = s[1:]
+			end := strings.IndexByte(s, q)
+			require.GreaterOrEqual(t, end, 0, "unterminated %c-quoted run in %q", q, s)
+			out = append(out, s[:end])
+			s = s[end+1:]
+			continue
+		}
+		end := 0
+		for end < len(s) && !isSpace(s[end]) {
+			end++
+		}
+		out = append(out, s[:end])
+		s = s[end:]
+	}
+	return out
+}
+
+// parseToolexecFromGoflags walks the same two split layers cmd/go does and
+// returns the argv it would end up executing for -toolexec.
+func parseToolexecFromGoflags(t *testing.T, goflags string) []string {
+	t.Helper()
+	flags := splitQuoted(t, goflags)
+	require.Len(t, flags, 1, "expected a lone -toolexec flag in %q", goflags)
+	value, ok := strings.CutPrefix(flags[0], "-toolexec=")
+	require.True(t, ok, "flag %q is not a -toolexec entry", flags[0])
+	return splitQuoted(t, value)
 }
 
 // versionMarkerPattern documents the exact tool-ID shape the go build cache
@@ -793,4 +931,62 @@ var versionMarkerPattern = regexp.MustCompile(`otelc@[^\s/]+(/[0-9a-f]{16})?`)
 func TestToolVersionLineMatchesCachePattern(t *testing.T) {
 	assert.Regexp(t, versionMarkerPattern, toolVersionLine("compile version go1.26.5", ""))
 	assert.Regexp(t, versionMarkerPattern, toolVersionLine("compile version go1.26.5", "0123456789abcdef"))
+}
+
+func TestUpdateImportConfigStopsAddedImportCycle(t *testing.T) {
+	// The outer build compiles example.com/p and resolves example.com/q, an
+	// import a rule added to it. The nested build compiles example.com/d, a
+	// dependency of q, and a rule adds an import of p to it. Resolving p would
+	// compile p again, add q again, and never end.
+	t.Setenv(util.EnvOtelcNestedResolving, "example.com/p>example.com/q")
+	cfgPath := filepath.Join(t.TempDir(), "importcfg")
+	require.NoError(t, os.WriteFile(cfgPath, []byte("packagefile fmt=/path/to/fmt.a\n"), 0o644))
+	ip := &instrumentPhase{
+		importConfigPath: cfgPath,
+		compileArgs:      []string{"compile", "-p", "example.com/d"},
+	}
+
+	err := ip.updateImportConfig(t.Context(), map[string]string{"p": "example.com/p"})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(),
+		"rules add an import cycle: example.com/p adds example.com/q; example.com/d adds example.com/p")
+}
+
+func TestEnterNestedResolution(t *testing.T) {
+	t.Run("extends the chain for the nested build and restores it", func(t *testing.T) {
+		t.Setenv(util.EnvOtelcNestedResolving, "example.com/p>example.com/q")
+		ip := &instrumentPhase{compileArgs: []string{"compile", "-p", "example.com/d"}}
+
+		restore, err := ip.enterNestedResolution("example.com/x")
+		require.NoError(t, err)
+		assert.Equal(t, "example.com/p>example.com/q,example.com/d>example.com/x",
+			os.Getenv(util.EnvOtelcNestedResolving))
+
+		restore()
+		assert.Equal(t, "example.com/p>example.com/q", os.Getenv(util.EnvOtelcNestedResolving))
+	})
+
+	t.Run("unsets the chain after the outermost resolution", func(t *testing.T) {
+		t.Setenv(util.EnvOtelcNestedResolving, "")
+		require.NoError(t, os.Unsetenv(util.EnvOtelcNestedResolving))
+		ip := &instrumentPhase{compileArgs: []string{"compile", "-p", "example.com/p"}}
+
+		restore, err := ip.enterNestedResolution("example.com/q")
+		require.NoError(t, err)
+		assert.Equal(t, "example.com/p>example.com/q", os.Getenv(util.EnvOtelcNestedResolving))
+
+		restore()
+		_, set := os.LookupEnv(util.EnvOtelcNestedResolving)
+		assert.False(t, set)
+	})
+
+	t.Run("a package adding itself is a cycle", func(t *testing.T) {
+		t.Setenv(util.EnvOtelcNestedResolving, "")
+		ip := &instrumentPhase{compileArgs: []string{"compile", "-p", "example.com/p"}}
+
+		_, err := ip.enterNestedResolution("example.com/p")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "rules add an import cycle: example.com/p adds example.com/p")
+	})
 }

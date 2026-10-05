@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"go/parser"
 	"go/token"
-	"io"
 	"log/slog"
 	"regexp"
 	"strings"
@@ -18,6 +17,7 @@ import (
 	"github.com/dave/dst/decorator"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -38,7 +38,7 @@ func TestRenameReturnValuesUsesStableBareNames(t *testing.T) {
 }
 
 func TestInsertRaw_SharedSyntheticName(t *testing.T) {
-	ctx := util.ContextWithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctx := util.ContextWithLogger(context.Background(), slog.New(slog.DiscardHandler))
 
 	ruleA, err := rule.NewInstRawRule([]byte(`
 target: main
@@ -59,8 +59,8 @@ raw: "log({{ .FuncArgument 0 }})"
 	// applied to the same parsed root/decl in sequence, not to independent
 	// copies (see groupRules/instrument in instrument.go).
 	funcDecl := parseFunc(t, "package main\nfunc Foo(int) {}")
-	require.NoError(t, insertRaw(ctx, ruleA, funcDecl, nil))
-	require.NoError(t, insertRaw(ctx, ruleB, funcDecl, nil))
+	require.NoError(t, insertRaw(ctx, ruleA, funcDecl, nil, rawAliasContext{}))
+	require.NoError(t, insertRaw(ctx, ruleB, funcDecl, nil, rawAliasContext{}))
 
 	require.Len(t, funcDecl.Body.List, 2)
 	argOf := func(stmt dst.Stmt) (string, string) {
@@ -106,7 +106,8 @@ raw: 'use({{ .FuncArgumentOfType "*net/http.Request" }}, {{ .FuncReturnOfType "*
 		require.NoError(t, err)
 
 		funcDecl := findFuncDeclInFile(t, root, "Handler")
-		require.NoError(t, insertRaw(ctx, rawRule, funcDecl, root))
+		aliases := rawAliasContext{imports: ast.ImportAliasMap(root, nil)}
+		require.NoError(t, insertRaw(ctx, rawRule, funcDecl, root, aliases))
 
 		call := funcDecl.Body.List[0].(*dst.ExprStmt).X.(*dst.CallExpr)
 		require.Len(t, call.Args, 2)
@@ -137,7 +138,8 @@ func Handler(t *template.Template) (page *htmltemplate.Template, err error) {
 		require.NoError(t, err)
 
 		funcDecl := findFuncDeclInFile(t, root, "Handler")
-		require.NoError(t, insertRaw(ctx, rawRule, funcDecl, root))
+		aliases := rawAliasContext{imports: ast.ImportAliasMap(root, nil)}
+		require.NoError(t, insertRaw(ctx, rawRule, funcDecl, root, aliases))
 
 		call := funcDecl.Body.List[0].(*dst.ExprStmt).X.(*dst.CallExpr)
 		require.Len(t, call.Args, 4)
@@ -151,7 +153,7 @@ func Handler(t *template.Template) (page *htmltemplate.Template, err error) {
 }
 
 func TestInsertRawAtPattern(t *testing.T) {
-	ctx := util.ContextWithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctx := util.ContextWithLogger(context.Background(), slog.New(slog.DiscardHandler))
 
 	tests := []struct {
 		name           string
@@ -399,6 +401,58 @@ func a() {
 	}
 }
 
+func TestInsertRawAtPatternSkipsUnrestorableStmt(t *testing.T) {
+	ctx := util.ContextWithLogger(context.Background(), slog.New(slog.DiscardHandler))
+
+	src := `package main
+
+func a() {
+	println("skip")
+	println("x")
+}
+`
+	fset := token.NewFileSet()
+	f, parseErr := parser.ParseFile(fset, "", src, parser.ParseComments)
+	require.NoError(t, parseErr)
+
+	dec := decorator.NewDecorator(fset)
+	dstFile, decorateErr := dec.DecorateFile(f)
+	require.NoError(t, decorateErr)
+
+	restorer := decorator.NewRestorer()
+	_, restoreErr := restorer.RestoreFile(dstFile)
+	require.NoError(t, restoreErr)
+
+	fn := dstFile.Decls[0].(*dst.FuncDecl)
+	// Replace the first statement with a node the restorer does not know.
+	// RenderNode then fails, the walker must warn and keep looking.
+	fn.Body.List[0] = &dst.ExprStmt{
+		X: &dst.CallExpr{
+			Fun:  dst.NewIdent("println"),
+			Args: []dst.Expr{&dst.BasicLit{Kind: token.STRING, Value: `"skip"`}},
+		},
+	}
+
+	stmts := []dst.Stmt{
+		&dst.ExprStmt{
+			X: &dst.CallExpr{
+				Fun:  dst.NewIdent("print"),
+				Args: []dst.Expr{&dst.BasicLit{Kind: token.STRING, Value: `"ok"`}},
+			},
+		},
+	}
+	pos := insertPos{
+		pattern:   regexp.MustCompile(`^println\("x"\)$`),
+		placement: "",
+	}
+	require.True(t, insertRawAtPattern(ctx, fn, restorer, pos, stmts))
+
+	var modifiedSrc strings.Builder
+	require.NoError(t, decorator.Fprint(&modifiedSrc, dstFile))
+	assert.Contains(t, modifiedSrc.String(), `print("ok")`)
+	assert.Contains(t, modifiedSrc.String(), `println("x")`)
+}
+
 func TestInsertRawInvalidRegexPattern(t *testing.T) {
 	ctx := util.ContextWithLogger(context.Background(), slog.New(slog.DiscardHandler))
 
@@ -419,7 +473,7 @@ func TestInsertRawInvalidRegexPattern(t *testing.T) {
 		Pattern:      `[unclosed-bracket`,
 	}
 
-	err = insertRaw(ctx, rawRule, fn, dstFile)
+	err = insertRaw(ctx, rawRule, fn, dstFile, rawAliasContext{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid raw rule pattern")
 }
@@ -441,19 +495,19 @@ func TestRenderRawCode(t *testing.T) {
 			name:     "FuncName",
 			src:      "package main\nfunc Foo() {}",
 			raw:      "call({{.FuncName}})",
-			expected: "call(Foo)",
+			expected: "call(" + dynamicIdentMarker + "Foo)",
 		},
 		{
 			name:     "FuncArgument",
 			src:      "package main\nfunc Foo(ctx int, name string) {}",
 			raw:      "use({{ .FuncArgument 0 }}, {{ .FuncArgument 1 }})",
-			expected: "use(ctx, name)",
+			expected: "use(" + dynamicIdentMarker + "ctx, " + dynamicIdentMarker + "name)",
 		},
 		{
 			name:     "FuncReturn",
 			src:      "package main\nfunc Foo() (int, error) { return 0, nil }",
 			raw:      "check({{ .FuncReturn 0 }}, {{ .FuncReturn 1 }})",
-			expected: "check(_unnamedRetVal_h1_0, _unnamedRetVal_h1_1)",
+			expected: "check(" + dynamicIdentMarker + "_unnamedRetVal_h1_0, " + dynamicIdentMarker + "_unnamedRetVal_h1_1)",
 		},
 		{
 			name:     "counts",
@@ -465,55 +519,55 @@ func TestRenderRawCode(t *testing.T) {
 			name:     "trim markers",
 			src:      "package main\nfunc Foo() {}",
 			raw:      "call({{- .FuncName -}})",
-			expected: "call(Foo)",
+			expected: "call(" + dynamicIdentMarker + "Foo)",
 		},
 		{
 			name:     "receiver excluded from FuncArgument",
 			src:      "package main\ntype T struct{}\nfunc (t T) Foo(a int) {}",
 			raw:      "use({{ .FuncArgument 0 }})",
-			expected: "use(a)",
+			expected: "use(" + dynamicIdentMarker + "a)",
 		},
 		{
 			name:     "Receiver",
 			src:      "package main\ntype T struct{}\nfunc (t T) Foo(a int) {}",
 			raw:      "use({{ .Receiver }}, {{ .FuncArgument 0 }})",
-			expected: "use(t, a)",
+			expected: "use(" + dynamicIdentMarker + "t, " + dynamicIdentMarker + "a)",
 		},
 		{
 			name:     "blank receiver gets a synthetic name",
 			src:      "package main\ntype T struct{}\nfunc (_ T) Foo(a int) {}",
 			raw:      "use({{ .Receiver }})",
-			expected: "use(_ignoredParam_h1_0)",
+			expected: "use(" + dynamicIdentMarker + "_ignoredParam_h1_0)",
 		},
 		{
 			name:     "unnamed receiver gets a synthetic name",
 			src:      "package main\ntype T struct{}\nfunc (T) Foo(a int) {}",
 			raw:      "use({{ .Receiver }})",
-			expected: "use(_ignoredParam_h1_0)",
+			expected: "use(" + dynamicIdentMarker + "_ignoredParam_h1_0)",
 		},
 		{
 			name:     "unnamed parameter gets a synthetic name",
 			raw:      "use({{ .FuncArgument 0 }})",
 			src:      "package main\nfunc Foo(int) {}",
-			expected: "use(_ignoredParam_h1_0)",
+			expected: "use(" + dynamicIdentMarker + "_ignoredParam_h1_0)",
 		},
 		{
 			name:     "blank parameter gets a synthetic name",
 			src:      "package main\nfunc Foo(_ int) {}",
 			raw:      "use({{ .FuncArgument 0 }})",
-			expected: "use(_ignoredParam_h1_0)",
+			expected: "use(" + dynamicIdentMarker + "_ignoredParam_h1_0)",
 		},
 		{
 			name:     "blank named return gets a synthetic name",
 			src:      "package main\nfunc Foo() (_ int) { return 0 }",
 			raw:      "check({{ .FuncReturn 0 }})",
-			expected: "check(_ignoredRetVal_h1_0)",
+			expected: "check(" + dynamicIdentMarker + "_ignoredRetVal_h1_0)",
 		},
 		{
 			name:     "named return values are collected as-is",
 			src:      "package main\nfunc Foo() (a int, b error) { return 0, nil }",
 			raw:      "check({{ .FuncReturn 0 }}, {{ .FuncReturn 1 }})",
-			expected: "check(a, b)",
+			expected: "check(" + dynamicIdentMarker + "a, " + dynamicIdentMarker + "b)",
 		},
 		{
 			name:     "control-flow actions are available",
@@ -527,7 +581,7 @@ func TestRenderRawCode(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			funcDecl := parseFunc(t, tt.src)
 
-			result, err := renderRawCode(tt.raw, funcDecl, "h1", nil)
+			result, err := renderRawCode(tt.raw, funcDecl, nil, "h1")
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected, result)
@@ -540,21 +594,21 @@ func TestRenderRawCode_HashSaltsSyntheticNames(t *testing.T) {
 	src := "package main\nfunc Foo(int) {}"
 	raw := "use({{ .FuncArgument 0 }})"
 
-	result1, err := renderRawCode(raw, parseFunc(t, src), "h1", nil)
+	result1, err := renderRawCode(raw, parseFunc(t, src), nil, "h1")
 	require.NoError(t, err)
 
-	result2, err := renderRawCode(raw, parseFunc(t, src), "h2", nil)
+	result2, err := renderRawCode(raw, parseFunc(t, src), nil, "h2")
 	require.NoError(t, err)
 
 	assert.NotEqual(t, result1, result2, "different hashes must salt the synthetic name differently")
-	assert.Equal(t, "use(_ignoredParam_h1_0)", result1)
-	assert.Equal(t, "use(_ignoredParam_h2_0)", result2)
+	assert.Equal(t, "use("+dynamicIdentMarker+"_ignoredParam_h1_0)", result1)
+	assert.Equal(t, "use("+dynamicIdentMarker+"_ignoredParam_h2_0)", result2)
 }
 
 func TestRenderRawCode_UnknownTagFails(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo() {}")
 
-	_, err := renderRawCode("{{Foo}}", funcDecl, "h1", nil)
+	_, err := renderRawCode("{{Foo}}", funcDecl, nil, "h1")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not defined")
@@ -568,7 +622,7 @@ func TestRenderRawCode_CompositeLiteralFails(t *testing.T) {
 	// escaping).
 	funcDecl := parseFunc(t, "package main\nfunc Foo() {}")
 
-	_, err := renderRawCode(`attrs := []Point{{X: 1, Y: 2}}; call({{.FuncName}})`, funcDecl, "h1", nil)
+	_, err := renderRawCode(`attrs := []Point{{X: 1, Y: 2}}; call({{.FuncName}})`, funcDecl, nil, "h1")
 
 	require.Error(t, err)
 }
@@ -576,7 +630,7 @@ func TestRenderRawCode_CompositeLiteralFails(t *testing.T) {
 func TestRenderRawCode_OutOfRangeArgument(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo() {}")
 
-	_, err := renderRawCode("{{.FuncArgument 0}}", funcDecl, "h1", nil)
+	_, err := renderRawCode("{{.FuncArgument 0}}", funcDecl, nil, "h1")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "out of range")
@@ -585,7 +639,7 @@ func TestRenderRawCode_OutOfRangeArgument(t *testing.T) {
 func TestRenderRawCode_NegativeArgumentIndex(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo(a int) {}")
 
-	_, err := renderRawCode("{{.FuncArgument -1}}", funcDecl, "h1", nil)
+	_, err := renderRawCode("{{.FuncArgument -1}}", funcDecl, nil, "h1")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "out of range")
@@ -594,7 +648,7 @@ func TestRenderRawCode_NegativeArgumentIndex(t *testing.T) {
 func TestRenderRawCode_OutOfRangeReturn(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo() {}")
 
-	_, err := renderRawCode("{{.FuncReturn 0}}", funcDecl, "h1", nil)
+	_, err := renderRawCode("{{.FuncReturn 0}}", funcDecl, nil, "h1")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "out of range")
@@ -603,7 +657,7 @@ func TestRenderRawCode_OutOfRangeReturn(t *testing.T) {
 func TestRenderRawCode_NegativeReturnIndex(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo() (int, error) { return 0, nil }")
 
-	_, err := renderRawCode("{{.FuncReturn -1}}", funcDecl, "h1", nil)
+	_, err := renderRawCode("{{.FuncReturn -1}}", funcDecl, nil, "h1")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "out of range")
@@ -612,7 +666,7 @@ func TestRenderRawCode_NegativeReturnIndex(t *testing.T) {
 func TestRenderRawCode_ReceiverOnFunctionWithoutReceiver(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo() {}")
 
-	_, err := renderRawCode("{{.Receiver}}", funcDecl, "h1", nil)
+	_, err := renderRawCode("{{.Receiver}}", funcDecl, nil, "h1")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no receiver")
@@ -621,7 +675,7 @@ func TestRenderRawCode_ReceiverOnFunctionWithoutReceiver(t *testing.T) {
 func TestRenderRawCode_InvalidTemplateSyntax(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo() {}")
 
-	_, err := renderRawCode("{{.FuncName", funcDecl, "h1", nil)
+	_, err := renderRawCode("{{.FuncName", funcDecl, nil, "h1")
 
 	require.Error(t, err)
 }
@@ -629,7 +683,262 @@ func TestRenderRawCode_InvalidTemplateSyntax(t *testing.T) {
 func TestRenderRawCode_NonIntegerArgumentIndex(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo(a int) {}")
 
-	_, err := renderRawCode("{{.FuncArgument abc}}", funcDecl, "h1", nil)
+	_, err := renderRawCode("{{.FuncArgument abc}}", funcDecl, nil, "h1")
 
 	require.Error(t, err)
+}
+
+// --- import alias override tests ---
+
+func TestApplyRawRule_ImportAliasMismatchUsesFileExistingAlias(t *testing.T) {
+	// The rule's raw code is written against the alias "traced" for "fmt".
+	// The file already imports "fmt" under its own alias "f". The injected
+	// code must use "f", not fail the build.
+	root := parseFile(t, `package main
+
+import (
+	f "fmt"
+)
+
+func Run() {}
+`)
+	r := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "inject_fmt",
+			Imports: map[string]string{"traced": "fmt"},
+		},
+		Func: "Run",
+		Raw:  `traced.Println("hi")`,
+	}
+
+	err := newTestPhase().applyRawRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	fn := findFuncDeclInFile(t, root, "Run")
+	require.Len(t, fn.Body.List, 1)
+	stmt, ok := fn.Body.List[0].(*dst.ExprStmt)
+	require.True(t, ok, "expected *dst.ExprStmt, got %T", fn.Body.List[0])
+	call, ok := stmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", stmt.X)
+	sel, ok := call.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
+	ident, ok := sel.X.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "f", ident.Name, "injected code must use the file's existing alias, not the rule's")
+	assert.Equal(t, "Println", sel.Sel.Name)
+}
+
+func TestApplyRawRule_OverrideShadowedByParameterReportsConflict(t *testing.T) {
+	root := parseFile(t, `package main
+
+import f "fmt"
+
+func Run(f sink) {}
+`)
+	r := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "inject_fmt",
+			Imports: map[string]string{"traced": "fmt"},
+		},
+		Func: "Run",
+		Raw:  `traced.Println("hi")`,
+	}
+
+	err := newTestPhase().applyRawRule(context.Background(), r, root)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "alias override conflict")
+	fn := findFuncDeclInFile(t, root, "Run")
+	assert.Empty(t, fn.Body.List, "must not inject code that would resolve to the wrong identifier")
+}
+
+func TestApplyRawRule_OverrideShadowedByBodyLocalReportsConflict(t *testing.T) {
+	// The file imports fmt as f and the target function declares f as a
+	// body-level local, so the rule's rewritten qualifier would resolve to
+	// the local instead of the import.
+	root := parseFile(t, `package main
+
+import f "fmt"
+
+func Run() {
+	f := sink{}
+	_ = f
+}
+`)
+	r := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "inject_fmt",
+			Imports: map[string]string{"traced": "fmt"},
+		},
+		Func: "Run",
+		Raw:  `traced.Println("hi")`,
+	}
+
+	err := newTestPhase().applyRawRule(context.Background(), r, root)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "alias override conflict")
+	fn := findFuncDeclInFile(t, root, "Run")
+	assert.Len(t, fn.Body.List, 2, "must not inject code that would resolve to the wrong identifier")
+}
+
+func TestInsertRaw_DoesNotRewriteArgumentNamedSameAsRuleAlias(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run(traced Sink) {}
+`)
+	funcDecl := findFuncDeclInFile(t, root, "Run")
+	r := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{Name: "call_method"},
+		Func:         "Run",
+		Raw:          `{{ .FuncArgument 0 }}.Method()`,
+	}
+	aliases := rawAliasContext{overrides: map[string]string{"traced": "f"}}
+
+	err := insertRaw(context.Background(), r, funcDecl, root, aliases)
+
+	require.NoError(t, err)
+	stmt, ok := funcDecl.Body.List[0].(*dst.ExprStmt)
+	require.True(t, ok, "expected *dst.ExprStmt, got %T", funcDecl.Body.List[0])
+	call, ok := stmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", stmt.X)
+	sel, ok := call.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
+	ident, ok := sel.X.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "traced", ident.Name, "the argument's own name must not be treated as the rule's import qualifier")
+	assert.Equal(t, "Method", sel.Sel.Name)
+}
+
+func TestApplyRawRule_AliasOverrideUsesResolvedName(t *testing.T) {
+	// The target file imports a divergent-name dependency unaliased, so the
+	// override must use ip.importNames' resolved real name, not a guess
+	// derived from the import path.
+	const importPath = "github.com/redis/go-redis/v9"
+	root := parseFile(t, `package main
+
+import "`+importPath+`"
+
+func Run() {}
+`)
+	r := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "use_client",
+			Imports: map[string]string{"traced": importPath},
+		},
+		Func: "Run",
+		Raw:  "traced.Ping()",
+	}
+
+	ip := newTestPhase()
+	ip.importNames = map[string]string{importPath: "redis"}
+
+	err := ip.applyRawRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	fn := findFuncDeclInFile(t, root, "Run")
+	require.Len(t, fn.Body.List, 1)
+	stmt, ok := fn.Body.List[0].(*dst.ExprStmt)
+	require.True(t, ok, "expected *dst.ExprStmt, got %T", fn.Body.List[0])
+	call, ok := stmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", stmt.X)
+	sel, ok := call.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
+	ident, ok := sel.X.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "redis", ident.Name, "override must use the resolved real name, not the path-derived guess")
+	assert.Equal(t, "Ping", sel.Sel.Name)
+	assert.Equal(t, 1, countImportSpecs(root), "must not add a redundant import for an alias the rewrite eliminated")
+}
+
+func TestApplyRawRule_RenderTemplateErrorWraps(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run() {}
+`)
+	r := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{Name: "bad_template"},
+		Func:         "Run",
+		Raw:          "use({{ .FuncArgument 0 }})",
+	}
+
+	err := newTestPhase().applyRawRule(context.Background(), r, root)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "out of range")
+}
+
+func TestApplyRawRule_ParseSnippetErrorPropagates(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run() {}
+`)
+	r := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{Name: "invalid_raw"},
+		Func:         "Run",
+		Raw:          "not valid go code +++",
+	}
+
+	err := newTestPhase().applyRawRule(context.Background(), r, root)
+
+	require.Error(t, err)
+}
+
+func TestApplyRawRule_FuncNotFound(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run() {}
+`)
+	r := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{Name: "missing_func"},
+		Func:         "Missing",
+		Raw:          `println("hi")`,
+	}
+
+	err := newTestPhase().applyRawRule(context.Background(), r, root)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "can not find function Missing")
+}
+
+func TestApplyRawRule_InsertRawErrorPropagates(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run() {
+	println("x")
+}
+`)
+	r := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{Name: "no_match"},
+		Func:         "Run",
+		Raw:          `println("hi")`,
+		Pattern:      `^println\("nope"\)$`,
+	}
+
+	err := newTestPhase().applyRawRule(context.Background(), r, root)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no statement matches the pattern")
+}
+
+func TestApplyRawRule_DotImportConflictSurfacesAsAnError(t *testing.T) {
+	root := parseFile(t, `package main
+
+import rt "runtime"
+
+func Run() {}
+`)
+	r := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "inject_raw",
+			Imports: map[string]string{".": "runtime"},
+		},
+		Func: "Run",
+		Raw:  `println("hi")`,
+	}
+
+	err := newTestPhase().applyRawRule(context.Background(), r, root)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dot-import conflict")
 }

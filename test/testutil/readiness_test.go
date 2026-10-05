@@ -5,6 +5,7 @@ package testutil
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -58,4 +59,30 @@ func TestWaitForSpans_timesOut(t *testing.T) {
 	// No spans sent — polling should report failure within the short timeout.
 	ok := pollForSpans(c, 1, 50*time.Millisecond)
 	assert.False(t, ok)
+}
+
+func TestFreePort(t *testing.T) {
+	t.Run("basic", func(t *testing.T) {
+		port := FreePort(t)
+		assert.Greater(t, port, 0)
+	})
+
+	const numGoroutines = 50
+	ports := make(chan int, numGoroutines)
+
+	t.Run("concurrent", func(t *testing.T) {
+		for i := 0; i < numGoroutines; i++ {
+			t.Run(fmt.Sprintf("goroutine-%d", i), func(t *testing.T) {
+				t.Parallel()
+				ports <- FreePort(t)
+			})
+		}
+	})
+
+	close(ports)
+	allocated := make(map[int]bool)
+	for port := range ports {
+		assert.False(t, allocated[port], "duplicate port returned: %d", port)
+		allocated[port] = true
+	}
 }

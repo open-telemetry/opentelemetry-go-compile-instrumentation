@@ -70,24 +70,41 @@ func TestHTTPServerOpenAIClient(t *testing.T) {
 	require.True(t, httpClientSpan.ParentSpanID().IsEmpty(), "HTTP client span must be the trace root")
 }
 
-func startMockOpenAIServer(t *testing.T) *httptest.Server {
+type openAIChatCompletionRequest struct {
+	Model  string `json:"model"`
+	Stream bool   `json:"stream"`
+}
+
+func startMockOpenAIChatCompletionsServer(
+	t *testing.T,
+	handle func(w http.ResponseWriter, req openAIChatCompletionRequest),
+) *httptest.Server {
 	t.Helper()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
-		var reqBody struct {
-			Model string `json:"model"`
-		}
+		var reqBody openAIChatCompletionRequest
 		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		handle(w, reqBody)
+	})
 
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server
+}
+
+func startMockOpenAIServer(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	return startMockOpenAIChatCompletionsServer(t, func(w http.ResponseWriter, req openAIChatCompletionRequest) {
 		w.Header().Set("Content-Type", "application/json")
 		resp := map[string]any{
 			"id":     "chatcmpl-test-123",
 			"object": "chat.completion",
-			"model":  reqBody.Model,
+			"model":  req.Model,
 			"choices": []map[string]any{
 				{
 					"index": 0,
@@ -108,8 +125,4 @@ func startMockOpenAIServer(t *testing.T) *httptest.Server {
 			t.Errorf("failed to encode response: %v", err)
 		}
 	})
-
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
-	return server
 }

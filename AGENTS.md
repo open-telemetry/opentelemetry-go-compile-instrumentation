@@ -55,12 +55,12 @@ Additional documentation:
 
 - All code changes must have tests that validate the new behavior or the fix. Do not introduce test
   files without assertions; every test must verify something meaningful.
-- All `.go` and `.sh` files must include the Apache 2.0 license header. Run `make format/license` to
+- All `.go` and `.sh` files must include the Apache 2.0 license header. Run `make lint/license-header/fix` to
   apply them automatically.
 - This is a multi-module Go project. When modifying dependencies, run `make go-mod-tidy` and
   `make crosslink` to keep all modules consistent.
 - Do not disable or weaken linter rules. If a linter reports an error, fix the code rather than
-  suppressing the warning. Linter configuration lives in `.config/`.
+  suppressing the warning. Linter configuration lives in `.tools/`.
 - All GitHub Actions references must be pinned to commit SHAs using ratchet. Never use mutable tags
   (e.g., `@v4`) in workflow files.
 

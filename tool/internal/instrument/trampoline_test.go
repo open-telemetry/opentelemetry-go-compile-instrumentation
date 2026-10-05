@@ -5,13 +5,76 @@ package instrument
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/dave/dst"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
+
+func TestGetHookFuncCachesParsedFile(t *testing.T) {
+	dir := t.TempDir()
+	hookFile := filepath.Join(dir, "hook.go")
+	// Two hook functions in one file, as a real instrumentation package
+	// typically has many rules sharing one hook file.
+	require.NoError(t, os.WriteFile(
+		hookFile,
+		[]byte("package hook\n\nfunc beforeA() {}\nfunc beforeB() {}\n"),
+		0o600,
+	))
+
+	ip := &instrumentPhase{}
+	ruleA := &rule.InstFuncRule{Before: "beforeA", ResolvedPath: dir}
+	first, err := ip.getHookFunc(ruleA, true)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+
+	// Corrupt the file so a real re-parse would fail; a second lookup for a
+	// *different* rule sharing the same file only succeeds if it reuses the
+	// cached parse instead of re-reading and re-parsing hook.go.
+	require.NoError(t, os.WriteFile(hookFile, []byte("not valid go"), 0o600))
+
+	ruleB := &rule.InstFuncRule{Before: "beforeB", ResolvedPath: dir}
+	second, err := ip.getHookFunc(ruleB, true)
+	require.NoError(t, err)
+	assert.Equal(t, "beforeB", second.Name.Name)
+}
+
+func TestGetHookFuncPropagatesParseError(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "hook.go"),
+		[]byte("not valid go"),
+		0o600,
+	))
+
+	ip := &instrumentPhase{}
+	r := &rule.InstFuncRule{Before: "beforeA", ResolvedPath: dir}
+	_, err := ip.getHookFunc(r, true)
+	require.Error(t, err)
+}
+
+func TestMaterializeTemplateClonesIndependently(t *testing.T) {
+	ip1 := &instrumentPhase{target: &dst.File{}}
+	require.NoError(t, ip1.materializeTemplate())
+
+	ip2 := &instrumentPhase{target: &dst.File{}}
+	require.NoError(t, ip2.materializeTemplate())
+
+	// Mutate ip1's hook context type name, as implementHookContext does per
+	// instrumented function, and confirm ip2's independently-cloned copy is
+	// unaffected by it.
+	typeSpec1 := ip1.hookCtxDecl.Specs[0].(*dst.TypeSpec) //nolint:forcetypeassert // test
+	originalName := typeSpec1.Name.Name
+	typeSpec1.Name.Name += "Suffix"
+
+	typeSpec2 := ip2.hookCtxDecl.Specs[0].(*dst.TypeSpec) //nolint:forcetypeassert // test
+	assert.Equal(t, originalName, typeSpec2.Name.Name)
+}
 
 func TestBaseTypeName(t *testing.T) {
 	tests := []struct {
@@ -934,6 +997,75 @@ func TestExtractReceiverTypeParamsConstraint_MultipleParams(t *testing.T) {
 	}
 }
 
+// TestExtractReceiverTypeParamsConstraint_NameCollision covers a declaration
+// whose type parameter shares its name with the selector of a qualified
+// constraint. Remapping to the receiver's names must rewrite only genuine type
+// parameter references, so fmt.Stringer keeps its selector instead of becoming
+// the nonexistent fmt.A.
+func TestExtractReceiverTypeParamsConstraint_NameCollision(t *testing.T) {
+	file, recvType := parseReceiverTypeWithDecl(t, `import "fmt"`,
+		"type GenStruct[Stringer any, V fmt.Stringer] struct{}",
+		"GenStruct[A, B]")
+
+	params := extractReceiverTypeParams(file, recvType)
+	require.NotNil(t, params)
+	require.Len(t, params.List, 2)
+	assert.Equal(t, []string{"A", "B"}, typeParamNames(t, params))
+
+	sel, ok := params.List[1].Type.(*dst.SelectorExpr)
+	require.True(t, ok, "expected the constraint to be a package-qualified selector")
+	pkgIdent, ok := sel.X.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "fmt", pkgIdent.Name)
+	assert.Equal(t, "Stringer", sel.Sel.Name,
+		"the selector names fmt.Stringer and must not be renamed to the receiver's parameter")
+}
+
+// TestExtractReceiverTypeParamsConstraint_MethodNameCollision covers the same
+// hazard for a name a constraint declares rather than references: an interface
+// method whose name matches a type parameter must keep its own name.
+func TestExtractReceiverTypeParamsConstraint_MethodNameCollision(t *testing.T) {
+	file, recvType := parseReceiverTypeWithDecl(t, "",
+		"type GenStruct[T any, V interface{ T() string }] struct{}",
+		"GenStruct[A, B]")
+
+	params := extractReceiverTypeParams(file, recvType)
+	require.NotNil(t, params)
+	require.Len(t, params.List, 2)
+	assert.Equal(t, []string{"A", "B"}, typeParamNames(t, params))
+
+	iface, ok := params.List[1].Type.(*dst.InterfaceType)
+	require.True(t, ok, "expected the constraint to be an interface")
+	require.Len(t, iface.Methods.List, 1)
+	require.Len(t, iface.Methods.List[0].Names, 1)
+	assert.Equal(t, "T", iface.Methods.List[0].Names[0].Name,
+		"the interface declares the method name and must not be renamed")
+}
+
+// TestExtractReceiverTypeParamsConstraint_SingleParamNameCollision covers the
+// single type parameter path, which builds its field list separately from the
+// multi-parameter one. A one parameter receiver cannot carry an inter-parameter
+// constraint, having no sibling to reference, but it can still collide with the
+// selector of its own qualified constraint.
+func TestExtractReceiverTypeParamsConstraint_SingleParamNameCollision(t *testing.T) {
+	file, recvType := parseReceiverTypeWithDecl(t, `import "fmt"`,
+		"type GenStruct[Stringer fmt.Stringer] struct{}",
+		"GenStruct[A]")
+
+	params := extractReceiverTypeParams(file, recvType)
+	require.NotNil(t, params)
+	require.Len(t, params.List, 1)
+	assert.Equal(t, []string{"A"}, typeParamNames(t, params))
+
+	sel, ok := params.List[0].Type.(*dst.SelectorExpr)
+	require.True(t, ok, "expected the constraint to be a package-qualified selector")
+	pkgIdent, ok := sel.X.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "fmt", pkgIdent.Name)
+	assert.Equal(t, "Stringer", sel.Sel.Name,
+		"the selector names fmt.Stringer and must not be renamed to the receiver's parameter")
+}
+
 // TestReceiverBaseTypeName_NonIdent covers the defensive fallback directly: a
 // non-identifier base expression, which no valid Go receiver form actually
 // produces, returns "" rather than panicking.
@@ -984,4 +1116,50 @@ func TestExtractReceiverTypeParamsNestedPointer(t *testing.T) {
 
 	require.NotNil(t, params)
 	assert.Equal(t, []string{"T"}, typeParamNames(t, params))
+}
+
+// TestExtractReceiverTypeParamsConstraint_RenamedInterParam covers a receiver
+// that renames the type parameters while a constraint refers to a sibling
+// parameter. type M[K any, V ~[]K] used as func (m M[A, B]) must recover V's
+// constraint as ~[]A, following the receiver's names, not the declaration's ~[]K.
+// A verbatim ~[]K would refer to a name the trampoline never declares and would
+// not compile.
+func TestExtractReceiverTypeParamsConstraint_RenamedInterParam(t *testing.T) {
+	file, recvType := parseReceiverTypeWithDecl(t, "",
+		"type M[K any, V ~[]K] struct{ k K; v V }", "M[A, B]")
+
+	params := extractReceiverTypeParams(file, recvType)
+	require.NotNil(t, params)
+	assert.Equal(t, []string{"A", "B"}, typeParamNames(t, params))
+	require.Len(t, params.List, 2)
+
+	// The second parameter's constraint is ~[]A: a ~ over a slice of the first
+	// receiver parameter, re-scoped from the declaration's ~[]K.
+	tilde, ok := params.List[1].Type.(*dst.UnaryExpr)
+	require.True(t, ok, "constraint should be a ~ expression")
+	slice, ok := tilde.X.(*dst.ArrayType)
+	require.True(t, ok, "constraint should be ~[]T")
+	elem, ok := slice.Elt.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "A", elem.Name,
+		"inter-parameter constraint must use the receiver name A, not the declaration name K")
+}
+
+// TestTypeParamDeclNames covers the positional flattening directly: a nil list
+// yields no names, a grouped field (type M[K, V any] declares K then V under
+// one field) contributes each name in order, and a field with no names, which
+// valid Go does not produce, still advances by one empty slot rather than being
+// dropped.
+func TestTypeParamDeclNames(t *testing.T) {
+	assert.Nil(t, typeParamDeclNames(nil))
+
+	params := &dst.FieldList{
+		List: []*dst.Field{
+			{Names: []*dst.Ident{ast.Ident("K"), ast.Ident("V")}, Type: ast.Ident("any")},
+			{Names: nil, Type: ast.Ident("comparable")},
+			{Names: []*dst.Ident{ast.Ident("T")}, Type: ast.Ident("any")},
+		},
+	}
+
+	assert.Equal(t, []string{"K", "V", "", "T"}, typeParamDeclNames(params))
 }
