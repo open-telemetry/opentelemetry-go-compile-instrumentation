@@ -457,7 +457,7 @@ func updateToolFile(ctx context.Context, toolFile string, prunedImports map[stri
 
 	updateGenerateDirective(f, opts)
 
-	updated, printErr := ast.PrintFile(f)
+	updated, printErr := ast.RenderFile(f)
 	if printErr != nil {
 		return printErr
 	}
