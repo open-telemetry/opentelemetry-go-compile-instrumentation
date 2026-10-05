@@ -712,7 +712,7 @@ func TestInstrumentFile_ApplyIgnoredCallSitesErrorIsWrapped(t *testing.T) {
 	assert.Contains(t, err.Error(), "applying //otelc:ignore call sites")
 }
 
-func TestWriteInstrumentedDebugCopiesSourceWithoutDiff(t *testing.T) {
+func TestWriteInstrumentedDebugCopiesSourceWithDiff(t *testing.T) {
 	buildDir := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, buildDir)
 	t.Setenv(util.EnvOtelcDebug, "1")
@@ -723,11 +723,13 @@ func TestWriteInstrumentedDebugCopiesSourceWithoutDiff(t *testing.T) {
 	ip := newTestPhase()
 	ip.workDir = t.TempDir()
 	ip.compileArgs = []string{"-p", "example.com/app", original}
-	require.NoError(t, ip.writeInstrumented(root, original))
+	require.NoError(t, ip.writeInstrumented(root, original, nil))
 	debugFile := util.GetBuildTemp(filepath.Join("debug", "example_com_app", "source.go"))
 	content, err := os.ReadFile(debugFile)
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "var X = 2")
-	_, err = os.Stat(debugFile + ".diff")
-	assert.ErrorIs(t, err, os.ErrNotExist)
+	content, err = os.ReadFile(debugFile + ".diff")
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "-var X = 1")
+	assert.Contains(t, string(content), "+var X = 2")
 }
