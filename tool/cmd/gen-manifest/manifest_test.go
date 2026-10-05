@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.opentelemetry.io/otelc/tool/data"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
 func TestGenerate(t *testing.T) {
@@ -65,12 +66,12 @@ server:
 	got, err := Generate(root)
 	require.NoError(t, err)
 	require.Equal(t, Manifest{
-		{ModulePath: "example.com/nested", Target: "example.com/server", VersionRange: "v1.5.0"},
-		{ModulePath: "example.com/parent", Target: "example.com/client"},
-		{ModulePath: "example.com/parent", Target: "example.com/ranged", VersionRange: "v1.0.0,v2.0.0"},
-		{ModulePath: "example.com/parent", Target: "example.com/target", VersionRange: "v1.0.0"},
-		{ModulePath: "example.com/parent", Target: "example.com/target", VersionRange: "v2.0.0"},
-		{ModulePath: "example.com/parent", Target: "example.com/worker"},
+		{ModulePath: "example.com/nested", Target: rule.NewTarget("example.com/server"), VersionRange: "v1.5.0"},
+		{ModulePath: "example.com/parent", Target: rule.NewTarget("example.com/client")},
+		{ModulePath: "example.com/parent", Target: rule.NewTarget("example.com/ranged"), VersionRange: "v1.0.0,v2.0.0"},
+		{ModulePath: "example.com/parent", Target: rule.NewTarget("example.com/target"), VersionRange: "v1.0.0"},
+		{ModulePath: "example.com/parent", Target: rule.NewTarget("example.com/target"), VersionRange: "v2.0.0"},
+		{ModulePath: "example.com/parent", Target: rule.NewTarget("example.com/worker")},
 	}, got)
 }
 
@@ -197,10 +198,50 @@ func TestGenerateValidatesTargets(t *testing.T) {
 				got, err := Generate(root)
 				require.NoError(t, err)
 				require.Equal(t, Manifest{
-					{ModulePath: "example.com/test", Target: test.target, VersionRange: "v1.0.0"},
+					{ModulePath: "example.com/test", Target: rule.NewTarget(test.target), VersionRange: "v1.0.0"},
 				}, got)
 			})
 		}
+	})
+
+	t.Run("preserves target lists", func(t *testing.T) {
+		root := t.TempDir()
+		writeModule(t, root, "module", "example.com/test")
+		writeRuleFile(t, root, "module/otelc.yaml", `
+list:
+  target:
+    - $root
+    - main
+    - not: example.com/test/internal/**
+  version: v1.0.0
+`)
+
+		got, err := Generate(root)
+		require.NoError(t, err)
+		require.Equal(t, Manifest{
+			{
+				ModulePath: "example.com/test",
+				Target: rule.Target{
+					Include: []string{rule.TargetRoot, "main"},
+					Exclude: []string{"example.com/test/internal/**"},
+				},
+				VersionRange: "v1.0.0",
+			},
+		}, got)
+	})
+
+	t.Run("rejects a target list with only not entries", func(t *testing.T) {
+		root := t.TempDir()
+		writeModule(t, root, "module", "example.com/test")
+		writeRuleFile(t, root, "module/otelc.yaml", `
+invalid:
+  target:
+    - not: main
+  version: v1.0.0
+`)
+
+		_, err := Generate(root)
+		require.ErrorContains(t, err, "selects no package")
 	})
 
 	t.Run("omits empty target", func(t *testing.T) {
@@ -405,11 +446,11 @@ func TestEmbeddedManifestMatchesGeneratorContract(t *testing.T) {
 		assert.NotEmpty(t, entry.Target)
 	}
 	assert.True(t, slices.IsSortedFunc(got, compareEntries))
-	assert.Len(t, slices.Compact(slices.Clone(got)), len(got))
+	assert.Len(t, slices.CompactFunc(slices.Clone(got), entriesEqual), len(got))
 }
 
 func TestEntryOmitsEmptyVersionRange(t *testing.T) {
-	content, err := json.Marshal(Entry{ModulePath: "example.com/module", Target: "example.com/target"})
+	content, err := json.Marshal(Entry{ModulePath: "example.com/module", Target: rule.NewTarget("example.com/target")})
 	require.NoError(t, err)
 	assert.NotContains(t, string(content), "versionRange")
 }
@@ -421,10 +462,10 @@ func compareEntries(a, b Entry) int {
 	if a.ModulePath > b.ModulePath {
 		return 1
 	}
-	if a.Target < b.Target {
+	if a.Target.String() < b.Target.String() {
 		return -1
 	}
-	if a.Target > b.Target {
+	if a.Target.String() > b.Target.String() {
 		return 1
 	}
 	if a.VersionRange < b.VersionRange {
@@ -434,6 +475,13 @@ func compareEntries(a, b Entry) int {
 		return 1
 	}
 	return 0
+}
+
+func entriesEqual(a, b Entry) bool {
+	return a.ModulePath == b.ModulePath &&
+		slices.Equal(a.Target.Include, b.Target.Include) &&
+		slices.Equal(a.Target.Exclude, b.Target.Exclude) &&
+		a.VersionRange == b.VersionRange
 }
 
 func writeModule(t *testing.T, root, relative, modulePath string) {

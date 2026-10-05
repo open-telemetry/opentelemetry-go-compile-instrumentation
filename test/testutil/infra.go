@@ -42,6 +42,11 @@ func newCmd(ctx context.Context, dir string, env []string, args ...string) *exec
 }
 
 func withSourceRoot(env []string) []string {
+	// nil means inherit the parent environment for exec.Cmd. The child
+	// receives OTELC_SOURCE_ROOT through that inheritance already.
+	if env == nil {
+		return nil
+	}
 	root := os.Getenv("OTELC_SOURCE_ROOT")
 	if root == "" {
 		return env

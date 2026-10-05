@@ -10,6 +10,10 @@ import (
 )
 
 func TestWithSourceRoot(t *testing.T) {
+	t.Run("nil inherits environment", func(t *testing.T) {
+		t.Setenv("OTELC_SOURCE_ROOT", "/repo")
+		require.Nil(t, withSourceRoot(nil))
+	})
 	t.Run("unset", func(t *testing.T) {
 		t.Setenv("OTELC_SOURCE_ROOT", "")
 		env := []string{"PATH=/bin"}

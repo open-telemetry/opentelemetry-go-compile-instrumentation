@@ -6,10 +6,11 @@ rule schema reference, see [Instrumentation Rules](rules.md).
 
 ## Selecting Instrumentations
 
-By default, `otelc` applies all instrumentation rules from its embedded bundle to every
-dependency it finds in your module graph. This zero-configuration mode works well for
-getting started: run `otelc go build` and all [supported libraries](getting-started.md#supported-libraries)
-are instrumented automatically.
+By default, `otelc` uses its embedded manifest to select instrumentation for dependencies
+in your module graph. Run `otelc go build` and matching
+[supported libraries](getting-started.md#supported-libraries) are instrumented automatically.
+Until #983, automatic pinning also needs a full source checkout; see
+[Getting Started](getting-started.md#managing-instrumentations).
 
 For projects that need tighter control — because they use a narrow set of libraries, because
 they ship a library themselves, or because they need reproducible, auditable builds — you can
@@ -56,11 +57,11 @@ OTEL_GO_DISABLED_INSTRUMENTATIONS=nethttp ./myapp
    set.
 3. **Tool files** (`otel.instrumentation.go` / `otelc.tool.go`) — when the project declares
    instrumentations explicitly. See [External Configuration Sources](external-configuration.md).
-4. **Embedded defaults** — the instrumentation bundle built into `otelc`, applied when none of
-   the above are present.
+4. **Manifest-discovered defaults** — built-in modules selected by the embedded manifest when none of
+    the above are present.
 
 Each source entirely replaces those below it. There is no merging: when `--rules` is provided,
-tool files and the embedded bundle are not consulted.
+tool files and manifest-discovered defaults are not consulted.
 
 ### Using `--rules` for development and debugging
 

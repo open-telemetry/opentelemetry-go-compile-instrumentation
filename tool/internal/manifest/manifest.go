@@ -8,13 +8,14 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/data"
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
 // Entry describes an instrumentation module's target and version range.
 type Entry struct {
-	ModulePath   string `json:"modulePath"`
-	Target       string `json:"target"`
-	VersionRange string `json:"versionRange,omitempty"`
+	ModulePath   string      `json:"modulePath"`
+	Target       rule.Target `json:"target"`
+	VersionRange string      `json:"versionRange,omitempty"`
 }
 
 // Manifest contains the built-in instrumentation metadata used during pinning.

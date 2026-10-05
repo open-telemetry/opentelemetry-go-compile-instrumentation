@@ -52,6 +52,12 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
+      - name: Restore otelc Go cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
+        with:
+          path: test/.otelc-gocache
+          key: ${{ runner.os }}-amd64-otelc-gocache-coverage-${{ hashFiles('go.mod', '**/go.mod', '**/go.sum', 'Makefile',
+            'tool/**', 'pkg/**', 'instrumentation/**', 'test/apps/**') }}
       - run: make test-e2e/coverage
         env:
           OTELC_TEST_GOCACHE: ${{ github.workspace }}/test/.otelc-gocache

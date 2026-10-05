@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -287,6 +288,49 @@ func TestSyncDepsFromSource_MismatchedInstrumentationModule(t *testing.T) {
 
 	err := syncDepsFromSource(t.Context(), map[string]bool{modulePath: true}, moduleDir, repositoryDir)
 	require.ErrorContains(t, err, "matched instrumentation module "+modulePath+" not found")
+	require.ErrorContains(t, err, "manifest and source checkout may be from different otelc versions")
+}
+
+func TestSyncDepsFromSource_MissingMatchedInstrumentationModule(t *testing.T) {
+	moduleDir, repositoryDir, _ := setupSyncDepsTest(t, "module example.com/app\n\ngo 1.21\n", nil)
+	modulePath := util.OtelcInstRoot + "/example.com/missing"
+	err := syncDepsFromSource(t.Context(), map[string]bool{modulePath: true}, moduleDir, repositoryDir)
+	require.ErrorContains(t, err, "loading matched instrumentation module "+modulePath)
+	require.ErrorContains(t, err, "manifest and source checkout may be from different otelc versions")
+}
+
+func TestSyncDepsFromSource_DeterministicReplaceOrder(t *testing.T) {
+	goMod := "module example.com/test\n\ngo 1.21\n"
+	instPaths := []string{
+		"google.golang.org/grpc",
+		"github.com/segmentio/kafka-go",
+		"github.com/gin-gonic/gin",
+		"net/http/client",
+	}
+	moduleDir, repositoryDir, goModPath := setupSyncDepsTest(t, goMod, instPaths)
+	modPaths := make(map[string]bool, len(instPaths))
+	for _, path := range instPaths {
+		modPaths[util.OtelcInstRoot+"/"+path] = true
+	}
+	require.NoError(t, syncDepsFromSource(t.Context(), modPaths, moduleDir, repositoryDir))
+
+	mf, err := parseGoMod(goModPath)
+	require.NoError(t, err)
+	require.NotEmpty(t, mf.Replace)
+	replacedPaths := make([]string, 0, len(mf.Replace))
+	for _, r := range mf.Replace {
+		replacedPaths = append(replacedPaths, r.Old.Path)
+	}
+	assert.True(t, slices.IsSorted(replacedPaths), "expected sorted replacements, got: %v", replacedPaths)
+}
+
+func TestSyncDepsFromSource_ModTidyFails(t *testing.T) {
+	moduleDir, repositoryDir, _ := setupSyncDepsTest(t,
+		"module example.com/test\n\ngo 999.0.0\n", []string{"net/http/client"})
+	err := syncDepsFromSource(t.Context(), map[string]bool{
+		util.OtelcInstRoot + "/net/http/client": true,
+	}, moduleDir, repositoryDir)
+	require.Error(t, err)
 }
 
 //nolint:revive // if we add named returns then nonamedreturns will complain

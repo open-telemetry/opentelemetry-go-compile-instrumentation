@@ -37,6 +37,9 @@ func repositorySourceRoot() (string, error) {
 	if err != nil {
 		return "", ex.Wrapf(err, "resolving otelc source checkout directory")
 	}
+	// No depth limit beyond the filesystem root: a match requires three
+	// nested go.mod files declaring this repository's module paths, which
+	// is specific enough that false positives are not expected in practice.
 	for {
 		if isRepositorySourceRoot(root) {
 			return root, nil
@@ -75,10 +78,12 @@ func instrumentationModuleDir(instDir, modulePath string) (string, error) {
 	dir := filepath.Join(instDir, path)
 	modFile, err := parseGoMod(filepath.Join(dir, goModFileName))
 	if err != nil {
-		return "", ex.Wrapf(err, "loading matched instrumentation module %s from %s", modulePath, dir)
+		return "", ex.Wrapf(err, "loading matched instrumentation module %s from %s; "+
+			"the embedded manifest and source checkout may be from different otelc versions", modulePath, dir)
 	}
 	if modFile.Module == nil || modFile.Module.Mod.Path != modulePath {
-		return "", ex.Newf("matched instrumentation module %s not found at %s", modulePath, dir)
+		return "", ex.Newf("matched instrumentation module %s not found at %s; "+
+			"the embedded manifest and source checkout may be from different otelc versions", modulePath, dir)
 	}
 	return dir, nil
 }

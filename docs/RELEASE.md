@@ -73,6 +73,9 @@ workflow completes:
    previous tag).
 3. Edit the notes in place to add context, highlight breaking changes, or
    group entries as needed — the release is already public at this point.
+   For the release that removes the embedded instrumentation bundle, mention
+   that existing clones may remove the unused Git merge driver with
+   `git config --remove-section merge.otelc-bundle` (optional).
 4. Confirm the release page lists all 5 platform binaries as downloadable
    assets.
 

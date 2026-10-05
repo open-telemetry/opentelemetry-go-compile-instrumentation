@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -211,6 +212,14 @@ func ensureOtelcRequire(moduleDir, version string) (bool, error) {
 		}
 	}
 
+	hasRequire := false
+	for _, req := range f.Require {
+		if req.Mod.Path == util.OtelcRoot {
+			hasRequire = true
+			break
+		}
+	}
+
 	if !hasTool {
 		if addErr := f.AddTool(util.OtelcToolCmdRoot); addErr != nil {
 			return false, ex.Wrap(addErr)
@@ -224,8 +233,10 @@ func ensureOtelcRequire(moduleDir, version string) (bool, error) {
 	}
 	modified = modified || added
 
+	// Dev builds can't pin their own version, so a missing require stays
+	// missing. Report it anyway so the caller tidies and go resolves one.
 	if !modified {
-		return false, nil
+		return !hasRequire, nil
 	}
 
 	if writeErr := writeGoMod(goModPath, f); writeErr != nil {
@@ -281,16 +292,15 @@ type instrumentationTargetMatch struct {
 }
 
 // instrumentationRuleMatchesDep reports whether r's target matches dep.
-// Root targets always pin the instrumentation module.
+// Targets that include $root always pin the instrumentation module; setup
+// matches them precisely later. Other targets are matched without the root
+// module paths, so an excluded $root excludes nothing here, which can only
+// pin a module that setup then leaves unused.
 func instrumentationRuleMatchesDep(dep *Dependency, entry manifest.Entry) instrumentationTargetMatch {
-	switch {
-	case rule.IsRootTarget(entry.Target):
+	if entry.Target.IncludesRoot() {
 		return instrumentationTargetMatch{matched: true, isRoot: true}
-	case rule.IsGlobTarget(entry.Target):
-		return instrumentationTargetMatch{matched: rule.MatchGlobTarget(entry.Target, dep.ImportPath)}
-	default:
-		return instrumentationTargetMatch{matched: entry.Target == dep.ImportPath}
 	}
+	return instrumentationTargetMatch{matched: entry.Target.Matches(dep.ImportPath, nil)}
 }
 
 func recordUnresolvedSkip(
@@ -329,7 +339,16 @@ func emitUnresolvedSkipWarnings(
 	}
 }
 
+// skipTidyMessage is logged when updateToolFile skips go mod tidy. Tests match
+// on it, since a skipped tidy leaves nothing else behind.
+const skipTidyMessage = "tool file and go.mod unchanged, skipping go mod tidy"
+
 func updateToolFile(ctx context.Context, toolFile string, prunedImports map[string]bool, opts PinOptions) error {
+	original, readErr := os.ReadFile(toolFile)
+	if readErr != nil {
+		return ex.Wrap(readErr)
+	}
+
 	p := ast.NewAstParser()
 
 	f, parseErr := p.Parse(toolFile, parser.ParseComments)
@@ -345,13 +364,30 @@ func updateToolFile(ctx context.Context, toolFile string, prunedImports map[stri
 
 	updateGenerateDirective(f, opts)
 
-	if writeErr := ast.WriteFileAtomic(toolFile, f); writeErr != nil {
-		return writeErr
+	updated, printErr := ast.PrintFile(f)
+	if printErr != nil {
+		return printErr
 	}
 
-	_, ensureErr := ensureOtelcRequire(filepath.Dir(toolFile), util.Version)
+	toolFileChanged := !bytes.Equal(updated, original)
+	if toolFileChanged {
+		if writeErr := util.WriteFileAtomic(toolFile, updated); writeErr != nil {
+			return writeErr
+		}
+	}
+
+	goModChanged, ensureErr := ensureOtelcRequire(filepath.Dir(toolFile), util.Version)
 	if ensureErr != nil {
 		return ensureErr
+	}
+
+	// go mod tidy loads the whole module graph, so only run it when otelc
+	// changed the tool file or go.mod, or go.sum is missing. Manual go.mod
+	// edits are left for the user to tidy.
+	goSumPath := filepath.Join(filepath.Dir(toolFile), "go.sum")
+	if !toolFileChanged && !goModChanged && util.PathExists(goSumPath) {
+		util.LoggerFromContext(ctx).DebugContext(ctx, skipTidyMessage, "toolFile", toolFile)
+		return nil
 	}
 
 	return runModTidy(ctx, filepath.Dir(toolFile))
@@ -507,7 +543,12 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 	return &PinResult{}, nil
 }
 
-func prepareVendoredBuild(ctx context.Context, logger *slog.Logger, args []string) ([]string, error) {
+func prepareVendoredBuild(
+	ctx context.Context,
+	logger *slog.Logger,
+	subcommand string,
+	args []string,
+) ([]string, error) {
 	if !vendoringActive(ctx, util.GetOtelcWorkDir()) {
 		return args, nil
 	}
@@ -518,7 +559,7 @@ func prepareVendoredBuild(ctx context.Context, logger *slog.Logger, args []strin
 		return nil, ex.Wrapf(err, "forcing module mode for vendored build")
 	}
 
-	return rewriteModVendor(args), nil
+	return rewriteModVendor(subcommand, args), nil
 }
 
 type PinOptions struct {
@@ -560,19 +601,23 @@ func Pin(ctx context.Context, opts PinOptions) (*PinResult, error) {
 
 func pinLocked(ctx context.Context, opts PinOptions) (*PinResult, error) {
 	moduleDirs := opts.ModuleDirs
+	subcommand := opts.Subcommand
+	if subcommand == "" {
+		subcommand = subcmdBuild
+	}
 	// moduleDirs being empty means Pin was invoked as a standalone command
 	// (not as part of a setup run), so use opts.Args to find module directories.
 	if len(moduleDirs) == 0 {
 		// For same reason as Setup, we have to check vendoring state before
 		// forcing module mode and rewriting vendor/ paths to module mode.
-		args, err := prepareVendoredBuild(ctx, util.LoggerFromContext(ctx), opts.Args)
+		args, err := prepareVendoredBuild(ctx, util.LoggerFromContext(ctx), subcommand, opts.Args)
 		if err != nil {
 			return nil, err
 		}
 		opts.Args = args
 
 		// Use opts.Args to find module directories
-		pkgs, getErr := getBuildPackages(ctx, opts.Args)
+		pkgs, getErr := getBuildPackages(ctx, subcommand, opts.Args)
 		if getErr != nil {
 			return nil, getErr
 		}

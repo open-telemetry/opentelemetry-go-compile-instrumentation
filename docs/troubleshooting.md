@@ -55,12 +55,12 @@ go list -m <module-path>
 ```
 
 **A `--rules` or `OTELC_RULES` override replaced the matching rules.** When either flag is
-set, `otelc` uses only those rules. The embedded bundle and any `otel.instrumentation.go`
+set, `otelc` uses only those rules. Manifest-discovered defaults and any `otel.instrumentation.go`
 declarations are ignored. Remove the override or add your custom rules to the specified file.
 
 **The `otel.instrumentation.go` file declares packages with no matching rules.** When a tool
 file is present, `otelc` loads only the rules from the declared instrumentation packages and
-ignores the embedded bundle. If those packages contain no `*.otelc.yml` files, the matched
+does not select manifest-discovered defaults. If those packages contain no `*.otelc.yml` files, the matched
 set is empty. See [External Configuration Sources](external-configuration.md).
 
 ### Instrumented but no spans appear

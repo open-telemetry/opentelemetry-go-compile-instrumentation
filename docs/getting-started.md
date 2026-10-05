@@ -98,10 +98,10 @@ otelc pin
 
 The `pin` command discovers applicable instrumentations, creates the file if it does not already exist, updates imports, synchronizes dependencies, and runs validation checks.
 
-If no instrumentation file exists, `otelc go build` automatically analyzes the application's dependency graph and generates a temporary instrumentation configuration for the duration of the build. This ensures a zero-configuration workflow while allowing projects to adopt a persistent, source-controlled configuration when desired.
+If no instrumentation file exists, `otelc go build` automatically analyzes the application's dependency graph and generates a temporary instrumentation configuration for the duration of the build. This allows projects to adopt a persistent, source-controlled configuration when desired.
 
 > [!NOTE]
-> Support for committing an `otelc pin`-generated `otel.instrumentation.go` file is still under development. Until the work in [#585](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/585) to decouple instrumentation packages from the `otelc` executable is complete, `otelc pin` should be considered a local workflow. `otelc go build` continues to work without a committed instrumentation file by automatically generating a temporary configuration during the build.
+> Until [#983](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/983) publishes the built-in instrumentation modules with explicit versioned requirements, `otelc pin` and `otelc go build` need a full local checkout of this repository. Run them from inside the checkout, or set `OTELC_SOURCE_ROOT` to its directory. A released `otelc` binary alone does not provide the source modules needed for automatic pinning. Support for committing a generated `otel.instrumentation.go` file remains under development in [#585](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/585).
 
 ## How It Works
 
@@ -129,8 +129,10 @@ The following libraries are automatically instrumented:
 | `github.com/openai/openai-go` (v1/v2/v3) | GenAI spans |
 | `github.com/anthropics/anthropic-sdk-go` | GenAI spans |
 | `github.com/segmentio/kafka-go` | Kafka messaging spans |
+| `github.com/rabbitmq/amqp091-go` | RabbitMQ messaging spans |
 | `github.com/aws/aws-sdk-go-v2` | AWS SDK client spans |
 | `github.com/linode/linodego/v2` | HTTP client spans and metrics |
+| `github.com/stripe/stripe-go` (v81/v82) | Stripe API client spans and metrics (net/http RoundTrip spans become children when both are enabled) |
 | `log`, `log/slog`, `github.com/sirupsen/logrus`, `go.uber.org/zap` | Trace/span ID log correlation |
 | `github.com/apache/cassandra-gocql-driver/v2` | Cassandra DB spans |
 | `github.com/olivere/elastic/v7` | Elasticsearch DB spans |

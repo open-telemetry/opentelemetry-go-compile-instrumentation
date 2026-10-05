@@ -24,7 +24,8 @@ reference. This document is the authoritative protocol specification.
 
 ## Overview
 
-By default, `otelc` instruments every dependency it finds using its embedded rule bundle.
+By default, `otelc` uses its embedded manifest to select built-in instrumentations for
+matching dependencies.
 This all-or-nothing model works for getting started, but it does not give you reproducible
 builds: adding a new version of `otelc` may silently change which libraries get instrumented.
 
