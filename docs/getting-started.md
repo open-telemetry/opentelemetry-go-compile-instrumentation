@@ -136,6 +136,7 @@ The following libraries are automatically instrumented:
 | `log`, `log/slog`, `github.com/sirupsen/logrus`, `go.uber.org/zap` | Trace/span ID log correlation |
 | `github.com/apache/cassandra-gocql-driver/v2` | Cassandra DB spans |
 | `github.com/olivere/elastic/v7` | Elasticsearch DB spans |
+| `github.com/opensearch-project/opensearch-go/v5` | OpenSearch DB spans |
 
 ## Learn More
 

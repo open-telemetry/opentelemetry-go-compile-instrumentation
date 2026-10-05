@@ -220,3 +220,25 @@ func RequireAWSClientSemconv(
 	// Recommended attributes
 	RequireAttribute(t, span, "aws.request_id", requestID)
 }
+
+// RequireOpenSearchClientSemconv verifies that an OpenSearch client span
+// follows semantic conventions. The database span conventions do not define a
+// separate OpenSearch page, so the generic database client attributes apply
+// with db.system.name=opensearch.
+// Reference: https://opentelemetry.io/docs/specs/semconv/database/database-spans/
+func RequireOpenSearchClientSemconv(
+	t *testing.T,
+	span ptrace.Span,
+	operationName, index, method, urlPath string,
+	statusCode int64,
+) {
+	RequireAttribute(t, span, string(semconv.DBSystemNameKey), "opensearch")
+	RequireAttribute(t, span, string(semconv.DBOperationNameKey), operationName)
+	if index != "" {
+		RequireAttribute(t, span, string(semconv.DBCollectionNameKey), index)
+	}
+	RequireAttribute(t, span, string(semconv.NetworkTransportKey), "tcp")
+	RequireAttribute(t, span, string(semconv.HTTPRequestMethodKey), method)
+	RequireAttribute(t, span, string(semconv.URLPathKey), urlPath)
+	RequireAttribute(t, span, string(semconv.DBResponseStatusCodeKey), strconv.FormatInt(statusCode, 10))
+}
