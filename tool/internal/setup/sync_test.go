@@ -215,6 +215,17 @@ func TestRepositorySourceRoot(t *testing.T) {
 		require.Equal(t, repositoryDir, got)
 	})
 
+	t.Run("environment nested in checkout", func(t *testing.T) {
+		nested := filepath.Join(repositoryDir, "test", "app")
+		require.NoError(t, os.MkdirAll(nested, 0o755))
+		t.Setenv("OTELC_SOURCE_ROOT", nested)
+		t.Chdir(t.TempDir())
+
+		got, err := repositorySourceRoot()
+		require.NoError(t, err)
+		require.Equal(t, repositoryDir, got)
+	})
+
 	t.Run("missing", func(t *testing.T) {
 		t.Setenv("OTELC_SOURCE_ROOT", t.TempDir())
 		_, err := repositorySourceRoot()
@@ -297,6 +308,33 @@ func TestSyncDepsFromSource_MissingMatchedInstrumentationModule(t *testing.T) {
 	err := syncDepsFromSource(t.Context(), map[string]bool{modulePath: true}, moduleDir, repositoryDir)
 	require.ErrorContains(t, err, "loading matched instrumentation module "+modulePath)
 	require.ErrorContains(t, err, "manifest and source checkout may be from different otelc versions")
+	mod, readErr := os.ReadFile(filepath.Join(moduleDir, "go.mod"))
+	require.NoError(t, readErr)
+	require.Equal(t,
+		"module example.com/app\n\ngo 1.21\n", string(mod),
+		"failed discovery must not modify the application",
+	)
+}
+
+func TestSyncDepsFromSource_InvalidMatchedModule(t *testing.T) {
+	moduleDir, repositoryDir, _ := setupSyncDepsTest(t,
+		"module example.com/app\n\ngo 1.21\n", []string{"example.com/lib"})
+	modulePath := util.OtelcInstRoot + "/example.com/lib"
+	require.NoError(t, os.WriteFile(
+		filepath.Join(repositoryDir, "instrumentation", "example.com", "lib", "go.mod"),
+		[]byte("module\n"), 0o644,
+	))
+
+	err := syncDepsFromSource(t.Context(), map[string]bool{modulePath: true}, moduleDir, repositoryDir)
+	require.ErrorContains(t, err, "loading matched instrumentation module "+modulePath)
+	require.ErrorContains(t, err, "failed to parse go.mod file")
+	require.ErrorContains(t, err, "manifest and source checkout may be from different otelc versions")
+	mod, readErr := os.ReadFile(filepath.Join(moduleDir, "go.mod"))
+	require.NoError(t, readErr)
+	require.Equal(t,
+		"module example.com/app\n\ngo 1.21\n", string(mod),
+		"failed discovery must not modify the application",
+	)
 }
 
 func TestSyncDepsFromSource_DeterministicReplaceOrder(t *testing.T) {
