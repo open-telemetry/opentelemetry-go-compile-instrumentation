@@ -79,16 +79,18 @@ func (ip *instrumentPhase) Error(msg string, args ...any) { ip.logger.Error(msg,
 func (ip *instrumentPhase) Warn(msg string, args ...any)  { ip.logger.Warn(msg, args...) }
 func (ip *instrumentPhase) Debug(msg string, args ...any) { ip.logger.Debug(msg, args...) }
 
+// debugArtifactDir returns the directory under .otelc-build holding this
+// package's debug artifacts (.otelc-build/debug/<escaped-package>/).
+func (ip *instrumentPhase) debugArtifactDir() string {
+	modPath := util.FindFlagValue(ip.compileArgs, "-p")
+	pkgDir := util.EscapePackagePath(modPath)
+	return util.GetBuildTemp(filepath.Join("debug", pkgDir))
+}
+
 // keepForDebug keeps the the file to .otelc-build directory for debugging
 func (ip *instrumentPhase) keepForDebug(name string) {
-	escape := func(s string) string {
-		dirName := strings.ReplaceAll(s, "/", "_")
-		dirName = strings.ReplaceAll(dirName, ".", "_")
-		return dirName
-	}
-	modPath := util.FindFlagValue(ip.compileArgs, "-p")
-	dest := filepath.Join("debug", escape(modPath), filepath.Base(name))
-	err := util.CopyFile(name, util.GetBuildTemp(dest))
+	dest := filepath.Join(ip.debugArtifactDir(), filepath.Base(name))
+	err := util.CopyFile(name, dest)
 	if err != nil { // error is tolerable here as this is only for debugging
 		ip.Warn("failed to save modified file", "dest", dest, "error", err)
 	}

@@ -29,6 +29,7 @@ const (
 type runtimePackage struct {
 	dir        string
 	importPath string
+	debugPath  string
 	name       string
 }
 
@@ -187,7 +188,11 @@ func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, 
 	if err := ast.WriteFileAtomic(otelcRuntimeFilePath, root); err != nil {
 		return ex.Wrapf(err, "writing otelc runtime file %s", otelcRuntimeFilePath)
 	}
-	keepForDebug(ctx, otelcRuntimeFilePath)
+	debugPath := pkg.debugPath
+	if debugPath == "" {
+		debugPath = pkg.importPath
+	}
+	keepForDebug(ctx, otelcRuntimeFilePath, debugPath)
 	sp.Info("Created otelc.runtime.go", "path", otelcRuntimeFilePath)
 	return nil
 }

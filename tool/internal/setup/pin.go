@@ -635,7 +635,7 @@ func generatePinnedProjects(ctx context.Context, moduleDirs []string, opts PinOp
 			return nil, syncErr
 		}
 
-		keepForDebug(ctx, path)
+		keepForDebug(ctx, path, "")
 	}
 
 	// Intentionally return an empty PinResult
