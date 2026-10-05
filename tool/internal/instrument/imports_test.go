@@ -324,40 +324,106 @@ func run() {}
 	assert.Empty(t, overrides)
 }
 
+func TestResolveImportOverrides_NoAliasOverrideWhenRuleAliasIsAFileAlias(t *testing.T) {
+	// A file may import one path under several aliases. When the rule alias
+	// already names the path in the file, the generated code compiles as
+	// written and must not be rewritten to a different file alias.
+	root := parseFile(t, `package main
+
+import (
+	a "fmt"
+	b "fmt"
+)
+
+func run() {}
+`)
+
+	ip := newTestPhase()
+	for _, ruleAlias := range []string{"a", "b"} {
+		_, overrides := ip.resolveImportOverrides(root, map[string]string{ruleAlias: "fmt"})
+		assert.Empty(t, overrides, "rule alias %q is one of the file's aliases for fmt", ruleAlias)
+	}
+}
+
+func TestResolveImportOverrides_OverrideWhenRuleAliasIsNotAFileAlias(t *testing.T) {
+	// When no file alias matches the rule alias, the override picks the
+	// lexicographically smallest file alias.
+	root := parseFile(t, `package main
+
+import (
+	a "fmt"
+	b "fmt"
+)
+
+func run() {}
+`)
+
+	ip := newTestPhase()
+	_, overrides := ip.resolveImportOverrides(root, map[string]string{"c": "fmt"})
+
+	assert.Equal(t, map[string]string{"c": "a"}, overrides)
+}
+
+func TestAddRuleImports_MultiAliasFileAcceptsEveryExistingAlias(t *testing.T) {
+	// A file may import one path under several aliases. A rule alias that
+	// names one of them must pass validation; a rule alias that names none
+	// of them must fail it.
+	root := parseFile(t, `package main
+
+import (
+    a "fmt"
+    b "fmt"
+)
+
+func run() {}
+`)
+
+	ip := &instrumentPhase{}
+	for _, ruleAlias := range []string{"a", "b"} {
+		err := ip.addRuleImports(t.Context(), root, map[string]string{ruleAlias: "fmt"}, "test-rule")
+		require.NoError(t, err,
+			"rule alias %q is one of the file's aliases for fmt", ruleAlias)
+	}
+
+	err := ip.addRuleImports(t.Context(), root, map[string]string{"c": "fmt"}, "test-rule")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "import alias mismatch")
+}
+
 // --- resolveAliasOverrides tests ---
 
 func TestResolveAliasOverrides_MismatchProducesOverride(t *testing.T) {
 	ruleImports := map[string]string{"traced": "fmt"}
-	existingAliases := map[string]string{"fmt": "f"}
+	existingAliasSets := map[string][]string{"fmt": {"f"}}
 
-	overrides := resolveAliasOverrides(ruleImports, existingAliases)
+	overrides := resolveAliasOverrides(ruleImports, existingAliasSets)
 
 	assert.Equal(t, map[string]string{"traced": "f"}, overrides)
 }
 
 func TestResolveAliasOverrides_MatchingAliasProducesNoOverride(t *testing.T) {
 	ruleImports := map[string]string{"redis": "github.com/redis/go-redis/v9"}
-	existingAliases := map[string]string{"github.com/redis/go-redis/v9": "redis"}
+	existingAliasSets := map[string][]string{"github.com/redis/go-redis/v9": {"redis"}}
 
-	overrides := resolveAliasOverrides(ruleImports, existingAliases)
+	overrides := resolveAliasOverrides(ruleImports, existingAliasSets)
 
 	assert.Empty(t, overrides)
 }
 
 func TestResolveAliasOverrides_PathNotYetImportedProducesNoOverride(t *testing.T) {
 	ruleImports := map[string]string{"redis": "github.com/redis/go-redis/v9"}
-	existingAliases := map[string]string{} // path not present in the file yet
+	existingAliasSets := map[string][]string{} // path not present in the file yet
 
-	overrides := resolveAliasOverrides(ruleImports, existingAliases)
+	overrides := resolveAliasOverrides(ruleImports, existingAliasSets)
 
 	assert.Empty(t, overrides)
 }
 
 func TestResolveAliasOverrides_DotAndBlankAliasesAreExempt(t *testing.T) {
 	ruleImports := map[string]string{".": "fmt", "_": "net/http"}
-	existingAliases := map[string]string{"fmt": "f", "net/http": "h"}
+	existingAliasSets := map[string][]string{"fmt": {"f"}, "net/http": {"h"}}
 
-	overrides := resolveAliasOverrides(ruleImports, existingAliases)
+	overrides := resolveAliasOverrides(ruleImports, existingAliasSets)
 
 	assert.Empty(t, overrides, "'.' and '_' aliases must never be substituted")
 }

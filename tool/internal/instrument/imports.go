@@ -6,6 +6,7 @@ package instrument
 import (
 	"context"
 	"go/token"
+	"slices"
 	"strings"
 
 	"github.com/dave/dst"
@@ -53,15 +54,15 @@ func (ip *instrumentPhase) addRuleImports(
 	// Validate: check for alias mismatches that would break injected code
 	for ruleAlias, importPath := range ruleImports {
 		if ruleAlias == "." {
-			// Dot-import conflict check
-			if existingAlias, pathExists := resolution.ExistingAliases[importPath]; pathExists {
-				if existingAlias != "." {
+			// Dot-import conflict check: the file must dot-import the path itself
+			if aliases, pathExists := resolution.ExistingAliasSets[importPath]; pathExists {
+				if !slices.Contains(aliases, ".") {
 					return ex.Newf(
 						"%s: dot-import conflict for %q - "+
-							"file imports the path with alias %q but rule requires dot-import; "+
+							"file imports the path with aliases %v but rule requires dot-import; "+
 							"injected unqualified identifiers will not resolve; "+
 							"either update the file to use dot-import or adjust the rule",
-						ruleName, importPath, existingAlias)
+						ruleName, importPath, aliases)
 				}
 			}
 			continue
@@ -72,15 +73,16 @@ func (ip *instrumentPhase) addRuleImports(
 
 		// Validate alias matches for all existing imports (both explicit and implicit).
 		// When a file already imports a path, we won't add a duplicate, so injected code
-		// must use the alias that actually exists in the file.
-		if existingAlias, pathExists := resolution.ExistingAliases[importPath]; pathExists {
-			if existingAlias != ruleAlias {
+		// must use an alias that actually exists in the file. A file may import the
+		// path under several aliases; each of them is valid.
+		if aliases, pathExists := resolution.ExistingAliasSets[importPath]; pathExists {
+			if !slices.Contains(aliases, ruleAlias) {
 				return ex.Newf(
 					"%s: import alias mismatch for %q - "+
-						"file uses alias %q but rule expects %q; "+
+						"file uses aliases %v but rule expects %q; "+
 						"injected code will fail to compile; "+
 						"either update the file's import or adjust the rule's import alias",
-					ruleName, importPath, existingAlias, ruleAlias)
+					ruleName, importPath, aliases, ruleAlias)
 			}
 		}
 	}
@@ -113,42 +115,49 @@ func (ip *instrumentPhase) resolveImportOverrides(
 ) (map[string]string, map[string]string) {
 	importAliases := ast.ImportAliasMap(root, ip.importNames)
 
-	// Sort by the lexicographically smallest alias for each path, so
-	// aliases stays the same across every call
+	// Collect every alias the file uses for each path, sorted, so alias
+	// selection stays the same across every call
 	resolvedAliases := ast.ResolvedImportAliasMap(root, ip.importNames)
-	existingAliases := make(map[string]string, len(resolvedAliases))
+	existingAliasSets := make(map[string][]string, len(resolvedAliases))
 	for alias, path := range resolvedAliases {
-		if current, exists := existingAliases[path]; !exists || alias < current {
-			existingAliases[path] = alias
-		}
+		existingAliasSets[path] = append(existingAliasSets[path], alias)
 	}
-	aliasOverrides := resolveAliasOverrides(ruleImports, existingAliases)
+	for _, aliases := range existingAliasSets {
+		slices.Sort(aliases)
+	}
+	aliasOverrides := resolveAliasOverrides(ruleImports, existingAliasSets)
 	return importAliases, aliasOverrides
 }
 
 // resolveAliasOverrides reports the alias to substitute for each rule
-// import already present in the target file under a different alias.
+// import the target file already imports under a different alias.
 // Substituting the file's alias into generated code, instead of the
 // rule's alias, avoids a build failure.
 //
-// existingAliases must resolve an unaliased import to its real name,
+// existingAliasSets maps each import path to every alias the file uses
+// for it. A rule alias that already names the path in the file needs no
+// substitution: the generated code compiles as written.
+//
+// existingAliasSets must resolve an unaliased import to its real name,
 // not a guess. A guessed name can be illegal as a Go identifier.
 //
 // The dot alias and the blank alias are exempt from substitution.
-func resolveAliasOverrides(ruleImports, existingAliases map[string]string) map[string]string {
+func resolveAliasOverrides(ruleImports map[string]string, existingAliasSets map[string][]string) map[string]string {
 	var overrides map[string]string
 	for ruleAlias, importPath := range ruleImports {
 		if ruleAlias == "." || ruleAlias == "_" {
 			continue
 		}
-		existingAlias, ok := existingAliases[importPath]
-		if !ok || existingAlias == ruleAlias || existingAlias == "." || existingAlias == "_" {
+		aliases, ok := existingAliasSets[importPath]
+		if !ok || slices.Contains(aliases, ruleAlias) {
 			continue
 		}
 		if overrides == nil {
 			overrides = make(map[string]string, len(ruleImports))
 		}
-		overrides[ruleAlias] = existingAlias
+		// The smallest alias keeps the substitution deterministic. Dot and
+		// blank aliases never reach the set; ast.ImportAliasMap skips them.
+		overrides[ruleAlias] = aliases[0]
 	}
 	return overrides
 }
