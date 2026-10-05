@@ -145,9 +145,10 @@ func TestApplyCallRule_Success(t *testing.T) {
 	file := makeCallFile(httpGetCall())
 	r := httpGetRule("traced({{ . }})")
 
-	err := newTestPhase().applyCallRule(context.Background(), r, file)
+	modified, err := newTestPhase().applyCallRule(context.Background(), r, file)
 
 	require.NoError(t, err)
+	require.True(t, modified, "the rule should have changed the file")
 	stmt := file.Decls[0].(*dst.FuncDecl).Body.List[0].(*dst.ExprStmt)
 	outerCall, ok := stmt.X.(*dst.CallExpr)
 	require.True(t, ok, "expected *dst.CallExpr after wrap, got %T", stmt.X)
@@ -164,9 +165,10 @@ func TestApplyCallRule_NonCallExprResult(t *testing.T) {
 	file := makeCallFile(httpGetCall())
 	r := httpGetRule("{{ . }}.Response")
 
-	err := newTestPhase().applyCallRule(context.Background(), r, file)
+	modified, err := newTestPhase().applyCallRule(context.Background(), r, file)
 
 	require.NoError(t, err)
+	require.True(t, modified, "the rule should have changed the file")
 	stmt := file.Decls[0].(*dst.FuncDecl).Body.List[0].(*dst.ExprStmt)
 	_, ok := stmt.X.(*dst.SelectorExpr)
 	require.True(t, ok, "expected *dst.SelectorExpr after wrap, got %T", stmt.X)
@@ -177,9 +179,10 @@ func TestApplyCallRule_InvalidTemplate(t *testing.T) {
 	file := makeCallFile(httpGetCall())
 	r := httpGetRule("wrapper({{")
 
-	err := newTestPhase().applyCallRule(context.Background(), r, file)
+	modified, err := newTestPhase().applyCallRule(context.Background(), r, file)
 
 	require.Error(t, err)
+	require.False(t, modified, "a rule that matched nothing or failed must not report a change")
 	assert.Contains(t, err.Error(), "failed to parse template")
 }
 
@@ -189,9 +192,10 @@ func TestApplyCallRule_AppendArgs(t *testing.T) {
 	r.AppendArgs = []string{"traced.Context()"}
 	r.Imports = map[string]string{"traced": "fmt"}
 
-	err := newTestPhase().applyCallRule(context.Background(), r, file)
+	modified, err := newTestPhase().applyCallRule(context.Background(), r, file)
 
 	require.NoError(t, err)
+	require.True(t, modified, "the rule should have changed the file")
 	fn := findFuncDeclInFile(t, file, "f")
 	stmt := fn.Body.List[0].(*dst.ExprStmt)
 	call, ok := stmt.X.(*dst.CallExpr)
@@ -214,13 +218,35 @@ func TestApplyCallRule_AppendArgsWithoutMatch(t *testing.T) {
 	r.AppendArgs = []string{"traced.Context()"}
 	r.Imports = map[string]string{"traced": "example.com/traced"}
 
-	err := newTestPhase().applyCallRule(context.Background(), r, file)
+	modified, err := newTestPhase().applyCallRule(context.Background(), r, file)
 
 	require.NoError(t, err)
+	require.False(t, modified, "a rule that matched nothing or failed must not report a change")
 	assert.False(t, fileImportsPath(file, "example.com/traced"))
 }
 
-func TestApplyCallRule_ImportAliasMismatch(t *testing.T) {
+func TestApplyCallRule_AppendArgsFailureIsUnmodified(t *testing.T) {
+	// The call matches, but append_args on an ellipsis call needs
+	// variadic_type, so the append fails and the call is left unchanged.
+	call := httpGetCall()
+	call.Ellipsis = true
+	file := makeCallFile(call)
+	r := httpGetRule("")
+	r.AppendArgs = []string{"traced.Context()"}
+	r.Imports = map[string]string{"traced": "example.com/traced"}
+
+	modified, err := newTestPhase().applyCallRule(context.Background(), r, file)
+
+	require.NoError(t, err)
+	require.False(t, modified, "a rule that matched nothing or failed must not report a change")
+	assert.Len(t, call.Args, 1)
+	assert.False(t, fileImportsPath(file, "example.com/traced"))
+}
+
+func TestApplyCallRule_ImportAliasMismatchUsesFileExistingAlias(t *testing.T) {
+	// The rule is written against the alias "traced" for "fmt". The
+	// file already imports "fmt" under its own alias "f". The injected
+	// code must use "f", not fail the build.
 	root := parseFile(t, `package main
 
 import (
@@ -235,10 +261,115 @@ func Run() {
 	r := httpGetRule("traced.Call({{ . }})")
 	r.Imports = map[string]string{"traced": "fmt"}
 
-	err := newTestPhase().applyCallRule(context.Background(), r, root)
+	_, err := newTestPhase().applyCallRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	run := findFuncDeclInFile(t, root, "Run")
+	stmt := run.Body.List[0].(*dst.ExprStmt)
+	call, ok := stmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr after wrap, got %T", stmt.X)
+	sel, ok := call.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
+	ident, ok := sel.X.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "f", ident.Name, "injected code must use the file's existing alias, not the rule's")
+	assert.Equal(t, "Call", sel.Sel.Name)
+}
+
+func TestApplyCallRule_UnrelatedSelectorSharingRuleAliasDoesNotBlockOverride(t *testing.T) {
+	root := parseFile(t, `package main
+
+import (
+	f "fmt"
+	"net/http"
+)
+
+func Other() {
+	traced.Value()
+}
+
+func Run() {
+	http.Get("url")
+}
+`)
+	r := httpGetRule("traced.Call({{ . }})")
+	r.Imports = map[string]string{"traced": "fmt"}
+
+	_, err := newTestPhase().applyCallRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	run := findFuncDeclInFile(t, root, "Run")
+	stmt := run.Body.List[0].(*dst.ExprStmt)
+	call, ok := stmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr after wrap, got %T", stmt.X)
+	sel, ok := call.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
+	ident, ok := sel.X.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "f", ident.Name, "injected code must use the file's existing alias, not the rule's")
+}
+
+func TestApplyCallRule_OverrideShadowedByParameterReportsConflict(t *testing.T) {
+	root := parseFile(t, `package main
+
+import (
+	f "fmt"
+	"net/http"
+)
+
+func Run(f sink) {
+	http.Get("url")
+}
+`)
+	r := httpGetRule("traced.Call({{ . }})")
+	r.Imports = map[string]string{"traced": "fmt"}
+
+	_, err := newTestPhase().applyCallRule(context.Background(), r, root)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "import alias mismatch")
+	assert.Contains(t, err.Error(), "alias override conflict")
+	run := findFuncDeclInFile(t, root, "Run")
+	stmt, ok := run.Body.List[0].(*dst.ExprStmt)
+	require.True(t, ok, "expected *dst.ExprStmt, got %T", run.Body.List[0])
+	_, ok = stmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", stmt.X)
+	assert.Equal(t, "http", stmt.X.(*dst.CallExpr).Fun.(*dst.SelectorExpr).X.(*dst.Ident).Name,
+		"must not wrap the call when the override would resolve to the wrong identifier")
+}
+
+func TestApplyCallReplace_DoesNotRewriteOriginalCallArguments(t *testing.T) {
+	call := &dst.CallExpr{
+		Fun: &dst.SelectorExpr{X: &dst.Ident{Name: "http"}, Sel: &dst.Ident{Name: "Get"}},
+		Args: []dst.Expr{
+			&dst.CallExpr{Fun: &dst.SelectorExpr{X: &dst.Ident{Name: "traced"}, Sel: &dst.Ident{Name: "Value"}}},
+		},
+	}
+	root := makeCallFile(call)
+	r := httpGetRule(`traced.Wrap({{ . }})`)
+	importAliases := map[string]string{"http": "net/http"}
+	aliasOverrides := map[string]string{"traced": "f"}
+
+	modified, err := newTestPhase().applyCallReplace(r, root, importAliases, aliasOverrides)
+
+	require.NoError(t, err)
+	assert.True(t, modified)
+	stmt := root.Decls[0].(*dst.FuncDecl).Body.List[0].(*dst.ExprStmt)
+	outer, ok := stmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", stmt.X)
+	outerSel, ok := outer.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", outer.Fun)
+	assert.Equal(t, "f", outerSel.X.(*dst.Ident).Name, "the rule's own qualifier must move to the file's alias")
+	assert.Equal(t, "Wrap", outerSel.Sel.Name)
+	require.Len(t, outer.Args, 1)
+	inner, ok := outer.Args[0].(*dst.CallExpr)
+	require.True(t, ok, "expected the substituted call to stay a *dst.CallExpr, got %T", outer.Args[0])
+	require.Len(t, inner.Args, 1)
+	argCall, ok := inner.Args[0].(*dst.CallExpr)
+	require.True(t, ok, "expected original argument to stay a *dst.CallExpr, got %T", inner.Args[0])
+	argSel, ok := argCall.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", argCall.Fun)
+	assert.Equal(t, "traced", argSel.X.(*dst.Ident).Name,
+		"the substituted call's own argument must not be rewritten just because it shares the rule's alias name")
 }
 
 func TestApplyCallRule_FuncArgumentUsesEnclosingFunction(t *testing.T) {
@@ -252,9 +383,10 @@ func Handler(name string) {
 `)
 	r := httpGetRule("traced({{ .FuncArgument 0 }}, {{ . }})")
 
-	err := newTestPhase().applyCallRule(context.Background(), r, root)
+	modified, err := newTestPhase().applyCallRule(context.Background(), r, root)
 
 	require.NoError(t, err)
+	require.True(t, modified, "the rule should have changed the file")
 	handler := findFuncDeclInFile(t, root, "Handler")
 	stmt := handler.Body.List[0].(*dst.ExprStmt)
 	outerCall, ok := stmt.X.(*dst.CallExpr)
@@ -283,9 +415,10 @@ func Handler(r *althttp.Request) (resp *althttp.Request, err error) {
 				"{{ . }})",
 		)
 
-		err := newTestPhase().applyCallRule(context.Background(), r, root)
+		modified, err := newTestPhase().applyCallRule(context.Background(), r, root)
 
 		require.NoError(t, err)
+		require.True(t, modified, "the rule should have changed the file")
 		handler := findFuncDeclInFile(t, root, "Handler")
 		outerCall, ok := handler.Body.List[0].(*dst.ExprStmt).X.(*dst.CallExpr)
 		require.True(t, ok, "expected *dst.CallExpr after wrap, got %T", handler.Body.List[0].(*dst.ExprStmt).X)
@@ -322,9 +455,10 @@ func Handler(t *template.Template) (page *htmltemplate.Template, err error) {
 			Replace:      replace,
 		}
 
-		err := newTestPhase().applyCallRule(context.Background(), r, root)
+		modified, err := newTestPhase().applyCallRule(context.Background(), r, root)
 
 		require.NoError(t, err)
+		require.True(t, modified, "the rule should have changed the file")
 		handler := findFuncDeclInFile(t, root, "Handler")
 		outerCall, ok := handler.Body.List[0].(*dst.ExprStmt).X.(*dst.CallExpr)
 		require.True(t, ok, "expected *dst.CallExpr after wrap, got %T", handler.Body.List[0].(*dst.ExprStmt).X)
@@ -363,8 +497,9 @@ func Run(ctx context.Context) {
 `)
 		r := httpGetRule(replace)
 
-		err := newTestPhase().applyCallRule(context.Background(), r, root)
+		modified, err := newTestPhase().applyCallRule(context.Background(), r, root)
 		require.NoError(t, err)
+		require.True(t, modified, "the rule should have changed the file")
 
 		fn := findFuncDeclInFile(t, root, "Run")
 		stmt := fn.Body.List[0].(*dst.ExprStmt)
@@ -393,8 +528,9 @@ func Run(name string) {
 `)
 		r := httpGetRule(replace)
 
-		err := newTestPhase().applyCallRule(context.Background(), r, root)
+		modified, err := newTestPhase().applyCallRule(context.Background(), r, root)
 		require.NoError(t, err)
+		require.True(t, modified, "the rule should have changed the file")
 
 		fn := findFuncDeclInFile(t, root, "Run")
 		stmt := fn.Body.List[0].(*dst.ExprStmt)
@@ -417,9 +553,10 @@ func Run(ctx context.Context) {
 	http.Get("url")
 }
 `)
-		err := newTestPhase().applyCallRule(context.Background(), newRule(), root)
+		modified, err := newTestPhase().applyCallRule(context.Background(), newRule(), root)
 
 		require.NoError(t, err)
+		require.True(t, modified, "the rule should have changed the file")
 		assert.True(t, fileImportsPath(root, "fmt"), "import must be added when the taken branch references it")
 	})
 
@@ -432,9 +569,10 @@ func Run(name string) {
 	http.Get("url")
 }
 `)
-		err := newTestPhase().applyCallRule(context.Background(), newRule(), root)
+		modified, err := newTestPhase().applyCallRule(context.Background(), newRule(), root)
 
 		require.NoError(t, err)
+		require.True(t, modified, "the rule should have changed the file")
 		assert.False(
 			t,
 			fileImportsPath(root, "fmt"),
@@ -455,9 +593,10 @@ func WithoutContext(name string) {
 	http.Get("url")
 }
 `)
-		err := newTestPhase().applyCallRule(context.Background(), newRule(), root)
+		modified, err := newTestPhase().applyCallRule(context.Background(), newRule(), root)
 
 		require.NoError(t, err)
+		require.True(t, modified, "the rule should have changed the file")
 		assert.True(
 			t,
 			fileImportsPath(root, "fmt"),
@@ -484,115 +623,6 @@ func fileImportsPath(root *dst.File, path string) bool {
 	return false
 }
 
-func TestUsedRuleImports_BlankAndDotAliasesAlwaysKept(t *testing.T) {
-	root := parseFile(t, `package main
-
-func f() {}
-`)
-	ruleImports := map[string]string{
-		"_": "example.com/sideeffect",
-		".": "example.com/dotimport",
-	}
-
-	used := usedRuleImports(root, ruleImports)
-
-	assert.Equal(t, ruleImports, used)
-}
-
-func TestUsedRuleImports_OnlyReferencedAliasesKept(t *testing.T) {
-	root := parseFile(t, `package main
-
-func f() {
-	traced.Call()
-}
-`)
-	ruleImports := map[string]string{
-		"traced":    "fmt",
-		"unrelated": "example.com/unrelated",
-	}
-
-	used := usedRuleImports(root, ruleImports)
-
-	assert.Equal(t, map[string]string{"traced": "fmt"}, used)
-}
-
-func TestUsedRuleImports_EmptyRuleImports(t *testing.T) {
-	root := parseFile(t, `package main
-
-func f() {}
-`)
-
-	used := usedRuleImports(root, nil)
-
-	assert.Nil(t, used)
-}
-
-func TestUsedRuleImports_PlainIdentifierWithoutSelector(t *testing.T) {
-	root := parseFile(t, `package main
-
-func f() {
-	use(traced)
-}
-`)
-	ruleImports := map[string]string{"traced": "fmt"}
-
-	used := usedRuleImports(root, ruleImports)
-
-	assert.Empty(t, used)
-}
-
-func TestUsedRuleImports_ChainedSelector(t *testing.T) {
-	root := parseFile(t, `package main
-
-func f() {
-	pkg.traced.Call()
-}
-`)
-	ruleImports := map[string]string{"traced": "fmt"}
-
-	used := usedRuleImports(root, ruleImports)
-
-	assert.Empty(t, used)
-}
-
-func TestUsedRuleImports_MultipleReferencesCountedOnce(t *testing.T) {
-	root := parseFile(t, `package main
-
-func f() {
-	traced.Call()
-	traced.Call()
-}
-`)
-	ruleImports := map[string]string{"traced": "fmt"}
-
-	used := usedRuleImports(root, ruleImports)
-
-	assert.Equal(t, map[string]string{"traced": "fmt"}, used)
-}
-
-func TestUsedRuleImports_MixedAliasKinds(t *testing.T) {
-	root := parseFile(t, `package main
-
-func f() {
-	traced.Call()
-}
-`)
-	ruleImports := map[string]string{
-		"traced": "fmt",
-		"unused": "example.com/unused",
-		"_":      "example.com/sideeffect",
-		".":      "example.com/dotimport",
-	}
-
-	used := usedRuleImports(root, ruleImports)
-
-	assert.Equal(t, map[string]string{
-		"traced": "fmt",
-		"_":      "example.com/sideeffect",
-		".":      "example.com/dotimport",
-	}, used)
-}
-
 func TestApplyCallRule_FuncTagWithoutEnclosingFunctionErrors(t *testing.T) {
 	root := parseFile(t, `package main
 
@@ -602,9 +632,10 @@ var resp, _ = http.Get("url")
 `)
 	r := httpGetRule("traced({{ .FuncName }}, {{ . }})")
 
-	err := newTestPhase().applyCallRule(context.Background(), r, root)
+	modified, err := newTestPhase().applyCallRule(context.Background(), r, root)
 
 	require.Error(t, err)
+	require.False(t, modified, "a rule that matched nothing or failed must not report a change")
 	assert.Contains(t, err.Error(), "no enclosing function is available")
 }
 
@@ -775,7 +806,7 @@ func TestMatchesCallRule_ImportAliasFromVersionSuffix(t *testing.T) {
 		},
 	}
 
-	importAliases := ast.ImportAliasMap(file)
+	importAliases := ast.ImportAliasMap(file, nil)
 	matches := matchesCallRule(call, r, importAliases)
 
 	assert.True(t, matches)
@@ -785,7 +816,7 @@ func TestAppendCallArgs_Empty(t *testing.T) {
 	r := &rule.InstCallRule{}
 	call := &dst.CallExpr{Fun: &dst.Ident{Name: "f"}}
 
-	modified, err := appendCallArgs(call, r)
+	modified, err := appendCallArgs(call, r, nil)
 
 	require.NoError(t, err)
 	assert.False(t, modified)
@@ -801,7 +832,7 @@ func TestAppendCallArgs_SimpleAppend(t *testing.T) {
 		Args: []dst.Expr{&dst.Ident{Name: "a"}},
 	}
 
-	modified, err := appendCallArgs(call, r)
+	modified, err := appendCallArgs(call, r, nil)
 
 	require.NoError(t, err)
 	assert.True(t, modified)
@@ -818,7 +849,7 @@ func TestAppendCallArgs_EllipsisNoVariadicType(t *testing.T) {
 		Ellipsis: true,
 	}
 
-	modified, err := appendCallArgs(call, r)
+	modified, err := appendCallArgs(call, r, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "variadic_type")
@@ -836,7 +867,7 @@ func TestAppendCallArgs_EllipsisWithVariadicType(t *testing.T) {
 		Ellipsis: true,
 	}
 
-	modified, err := appendCallArgs(call, r)
+	modified, err := appendCallArgs(call, r, nil)
 
 	require.NoError(t, err)
 	assert.True(t, modified)
@@ -862,7 +893,7 @@ func TestAppendCallArgs_EllipsisNoArgs(t *testing.T) {
 		Ellipsis: true,
 	}
 
-	modified, err := appendCallArgs(call, r)
+	modified, err := appendCallArgs(call, r, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no arguments")
@@ -880,7 +911,7 @@ func TestAppendCallArgs_InvalidVariadicType(t *testing.T) {
 		Ellipsis: true,
 	}
 
-	modified, err := appendCallArgs(call, r)
+	modified, err := appendCallArgs(call, r, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse variadic_type")
@@ -893,7 +924,7 @@ func TestAppendCallArgs_InvalidExpr(t *testing.T) {
 	}
 	call := &dst.CallExpr{Fun: &dst.Ident{Name: "f"}}
 
-	modified, err := appendCallArgs(call, r)
+	modified, err := appendCallArgs(call, r, nil)
 
 	require.Error(t, err)
 	assert.False(t, modified)
@@ -912,8 +943,9 @@ func TestAppendCallArgs_WithReplace(t *testing.T) {
 		Replace:      "wrapper({{ . }})",
 	}
 
-	err := newTestPhase().applyCallRule(context.Background(), r, file)
+	modified, err := newTestPhase().applyCallRule(context.Background(), r, file)
 	require.NoError(t, err)
+	require.True(t, modified, "the rule should have changed the file")
 
 	stmt := file.Decls[0].(*dst.FuncDecl).Body.List[0].(*dst.ExprStmt)
 	outerCall, ok := stmt.X.(*dst.CallExpr)
@@ -994,7 +1026,7 @@ func TestMatchesCallRule_ImportAliasFromGopkgIn(t *testing.T) {
 		},
 	}
 
-	importAliases := ast.ImportAliasMap(file)
+	importAliases := ast.ImportAliasMap(file, nil)
 	matches := matchesCallRule(call, r, importAliases)
 
 	assert.True(t, matches)
@@ -1017,21 +1049,10 @@ func TestApplyCallRule_NoMatchIsNoOp(t *testing.T) {
 		Replace:      "Wrapper({{ . }})",
 	}
 
-	err := newTestPhase().applyCallRule(context.Background(), r, file)
+	modified, err := newTestPhase().applyCallRule(context.Background(), r, file)
 
 	require.NoError(t, err, "applyCallRule must no-op when no calls match")
-}
-
-func TestApplyCallAppendArgs_WarnsAndKeepsGoingOnError(t *testing.T) {
-	// The call still matches the rule, but the append_args entry itself is
-	// not a parseable Go expression
-	file := makeCallFile(httpGetCall())
-	r := httpGetRule("")
-	r.AppendArgs = []string{"(("}
-
-	modified := newTestPhase().applyCallAppendArgs(r, file, nil)
-
-	assert.True(t, modified, "the call matched the rule even though appending its args failed")
+	require.False(t, modified, "a rule that matched nothing or failed must not report a change")
 }
 
 func TestApplyCallAppendArgs_NoMatchReturnsFalse(t *testing.T) {
@@ -1054,10 +1075,24 @@ func TestApplyCallAppendArgs_NoMatchReturnsFalse(t *testing.T) {
 	}
 
 	ip := newTestPhase()
-	importAliases := ast.ImportAliasMap(file)
-	result := ip.applyCallAppendArgs(r, file, importAliases)
+	importAliases := ast.ImportAliasMap(file, nil)
+	result := ip.applyCallAppendArgs(r, file, importAliases, nil)
 
 	assert.False(t, result, "applyCallAppendArgs must return false when no calls match")
+}
+
+func TestApplyCallAppendArgs_ParseErrorIsWarnedNotFatal(t *testing.T) {
+	call := httpGetCall()
+	file := makeCallFile(call)
+	r := httpGetRule("")
+	r.AppendArgs = []string{"func {{{"}
+
+	ip := newTestPhase()
+	importAliases := ast.ImportAliasMap(file, nil)
+	result := ip.applyCallAppendArgs(r, file, importAliases, nil)
+
+	assert.False(t, result, "an append that failed to parse must not count as a change")
+	assert.Len(t, call.Args, 1, "call must be left unmodified when append_args fails to parse")
 }
 
 func TestApplyCallRule_WrapFailureReturnsError(t *testing.T) {
@@ -1065,9 +1100,10 @@ func TestApplyCallRule_WrapFailureReturnsError(t *testing.T) {
 	file := makeCallFile(httpGetCall())
 	r := httpGetRule("not a valid expression {{ . }}")
 
-	err := newTestPhase().applyCallRule(context.Background(), r, file)
+	modified, err := newTestPhase().applyCallRule(context.Background(), r, file)
 
 	require.Error(t, err)
+	require.False(t, modified, "a rule that matched nothing or failed must not report a change")
 	assert.Contains(t, err.Error(), "failed to parse generated code")
 }
 
@@ -1288,7 +1324,7 @@ func run() {
 `)
 	r := methodCallRule("Logger", "Info", "traced({{ . }})")
 
-	err := ip.applyCallRule(context.Background(), r, root)
+	_, err := ip.applyCallRule(context.Background(), r, root)
 	require.NoError(t, err)
 
 	out := renderFile(t, root)
@@ -1309,7 +1345,7 @@ func run() {
 `)
 	r := methodCallRule("*DB", "QueryContext", "traced({{ . }})")
 
-	err := ip.applyCallRule(context.Background(), r, root)
+	_, err := ip.applyCallRule(context.Background(), r, root)
 	require.NoError(t, err)
 
 	out := renderFile(t, root)
@@ -1331,7 +1367,7 @@ func run() {
 `)
 	r := methodCallRule("*DB", "QueryContext", "traced({{ . }})")
 
-	err := ip.applyCallRule(context.Background(), r, root)
+	_, err := ip.applyCallRule(context.Background(), r, root)
 	require.NoError(t, err)
 
 	out := renderFile(t, root)
@@ -1357,7 +1393,7 @@ func run() {
 `)
 	r := methodCallRule("Logger", "Info", "traced({{ . }})")
 
-	err := ip.applyCallRule(context.Background(), r, root)
+	_, err := ip.applyCallRule(context.Background(), r, root)
 	require.NoError(t, err)
 
 	out := renderFile(t, root)
@@ -1382,7 +1418,7 @@ func run() {
 `)
 	r := methodCallRule("*Client", "Do", "traced({{ . }})")
 
-	err := ip.applyCallRule(context.Background(), r, root)
+	_, err := ip.applyCallRule(context.Background(), r, root)
 	require.NoError(t, err)
 
 	out := renderFile(t, root)
@@ -1405,7 +1441,7 @@ func run() {
 `)
 	r := methodCallRule("Logger", "Info", "traced({{ . }})")
 
-	err := ip.applyCallRule(context.Background(), r, root)
+	_, err := ip.applyCallRule(context.Background(), r, root)
 	require.NoError(t, err)
 
 	out := renderFile(t, root)
@@ -1428,7 +1464,7 @@ func run() {
 `)
 	r := methodCallRule("Logger", "Info", "traced({{ . }})")
 
-	err := ip.applyCallRule(context.Background(), r, root)
+	_, err := ip.applyCallRule(context.Background(), r, root)
 	require.NoError(t, err)
 
 	assert.False(t, ip.methodCallInfoLoaded,
@@ -1452,11 +1488,13 @@ func run() {
 	infoRule := methodCallRule("Logger", "Info", "tracedInfo({{ . }})")
 	warnRule := methodCallRule("Logger", "Warn", "tracedWarn({{ . }})")
 
-	require.NoError(t, ip.applyCallRule(context.Background(), infoRule, root))
+	_, err := ip.applyCallRule(context.Background(), infoRule, root)
+	require.NoError(t, err)
 	info := ip.methodCallInfo
 	require.NotNil(t, info, "first method_call rule must have built package info")
 
-	require.NoError(t, ip.applyCallRule(context.Background(), warnRule, root))
+	_, err = ip.applyCallRule(context.Background(), warnRule, root)
+	require.NoError(t, err)
 	assert.Same(t, info, ip.methodCallInfo,
 		"a second method_call rule on the same package must reuse, not rebuild, the cached package info")
 
@@ -1480,8 +1518,10 @@ func run() {
 	firstRule := methodCallRule("Logger", "Info", "first({{ . }})")
 	secondRule := methodCallRule("Logger", "Info", "second({{ . }})")
 
-	require.NoError(t, ip.applyCallRule(context.Background(), firstRule, root))
-	require.NoError(t, ip.applyCallRule(context.Background(), secondRule, root))
+	_, err := ip.applyCallRule(context.Background(), firstRule, root)
+	require.NoError(t, err)
+	_, err = ip.applyCallRule(context.Background(), secondRule, root)
+	require.NoError(t, err)
 
 	out := renderFile(t, root)
 	assert.Contains(t, out, `first(second(l.Info("hi")))`)
@@ -1501,7 +1541,7 @@ func run() {
 `)
 	r := methodCallRule("Logger", "Info", "traced({{ . }})")
 
-	err := ip.applyCallRule(context.Background(), r, root)
+	_, err := ip.applyCallRule(context.Background(), r, root)
 	require.NoError(t, err)
 
 	out := renderFile(t, root)
@@ -1744,4 +1784,140 @@ func TestExportImporter_ImportFrom_ImportMapFallback(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "vendor/golang.org/x/net/http2/hpack", got.Path())
 	assert.True(t, got.Complete())
+}
+
+// TestApplyCallRule_UnaliasedImportWithDivergentNameMatches covers a
+// package whose declared name differs from the name guessed from its
+// import path, for example "redis" for "github.com/redis/go-redis/v9".
+// With ip.importNames holding the real name, matching must use that
+// name instead of the guess.
+func TestApplyCallRule_UnaliasedImportWithDivergentNameMatches(t *testing.T) {
+	const importPath = "github.com/redis/go-redis/v9"
+	root := parseFile(t, `package main
+
+import "`+importPath+`"
+
+func Run() {
+	redis.NewClient()
+}
+`)
+	r := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_new_client"},
+		ImportPath:   importPath,
+		FuncName:     "NewClient",
+		Replace:      "traced({{ . }})",
+	}
+
+	ip := newTestPhase()
+	ip.importNames = map[string]string{importPath: "redis"}
+
+	_, err := ip.applyCallRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	run := findFuncDeclInFile(t, root, "Run")
+	stmt := run.Body.List[0].(*dst.ExprStmt)
+	call, ok := stmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr after wrap, got %T", stmt.X)
+	fn, ok := call.Fun.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "traced", fn.Name, "rule must have matched and wrapped the call")
+}
+
+func TestApplyCallRule_UnaliasedImportWithDivergentNameMissesWithoutTable(t *testing.T) {
+	// This test uses the same fixture, without ip.importNames. Matching
+	// reverts to the guess "go-redis" and must silently miss the call.
+	const importPath = "github.com/redis/go-redis/v9"
+	root := parseFile(t, `package main
+
+import "`+importPath+`"
+
+func Run() {
+	redis.NewClient()
+}
+`)
+	r := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_new_client"},
+		ImportPath:   importPath,
+		FuncName:     "NewClient",
+		Replace:      "traced({{ . }})",
+	}
+
+	_, err := newTestPhase().applyCallRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	run := findFuncDeclInFile(t, root, "Run")
+	stmt := run.Body.List[0].(*dst.ExprStmt)
+	_, ok := stmt.X.(*dst.CallExpr)
+	require.True(t, ok)
+	sel, ok := stmt.X.(*dst.CallExpr).Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "call must be left unwrapped (still redis.NewClient()), got %T", stmt.X.(*dst.CallExpr).Fun)
+	assert.Equal(t, "NewClient", sel.Sel.Name)
+}
+
+func TestApplyCallRule_AliasOverrideDoesNotResolvePackages(t *testing.T) {
+	root := parseFile(t, `package main
+
+import (
+	f "example.com/does/not/exist"
+	"net/http"
+)
+
+func Run() {
+	http.Get("url")
+}
+`)
+	r := httpGetRule("traced.Call({{ . }})")
+	r.Imports = map[string]string{"traced": "example.com/does/not/exist"}
+
+	_, err := newTestPhase().applyCallRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	run := findFuncDeclInFile(t, root, "Run")
+	stmt := run.Body.List[0].(*dst.ExprStmt)
+	call, ok := stmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr after wrap, got %T", stmt.X)
+	sel, ok := call.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
+	ident, ok := sel.X.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "f", ident.Name, "override must use the file's existing alias without a live package lookup")
+}
+
+func TestApplyCallRule_AliasOverrideUsesResolvedName(t *testing.T) {
+	const importPath = "github.com/redis/go-redis/v9"
+	root := parseFile(t, `package main
+
+import "`+importPath+`"
+
+func Run() {
+	redis.NewClient()
+}
+`)
+	r := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "wrap_new_client",
+			Imports: map[string]string{"traced": importPath},
+		},
+		ImportPath: importPath,
+		FuncName:   "NewClient",
+		Replace:    "traced.Wrap({{ . }})",
+	}
+
+	ip := newTestPhase()
+	ip.importNames = map[string]string{importPath: "redis"}
+
+	_, err := ip.applyCallRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	run := findFuncDeclInFile(t, root, "Run")
+	stmt := run.Body.List[0].(*dst.ExprStmt)
+	call, ok := stmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr after wrap, got %T", stmt.X)
+	sel, ok := call.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
+	ident, ok := sel.X.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "redis", ident.Name, "override must use the resolved real name, not the path-derived guess")
+	assert.Equal(t, "Wrap", sel.Sel.Name)
+	assert.Equal(t, 1, countImportSpecs(root), "must not add a redundant import for an alias the rewrite eliminated")
 }
