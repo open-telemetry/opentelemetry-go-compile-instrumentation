@@ -91,6 +91,28 @@ func exprString(t *testing.T, expr dst.Expr) string {
 
 // --- walkLitsWithEnclosingFunc tests ---
 
+// requireModified takes an apply function's results and requires that it
+// changed the file without error.
+func requireModified(t *testing.T) func(bool, error) {
+	t.Helper()
+	return func(modified bool, err error) {
+		t.Helper()
+		require.NoError(t, err)
+		require.True(t, modified, "the rule should have changed the file")
+	}
+}
+
+// requireUnmodified takes an apply function's results and requires that it
+// left the file unchanged without error.
+func requireUnmodified(t *testing.T) func(bool, error) {
+	t.Helper()
+	return func(modified bool, err error) {
+		t.Helper()
+		require.NoError(t, err)
+		require.False(t, modified, "the rule should have left the file unchanged")
+	}
+}
+
 func TestWalkLitsWithEnclosingFunc_TracksEnclosingFunc(t *testing.T) {
 	root := parseFile(t, `package main
 
@@ -615,7 +637,7 @@ func run(f sink) *http.Transport {
 	r := transportRule(&rule.InstLitField{Name: "Proxy", Wrap: "traced.Sprint({{ . }})"})
 	r.Imports = map[string]string{"traced": "fmt"}
 
-	err := newTestPhase().applyLitRule(context.Background(), r, root)
+	_, err := newTestPhase().applyLitRule(context.Background(), r, root)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "alias override conflict")
@@ -640,7 +662,7 @@ func run(s sink) *http.Transport {
 	r := transportRule(&rule.InstLitField{Name: "Proxy", Wrap: "traced.Sprint({{ . }})"})
 	r.Imports = map[string]string{"traced": "fmt"}
 
-	err := newTestPhase().applyLitRule(context.Background(), r, root)
+	_, err := newTestPhase().applyLitRule(context.Background(), r, root)
 
 	require.NoError(t, err)
 	lit := litFromReturn(t, root, "run")
@@ -671,7 +693,7 @@ func run(name string) *http.Transport {
 `)
 	r := transportRule(&rule.InstLitField{Name: "Proxy", Wrap: "wrapProxy({{ .FuncArgument 0 }}, {{ . }})"})
 
-	err := newTestPhase().applyLitRule(context.Background(), r, root)
+	_, err := newTestPhase().applyLitRule(context.Background(), r, root)
 
 	require.NoError(t, err)
 	lit := litFromReturn(t, root, "run")

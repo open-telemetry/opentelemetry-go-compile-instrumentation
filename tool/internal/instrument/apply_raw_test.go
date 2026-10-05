@@ -17,6 +17,7 @@ import (
 	"github.com/dave/dst/decorator"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -105,7 +106,8 @@ raw: 'use({{ .FuncArgumentOfType "*net/http.Request" }}, {{ .FuncReturnOfType "*
 		require.NoError(t, err)
 
 		funcDecl := findFuncDeclInFile(t, root, "Handler")
-		require.NoError(t, insertRaw(ctx, rawRule, funcDecl, root))
+		aliases := rawAliasContext{imports: ast.ImportAliasMap(root, nil)}
+		require.NoError(t, insertRaw(ctx, rawRule, funcDecl, root, aliases))
 
 		call := funcDecl.Body.List[0].(*dst.ExprStmt).X.(*dst.CallExpr)
 		require.Len(t, call.Args, 2)
@@ -136,7 +138,8 @@ func Handler(t *template.Template) (page *htmltemplate.Template, err error) {
 		require.NoError(t, err)
 
 		funcDecl := findFuncDeclInFile(t, root, "Handler")
-		require.NoError(t, insertRaw(ctx, rawRule, funcDecl, root))
+		aliases := rawAliasContext{imports: ast.ImportAliasMap(root, nil)}
+		require.NoError(t, insertRaw(ctx, rawRule, funcDecl, root, aliases))
 
 		call := funcDecl.Body.List[0].(*dst.ExprStmt).X.(*dst.CallExpr)
 		require.Len(t, call.Args, 4)

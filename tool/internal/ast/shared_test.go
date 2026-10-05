@@ -903,12 +903,12 @@ func (r (*T)) Pointer() {}
 	file, err := NewAstParser().ParseSource(src)
 	require.NoError(t, err)
 
-	value, ok, err := FindFuncDecl(file, &rule.InstFuncRule{Func: "Value", Recv: "T"})
+	value, ok, err := FindFuncDecl(file, &rule.InstFuncRule{Func: "Value", Recv: "T"}, nil)
 	require.NoError(t, err)
 	require.True(t, ok, "parenthesized value receiver (r (T)) should match")
 	assert.Equal(t, "Value", value.Name.Name)
 
-	pointer, ok, err := FindFuncDecl(file, &rule.InstFuncRule{Func: "Pointer", Recv: "*T"})
+	pointer, ok, err := FindFuncDecl(file, &rule.InstFuncRule{Func: "Pointer", Recv: "*T"}, nil)
 	require.NoError(t, err)
 	require.True(t, ok, "parenthesized pointer receiver (r (*T)) should match")
 	assert.Equal(t, "Pointer", pointer.Name.Name)

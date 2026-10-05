@@ -1604,7 +1604,7 @@ func TestGetBuildPackages_TestWithoutTargets(t *testing.T) {
 	setupTestModule(t, nil)
 	for _, args := range [][]string{{"-test.run", "TestName"}, {"-run", "TestName"}, {"--", "custom"}, {"-args", "custom"}, {"--args", "custom"}} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			pkgs, err := getBuildPackages(t.Context(), subcmdTest, args)
+			pkgs, _, err := getBuildPackages(t.Context(), subcmdTest, args)
 			require.NoError(t, err)
 			require.Len(t, pkgs, 1)
 			assert.Equal(t, "testmodule", pkgs[0].PkgPath)

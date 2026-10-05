@@ -251,7 +251,7 @@ func Run() {
 	r := httpGetRule("traced.Call({{ . }})")
 	r.Imports = map[string]string{"traced": "fmt"}
 
-	modified, err := newTestPhase().applyCallRule(context.Background(), r, root)
+	_, err := newTestPhase().applyCallRule(context.Background(), r, root)
 
 	require.NoError(t, err)
 	run := findFuncDeclInFile(t, root, "Run")
@@ -285,7 +285,7 @@ func Run() {
 	r := httpGetRule("traced.Call({{ . }})")
 	r.Imports = map[string]string{"traced": "fmt"}
 
-	err := newTestPhase().applyCallRule(context.Background(), r, root)
+	_, err := newTestPhase().applyCallRule(context.Background(), r, root)
 
 	require.NoError(t, err)
 	run := findFuncDeclInFile(t, root, "Run")
@@ -314,7 +314,7 @@ func Run(f sink) {
 	r := httpGetRule("traced.Call({{ . }})")
 	r.Imports = map[string]string{"traced": "fmt"}
 
-	err := newTestPhase().applyCallRule(context.Background(), r, root)
+	_, err := newTestPhase().applyCallRule(context.Background(), r, root)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "alias override conflict")
@@ -1058,7 +1058,7 @@ func TestApplyCallAppendArgs_ParseErrorIsWarnedNotFatal(t *testing.T) {
 	importAliases := ast.ImportAliasMap(file, nil)
 	result := ip.applyCallAppendArgs(r, file, importAliases, nil)
 
-	assert.True(t, result, "a matching call was found even though the append failed")
+	assert.False(t, result, "an append that failed to parse must not count as a change")
 	assert.Len(t, call.Args, 1, "call must be left unmodified when append_args fails to parse")
 }
 
@@ -1099,7 +1099,7 @@ func Run() {
 	ip := newTestPhase()
 	ip.importNames = map[string]string{importPath: "redis"}
 
-	err := ip.applyCallRule(context.Background(), r, root)
+	_, err := ip.applyCallRule(context.Background(), r, root)
 
 	require.NoError(t, err)
 	run := findFuncDeclInFile(t, root, "Run")
@@ -1130,7 +1130,7 @@ func Run() {
 		Replace:      "traced({{ . }})",
 	}
 
-	err := newTestPhase().applyCallRule(context.Background(), r, root)
+	_, err := newTestPhase().applyCallRule(context.Background(), r, root)
 
 	require.NoError(t, err)
 	run := findFuncDeclInFile(t, root, "Run")
@@ -1157,7 +1157,7 @@ func Run() {
 	r := httpGetRule("traced.Call({{ . }})")
 	r.Imports = map[string]string{"traced": "example.com/does/not/exist"}
 
-	err := newTestPhase().applyCallRule(context.Background(), r, root)
+	_, err := newTestPhase().applyCallRule(context.Background(), r, root)
 
 	require.NoError(t, err)
 	run := findFuncDeclInFile(t, root, "Run")
@@ -1194,7 +1194,7 @@ func Run() {
 	ip := newTestPhase()
 	ip.importNames = map[string]string{importPath: "redis"}
 
-	err := ip.applyCallRule(context.Background(), r, root)
+	_, err := ip.applyCallRule(context.Background(), r, root)
 
 	require.NoError(t, err)
 	run := findFuncDeclInFile(t, root, "Run")

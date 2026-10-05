@@ -48,7 +48,7 @@ func (ip *instrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule
 			continue
 		}
 		if shadowErr := checkAliasOverrideShadowing(aliasOverrides, enclosing); shadowErr != nil {
-			return shadowErr
+			return false, shadowErr
 		}
 		litModified, setErr := ip.setLitFields(lit, enclosing, setters, r, aliasOverrides)
 		if setErr != nil {
