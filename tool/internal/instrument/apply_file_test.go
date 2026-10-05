@@ -596,3 +596,45 @@ func TestApplyFileRule_PlatformConstraintMatching(t *testing.T) {
 		assert.NotContains(t, ip.compileArgs, outPath)
 	})
 }
+
+func TestStripDirectiveIgnore_BooleanSimplification(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{name: "ignore && ignore is always true", input: "//go:build ignore && ignore", expected: ""},
+		{name: "X && !ignore is always false", input: "//go:build linux && !ignore", expected: "//go:build ignore"},
+		{
+			name:     "keeps remaining AND terms",
+			input:    "//go:build ignore && linux && amd64",
+			expected: "//go:build linux && amd64",
+		},
+		{name: "ignore || !ignore is always true", input: "//go:build ignore || !ignore", expected: ""},
+		{name: "X || ignore is always true", input: "//go:build linux || ignore", expected: ""},
+		{name: "X || !ignore keeps X", input: "//go:build linux || !ignore", expected: "//go:build linux"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, stripDirectiveIgnore(tt.input))
+		})
+	}
+}
+
+func TestApplyFileRule_InvalidBuildConstraint(t *testing.T) {
+	srcDir := t.TempDir()
+	content := "//go:build linux &&\n\npackage sourcepkg\n"
+	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "helper.go"), []byte(content), 0o644))
+
+	ip := &instrumentPhase{
+		logger:       slog.New(slog.DiscardHandler),
+		workDir:      t.TempDir(),
+		buildContext: &build.Context{GOOS: "linux", GOARCH: "amd64"},
+	}
+	fileRule := &rule.InstFileRule{File: "helper.go", Path: "example.com/mypkg", ResolvedPath: srcDir}
+	fileRule.Name = "test_invalid_constraint"
+
+	err := ip.applyFileRule(t.Context(), fileRule, "targetpkg")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "matching build constraints")
+}
