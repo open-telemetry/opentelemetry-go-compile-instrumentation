@@ -1411,7 +1411,7 @@ func TestGenerateRuntimePerPackageSkipsSelfImportForFileTargets(t *testing.T) {
 		t,
 		sp.generateRuntimePerPackage(t.Context(), []*packages.Package{appPackage}, []*rule.InstRuleSet{externalRule}),
 	)
-	assert.FileExists(t, filepath.Join(setupDebugDir(pkgload.CommandLineArgumentsPackage), otelcRuntimeFile))
+	assert.FileExists(t, filepath.Join(setupDebugDir(pkgload.CommandLineArgumentsPackage), otelcRuntimeFile+".diff"))
 }
 
 // TestRuntimeImportPathFallsBackWhenResolveFails verifies that a file target
