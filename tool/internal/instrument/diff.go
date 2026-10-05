@@ -83,6 +83,9 @@ func (ip *instrumentPhase) applyRulesCapturingDiffsWithRenderer(
 		result.modified = result.modified || res.modified
 		if res.needsGlobals {
 			result.needsGlobals = true
+			if debug {
+				ip.globalsContributors = append(ip.globalsContributors, r.GetName())
+			}
 		}
 		if !capturing {
 			continue
@@ -196,6 +199,84 @@ func (ip *instrumentPhase) writeDiffForDebug(oldFile, newFile string, changes []
 		return
 	}
 	ip.Info("Wrote instrumentation diff", "path", dest, "rules", len(changes))
+}
+
+// WriteAddedSourceDiff writes a unified diff representing a new file
+// introduced entirely by instrumentation, with /dev/null as the original source.
+func WriteAddedSourceDiff(dest, newFile, header string, logger *slog.Logger) {
+	if !DiffDebugEnabled() {
+		return
+	}
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
+
+	newContent, err := os.ReadFile(newFile)
+	if err != nil {
+		removeStaleDiff(dest, logger)
+		logger.Warn("failed to read added file for diff", "path", newFile, "error", err)
+		return
+	}
+
+	diffText, err := unifiedDiff(nil, newContent, "/dev/null", newFile)
+	if err != nil {
+		logger.Warn("failed to generate added source instrumentation diff", "path", newFile, "error", err)
+		return
+	}
+
+	var report strings.Builder
+	if header != "" {
+		_, _ = report.WriteString(header)
+		if !strings.HasSuffix(header, "\n") {
+			_ = report.WriteByte('\n')
+		}
+	}
+	_, _ = report.WriteString(diffText)
+
+	if err = os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		logger.Warn("failed to create directory for instrumentation diff", "dest", dest, "error", err)
+		return
+	}
+	if err = os.WriteFile(dest, []byte(report.String()), 0o600); err != nil {
+		logger.Warn("failed to write instrumentation diff", "dest", dest, "error", err)
+		return
+	}
+	logger.Info("Wrote added source instrumentation diff", "path", dest)
+}
+
+// writeAddedSourceDiffForDebug writes a unified diff representing a new file
+// introduced entirely by instrumentation, with /dev/null as the original source.
+func (ip *instrumentPhase) writeAddedSourceDiffForDebug(newFile, header string) {
+	dest := filepath.Join(ip.debugArtifactDir(), filepath.Base(newFile)+".diff")
+	WriteAddedSourceDiff(dest, newFile, header, ip.logger)
+}
+
+// writeFileRuleDiffForDebug records a generated InstFileRule file in the debug
+// report, attributed to the rule that introduced it.
+func (ip *instrumentPhase) writeFileRuleDiffForDebug(newFile, ruleName string) {
+	header := fmt.Sprintf("=== rule: %s ===", ruleName)
+	ip.writeAddedSourceDiffForDebug(newFile, header)
+}
+
+// FormatGeneratedFileHeader formats the header block for generated instrumentation files,
+// listing the contributing rules in order.
+func FormatGeneratedFileHeader(filename string, contributors []string) string {
+	var header strings.Builder
+	_, _ = fmt.Fprintf(&header, "=== generated instrumentation file: %s ===", filename)
+	if len(contributors) > 0 {
+		_, _ = header.WriteString("\nrules:")
+		for _, c := range contributors {
+			_, _ = fmt.Fprintf(&header, "\n  - %s", c)
+		}
+	}
+	return header.String()
+}
+
+// writeGlobalsDiffForDebug records the generated otelc.globals.go file in the
+// debug report, attributing it to the rules that required its generation.
+func (ip *instrumentPhase) writeGlobalsDiffForDebug(path string, contributors []string) {
+	header := FormatGeneratedFileHeader(otelcGlobalsFile, contributors)
+	ip.writeAddedSourceDiffForDebug(path, header)
 }
 
 func unifiedDiff(a, b []byte, fromFile, toFile string) (string, error) {
