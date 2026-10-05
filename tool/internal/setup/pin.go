@@ -617,12 +617,12 @@ func pinLocked(ctx context.Context, opts PinOptions) (*PinResult, error) {
 		opts.Args = args
 
 		// Use opts.Args to find module directories
-		pkgs, getErr := getBuildPackages(ctx, subcommand, opts.Args)
+		buildPkgs, _, getErr := getBuildPackages(ctx, subcommand, opts.Args)
 		if getErr != nil {
 			return nil, getErr
 		}
 
-		moduleDirs, err = pkgload.FindModuleDirs(ctx, pkgs)
+		moduleDirs, err = pkgload.FindModuleDirs(ctx, buildPkgs)
 		if err != nil {
 			return nil, err
 		}
