@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.opentelemetry.io/otelc/test/testutil"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // TestGlobTargetCallRuleSkipsUnchangedFiles builds with a call rule whose "**"
@@ -115,6 +116,9 @@ wrap_http_get:
 	// reusing an archive from an earlier build.
 	env := append(os.Environ(), "GOCACHE="+t.TempDir())
 	bin := filepath.Join(t.TempDir(), "app")
+	if util.IsWindows() {
+		bin += ".exe"
+	}
 	runOtelcCommand(t, moduleDir, env, otelcPath, "go", "build", "-o", bin, ".")
 
 	out, err := exec.CommandContext(t.Context(), bin).CombinedOutput()
