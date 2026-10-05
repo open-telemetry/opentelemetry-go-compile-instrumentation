@@ -179,13 +179,17 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 		}
 		return true
 	})
+	modified := false
 	for _, call := range matchingCalls {
-		if _, err := appendCallArgs(call, r); err != nil {
+		ok, err := appendCallArgs(call, r)
+		if err != nil {
 			ip.Warn("Failed to append args to call", "error", err)
+			continue
 		}
+		modified = modified || ok
 	}
 
-	return len(matchingCalls) > 0
+	return modified
 }
 
 // appendCallArgs appends the expressions from r.AppendArgs to the call's argument list.

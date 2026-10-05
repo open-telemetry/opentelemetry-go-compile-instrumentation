@@ -215,6 +215,24 @@ func TestApplyCallRule_AppendArgsWithoutMatch(t *testing.T) {
 	assert.False(t, fileImportsPath(file, "example.com/traced"))
 }
 
+func TestApplyCallRule_AppendArgsFailureIsUnmodified(t *testing.T) {
+	// The call matches, but append_args on an ellipsis call needs
+	// variadic_type, so the append fails and the call is left unchanged.
+	call := httpGetCall()
+	call.Ellipsis = true
+	file := makeCallFile(call)
+	r := httpGetRule("")
+	r.AppendArgs = []string{"traced.Context()"}
+	r.Imports = map[string]string{"traced": "example.com/traced"}
+
+	modified, err := newTestPhase().applyCallRule(context.Background(), r, file)
+
+	require.NoError(t, err)
+	require.False(t, modified, "a rule that matched nothing or failed must not report a change")
+	assert.Len(t, call.Args, 1)
+	assert.False(t, fileImportsPath(file, "example.com/traced"))
+}
+
 func TestApplyCallRule_ImportAliasMismatch(t *testing.T) {
 	root := parseFile(t, `package main
 
