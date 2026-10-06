@@ -145,7 +145,7 @@ func (ip *instrumentPhase) applyCallReplace(
 	return true, nil
 }
 
-func (*instrumentPhase) applyCallAppendArgs(
+func (ip *instrumentPhase) applyCallAppendArgs(
 	r *rule.InstCallRule,
 	root *dst.File,
 	importAliases map[string]string,
@@ -333,7 +333,11 @@ func (ip *instrumentPhase) matchesMethodCallRule(call *dst.CallExpr, r *rule.Ins
 
 // logUnresolvedMethodCall logs why a call to a method with the rule's name
 // could not be resolved to a receiver type.
-func (ip *instrumentPhase) logUnresolvedMethodCall(r *rule.InstCallRule, pos token.Position, info *methodCallPackageInfo) {
+func (ip *instrumentPhase) logUnresolvedMethodCall(
+	r *rule.InstCallRule,
+	pos token.Position,
+	info *methodCallPackageInfo,
+) {
 	args := []any{
 		"rule", r.Name, "method", r.FuncName,
 		"file", pos.Filename, "line", pos.Line, "column", pos.Column,
