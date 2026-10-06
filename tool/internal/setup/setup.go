@@ -850,6 +850,7 @@ func hookImports(
 		ctx,
 		packages.NeedName|packages.NeedImports|packages.NeedDeps,
 		buildFlags,
+		false,
 		hookPaths...,
 	)
 	if err != nil {
