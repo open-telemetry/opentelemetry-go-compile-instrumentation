@@ -1650,7 +1650,6 @@ func TestRuntime(t *testing.T) {
 	}
 }
 
-
 func TestHookImportsError(t *testing.T) {
 	matched := []*rule.InstRuleSet{
 		{
