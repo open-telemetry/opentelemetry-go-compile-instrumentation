@@ -58,6 +58,7 @@ func injectedDeps(
 		ctx,
 		packages.NeedName|packages.NeedFiles|packages.NeedImports|packages.NeedDeps,
 		buildFlags,
+		false,
 		hookPaths...,
 	)
 	if err != nil {
@@ -157,7 +158,7 @@ func (sp *setupPhase) matchInjectedDeps(
 	ctx context.Context,
 	matched []*rule.InstRuleSet,
 	deps []*Dependency,
-	moduleDirs map[string]bool,
+	moduleDirs []string,
 	buildFlags []string,
 ) ([]*rule.InstRuleSet, error) {
 	known := make(map[string]bool, len(deps))
