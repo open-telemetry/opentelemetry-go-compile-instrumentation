@@ -293,11 +293,30 @@ func (ip *instrumentPhase) matchesMethodCallRule(call *dst.CallExpr, r *rule.Ins
 
 	pos := ip.parser.FindPosition(sel.Sel)
 	if pos.Filename == "" {
+		ip.Debug("method_call: call has no source position, skipping",
+			"rule", r.Name, "method", r.FuncName)
 		return false
 	}
 
 	importPath, recvType, ok := info.methodReceiver(pos.Filename, pos.Line, pos.Column)
-	return ok && importPath == r.ImportPath && recvType == r.RecvType
+	if !ok {
+		ip.logUnresolvedMethodCall(r, pos, info)
+		return false
+	}
+	return importPath == r.ImportPath && recvType == r.RecvType
+}
+
+// logUnresolvedMethodCall logs why a call to a method with the rule's name
+// could not be resolved to a receiver type.
+func (ip *instrumentPhase) logUnresolvedMethodCall(r *rule.InstCallRule, pos token.Position, info *methodCallPackageInfo) {
+	args := []any{
+		"rule", r.Name, "method", r.FuncName,
+		"file", pos.Filename, "line", pos.Line, "column", pos.Column,
+	}
+	if info.firstTypeError != nil {
+		args = append(args, "first_type_error", info.firstTypeError)
+	}
+	ip.Debug("method_call: call could not be resolved to a receiver type, rule will not match", args...)
 }
 
 // ensureMethodCallInfo type-checks the package at most once.
@@ -347,7 +366,8 @@ type methodCallPosition struct {
 // methodCallPackageInfo is the result of type-checking one package for
 // method_call matching.
 type methodCallPackageInfo struct {
-	selByPos map[methodCallPosition]*types.Selection
+	selByPos       map[methodCallPosition]*types.Selection
+	firstTypeError error
 }
 
 // checkPackageForMethodCalls type-checks files in pkgPath.
@@ -369,13 +389,21 @@ func checkPackageForMethodCalls(
 	info := &types.Info{
 		Selections: make(map[*ast.SelectorExpr]*types.Selection),
 	}
+	var firstTypeError error
 	tcfg := &types.Config{
 		Importer: newExportImporter(fset, cfg.PackageFile, cfg.ImportMap),
-		Error:    func(error) {}, // Type errors are expected and ignored here.
+		Error: func(err error) {
+			if firstTypeError == nil {
+				firstTypeError = err
+			}
+		},
 	}
 	_, _ = tcfg.Check(pkgPath, fset, astFiles, info)
 
-	pi := &methodCallPackageInfo{selByPos: make(map[methodCallPosition]*types.Selection, len(info.Selections))}
+	pi := &methodCallPackageInfo{
+		selByPos:       make(map[methodCallPosition]*types.Selection, len(info.Selections)),
+		firstTypeError: firstTypeError,
+	}
 	for sel, selection := range info.Selections {
 		pos := fset.Position(sel.Sel.Pos())
 		pi.selByPos[methodCallPosition{file: pos.Filename, line: pos.Line, col: pos.Column}] = selection

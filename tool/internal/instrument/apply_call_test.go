@@ -1480,6 +1480,8 @@ func run() {
 	o.Info("hi")
 }
 `)
+	var logs bytes.Buffer
+	ip.logger = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	r := methodCallRule("Logger", "Info", "traced({{ . }})")
 
 	_, err := ip.applyCallRule(context.Background(), r, root)
@@ -1487,6 +1489,8 @@ func run() {
 
 	out := renderFile(t, root)
 	assert.NotContains(t, out, "traced(")
+	assert.Empty(t, logs.String(),
+		"a call that resolves cleanly to a different type is a correct non-match, not a miss to log")
 }
 
 func TestApplyCallRule_MethodCall_NameMismatchSkipsTypeChecking(t *testing.T) {
@@ -1627,6 +1631,78 @@ func (l Logger) Info(msg string) {}
 	assert.False(t, ip.matchesMethodCallRule(call, r))
 }
 
+func TestMatchesMethodCallRule_NoSourcePositionLogsMiss(t *testing.T) {
+	ip, _ := setupMethodCallPhase(t, `package sample
+
+type Logger struct{}
+
+func (l Logger) Info(msg string) {}
+`)
+	var logs bytes.Buffer
+	ip.logger = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	r := methodCallRule("Logger", "Info", "traced({{ . }})")
+
+	call := &dst.CallExpr{
+		Fun: &dst.SelectorExpr{
+			X:   &dst.Ident{Name: "l"},
+			Sel: &dst.Ident{Name: "Info"},
+		},
+	}
+
+	assert.False(t, ip.matchesMethodCallRule(call, r))
+	assert.Contains(t, logs.String(), "no source position")
+}
+
+// findCallByMethodName returns the first *dst.CallExpr in root whose Fun is a
+// selector naming methodName, e.g. recv.methodName(...).
+func findCallByMethodName(root *dst.File, methodName string) *dst.CallExpr {
+	var found *dst.CallExpr
+	dst.Inspect(root, func(n dst.Node) bool {
+		if found != nil {
+			return false
+		}
+		call, ok := n.(*dst.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*dst.SelectorExpr)
+		if !ok || sel.Sel.Name != methodName {
+			return true
+		}
+		found = call
+		return false
+	})
+	return found
+}
+
+func TestMatchesMethodCallRule_UnresolvedReceiverLogsMiss(t *testing.T) {
+	ip, root := setupMethodCallPhase(t, `package sample
+
+type Writer interface {
+	Write(p []byte) (int, error)
+}
+
+type Buffer struct{}
+
+func (b *Buffer) Write(p []byte) (int, error) { return len(p), nil }
+
+func run() {
+	var w Writer = &Buffer{}
+	w.Write(nil)
+}
+`)
+	var logs bytes.Buffer
+	ip.logger = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	r := methodCallRule("*Buffer", "Write", "traced({{ . }})")
+
+	call := findCallByMethodName(root, "Write")
+	require.NotNil(t, call, "did not find Write call via dst")
+
+	assert.False(t, ip.matchesMethodCallRule(call, r),
+		"a call through an interface-typed receiver must not resolve, so it must not match")
+	assert.Contains(t, logs.String(), "could not be resolved to a receiver type")
+}
+
 func TestCheckPackageForMethodCalls_NonexistentFileFails(t *testing.T) {
 	dir := t.TempDir()
 	missing := filepath.Join(dir, "missing.go")
@@ -1673,6 +1749,7 @@ func run() {
 	_, recvType, ok := pi.methodReceiver(filepath.Base(path), line, col)
 	require.True(t, ok, "a type error elsewhere must not prevent resolving unrelated selections")
 	assert.Equal(t, "Logger", recvType)
+	require.Error(t, pi.firstTypeError, "the type error must still be recorded for later diagnostics")
 }
 
 func TestMethodReceiver_PositionNotFound(t *testing.T) {
