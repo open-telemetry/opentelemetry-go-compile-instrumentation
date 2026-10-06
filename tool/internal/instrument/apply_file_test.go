@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 func TestStripBuildIgnoreTag(t *testing.T) {
@@ -637,4 +638,36 @@ func TestApplyFileRule_InvalidBuildConstraint(t *testing.T) {
 	err := ip.applyFileRule(t.Context(), fileRule, "targetpkg")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "matching build constraints")
+}
+
+func TestApplyFileRule_UsesForwardedBuildTags(t *testing.T) {
+	content := "//go:build ignore && enterprise\n\npackage sourcepkg\n\nfunc EnterpriseOnly() {}\n"
+
+	run := func(t *testing.T, buildFlags []string) (string, *instrumentPhase) {
+		t.Helper()
+		t.Setenv("GOFLAGS", "")
+		t.Setenv(util.EnvOtelcBuildFlags, util.EncodeBuildFlags(buildFlags))
+
+		srcDir := t.TempDir()
+		workDir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(srcDir, "helper.go"), []byte(content), 0o644))
+
+		ip := &instrumentPhase{logger: slog.New(slog.DiscardHandler), workDir: workDir}
+		fileRule := &rule.InstFileRule{File: "helper.go", Path: "example.com/mypkg", ResolvedPath: srcDir}
+		fileRule.Name = "test_enterprise_tag"
+		require.NoError(t, ip.applyFileRule(t.Context(), fileRule, "targetpkg"))
+		return filepath.Join(workDir, "otelc.helper.go"), ip
+	}
+
+	t.Run("includes file when the build passes the tag", func(t *testing.T) {
+		outPath, ip := run(t, []string{"-tags=enterprise"})
+		assert.FileExists(t, outPath)
+		assert.Contains(t, ip.compileArgs, outPath)
+	})
+
+	t.Run("skips file when the build does not pass the tag", func(t *testing.T) {
+		outPath, ip := run(t, nil)
+		assert.NoFileExists(t, outPath)
+		assert.NotContains(t, ip.compileArgs, outPath)
+	})
 }

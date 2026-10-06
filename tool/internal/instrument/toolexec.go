@@ -87,7 +87,52 @@ func (ip *instrumentPhase) getBuildContext() *build.Context {
 	if ip.buildContext != nil {
 		return ip.buildContext
 	}
-	return &build.Default
+	// The go command does not forward -tags to the compiler, so start from
+	// build.Default and apply the tags the user passed to the build.
+	bctx := build.Default
+	bctx.BuildTags = activeBuildTags()
+	ip.buildContext = &bctx
+	return ip.buildContext
+}
+
+// activeBuildTags returns the build tags of the current go build.
+func activeBuildTags() []string {
+	return userBuildTags(util.SplitGoflags(os.Getenv("GOFLAGS")), util.GetBuildFlags())
+}
+
+// userBuildTags returns the build tags of the effective -tags flag. Flags from
+// buildFlags (the command line) override GOFLAGS, as they do in the go command.
+func userBuildTags(goflags, buildFlags []string) []string {
+	value, found := lastTagsValue(goflags)
+	if v, ok := lastTagsValue(buildFlags); ok {
+		value, found = v, true
+	}
+	if !found {
+		return nil
+	}
+	return strings.FieldsFunc(strings.Trim(value, `"'`), func(r rune) bool {
+		return r == ',' || r == ' '
+	})
+}
+
+// lastTagsValue returns the value of the last -tags flag in flags, accepting
+// the "-tags value", "-tags=value" and double-dash forms.
+func lastTagsValue(flags []string) (string, bool) {
+	value, found := "", false
+	for i := 0; i < len(flags); i++ {
+		flag := flags[i]
+		if strings.HasPrefix(flag, "--") {
+			flag = flag[1:]
+		}
+		switch {
+		case flag == "-tags" && i+1 < len(flags):
+			value, found = flags[i+1], true
+			i++
+		case strings.HasPrefix(flag, "-tags="):
+			value, found = strings.TrimPrefix(flag, "-tags="), true
+		}
+	}
+	return value, found
 }
 
 // keepForDebug keeps the the file to .otelc-build directory for debugging
@@ -548,6 +593,11 @@ func toolVersionLine(line, rulesHash string) string {
 func markedToolVersion(rawOutput string) string {
 	var rulesHash string
 	if content, err := os.ReadFile(util.GetMatchedRuleFile()); err == nil {
+		// Build tags decide which add_file rule files apply, so a tagged build
+		// must not reuse artifacts compiled without those tags.
+		if tags := activeBuildTags(); len(tags) > 0 {
+			content = append(content, "\ntags="+strings.Join(tags, ",")...)
+		}
 		sum := sha256.Sum256(content)
 		rulesHash = hex.EncodeToString(sum[:8])
 	}
