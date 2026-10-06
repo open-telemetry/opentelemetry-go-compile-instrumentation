@@ -616,3 +616,26 @@ func TestCollectPaths(t *testing.T) {
 		})
 	}
 }
+
+func TestFindNew_MultiAliasSets(t *testing.T) {
+	// A file may import one path under several aliases. ExistingAliasSets
+	// keeps every alias, sorted. ExistingAliases keeps one alias, and the
+	// last spec wins there.
+	root := &dst.File{
+		Decls: []dst.Decl{
+			&dst.GenDecl{
+				Tok: token.IMPORT,
+				Specs: []dst.Spec{
+					&dst.ImportSpec{Name: dst.NewIdent("a"), Path: &dst.BasicLit{Value: `"fmt"`}},
+					&dst.ImportSpec{Name: dst.NewIdent("b"), Path: &dst.BasicLit{Value: `"fmt"`}},
+				},
+			},
+		},
+	}
+
+	result := FindNew(t.Context(), root, map[string]string{"a": "fmt"})
+
+	assert.Equal(t, map[string][]string{"fmt": {"a", "b"}}, result.ExistingAliasSets)
+	assert.Equal(t, "b", result.ExistingAliases["fmt"], "the last spec wins in the single-alias view")
+	assert.Empty(t, result.NewImports, "alias a already names fmt in the file")
+}
