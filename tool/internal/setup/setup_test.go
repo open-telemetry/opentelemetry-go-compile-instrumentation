@@ -1649,3 +1649,16 @@ func TestRuntime(t *testing.T) {
 		})
 	}
 }
+
+
+func TestHookImportsError(t *testing.T) {
+	matched := []*rule.InstRuleSet{
+		{
+			FileRules: []*rule.InstFileRule{{Path: "example.com/app/hooks"}},
+		},
+	}
+	_, err := hookImports(context.Background(), []string{"-C"}, matched)
+	if err == nil {
+		t.Fatal("expected error for malformed build flags, got nil")
+	}
+}
