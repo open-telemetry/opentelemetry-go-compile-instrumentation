@@ -1701,6 +1701,34 @@ func run() {
 	assert.False(t, ok, "an anonymous interface receiver has no named type to report")
 }
 
+func TestMethodReceiver_NamedInterfaceReceiverDoesNotMatch(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempGoFile(t, dir, "sample.go", `package sample
+
+type Writer interface {
+	Write(p []byte) (int, error)
+}
+
+type Buffer struct{}
+
+func (b *Buffer) Write(p []byte) (int, error) { return len(p), nil }
+
+func run() {
+	var w Writer = &Buffer{}
+	w.Write(nil)
+}
+`)
+
+	pi, err := checkPackageForMethodCalls("example.com/sample", []string{path}, imports.ImportConfig{})
+	require.NoError(t, err)
+
+	line, col := selectorPosition(t, path, "Write", 1)
+	_, _, ok := pi.methodReceiver(filepath.Base(path), line, col)
+	assert.False(t, ok,
+		"a call through a named interface-typed receiver must not resolve, since go/types reports "+
+			"the interface as the receiver, not the concrete *Buffer behind it")
+}
+
 // buildFakeArchive writes a minimal cmd/compile-style archive file
 func buildFakeArchive(t *testing.T, dir, name string, data []byte) string {
 	t.Helper()

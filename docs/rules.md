@@ -975,9 +975,9 @@ Examples:
 
 **Understanding method_call Matching:**
 
-`method_call` matches on the call's receiver type using the qualified format: `package/path.Type.Method`, or `package/path.*Type.Method` for a method with a pointer receiver.
+`method_call` matches a call by its receiver type. Use the format `package/path.Type.Method` for a value receiver, or `package/path.*Type.Method` for a pointer receiver. As with the `recv` field on function hook rules, a rule with `*` matches only a pointer receiver, and a rule without `*` matches only a value receiver.
 
-As with the `recv` field on function hook rules, the `*` must be present to match a pointer receiver and absent to match a value receiver — the two do not match each other.
+The `*` and the type name name the method's declared receiver, not the type of the call-site variable. Go takes the address of an addressable value automatically, so a value-typed variable still satisfies a pointer-receiver rule. For example, method `Info` has the declared receiver `*Logger`. The rule `go.uber.org/zap.*Logger.Info` matches the call `l.Info()`, even where `l` has the type `zap.Logger`, not `*zap.Logger`.
 
 Examples:
 
@@ -988,6 +988,18 @@ Examples:
 
 - A same-named method on a different type
 - A pointer-receiver method when the rule omits `*` (or vice versa)
+- A call through an interface-typed receiver (see below)
+
+**Calls through interfaces never match:**
+
+`method_call` matches only a call whose receiver type is concrete. When a call goes through an interface-typed variable, the type checker sees only the interface, not the concrete type that the variable holds at runtime. For this reason, a `method_call` rule never matches a call made through an interface-typed receiver, even when the concrete type would otherwise match.
+
+For example, suppose variable `w` has the static type `io.Writer` and holds a `*bytes.Buffer`:
+
+- The rule `io.Writer.Write` does not match the call `w.Write(p)`. A match here would match every concrete type that implements `io.Writer`, not only calls on an `io.Writer` value.
+- The rule `bytes.*Buffer.Write` also does not match the call `w.Write(p)`. The type checker cannot see the concrete type behind an interface value.
+
+To instrument a method, write the rule against the concrete type, and call that method through a variable of the concrete type, not through an interface.
 
 **Examples:**
 

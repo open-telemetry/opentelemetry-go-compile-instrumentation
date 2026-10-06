@@ -437,6 +437,10 @@ func (pi *methodCallPackageInfo) methodReceiver(file string, line, col int) (str
 		return "", "", false
 	}
 
+	if _, isInterface := named.Underlying().(*types.Interface); isInterface {
+		return "", "", false
+	}
+
 	recvType := named.Obj().Name()
 	if pointer {
 		recvType = "*" + recvType
