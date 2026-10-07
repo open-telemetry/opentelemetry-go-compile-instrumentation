@@ -110,6 +110,16 @@ func classifyOperation(path string) operationType {
 	return opUnknown
 }
 
+// requestTruncatedWarnOnce and responseTruncatedWarnOnce log the
+// size-cap-exceeded warning once per operationType rather than once per
+// request. The message only ever varies by operation name and a constant
+// cap, so there are a handful of distinct messages total; a workload that
+// regularly exceeds the cap would otherwise log on every single request.
+var (
+	requestTruncatedWarnOnce  [opUnknown + 1]sync.Once
+	responseTruncatedWarnOnce [opUnknown + 1]sync.Once
+)
+
 func operationName(op operationType) string {
 	switch op {
 	case opChat:
@@ -180,8 +190,10 @@ func otelMiddleware(
 		var prompts []string
 
 		if truncated {
-			logger.Warn("openai request body exceeded size cap, skipping request attributes",
-				"operation", opName, "cap_bytes", maxRequestBodySize)
+			requestTruncatedWarnOnce[op].Do(func() {
+				logger.Warn("openai request body exceeded size cap, skipping request attributes",
+					"operation", opName, "cap_bytes", maxRequestBodySize)
+			})
 		} else {
 			switch op {
 			case opChat:
@@ -302,8 +314,10 @@ func handleNonStreamingResponse(
 		return
 	}
 	if truncated {
-		logger.Warn("openai response body exceeded size cap, skipping response attributes",
-			"operation", operationName(op), "cap_bytes", maxResponseBodySize)
+		responseTruncatedWarnOnce[op].Do(func() {
+			logger.Warn("openai response body exceeded size cap, skipping response attributes",
+				"operation", operationName(op), "cap_bytes", maxResponseBodySize)
+		})
 		return
 	}
 
