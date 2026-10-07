@@ -1702,6 +1702,35 @@ func run() {
 	assert.Contains(t, logs.String(), "could not be resolved to a receiver type")
 }
 
+func TestMatchesMethodCallRule_MissLogsFirstTypeError(t *testing.T) {
+	// undefinedFn makes the package check record a firstTypeError while
+	// still resolving the rest of the package. The call l.Info cannot
+	// resolve because l is undeclared, so the miss log must carry the
+	// recorded type error.
+	ip, root := setupMethodCallPhase(t, `package sample
+
+type Logger struct{}
+
+func (l Logger) Info(msg string) {}
+
+func run() {
+	undefinedFn()
+	l.Info("hi")
+}
+`)
+	var logs bytes.Buffer
+	ip.logger = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	r := methodCallRule("Logger", "Info", "traced({{ . }})")
+
+	call := findCallByMethodName(root, "Info")
+	require.NotNil(t, call, "did not find Info call via dst")
+
+	assert.False(t, ip.matchesMethodCallRule(call, r))
+	assert.Contains(t, logs.String(), "could not be resolved to a receiver type")
+	assert.Contains(t, logs.String(), "first_type_error")
+	assert.Contains(t, logs.String(), "undefined")
+}
+
 func TestCheckPackageForMethodCalls_NonexistentFileFails(t *testing.T) {
 	dir := t.TempDir()
 	missing := filepath.Join(dir, "missing.go")

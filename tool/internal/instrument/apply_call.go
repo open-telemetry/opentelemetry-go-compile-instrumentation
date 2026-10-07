@@ -419,6 +419,11 @@ func checkPackageForMethodCalls(
 		Selections: make(map[*ast.SelectorExpr]*types.Selection),
 	}
 	var firstTypeError error
+	// Sizes is nil, so go/types uses SizesFor("gc", "amd64") — unsafe sizing
+	// is checked with amd64 sizes on every other architecture. Mismatches only
+	// surface as type errors, which degrade method_call matching, never break
+	// the build. Set Sizes explicitly if the setup phase learns the target
+	// GOARCH.
 	tcfg := &types.Config{
 		Importer: newExportImporter(fset, cfg.PackageFile, cfg.ImportMap),
 		Error: func(err error) {

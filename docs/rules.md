@@ -979,6 +979,8 @@ Examples:
 
 The `*` and the type name name the method's declared receiver, not the type of the call-site variable. Go takes the address of an addressable value automatically, so a value-typed variable still satisfies a pointer-receiver rule. For example, method `Info` has the declared receiver `*Logger`. The rule `go.uber.org/zap.*Logger.Info` matches the call `l.Info()`, even where `l` has the type `zap.Logger`, not `*zap.Logger`.
 
+The same applies to methods promoted from an embedded type: the rule names the type that *declares* the method, not the struct the call is made on. For example, `Embedder` embeds `Logger`, and `Logger` declares `Info`; the rule `…/Logger.Info` matches `e.Info()`, and a rule for `…/Embedder.Info` does not match.
+
 Examples:
 
 - `go.uber.org/zap.*Logger.Info` matches `logger.Info(...)` where `logger` has a pointer-receiver `*zap.Logger`
