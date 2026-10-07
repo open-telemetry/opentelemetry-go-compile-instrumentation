@@ -109,3 +109,16 @@ amqp_hook_reject:
         before: BeforeReject
         after: AfterReject
         path: "go.opentelemetry.io/otelc/instrumentation/github.com/rabbitmq/amqp091-go"
+
+# Hooked on shutdown, not Close; see the README's hook table for why.
+amqp_hook_shutdown:
+  target: github.com/rabbitmq/amqp091-go
+  version: v1.9.0
+  where:
+    func: shutdown
+    recv: "*Channel"
+  do:
+    - inject_hooks:
+        before: BeforeShutdown
+        after: AfterShutdown
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/rabbitmq/amqp091-go"
