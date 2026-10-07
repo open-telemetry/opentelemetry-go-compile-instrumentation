@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -559,6 +560,7 @@ func TestOtelMiddleware_StreamingResponse(t *testing.T) {
 // silent.
 func TestOtelMiddleware_ResponseBodyTruncated(t *testing.T) {
 	sr := setupTestTracer(t)
+	responseTruncatedWarnOnce = [opUnknown + 1]sync.Once{}
 
 	var logBuf bytes.Buffer
 	origLogger := logger
@@ -616,6 +618,7 @@ func TestOtelMiddleware_ResponseBodyTruncated(t *testing.T) {
 // body.
 func TestOtelMiddleware_RequestBodyTruncated(t *testing.T) {
 	sr := setupTestTracer(t)
+	requestTruncatedWarnOnce = [opUnknown + 1]sync.Once{}
 
 	var logBuf bytes.Buffer
 	origLogger := logger
@@ -661,6 +664,41 @@ func TestOtelMiddleware_RequestBodyTruncated(t *testing.T) {
 	assertInt64Attribute(t, attrs, "gen_ai.usage.input_tokens", 7)
 	assert.Contains(t, logBuf.String(), "request body exceeded size cap",
 		"a truncated request must be logged instead of silently dropped")
+}
+
+// TestOtelMiddleware_TruncatedBodyWarnsOncePerOperation covers a workload
+// that regularly exceeds the cap: it must not log on every single request,
+// only once for the operation, so a noisy caller doesn't flood the logs.
+func TestOtelMiddleware_TruncatedBodyWarnsOncePerOperation(t *testing.T) {
+	setupTestTracer(t)
+	requestTruncatedWarnOnce = [opUnknown + 1]sync.Once{}
+
+	var logBuf bytes.Buffer
+	origLogger := logger
+	t.Cleanup(func() { logger = origLogger })
+	logger = slog.New(slog.NewJSONHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	middleware := OtelMiddleware()
+	padding := strings.Repeat("x", maxRequestBodySize)
+	oversized := `{"model":"gpt-4","padding":"` + padding + `"}`
+	next := func(r *http.Request) (*http.Response, error) {
+		_, _ = io.ReadAll(r.Body)
+		return &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"model":"gpt-4","choices":[]}`))),
+		}, nil
+	}
+
+	for i := 0; i < 3; i++ {
+		req, _ := http.NewRequest("POST", "http://api.openai.com/v1/chat/completions",
+			io.NopCloser(strings.NewReader(oversized)))
+		_, err := middleware(req, next)
+		require.NoError(t, err)
+	}
+
+	count := strings.Count(logBuf.String(), "request body exceeded size cap")
+	assert.Equal(t, 1, count, "a workload that keeps exceeding the cap must warn once, not on every request")
 }
 
 func TestOtelMiddleware_AzurePath(t *testing.T) {
