@@ -796,12 +796,19 @@ func hookImports(
 	}
 
 	result := make(map[string]map[string]bool, len(pkgs))
+	var loadErr error
 	for _, hook := range pkgs {
 		deps := make(map[string]bool)
 		packages.Visit([]*packages.Package{hook}, nil, func(p *packages.Package) {
+			if len(p.Errors) > 0 && loadErr == nil {
+				loadErr = ex.Newf("loading package %q: %v", p.PkgPath, p.Errors[0])
+			}
 			deps[p.PkgPath] = true
 		})
 		result[hook.PkgPath] = deps
+	}
+	if loadErr != nil {
+		return nil, loadErr
 	}
 	return result, nil
 }
