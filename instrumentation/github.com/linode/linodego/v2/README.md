@@ -15,7 +15,7 @@ Client configuration helpers (`SetToken`, `SetBaseURL`, …) are not instrumente
 ### Metrics
 
 - **`linodego.client.operation.duration`** (histogram, seconds) — public API method latency.
-- Labels (moderate cardinality only): `server.address`, `code.function.name`, `http.response.status_code` (when known).
+- Labels (moderate cardinality only): `server.address`, `code.function.name`, `http.response.status_code` (when known), `error.type` (on failures, matching the operation span).
 - **Not** labeled by URL paths that embed resource IDs (those stay on spans).
 - Per-request HTTP duration is left to net/http instrumentation / request spans.
 

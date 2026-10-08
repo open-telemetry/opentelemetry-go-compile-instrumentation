@@ -176,14 +176,16 @@ func NewMetrics(meter metric.Meter) Metrics {
 //   - server.address — fixed default host
 //   - code.function.name — public Client method (finite API surface, ~hundreds)
 //   - http.response.status_code — when known (HTTP status range)
+//   - error.type — on failures (HTTP status code or Go error type)
 //
 // Omitted (unbounded / path IDs):
 //   - url.path / raw endpoints like "linode/instances/123"
 //   - resource UIDs, request IDs, etc.
 //
 // Per-request HTTP method/path detail stays on spans (and optional net/http metrics).
-func MetricAttributes(operation string, statusCode int) []attribute.KeyValue {
-	attrs := make([]attribute.KeyValue, 0, 3)
+func MetricAttributes(operation string, statusCode int, errorType string) []attribute.KeyValue {
+	const maxAttributes = 4
+	attrs := make([]attribute.KeyValue, 0, maxAttributes)
 	attrs = append(attrs, semconv.ServerAddress(DefaultServerAddress))
 	if op := strings.TrimSpace(operation); op != "" {
 		attrs = append(attrs, semconv.CodeFunctionName(op))
@@ -191,13 +193,27 @@ func MetricAttributes(operation string, statusCode int) []attribute.KeyValue {
 	if statusCode > 0 {
 		attrs = append(attrs, semconv.HTTPResponseStatusCode(statusCode))
 	}
+	if errorType != "" {
+		attrs = append(attrs, semconv.ErrorTypeKey.String(errorType))
+	}
 	return attrs
 }
 
 // RecordOperationDuration records public API method duration in seconds.
-func (m Metrics) RecordOperationDuration(ctx context.Context, seconds float64, operation string, statusCode int) {
+// errorType is the span's error.type value, or empty for a successful operation.
+func (m Metrics) RecordOperationDuration(
+	ctx context.Context,
+	seconds float64,
+	operation string,
+	statusCode int,
+	errorType string,
+) {
 	if m.operationDuration == nil {
 		return
 	}
-	m.operationDuration.Record(ctx, seconds, metric.WithAttributes(MetricAttributes(operation, statusCode)...))
+	m.operationDuration.Record(
+		ctx,
+		seconds,
+		metric.WithAttributes(MetricAttributes(operation, statusCode, errorType)...),
+	)
 }

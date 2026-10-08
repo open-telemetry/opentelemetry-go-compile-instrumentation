@@ -258,7 +258,7 @@ func TestPublicMethodHooks_Error(t *testing.T) {
 	assert.Equal(t, "404", attrs["error.type"])
 	metricAttrs := requireOperationMetricAttrs(t, reader)
 	assert.Equal(t, int64(404), metricAttrs["http.response.status_code"])
-	assert.NotContains(t, metricAttrs, "error.type")
+	assert.Equal(t, attrs["error.type"], metricAttrs["error.type"])
 }
 
 func TestPublicMethodHooks_PlainError(t *testing.T) {
@@ -282,7 +282,7 @@ func TestPublicMethodHooks_PlainError(t *testing.T) {
 	assert.NotContains(t, attrs, "http.response.status_code")
 	metricAttrs := requireOperationMetricAttrs(t, reader)
 	assert.NotContains(t, metricAttrs, "http.response.status_code")
-	assert.NotContains(t, metricAttrs, "error.type")
+	assert.Equal(t, attrs["error.type"], metricAttrs["error.type"])
 }
 
 func TestPublicMethodHooks_NonErrorHTTPStatusOmitsErrorType(t *testing.T) {
