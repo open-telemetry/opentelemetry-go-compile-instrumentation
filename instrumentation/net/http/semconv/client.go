@@ -145,12 +145,13 @@ func (n HTTPClient) RequestTraceAttrs(req *http.Request) []attribute.KeyValue {
 
 	var u string
 	if req.URL != nil {
-		// Remove any username/password info that may be in the URL.
-		userinfo := req.URL.User
-		req.URL.User = nil
-		u = req.URL.String()
-		// Restore any username/password info that was removed.
-		req.URL.User = userinfo
+		// Redact on a copy: writing to the caller's URL would be visible to any
+		// other goroutine holding the same request. Removes userinfo and sensitive
+		// query values per the URL semantic conventions.
+		redacted := *req.URL
+		redacted.User = nil
+		redacted.RawQuery = redactQuery(redacted.RawQuery)
+		u = redacted.String()
 	}
 	attrs = append(attrs, semconv.URLFull(u))
 
