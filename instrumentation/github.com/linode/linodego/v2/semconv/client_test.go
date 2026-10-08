@@ -154,6 +154,7 @@ func TestMetricAttributes_ModerateCardinality(t *testing.T) {
 	assert.Equal(t, DefaultServerAddress, m["server.address"])
 	assert.Equal(t, "GetInstance", m["code.function.name"])
 	assert.Equal(t, int64(404), m["http.response.status_code"])
+	assert.NotContains(t, m, "error.type")
 
 	// Unbounded path-style labels must not appear on metrics.
 	_, hasPath := m["url.path"]
