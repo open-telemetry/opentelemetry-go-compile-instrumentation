@@ -30,6 +30,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
+	otelsemconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 	"go.opentelemetry.io/otel/trace"
 
 	"go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2/semconv"
@@ -135,15 +136,7 @@ func AfterDoRequest(ictx hook.HookContext, err error) {
 	defer span.End()
 
 	if err != nil {
-		span.RecordError(err)
-		if code, ok := semconv.StatusCodeFromError(err); ok {
-			span.SetAttributes(semconv.LinodegoErrorTraceAttrs(err)...)
-			if sc, desc := semconv.HTTPClientStatus(code); sc != codes.Unset {
-				span.SetStatus(sc, desc)
-			}
-		} else {
-			span.SetStatus(codes.Error, err.Error())
-		}
+		finishSpanWithError(span, err)
 		logger.Debug("AfterDoRequest error", "error", err)
 	}
 
@@ -163,6 +156,7 @@ func finishSpanWithError(span trace.Span, err error) int {
 		}
 		return code
 	}
+	span.SetAttributes(otelsemconv.ErrorType(err))
 	span.SetStatus(codes.Error, err.Error())
 	return 0
 }
