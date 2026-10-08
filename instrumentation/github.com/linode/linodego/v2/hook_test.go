@@ -190,7 +190,7 @@ func TestBeforeAfterDoRequest_PlainError(t *testing.T) {
 	assert.Equal(t, codes.Error, got.Status().Code)
 	assert.Equal(t, "network down", got.Status().Description)
 	attrs := attrMap(got.Attributes())
-	assert.NotContains(t, attrs, "error.type")
+	assert.Equal(t, "*errors.errorString", attrs["error.type"])
 }
 
 func TestBeforeDoRequest_Disabled(t *testing.T) {
@@ -273,7 +273,7 @@ func TestPublicMethodHooks_PlainError(t *testing.T) {
 	assert.Equal(t, codes.Error, got.Status().Code)
 	assert.Equal(t, "network down", got.Status().Description)
 	attrs := attrMap(got.Attributes())
-	assert.NotContains(t, attrs, "error.type")
+	assert.Equal(t, "*errors.errorString", attrs["error.type"])
 	assert.NotContains(t, attrs, "http.response.status_code")
 }
 
