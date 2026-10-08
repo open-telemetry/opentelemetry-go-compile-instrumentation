@@ -350,20 +350,14 @@ func (ip *instrumentPhase) applyIgnoredCallSites(ctx context.Context, root *dst.
 		return false, nil
 	}
 
-	var blocks []*dst.BlockStmt
-	dst.Inspect(root, func(n dst.Node) bool {
-		if block, ok := n.(*dst.BlockStmt); ok {
-			blocks = append(blocks, block)
-		}
-		return true
-	})
+	stmtLists := findStmtLists(root)
 
 	selfPackage := ip.isSuppressHooksPackage()
 
 	bracketed := 0
 	nextFlag := 0
-	for _, block := range blocks {
-		n, err := bracketMarkedStmts(block, marked, selfPackage, &nextFlag)
+	for _, list := range stmtLists {
+		n, err := bracketMarkedStmts(list, marked, selfPackage, &nextFlag)
 		if err != nil {
 			return false, err
 		}
@@ -410,24 +404,45 @@ func (ip *instrumentPhase) markIgnoreConsumed(stmt dst.Stmt) {
 	ip.consumedIgnoreStmts[stmt] = true
 }
 
-// bracketMarkedStmts brackets every statement in block.List that appears in
+// findStmtLists returns a pointer to every statement list in root: the body
+// of each block, plus the body of each switch case and select case. A
+// //otelc:ignore comment can sit above a call in any of these lists.
+func findStmtLists(root *dst.File) []*[]dst.Stmt {
+	var lists []*[]dst.Stmt
+	dst.Inspect(root, func(n dst.Node) bool {
+		switch node := n.(type) {
+		case *dst.BlockStmt:
+			lists = append(lists, &node.List)
+		case *dst.CaseClause:
+			lists = append(lists, &node.Body)
+		case *dst.CommClause:
+			lists = append(lists, &node.Body)
+		}
+		return true
+	})
+	return lists
+}
+
+// bracketMarkedStmts brackets every statement in *list that appears in
 // marked and reports how many it bracketed. selfPackage decides whether the
 // inserted calls need a "runtime" qualifier. nextFlag numbers each inserted
 // guard variable so that two bracketed statements in the same function never
-// collide; callers share one counter across every block in the file.
+// collide; callers share one counter across every list in the file.
 func bracketMarkedStmts(
-	block *dst.BlockStmt,
+	list *[]dst.Stmt,
 	marked map[dst.Stmt]bool,
 	selfPackage bool,
 	nextFlag *int,
 ) (int, error) {
+	stmts := *list
 	bracketed := 0
-	for i := 0; i < len(block.List); i++ {
-		stmt := block.List[i]
+	for i := 0; i < len(stmts); i++ {
+		stmt := stmts[i]
 		if !marked[stmt] {
 			continue
 		}
 		if hasEscapingControlFlow(stmt) {
+			*list = stmts
 			return 0, ex.Newf(
 				"the statement above //otelc:ignore returns, breaks, continues, or jumps out of " +
 					"its enclosing block; the suppression placed after it would not always run. " +
@@ -436,12 +451,13 @@ func bracketMarkedStmts(
 		}
 		before, after := suppressHooksStmts(selfPackage, *nextFlag)
 		*nextFlag++
-		block.List = append(block.List[:i], append(before, block.List[i:]...)...)
+		stmts = append(stmts[:i], append(before, stmts[i:]...)...)
 		i += len(before)
-		block.List = append(block.List[:i+1], append(after, block.List[i+1:]...)...)
+		stmts = append(stmts[:i+1], append(after, stmts[i+1:]...)...)
 		i += len(after)
 		bracketed++
 	}
+	*list = stmts
 	return bracketed, nil
 }
 

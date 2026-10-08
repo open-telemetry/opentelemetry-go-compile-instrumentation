@@ -1338,7 +1338,7 @@ func Run() {
 	assert.NotContains(t, src, "SuppressHooks")
 }
 
-func TestApplyIgnoredCallSites_SwitchCaseBodyIsNeverBracketed(t *testing.T) {
+func TestApplyIgnoredCallSites_BracketsSwitchCaseBody(t *testing.T) {
 	root := parseFile(t, `package main
 
 func Run() {
@@ -1356,8 +1356,30 @@ func hooked() {}
 	require.NoError(t, err)
 
 	src := renderFile(t, root)
-	assert.NotContains(t, src, "SuppressHooks")
-	assert.NotContains(t, src, `"runtime"`)
+	assert.Contains(t, src, "runtime.SuppressHooks()")
+	assert.Contains(t, src, `"runtime"`)
+}
+
+func TestApplyIgnoredCallSites_BracketsSelectCommBody(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run(ch chan int) {
+	select {
+	case <-ch:
+		//otelc:ignore
+		hooked()
+	}
+}
+
+func hooked() {}
+`)
+
+	_, err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+	require.NoError(t, err)
+
+	src := renderFile(t, root)
+	assert.Contains(t, src, "runtime.SuppressHooks()")
+	assert.Contains(t, src, `"runtime"`)
 }
 
 func TestMarkIgnoreConsumed_NilStmtIsANoop(t *testing.T) {
