@@ -668,10 +668,14 @@ func TestOtelMiddleware_RequestBodyTruncated(t *testing.T) {
 
 // TestOtelMiddleware_TruncatedBodyWarnsOncePerOperation covers a workload
 // that regularly exceeds the cap: it must not log on every single request,
-// only once for the operation, so a noisy caller doesn't flood the logs.
+// only once per operation, so a noisy caller doesn't flood the logs. It also
+// guards against a single package-wide sync.Once: a second, distinct
+// operation must still get its own warning, and the request and response
+// warnings must be independent of each other since they use separate arrays.
 func TestOtelMiddleware_TruncatedBodyWarnsOncePerOperation(t *testing.T) {
 	setupTestTracer(t)
 	requestTruncatedWarnOnce = [opUnknown + 1]sync.Once{}
+	responseTruncatedWarnOnce = [opUnknown + 1]sync.Once{}
 
 	var logBuf bytes.Buffer
 	origLogger := logger
@@ -679,9 +683,10 @@ func TestOtelMiddleware_TruncatedBodyWarnsOncePerOperation(t *testing.T) {
 	logger = slog.New(slog.NewJSONHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	middleware := OtelMiddleware()
-	padding := strings.Repeat("x", maxRequestBodySize)
-	oversized := `{"model":"gpt-4","padding":"` + padding + `"}`
-	next := func(r *http.Request) (*http.Response, error) {
+	requestPadding := strings.Repeat("x", maxRequestBodySize)
+	oversizedChatReq := `{"model":"gpt-4","padding":"` + requestPadding + `"}`
+	oversizedEmbeddingReq := `{"model":"text-embedding-3-small","padding":"` + requestPadding + `"}`
+	normalResp := func(r *http.Request) (*http.Response, error) {
 		_, _ = io.ReadAll(r.Body)
 		return &http.Response{
 			StatusCode: 200,
@@ -690,15 +695,51 @@ func TestOtelMiddleware_TruncatedBodyWarnsOncePerOperation(t *testing.T) {
 		}, nil
 	}
 
+	// Three oversized chat requests must warn once for chat, not three times.
 	for i := 0; i < 3; i++ {
 		req, _ := http.NewRequest("POST", "http://api.openai.com/v1/chat/completions",
-			io.NopCloser(strings.NewReader(oversized)))
-		_, err := middleware(req, next)
+			io.NopCloser(strings.NewReader(oversizedChatReq)))
+		_, err := middleware(req, normalResp)
 		require.NoError(t, err)
 	}
 
-	count := strings.Count(logBuf.String(), "request body exceeded size cap")
-	assert.Equal(t, 1, count, "a workload that keeps exceeding the cap must warn once, not on every request")
+	// A distinct operation (embeddings) must still get its own warning. If
+	// the implementation used a single package-wide sync.Once instead of one
+	// per operation, this would be silently swallowed by the chat warning
+	// above.
+	embedReq, _ := http.NewRequest("POST", "http://api.openai.com/v1/embeddings",
+		io.NopCloser(strings.NewReader(oversizedEmbeddingReq)))
+	_, err := middleware(embedReq, normalResp)
+	require.NoError(t, err)
+
+	// An oversized response for chat must still warn even though the chat
+	// request warning already fired above: request and response truncation
+	// use separate sync.Once arrays and must not suppress each other.
+	normalChatReq, _ := http.NewRequest("POST", "http://api.openai.com/v1/chat/completions",
+		io.NopCloser(strings.NewReader(`{"model":"gpt-4"}`)))
+	oversizedResp := func(r *http.Request) (*http.Response, error) {
+		_, _ = io.ReadAll(r.Body)
+		padding := strings.Repeat("x", maxResponseBodySize)
+		body := `{"id":"chatcmpl-big","model":"gpt-4","choices":[],"padding":"` + padding + `"}`
+		return &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}, nil
+	}
+	_, err = middleware(normalChatReq, oversizedResp)
+	require.NoError(t, err)
+
+	requestChatWarns := strings.Count(logBuf.String(),
+		`"msg":"openai request body exceeded size cap, skipping request attributes","operation":"chat"`)
+	requestEmbedWarns := strings.Count(logBuf.String(),
+		`"msg":"openai request body exceeded size cap, skipping request attributes","operation":"embeddings"`)
+	responseChatWarns := strings.Count(logBuf.String(),
+		`"msg":"openai response body exceeded size cap, skipping response attributes","operation":"chat"`)
+
+	assert.Equal(t, 1, requestChatWarns, "three oversized chat requests must warn once, not three times")
+	assert.Equal(t, 1, requestEmbedWarns, "a distinct operation must still get its own warning")
+	assert.Equal(t, 1, responseChatWarns, "the response warning must fire independently of the request warning for the same operation")
 }
 
 func TestOtelMiddleware_AzurePath(t *testing.T) {
