@@ -1147,7 +1147,17 @@ func Run() {
 	assert.Contains(
 		t,
 		src,
-		"runtime.SuppressHooks()\n\t//otelc:ignore\n\thttp.Get(\"ignored\")\n\truntime.UnsuppressHooks()",
+		"runtime.SuppressHooks()\n"+
+			"\totelcIgnoreDone0 := false\n"+
+			"\tdefer func() {\n"+
+			"\t\tif !otelcIgnoreDone0 {\n"+
+			"\t\t\truntime.UnsuppressHooks()\n"+
+			"\t\t}\n"+
+			"\t}()\n"+
+			"\t//otelc:ignore\n"+
+			"\thttp.Get(\"ignored\")\n"+
+			"\totelcIgnoreDone0 = true\n"+
+			"\truntime.UnsuppressHooks()",
 	)
 	assert.NotContains(t, src, "runtime.SuppressHooks()\n\thttp.Get(\"kept\")")
 }
@@ -1187,7 +1197,21 @@ func hooked() {}
 	require.NoError(t, err)
 
 	src := renderFile(t, root)
-	assert.Contains(t, src, "runtime.SuppressHooks()\n\t\t//otelc:ignore\n\t\thooked()\n\t\truntime.UnsuppressHooks()")
+	assert.Contains(
+		t,
+		src,
+		"runtime.SuppressHooks()\n"+
+			"\t\totelcIgnoreDone0 := false\n"+
+			"\t\tdefer func() {\n"+
+			"\t\t\tif !otelcIgnoreDone0 {\n"+
+			"\t\t\t\truntime.UnsuppressHooks()\n"+
+			"\t\t\t}\n"+
+			"\t\t}()\n"+
+			"\t\t//otelc:ignore\n"+
+			"\t\thooked()\n"+
+			"\t\totelcIgnoreDone0 = true\n"+
+			"\t\truntime.UnsuppressHooks()",
+	)
 }
 
 func TestApplyIgnoredCallSites_RejectsBareReturn(t *testing.T) {
@@ -1245,6 +1269,49 @@ func hooked() bool       { return false }
 
 	src := renderFile(t, root)
 	assert.Contains(t, src, "runtime.SuppressHooks()")
+}
+
+func TestApplyIgnoredCallSites_PreservesAssignmentScope(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run() {
+	//otelc:ignore
+	v, err := hooked()
+	_ = v
+	_ = err
+}
+
+func hooked() (int, error) { return 0, nil }
+`)
+
+	_, err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+	require.NoError(t, err)
+
+	src := renderFile(t, root)
+	assert.Contains(t, src, "v, err := hooked()")
+	assert.Contains(t, src, "_ = v")
+	assert.Contains(t, src, "_ = err")
+}
+
+func TestApplyIgnoredCallSites_DistinctGuardNamesAcrossStatements(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run() {
+	//otelc:ignore
+	hooked()
+	//otelc:ignore
+	hooked()
+}
+
+func hooked() {}
+`)
+
+	_, err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+	require.NoError(t, err)
+
+	src := renderFile(t, root)
+	assert.Contains(t, src, "otelcIgnoreDone0")
+	assert.Contains(t, src, "otelcIgnoreDone1")
 }
 
 func TestApplyIgnoredCallSites_SkipsStatementAlreadyConsumedByWrapCall(t *testing.T) {
@@ -1316,7 +1383,21 @@ func hooked() {}
 	require.NoError(t, err)
 
 	src := renderFile(t, root)
-	assert.Contains(t, src, "SuppressHooks()\n\t//otelc:ignore\n\thooked()\n\tUnsuppressHooks()")
+	assert.Contains(
+		t,
+		src,
+		"SuppressHooks()\n"+
+			"\totelcIgnoreDone0 := false\n"+
+			"\tdefer func() {\n"+
+			"\t\tif !otelcIgnoreDone0 {\n"+
+			"\t\t\tUnsuppressHooks()\n"+
+			"\t\t}\n"+
+			"\t}()\n"+
+			"\t//otelc:ignore\n"+
+			"\thooked()\n"+
+			"\totelcIgnoreDone0 = true\n"+
+			"\tUnsuppressHooks()",
+	)
 	assert.NotContains(t, src, `"runtime"`)
 }
 
@@ -1337,7 +1418,21 @@ func hooked() {}
 	require.NoError(t, err)
 
 	src := renderFile(t, root)
-	assert.Contains(t, src, "runtime.SuppressHooks()\n\t//otelc:ignore\n\thooked()\n\truntime.UnsuppressHooks()")
+	assert.Contains(
+		t,
+		src,
+		"runtime.SuppressHooks()\n"+
+			"\totelcIgnoreDone0 := false\n"+
+			"\tdefer func() {\n"+
+			"\t\tif !otelcIgnoreDone0 {\n"+
+			"\t\t\truntime.UnsuppressHooks()\n"+
+			"\t\t}\n"+
+			"\t}()\n"+
+			"\t//otelc:ignore\n"+
+			"\thooked()\n"+
+			"\totelcIgnoreDone0 = true\n"+
+			"\truntime.UnsuppressHooks()",
+	)
 	assert.Contains(t, src, `"runtime"`)
 }
 

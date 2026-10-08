@@ -5,6 +5,8 @@ package instrument
 
 import (
 	"context"
+	"fmt"
+	"go/token"
 
 	"github.com/dave/dst"
 	"github.com/dave/dst/dstutil"
@@ -359,8 +361,9 @@ func (ip *instrumentPhase) applyIgnoredCallSites(ctx context.Context, root *dst.
 	selfPackage := ip.isSuppressHooksPackage()
 
 	bracketed := 0
+	nextFlag := 0
 	for _, block := range blocks {
-		n, err := bracketMarkedStmts(block, marked, selfPackage)
+		n, err := bracketMarkedStmts(block, marked, selfPackage, &nextFlag)
 		if err != nil {
 			return false, err
 		}
@@ -409,8 +412,15 @@ func (ip *instrumentPhase) markIgnoreConsumed(stmt dst.Stmt) {
 
 // bracketMarkedStmts brackets every statement in block.List that appears in
 // marked and reports how many it bracketed. selfPackage decides whether the
-// inserted calls need a "runtime" qualifier.
-func bracketMarkedStmts(block *dst.BlockStmt, marked map[dst.Stmt]bool, selfPackage bool) (int, error) {
+// inserted calls need a "runtime" qualifier. nextFlag numbers each inserted
+// guard variable so that two bracketed statements in the same function never
+// collide; callers share one counter across every block in the file.
+func bracketMarkedStmts(
+	block *dst.BlockStmt,
+	marked map[dst.Stmt]bool,
+	selfPackage bool,
+	nextFlag *int,
+) (int, error) {
 	bracketed := 0
 	for i := 0; i < len(block.List); i++ {
 		stmt := block.List[i]
@@ -424,15 +434,45 @@ func bracketMarkedStmts(block *dst.BlockStmt, marked map[dst.Stmt]bool, selfPack
 					"Assign the call's result to a variable in its own statement, then use the " +
 					"variable in the control-flow statement on its own, unannotated line")
 		}
-		inc := ast.ExprStmt(suppressHooksCall(suppressHooksFuncName, selfPackage))
-		dec := ast.ExprStmt(suppressHooksCall(unsuppressHooksFuncName, selfPackage))
-		block.List = append(block.List[:i], append([]dst.Stmt{inc}, block.List[i:]...)...)
-		i++
-		block.List = append(block.List[:i+1], append([]dst.Stmt{dec}, block.List[i+1:]...)...)
-		i++
+		before, after := suppressHooksStmts(selfPackage, *nextFlag)
+		*nextFlag++
+		block.List = append(block.List[:i], append(before, block.List[i:]...)...)
+		i += len(before)
+		block.List = append(block.List[:i+1], append(after, block.List[i+1:]...)...)
+		i += len(after)
 		bracketed++
 	}
 	return bracketed, nil
+}
+
+// suppressHooksStmts returns the statements to put before and after an
+// ignored call to suppress any hooks around it.
+//
+// A deferred statement also turns suppression off if the call panics.
+func suppressHooksStmts(selfPackage bool, id int) (before, after []dst.Stmt) {
+	flag := fmt.Sprintf("otelcIgnoreDone%d", id)
+
+	fallback := &dst.IfStmt{
+		Cond: &dst.UnaryExpr{Op: token.NOT, X: ast.Ident(flag)},
+		Body: ast.Block(ast.ExprStmt(suppressHooksCall(unsuppressHooksFuncName, selfPackage))),
+	}
+	deferFallback := ast.DeferStmt(&dst.CallExpr{
+		Fun: &dst.FuncLit{
+			Type: &dst.FuncType{Params: &dst.FieldList{}},
+			Body: ast.BlockStmts(fallback),
+		},
+	})
+
+	before = []dst.Stmt{
+		ast.ExprStmt(suppressHooksCall(suppressHooksFuncName, selfPackage)),
+		ast.DefineStmts([]dst.Expr{ast.Ident(flag)}, []dst.Expr{ast.BoolFalse()}),
+		deferFallback,
+	}
+	after = []dst.Stmt{
+		ast.AssignStmt(ast.Ident(flag), ast.BoolTrue()),
+		ast.ExprStmt(suppressHooksCall(unsuppressHooksFuncName, selfPackage)),
+	}
+	return before, after
 }
 
 // hasEscapingControlFlow reports whether stmt's subtree holds a return,
