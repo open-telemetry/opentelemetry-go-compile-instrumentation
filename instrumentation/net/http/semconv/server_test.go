@@ -70,6 +70,23 @@ func TestHTTPServerRequestTraceAttrs(t *testing.T) {
 			},
 		},
 		{
+			name:   "url.query redacts sensitive query parameters",
+			server: "",
+			req: &http.Request{
+				Method:     "GET",
+				Host:       "example.com",
+				RemoteAddr: "192.168.1.1:12345",
+				URL: &url.URL{
+					Path:     "/search",
+					RawQuery: "q=test&sig=secret&X-Goog-Signature=abc",
+				},
+				Proto: "HTTP/1.1",
+			},
+			expected: map[string]interface{}{
+				"url.query": "q=test&sig=REDACTED&X-Goog-Signature=REDACTED",
+			},
+		},
+		{
 			name:   "request with non-standard port",
 			server: "example.com:8080",
 			req: &http.Request{

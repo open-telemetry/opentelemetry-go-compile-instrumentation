@@ -11,7 +11,6 @@ import (
 	"go/parser"
 	"go/token"
 	"log/slog"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -480,7 +479,7 @@ func updatePinnedProjects(
 	return &PinResult{}, nil
 }
 
-func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opts PinOptions) (*PinResult, error) {
+func generatePinnedProjects(ctx context.Context, moduleDirs []string, opts PinOptions) (*PinResult, error) {
 	logger := util.LoggerFromContext(ctx)
 	subcommand := opts.Subcommand
 	if subcommand == "" {
@@ -519,8 +518,7 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 
 	// Generate otel.instrumentation.go file with imports for all matched rules.
 	f := generateOtelInstrumentationGo(imports, opts)
-	dirs := slices.Sorted(maps.Keys(moduleDirs))
-	for _, moduleDir := range dirs {
+	for _, moduleDir := range normalizeModuleDirs(moduleDirs) {
 		path := filepath.Join(moduleDir, toolFileCanonical)
 		if writeErr := ast.WriteFileAtomic(path, f); writeErr != nil {
 			return nil, ex.Wrapf(writeErr, "writing %s", path)
@@ -573,9 +571,10 @@ type PinOptions struct {
 	Args []string
 	// Subcommand passed to go in findDeps (defaults to "build")
 	Subcommand string
-	// ModuleDirs is the set of module directories to search for tool files
-	// If empty, module directories will be found using opts.Args
-	ModuleDirs map[string]bool
+	// ModuleDirs lists the module directories to search for tool files.
+	// The list may hold duplicates and entries in any order; Pin normalizes it.
+	// If the list is empty, Pin finds the module directories with opts.Args.
+	ModuleDirs []string
 }
 
 type PinResult struct {
@@ -600,7 +599,7 @@ func Pin(ctx context.Context, opts PinOptions) (*PinResult, error) {
 }
 
 func pinLocked(ctx context.Context, opts PinOptions) (*PinResult, error) {
-	moduleDirs := opts.ModuleDirs
+	moduleDirs := normalizeModuleDirs(opts.ModuleDirs)
 	subcommand := opts.Subcommand
 	if subcommand == "" {
 		subcommand = subcmdBuild
@@ -646,7 +645,7 @@ func pinLocked(ctx context.Context, opts PinOptions) (*PinResult, error) {
 
 // autoPin is a convenience function that automatically tracks generated/modified files before calling Pin
 // in order to restore them after the build completes.
-func autoPin(ctx context.Context, moduleDirs map[string]bool, subcommand string, args []string) (*PinResult, error) {
+func autoPin(ctx context.Context, moduleDirs []string, subcommand string, args []string) (*PinResult, error) {
 	stateManager, found := stateManagerFromContext(ctx)
 	if !found {
 		return nil, ex.New("state manager not found in context")
