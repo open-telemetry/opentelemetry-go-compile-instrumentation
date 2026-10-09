@@ -30,6 +30,10 @@ type runtimePackage struct {
 	dir        string
 	importPath string
 	name       string
+	// importedByHooks holds the hook packages that import this package,
+	// directly or through a chain. A generated file here cannot import them
+	// back without creating an import cycle.
+	importedByHooks map[string]bool
 }
 
 //nolint:gochecknoglobals // This is a constant
@@ -156,16 +160,25 @@ func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, 
 	fileRules := []*rule.InstFileRule{}
 	for _, m := range matched {
 		for _, funcRule := range m.AllFuncRules() {
-			if funcRule.Path != pkg.importPath {
+			skip, err := skipHook(m, funcRule.Path, pkg)
+			if err != nil {
+				return err
+			}
+			if !skip {
 				funcRules = append(funcRules, funcRule)
 			}
 		}
 		for _, fileRule := range m.FileRules {
-			if fileRule.Path != pkg.importPath {
+			skip, err := skipHook(m, fileRule.Path, pkg)
+			if err != nil {
+				return err
+			}
+			if !skip {
 				fileRules = append(fileRules, fileRule)
 			}
 		}
 	}
+
 	if len(funcRules) == 0 && len(fileRules) == 0 {
 		return sp.removeRuntimeFile(ctx, pkg.dir)
 	}
@@ -190,4 +203,23 @@ func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, 
 	keepForDebug(ctx, otelcRuntimeFilePath)
 	sp.Info("Created otelc.runtime.go", "path", otelcRuntimeFilePath)
 	return nil
+}
+
+// skipHook reports whether the hook at hookPath must be left out of pkg's
+// runtime file. It returns an error when the cycle cannot be avoided, because
+// the rule targets pkg itself while the hook imports pkg back.
+func skipHook(m *rule.InstRuleSet, hookPath string, pkg runtimePackage) (bool, error) {
+	if hookPath == pkg.importPath {
+		return true, nil
+	}
+	if !pkg.importedByHooks[hookPath] {
+		return false, nil
+	}
+	if m.ModulePath == pkg.importPath {
+		return false, ex.Newf(
+			"cannot instrument %s: its hook package %s imports it, which would create an import cycle",
+			pkg.importPath, hookPath,
+		)
+	}
+	return true, nil
 }

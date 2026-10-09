@@ -30,6 +30,8 @@ func TestAddDeps(t *testing.T) {
 		packageImportPath string
 		packageName       string
 		goldenFile        string // Empty means no file should be generated
+		wantErr           bool
+		importedByHooks   map[string]bool
 	}{
 		{
 			name:        "empty_matched_rules",
@@ -133,6 +135,57 @@ func TestAddDeps(t *testing.T) {
 			packageName:       "hooks",
 			goldenFile:        "mixed_self_and_external.otelc.runtime.go.golden",
 		},
+		{
+			// The hook package imports this package. A generated file here would
+			// import the hook back and close an import cycle.
+			name: "hook_imports_package",
+			matched: []*rule.InstRuleSet{
+				newTestRuleSet(
+					"example.com/app",
+					[]*rule.InstFuncRule{newTestFuncRule("example.com/app/hooks", "example.com/app")},
+					[]*rule.InstFileRule{newTestFileRule("example.com/app/hooks", "example.com/app")},
+				),
+			},
+			packageImportPath: "example.com/app/internal/log",
+			packageName:       "log",
+			importedByHooks:   map[string]bool{"example.com/app/hooks": true},
+			goldenFile:        "",
+		},
+		{
+			// Only the hook that imports this package is dropped. Other hooks stay.
+			name: "hook_imports_package_and_external_hook",
+			matched: []*rule.InstRuleSet{
+				newTestRuleSet(
+					"example.com/app",
+					[]*rule.InstFuncRule{
+						newTestFuncRule("example.com/app/hooks", "example.com/app"),
+						newTestFuncRule("example.com/external-hooks", "example.com/app"),
+					},
+					nil,
+				),
+			},
+			packageImportPath: "example.com/app/internal/log",
+			packageName:       "log",
+			importedByHooks:   map[string]bool{"example.com/app/hooks": true},
+			goldenFile:        "hook_imports_package_and_external_hook.otelc.runtime.go.golden",
+		},
+		{
+			// The rule targets the very package its hook imports. The cycle is
+			// unavoidable, so addDeps must error instead of silently dropping the hook.
+			name: "hook_imports_its_own_target",
+			matched: []*rule.InstRuleSet{
+				newTestRuleSet(
+					"example.com/app/internal/log",
+					[]*rule.InstFuncRule{newTestFuncRule("example.com/app/hooks", "example.com/app/internal/log")},
+					nil,
+				),
+			},
+			packageImportPath: "example.com/app/internal/log",
+			packageName:       "log",
+			importedByHooks:   map[string]bool{"example.com/app/hooks": true},
+			goldenFile:        "",
+			wantErr:           true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -144,10 +197,16 @@ func TestAddDeps(t *testing.T) {
 			ctx := contextWithStateManager(t.Context(), stateManager)
 
 			err := sp.addDeps(ctx, tt.matched, runtimePackage{
-				dir:        tmpDir,
-				importPath: tt.packageImportPath,
-				name:       tt.packageName,
+				dir:             tmpDir,
+				importPath:      tt.packageImportPath,
+				name:            tt.packageName,
+				importedByHooks: tt.importedByHooks,
 			})
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.NoFileExists(t, filepath.Join(tmpDir, otelcRuntimeFile))
+				return
+			}
 			require.NoError(t, err)
 
 			runtimeFilePath := filepath.Join(tmpDir, otelcRuntimeFile)
