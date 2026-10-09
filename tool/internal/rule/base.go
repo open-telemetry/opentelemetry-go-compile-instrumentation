@@ -98,6 +98,9 @@ type InstRuleSet struct {
 	DirectiveRules map[string][]*InstDirectiveRule `json:"directive_rules"`
 	DeclRules      map[string][]*InstDeclRule      `json:"decl_rules"`
 	FileRules      []*InstFileRule                 `json:"file_rules"`
+	// IgnoredCallFiles lists source files that hold a //otelc:ignore comment
+	// above a call.
+	IgnoredCallFiles []string `json:"ignored_call_files,omitempty"`
 }
 
 func NewInstRuleSet(importPath string) *InstRuleSet {
@@ -139,7 +142,8 @@ func (irs *InstRuleSet) IsEmpty() bool {
 			len(irs.LitRules) == 0 &&
 			len(irs.DirectiveRules) == 0 &&
 			len(irs.DeclRules) == 0 &&
-			len(irs.FileRules) == 0)
+			len(irs.FileRules) == 0 &&
+			len(irs.IgnoredCallFiles) == 0)
 }
 
 // AddRule is a generic method that adds any type of rule to the appropriate map.
@@ -175,6 +179,13 @@ func (irs *InstRuleSet) AddDirectiveRule(file string, rule *InstDirectiveRule) {
 
 func (irs *InstRuleSet) AddDeclRule(file string, rule *InstDeclRule) {
 	addRule(file, rule, irs.DeclRules)
+}
+
+// AddIgnoredCallFile records that file holds a //otelc:ignore comment above
+// a call.
+func (irs *InstRuleSet) AddIgnoredCallFile(file string) {
+	util.Assert(filepath.IsAbs(file), "file must be an absolute path")
+	irs.IgnoredCallFiles = append(irs.IgnoredCallFiles, file)
 }
 
 func (irs *InstRuleSet) AddFileRule(rule *InstFileRule) {

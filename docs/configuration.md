@@ -116,7 +116,68 @@ Rules target packages and locations within them using three fields — the full 
   - `all-of`, `one-of`, `not` — compose predicates. See
     [`where.file` semantics](rules.md#wherefile-semantics).
 
-**Planned:** Source-level opt-out pragmas (`//otelc:ignore`) are planned (#469).
+### Source directives (`//otelc:ignore`, `//otelc:instrument`)
+
+When you cannot express an exclusion through a rule — or want the opt-out to live next to the
+code it applies to — annotate the source directly. These directives are line comments with
+**no space after `//`** (`//otelc:ignore`, not `// otelc:ignore`).
+
+- **Ignore a single function.** Put `//otelc:ignore` in the comment directly above a function
+  or method declaration. A rule targeting it is skipped and no trampoline is injected:
+
+  ```go
+  //otelc:ignore
+  func doNotInstrument() { /* ... */ }
+  ```
+
+- **Ignore a whole file.** Put `//otelc:ignore` in the file's leading comment block, before
+  the `package` clause. Every rule targeting that file is skipped:
+
+  ```go
+  //otelc:ignore
+
+  package mypkg
+  ```
+
+- **Opt specific functions back in.** In a file that carries a file-level `//otelc:ignore`,
+  add `//otelc:instrument` above a function to force that one to be instrumented anyway:
+
+  ```go
+  //otelc:ignore
+
+  package mypkg
+
+  //otelc:instrument
+  func stillInstrumented() { /* ... */ }
+  ```
+
+- **Ignore a single call site.** Put `//otelc:ignore` in the comment directly above the
+  statement that holds the call. That one call is skipped and every other call to the same
+  function stays instrumented:
+
+  ```go
+  //otelc:ignore
+  db, err := sql.Open("postgres", dsn)
+  ```
+
+  This form covers a call to a function you do not own — for example a library's `sql.Open` —
+  as it annotates your own call site, not the library's declaration. It works for both a
+  `wrap_call` rule and an `inject_hooks` rule.
+
+Keep in mind:
+
+- Only **function rules** are overridable. A file-level `//otelc:ignore` unconditionally skips
+  non-function rules (struct/raw/call/decl/directive) for that file — there is no
+  `//otelc:instrument` equivalent to force them through.
+- If a function carries both `//otelc:instrument` and `//otelc:ignore`, **`//otelc:ignore`
+  wins** — the directive closest to the declaration takes precedence.
+- The annotated statement must not return, break, continue, or jump out of its enclosing
+  block. Assign the call's result to a variable in its own statement, then use the variable in
+  the control-flow statement on its own, unannotated line.
+- The annotated statement must hold only one call. `//otelc:ignore` suppresses hooks for the
+  whole statement, so a statement with more than one call, such as `combine(a(), b())`, would
+  suppress hooks for every call in it. Give each other call its own statement first, then use
+  its result in the annotated statement.
 
 ## Runtime Tuning
 

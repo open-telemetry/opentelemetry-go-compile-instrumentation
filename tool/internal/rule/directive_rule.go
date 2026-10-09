@@ -4,6 +4,7 @@
 package rule
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
@@ -46,6 +47,9 @@ func (r *InstDirectiveRule) validate() error {
 	}
 	if strings.HasPrefix(r.Directive, "//") {
 		return ex.Newf("directive should not start with //")
+	}
+	if slices.Contains(util.BuiltinDirectives, r.Directive) {
+		return ex.Newf("directive %q is reserved for otelc", r.Directive)
 	}
 	if strings.TrimSpace(r.Template) == "" {
 		return ex.Newf("template cannot be empty")

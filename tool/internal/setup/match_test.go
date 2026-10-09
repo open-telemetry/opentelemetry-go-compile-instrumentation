@@ -1976,6 +1976,155 @@ func TestPreciseMatching_MatchOneRuleError(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestKnownDirectiveNames(t *testing.T) {
+	rules := []rule.InstRule{
+		&rule.InstFuncRule{InstBaseRule: rule.InstBaseRule{Name: "f"}, Func: "Foo"},
+		&rule.InstDirectiveRule{InstBaseRule: rule.InstBaseRule{Name: "d"}, Directive: "otelc:span"},
+	}
+
+	known := knownDirectiveNames(rules)
+
+	assert.True(t, known[util.DirectiveIgnore])
+	assert.True(t, known[util.DirectiveInstrument])
+	assert.True(t, known["otelc:span"])
+	assert.False(t, known["otelc:trace"])
+}
+
+func TestPreciseMatching_WarnsOnUnknownDirective(t *testing.T) {
+	srcFile := writeGoSource(t, "typo.go", "package typo\n\n//otelc:ignoer\nfunc Foo() {}\n")
+	dep := &Dependency{
+		ImportPath: "example.com/typo",
+		Sources:    []string{srcFile},
+	}
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "r", Target: rule.NewTarget("example.com/typo")},
+		Func:         "Foo",
+		Before:       "BeforeFoo",
+		Path:         "example.com/hooks",
+	}
+
+	var buf bytes.Buffer
+	sp := &setupPhase{logger: slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))}
+	set := rule.NewInstRuleSet(dep.ImportPath)
+	_, err := sp.preciseMatching(context.Background(), dep, []rule.InstRule{funcRule}, set)
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "otelc:ignoer")
+	assert.Contains(t, out, srcFile)
+}
+
+func TestPreciseMatching_NoWarnForKnownDirective(t *testing.T) {
+	srcFile := writeGoSource(t, "known.go", "package known\n\n//otelc:ignore\nfunc Foo() {}\n")
+	dep := &Dependency{
+		ImportPath: "example.com/known",
+		Sources:    []string{srcFile},
+	}
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "r", Target: rule.NewTarget("example.com/known")},
+		Func:         "Foo",
+		Before:       "BeforeFoo",
+		Path:         "example.com/hooks",
+	}
+
+	var buf bytes.Buffer
+	sp := &setupPhase{logger: slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))}
+	set := rule.NewInstRuleSet(dep.ImportPath)
+	_, err := sp.preciseMatching(context.Background(), dep, []rule.InstRule{funcRule}, set)
+	require.NoError(t, err)
+
+	assert.Empty(t, buf.String())
+}
+
+func TestMarkIgnoredCallFiles_DirectiveAboveCall(t *testing.T) {
+	srcFile := writeGoSource(
+		t,
+		"caller.go",
+		"package caller\n\nfunc Foo() {\n\t//otelc:ignore\n\tBar()\n}\n\nfunc Bar() {}\n",
+	)
+	dep := &Dependency{Sources: []string{srcFile}}
+
+	set := rule.NewInstRuleSet("example.com/caller")
+	require.NoError(t, markIgnoredCallFiles(dep, set))
+
+	assert.Equal(t, []string{srcFile}, set.IgnoredCallFiles)
+}
+
+func TestMarkIgnoredCallFiles_DirectiveAboveFunctionDoesNotCount(t *testing.T) {
+	srcFile := writeGoSource(t, "owner.go", "package owner\n\n//otelc:ignore\nfunc Foo() {}\n")
+	dep := &Dependency{Sources: []string{srcFile}}
+
+	set := rule.NewInstRuleSet("example.com/owner")
+	require.NoError(t, markIgnoredCallFiles(dep, set))
+
+	assert.Empty(t, set.IgnoredCallFiles)
+}
+
+func TestMarkIgnoredCallFiles_NoDirective(t *testing.T) {
+	srcFile := writeGoSource(t, "plain.go", "package plain\n\nfunc Foo() {}\n")
+	dep := &Dependency{Sources: []string{srcFile}}
+
+	set := rule.NewInstRuleSet("example.com/plain")
+	require.NoError(t, markIgnoredCallFiles(dep, set))
+
+	assert.Empty(t, set.IgnoredCallFiles)
+}
+
+func TestMarkIgnoredCallFiles_MissingFile(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing.go")
+	dep := &Dependency{Sources: []string{missing}}
+
+	set := rule.NewInstRuleSet("example.com/missing")
+	err := markIgnoredCallFiles(dep, set)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "scanning")
+}
+
+func TestMarkIgnoredCallFiles_InvalidSyntax(t *testing.T) {
+	srcFile := writeGoSource(t, "broken.go", "package broken\n\n//otelc:ignore\nfunc Foo(garbage syntax here\n")
+	dep := &Dependency{Sources: []string{srcFile}}
+
+	set := rule.NewInstRuleSet("example.com/broken")
+	err := markIgnoredCallFiles(dep, set)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parsing")
+}
+
+func TestRunMatch_IgnoredCallFileWithNoMatchingRule(t *testing.T) {
+	srcFile := writeGoSource(
+		t,
+		"caller.go",
+		"package caller\n\nfunc Foo() {\n\t//otelc:ignore\n\tBar()\n}\n\nfunc Bar() {}\n",
+	)
+	dep := &Dependency{
+		ImportPath: "example.com/caller",
+		Sources:    []string{srcFile},
+	}
+
+	sp := newTestSetupPhase()
+	set, err := sp.runMatch(context.Background(), dep, map[string][]rule.InstRule{}, nil)
+	require.NoError(t, err)
+	require.NotNil(t, set)
+	assert.False(t, set.IsEmpty())
+	assert.Equal(t, []string{srcFile}, set.IgnoredCallFiles)
+}
+
+func TestRunMatch_PropagatesMarkIgnoredCallFilesError(t *testing.T) {
+	srcFile := writeGoSource(t, "broken.go", "package broken\n\n//otelc:ignore\nfunc Foo(garbage syntax here\n")
+	dep := &Dependency{
+		ImportPath: "example.com/broken",
+		Sources:    []string{srcFile},
+	}
+
+	sp := newTestSetupPhase()
+	set, err := sp.runMatch(context.Background(), dep, map[string][]rule.InstRule{}, nil)
+
+	require.Error(t, err)
+	assert.Nil(t, set)
+}
+
 func TestRulesFromDirWalkError(t *testing.T) {
 	_, err := rulesFromDir(filepath.Join(t.TempDir(), "missing"), false)
 	require.Error(t, err)

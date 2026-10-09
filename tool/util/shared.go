@@ -40,6 +40,20 @@ const (
 	OtelcToolExe            = "otelc"
 )
 
+// DirectiveIgnore and DirectiveInstrument live in util, not ast or rule. ast
+// already imports rule, so rule importing ast back would cycle. Both
+// packages import util instead.
+const (
+	DirectiveIgnore     = "otelc:ignore"
+	DirectiveInstrument = "otelc:instrument"
+)
+
+// BuiltinDirectives lists directive names reserved for otelc. A directive
+// rule using one of these names fails validation.
+//
+//nolint:gochecknoglobals // read-only lookup table
+var BuiltinDirectives = []string{DirectiveIgnore, DirectiveInstrument}
+
 // IsRuleFile reports whether name identifies an otelc rule file.
 func IsRuleFile(name string) bool {
 	return name == "otelc.yml" ||
