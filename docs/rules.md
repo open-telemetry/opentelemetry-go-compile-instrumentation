@@ -5,6 +5,7 @@
 - [Schema Reference](#schema-reference)
   - [Rule shape](#rule-shape)
   - [Top-level fields](#top-level-fields)
+  - [Added-import cycles](#added-import-cycles)
   - [Quick demo](#quick-demo)
   - [`where` semantics](#where-semantics)
   - [`where.file` semantics](#wherefile-semantics)
@@ -93,6 +94,16 @@ Field notes:
     ctx: "context"   # Aliased import: import ctx "context"
     _: "unsafe"      # Blank import: import _ "unsafe"
   ```
+
+#### Added-import cycles
+
+otelc resolves a rule-added import with a nested build. That build sees each package's original imports only, so Go cannot detect a cycle that the added imports form: when the rule for `p` adds an import of `q` and the rule for `q` adds an import of `p`, each nested build starts another one and the build never ends. otelc stops this and fails the build:
+
+```
+rules add an import cycle: p adds q; q adds p
+```
+
+The added imports must not require each other in a cycle. This applies to the `imports` field and to function hook rules alike, whose imports are resolved the same way.
 
 ### Quick demo
 
