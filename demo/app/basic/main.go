@@ -58,6 +58,14 @@ func GenericExample[K comparable, V any](key K, value V) V {
 	return value
 }
 
+// Query exercises HookContext accessors for concrete slots alongside a
+// generic return value.
+func Query[T any](ctx context.Context, query string) (T, error) {
+	fmt.Println("Query:", query)
+	var zero T
+	return zero, nil
+}
+
 // Example demonstrates how to use the instrumenter.
 func Example() {
 	// Output:
@@ -109,6 +117,7 @@ func main() {
 	_ = GenericExample(1, 2)
 	g := &GenStruct[string]{Value: "Hello"}
 	_ = g.GenericRecvExample(", Generic Recv World!")
+	_, _ = Query[int](context.Background(), "SELECT 1")
 
 	// Call real module function
 	println(rate.Every(time.Duration(1)))

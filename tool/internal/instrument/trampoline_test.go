@@ -774,6 +774,66 @@ func TestReplaceTypeParamsWithAny(t *testing.T) {
 	})
 }
 
+func TestReferencesTypeParameter(t *testing.T) {
+	tp := typeParamsT()
+
+	assert.True(t, referencesTypeParameter(dst.NewIdent("T"), tp), "bare type parameter")
+	assert.True(t, referencesTypeParameter(&dst.StarExpr{X: dst.NewIdent("T")}, tp), "pointer to type parameter")
+	assert.True(t, referencesTypeParameter(&dst.ArrayType{Elt: dst.NewIdent("T")}, tp), "slice of type parameter")
+	assert.True(t, referencesTypeParameter(
+		&dst.IndexExpr{X: dst.NewIdent("GenStruct"), Index: dst.NewIdent("T")}, tp),
+		"generic-instantiated type")
+
+	assert.False(t, referencesTypeParameter(dst.NewIdent("string"), tp), "unrelated concrete type")
+	assert.False(t, referencesTypeParameter(&dst.ArrayType{Elt: dst.NewIdent("string")}, tp), "slice of concrete type")
+	assert.False(t, referencesTypeParameter(dst.NewIdent("T"), nil), "nil typeParams")
+	assert.False(t, referencesTypeParameter(nil, tp), "nil type expression")
+
+	// In func(T int), T names a parameter rather than its type.
+	funcTypeWithCollidingParamName := &dst.FuncType{
+		Params: &dst.FieldList{List: []*dst.Field{
+			{Names: []*dst.Ident{dst.NewIdent("T")}, Type: dst.NewIdent("int")},
+		}},
+	}
+	assert.False(t, referencesTypeParameter(funcTypeWithCollidingParamName, tp),
+		"parameter name colliding with type parameter is not a type reference")
+
+	funcTypeWithRealReference := &dst.FuncType{
+		Params: &dst.FieldList{List: []*dst.Field{
+			{Names: []*dst.Ident{dst.NewIdent("x")}, Type: dst.NewIdent("T")},
+		}},
+	}
+	assert.True(t, referencesTypeParameter(funcTypeWithRealReference, tp),
+		"func parameter whose type is the type parameter")
+
+	interfaceWithGenericMethod := &dst.InterfaceType{
+		Methods: &dst.FieldList{List: []*dst.Field{
+			{
+				Names: []*dst.Ident{dst.NewIdent("Get")},
+				Type:  &dst.FuncType{Results: &dst.FieldList{List: []*dst.Field{{Type: dst.NewIdent("T")}}}},
+			},
+		}},
+	}
+	assert.True(t, referencesTypeParameter(interfaceWithGenericMethod, tp),
+		"interface literal with a method referencing the type parameter")
+
+	interfaceWithoutGenericMethod := &dst.InterfaceType{
+		Methods: &dst.FieldList{List: []*dst.Field{
+			{
+				Names: []*dst.Ident{dst.NewIdent("Close")},
+				Type:  &dst.FuncType{Results: &dst.FieldList{List: []*dst.Field{{Type: dst.NewIdent("error")}}}},
+			},
+		}},
+	}
+	assert.False(t, referencesTypeParameter(interfaceWithoutGenericMethod, tp),
+		"interface literal with no method referencing the type parameter")
+
+	// The T in testing.T belongs to the imported package.
+	testingT := &dst.StarExpr{X: &dst.SelectorExpr{X: dst.NewIdent("testing"), Sel: dst.NewIdent("T")}}
+	assert.False(t, referencesTypeParameter(testingT, tp),
+		"*testing.T is not a reference despite the selector name colliding with T")
+}
+
 // parseReceiverType returns the file and the receiver type expression of a
 // method declared on the given receiver source, e.g. "*GenStruct[T]". The
 // synthetic file has no matching type declaration, so constraint recovery
