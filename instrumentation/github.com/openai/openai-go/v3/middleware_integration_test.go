@@ -652,11 +652,12 @@ func TestOtelMiddleware_StreamingSpanEndedOnCloseWithoutRead(t *testing.T) {
 	require.Len(t, sr.Ended(), 1, "closing an unread stream must end the span exactly once")
 }
 
-// Closing twice, or closing after draining, must not end the span a second
-// time. A double end is silently ignored by the SDK but would double-count in
-// any exporter that tracks span starts and ends.
-func TestOtelMiddleware_StreamingSpanEndedOnceOnRepeatedClose(t *testing.T) {
-	sr := setupTestTracer(t)
+// Closing twice, or closing after draining, must not finalize the stream a
+// second time. Span.End() is idempotent, so a span count cannot show this: the
+// SDK drops the second end before an exporter sees anything. The duration
+// histogram can, because every finalization records a measurement.
+func TestOtelMiddleware_StreamingFinalizesOnceOnRepeatedClose(t *testing.T) {
+	reader := setupTestMeter(t)
 
 	resp, err := OtelMiddleware()(streamingChatRequest(t), streamingChatResponse())
 	require.NoError(t, err)
@@ -667,5 +668,8 @@ func TestOtelMiddleware_StreamingSpanEndedOnceOnRepeatedClose(t *testing.T) {
 	require.NoError(t, resp.Body.Close())
 	require.NoError(t, resp.Body.Close())
 
-	require.Len(t, sr.Ended(), 1, "repeated Close must not end the span again")
+	dps := durationDataPoints(t, reader)
+	require.Len(t, dps, 1)
+	require.Equal(t, uint64(1), dps[0].Count,
+		"draining then closing twice must record the operation duration once")
 }
