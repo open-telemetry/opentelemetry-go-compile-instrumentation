@@ -3,7 +3,7 @@
 
 .PHONY: help start stop restart reload status logs clean build load-test urls health \
         start-http stop-http build-http build-http-nocache clean-docker-cache \
-        verify-traces test-propagation debug-http rebuild-http package \
+        verify-traces test-propagation debug-http rebuild-http \
         start-grpc stop-grpc build-grpc build-grpc-nocache rebuild-grpc \
         quickstart-grpc dev-grpc verify-traces-grpc debug-grpc
 
@@ -23,9 +23,6 @@ HTTP_SERVICES := prometheus jaeger otel-collector grafana http-server http-clien
 # gRPC services list
 GRPC_SERVICES := prometheus jaeger otel-collector grafana grpc-server grpc-client
 
-# Path to main project Makefile
-PROJECT_ROOT := ../../..
-
 help: ## Show this help message
 	@echo "$(BLUE)OpenTelemetry Demo Infrastructure$(NC)"
 	@echo "$(BLUE)====================================$(NC)"
@@ -39,16 +36,13 @@ help: ## Show this help message
 	@echo "  $(YELLOW)make rebuild-http$(NC)      - Force full rebuild"
 	@echo ""
 	@echo "$(BLUE)Development:$(NC)"
-	@echo "  $(YELLOW)make package$(NC)           - Repackage instrumentation code"
-	@echo "  $(YELLOW)make build-http$(NC)        - Build HTTP apps (auto-packages)"
+	@echo "  $(YELLOW)make build-http$(NC)        - Build HTTP apps"
 	@echo "  $(YELLOW)make rebuild-http$(NC)      - Full rebuild with cache purge"
 	@echo ""
 	@echo "$(BLUE)Debugging:$(NC)"
 	@echo "  $(YELLOW)make verify-traces$(NC)     - Check traces in Jaeger"
 	@echo "  $(YELLOW)make test-propagation$(NC)  - Test context propagation"
 	@echo "  $(YELLOW)make debug-http$(NC)        - Start with debug logging"
-	@echo ""
-	@echo "$(BLUE)Note:$(NC) All build targets auto-run 'make package' to include latest code changes."
 	@echo ""
 	@echo "$(BLUE)Documentation:$(NC)"
 	@echo "  See CONTEXT_PROPAGATION.md for trace linking documentation"
@@ -136,17 +130,12 @@ urls: ## Show URLs for all UIs
 	@echo "  $(GREEN)Services: APM$(NC)             http://localhost:3000/d/opentelemetry-apm"
 	@echo ""
 
-package: ## Package instrumentation code (run after changing pkg/ files)
-	@echo "$(BLUE)Packaging instrumentation code...$(NC)"
-	@cd $(PROJECT_ROOT) && make package
-	@echo "$(GREEN)✓ Package complete$(NC)"
-
-build: package ## Rebuild demo applications (auto-packages instrumentation)
+build: ## Rebuild demo applications
 	@echo "$(BLUE)Building demo applications...$(NC)"
 	@docker-compose build
 	@echo "$(GREEN)✓ Build complete$(NC)"
 
-build-nocache: package ## Rebuild demo applications without cache (auto-packages)
+build-nocache: ## Rebuild demo applications without cache
 	@echo "$(BLUE)Building demo applications (no cache)...$(NC)"
 	@docker-compose build --no-cache
 	@echo "$(GREEN)✓ Build complete$(NC)"
@@ -296,17 +285,17 @@ stop-http: ## Stop HTTP demo services
 	@docker-compose stop http-server http-client
 	@echo "$(GREEN)✓ HTTP services stopped$(NC)"
 
-build-http: package ## Build only HTTP demo applications (auto-packages)
+build-http: ## Build only HTTP demo applications
 	@echo "$(BLUE)Building HTTP demo applications...$(NC)"
 	@docker-compose build http-server http-client
 	@echo "$(GREEN)✓ HTTP build complete$(NC)"
 
-build-http-nocache: package ## Build HTTP apps without Docker cache (auto-packages)
+build-http-nocache: ## Build HTTP apps without Docker cache
 	@echo "$(BLUE)Building HTTP applications (no cache)...$(NC)"
 	@docker-compose build --no-cache http-server http-client
 	@echo "$(GREEN)✓ HTTP build complete$(NC)"
 
-rebuild-http: package clean-docker-cache ## Full rebuild: package, purge cache, rebuild HTTP apps
+rebuild-http: clean-docker-cache ## Full rebuild: purge cache and rebuild HTTP apps
 	@echo "$(BLUE)Full HTTP rebuild...$(NC)"
 	@docker-compose build --no-cache http-server http-client
 	@echo "$(GREEN)✓ Full HTTP rebuild complete$(NC)"
@@ -404,17 +393,17 @@ stop-grpc: ## Stop gRPC demo services
 	@docker-compose stop grpc-server grpc-client
 	@echo "$(GREEN)✓ gRPC services stopped$(NC)"
 
-build-grpc: package ## Build only gRPC demo applications (auto-packages)
+build-grpc: ## Build only gRPC demo applications
 	@echo "$(BLUE)Building gRPC demo applications...$(NC)"
 	@docker-compose build grpc-server grpc-client
 	@echo "$(GREEN)✓ gRPC build complete$(NC)"
 
-build-grpc-nocache: package ## Build gRPC apps without Docker cache (auto-packages)
+build-grpc-nocache: ## Build gRPC apps without Docker cache
 	@echo "$(BLUE)Building gRPC applications (no cache)...$(NC)"
 	@docker-compose build --no-cache grpc-server grpc-client
 	@echo "$(GREEN)✓ gRPC build complete$(NC)"
 
-rebuild-grpc: package clean-docker-cache ## Full rebuild: package, purge cache, rebuild gRPC apps
+rebuild-grpc: clean-docker-cache ## Full rebuild: purge cache and rebuild gRPC apps
 	@echo "$(BLUE)Full gRPC rebuild...$(NC)"
 	@docker-compose build --no-cache grpc-server grpc-client
 	@echo "$(GREEN)✓ Full gRPC rebuild complete$(NC)"

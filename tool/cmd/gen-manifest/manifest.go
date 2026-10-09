@@ -14,20 +14,17 @@ import (
 	"golang.org/x/mod/modfile"
 
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/manifest"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
-// Entry describes a distinct instrumentation module, target package, and
-// minimum version bound.
-type Entry struct {
-	ModulePath string `json:"modulePath"`
-	Target     string `json:"target"`
-	// VersionRange is a minimum version bound. Empty means all versions.
-	VersionRange string `json:"versionRange,omitempty"`
-}
-
-type Manifest []Entry
+// The generator and the embedded loader share one JSON schema. Keeping these
+// aliases also lets the generator tests construct the entries they expect.
+type (
+	Entry    = manifest.Entry
+	Manifest = manifest.Manifest
+)
 
 type yamlRule struct {
 	Target       rule.Target `yaml:"target"`
@@ -63,12 +60,17 @@ func Generate(instrumentationRoot string) (Manifest, error) {
 		if cmp := strings.Compare(a.ModulePath, b.ModulePath); cmp != 0 {
 			return cmp
 		}
-		if cmp := strings.Compare(a.Target, b.Target); cmp != 0 {
+		if cmp := strings.Compare(a.Target.String(), b.Target.String()); cmp != 0 {
 			return cmp
 		}
 		return strings.Compare(a.VersionRange, b.VersionRange)
 	})
-	manifest = slices.Compact(manifest)
+	manifest = slices.CompactFunc(manifest, func(a, b Entry) bool {
+		return a.ModulePath == b.ModulePath &&
+			slices.Equal(a.Target.Include, b.Target.Include) &&
+			slices.Equal(a.Target.Exclude, b.Target.Exclude) &&
+			a.VersionRange == b.VersionRange
+	})
 	return manifest, nil
 }
 
@@ -160,15 +162,11 @@ func parseRuleEntriesForVersion(content []byte, path, modulePath, currentVersion
 		if validateErr := ruleConfig.Target.Validate(); validateErr != nil {
 			return nil, ex.Wrapf(validateErr, "validating target for rule %q in file %s", entry.Name, path)
 		}
-		// One entry per included pattern. Excluded patterns only narrow what a
-		// rule applies to, so the manifest may list a package a rule skips.
-		for _, target := range ruleConfig.Target.Include {
-			entries = append(entries, Entry{
-				ModulePath:   modulePath,
-				Target:       target,
-				VersionRange: ruleConfig.VersionRange,
-			})
-		}
+		entries = append(entries, Entry{
+			ModulePath:   modulePath,
+			Target:       ruleConfig.Target,
+			VersionRange: ruleConfig.VersionRange,
+		})
 	}
 	return entries, nil
 }

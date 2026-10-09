@@ -98,10 +98,10 @@ otelc pin
 
 The `pin` command discovers applicable instrumentations, creates the file if it does not already exist, updates imports, synchronizes dependencies, and runs validation checks.
 
-If no instrumentation file exists, `otelc go build` automatically analyzes the application's dependency graph and generates a temporary instrumentation configuration for the duration of the build. This ensures a zero-configuration workflow while allowing projects to adopt a persistent, source-controlled configuration when desired.
+If no instrumentation file exists, `otelc go build` automatically analyzes the application's dependency graph and generates a temporary instrumentation configuration for the duration of the build. This allows projects to adopt a persistent, source-controlled configuration when desired.
 
 > [!NOTE]
-> Support for committing an `otelc pin`-generated `otel.instrumentation.go` file is still under development. Until the work in [#585](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/585) to decouple instrumentation packages from the `otelc` executable is complete, `otelc pin` should be considered a local workflow. `otelc go build` continues to work without a committed instrumentation file by automatically generating a temporary configuration during the build.
+> Until [#983](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/983) publishes the built-in instrumentation modules with explicit versioned requirements, `otelc pin` and `otelc go build` need a full local checkout of this repository. Run them from inside the checkout, or set `OTELC_SOURCE_ROOT` to its directory. A released `otelc` binary alone does not provide the source modules needed for automatic pinning. Support for committing a generated `otel.instrumentation.go` file remains under development in [#585](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/585).
 
 ## How It Works
 

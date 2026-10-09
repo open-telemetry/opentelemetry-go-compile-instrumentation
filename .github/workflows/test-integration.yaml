@@ -63,7 +63,9 @@ jobs:
         env:
           OTELC_TEST_GOCACHE: ${{ github.workspace }}/test/.otelc-gocache
         run: make test-integration/coverage
-      - uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7  # v5.5.1
+      - uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac  # v5.5.5
+        with:
+          fail_ci_if_error: true
 
   test-integration:
     name: Integration Tests (go ${{ matrix.platform.os }} ${{ matrix.platform.arch }} shard ${{ matrix.shard }})

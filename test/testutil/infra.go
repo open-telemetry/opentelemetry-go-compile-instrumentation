@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -36,7 +37,27 @@ func newCmd(ctx context.Context, dir string, env []string, args ...string) *exec
 	} else {
 		cmd.Env = env
 	}
+	cmd.Env = withSourceRoot(cmd.Env)
 	return cmd
+}
+
+func withSourceRoot(env []string) []string {
+	// nil means inherit the parent environment for exec.Cmd. The child
+	// receives OTELC_SOURCE_ROOT through that inheritance already.
+	if env == nil {
+		return nil
+	}
+	root := os.Getenv("OTELC_SOURCE_ROOT")
+	if root == "" {
+		return env
+	}
+	const prefix = "OTELC_SOURCE_ROOT="
+	for _, value := range env {
+		if strings.HasPrefix(value, prefix) {
+			return env
+		}
+	}
+	return append(env, prefix+root)
 }
 
 // OtelcPath returns the absolute path to the otelc binary, assuming the

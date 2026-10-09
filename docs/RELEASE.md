@@ -73,6 +73,9 @@ workflow completes:
    previous tag).
 3. Edit the notes in place to add context, highlight breaking changes, or
    group entries as needed — the release is already public at this point.
+   For the release that removes the embedded instrumentation bundle, mention
+   that existing clones may remove the unused Git merge driver with
+   `git config --remove-section merge.otelc-bundle` (optional).
 4. Confirm the release page lists all 5 platform binaries as downloadable
    assets.
 
@@ -107,6 +110,14 @@ After the release is published:
 3. **Announce the release** in the
    [#otel-go-compt-instr-sig](https://cloud-native.slack.com/archives/C088D8GSSSF)
    Slack channel with a link to the release notes.
+
+4. **Clean up the retired bundle merge-driver configuration.** Users who ran
+   `make setup-git` with an earlier release can remove its now-unused local Git
+   configuration with:
+
+   ```sh
+   git config --remove-section merge.otelc-bundle
+   ```
 
 ## Patch Releases (Hotfixes)
 
