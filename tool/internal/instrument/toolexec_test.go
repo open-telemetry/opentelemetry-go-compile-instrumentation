@@ -782,6 +782,24 @@ func TestMarkedToolVersion(t *testing.T) {
 		got := markedToolVersion(raw)
 		assert.Regexp(t, `^compile version go1\.26\.5 otelc@\S+/[0-9a-f]{16}$`, got)
 	})
+
+	t.Run("build tags change the rules hash", func(t *testing.T) {
+		workDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, workDir)
+		t.Setenv("GOFLAGS", "")
+		require.NoError(t, os.MkdirAll(filepath.Join(workDir, util.BuildTempDir), 0o755))
+		require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), []byte(`[{"module_path":"main"}]`), 0o644))
+
+		t.Setenv(util.EnvOtelcBuildFlags, util.EncodeBuildFlags(nil))
+		untagged := markedToolVersion(raw)
+		t.Setenv(util.EnvOtelcBuildFlags, util.EncodeBuildFlags([]string{"-tags=enterprise"}))
+		tagged := markedToolVersion(raw)
+		t.Setenv(util.EnvOtelcBuildFlags, util.EncodeBuildFlags([]string{"-tags=beta"}))
+		otherTag := markedToolVersion(raw)
+
+		assert.NotEqual(t, untagged, tagged)
+		assert.NotEqual(t, tagged, otherTag)
+	})
 }
 
 func TestEnableNestedToolexec(t *testing.T) {
@@ -989,4 +1007,33 @@ func TestEnterNestedResolution(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "rules add an import cycle: example.com/p adds example.com/p")
 	})
+}
+
+func TestUserBuildTags(t *testing.T) {
+	tests := []struct {
+		name       string
+		goflags    []string
+		buildFlags []string
+		expected   []string
+	}{
+		{name: "no tags", goflags: nil, buildFlags: []string{"-race"}, expected: nil},
+		{name: "equals form", buildFlags: []string{"-tags=enterprise,beta"}, expected: []string{"enterprise", "beta"}},
+		{name: "separate value", buildFlags: []string{"-tags", "enterprise"}, expected: []string{"enterprise"}},
+		{name: "double dash", buildFlags: []string{"--tags=enterprise"}, expected: []string{"enterprise"}},
+		{name: "space separated list", buildFlags: []string{"-tags", "a b"}, expected: []string{"a", "b"}},
+		{name: "last flag wins", buildFlags: []string{"-tags=a", "-tags=b"}, expected: []string{"b"}},
+		{name: "from GOFLAGS", goflags: []string{"-mod=mod", "-tags=enterprise"}, expected: []string{"enterprise"}},
+		{
+			name:       "command line overrides GOFLAGS",
+			goflags:    []string{"-tags=fromenv"},
+			buildFlags: []string{"-tags=fromcli"},
+			expected:   []string{"fromcli"},
+		},
+		{name: "quoted GOFLAGS value", goflags: []string{`-tags="a,b"`}, expected: []string{"a", "b"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, userBuildTags(tt.goflags, tt.buildFlags))
+		})
+	}
 }
