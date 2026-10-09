@@ -12,7 +12,7 @@ groups:
   #   - (*Client).doRequest: span name "{METHOD} {endpoint}"
   #
   # Metrics: public API latency histogram with moderate-cardinality labels
-  # (operation name, status code, server). Raw paths with resource IDs are
+  # (operation name, status code, error type, server). Raw paths with resource IDs are
   # not used as metric labels — those stay on spans only.
   # ---------------------------------------------------------------------------
 
@@ -48,9 +48,10 @@ groups:
     unit: s
     stability: development
     brief: >
-      Duration of linodego public Client API operations. Labeled by operation name and HTTP status when known; not by URL
-      paths that embed resource IDs.
+      Duration of linodego public Client API operations. Labeled by operation name, HTTP status when known, and error type
+      on failures; not by URL paths that embed resource IDs.
     attributes:
       - ref: server.address
       - ref: code.function.name
       - ref: http.response.status_code
+      - ref: error.type
