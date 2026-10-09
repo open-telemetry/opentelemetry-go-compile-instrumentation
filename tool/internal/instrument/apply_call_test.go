@@ -1250,6 +1250,24 @@ func hooked() bool { return false }
 	assert.Contains(t, err.Error(), "returns, breaks, continues, or jumps out of")
 }
 
+func TestApplyIgnoredCallSites_RejectsMultipleCallsInOneStatement(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run() {
+	//otelc:ignore
+	combine(a(), b())
+}
+
+func combine(x, y int) int { return x + y }
+func a() int                { return 1 }
+func b() int                { return 2 }
+`)
+
+	_, err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "holds more than one call")
+}
+
 func TestApplyIgnoredCallSites_AllowsReturnInsideNestedClosure(t *testing.T) {
 	root := parseFile(t, `package main
 

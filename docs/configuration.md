@@ -174,6 +174,10 @@ Keep in mind:
 - The annotated statement must not return, break, continue, or jump out of its enclosing
   block. Assign the call's result to a variable in its own statement, then use the variable in
   the control-flow statement on its own, unannotated line.
+- The annotated statement must hold only one call. `//otelc:ignore` suppresses hooks for the
+  whole statement, so a statement with more than one call, such as `combine(a(), b())`, would
+  suppress hooks for every call in it. Give each other call its own statement first, then use 
+  its result in the annotated statement.
 
 ## Runtime Tuning
 

@@ -434,6 +434,14 @@ func bracketMarkedStmts(
 					"Assign the call's result to a variable in its own statement, then use the " +
 					"variable in the control-flow statement on its own, unannotated line")
 		}
+		if hasMultipleCalls(stmt) {
+			*list = stmts
+			return 0, ex.Newf(
+				"the statement above //otelc:ignore holds more than one call. The bracket " +
+					"suppresses hooks for the whole statement, so it would also suppress hooks " +
+					"for the other calls. Give each other call its own statement, then use " +
+					"its result here")
+		}
 		before, after := suppressHooksStmts(selfPackage, *nextFlag)
 		*nextFlag++
 		stmts = append(stmts[:i], append(before, stmts[i:]...)...)
@@ -494,4 +502,20 @@ func hasEscapingControlFlow(stmt dst.Stmt) bool {
 		return true
 	})
 	return found
+}
+
+// hasMultipleCalls reports whether stmt's subtree holds more than one call,
+// outside a nested function literal.
+func hasMultipleCalls(stmt dst.Stmt) bool {
+	calls := 0
+	dst.Inspect(stmt, func(n dst.Node) bool {
+		switch n.(type) {
+		case *dst.FuncLit:
+			return false
+		case *dst.CallExpr:
+			calls++
+		}
+		return true
+	})
+	return calls > 1
 }
