@@ -152,6 +152,74 @@ replace: "wrapper({{ . }}) {{ unclosed"
 			ruleName: "bad",
 			wantErr:  true,
 		},
+		{
+			name: "method_call value receiver",
+			yaml: `
+method_call: go.uber.org/zap.Logger.Info
+replace: "tracedInfo({{ . }})"
+`,
+			ruleName: "wrap_zap_info",
+			check: func(t *testing.T, r *InstCallRule) {
+				assert.Equal(t, "go.uber.org/zap.Logger.Info", r.MethodCall)
+				assert.Equal(t, "go.uber.org/zap", r.ImportPath)
+				assert.Equal(t, "Logger", r.RecvType)
+				assert.Equal(t, "Info", r.FuncName)
+				assert.Empty(t, r.FunctionCall)
+			},
+		},
+		{
+			name: "method_call pointer receiver",
+			yaml: `
+method_call: database/sql.*DB.QueryContext
+replace: "traced({{ . }})"
+`,
+			ruleName: "wrap_db_query",
+			check: func(t *testing.T, r *InstCallRule) {
+				assert.Equal(t, "database/sql", r.ImportPath)
+				assert.Equal(t, "*DB", r.RecvType)
+				assert.Equal(t, "QueryContext", r.FuncName)
+			},
+		},
+		{
+			name: "method_call and function_call are mutually exclusive",
+			yaml: `
+function_call: net/http.Get
+method_call: go.uber.org/zap.Logger.Info
+replace: "traced({{ . }})"
+`,
+			ruleName:    "bad",
+			wantErr:     true,
+			errContains: "mutually exclusive",
+		},
+		{
+			name: "neither function_call nor method_call set",
+			yaml: `
+replace: "traced({{ . }})"
+`,
+			ruleName:    "bad",
+			wantErr:     true,
+			errContains: "one of function_call or method_call must be set",
+		},
+		{
+			name: "invalid method_call format missing method",
+			yaml: `
+method_call: go.uber.org/zap.Logger
+replace: "traced({{ . }})"
+`,
+			ruleName:    "bad",
+			wantErr:     true,
+			errContains: "invalid method_call format",
+		},
+		{
+			name: "invalid method_call format bad type name",
+			yaml: `
+method_call: go.uber.org/zap.123Logger.Info
+replace: "traced({{ . }})"
+`,
+			ruleName:    "bad",
+			wantErr:     true,
+			errContains: "invalid method_call format",
+		},
 	}
 
 	for _, tt := range tests {
@@ -214,4 +282,86 @@ func TestInstCallRule_UnmarshalJSON(t *testing.T) {
 		assert.Equal(t, []string{"ctx"}, r.AppendArgs)
 		assert.Equal(t, "http.Option", r.VariadicType)
 	})
+
+	t.Run("method_call populates derived fields", func(t *testing.T) {
+		data := `{"method_call":"go.uber.org/zap.Logger.Info","replace":"wrapper({{ . }})"}`
+		var r InstCallRule
+		err := json.Unmarshal([]byte(data), &r)
+		require.NoError(t, err)
+		assert.Equal(t, "go.uber.org/zap", r.ImportPath)
+		assert.Equal(t, "Logger", r.RecvType)
+		assert.Equal(t, "Info", r.FuncName)
+	})
+}
+
+func TestParseMethodCall(t *testing.T) {
+	tests := []struct {
+		name           string
+		methodCall     string
+		wantImportPath string
+		wantRecvType   string
+		wantFuncName   string
+		wantErr        bool
+	}{
+		{
+			name:           "value receiver",
+			methodCall:     "go.uber.org/zap.Logger.Info",
+			wantImportPath: "go.uber.org/zap",
+			wantRecvType:   "Logger",
+			wantFuncName:   "Info",
+		},
+		{
+			name:           "pointer receiver",
+			methodCall:     "database/sql.*DB.QueryContext",
+			wantImportPath: "database/sql",
+			wantRecvType:   "*DB",
+			wantFuncName:   "QueryContext",
+		},
+		{
+			name:           "single-segment import path",
+			methodCall:     "fmt.Stringer.String",
+			wantImportPath: "fmt",
+			wantRecvType:   "Stringer",
+			wantFuncName:   "String",
+		},
+		{
+			name:       "missing method name",
+			methodCall: "go.uber.org/zap.Logger",
+			wantErr:    true,
+		},
+		{
+			name:       "missing receiver type",
+			methodCall: "Logger.Info",
+			wantErr:    true,
+		},
+		{
+			name:       "no dots at all",
+			methodCall: "Info",
+			wantErr:    true,
+		},
+		{
+			name:       "type name starts with a digit",
+			methodCall: "go.uber.org/zap.123Logger.Info",
+			wantErr:    true,
+		},
+		{
+			name:       "empty string",
+			methodCall: "",
+			wantErr:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			importPath, recvType, funcName, err := parseMethodCall(tt.methodCall)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantImportPath, importPath)
+			assert.Equal(t, tt.wantRecvType, recvType)
+			assert.Equal(t, tt.wantFuncName, funcName)
+		})
+	}
 }
