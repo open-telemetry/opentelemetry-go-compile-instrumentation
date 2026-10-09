@@ -138,6 +138,19 @@ func (ip *instrumentPhase) skipRuleForFileIgnore(r rule.InstRule, funcDecl *dst.
 	return false
 }
 
+// rsetHasMethodCallRule reports whether rset contains at least one
+// method_call rule.
+func rsetHasMethodCallRule(rset *rule.InstRuleSet) bool {
+	for _, rules := range rset.CallRules {
+		for _, r := range rules {
+			if r.MethodCall != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // instrumentFile applies rules to a single file and reports whether any of
 // them is a function rule (i.e. whether a globals file is needed).
 func (ip *instrumentPhase) instrumentFile(ctx context.Context, file string, rules []rule.InstRule) (bool, error) {
@@ -211,6 +224,12 @@ func (ip *instrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSe
 			return ex.Wrapf(err, "applying file rule %s to package %s", rule.Name, rset.PackageName)
 		}
 	}
+	// Run the method_call type-check once, before any file in the package is
+	// rewritten.
+	if rsetHasMethodCallRule(rset) {
+		ip.ensureMethodCallInfo()
+	}
+
 	file2rules, files := groupRules(ip.workDir, rset)
 	for _, file := range files {
 		fileHasFuncRule, err := ip.instrumentFile(ctx, file, file2rules[file])

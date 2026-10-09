@@ -736,6 +736,26 @@ func TestGroupRules(t *testing.T) {
 	}
 }
 
+func TestRsetHasMethodCallRule(t *testing.T) {
+	t.Run("no call rules", func(t *testing.T) {
+		rset := rule.NewInstRuleSet("example.com/p")
+		assert.False(t, rsetHasMethodCallRule(rset))
+	})
+
+	t.Run("function_call rule only", func(t *testing.T) {
+		rset := rule.NewInstRuleSet("example.com/p")
+		rset.AddCallRule("/f.go", &rule.InstCallRule{FunctionCall: "net/http.Get"})
+		assert.False(t, rsetHasMethodCallRule(rset))
+	})
+
+	t.Run("method_call rule present", func(t *testing.T) {
+		rset := rule.NewInstRuleSet("example.com/p")
+		rset.AddCallRule("/f.go", &rule.InstCallRule{FunctionCall: "net/http.Get"})
+		rset.AddCallRule("/g.go", &rule.InstCallRule{MethodCall: "example.com/p.*Buffer.Write"})
+		assert.True(t, rsetHasMethodCallRule(rset))
+	})
+}
+
 // TestInstrumentSkipsFilesNoRuleChanged checks that a file a call rule is
 // attached to, but that has no matching call, stays in the compile command as
 // it is. Setup attaches call rules to every file of a target package, so with
@@ -777,4 +797,59 @@ func G() int { return 1 }
 	assert.Equal(t, unmatched, ip.compileArgs[4],
 		"a file no rule changed must stay in the compile command as it is")
 	assert.NoFileExists(t, filepath.Join(ip.workDir, "unmatched.go"))
+}
+
+func TestInstrumentMethodCallMatchesRegardlessOfFileOrder(t *testing.T) {
+	src := t.TempDir()
+	setup := filepath.Join(src, "a_setup.go")
+	call := filepath.Join(src, "b_call.go")
+	require.NoError(t, os.WriteFile(setup, []byte(`package p
+
+import "net/http"
+
+type Buffer struct{}
+
+func (b *Buffer) Write(p []byte) (int, error) { return len(p), nil }
+
+func F() { _, _ = http.Get("http://example.com") }
+`), 0o600))
+	require.NoError(t, os.WriteFile(call, []byte(`package p
+
+func G(b *Buffer) { _, _ = b.Write(nil) }
+`), 0o600))
+
+	unrelatedRule := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_get"},
+		FunctionCall: "net/http.Get",
+		ImportPath:   "net/http",
+		FuncName:     "Get",
+		Replace:      "({{ . }})",
+	}
+	methodRule := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_write"},
+		MethodCall:   "example.com/p.*Buffer.Write",
+		ImportPath:   "example.com/p",
+		RecvType:     "*Buffer",
+		FuncName:     "Write",
+		Replace:      "({{ . }})",
+	}
+	rset := rule.NewInstRuleSet("example.com/p")
+	rset.PackageName = "p"
+	rset.AddCallRule(setup, unrelatedRule)
+	rset.AddCallRule(call, methodRule)
+
+	ip := newTestPhase()
+	ip.workDir = t.TempDir()
+	ip.compileArgs = []string{"compile", "-p", "example.com/p", setup, call}
+	require.NoError(t, ip.instrument(context.Background(), rset))
+
+	assert.True(t, ip.methodCallInfoLoaded)
+	assert.Equal(t, filepath.Join(ip.workDir, "a_setup.go"), ip.compileArgs[3],
+		"a_setup.go's own rule must still rewrite it")
+	assert.Equal(t, filepath.Join(ip.workDir, "b_call.go"), ip.compileArgs[4],
+		"the method_call rule must still match b_call.go even though a_setup.go was rewritten first")
+
+	written, err := os.ReadFile(filepath.Join(ip.workDir, "b_call.go"))
+	require.NoError(t, err)
+	assert.Contains(t, string(written), "(b.Write(nil))")
 }

@@ -1,0 +1,7 @@
+wrap_logger_info:
+  target: main
+  where:
+    method_call: go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/call-rule-method-call/helpers/logger.Logger.Info
+  do:
+    - wrap_call:
+        replace: "tracedInfo({{ . }})"

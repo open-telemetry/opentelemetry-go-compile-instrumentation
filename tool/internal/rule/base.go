@@ -60,6 +60,7 @@ type WhereDef struct {
 	Struct        string     `json:"struct,omitempty"         yaml:"struct,omitempty"`
 	StructLiteral string     `json:"struct_literal,omitempty" yaml:"struct_literal,omitempty"`
 	FunctionCall  string     `json:"function_call,omitempty"  yaml:"function_call,omitempty"`
+	MethodCall    string     `json:"method_call,omitempty"    yaml:"method_call,omitempty"`
 	Directive     string     `json:"directive,omitempty"      yaml:"directive,omitempty"`
 	Kind          string     `json:"kind,omitempty"           yaml:"kind,omitempty"`
 	Identifier    string     `json:"identifier,omitempty"     yaml:"identifier,omitempty"`

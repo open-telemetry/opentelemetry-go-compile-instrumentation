@@ -75,6 +75,9 @@ type instrumentPhase struct {
 	// buildUsesIgnoreDirective is true when some package in this build has a
 	// //otelc:ignore comment above a call, found during setup.
 	buildUsesIgnoreDirective bool
+	// methodCallInfo is built lazily by ensureMethodCallInfo.
+	methodCallInfo       *methodCallPackageInfo
+	methodCallInfoLoaded bool
 }
 
 func (ip *instrumentPhase) Info(msg string, args ...any)  { ip.logger.Info(msg, args...) }
