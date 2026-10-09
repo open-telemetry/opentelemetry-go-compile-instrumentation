@@ -40,25 +40,34 @@ func (sp *setupPhase) Error(msg string, args ...any) { sp.logger.Error(msg, args
 func (sp *setupPhase) Warn(msg string, args ...any)  { sp.logger.Warn(msg, args...) }
 func (sp *setupPhase) Debug(msg string, args ...any) { sp.logger.Debug(msg, args...) }
 
+func setupDebugDir(pkgPath string) string {
+	if pkgPath == "" {
+		pkgPath = "main"
+	}
+	return filepath.Join(util.GetBuildTemp("debug"), util.EscapePackagePath(pkgPath))
+}
+
+func cleanupDebugArtifacts() error {
+	if !instrument.DiffDebugEnabled() {
+		return nil
+	}
+	return instrument.CleanupDebugArtifacts()
+}
+
 // keepForDebug copies the file to the build temp directory for debugging.
 // Error is tolerated as it's not critical.
-func keepForDebug(ctx context.Context, srcPath string) {
+func keepForDebug(ctx context.Context, srcPath, pkgPath string) {
 	logger := util.LoggerFromContext(ctx)
-
-	escape := func(s string) string {
-		s = strings.ReplaceAll(s, "/", "_")
-		s = strings.ReplaceAll(s, ".", "_")
-		return s
+	var targetDir string
+	switch {
+	case pkgPath != "":
+		targetDir = setupDebugDir(pkgPath)
+	case filepath.Clean(filepath.Dir(srcPath)) == filepath.Clean(util.GetOtelcWorkDir()):
+		targetDir = setupDebugDir("main")
+	default:
+		targetDir = setupDebugDir(filepath.Base(filepath.Dir(srcPath)))
 	}
-
-	var name string
-	if filepath.Clean(filepath.Dir(srcPath)) == filepath.Clean(util.GetOtelcWorkDir()) {
-		name = "main"
-	} else {
-		name = escape(filepath.Base(filepath.Dir(srcPath)))
-	}
-
-	dstPath := filepath.Join(util.GetBuildTemp("debug"), name, filepath.Base(srcPath))
+	dstPath := filepath.Join(targetDir, filepath.Base(srcPath))
 	if err := util.CopyFile(srcPath, dstPath); err != nil {
 		logger.WarnContext(ctx, "failed to record added file", "path", srcPath, "error", err)
 	}
@@ -288,6 +297,7 @@ func (sp *setupPhase) generateRuntimePerPackage(
 		if err := sp.addDeps(ctx, matched, runtimePackage{
 			dir:        pkgDir,
 			importPath: sp.runtimeImportPath(ctx, pkg, pkgDir),
+			debugPath:  pkg.PkgPath,
 			name:       pkg.Name,
 		}); err != nil {
 			return ex.Wrapf(err, "adding deps for package at %s", pkgDir)
@@ -353,6 +363,14 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	if cmd.Name == "go" {
 		subcommand = cmd.Args().First() // build / install / test
 		args = cmd.Args().Tail()        // trim the subcommand
+	} else {
+		// Clean up debug artifacts from previous runs for standalone `otelc setup`,
+		// as it prepares the environment for a subsequent toolexec build.
+		// For `otelc go ...`, runGoBuild already performed this cleanup at its
+		// lifecycle boundary before invoking Setup.
+		if err := cleanupDebugArtifacts(); err != nil {
+			return ex.Wrapf(err, "cleaning debug artifacts")
+		}
 	}
 
 	logger := util.LoggerFromContext(ctx)
@@ -715,6 +733,9 @@ func runGoBuild(ctx context.Context, cmd *cli.Command) error {
 	// Clean up import tracking files from previous builds at the start
 	// to prevent stale data from affecting this build.
 	instrument.CleanupImportTrackingFiles()
+	if err := cleanupDebugArtifacts(); err != nil {
+		return ex.Wrapf(err, "cleaning debug artifacts")
+	}
 
 	defer func() {
 		// Restore backed-up go.mod/go.sum but keep .otelc-build/ for debugging.

@@ -89,7 +89,7 @@ func (ip *instrumentPhase) applyOneRule(ctx context.Context, r rule.InstRule, ro
 }
 
 func (ip *instrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSet) error {
-	hasFuncRule := false
+	needsGlobals := false
 	// Apply file rules first because they can introduce new files that used
 	// by other rules such as raw rules
 	for _, rule := range rset.FileRules {
@@ -108,24 +108,23 @@ func (ip *instrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSe
 		}
 
 		// Apply the rules to the target file
-		modified := false
-		for _, r := range rules {
-			res, err1 := ip.applyOneRule(ctx, r, root)
-			if err1 != nil {
-				return ex.Wrapf(err1, "applying rule %s", r.GetName())
-			}
-			hasFuncRule = hasFuncRule || res.needsGlobals
-			modified = modified || res.modified
+		result, changes, err1 := ip.applyRulesCapturingDiffs(ctx, rules, root)
+		if err1 != nil {
+			return err1
 		}
 		// Leave a file no rule changed out of the compile command. A glob
 		// target attaches call and literal rules to every file of every
 		// package it matches, and rewriting those would needlessly reprint
 		// them, including cgo and standard library files.
-		if !modified {
+		if !result.modified {
 			// Phase state (target, parser, tjumps) still describes this file.
 			// Nothing reads it past this point, and the next parseFile resets it.
+			if DiffDebugEnabled() {
+				ip.removeStaleDiff(filepath.Join(ip.debugArtifactDir(), filepath.Base(file)+".diff"))
+			}
 			continue
 		}
+		needsGlobals = needsGlobals || result.needsGlobals
 		// Since trampoline-jump-if is performance-critical, perform AST level
 		// optimization for them before writing to file
 		if err = ip.optimizeTJumps(); err != nil {
@@ -133,14 +132,14 @@ func (ip *instrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSe
 		}
 		// Once all func rules targeting this file are applied, write instrumented
 		// AST to new file and replace the original file in the compile command
-		if err = ip.writeInstrumented(root, file); err != nil {
+		if err = ip.writeInstrumented(root, file, changes); err != nil {
 			return ex.Wrapf(err, "writing instrumented file %s", file)
 		}
 	}
 
-	// Write globals file if any function is instrumented because injected code
+	// Write globals file if any rule requires it because injected code
 	// always requires some global variables and auxiliary declarations
-	if hasFuncRule {
+	if needsGlobals {
 		return ip.writeGlobals(rset.PackageName)
 	}
 	return nil
