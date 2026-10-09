@@ -6,7 +6,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -175,10 +177,9 @@ func mergeProfiles(ctx context.Context, dir string, types []profileType) error {
 
 // mergeProfileType merges all PID-stamped files for a single profile type.
 func mergeProfileType(ctx context.Context, dir string, t profileType) error {
-	pattern := filepath.Join(dir, fmt.Sprintf("otelc-%s-*.pprof", t))
-	files, err := filepath.Glob(pattern)
+	files, err := findProfileFiles(dir, t)
 	if err != nil {
-		return ex.Wrapf(err, "glob %s profiles", t)
+		return err
 	}
 	if len(files) == 0 {
 		return nil
@@ -243,4 +244,29 @@ func (s *profileSession) writeHeapProfile() error {
 		return ex.Wrapf(closeErr, "close heap profile %q", path)
 	}
 	return nil
+}
+
+// findProfileFiles returns the PID-stamped profile files of type t in dir, in
+// name order. It scans the directory instead of using filepath.Glob because dir
+// is the user's --profile-path, and glob meta-characters in it, such as the
+// brackets in "run[1]", would be read as part of the pattern.
+func findProfileFiles(dir string, t profileType) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, ex.Wrapf(err, "read profile directory %q", dir)
+	}
+
+	prefix := fmt.Sprintf("otelc-%s-", t)
+	var files []string
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, ".pprof") {
+			continue
+		}
+		files = append(files, filepath.Join(dir, name))
+	}
+	return files, nil
 }

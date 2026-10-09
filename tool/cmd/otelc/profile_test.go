@@ -364,17 +364,59 @@ func TestWriteHeapProfileCreateError(t *testing.T) {
 	require.ErrorContains(t, err, "create heap profile")
 }
 
-func TestMergeTypeGlobError(t *testing.T) {
-	// An unclosed bracket in the directory name makes filepath.Glob fail.
-	dir := filepath.Join(t.TempDir(), "a[")
-	err := mergeProfileType(context.Background(), dir, profileTypeCPU)
+// TestMergeDirWithGlobCharacters checks that a profile directory whose name
+// contains glob meta-characters is merged like any other. The directory comes
+// from the user's --profile-path, so it can be anything.
+func TestMergeDirWithGlobCharacters(t *testing.T) {
+	for _, name := range []string{"a[", "profiles[1]", "run[0-9]"} {
+		t.Run(name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), name)
+
+			s, err := startProfileSession(dir, []profileType{profileTypeHeap})
+			require.NoError(t, err)
+			require.NoError(t, s.stop())
+			pidFile := filepath.Join(dir, fmt.Sprintf("otelc-heap-%d.pprof", os.Getpid()))
+			assertFileExists(t, pidFile)
+
+			require.NoError(t, mergeProfiles(context.Background(), dir, []profileType{profileTypeHeap}))
+
+			assertFileExists(t, filepath.Join(dir, "otelc-heap.pprof"))
+			_, statErr := os.Stat(pidFile)
+			require.True(t, os.IsNotExist(statErr), "PID-stamped file %q should be removed after merge", pidFile)
+		})
+	}
+}
+
+func TestMergeTypeReadDirError(t *testing.T) {
+	// A NUL byte makes the directory scan fail with something other than "does not exist".
+	err := mergeProfileType(context.Background(), "bad\x00dir", profileTypeCPU)
 	require.Error(t, err)
+	require.ErrorContains(t, err, "read profile directory")
 }
 
 func TestMergeReturnsMergeError(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "a[")
-	err := mergeProfiles(context.Background(), dir, []profileType{profileTypeCPU})
+	err := mergeProfiles(context.Background(), "bad\x00dir", []profileType{profileTypeCPU})
 	require.Error(t, err)
+}
+
+func TestMergeMissingDir(t *testing.T) {
+	// Nothing was written, so there is nothing to merge and no error.
+	dir := filepath.Join(t.TempDir(), "never-created")
+	require.NoError(t, mergeProfiles(context.Background(), dir, []profileType{profileTypeCPU}))
+}
+
+func TestMergeIgnoresUnrelatedFiles(t *testing.T) {
+	dir := t.TempDir()
+	// None of these is a PID-stamped CPU profile, so there is nothing to merge
+	// and no merged file may be produced.
+	for _, name := range []string{"otelc-heap-1.pprof", "otelc-cpu-1.trace", "notes-cpu-1.pprof"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("data"), 0o644))
+	}
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "otelc-cpu-2.pprof"), 0o755))
+
+	require.NoError(t, mergeProfileType(context.Background(), dir, profileTypeCPU))
+	_, statErr := os.Stat(filepath.Join(dir, "otelc-cpu.pprof"))
+	require.True(t, os.IsNotExist(statErr), "no merged file expected")
 }
 
 func TestMergeTypeCreateOutputError(t *testing.T) {
