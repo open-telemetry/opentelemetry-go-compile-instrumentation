@@ -124,6 +124,37 @@ func TestDBClient(t *testing.T) {
 			testutil.HasAttribute("db.operation.name", "COMMIT"),
 		)
 		require.Equal(t, "COMMIT", commitSpan.Name())
+
+		// Regression for #1187: Commit must land in the same trace as BeginTx,
+		// not get orphaned onto its own trace by starting from
+		// context.Background(). (ExecContext's span isn't asserted here: it
+		// takes its own ctx argument from the caller, independent of the
+		// transaction's begin context, so it isn't guaranteed to match.)
+		require.Equal(t, beginSpan.TraceID(), commitSpan.TraceID(),
+			"commit span must share the transaction's trace, not start a new one")
+	})
+
+	t.Run("TransactionRollback", func(t *testing.T) {
+		f := testutil.NewTestFixture(t)
+
+		f.Run("dbclient", "-op=tx-rollback")
+
+		beginSpan := testutil.RequireSpan(t, f.Traces(),
+			testutil.IsClient,
+			testutil.HasAttribute("db.operation.name", "START"),
+		)
+
+		rollbackSpan := testutil.RequireSpan(t, f.Traces(),
+			testutil.IsClient,
+			testutil.HasAttribute("db.operation.name", "ROLLBACK"),
+		)
+		require.Equal(t, "ROLLBACK", rollbackSpan.Name())
+
+		// Regression for #1187: same fix as Commit, via the same txContext
+		// helper, but exercised independently so a change that fixes one and
+		// breaks the other doesn't slip through untested.
+		require.Equal(t, beginSpan.TraceID(), rollbackSpan.TraceID(),
+			"rollback span must share the transaction's trace, not start a new one")
 	})
 
 	t.Run("TransactionFailure", func(t *testing.T) {
