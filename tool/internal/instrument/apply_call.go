@@ -458,7 +458,9 @@ func bracketMarkedStmts(
 // ignored call to suppress any hooks around it.
 //
 // A deferred statement also turns suppression off if the call panics.
-func suppressHooksStmts(selfPackage bool, id int) (before, after []dst.Stmt) {
+
+//nolint:revive // nonamedreturns conflicts with confusing-results
+func suppressHooksStmts(selfPackage bool, id int) ([]dst.Stmt, []dst.Stmt) {
 	flag := fmt.Sprintf("otelcIgnoreDone%d", id)
 
 	fallback := &dst.IfStmt{
@@ -472,12 +474,12 @@ func suppressHooksStmts(selfPackage bool, id int) (before, after []dst.Stmt) {
 		},
 	})
 
-	before = []dst.Stmt{
+	before := []dst.Stmt{
 		ast.ExprStmt(suppressHooksCall(suppressHooksFuncName, selfPackage)),
 		ast.DefineStmts([]dst.Expr{ast.Ident(flag)}, []dst.Expr{ast.BoolFalse()}),
 		deferFallback,
 	}
-	after = []dst.Stmt{
+	after := []dst.Stmt{
 		ast.AssignStmt(ast.Ident(flag), ast.BoolTrue()),
 		ast.ExprStmt(suppressHooksCall(unsuppressHooksFuncName, selfPackage)),
 	}
