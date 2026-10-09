@@ -1314,7 +1314,7 @@ func hooked() {}
 	assert.Contains(t, src, "otelcIgnoreDone1")
 }
 
-func TestApplyIgnoredCallSites_SkipsStatementAlreadyConsumedByWrapCall(t *testing.T) {
+func TestApplyIgnoredCallSites_BracketsEvenWhenAWrapCallRuleAlsoSkippedTheCall(t *testing.T) {
 	root := parseFile(t, `package main
 
 import "unsafe"
@@ -1327,15 +1327,22 @@ func Run() {
 `)
 
 	ip := newTestPhase()
-	fn := findFuncDeclInFile(t, root, "Run")
-	stmt := fn.Body.List[len(fn.Body.List)-1]
-	ip.markIgnoreConsumed(stmt)
+	r := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_sizeof"},
+		FunctionCall: "unsafe.Sizeof",
+		ImportPath:   "unsafe",
+		FuncName:     "Sizeof",
+		Replace:      "Wrapper({{ . }})",
+	}
+	_, err := ip.applyCallRule(context.Background(), r, root)
+	require.NoError(t, err)
 
-	_, err := ip.applyIgnoredCallSites(context.Background(), root)
+	_, err = ip.applyIgnoredCallSites(context.Background(), root)
 	require.NoError(t, err)
 
 	src := renderFile(t, root)
-	assert.NotContains(t, src, "SuppressHooks")
+	assert.Contains(t, src, "runtime.SuppressHooks()")
+	assert.NotContains(t, src, "Wrapper(")
 }
 
 func TestApplyIgnoredCallSites_BracketsSwitchCaseBody(t *testing.T) {
@@ -1380,12 +1387,6 @@ func hooked() {}
 	src := renderFile(t, root)
 	assert.Contains(t, src, "runtime.SuppressHooks()")
 	assert.Contains(t, src, `"runtime"`)
-}
-
-func TestMarkIgnoreConsumed_NilStmtIsANoop(t *testing.T) {
-	ip := newTestPhase()
-	ip.markIgnoreConsumed(nil)
-	assert.Empty(t, ip.consumedIgnoreStmts)
 }
 
 func TestApplyIgnoredCallSites_SelfImportUsesUnqualifiedCalls(t *testing.T) {

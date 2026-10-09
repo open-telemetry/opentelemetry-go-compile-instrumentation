@@ -3,7 +3,11 @@
 
 package main
 
-import "unsafe"
+import (
+	"unsafe"
+
+	"runtime"
+)
 
 func Wrapper(size uintptr) uintptr {
 	println("Wrapped!")
@@ -12,8 +16,17 @@ func Wrapper(size uintptr) uintptr {
 
 func main() {
 	x := 42
+	runtime.SuppressHooks()
+	otelcIgnoreDone0 := false
+	defer func() {
+		if !otelcIgnoreDone0 {
+			runtime.UnsuppressHooks()
+		}
+	}()
 	//otelc:ignore
 	ignored := unsafe.Sizeof(x)
+	otelcIgnoreDone0 = true
+	runtime.UnsuppressHooks()
 	_ = ignored
 
 	y := "hello"

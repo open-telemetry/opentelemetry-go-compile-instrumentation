@@ -72,9 +72,6 @@ type instrumentPhase struct {
 	// rules (one file implementing dozens of before/after pairs), so caching
 	// by file avoids re-parsing it once per rule.
 	parsedHookFiles map[string]*dst.File
-	// consumedIgnoreStmts holds statements whose //otelc:ignore comment a
-	// wrap_call rule already acted on. Reset at the start of each file.
-	consumedIgnoreStmts map[dst.Stmt]bool
 	// buildUsesIgnoreDirective is true when some package in this build has a
 	// //otelc:ignore comment above a call, found during setup.
 	buildUsesIgnoreDirective bool

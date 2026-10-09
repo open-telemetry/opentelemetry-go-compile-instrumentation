@@ -102,7 +102,6 @@ func (ip *instrumentPhase) applyCallReplace(
 		}
 		if ast.HasLeadingDirective(stmts[call], util.DirectiveIgnore) {
 			ip.Debug("Skip call site due to //otelc:ignore", "rule", r.Name)
-			ip.markIgnoreConsumed(stmts[call])
 			return true
 		}
 		if shadowErr := checkAliasOverrideShadowing(aliasOverrides, enclosing); shadowErr != nil {
@@ -174,7 +173,6 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 		}
 		if ast.HasLeadingDirective(stmts[call], util.DirectiveIgnore) {
 			ip.Debug("Skip call site due to //otelc:ignore", "rule", r.Name)
-			ip.markIgnoreConsumed(stmts[call])
 			return true
 		}
 		matchingCalls = append(matchingCalls, call)
@@ -342,10 +340,9 @@ func buildEllipsisIIFE(spreadArg, varType dst.Expr, newArgs []dst.Expr) *dst.Cal
 }
 
 // applyIgnoredCallSites brackets every call whose enclosing statement
-// carries //otelc:ignore, skipping a statement a wrap_call rule already
-// consumed in this file. It reports whether it changed root.
+// carries //otelc:ignore. It reports whether it changed root.
 func (ip *instrumentPhase) applyIgnoredCallSites(ctx context.Context, root *dst.File) (bool, error) {
-	marked := ip.markedIgnoredStmts(root)
+	marked := markedIgnoredStmts(root)
 	if len(marked) == 0 {
 		return false, nil
 	}
@@ -378,11 +375,11 @@ func (ip *instrumentPhase) applyIgnoredCallSites(ctx context.Context, root *dst.
 }
 
 // markedIgnoredStmts returns statements in root carrying //otelc:ignore
-// above a call, excluding ones already consumed by a wrap_call rule.
-func (ip *instrumentPhase) markedIgnoredStmts(root *dst.File) map[dst.Stmt]bool {
+// above a call.
+func markedIgnoredStmts(root *dst.File) map[dst.Stmt]bool {
 	marked := make(map[dst.Stmt]bool)
 	for _, stmt := range ast.CallEnclosingStmts(root) {
-		if stmt == nil || ip.consumedIgnoreStmts[stmt] {
+		if stmt == nil {
 			continue
 		}
 		if ast.HasLeadingDirective(stmt, util.DirectiveIgnore) {
@@ -390,18 +387,6 @@ func (ip *instrumentPhase) markedIgnoredStmts(root *dst.File) map[dst.Stmt]bool 
 		}
 	}
 	return marked
-}
-
-// markIgnoreConsumed marks stmt's //otelc:ignore comment as already handled
-// by a wrap_call rule.
-func (ip *instrumentPhase) markIgnoreConsumed(stmt dst.Stmt) {
-	if stmt == nil {
-		return
-	}
-	if ip.consumedIgnoreStmts == nil {
-		ip.consumedIgnoreStmts = make(map[dst.Stmt]bool)
-	}
-	ip.consumedIgnoreStmts[stmt] = true
 }
 
 // findStmtLists returns a pointer to every statement list in root: the body

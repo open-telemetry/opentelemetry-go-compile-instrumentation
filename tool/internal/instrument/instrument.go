@@ -146,8 +146,6 @@ func (ip *instrumentPhase) instrumentFile(ctx context.Context, file string, rule
 	if err != nil {
 		return false, ex.Wrapf(err, "parsing file %s", file)
 	}
-	ip.consumedIgnoreStmts = nil
-
 	fileIgnored := ast.FileHasLeadingDirective(root, util.DirectiveIgnore)
 	if fileIgnored {
 		ip.Debug("File-level //otelc:ignore found, only //otelc:instrument functions will be instrumented",
