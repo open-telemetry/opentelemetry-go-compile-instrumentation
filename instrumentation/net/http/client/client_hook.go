@@ -119,16 +119,20 @@ func BeforeRoundTrip(ictx hook.HookContext, transport *http.Transport, req *http
 		trace.WithAttributes(attrs...),
 	)
 
-	// Ensure headers map is initialized before injecting trace context
+	// RoundTrip must not modify the caller's request, and WithContext only
+	// shallow-copies it, so the Header map would still be the caller's. That map
+	// is often shared (a base header set assigned to many requests), so injecting
+	// into it from concurrent calls races. Give the outgoing request its own map.
+	newReq := req.WithContext(ctx)
 	if req.Header == nil {
-		req.Header = make(http.Header)
+		newReq.Header = make(http.Header)
+	} else {
+		newReq.Header = req.Header.Clone()
 	}
 
-	// Inject trace context into request headers
-	propagator.Inject(ctx, propagation.HeaderCarrier(req.Header))
+	// Inject trace context into the outgoing request's headers
+	propagator.Inject(ctx, propagation.HeaderCarrier(newReq.Header))
 
-	// Update request with new context
-	newReq := req.WithContext(ctx)
 	ictx.SetParam(requestParamIndex, newReq)
 
 	// Store data for after hook
