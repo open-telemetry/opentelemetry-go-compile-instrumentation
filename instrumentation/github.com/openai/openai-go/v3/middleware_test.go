@@ -704,3 +704,35 @@ func TestContentCaptureFromEnv(t *testing.T) {
 	assert.False(t, contentCaptureFromEnv("1"))
 	assert.False(t, contentCaptureFromEnv("TRUE"))
 }
+
+func TestReadBoundedBoundary(t *testing.T) {
+	const limit = 10
+	tests := []struct {
+		name          string
+		bodyLen       int
+		wantTruncated bool
+	}{
+		{name: "well under the cap", bodyLen: 9, wantTruncated: false},
+		{name: "exactly at the cap", bodyLen: limit, wantTruncated: false},
+		{name: "one byte over the cap", bodyLen: limit + 1, wantTruncated: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			full := strings.Repeat("a", tt.bodyLen)
+			bodyBytes, truncated, reassembled, err := readBounded(io.NopCloser(strings.NewReader(full)), limit)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantTruncated, truncated)
+
+			if tt.wantTruncated {
+				assert.Nil(t, bodyBytes, "a truncated body must not expose a prefix to parsers")
+			} else {
+				assert.Equal(t, full, string(bodyBytes))
+			}
+
+			got, err := io.ReadAll(reassembled)
+			require.NoError(t, err)
+			assert.Equal(t, full, string(got), "the caller must always receive the full body")
+		})
+	}
+}
