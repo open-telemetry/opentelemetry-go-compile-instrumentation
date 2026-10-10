@@ -86,7 +86,11 @@ RATCHET = $(TOOLS)/ratchet
 $(RATCHET): PACKAGE=github.com/sethvargo/ratchet
 
 BUNDLE = $(TOOLS)/bundle
-$(BUNDLE): | $(TOOLS)
+# The sources are real prerequisites, not order-only: with only `| $(TOOLS)`
+# make never rebuilds an existing .bin/bundle, so editing the bundle tool (or
+# switching to a branch that changed it) silently keeps using the stale binary
+# and `make package` then writes an archive that fails Verify Bundle in CI.
+$(BUNDLE): $(wildcard $(TOOLS_DIR)/bundle/*.go) $(TOOLS_DIR)/bundle/go.mod | $(TOOLS)
 	cd $(TOOLS_DIR)/bundle && GOWORK=off go build -o $@
 
 EMBEDMD = $(TOOLS)/embedmd
