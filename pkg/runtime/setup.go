@@ -5,6 +5,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -275,30 +276,30 @@ func setupLoggerProvider(ctx context.Context, res *resource.Resource) error {
 
 // Shutdown gracefully shuts down the OpenTelemetry SDK
 func Shutdown(ctx context.Context) error {
-	var err error
+	var errs []error
 
 	if tracerProvider != nil {
 		if shutdownErr := tracerProvider.Shutdown(ctx); shutdownErr != nil {
 			Logger().Error("failed to shutdown tracer provider", "error", shutdownErr)
-			err = shutdownErr
+			errs = append(errs, shutdownErr)
 		}
 	}
 
 	if meterProvider != nil {
 		if shutdownErr := meterProvider.Shutdown(ctx); shutdownErr != nil {
 			Logger().Error("failed to shutdown meter provider", "error", shutdownErr)
-			err = shutdownErr
+			errs = append(errs, shutdownErr)
 		}
 	}
 
 	if loggerProvider != nil {
 		if shutdownErr := loggerProvider.Shutdown(ctx); shutdownErr != nil {
 			Logger().Error("failed to shutdown logger provider", "error", shutdownErr)
-			err = shutdownErr
+			errs = append(errs, shutdownErr)
 		}
 	}
 
-	return err
+	return errors.Join(errs...)
 }
 
 // StartRuntimeMetrics enables Go runtime metrics collection.
