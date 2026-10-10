@@ -82,7 +82,7 @@ func operationName(op operationType) string {
 // API calls following GenAI semantic conventions.
 func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, error)) (*http.Response, error) {
 	return func(req *http.Request, next func(*http.Request) (*http.Response, error)) (*http.Response, error) {
-		if req.Body == nil {
+		if req.Body == nil || req.URL == nil {
 			return next(req)
 		}
 
@@ -134,14 +134,14 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 			semconv.GenAIRequestModel(model),
 			semconv.GenAIProviderName(provider),
 		}
-		spanAttrs = append(baseAttrs, spanAttrs...)
 		serverAddress, serverPort := netutil.HTTPServerEndpoint(req.URL)
 		if serverAddress != "" && serverPort > 0 {
-			spanAttrs = append(spanAttrs,
+			baseAttrs = append(baseAttrs,
 				otelsemconv.ServerAddress(serverAddress),
 				otelsemconv.ServerPort(serverPort),
 			)
 		}
+		spanAttrs = append(baseAttrs, spanAttrs...)
 
 		ctx := req.Context()
 		ctx, span := tracer.Start(ctx, spanName,
