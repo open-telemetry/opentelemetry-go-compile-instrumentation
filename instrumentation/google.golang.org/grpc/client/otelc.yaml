@@ -1,5 +1,3 @@
-version: "v1.0.0"
-
 client_hook_newclient:
   target: google.golang.org/grpc
   where:
