@@ -121,7 +121,7 @@ func TestParseLegacyFilePreservesRules(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, rules, 1)
 	assert.Equal(t, "server_hook", rules[0].GetName())
-	assert.Equal(t, "net/http", rules[0].GetTarget())
+	assert.Equal(t, "net/http", rules[0].GetTarget().String())
 }
 
 func TestFileRules(t *testing.T) {
