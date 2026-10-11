@@ -4,6 +4,7 @@
 package k8s_client_go
 
 import (
+	"reflect"
 	"sync"
 	"testing"
 
@@ -338,12 +339,21 @@ func stubObjectKinds(t *testing.T, real func(runtime.Object) ([]schema.GroupVers
 	}, &n
 }
 
-func TestLookupGVK_CachesPerType(t *testing.T) {
+// setupGVKCacheTest resets gvkCache and swaps objectKindsFunc for a counting
+// stub, restored on cleanup. Returns the call counter so a test can assert
+// the underlying registry scan ran, or didn't run again.
+func setupGVKCacheTest(t *testing.T) *int {
+	t.Helper()
 	gvkCache = sync.Map{}
 	real := objectKindsFunc
 	stub, calls := stubObjectKinds(t, real)
 	objectKindsFunc = stub
 	t.Cleanup(func() { objectKindsFunc = real })
+	return calls
+}
+
+func TestLookupGVK_CachesPerType(t *testing.T) {
+	calls := setupGVKCacheTest(t)
 
 	pod1 := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "a"}}
 	pod2 := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "b"}}
@@ -362,11 +372,7 @@ func TestLookupGVK_CachesPerType(t *testing.T) {
 }
 
 func TestLookupGVK_CachesDifferentTypesSeparately(t *testing.T) {
-	gvkCache = sync.Map{}
-	real := objectKindsFunc
-	stub, calls := stubObjectKinds(t, real)
-	objectKindsFunc = stub
-	t.Cleanup(func() { objectKindsFunc = real })
+	calls := setupGVKCacheTest(t)
 
 	pod := lookupGVK(&corev1.Pod{})
 	node := lookupGVK(&corev1.Node{})
@@ -378,11 +384,7 @@ func TestLookupGVK_CachesDifferentTypesSeparately(t *testing.T) {
 }
 
 func TestLookupGVK_CachesMisses(t *testing.T) {
-	gvkCache = sync.Map{}
-	real := objectKindsFunc
-	stub, calls := stubObjectKinds(t, real)
-	objectKindsFunc = stub
-	t.Cleanup(func() { objectKindsFunc = real })
+	calls := setupGVKCacheTest(t)
 
 	// A type with no GVK registered in the scheme: unregisteredObject is
 	// runtime.Object-shaped but never added to scheme.Scheme, so ObjectKinds
@@ -412,11 +414,7 @@ func (o *unregisteredObject) DeepCopyObject() runtime.Object {
 // informer shares the single Go type unstructured.Unstructured, so two
 // different CRDs must not be able to evict or shadow each other's GVK.
 func TestLookupGVK_UnstructuredObjectsDoNotCollide(t *testing.T) {
-	gvkCache = sync.Map{}
-	real := objectKindsFunc
-	stub, calls := stubObjectKinds(t, real)
-	objectKindsFunc = stub
-	t.Cleanup(func() { objectKindsFunc = real })
+	calls := setupGVKCacheTest(t)
 
 	widget := &unstructured.Unstructured{}
 	widget.SetAPIVersion("example.com/v1")
@@ -435,4 +433,19 @@ func TestLookupGVK_UnstructuredObjectsDoNotCollide(t *testing.T) {
 	assert.Equal(t, "Gadget", gadgetResult.kind)
 	assert.Equal(t, widgetResult, widgetAgain, "repeated lookups on the same object must agree")
 	assert.NotEqual(t, widgetResult, gadgetResult, "two different CRDs sharing the unstructured.Unstructured Go type must not collide")
+}
+
+// TestLookupGVK_UnstructuredEmptyGVK covers an unstructured object with no
+// kind/apiVersion set yet (e.g. caught mid-decode). It must resolve to a
+// clean miss without ever touching gvkCache or the scheme scan, since the
+// type-assertion short-circuit in lookupGVK runs before either.
+func TestLookupGVK_UnstructuredEmptyGVK(t *testing.T) {
+	calls := setupGVKCacheTest(t)
+
+	result := lookupGVK(&unstructured.Unstructured{})
+
+	assert.False(t, result.ok)
+	assert.Equal(t, 0, *calls, "an unstructured object must never reach the scheme scan, even with an empty GVK")
+	_, cached := gvkCache.Load(reflect.TypeOf(&unstructured.Unstructured{}))
+	assert.False(t, cached, "an unstructured object must never be stored in gvkCache")
 }
