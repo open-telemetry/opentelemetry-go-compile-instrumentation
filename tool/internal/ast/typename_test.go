@@ -259,9 +259,71 @@ func TestTypeNameMatches_ImportAliasResolution(t *testing.T) {
 	})
 }
 
+// TestTypeNameMatches_StrictImportContext covers the case where the file's
+// imports are known but the qualifying identifier isn't one of them. The
+// path-tail fallback must not run there: it would match an identifier the file
+// never imported under that path (#1271).
+func TestTypeNameMatches_StrictImportContext(t *testing.T) {
+	t.Run("same-tail import of a different path does not match", func(t *testing.T) {
+		// ResolvedImportAliasMap drops this unaliased import because nothing
+		// resolves its package name, so "http" is absent from the map even
+		// though the file does import a package whose tail is "http".
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import "example.com/legacy/http"
+
+func f(r *http.Request) {}
+`)
+		require.NoError(t, err)
+
+		imports := ResolvedImportAliasMap(file, nil)
+		require.NotNil(t, imports)
+		require.Empty(t, imports)
+
+		matched, err := MatchesTypeName(firstParamType(t, file), "*net/http.Request", imports)
+		require.NoError(t, err)
+		assert.False(t, matched, "net/http.Request must not match example.com/legacy/http.Request")
+	})
+
+	t.Run("identifier absent from a known import map does not match", func(t *testing.T) {
+		node := &dst.SelectorExpr{X: &dst.Ident{Name: "http"}, Sel: &dst.Ident{Name: "Request"}}
+		tn, err := parseTypeName("net/http.Request")
+		require.NoError(t, err)
+
+		// Non-nil but without "http": the file's imports are known, and "http"
+		// isn't one of them.
+		assert.False(t, tn.matches(node, map[string]string{"fmt": "fmt"}))
+		assert.False(t, tn.matches(node, map[string]string{}))
+	})
+
+	t.Run("nil import map still falls back to the path tail", func(t *testing.T) {
+		node := &dst.SelectorExpr{X: &dst.Ident{Name: "http"}, Sel: &dst.Ident{Name: "Request"}}
+		tn, err := parseTypeName("net/http.Request")
+		require.NoError(t, err)
+
+		assert.True(t, tn.matches(node, nil))
+	})
+}
+
+// firstParamType returns the type expression of the first parameter of the
+// first function declared in file.
+func firstParamType(t *testing.T, file *dst.File) dst.Expr {
+	t.Helper()
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*dst.FuncDecl)
+		if !ok || fn.Type.Params == nil || len(fn.Type.Params.List) == 0 {
+			continue
+		}
+		return fn.Type.Params.List[0].Type
+	}
+	t.Fatal("no function with parameters in file")
+	return nil
+}
+
 func TestImportAliasMap(t *testing.T) {
 	t.Run("nil file returns nil", func(t *testing.T) {
-		assert.Nil(t, ImportAliasMap(nil))
+		assert.Nil(t, ImportAliasMap(nil, nil))
 	})
 
 	t.Run("resolves default and aliased imports, skips blank and dot imports", func(t *testing.T) {
@@ -279,7 +341,7 @@ func f(r *http.Request, r2 *althttp.Request) {}
 `)
 		require.NoError(t, err)
 
-		imports := ImportAliasMap(file)
+		imports := ImportAliasMap(file, nil)
 		assert.Len(t, imports, 2)
 		assert.Equal(t, "net/http", imports["http"])
 		assert.Equal(t, "net/http", imports["althttp"])
@@ -300,7 +362,7 @@ func f(t *jwt.Token, n *yaml.Node) {}
 `)
 		require.NoError(t, err)
 
-		imports := ImportAliasMap(file)
+		imports := ImportAliasMap(file, nil)
 		assert.Equal(t, "github.com/golang-jwt/jwt/v5", imports["jwt"])
 		assert.Equal(t, "gopkg.in/yaml.v3", imports["yaml"])
 	})
@@ -318,7 +380,7 @@ func f(x *foo.T, y *bar.T) {}
 `)
 		require.NoError(t, err)
 
-		imports := ImportAliasMap(file)
+		imports := ImportAliasMap(file, nil)
 		assert.Len(t, imports, 2)
 		assert.Equal(t, "github.com/a/foo/v2", imports["foo"])
 		assert.Equal(t, "github.com/b/bar/v2", imports["bar"])
@@ -335,9 +397,59 @@ func f(c *redis.Client) {}
 `)
 		require.NoError(t, err)
 
-		imports := ImportAliasMap(file)
+		imports := ImportAliasMap(file, nil)
 		assert.NotContains(t, imports, "redis")
 		assert.Equal(t, "github.com/redis/go-redis/v9", imports["go-redis"])
+	})
+
+	t.Run("resolvedNames resolves a package name unrelated to its import path", func(t *testing.T) {
+		// This test uses the same fixture, with the real name supplied.
+		// The import must be keyed by "redis", not the guessed
+		// "go-redis".
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import "github.com/redis/go-redis/v9"
+
+func f(c *redis.Client) {}
+`)
+		require.NoError(t, err)
+
+		resolvedNames := map[string]string{"github.com/redis/go-redis/v9": "redis"}
+		imports := ImportAliasMap(file, resolvedNames)
+		assert.Equal(t, "github.com/redis/go-redis/v9", imports["redis"])
+		assert.NotContains(t, imports, "go-redis")
+	})
+
+	t.Run("resolvedNames miss falls back to the guess", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import "github.com/redis/go-redis/v9"
+
+func f(c *redis.Client) {}
+`)
+		require.NoError(t, err)
+
+		resolvedNames := map[string]string{"example.com/unrelated": "whatever"}
+		imports := ImportAliasMap(file, resolvedNames)
+		assert.Equal(t, "github.com/redis/go-redis/v9", imports["go-redis"])
+	})
+
+	t.Run("explicit alias in the file always wins over resolvedNames", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import goredis "github.com/redis/go-redis/v9"
+
+func f(c *goredis.Client) {}
+`)
+		require.NoError(t, err)
+
+		resolvedNames := map[string]string{"github.com/redis/go-redis/v9": "redis"}
+		imports := ImportAliasMap(file, resolvedNames)
+		assert.Equal(t, "github.com/redis/go-redis/v9", imports["goredis"])
+		assert.NotContains(t, imports, "redis")
 	})
 
 	t.Run("v-prefixed last segment that is not a version suffix is preserved", func(t *testing.T) {
@@ -352,7 +464,7 @@ func f(c *vault.Client) {}
 `)
 		require.NoError(t, err)
 
-		imports := ImportAliasMap(file)
+		imports := ImportAliasMap(file, nil)
 		assert.Equal(t, "github.com/hashicorp/vault", imports["vault"])
 	})
 
@@ -362,7 +474,7 @@ func f(c *vault.Client) {}
 			{Path: &dst.BasicLit{Value: `"net/http"`}},
 		}}
 
-		imports := ImportAliasMap(file)
+		imports := ImportAliasMap(file, nil)
 		assert.Len(t, imports, 1)
 		assert.Equal(t, "net/http", imports["http"])
 	})
@@ -373,7 +485,7 @@ func f(c *vault.Client) {}
 			{Path: &dst.BasicLit{Value: `"net/http"`}},
 		}}
 
-		imports := ImportAliasMap(file)
+		imports := ImportAliasMap(file, nil)
 		assert.Len(t, imports, 1)
 		assert.Equal(t, "net/http", imports["http"])
 	})
@@ -399,7 +511,7 @@ func f(c *vault.Client) {}
 			},
 		}
 
-		imports := ImportAliasMap(file)
+		imports := ImportAliasMap(file, nil)
 		assert.Len(t, imports, 2)
 		assert.Equal(t, "net/http", imports["http"])
 		assert.Equal(t, "net/http", imports["althttp"])
@@ -423,10 +535,87 @@ func f(c *vault.Client) {}
 			},
 		}
 
-		imports := ImportAliasMap(file)
+		imports := ImportAliasMap(file, nil)
 		assert.Len(t, imports, 1)
 		assert.Equal(t, "net/http", imports["http"])
 		assert.NotContains(t, imports, "ignored")
+	})
+}
+
+func TestResolvedImportAliasMap(t *testing.T) {
+	t.Run("nil file returns nil", func(t *testing.T) {
+		assert.Nil(t, ResolvedImportAliasMap(nil, nil))
+	})
+
+	t.Run("unaliased import with no resolvedNames entry is omitted, not guessed", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import "github.com/redis/go-redis/v9"
+
+func f(c *redis.Client) {}
+`)
+		require.NoError(t, err)
+
+		imports := ResolvedImportAliasMap(file, nil)
+		assert.Empty(t, imports)
+	})
+
+	t.Run("resolvedNames hit is kept", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import "github.com/redis/go-redis/v9"
+
+func f(c *redis.Client) {}
+`)
+		require.NoError(t, err)
+
+		resolvedNames := map[string]string{"github.com/redis/go-redis/v9": "redis"}
+		imports := ResolvedImportAliasMap(file, resolvedNames)
+		assert.Equal(t, "github.com/redis/go-redis/v9", imports["redis"])
+	})
+
+	t.Run("explicit alias in the file is kept even without resolvedNames", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import goredis "github.com/redis/go-redis/v9"
+
+func f(c *goredis.Client) {}
+`)
+		require.NoError(t, err)
+
+		imports := ResolvedImportAliasMap(file, nil)
+		assert.Equal(t, "github.com/redis/go-redis/v9", imports["goredis"])
+	})
+
+	t.Run("unaliased import matching guess is kept via resolvedNames", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import "net/http"
+
+func f(r *http.Request) {}
+`)
+		require.NoError(t, err)
+
+		resolvedNames := map[string]string{"net/http": "http"}
+		imports := ResolvedImportAliasMap(file, resolvedNames)
+		assert.Equal(t, "net/http", imports["http"])
+	})
+
+	t.Run("unaliased import with no resolvedNames table at all is omitted", func(t *testing.T) {
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import "net/http"
+
+func f(r *http.Request) {}
+`)
+		require.NoError(t, err)
+
+		assert.Empty(t, ResolvedImportAliasMap(file, nil))
 	})
 }
 

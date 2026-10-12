@@ -65,11 +65,11 @@ func TestToolexecPassesThroughNonToolCommands(t *testing.T) {
 	assert.FileExists(t, marker)
 }
 
-// TestToolexecNestedGatesInstrumentation checks that the nested flag, not the
-// command shape, decides whether otelc instruments: the same compile-shaped
-// command is instrumented when nested is false (and here fails because no
-// matched.json exists) but passed straight through when nested is true.
-func TestToolexecNestedGatesInstrumentation(t *testing.T) {
+// TestToolexecNestedInstrumentsCompile checks that a nested build instruments
+// compiles too, since it shares the outer build's cache keys. The compile here
+// fails in both modes because no matched.json exists. Other nested commands
+// are run unchanged.
+func TestToolexecNestedInstrumentsCompile(t *testing.T) {
 	ctx := util.ContextWithLogger(t.Context(), slog.Default())
 	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
 
@@ -85,9 +85,20 @@ func TestToolexecNestedGatesInstrumentation(t *testing.T) {
 		assert.NoFileExists(t, marker, "the tool is not run when instrumentation fails first")
 	})
 
-	t.Run("nested passes the command straight through", func(t *testing.T) {
-		require.NoError(t, Toolexec(ctx, compileArgs, true))
-		assert.FileExists(t, marker)
+	t.Run("nested attempts instrumentation too", func(t *testing.T) {
+		err := Toolexec(ctx, compileArgs, true)
+		require.Error(t, err, "instrumentation should try to load the absent matched.json")
+		assert.Contains(t, err.Error(), "otelc setup")
+		assert.NoFileExists(t, marker, "the tool is not run when instrumentation fails first")
+	})
+
+	t.Run("nested runs other commands unchanged", func(t *testing.T) {
+		linkMarker := filepath.Join(t.TempDir(), "ran")
+		linkStub := writeStub(t, "link", "touch "+linkMarker)
+		linkArgs := []string{linkStub, "-o", "exe", "-buildid", "id", "-importcfg", "importcfg.link"}
+		require.True(t, util.IsLinkCommandWithArgs(linkArgs), "stub must look like a link command")
+		require.NoError(t, Toolexec(ctx, linkArgs, true))
+		assert.FileExists(t, linkMarker)
 	})
 }
 
