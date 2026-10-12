@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net"
 
+	"go.opentelemetry.io/otelc/test/shared/grpcpb"
 	"go.opentelemetry.io/otelc/test/shared/grpcpb/pb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/stats"
@@ -70,7 +71,7 @@ func (rpcTracker) HandleRPC(ctx context.Context, rs stats.RPCStats) {
 		return
 	}
 	method, _ := ctx.Value(rpcMethodKey{}).(string)
-	slog.Info("rpc completed", "method", method)
+	slog.Info(grpcpb.RPCCompletedLog(method))
 }
 
 func (rpcTracker) TagConn(ctx context.Context, _ *stats.ConnTagInfo) context.Context {

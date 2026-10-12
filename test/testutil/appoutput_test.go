@@ -85,3 +85,40 @@ func TestAppOutput_ConcurrentWritesAreRecorded(t *testing.T) {
 	require.Equal(t, 10, out.Len())
 	require.Equal(t, "xxxxxxxxxx", out.String())
 }
+
+func TestAppOutput_WaitForUnregistersWaiterOnContextDone(t *testing.T) {
+	var out AppOutput
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	// The substring is absent, so WaitFor registers a waiter before finding
+	// the context done. That waiter must not outlive the call.
+	err := out.WaitFor(ctx, "never written")
+	require.ErrorIs(t, err, context.Canceled)
+	require.Zero(t, out.pendingWaiters(), "a wait that ended with its context left its waiter registered")
+}
+
+func TestAppOutput_WaitForCancelRacingWriteLeavesNoWaiter(t *testing.T) {
+	// Repeated so the cancellation and the write land either side of each
+	// other rather than in one fixed order.
+	for range 100 {
+		var out AppOutput
+		ctx, cancel := context.WithCancel(t.Context())
+
+		done := make(chan error, 1)
+		go func() { done <- out.WaitFor(ctx, "rpc completed") }()
+
+		var wg sync.WaitGroup
+		wg.Go(cancel)
+		wg.Go(func() { _, _ = out.Write([]byte("rpc completed\n")) })
+		wg.Wait()
+
+		// Both outcomes are legitimate: the write may satisfy the wait, or the
+		// cancellation may win. Either way the waiter must be gone, so neither
+		// path can leak it.
+		if err := <-done; err != nil {
+			require.ErrorIs(t, err, context.Canceled)
+		}
+		require.Zero(t, out.pendingWaiters(), "waiter left registered after a cancel raced a write")
+	}
+}

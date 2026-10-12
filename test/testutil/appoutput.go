@@ -70,8 +70,40 @@ func (o *AppOutput) WaitFor(ctx context.Context, substr string) error {
 	case <-ready:
 		return nil
 	case <-ctx.Done():
+		// Stop tracking this waiter. Left registered, a wait that timed out
+		// would be held alive by the slice until output that may never be
+		// written arrives. A concurrent Write may also have satisfied it in
+		// the moment between ctx finishing and the lock being taken, in which
+		// case it is already gone and the output did arrive after all.
+		if !o.removeWaiter(ready) {
+			return nil
+		}
 		return ex.Wrapf(ctx.Err(), "waiting for app output %q", substr)
 	}
+}
+
+// removeWaiter drops the waiter owning ready, reporting whether it was still
+// registered. One that has gone was released by a concurrent Write.
+func (o *AppOutput) removeWaiter(ready chan struct{}) bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	for i, w := range o.waiters {
+		if w.ready == ready {
+			o.waiters = append(o.waiters[:i], o.waiters[i+1:]...)
+			return true
+		}
+	}
+
+	return false
+}
+
+// pendingWaiters reports how many WaitFor calls are still registered. Tests use
+// it to assert that a wait which ended with its context left nothing behind.
+func (o *AppOutput) pendingWaiters() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return len(o.waiters)
 }
 
 // String returns everything written so far.
