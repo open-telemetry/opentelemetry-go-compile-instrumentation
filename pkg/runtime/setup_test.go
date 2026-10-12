@@ -140,6 +140,37 @@ func TestShutdownProviders(t *testing.T) {
 	require.NoError(t, Shutdown(context.Background()))
 }
 
+type errLogProcessor struct{ err error }
+
+func (errLogProcessor) Enabled(context.Context, sdklog.EnabledParameters) bool { return true }
+func (errLogProcessor) OnEmit(context.Context, *sdklog.Record) error           { return nil }
+func (p errLogProcessor) Shutdown(context.Context) error                       { return p.err }
+func (errLogProcessor) ForceFlush(context.Context) error                       { return nil }
+
+type customErrSpanProcessor struct{ err error }
+
+func (customErrSpanProcessor) OnStart(context.Context, sdktrace.ReadWriteSpan) {}
+func (customErrSpanProcessor) OnEnd(sdktrace.ReadOnlySpan)                     {}
+func (customErrSpanProcessor) ForceFlush(context.Context) error                { return nil }
+func (p customErrSpanProcessor) Shutdown(context.Context) error                { return p.err }
+
+func TestShutdownMultipleErrors(t *testing.T) {
+	origTracer, origMeter, origLogger := tracerProvider, meterProvider, loggerProvider
+	t.Cleanup(func() { tracerProvider, meterProvider, loggerProvider = origTracer, origMeter, origLogger })
+
+	tracerErr := errors.New("tracer shutdown failed")
+	loggerErr := errors.New("logger shutdown failed")
+
+	tracerProvider = sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(customErrSpanProcessor{err: tracerErr}))
+	meterProvider = nil
+	loggerProvider = sdklog.NewLoggerProvider(sdklog.WithProcessor(errLogProcessor{err: loggerErr}))
+
+	err := Shutdown(context.Background())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, tracerErr)
+	assert.ErrorIs(t, err, loggerErr)
+}
+
 // restoreProviders resets the global providers after a test that configures them.
 func restoreProviders(t *testing.T) {
 	origTracer, origMeter, origLogger := tracerProvider, meterProvider, loggerProvider
