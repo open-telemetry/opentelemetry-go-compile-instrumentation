@@ -168,3 +168,6 @@ func (ts TraceStats) String() string {
 
 // IsProducer matches producer spans.
 func IsProducer(s ptrace.Span) bool { return s.Kind() == ptrace.SpanKindProducer }
+
+// IsConsumer matches consumer spans.
+func IsConsumer(s ptrace.Span) bool { return s.Kind() == ptrace.SpanKindConsumer }

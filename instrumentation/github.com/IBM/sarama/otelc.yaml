@@ -1,0 +1,14 @@
+version: "v1.0.0"
+
+# NewClient is the single construction path shared by NewSyncProducer,
+# NewAsyncProducer, NewConsumer and NewConsumerGroup, so appending the OTel
+# interceptors to the shared *Config here covers every producer and consumer
+# built from it.
+sarama_newclient:
+  target: github.com/IBM/sarama
+  where:
+    func: NewClient
+  do:
+    - inject_hooks:
+        before: BeforeNewClient
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/IBM/sarama"

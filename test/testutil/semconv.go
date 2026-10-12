@@ -220,3 +220,39 @@ func RequireAWSClientSemconv(
 	// Recommended attributes
 	RequireAttribute(t, span, "aws.request_id", requestID)
 }
+
+// RequireSaramaProducerSemconv verifies that an IBM/sarama producer span
+// follows the messaging semantic conventions.
+// Reference: https://opentelemetry.io/docs/specs/semconv/messaging/kafka/
+func RequireSaramaProducerSemconv(
+	t *testing.T,
+	span ptrace.Span,
+	topic, endpoint string,
+) {
+	RequireAttribute(t, span, string(semconv.MessagingSystemKey), "kafka")
+	RequireAttribute(t, span, string(semconv.MessagingOperationNameKey), "send")
+	RequireAttribute(t, span, string(semconv.MessagingDestinationNameKey), topic)
+	RequireAttribute(t, span, "messaging.kafka.async", true)
+	if host, portText, err := net.SplitHostPort(endpoint); err == nil {
+		RequireAttribute(t, span, string(semconv.ServerAddressKey), host)
+		if port, convErr := strconv.Atoi(portText); convErr == nil && port > 0 {
+			RequireAttribute(t, span, string(semconv.ServerPortKey), int64(port))
+		}
+	}
+}
+
+// RequireSaramaConsumerSemconv verifies that an IBM/sarama consumer span
+// follows the messaging semantic conventions.
+// Reference: https://opentelemetry.io/docs/specs/semconv/messaging/kafka/
+func RequireSaramaConsumerSemconv(
+	t *testing.T,
+	span ptrace.Span,
+	topic, partition string,
+	offset int64,
+) {
+	RequireAttribute(t, span, string(semconv.MessagingSystemKey), "kafka")
+	RequireAttribute(t, span, string(semconv.MessagingOperationNameKey), "receive")
+	RequireAttribute(t, span, string(semconv.MessagingDestinationNameKey), topic)
+	RequireAttribute(t, span, string(semconv.MessagingDestinationPartitionIDKey), partition)
+	RequireAttribute(t, span, "messaging.kafka.offset", offset)
+}
