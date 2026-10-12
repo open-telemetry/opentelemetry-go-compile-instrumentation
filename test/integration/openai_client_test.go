@@ -115,6 +115,7 @@ func TestOpenAIClientV3(t *testing.T) {
 		"chat",
 		"gpt-4",
 		"local",
+		server.Listener.Addr().String(),
 		"chatcmpl-test-123",
 		"gpt-4",
 		[]string{"stop"},
