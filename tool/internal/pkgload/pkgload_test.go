@@ -6,6 +6,7 @@ package pkgload
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -13,8 +14,42 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
+func TestCollectPackageNames(t *testing.T) {
+	// Package b is shared by a and c, a diamond dependency. The walk
+	// must visit b once and not repeat work.
+	b := &packages.Package{PkgPath: "example.com/b", Name: "bpkg"}
+	c := &packages.Package{PkgPath: "example.com/c", Name: "cpkg", Imports: map[string]*packages.Package{"b": b}}
+	a := &packages.Package{
+		PkgPath: "example.com/a",
+		Name:    "apkg",
+		Imports: map[string]*packages.Package{"b": b, "c": c},
+	}
+
+	names := CollectPackageNames([]*packages.Package{a})
+
+	assert.Equal(t, map[string]string{
+		"example.com/a": "apkg",
+		"example.com/b": "bpkg",
+		"example.com/c": "cpkg",
+	}, names)
+}
+
+func TestCollectPackageNames_SkipsEmptyName(t *testing.T) {
+	pkg := &packages.Package{PkgPath: "example.com/broken", Name: ""}
+
+	names := CollectPackageNames([]*packages.Package{pkg})
+
+	assert.Empty(t, names)
+}
+
+func TestCollectPackageNames_EmptyInput(t *testing.T) {
+	names := CollectPackageNames(nil)
+
+	assert.Empty(t, names)
+}
+
 func TestLoadPackages(t *testing.T) {
-	pkgs, err := LoadPackages(t.Context(), packages.NeedName, nil, "fmt")
+	pkgs, err := LoadPackages(t.Context(), packages.NeedName, nil, false, "fmt")
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 	assert.Equal(t, "fmt", pkgs[0].Name)
@@ -38,7 +73,7 @@ func TestLoadPackagesWithChangeDirectoryFlag(t *testing.T) {
 	t.Chdir(tmpDir)
 
 	for _, buildFlags := range [][]string{{"-C", "app"}, {"-C=app"}} {
-		pkgs, err := LoadPackages(t.Context(), packages.NeedName|packages.NeedModule, buildFlags, ".")
+		pkgs, err := LoadPackages(t.Context(), packages.NeedName|packages.NeedModule, buildFlags, false, ".")
 		require.NoError(t, err)
 		require.Len(t, pkgs, 1)
 		require.NotNil(t, pkgs[0].Module)
@@ -391,19 +426,12 @@ func TestFindModuleDirs(t *testing.T) {
 	tests := []struct {
 		name    string
 		pkgs    []*packages.Package
-		want    map[string]bool
+		want    []string
 		wantErr bool
 	}{
 		{
-			name: "collects module dirs",
+			name: "collects module dirs in sorted order",
 			pkgs: []*packages.Package{
-				{
-					PkgPath: "example.com/a",
-					GoFiles: []string{"/tmp/moda/a.go"},
-					Module: &packages.Module{
-						Dir: "/tmp/moda",
-					},
-				},
 				{
 					PkgPath: "example.com/b",
 					GoFiles: []string{"/tmp/modb/b.go"},
@@ -411,14 +439,21 @@ func TestFindModuleDirs(t *testing.T) {
 						Dir: "/tmp/modb",
 					},
 				},
+				{
+					PkgPath: "example.com/a",
+					GoFiles: []string{"/tmp/moda/a.go"},
+					Module: &packages.Module{
+						Dir: "/tmp/moda",
+					},
+				},
 			},
-			want: map[string]bool{
-				"/tmp/moda": true,
-				"/tmp/modb": true,
+			want: []string{
+				"/tmp/moda",
+				"/tmp/modb",
 			},
 		},
 		{
-			name: "deduplicates module dirs",
+			name: "deduplicates module dirs across multiple packages",
 			pkgs: []*packages.Package{
 				{
 					PkgPath: "example.com/a",
@@ -434,9 +469,16 @@ func TestFindModuleDirs(t *testing.T) {
 						Dir: "/tmp/mod",
 					},
 				},
+				{
+					PkgPath: "example.com/c",
+					GoFiles: []string{"/tmp/mod/c.go"},
+					Module: &packages.Module{
+						Dir: "/tmp/mod",
+					},
+				},
 			},
-			want: map[string]bool{
-				"/tmp/mod": true,
+			want: []string{
+				"/tmp/mod",
 			},
 		},
 		{
@@ -447,7 +489,7 @@ func TestFindModuleDirs(t *testing.T) {
 					GoFiles: []string{"/tmp/a.go"},
 				},
 			},
-			want: map[string]bool{},
+			want: []string{},
 		},
 		{
 			name: "skips package with module but no go files",
@@ -459,7 +501,7 @@ func TestFindModuleDirs(t *testing.T) {
 					},
 				},
 			},
-			want: map[string]bool{},
+			want: []string{},
 		},
 		{
 			name: "skips command line package without go files",
@@ -468,7 +510,7 @@ func TestFindModuleDirs(t *testing.T) {
 					PkgPath: CommandLineArgumentsPackage,
 				},
 			},
-			want: map[string]bool{},
+			want: []string{},
 		},
 		{
 			name: "resolves module dir for command line package",
@@ -478,8 +520,8 @@ func TestFindModuleDirs(t *testing.T) {
 					GoFiles: []string{mainFile},
 				},
 			},
-			want: map[string]bool{
-				tmp: true,
+			want: []string{
+				tmp,
 			},
 		},
 		{
@@ -500,11 +542,14 @@ func TestFindModuleDirs(t *testing.T) {
 
 			if tt.wantErr {
 				require.Error(t, err)
+				assert.Nil(t, got, "must return no partial result on error")
 				return
 			}
 
 			require.NoError(t, err)
-			require.Equal(t, tt.want, got)
+			assert.NotNil(t, got, "empty result must be non-nil")
+			assert.Equal(t, tt.want, got)
+			assert.True(t, slices.IsSorted(got), "output must be sorted")
 		})
 	}
 }

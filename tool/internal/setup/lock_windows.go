@@ -11,18 +11,17 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// isTransientLockFileError reports whether err is a Windows sharing
-// violation (ERROR_SHARING_VIOLATION). Opening or statting the lock file
-// can collide with a handle that briefly excludes new opens: the holder's
-// in-flight DeleteFile during release, or an antivirus/indexer scan. The
-// condition clears as soon as the offending handle closes, so an
-// acquisition attempt treats it as "the file is busy, try again" rather
-// than as an error.
+// isTransientLockFileError reports whether err is a transient Windows error
+// caused by concurrent lock-file operations, specifically:
+//   - ERROR_SHARING_VIOLATION (32) which occurs when opening a file that is in the
+//     middle of being deleted by another process, or when statting a file whose
+//     delete-on-close handle hasn't fully closed yet.
+//   - ERROR_ACCESS_DENIED (5) which occurs when opening a file marked for deletion
+//     (delete-pending) by the releasing process before its handle teardown completes,
+//     or during transient background scanner/indexer file opens.
 //
-// ERROR_ACCESS_DENIED is deliberately not treated as transient: it can
-// mean a delete-pending file on filesystems without POSIX delete
-// semantics, but it is also how real permission problems surface, and
-// those must fail loudly instead of retrying forever.
+// Both conditions clear as soon as the offending handle closes, so an acquisition
+// attempt treats them as "the file is busy, try again" rather than as an error.
 func isTransientLockFileError(err error) bool {
-	return errors.Is(err, windows.ERROR_SHARING_VIOLATION)
+	return errors.Is(err, windows.ERROR_SHARING_VIOLATION) || errors.Is(err, windows.ERROR_ACCESS_DENIED)
 }

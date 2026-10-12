@@ -62,6 +62,11 @@ func TestOpenAIClient(t *testing.T) {
 
 // TestOpenAIClientV2 exercises the openai-go/v2 instrumentation package end
 // to end via otelc go build, rather than only unit-testing it in isolation.
+// v1 and v3 are otherwise identical shares of the same internal/streaming
+// module (a sibling of v2/v3 nested under v1's own directory in the repo,
+// not a descendant of either), so this is the only integration coverage of
+// the tool actually resolving that shared module for a consumer that never
+// imports v1 at all.
 func TestOpenAIClientV2(t *testing.T) {
 	t.Parallel()
 	testutil.Build(t, "", "openaiclientv2", "go", "build", "-a")
