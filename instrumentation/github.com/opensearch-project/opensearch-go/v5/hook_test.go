@@ -96,6 +96,7 @@ func TestParseOpenSearchPath(t *testing.T) {
 		{"POST", "/orders*/_search", "search", "orders*"},
 		{"POST", "/m%C3%BCnchen/_search", "search", "münchen"},
 		{"POST", "/orders/_doc/_search", "search", "orders"},
+		{"GET", "/orders/_doc/_search", "get", "orders"},
 		{"GET", "/_cluster/health", "cluster.health", ""},
 		{"GET", "/_nodes/http", "nodes.http", ""},
 		{"GET", "/_nodes/n-123/stats", "nodes.stats", ""},

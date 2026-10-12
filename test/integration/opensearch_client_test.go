@@ -10,6 +10,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -19,8 +21,12 @@ import (
 	"go.opentelemetry.io/otelc/test/testutil"
 )
 
+// TestOpenSearchClient and TestOpenSearchClient_Disabled must not run in
+// parallel: both build the same opensearchclientv5 app directory, and
+// testutil.Build registers cleanup that removes that binary and .otelc-build,
+// so one test can delete files while the other is still building or starting
+// the app.
 func TestOpenSearchClient(t *testing.T) {
-	t.Parallel()
 	testutil.Build(t, "", "opensearchclientv5", "go", "build", "-a")
 
 	f := testutil.NewTestFixture(t)
@@ -60,6 +66,7 @@ func TestOpenSearchClient(t *testing.T) {
 		"/orders/_search",
 		200,
 	)
+	requireServerAddress(t, searchClient, os.URL)
 
 	indexBody := hitEndpoint(t, frontPort, "/index")
 	require.Contains(t, indexBody, "id=1")
@@ -88,6 +95,7 @@ func TestOpenSearchClient(t *testing.T) {
 		"/orders/_doc/1",
 		200,
 	)
+	requireServerAddress(t, indexClient, os.URL)
 
 	deleteBody := hitEndpoint(t, frontPort, "/delete")
 	require.Contains(t, deleteBody, "id=1")
@@ -116,10 +124,10 @@ func TestOpenSearchClient(t *testing.T) {
 		"/orders/_doc/1",
 		200,
 	)
+	requireServerAddress(t, deleteClient, os.URL)
 }
 
 func TestOpenSearchClient_Disabled(t *testing.T) {
-	t.Parallel()
 	testutil.Build(t, "", "opensearchclientv5", "go", "build", "-a")
 
 	f := testutil.NewTestFixture(t)
@@ -163,6 +171,20 @@ func TestOpenSearchClient_Disabled(t *testing.T) {
 	require.Equal(t, 2, endpointSpans)
 	require.GreaterOrEqual(t, clientSpans, 2, "inner net/http client spans must come back when opensearch is disabled")
 	require.Empty(t, unexpectedSpan, "unexpected spans: %v", unexpectedSpan)
+}
+
+// requireServerAddress asserts that the client span recorded the node that was
+// actually contacted. opensearchapi reaches the hook with a relative URL, so
+// server.address and server.port are only known once the request has been sent.
+func requireServerAddress(t *testing.T, span ptrace.Span, osURL string) {
+	t.Helper()
+	u, err := url.Parse(osURL)
+	require.NoError(t, err)
+	port, err := strconv.Atoi(u.Port())
+	require.NoError(t, err)
+	attrs := testutil.Attrs(span)
+	require.Equal(t, u.Hostname(), attrs["server.address"])
+	require.Equal(t, int64(port), attrs["server.port"])
 }
 
 func startOpenSearchMock(t *testing.T) *httptest.Server {

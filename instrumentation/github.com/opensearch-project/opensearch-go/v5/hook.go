@@ -28,6 +28,7 @@ import (
 
 	"github.com/opensearch-project/opensearch-go/v5"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 	"go.opentelemetry.io/otel/trace"
@@ -131,6 +132,20 @@ func AfterRequest(ictx hook.HookContext, resp *http.Response, err error) {
 	span := data.span
 	defer span.End()
 
+	// internal/build.Request hands the hook a relative URL, so BeforeRequest
+	// cannot see the host for the standard opensearchapi calls. The transport
+	// fills in the node it contacts before the request goes out, so record the
+	// endpoint from the request that was actually sent.
+	if resp != nil && resp.Request != nil && resp.Request.URL != nil {
+		if addr := resp.Request.URL.Hostname(); addr != "" {
+			attrs := []attribute.KeyValue{semconv.ServerAddress(addr)}
+			if p := portOf(resp.Request.URL); p > 0 {
+				attrs = append(attrs, semconv.ServerPort(p))
+			}
+			span.SetAttributes(attrs...)
+		}
+	}
+
 	status := 0
 	if resp != nil && resp.StatusCode > 0 {
 		status = resp.StatusCode
@@ -183,7 +198,9 @@ func portOf(u *url.URL) int {
 // a REST method + path. The first path segment that does not start with '_'
 // is the index. The operation comes from a later '_'-prefixed action
 // (search, bulk, …) or, for document routes (/_doc, /_create), from the
-// HTTP method.
+// HTTP method. A document route wins over the action scan when the method
+// addresses a single document, because the id there can look like an action:
+// GET /orders/_doc/_search is a lookup of the id "_search", not a search.
 func parseOpenSearchPath(method, path string) (operation, index string) {
 	path = unescapePath(path)
 	if i := strings.IndexByte(path, '?'); i >= 0 {
@@ -220,8 +237,26 @@ func splitPath(path string) []string {
 	return out
 }
 
+// docIDMethod reports whether method addresses a single document at
+// /{index}/_doc/{id} or /{index}/_create/{id}. For those methods the trailing
+// segment is a document id and may collide with an action name, so the
+// document route has to be resolved before the action scan. POST carries no id
+// in that position (it indexes with an auto-generated id), so the action scan
+// still wins there.
+func docIDMethod(method string) bool {
+	switch method {
+	case "GET", "HEAD", "DELETE", "PUT":
+		return true
+	default:
+		return false
+	}
+}
+
 func operationFrom(method string, segs []string) string {
 	method = strings.ToUpper(strings.TrimSpace(method))
+	if hasDocType(segs) && docIDMethod(method) {
+		return docOperation(method, segs)
+	}
 	if op := lastKnownAction(segs); op != "" {
 		return op
 	}
