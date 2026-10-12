@@ -4,7 +4,6 @@
 package ast
 
 import (
-	"fmt"
 	"go/format"
 	"go/token"
 	"strconv"
@@ -52,24 +51,19 @@ func FindFuncDeclWithoutRecv(root *dst.File, funcName string) *dst.FuncDecl {
 // - GenStruct[T] -> GenStruct
 func stripGenericTypes(recvTypeExpr dst.Expr) string {
 	switch expr := recvTypeExpr.(type) {
-	case *dst.StarExpr: // func (*Recv)T or func (*Recv[T])T
-		// Check if X is an Ident (non-generic) or IndexExpr/IndexListExpr (generic)
-		switch x := expr.X.(type) {
-		case *dst.Ident:
-			// Non-generic pointer receiver: *MyStruct
-			return "*" + x.Name
-		case *dst.IndexExpr:
-			// Generic pointer receiver with single type param: *GenStruct[T]
-			if baseIdent, ok := x.X.(*dst.Ident); ok {
-				return "*" + baseIdent.Name
-			}
-		case *dst.IndexListExpr:
-			// Generic pointer receiver with multiple type params: *GenStruct[T, U]
-			if baseIdent, ok := x.X.(*dst.Ident); ok {
-				return "*" + baseIdent.Name
-			}
+	case *dst.StarExpr: // func (*Recv), func (*Recv[T]), or func (*(Recv))
+		// Recurse into the pointed-to expression so pointer receivers compose
+		// with every other shape, parenthesised forms included. A base that is
+		// itself unrecognised yields "" rather than a bare "*".
+		if inner := stripGenericTypes(expr.X); inner != "" {
+			return "*" + inner
 		}
-	case *dst.Ident: // func (Recv)T
+	case *dst.ParenExpr: // func ((Recv)), func ((*Recv)), or func ((Recv[T]))
+		// Go permits parenthesised receiver types; unwrap and reuse the same
+		// rules. gofmt removes these parentheses, so they are rare, but the
+		// parser still produces them for unformatted dependency source.
+		return stripGenericTypes(expr.X)
+	case *dst.Ident: // func (Recv)
 		return expr.Name
 	case *dst.IndexExpr:
 		// Generic value receiver with single type param: GenStruct[T]
@@ -103,9 +97,14 @@ func findFuncDecl(root *dst.File, funcName, recv string) *dst.FuncDecl {
 		recvTypeExpr := funcDecl.Recv.List[0].Type
 		baseType := stripGenericTypes(recvTypeExpr)
 
+		// A receiver shape stripGenericTypes does not recognise is one this rule
+		// cannot be selecting, so treat it as no match rather than ending the
+		// whole build. The parenthesised and pointer forms are handled above;
+		// this guards any remaining shape, for example a qualified receiver from
+		// source that would not itself compile, without aborting on an unrelated
+		// function.
 		if baseType == "" {
-			msg := fmt.Sprintf("unexpected receiver type: %T", recvTypeExpr)
-			util.Unimplemented(msg)
+			return false
 		}
 
 		return baseType == recv && name == funcName
@@ -120,6 +119,9 @@ func findFuncDecl(root *dst.File, funcName, recv string) *dst.FuncDecl {
 // FindFuncDecl finds the function declaration targeted by r, including
 // name, receiver, and optional signature-filter matching.
 //
+// resolvedNames maps an import path to a package name. Pass nil when
+// none is available.
+//
 // The returned bool reports whether a matching declaration was found. It is
 // false both when no declaration matches r's function name and receiver, and
 // when a declaration is found but does not satisfy r's signature filters. When
@@ -127,17 +129,18 @@ func findFuncDecl(root *dst.File, funcName, recv string) *dst.FuncDecl {
 func FindFuncDecl[R rule.InstFuncRule | rule.InstRawRule | rule.FilterDef](
 	root *dst.File,
 	r *R,
+	resolvedNames map[string]string,
 ) (*dst.FuncDecl, bool, error) {
 	var (
-		funcName       string
-		recv           string
-		matchSignature bool
+		funcName string
+		recv     string
+		funcRule *rule.InstFuncRule
 	)
 	switch rr := any(r).(type) {
 	case *rule.InstFuncRule:
 		funcName = rr.Func
 		recv = rr.Recv
-		matchSignature = true
+		funcRule = rr
 	case *rule.InstRawRule:
 		funcName = rr.Func
 		recv = rr.Recv
@@ -151,15 +154,11 @@ func FindFuncDecl[R rule.InstFuncRule | rule.InstRawRule | rule.FilterDef](
 		return nil, false, nil
 	}
 
-	if !matchSignature {
+	if funcRule == nil {
 		return funcDecl, true, nil
 	}
 
-	rr, ok := any(r).(*rule.InstFuncRule)
-	if !ok {
-		return nil, false, ex.Newf("unexpected %T value", r)
-	}
-	ok, err := funcDeclMatchesFilters(funcDecl, rr, root)
+	ok, err := funcDeclMatchesFilters(funcDecl, funcRule, root, resolvedNames)
 	if err != nil {
 		return nil, false, err
 	}
@@ -332,11 +331,6 @@ func FindStructType(root *dst.File, name string) *dst.StructType {
 	return nil
 }
 
-// AddStructField appends a field named name of type t to the given struct.
-func AddStructField(st *dst.StructType, name, t string) {
-	st.Fields.List = append(st.Fields.List, Field(name, Ident(t)))
-}
-
 // funcDeclMatchesFilters reports whether funcDecl satisfies all signature
 // sub-filters in r.  Returns true when no sub-filters are set.
 //
@@ -351,11 +345,16 @@ func AddStructField(st *dst.StructType, name, t string) {
 // Qualified type names are resolved against imports, which maps the local
 // identifier used at a use site to its real import path (see ImportAliasMap).
 // Matching is therefore relative to the enclosing file's import declarations.
-func funcDeclMatchesFilters(funcDecl *dst.FuncDecl, r *rule.InstFuncRule, root *dst.File) (bool, error) {
+func funcDeclMatchesFilters(
+	funcDecl *dst.FuncDecl,
+	r *rule.InstFuncRule,
+	root *dst.File,
+	resolvedNames map[string]string,
+) (bool, error) {
 	if r.Signature == nil && r.SignatureContains == nil && r.Result == "" && r.LastResult == "" && r.Param == "" {
 		return true, nil
 	}
-	imports := ImportAliasMap(root)
+	imports := ImportAliasMap(root, resolvedNames)
 	ft := funcDecl.Type
 
 	if r.Signature != nil {
