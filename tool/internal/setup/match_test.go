@@ -594,8 +594,8 @@ func TestDoSequenceLoadsAllExpandedRules(t *testing.T) {
 	require.True(t, hasFunc, "expected an InstFuncRule from inject_hooks")
 	require.True(t, hasRaw, "expected an InstRawRule from inject_code")
 
-	// Re-reading the same file must still dedupe the entry as a unit: the
-	// group is replaced, not appended, so the count stays at 2 (not 4).
+	// The same file given two times is loaded one time, so the count stays
+	// at 2 (not 4).
 	sp = newTestSetupPhase()
 	sp.ruleConfig = p + "," + p
 
@@ -655,6 +655,47 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 		require.Equal(t, "dummyrule", rules[1].GetName())
 	})
 
+	// When the root tool file imports a package and one of its sub-packages,
+	// the walk of the parent package directory also finds the rule files of
+	// the sub-package. Each rule file must be loaded only one time.
+	for _, tc := range []struct {
+		name      string
+		subGoFile string
+	}{
+		{name: "regular sub-package", subGoFile: "package sub\n"},
+		{name: "tools-only sub-package", subGoFile: "//go:build tools\n\npackage sub\n"},
+	} {
+		t.Run("rule files shared by overlapping imports are loaded once: "+tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			fooDir := filepath.Join(tmp, "foo")
+
+			writeInstrumentationModule(t, fooDir, "example.com/foo", true, nil)
+			subDir := filepath.Join(fooDir, "sub")
+			writeOverlapSubPackage(t, subDir, tc.subGoFile)
+
+			rootTool := writeOverlapRootModule(t, tmp, fooDir, "example.com/foo", "example.com/foo/sub")
+
+			rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool})
+			require.NoError(t, err)
+			require.ElementsMatch(t, []string{"dummyrule", "subrule"}, ruleNames(rules))
+		})
+	}
+
+	t.Run("rule files shared by overlapping imports are loaded once in any import order", func(t *testing.T) {
+		tmp := t.TempDir()
+		fooDir := filepath.Join(tmp, "foo")
+
+		writeInstrumentationModule(t, fooDir, "example.com/foo", true, nil)
+		writeOverlapSubPackage(t, filepath.Join(fooDir, "sub"), "package sub\n")
+
+		// The sub-package comes first in the tool file this time.
+		rootTool := writeOverlapRootModule(t, tmp, fooDir, "example.com/foo/sub", "example.com/foo")
+
+		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool})
+		require.NoError(t, err)
+		require.ElementsMatch(t, []string{"dummyrule", "subrule"}, ruleNames(rules))
+	})
+
 	t.Run("returns instrumentation walk errors", func(t *testing.T) {
 		tmp := t.TempDir()
 
@@ -669,6 +710,76 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 		_, err := loadRulesFromToolFiles(t.Context(), []string{rootTool})
 		require.ErrorIs(t, err, errNotInstrumentation)
 	})
+}
+
+// writeOverlapSubPackage writes a sub-package with one rule file (rule name
+// "subrule") in dir. goFile is the content of the only Go file.
+func writeOverlapSubPackage(t *testing.T, dir, goFile string) {
+	t.Helper()
+
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sub.go"), []byte(goFile), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sub.otelc.yml"), []byte(`subrule:
+  target: main
+  where:
+    func: Example
+  do:
+    - inject_code:
+        raw: "_ = 2"
+`), 0o644))
+}
+
+// writeOverlapRootModule writes a root module in dir that requires the
+// example.com/foo module (replaced by fooDir), and a tool file that imports
+// the given import paths in the given order. It returns the tool file path.
+func writeOverlapRootModule(t *testing.T, dir, fooDir string, imports ...string) string {
+	t.Helper()
+
+	goMod := "module example.com/root\n\ngo 1.25\n\n" +
+		"require example.com/foo v0.0.0-00010101000000-000000000000\n\n" +
+		"replace example.com/foo => " + fooDir + "\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goMod), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "dummy.go"), []byte("package dummy\n"), 0o644))
+
+	toolFile := filepath.Join(dir, toolFileCanonical)
+	writeToolFile(t, toolFile, imports...)
+	return toolFile
+}
+
+func TestRuleFileKey(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "a.otelc.yml")
+	require.NoError(t, os.WriteFile(file, []byte(""), 0o644))
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "sub"), 0o755))
+
+	want := ruleFileKey(file)
+	assert.True(t, filepath.IsAbs(want))
+	assert.Equal(t, want, ruleFileKey(filepath.Join(dir, "sub", "..", "a.otelc.yml")))
+
+	// A path that does not exist gives its absolute, cleaned form.
+	assert.Equal(t, filepath.Join(dir, "missing.otelc.yml"),
+		ruleFileKey(filepath.Join(dir, "x", "..", "missing.otelc.yml")))
+
+	t.Run("relative path", func(t *testing.T) {
+		t.Chdir(dir)
+		assert.Equal(t, want, ruleFileKey("a.otelc.yml"))
+	})
+
+	t.Run("symbolic link", func(t *testing.T) {
+		link := filepath.Join(dir, "link")
+		if err := os.Symlink(dir, link); err != nil {
+			t.Skipf("cannot create symbolic link: %v", err)
+		}
+		assert.Equal(t, want, ruleFileKey(filepath.Join(link, "a.otelc.yml")))
+	})
+}
+
+func ruleNames(rules []rule.InstRule) []string {
+	names := make([]string, 0, len(rules))
+	for _, r := range rules {
+		names = append(names, r.GetName())
+	}
+	return names
 }
 
 func TestLoadDefaultRules(t *testing.T) {
@@ -1251,6 +1362,107 @@ mangle:
 		names[i] = r.GetName()
 	}
 	require.Equal(t, []string{"alpha", "mangle", "zebra"}, names)
+}
+
+func TestLoadCustomRulesLastRuleNameWins(t *testing.T) {
+	// first defines "dup" with two modifiers, second defines "dup" with one.
+	// The entry of the last file in the list wins as a unit. A file that is in
+	// the list again is loaded one time only, but its position still counts.
+	first := writeCustomRules(t, "first.otelc.yml", `dup:
+  target: main
+  where:
+    func: Example
+  do:
+    - inject_code:
+        raw: "_ = 1"
+    - inject_code:
+        raw: "_ = 11"
+onlyfirst:
+  target: main
+  func: Example
+  raw: "_ = 3"`)
+	second := writeCustomRules(t, "second.otelc.yml", `dup:
+  target: main
+  func: Example
+  raw: "_ = 2"
+onlysecond:
+  target: main
+  func: Example
+  raw: "_ = 4"`)
+
+	rawOf := func(t *testing.T, rules []rule.InstRule, name string) []string {
+		t.Helper()
+		var raws []string
+		for _, r := range rules {
+			if r.GetName() != name {
+				continue
+			}
+			raw, ok := r.(*rule.InstRawRule)
+			require.True(t, ok, "rule %q must be an InstRawRule", name)
+			raws = append(raws, raw.Raw)
+		}
+		return raws
+	}
+
+	t.Run("last file in the list wins", func(t *testing.T) {
+		rules, err := loadCustomRules(t.Context(), first+","+second)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"_ = 2"}, rawOf(t, rules, "dup"))
+		assert.ElementsMatch(t, []string{"dup", "onlyfirst", "onlysecond"}, ruleNames(rules))
+	})
+
+	t.Run("order of the list decides", func(t *testing.T) {
+		rules, err := loadCustomRules(t.Context(), second+","+first)
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{"_ = 1", "_ = 11"}, rawOf(t, rules, "dup"))
+		assert.ElementsMatch(t, []string{"dup", "dup", "onlyfirst", "onlysecond"}, ruleNames(rules))
+	})
+
+	t.Run("a file given again later wins", func(t *testing.T) {
+		rules, err := loadCustomRules(t.Context(), first+","+second+","+first)
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{"_ = 1", "_ = 11"}, rawOf(t, rules, "dup"))
+		assert.ElementsMatch(t, []string{"dup", "dup", "onlyfirst", "onlysecond"}, ruleNames(rules))
+	})
+
+	t.Run("a file found again through a directory wins", func(t *testing.T) {
+		rules, err := loadCustomRules(t.Context(), first+","+second+","+filepath.Dir(first))
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{"_ = 1", "_ = 11"}, rawOf(t, rules, "dup"))
+	})
+}
+
+func TestLoadCustomRulesLoadsEachFileOnce(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "a.otelc.yml")
+	// No "version" key: each load of the file logs a legacy-version warning.
+	require.NoError(t, os.WriteFile(file, []byte(`hook:
+  target: main
+  func: Example
+  raw: "_ = 1"`), 0o644))
+
+	// Not cleaned on purpose: this is a different string for the same file.
+	otherPath := dir + string(os.PathSeparator) + "." + string(os.PathSeparator) + "a.otelc.yml"
+	require.NotEqual(t, file, otherPath)
+
+	for name, ruleConfig := range map[string]string{
+		"file then directory":   file + "," + dir,
+		"directory then file":   dir + "," + file,
+		"same file two times":   file + "," + file,
+		"same file, other path": file + "," + otherPath,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var output bytes.Buffer
+			logger := slog.New(slog.NewTextHandler(&output, nil))
+			ctx := util.ContextWithLogger(t.Context(), logger)
+
+			rules, err := loadCustomRules(ctx, ruleConfig)
+			require.NoError(t, err)
+			assert.Equal(t, []string{"hook"}, ruleNames(rules))
+			assert.Equal(t, 1, strings.Count(output.String(), "no minimum otelc version"),
+				"the rule file must be loaded one time, log:\n%s", output.String())
+		})
+	}
 }
 
 func TestRunMatch_EmptyRules(t *testing.T) {

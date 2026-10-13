@@ -78,6 +78,12 @@ otelc --rules custom-rules/ go build .
 otelc --rules base-rules/,extra.otelc.yml go build .
 ```
 
+Each rule file is read once, even if it appears more than once in the list or in a listed
+directory. When two rule files define a rule with the same name, the rule from the file that comes
+last is used. Files come in list order. The files in a directory come in path-name order
+(`a.otelc.yml` before `b.otelc.yml`). A file that appears again later in the list counts at its
+last position.
+
 > [!NOTE]
 > `--rules` is a global `otelc` flag and must appear **before** the `go` subcommand.
 > `otelc go` passes all arguments after `go` directly to the Go toolchain without parsing
