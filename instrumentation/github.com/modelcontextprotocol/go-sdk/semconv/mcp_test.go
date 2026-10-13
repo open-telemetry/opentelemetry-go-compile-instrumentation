@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 func TestToolCallTraceAttrs(t *testing.T) {
@@ -33,4 +34,15 @@ func TestConstants(t *testing.T) {
 	assert.Equal(t, "tools/call", MethodCallTool)
 	assert.Equal(t, "execute_tool", OperationExecuteTool)
 	assert.Equal(t, "tool_error", ToolError)
+}
+
+// asMap indexes attributes by key so a test can assert on individual values.
+// It lives in this file rather than a separate helpers_test.go because every
+// test file must pair 1:1 with a source file of the same name.
+func asMap(attrs []attribute.KeyValue) map[string]any {
+	m := make(map[string]any, len(attrs))
+	for _, a := range attrs {
+		m[string(a.Key)] = a.Value.AsInterface()
+	}
+	return m
 }

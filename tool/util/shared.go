@@ -29,7 +29,8 @@ const (
 	EnvOtelcNestedToolexec = "OTELC_NESTED_TOOLEXEC"
 	// EnvOtelcNestedResolving lists, outermost first, the compiles waiting on
 	// a nested build to resolve an import a rule added, as comma-separated
-	// "package>added import" entries.
+	// "package>added import" entries. Import paths cannot contain "," or ">",
+	// so the entries need no escaping.
 	EnvOtelcNestedResolving = "OTELC_NESTED_RESOLVING"
 	BuildTempDir            = ".otelc-build"
 	BuildLockFile           = BuildTempDir + ".lock"
