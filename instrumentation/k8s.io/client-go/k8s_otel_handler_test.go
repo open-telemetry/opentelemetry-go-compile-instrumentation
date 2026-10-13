@@ -449,3 +449,25 @@ func TestLookupGVK_UnstructuredEmptyGVK(t *testing.T) {
 	_, cached := gvkCache.Load(reflect.TypeOf(&unstructured.Unstructured{}))
 	assert.False(t, cached, "an unstructured object must never be stored in gvkCache")
 }
+
+// BenchmarkLookupGVK_Uncached forces a real scheme.Scheme.ObjectKinds scan on
+// every call, by resetting gvkCache before each iteration, to measure the
+// cost this change avoids for every event after the first of a given type.
+func BenchmarkLookupGVK_Uncached(b *testing.B) {
+	pod := &corev1.Pod{}
+	for i := 0; i < b.N; i++ {
+		gvkCache = sync.Map{}
+		lookupGVK(pod)
+	}
+}
+
+// BenchmarkLookupGVK_Cached measures the steady-state cost once a typed
+// object's GVK is already cached, which is every event after the first.
+func BenchmarkLookupGVK_Cached(b *testing.B) {
+	pod := &corev1.Pod{}
+	gvkCache = sync.Map{}
+	lookupGVK(pod) // warm the cache
+	for i := 0; i < b.N; i++ {
+		lookupGVK(pod)
+	}
+}
