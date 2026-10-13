@@ -198,6 +198,53 @@ func removeAfterTrampolineDecl(targetFile *dst.File, tjump *tJump) error {
 	return ex.Newf("can not remove After trampoline function")
 }
 
+// removeUnusedHookContextMethods empties the bodies of the return-value
+// methods on tjump's HookContextImpl when there is no After hook to populate
+// returnVals. These methods stay reachable through the HookContext interface
+// from a Before hook, so their bodies preserve the existing no-return-values
+// behavior (nil, no-op, 0) rather than panicking.
+//
+// Generic targets are left untouched: rewriteHookContextMethods already made
+// their return-value methods panic unconditionally, regardless of After,
+// since they're unsupported for generics altogether (see #1252/#1173).
+// Replacing that panic here would silently undo that guard.
+func removeUnusedHookContextMethods(targetFile *dst.File, tjump *tJump) error {
+	if findTargetGenericType(targetFile, tjump.target) != nil {
+		return nil
+	}
+	structName := trampolineHookContextImplType + tjump.rule.Identity()
+	emptyBodies := map[string]*dst.BlockStmt{
+		trampolineGetReturnValName:      ast.Block(ast.ReturnStmt(ast.Exprs(ast.Nil()))),
+		trampolineSetReturnValName:      ast.BlockStmts(),
+		trampolineGetReturnValCountName: ast.Block(ast.ReturnStmt(ast.Exprs(ast.IntLit(0)))),
+	}
+	found := 0
+	for _, decl := range targetFile.Decls {
+		funcDecl, ok := decl.(*dst.FuncDecl)
+		if !ok || funcDecl.Recv == nil || len(funcDecl.Recv.List) == 0 {
+			continue
+		}
+		starExpr, ok := funcDecl.Recv.List[0].Type.(*dst.StarExpr)
+		if !ok {
+			continue
+		}
+		recvIdent, ok := starExpr.X.(*dst.Ident)
+		if !ok || recvIdent.Name != structName {
+			continue
+		}
+		body, isReturnValMethod := emptyBodies[funcDecl.Name.Name]
+		if !isReturnValMethod {
+			continue
+		}
+		funcDecl.Body = body
+		found++
+	}
+	if found != len(emptyBodies) {
+		return ex.Newf("can not find unused HookContext methods")
+	}
+	return nil
+}
+
 // canFlattenTJump checks if the tjump can be safely flattened based on
 // the hook function's usage of HookContext. Returns true if:
 // 1. SetSkipCall is never called (so skip is always false)
@@ -372,6 +419,10 @@ func (ip *instrumentPhase) optimizeTJumps() error {
 				return err
 			}
 			err = removeAfterTrampolineDecl(ip.target, tjump)
+			if err != nil {
+				return err
+			}
+			err = removeUnusedHookContextMethods(ip.target, tjump)
 			if err != nil {
 				return err
 			}
