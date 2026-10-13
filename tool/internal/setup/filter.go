@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/dave/dst"
@@ -60,9 +61,18 @@ type matchContext struct {
 	// as read-only; node updates would corrupt downstream rule matching.
 	AST *dst.File
 
+	// Package, when non-nil, makes leaf predicates hold if any file in it does.
+	Package []*dst.File
 	// ResolvedNames maps an import path to a package name, for
 	// signature matching against real names instead of a guess.
 	ResolvedNames map[string]string
+}
+
+func (c *matchContext) anyFile(pred func(*dst.File) bool) bool {
+	if c.Package == nil {
+		return pred(c.AST)
+	}
+	return slices.ContainsFunc(c.Package, pred)
 }
 
 // --- Leaf filters ---
@@ -88,8 +98,10 @@ func (f *funcFilter) Match(ctx *matchContext) bool {
 		Func: f.Func,
 		Recv: f.Recv,
 	}
-	_, ok, _ := ast.FindFuncDecl(ctx.AST, fr, ctx.ResolvedNames)
-	return ok
+	return ctx.anyFile(func(file *dst.File) bool {
+		_, ok, _ := ast.FindFuncDecl(file, fr, ctx.ResolvedNames)
+		return ok
+	})
 }
 
 // structFilter matches source files that declare the named struct.
@@ -100,7 +112,7 @@ type structFilter struct {
 func (f *structFilter) Match(ctx *matchContext) bool {
 	// Only true structs match; an interface or alias of the same name does not.
 	// This inverts under `not`, which now includes files it once excluded.
-	return ast.FindStructType(ctx.AST, f.Struct) != nil
+	return ctx.anyFile(func(file *dst.File) bool { return ast.FindStructType(file, f.Struct) != nil })
 }
 
 // packageNameFilter matches source files whose declared package clause equals
@@ -114,7 +126,7 @@ type packageNameFilter struct {
 }
 
 func (f *packageNameFilter) Match(ctx *matchContext) bool {
-	return ctx.AST.Name.Name == f.Name
+	return ctx.anyFile(func(file *dst.File) bool { return file.Name.Name == f.Name })
 }
 
 // directiveFilter matches source files that contain the specified directive.
@@ -123,7 +135,7 @@ type directiveFilter struct {
 }
 
 func (f *directiveFilter) Match(ctx *matchContext) bool {
-	return ast.FileHasLeadingDirective(ctx.AST, f.Directive)
+	return ctx.anyFile(func(file *dst.File) bool { return ast.FileHasLeadingDirective(file, f.Directive) })
 }
 
 // isTestFilter selects or excludes test builds — compilations the Go toolchain
