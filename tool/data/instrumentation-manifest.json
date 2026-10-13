@@ -49,6 +49,10 @@
     "target": "github.com/openai/openai-go/v3"
   },
   {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/opensearch-project/opensearch-go/v5",
+    "target": "github.com/opensearch-project/opensearch-go/v5"
+  },
+  {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/rabbitmq/amqp091-go",
     "target": "github.com/rabbitmq/amqp091-go",
     "versionRange": "v1.9.0"
