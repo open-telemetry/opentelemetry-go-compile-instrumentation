@@ -1,0 +1,34 @@
+groups:
+  # ---------------------------------------------------------------------------
+  # gorilla/mux instrumentation emission contract.
+  #
+  # Source of truth for this file:
+  #   instrumentation/github.com/gorilla/mux/hook.go (AfterMatch)
+  #
+  # The mux instrumentation creates no spans and records no metrics of its own.
+  # A mux application is served through `net/http`, so the server span already
+  # exists by the time mux's router runs (see `groups/http.yaml` for the
+  # `net/http` contract). This instrumentation only *enriches* that existing
+  # `net/http` server span, once per request, after Router.Match has matched a
+  # route:
+  #
+  #   - it renames the span from `<METHOD>` to `<METHOD> <route pattern>`
+  #   - it sets `http.route` to the matched route pattern
+  #
+  # Nothing is set when no route matches (404), when the method does not match
+  # (405), when a custom NotFoundHandler / MethodNotAllowedHandler is used, or
+  # when the span is not recording. Mux has no handler-error API, so this
+  # instrumentation does not set span status or record exceptions.
+  #
+  # Span status and recorded exceptions are span fields rather than attributes,
+  # so `http.route` below is the instrumentation's whole attribute surface. It
+  # is a standard upstream attribute, referenced with `ref:`.
+  # ---------------------------------------------------------------------------
+
+  - id: registry.otelc.mux
+    type: attribute_group
+    display_name: otelc mux attributes
+    brief: >
+      Attributes the mux instrumentation adds to the enclosing `net/http` server span once mux's router has matched a route.
+    attributes:
+      - ref: http.route
