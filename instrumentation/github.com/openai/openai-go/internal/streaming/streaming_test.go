@@ -423,6 +423,7 @@ func TestStreamingReader_AbortOnReadError(t *testing.T) {
 	require.Len(t, s.Events(), 1)
 	assert.Equal(t, "exception", s.Events()[0].Name)
 	assertSliceAttribute(t, s.Attributes(), "gen_ai.response.finish_reasons", []string{"error"})
+	assertAttribute(t, s.Attributes(), "error.type", "*errors.errorString")
 }
 
 // Closing the reader before a finish reason or the [DONE] marker is a
@@ -507,6 +508,7 @@ func TestStreamingReader_TruncatedAfterFinishReasonIsError(t *testing.T) {
 	// The real finish reason is preserved; the transport error is what made
 	// this an aborted stream.
 	assertSliceAttribute(t, s.Attributes(), "gen_ai.response.finish_reasons", []string{"stop"})
+	assertAttribute(t, s.Attributes(), "error.type", "*errors.errorString")
 }
 
 // Helper functions for attribute assertions.

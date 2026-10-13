@@ -8,7 +8,7 @@ repo for information on this and other SIGs.
 See the [public meeting
 notes](https://docs.google.com/document/d/1XkVahJfhf482d3WVHsvUUDaGzHc8TO3sqQlSS80mpGY/edit)
 for a summary description of past meetings. You can also get in touch on slack channel
-[#otel-go-compt-instr-sig](https://cloud-native.slack.com/archives/C088D8GSSSF)
+[#otel-go-compile-instrumentation](https://cloud-native.slack.com/archives/C088D8GSSSF)
 
 ## Development
 
@@ -16,7 +16,7 @@ for a summary description of past meetings. You can also get in touch on slack c
 
 This project uses several tools for development. Most tools will be automatically installed when you first run the corresponding `make` target. However, you need to have:
 
-- [Go](https://golang.org/dl/) 1.25 or later
+- [Go](https://golang.org/dl/) 1.26 or later
 - [Git](https://git-scm.com/)
 - Make (usually pre-installed on macOS and Linux)
 

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/dave/dst"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -61,6 +62,76 @@ func TestFindPosition(t *testing.T) {
 	})
 }
 
+// findCallExpr returns the first *dst.CallExpr for a call to funcName in root.
+func findCallExpr(t *testing.T, root dst.Node, funcName string) *dst.CallExpr {
+	t.Helper()
+	var found *dst.CallExpr
+	dst.Inspect(root, func(n dst.Node) bool {
+		if found != nil {
+			return false
+		}
+		call, ok := n.(*dst.CallExpr)
+		if !ok {
+			return true
+		}
+		ident, ok := call.Fun.(*dst.Ident)
+		if !ok || ident.Name != funcName {
+			return true
+		}
+		found = call
+		return false
+	})
+	require.NotNil(t, found, "no call to %s found", funcName)
+	return found
+}
+
+func TestPropagatePositions(t *testing.T) {
+	p := NewAstParser()
+	file, err := p.ParseSource("package main\n\nfunc Foo() {\n\tbar(1)\n}\n")
+	require.NoError(t, err)
+
+	orig := findCallExpr(t, file, "bar")
+	origPos := p.FindPosition(orig)
+	require.True(t, origPos.IsValid(), "orig call must have a known source position")
+
+	cloned, ok := dst.Clone(orig).(*dst.CallExpr)
+	require.True(t, ok)
+	clonedPos := p.FindPosition(cloned)
+	require.False(t, clonedPos.IsValid(), "a freshly cloned node starts out unmapped")
+
+	p.PropagatePositions(orig, cloned)
+
+	assert.Equal(t, origPos, p.FindPosition(cloned), "cloned node must inherit orig's position")
+	// Nested nodes (e.g. the argument) must be propagated too.
+	origArg := orig.Args[0]
+	clonedArg := cloned.Args[0]
+	assert.Equal(t, p.FindPosition(origArg), p.FindPosition(clonedArg))
+}
+
+func TestPropagatePositions_ShapeMismatchIsNoop(t *testing.T) {
+	p := NewAstParser()
+	file, err := p.ParseSource("package main\n\nfunc Foo() {\n\tbar(1)\n}\n")
+	require.NoError(t, err)
+
+	orig := findCallExpr(t, file, "bar")
+
+	// cloned has a different node count than orig (an extra argument), so
+	// PropagatePositions must bail out without mapping any position.
+	cloned := &dst.CallExpr{
+		Fun: dst.NewIdent("bar"),
+		Args: []dst.Expr{
+			&dst.BasicLit{Kind: token.INT, Value: "1"},
+			&dst.BasicLit{Kind: token.INT, Value: "2"},
+		},
+	}
+
+	p.PropagatePositions(orig, cloned)
+
+	pos := p.FindPosition(cloned)
+	assert.False(t, pos.IsValid(),
+		"a shape mismatch between orig and cloned must leave the clone's positions unmapped")
+}
+
 func TestWriteFile(t *testing.T) {
 	p := NewAstParser()
 	file, err := p.ParseSource("package main\n\nfunc Foo() {}\n")
@@ -96,6 +167,35 @@ func TestWriteFileAtomic(t *testing.T) {
 	data, err := os.ReadFile(out)
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "func Bar()")
+}
+
+// unprintableFile returns an AST that the restorer cannot turn back into
+// source: go/format re-parses files with grouped imports, and a function
+// named "1bad" does not parse.
+func unprintableFile(t *testing.T) *dst.File {
+	t.Helper()
+
+	p := NewAstParser()
+	file, err := p.ParseSource("package main\n\nimport (\n\t\"fmt\"\n)\n\nfunc Foo() { fmt.Println() }\n")
+	require.NoError(t, err)
+
+	FindFuncDeclWithoutRecv(file, "Foo").Name = dst.NewIdent("1bad")
+	return file
+}
+
+func TestPrintFile_RestoreError(t *testing.T) {
+	data, err := PrintFile(unprintableFile(t))
+	require.ErrorContains(t, err, "failed to restore AST")
+	assert.Nil(t, data)
+}
+
+func TestWriteFileAtomic_RestoreError(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "atomic.go")
+
+	err := WriteFileAtomic(out, unprintableFile(t))
+	require.ErrorContains(t, err, "failed to restore AST")
+	require.ErrorContains(t, err, out)
+	assert.NoFileExists(t, out)
 }
 
 func TestParseAst(t *testing.T) {

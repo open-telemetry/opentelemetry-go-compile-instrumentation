@@ -190,10 +190,10 @@ func loadRulesYAML(t *testing.T, p loadRulesParams) *rule.InstRuleSet {
 		}
 
 		// Mirror the setup-phase package gate: a rule applies only when its
-		// target selects this fixture's import path (exact equality or glob
-		// match). This lets golden fixtures prove glob match vs no-match
-		// against realistic deep import paths, not just "main".
-		if !targetMatches(map[string]any{"target": instRule.GetTarget()}, p.importPath) {
+		// target selects this fixture's import path. This lets golden fixtures
+		// prove match vs no-match against realistic deep import paths, not
+		// just "main".
+		if !instRule.GetTarget().Matches(p.importPath, nil) {
 			continue
 		}
 
@@ -298,7 +298,7 @@ func fileFilterMatches(t *testing.T, def *rule.FilterDef, isTest bool, tree *dst
 	}
 	switch {
 	case def.HasFunc != "":
-		_, ok, _ := ast.FindFuncDecl(tree, def)
+		_, ok, _ := ast.FindFuncDecl(tree, def, nil)
 		return ok
 	case def.HasStruct != "":
 		return ast.FindStructType(tree, def.HasStruct) != nil
@@ -315,22 +315,6 @@ func fileFilterMatches(t *testing.T, def *rule.FilterDef, isTest bool, tree *dst
 			"evaluate (%+v); extend fileFilterMatches to mirror setup.buildFile", def)
 		return false
 	}
-}
-
-// targetMatches reports whether a rule's target selects importPath, mirroring
-// setup-phase package selection: a glob target matches via MatchGlobTarget, an
-// exact target matches only on equality. A missing, non-string, or empty target
-// never matches, so an invalid fixture fails the golden test instead of silently
-// being applied.
-func targetMatches(props map[string]any, importPath string) bool {
-	target, ok := props["target"].(string)
-	if !ok || strings.TrimSpace(target) == "" {
-		return false
-	}
-	if rule.IsGlobTarget(target) {
-		return rule.MatchGlobTarget(target, importPath)
-	}
-	return target == importPath
 }
 
 func writeMatchedJSON(ruleSet *rule.InstRuleSet) {
@@ -718,4 +702,122 @@ func TestGroupRules(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRsetHasMethodCallRule(t *testing.T) {
+	t.Run("no call rules", func(t *testing.T) {
+		rset := rule.NewInstRuleSet("example.com/p")
+		assert.False(t, rsetHasMethodCallRule(rset))
+	})
+
+	t.Run("function_call rule only", func(t *testing.T) {
+		rset := rule.NewInstRuleSet("example.com/p")
+		rset.AddCallRule("/f.go", &rule.InstCallRule{FunctionCall: "net/http.Get"})
+		assert.False(t, rsetHasMethodCallRule(rset))
+	})
+
+	t.Run("method_call rule present", func(t *testing.T) {
+		rset := rule.NewInstRuleSet("example.com/p")
+		rset.AddCallRule("/f.go", &rule.InstCallRule{FunctionCall: "net/http.Get"})
+		rset.AddCallRule("/g.go", &rule.InstCallRule{MethodCall: "example.com/p.*Buffer.Write"})
+		assert.True(t, rsetHasMethodCallRule(rset))
+	})
+}
+
+// TestInstrumentSkipsFilesNoRuleChanged checks that a file a call rule is
+// attached to, but that has no matching call, stays in the compile command as
+// it is. Setup attaches call rules to every file of a target package, so with
+// a glob target that is most files of the build.
+func TestInstrumentSkipsFilesNoRuleChanged(t *testing.T) {
+	src := t.TempDir()
+	matched := filepath.Join(src, "matched.go")
+	unmatched := filepath.Join(src, "unmatched.go")
+	require.NoError(t, os.WriteFile(matched, []byte(`package p
+
+import "net/http"
+
+func F() { _, _ = http.Get("http://example.com") }
+`), 0o600))
+	require.NoError(t, os.WriteFile(unmatched, []byte(`package p
+
+func G() int { return 1 }
+`), 0o600))
+
+	r := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_get"},
+		FunctionCall: "net/http.Get",
+		ImportPath:   "net/http",
+		FuncName:     "Get",
+		Replace:      "({{ . }})",
+	}
+	rset := rule.NewInstRuleSet("example.com/p")
+	rset.PackageName = "p"
+	rset.AddCallRule(matched, r)
+	rset.AddCallRule(unmatched, r)
+
+	ip := newTestPhase()
+	ip.workDir = t.TempDir()
+	ip.compileArgs = []string{"compile", "-p", "example.com/p", matched, unmatched}
+	require.NoError(t, ip.instrument(context.Background(), rset))
+
+	assert.Equal(t, filepath.Join(ip.workDir, "matched.go"), ip.compileArgs[3],
+		"the file with a matching call must be replaced by its instrumented copy")
+	assert.Equal(t, unmatched, ip.compileArgs[4],
+		"a file no rule changed must stay in the compile command as it is")
+	assert.NoFileExists(t, filepath.Join(ip.workDir, "unmatched.go"))
+}
+
+func TestInstrumentMethodCallMatchesRegardlessOfFileOrder(t *testing.T) {
+	src := t.TempDir()
+	setup := filepath.Join(src, "a_setup.go")
+	call := filepath.Join(src, "b_call.go")
+	require.NoError(t, os.WriteFile(setup, []byte(`package p
+
+import "net/http"
+
+type Buffer struct{}
+
+func (b *Buffer) Write(p []byte) (int, error) { return len(p), nil }
+
+func F() { _, _ = http.Get("http://example.com") }
+`), 0o600))
+	require.NoError(t, os.WriteFile(call, []byte(`package p
+
+func G(b *Buffer) { _, _ = b.Write(nil) }
+`), 0o600))
+
+	unrelatedRule := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_get"},
+		FunctionCall: "net/http.Get",
+		ImportPath:   "net/http",
+		FuncName:     "Get",
+		Replace:      "({{ . }})",
+	}
+	methodRule := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_write"},
+		MethodCall:   "example.com/p.*Buffer.Write",
+		ImportPath:   "example.com/p",
+		RecvType:     "*Buffer",
+		FuncName:     "Write",
+		Replace:      "({{ . }})",
+	}
+	rset := rule.NewInstRuleSet("example.com/p")
+	rset.PackageName = "p"
+	rset.AddCallRule(setup, unrelatedRule)
+	rset.AddCallRule(call, methodRule)
+
+	ip := newTestPhase()
+	ip.workDir = t.TempDir()
+	ip.compileArgs = []string{"compile", "-p", "example.com/p", setup, call}
+	require.NoError(t, ip.instrument(context.Background(), rset))
+
+	assert.True(t, ip.methodCallInfoLoaded)
+	assert.Equal(t, filepath.Join(ip.workDir, "a_setup.go"), ip.compileArgs[3],
+		"a_setup.go's own rule must still rewrite it")
+	assert.Equal(t, filepath.Join(ip.workDir, "b_call.go"), ip.compileArgs[4],
+		"the method_call rule must still match b_call.go even though a_setup.go was rewritten first")
+
+	written, err := os.ReadFile(filepath.Join(ip.workDir, "b_call.go"))
+	require.NoError(t, err)
+	assert.Contains(t, string(written), "(b.Write(nil))")
 }

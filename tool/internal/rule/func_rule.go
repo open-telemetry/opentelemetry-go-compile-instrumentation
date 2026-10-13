@@ -130,7 +130,7 @@ func (r *InstFuncRule) Identity() string {
 		return "+" + encList(s.Args) + encList(s.Returns)
 	}
 	parts := []string{
-		enc(r.Target), enc(r.Version), enc(r.Func), enc(r.Recv),
+		enc(r.Target.String()), enc(r.Version), enc(r.Func), enc(r.Recv),
 		enc(r.Before), enc(r.After), enc(r.Path),
 		enc(r.Result), enc(r.LastResult), enc(r.Param),
 		encSig(r.Signature), encSig(r.SignatureContains),

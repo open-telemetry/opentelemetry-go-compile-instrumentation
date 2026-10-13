@@ -8,6 +8,8 @@ import (
 	"crypto/tls"
 	"net/http"
 	"net/url"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -132,6 +134,22 @@ func TestHTTPClientRequestTraceAttrs(t *testing.T) {
 			},
 			unexpected: []string{"http.request.method_original"},
 		},
+		{
+			name: "url.full redacts sensitive query parameters",
+			req: &http.Request{
+				Method: "GET",
+				URL: &url.URL{
+					Scheme:   "https",
+					Host:     "example.com",
+					Path:     "/download",
+					RawQuery: "file=doc.pdf&X-Amz-Signature=deadbeef&sig=tok",
+				},
+				Proto: "HTTP/1.1",
+			},
+			expected: map[string]interface{}{
+				"url.full": "https://example.com/download?file=doc.pdf&X-Amz-Signature=REDACTED&sig=REDACTED",
+			},
+		},
 	}
 
 	client := NewHTTPClient(nil)
@@ -157,6 +175,64 @@ func TestHTTPClientRequestTraceAttrs(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestHTTPClientRequestTraceAttrsDoesNotMutateRequest pins the actual hazard.
+// Redacting in place and restoring afterwards leaves the request correct once
+// the call returns, so a check made after the fact cannot see the problem: the
+// damage is only visible to a goroutine reading the request while the window is
+// open. The reader therefore inspects the fields on every pass and records a
+// sighting, rather than relying on -race, which this repo's test targets do not
+// enable. Both goroutines block on start so their loops genuinely overlap.
+func TestHTTPClientRequestTraceAttrsDoesNotMutateRequest(t *testing.T) {
+	req := &http.Request{
+		Method: http.MethodGet,
+		URL: &url.URL{
+			Scheme:   "https",
+			Host:     "example.com",
+			Path:     "/download",
+			User:     url.UserPassword("alice", "hunter2"),
+			RawQuery: "file=doc.pdf&sig=secret",
+		},
+		Proto: "HTTP/1.1",
+	}
+	wantUser := req.URL.User.String()
+	wantQuery := req.URL.RawQuery
+
+	const iterations = 5000
+	client := NewHTTPClient(nil)
+
+	var sawMutation atomic.Bool
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		<-start
+		for range iterations {
+			if u := req.URL.User; u == nil || u.String() != wantUser {
+				sawMutation.Store(true)
+			}
+			if req.URL.RawQuery != wantQuery {
+				sawMutation.Store(true)
+			}
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		<-start
+		for range iterations {
+			_ = client.RequestTraceAttrs(req)
+		}
+	}()
+
+	close(start)
+	wg.Wait()
+
+	assert.False(t, sawMutation.Load(),
+		"a concurrent reader observed the request mid-redaction: RequestTraceAttrs must not write to req.URL")
 }
 
 func TestHTTPClientResponseTraceAttrs(t *testing.T) {

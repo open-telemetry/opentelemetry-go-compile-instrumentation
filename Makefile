@@ -26,7 +26,7 @@ INST_BUNDLE_INST_TMP = instrumentation_temp
 API_SYNC_SOURCE = pkg/hook/context.go
 API_SYNC_TARGET = tool/internal/instrument/api.tmpl
 TOOLS_DIR = .tools
-GO_VERSION = 1.25
+GO_VERSION = 1.26
 INTEGRATION_TEST_RUN ?= .
 TOOL_COVERAGE_THRESHOLD ?= 68
 PKG_COVERAGE_THRESHOLD ?= 70
@@ -295,7 +295,8 @@ lint/dockerfile: hadolint
 	elif [ -f /opt/homebrew/bin/hadolint ]; then \
 		HADOLINT_CMD="/opt/homebrew/bin/hadolint"; \
 	fi; \
-	$$HADOLINT_CMD -c .tools/hadolint.yaml demo/app/grpc/client/Dockerfile demo/app/grpc/server/Dockerfile demo/app/http/client/Dockerfile demo/app/http/server/Dockerfile
+	DOCKERFILES=$$(find demo/app -name "Dockerfile" | sort); \
+	$$HADOLINT_CMD --failure-threshold warning -c .tools/hadolint.yaml $$DOCKERFILES
 
 lint/makefile: ## Lint Makefile
 lint/makefile: $(CHECKMAKE)

@@ -94,6 +94,32 @@ func (ap *AstParser) FindPosition(node dst.Node) token.Position {
 	return ap.fset.Position(astNode.Pos())
 }
 
+// PropagatePositions copies source positions from orig onto the matching
+// nodes in cloned. It reports whether the two subtrees have the same
+// shape, so positions could be propagated.
+//
+// orig and cloned must have the same shape.
+func (ap *AstParser) PropagatePositions(orig, cloned dst.Node) bool {
+	var origNodes, clonedNodes []dst.Node
+	dst.Inspect(orig, func(n dst.Node) bool {
+		origNodes = append(origNodes, n)
+		return true
+	})
+	dst.Inspect(cloned, func(n dst.Node) bool {
+		clonedNodes = append(clonedNodes, n)
+		return true
+	})
+	if len(origNodes) != len(clonedNodes) {
+		return false
+	}
+	for i, on := range origNodes {
+		if astNode, ok := ap.dec.Ast.Nodes[on]; ok {
+			ap.dec.Ast.Nodes[clonedNodes[i]] = astNode
+		}
+	}
+	return true
+}
+
 // WriteFile writes the AST to a file.
 func WriteFile(filePath string, root *dst.File) error {
 	file, err := os.Create(filePath)
@@ -119,16 +145,26 @@ func writeFile(w io.WriteCloser, filePath string, root *dst.File) (retErr error)
 	return nil
 }
 
-// WriteFileAtomic writes the AST to a file atomically.
-func WriteFileAtomic(filePath string, root *dst.File) error {
+// PrintFile renders the AST to source bytes without writing it anywhere.
+func PrintFile(root *dst.File) ([]byte, error) {
 	var buf bytes.Buffer
 
 	r := decorator.NewRestorer()
 	if err := r.Fprint(&buf, root); err != nil {
-		return ex.Wrapf(err, "failed to restore AST for file %s", filePath)
+		return nil, ex.Wrapf(err, "failed to restore AST")
 	}
 
-	return util.WriteFileAtomic(filePath, buf.Bytes())
+	return buf.Bytes(), nil
+}
+
+// WriteFileAtomic writes the AST to a file atomically.
+func WriteFileAtomic(filePath string, root *dst.File) error {
+	data, err := PrintFile(root)
+	if err != nil {
+		return ex.Wrapf(err, "for file %s", filePath)
+	}
+
+	return util.WriteFileAtomic(filePath, data)
 }
 
 // ParsePackageName parses only the package name from a file, skipping

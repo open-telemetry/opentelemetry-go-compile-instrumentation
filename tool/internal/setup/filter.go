@@ -63,6 +63,9 @@ type matchContext struct {
 
 	// Package, when non-nil, makes leaf predicates hold if any file in it does.
 	Package []*dst.File
+	// ResolvedNames maps an import path to a package name, for
+	// signature matching against real names instead of a guess.
+	ResolvedNames map[string]string
 }
 
 func (c *matchContext) anyFile(pred func(*dst.File) bool) bool {
@@ -96,7 +99,7 @@ func (f *funcFilter) Match(ctx *matchContext) bool {
 		Recv: f.Recv,
 	}
 	return ctx.anyFile(func(file *dst.File) bool {
-		_, ok, _ := ast.FindFuncDecl(file, fr)
+		_, ok, _ := ast.FindFuncDecl(file, fr, ctx.ResolvedNames)
 		return ok
 	})
 }
