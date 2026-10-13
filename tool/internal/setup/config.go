@@ -61,9 +61,9 @@ func findToolFile(moduleDir string) (string, error) {
 	}
 }
 
-func findToolFiles(moduleDirs map[string]bool) ([]string, error) {
+func findToolFiles(moduleDirs []string) ([]string, error) {
 	toolFiles := make([]string, 0, len(moduleDirs))
-	for dir := range moduleDirs {
+	for _, dir := range moduleDirs {
 		toolFile, err := findToolFile(dir)
 		if err != nil {
 			return nil, err

@@ -17,84 +17,83 @@ import (
 	"go.opentelemetry.io/otelc/test/testutil"
 )
 
-func TestMongoClientV1(t *testing.T) {
+func TestMongoClient(t *testing.T) {
 	t.Parallel()
 	testutil.Build(t, "", "mongoclient", "go", "build", "-a")
 
-	testCases := []struct {
-		name string
-	}{
-		{
-			name: "basic",
-		},
-	}
+	t.Run("V1", func(t *testing.T) {
+		testCases := []struct {
+			name string
+		}{
+			{
+				name: "basic",
+			},
+		}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			f := testutil.NewTestFixture(t)
-			addr := StartMockMongoServer(t)
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				f := testutil.NewTestFixture(t)
+				addr := StartMockMongoServer(t)
 
-			output := f.Run("mongoclient", "-uri=mongodb://"+addr, "-version=1")
-			require.Contains(t, output, "MongoDB operations completed successfully")
+				output := f.Run("mongoclient", "-uri=mongodb://"+addr, "-version=1")
+				require.Contains(t, output, "MongoDB operations completed successfully")
 
-			spans := testutil.AllSpans(f.Traces())
-			require.GreaterOrEqual(t, len(spans), 1, "expected at least 1 span (insert)")
+				spans := testutil.AllSpans(f.Traces())
+				require.GreaterOrEqual(t, len(spans), 1, "expected at least 1 span (insert)")
 
-			// Verify insert span matching the actual attributes from otelmongo
-			insertSpan := testutil.RequireSpan(t, f.Traces(),
-				testutil.IsClient,
-				testutil.HasAttribute("db.operation.name", "insert"),
-			)
+				// Verify insert span matching the actual attributes from otelmongo
+				insertSpan := testutil.RequireSpan(t, f.Traces(),
+					testutil.IsClient,
+					testutil.HasAttribute("db.operation.name", "insert"),
+				)
 
-			// Assert MongoDB specific semantic conventions attributes
-			testutil.RequireAttribute(t, insertSpan, "db.system.name", "mongodb")
-			testutil.RequireAttribute(t, insertSpan, "db.operation.name", "insert")
-			testutil.RequireAttribute(t, insertSpan, "db.namespace", "testdb")
-			testutil.RequireAttribute(t, insertSpan, "db.collection.name", "users")
-			testutil.RequireAttributeContains(t, insertSpan, "network.peer.address", "127.0.0.1")
-			testutil.RequireAttribute(t, insertSpan, "network.transport", "tcp")
-		})
-	}
-}
+				// Assert MongoDB specific semantic conventions attributes
+				testutil.RequireAttribute(t, insertSpan, "db.system.name", "mongodb")
+				testutil.RequireAttribute(t, insertSpan, "db.operation.name", "insert")
+				testutil.RequireAttribute(t, insertSpan, "db.namespace", "testdb")
+				testutil.RequireAttribute(t, insertSpan, "db.collection.name", "users")
+				testutil.RequireAttributeContains(t, insertSpan, "network.peer.address", "127.0.0.1")
+				testutil.RequireAttribute(t, insertSpan, "network.transport", "tcp")
+			})
+		}
+	})
 
-func TestMongoClientV2(t *testing.T) {
-	t.Parallel()
-	testutil.Build(t, "", "mongoclient", "go", "build", "-a")
+	t.Run("V2", func(t *testing.T) {
+		testCases := []struct {
+			name string
+		}{
+			{
+				name: "basic",
+			},
+		}
 
-	testCases := []struct {
-		name string
-	}{
-		{
-			name: "basic",
-		},
-	}
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				f := testutil.NewTestFixture(t)
+				addr := StartMockMongoServer(t)
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			f := testutil.NewTestFixture(t)
-			addr := StartMockMongoServer(t)
+				output := f.Run("mongoclient", "-uri=mongodb://"+addr, "-version=2")
+				require.Contains(t, output, "MongoDB operations completed successfully")
 
-			output := f.Run("mongoclient", "-uri=mongodb://"+addr, "-version=2")
-			require.Contains(t, output, "MongoDB operations completed successfully")
+				spans := testutil.AllSpans(f.Traces())
+				require.GreaterOrEqual(t, len(spans), 1, "expected at least 1 span (insert)")
 
-			spans := testutil.AllSpans(f.Traces())
-			require.GreaterOrEqual(t, len(spans), 1, "expected at least 1 span (insert)")
+				// Verify insert span matching the actual attributes from otelmongo
+				insertSpan := testutil.RequireSpan(t, f.Traces(),
+					testutil.IsClient,
+					testutil.HasAttribute("db.operation.name", "insert"),
+				)
 
-			// Verify insert span matching the actual attributes from otelmongo
-			insertSpan := testutil.RequireSpan(t, f.Traces(),
-				testutil.IsClient,
-				testutil.HasAttribute("db.operation.name", "insert"),
-			)
-
-			// Assert MongoDB specific semantic conventions attributes
-			testutil.RequireAttribute(t, insertSpan, "db.system.name", "mongodb")
-			testutil.RequireAttribute(t, insertSpan, "db.operation.name", "insert")
-			testutil.RequireAttribute(t, insertSpan, "db.namespace", "testdb")
-			testutil.RequireAttribute(t, insertSpan, "db.collection.name", "users")
-			testutil.RequireAttributeContains(t, insertSpan, "network.peer.address", "127.0.0.1")
-			testutil.RequireAttribute(t, insertSpan, "network.transport", "tcp")
-		})
-	}
+				// Assert MongoDB specific semantic conventions attributes
+				testutil.RequireAttribute(t, insertSpan, "db.system.name", "mongodb")
+				testutil.RequireAttribute(t, insertSpan, "db.operation.name", "insert")
+				testutil.RequireAttribute(t, insertSpan, "db.namespace", "testdb")
+				testutil.RequireAttribute(t, insertSpan, "db.collection.name", "users")
+				testutil.RequireAttributeContains(t, insertSpan, "network.peer.address", "127.0.0.1")
+				testutil.RequireAttribute(t, insertSpan, "network.transport", "tcp")
+			})
+		}
+	})
 }
 
 // StartMockMongoServer starts a minimal mock MongoDB wire protocol server.
