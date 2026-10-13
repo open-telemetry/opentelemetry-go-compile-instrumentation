@@ -233,9 +233,10 @@ func (sp *setupPhase) preciseMatching(
 		// evaluated against that file. All fields are constant for a given
 		// source file, so no updates are needed inside the inner loop.
 		mctx := matchContext{
-			IsTest:     isTest,
-			SourceFile: source,
-			AST:        tree,
+			IsTest:        isTest,
+			SourceFile:    source,
+			AST:           tree,
+			ResolvedNames: sp.resolvedNames,
 		}
 
 		for _, rf := range ruleFilters {
@@ -288,7 +289,7 @@ func (sp *setupPhase) matchOneRule(
 ) error {
 	switch rt := r.(type) {
 	case *rule.InstFuncRule:
-		_, ok, err := ast.FindFuncDecl(tree, rt)
+		_, ok, err := ast.FindFuncDecl(tree, rt, sp.resolvedNames)
 		if err != nil {
 			return err
 		}
@@ -303,7 +304,7 @@ func (sp *setupPhase) matchOneRule(
 			sp.Info("Match struct rule", "rule", rt, "dep", dep)
 		}
 	case *rule.InstRawRule:
-		_, ok, err := ast.FindFuncDecl(tree, rt)
+		_, ok, err := ast.FindFuncDecl(tree, rt, sp.resolvedNames)
 		if err != nil {
 			return err
 		}
@@ -474,7 +475,7 @@ func loadRulesFromToolFiles(
 	return ruleSet, nil
 }
 
-func (sp *setupPhase) loadRules(ctx context.Context, moduleDirs map[string]bool) ([]rule.InstRule, error) {
+func (sp *setupPhase) loadRules(ctx context.Context, moduleDirs []string) ([]rule.InstRule, error) {
 	// Load rules from environment variable OTELC_RULES if specified. It has the
 	// highest priority.
 	rulePath := os.Getenv(util.EnvOtelcRules)
@@ -507,7 +508,7 @@ func (sp *setupPhase) loadRules(ctx context.Context, moduleDirs map[string]bool)
 func (sp *setupPhase) matchDeps(
 	ctx context.Context,
 	deps []*Dependency,
-	moduleDirs map[string]bool,
+	moduleDirs []string,
 ) ([]*rule.InstRuleSet, error) {
 	// Construct the set of default allRules by parsing embedded data
 	allRules, err := sp.loadRules(ctx, moduleDirs)

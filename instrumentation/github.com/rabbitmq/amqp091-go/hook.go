@@ -369,6 +369,36 @@ func AfterReject(ictx hook.HookContext, err error) {
 	afterChannelSettle(ictx, err)
 }
 
+// -----------------------------------------------------------------------------
+// Channel lifecycle: (*Channel).shutdown
+// -----------------------------------------------------------------------------
+
+// BeforeShutdown stashes ch for AfterShutdown. shutdown is hooked instead of
+// Close since it's the one place Close and Connection.shutdown both funnel
+// through; see the package README for why.
+func BeforeShutdown(ictx hook.HookContext, ch *amqp.Channel, _ *amqp.Error) {
+	if ch == nil {
+		return
+	}
+	ictx.SetData(ch)
+}
+
+// AfterShutdown drops ch's entries from publishParents and channelAcks and
+// ends any process spans still awaiting acknowledgement, once shutdown has
+// actually finished rather than before; see the package README.
+func AfterShutdown(ictx hook.HookContext) {
+	ch, ok := ictx.GetData().(*amqp.Channel)
+	if !ok || ch == nil {
+		return
+	}
+	publishParents.Delete(ch)
+	if v, ok := channelAcks.LoadAndDelete(ch); ok {
+		if p, ok := v.(*pendingAcks); ok {
+			p.endAll()
+		}
+	}
+}
+
 func afterChannelSettle(ictx hook.HookContext, err error) {
 	call, ok := ictx.GetData().(*ackCall)
 	if !ok || call == nil {

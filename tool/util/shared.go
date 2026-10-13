@@ -29,7 +29,8 @@ const (
 	EnvOtelcNestedToolexec = "OTELC_NESTED_TOOLEXEC"
 	// EnvOtelcNestedResolving lists, outermost first, the compiles waiting on
 	// a nested build to resolve an import a rule added, as comma-separated
-	// "package>added import" entries.
+	// "package>added import" entries. Import paths cannot contain "," or ">",
+	// so the entries need no escaping.
 	EnvOtelcNestedResolving = "OTELC_NESTED_RESOLVING"
 	BuildTempDir            = ".otelc-build"
 	BuildLockFile           = BuildTempDir + ".lock"
@@ -51,6 +52,12 @@ func IsRuleFile(name string) bool {
 func GetMatchedRuleFile() string {
 	const matchedRuleFile = "matched.json"
 	return GetBuildTemp(matchedRuleFile)
+}
+
+// GetImportNamesFile returns the path to the import name table file.
+func GetImportNamesFile() string {
+	const importNamesFile = "import_names.json"
+	return GetBuildTemp(importNamesFile)
 }
 
 // GetAddedImportsFileForProcess returns the per-process import tracking file.
