@@ -88,6 +88,19 @@ func (ip *instrumentPhase) applyOneRule(ctx context.Context, r rule.InstRule, ro
 	}
 }
 
+// rsetHasMethodCallRule reports whether rset contains at least one
+// method_call rule.
+func rsetHasMethodCallRule(rset *rule.InstRuleSet) bool {
+	for _, rules := range rset.CallRules {
+		for _, r := range rules {
+			if r.MethodCall != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (ip *instrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSet) error {
 	hasFuncRule := false
 	// Apply file rules first because they can introduce new files that used
@@ -98,6 +111,12 @@ func (ip *instrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSe
 			return ex.Wrapf(err, "applying file rule %s to package %s", rule.Name, rset.PackageName)
 		}
 	}
+	// Run the method_call type-check once, before any file in the package is
+	// rewritten.
+	if rsetHasMethodCallRule(rset) {
+		ip.ensureMethodCallInfo()
+	}
+
 	file2rules, files := groupRules(ip.workDir, rset)
 	for _, file := range files {
 		rules := file2rules[file]
