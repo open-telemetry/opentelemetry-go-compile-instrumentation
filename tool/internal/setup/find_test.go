@@ -409,6 +409,8 @@ func TestFindDepsMergesIdenticalCompiles(t *testing.T) {
 	})
 
 	dir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, dir)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
 	write := func(rel string) string {
 		path := filepath.Join(dir, rel)
 		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
