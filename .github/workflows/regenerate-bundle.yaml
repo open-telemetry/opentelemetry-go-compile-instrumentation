@@ -51,6 +51,7 @@ jobs:
         with:
           # zizmor: ignore[artipacked]: credentials are required by the git push later in this job
           persist-credentials: true
+          fetch-depth: 0
           ref: ${{ steps.pr.outputs.head_ref }}
           repository: ${{ steps.pr.outputs.head_repo_full }}
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -59,17 +60,31 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Merge main into the PR branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config merge.otelc-bundle.name "Keep current otelc-bundle.tgz (regenerate with make package)"
+          git config merge.otelc-bundle.driver ".github/scripts/merge-bundle.sh %A"
+          git fetch --force origin main
+          if ! git merge --no-ff --no-commit origin/main >/dev/null; then
+            git merge --abort || true
+            gh api "repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments" \
+              -f body="Cannot auto-merge: this PR has conflicts with \`main\` beyond \`tool/data/otelc-bundle.tgz\`. Please resolve them manually; see [Keeping the bundle in sync](https://github.com/${{ github.repository }}/blob/main/CONTRIBUTING.md#keeping-the-bundle-in-sync)."
+            exit 1
+          fi
+
       - name: Regenerate bundle
         run: make package
 
       - name: Commit and push if changed
         run: |
-          if git diff --quiet -- tool/data/otelc-bundle.tgz; then
-            echo "Bundle is already up to date."
+          git add tool/data/otelc-bundle.tgz
+          if git diff --quiet --cached; then
+            echo "Nothing to commit; bundle is already up to date."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add tool/data/otelc-bundle.tgz
-          git commit -m "chore: regenerate otelc-bundle.tgz"
+          git commit -m "chore: merge main and regenerate otelc-bundle.tgz"
           git push
