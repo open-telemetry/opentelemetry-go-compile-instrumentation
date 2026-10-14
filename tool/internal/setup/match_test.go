@@ -1438,7 +1438,7 @@ onlysecond:
 }
 
 func TestLoadCustomRulesSymlinkParent(t *testing.T) {
-	first := writeCustomRules(t, "rules.yml", `dup:
+	first := writeCustomRules(t, "rules.otelc.yml", `dup:
   target: main
   func: Example
   raw: "_ = 1"
@@ -1446,7 +1446,7 @@ onlyfirst:
   target: main
   func: Example
   raw: "_ = 3"`)
-	second := writeCustomRules(t, "rules.yml", `dup:
+	second := writeCustomRules(t, "rules.otelc.yml", `dup:
   target: main
   func: Example
   raw: "_ = 2"
@@ -1464,24 +1464,42 @@ onlysecond:
 	t.Chdir(filepath.Dir(second))
 
 	// Joining would clean link/.. before the filesystem can resolve the link.
-	viaLink := link + string(os.PathSeparator) + ".." + string(os.PathSeparator) + "rules.yml"
-	for _, tt := range []struct {
+	viaLink := link + string(os.PathSeparator) + ".." + string(os.PathSeparator) + "rules.otelc.yml"
+	tests := []struct {
 		name  string
 		paths string
 		want  string
 	}{
-		{"absolute paths", viaLink + "," + second, "_ = 2"},
-		{"relative paths", "link/../rules.yml,rules.yml", "_ = 2"},
-		{"reverse order", second + "," + viaLink, "_ = 1"},
-		{"repeated file", viaLink + "," + second + "," + first, "_ = 1"},
-	} {
+		{
+			name:  "absolute paths",
+			paths: viaLink + "," + second,
+			want:  "_ = 2",
+		},
+		{
+			name:  "relative paths",
+			paths: "link/../rules.otelc.yml,rules.otelc.yml",
+			want:  "_ = 2",
+		},
+		{
+			name:  "reverse order",
+			paths: second + "," + viaLink,
+			want:  "_ = 1",
+		},
+		{
+			name:  "repeated file",
+			paths: viaLink + "," + second + "," + first,
+			want:  "_ = 1",
+		},
+	}
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rules, err := loadCustomRules(t.Context(), tt.paths, util.Version)
 			require.NoError(t, err)
+			assert.ElementsMatch(t, []string{"dup", "onlyfirst", "onlysecond"}, ruleNames(rules))
 			got := make(map[string]string)
 			for _, r := range rules {
 				raw, ok := r.(*rule.InstRawRule)
-				require.True(t, ok)
+				require.True(t, ok, "rule %q must be an InstRawRule", r.GetName())
 				got[r.GetName()] = raw.Raw
 			}
 			assert.Equal(t, map[string]string{
