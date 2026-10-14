@@ -587,6 +587,10 @@ hook_fallible:
         path: example.com/hooks/db
 ```
 
+**Stack frames and line markers:**
+
+The trampoline call that the tool adds to the target function gets the same line markers as the code of the Raw Code Injection Rule. In stack traces, it shows the file `<generated>`. The original statements of the function keep their original file path and line number. See "Stack frames and line markers" in the [Raw Code Injection Rule](#3-raw-code-injection-rule) section.
+
 ### 2. Struct Field Injection Rule
 
 This rule adds one or more new fields to a specified struct type.
@@ -779,6 +783,14 @@ The injected code will be placed immediately before the `println("hello")` state
 Note the pattern starts with `^`. During AST traversal, outer statements (such as `if`, `for`, or `go func`) are visited before their inner statements. Since matching is performed on the formatted string of each statement, a loose pattern may accidentally match a parent statement if it contains the target code.
 
 Anchoring the pattern with `^` (and usually `$`) ensures that only the exact statement is matched, preventing insertion at the wrong level (e.g., before an entire block instead of the intended inner statement).
+
+**Stack frames and line markers:**
+
+The tool puts a `/*line <generated>:1*/` directive on the first statement of each run of injected statements. The next injected lines get the next line numbers in `<generated>`: 2, 3, and so on. These numbers count printed lines, not statements. An injected statement that uses several lines takes several numbers. In stack traces, injected code shows the file `<generated>`. The Go build joins this name with the build directory, so a stack filter can match the `<generated>` suffix. The first original statement after a run gets a directive that restores its original absolute file path and line number. The next original statements keep their original lines. Exception: if the original file name (from a `//line` directive in the source) has characters that cannot be in a comment, the tool cannot restore it. Then the code after the injected code can show `<generated>` until the next valid position.
+
+The same applies to the trampoline code of the [Function Hook Rule](#1-function-hook-rule).
+
+With `go build -trimpath`, the Go compiler rewrites the original file path in the same way as for normal Go files. Injected code stays in `<generated>`.
 
 ### 4. Call Wrapping Rule
 

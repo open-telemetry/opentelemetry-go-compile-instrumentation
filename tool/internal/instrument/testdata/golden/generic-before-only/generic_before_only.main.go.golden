@@ -3,15 +3,15 @@
 
 package main
 
+//line <generated>:1
 import _ "unsafe"
 
+//line /golden/work/main.go:6
 func GenericFuncBeforeOnly[T any](p1 T, p2 int) (_unnamedRetVal_3330034316_0 T, _unnamedRetVal_3330034316_1 error) {
-	//line <generated>:1
-	if OtelBeforeTrampoline_GenericFuncBeforeOnly3330034316[T](&p1, &p2); false {
+	/*line <generated>:1*/ if OtelBeforeTrampoline_GenericFuncBeforeOnly3330034316[T](&p1, &p2); false {
 	} else {
 	}
-	//line main.go:7:2
-	return p1, nil
+	/*line /golden/work/main.go:7:1*/ return p1, nil
 }
 
 //line <generated>:1

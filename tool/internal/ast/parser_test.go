@@ -62,6 +62,61 @@ func TestFindPosition(t *testing.T) {
 	})
 }
 
+func TestOriginalPosition(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "orig.go")
+	src := "package main\n\nfunc Foo() {\n\tbar(1)\n}\n"
+	require.NoError(t, os.WriteFile(path, []byte(src), 0o600))
+	p := NewAstParser()
+	file, err := p.Parse(path, parser.ParseComments)
+	require.NoError(t, err)
+	fn := FindFuncDeclWithoutRecv(file, "Foo")
+	require.NotNil(t, fn)
+	call := fn.Body.List[0]
+
+	t.Run("node of the parsed file", func(t *testing.T) {
+		pos, ok := p.OriginalPosition(call)
+		require.True(t, ok)
+		assert.Equal(t, "orig.go", pos.Filename)
+		assert.Equal(t, 4, pos.Line)
+		assert.Equal(t, 2, pos.Column)
+	})
+
+	t.Run("closing brace of a block", func(t *testing.T) {
+		pos, ok := p.Rbrace(fn.Body)
+		require.True(t, ok)
+		assert.Equal(t, 5, pos.Line)
+		assert.Equal(t, 1, pos.Column)
+	})
+
+	t.Run("node that is not in a map", func(t *testing.T) {
+		_, ok := p.OriginalPosition(Ident("orphan"))
+		assert.False(t, ok)
+		_, ok = p.Rbrace(&dst.BlockStmt{})
+		assert.False(t, ok)
+	})
+
+	t.Run("snippet of the same parser", func(t *testing.T) {
+		// The snippet has its own file in the same file set.
+		stmts, snippetErr := p.ParseSnippet("baz()")
+		require.NoError(t, snippetErr)
+		_, ok := p.OriginalPosition(stmts[0])
+		assert.False(t, ok)
+	})
+
+	t.Run("source with a line directive", func(t *testing.T) {
+		lineFile := filepath.Join(t.TempDir(), "gen.go")
+		lineSrc := "package main\n\n//line other.go:100\nfunc Foo() {\n\tbar(1)\n}\n"
+		require.NoError(t, os.WriteFile(lineFile, []byte(lineSrc), 0o600))
+		lineParser := NewAstParser()
+		lineRoot, parseErr := lineParser.Parse(lineFile, parser.ParseComments)
+		require.NoError(t, parseErr)
+		pos, ok := lineParser.OriginalPosition(FindFuncDeclWithoutRecv(lineRoot, "Foo").Body.List[0])
+		require.True(t, ok)
+		assert.Equal(t, "other.go", pos.Filename)
+		assert.Equal(t, 101, pos.Line)
+	})
+}
+
 // findCallExpr returns the first *dst.CallExpr for a call to funcName in root.
 func findCallExpr(t *testing.T, root dst.Node, funcName string) *dst.CallExpr {
 	t.Helper()

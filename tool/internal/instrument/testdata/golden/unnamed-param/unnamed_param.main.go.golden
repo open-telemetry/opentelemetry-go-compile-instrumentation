@@ -3,14 +3,14 @@
 
 package main
 
+//line <generated>:1
 import _ "unsafe"
 
+//line /golden/work/main.go:6
 func Unnamed(_ignoredParam_604682800_0 int, _ignoredParam_604682800_1 float32) {
-	//line <generated>:1
-	if OtelBeforeTrampoline_Unnamed604682800(&_ignoredParam_604682800_0, &_ignoredParam_604682800_1); false {
+	/*line <generated>:1*/ if OtelBeforeTrampoline_Unnamed604682800(&_ignoredParam_604682800_0, &_ignoredParam_604682800_1); false {
 	} else {
-	}
-	//line main.go:6:28
+	} /*line /golden/work/main.go:5*/
 }
 
 //line <generated>:1

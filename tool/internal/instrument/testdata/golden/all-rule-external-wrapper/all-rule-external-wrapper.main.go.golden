@@ -9,19 +9,20 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/all-rule-external-wrapper/helpers/wrapper"
 )
 
+//line /golden/work/main.go:8
 type T struct{ ExternalTag wrapper.Tag }
 
 var GlobalVar interface{} = wrapper.WrapValue("original")
 
 func RawFunc() {
-	wrapper.Log("raw instrumented")
-	println("raw func body")
+	/*line <generated>:1*/ wrapper.Log("raw instrumented")
+	/*line /golden/work/main.go:13:1*/ println("raw func body")
 }
 
 //otelc:external-log
 func DirectiveFunc() {
-	wrapper.Log("DirectiveFunc")
-	println("directive func body")
+	/*line <generated>:1*/ wrapper.Log("DirectiveFunc")
+	/*line /golden/work/main.go:18:1*/ println("directive func body")
 }
 
 func CallSizeof() {

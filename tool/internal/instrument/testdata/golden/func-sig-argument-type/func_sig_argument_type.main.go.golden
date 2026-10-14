@@ -3,17 +3,16 @@
 
 package main
 
+//line <generated>:1
 import _ "unsafe"
 
+//line /golden/work/main.go:6
 func Func1(p1 string, p2 int) (_unnamedRetVal_300812424_0 float32, _unnamedRetVal_300812424_1 error) {
-	//line <generated>:1
-	if hookContext300812424, _ := OtelBeforeTrampoline_Func1300812424(&p1, &p2); false {
+	/*line <generated>:1*/ if hookContext300812424, _ := OtelBeforeTrampoline_Func1300812424(&p1, &p2); false {
 	} else {
 		defer OtelAfterTrampoline_Func1300812424(hookContext300812424, &_unnamedRetVal_300812424_0, &_unnamedRetVal_300812424_1)
 	}
-	//line main.go:7:2
-	println("Hello, World!")
-	//line main.go:8:2
+	/*line /golden/work/main.go:7:1*/ println("Hello, World!")
 	return 0.0, nil
 }
 

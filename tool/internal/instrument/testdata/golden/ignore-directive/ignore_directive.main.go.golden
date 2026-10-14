@@ -3,18 +3,18 @@
 
 package main
 
+//line <generated>:1
 import _ "unsafe"
 
 //otelc:ignore
+//line /golden/work/main.go:7
 func IgnoredFunc(p1 string) {}
 
 func InstrumentedFunc(p1 string) {
-	//line <generated>:1
-	if hookContext1063730264, _ := OtelBeforeTrampoline_InstrumentedFunc1063730264(&p1); false {
+	/*line <generated>:1*/ if hookContext1063730264, _ := OtelBeforeTrampoline_InstrumentedFunc1063730264(&p1); false {
 	} else {
 		defer OtelAfterTrampoline_InstrumentedFunc1063730264(hookContext1063730264)
-	}
-	//line main.go:9:34
+	} /*line /golden/work/main.go:8*/
 }
 
 func main() {}

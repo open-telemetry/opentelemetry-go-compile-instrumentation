@@ -11,6 +11,7 @@ import (
 	"strings"
 )
 
+//line /golden/work/main.go:10
 func NewReader() *stdio.LimitedReader {
 	return &stdio.LimitedReader{R: strings.NewReader("hello"), N: 10}
 }

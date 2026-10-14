@@ -3,16 +3,15 @@
 
 package main
 
+//line <generated>:1
 import _ "unsafe"
 
+//line /golden/work/main.go:6
 func Func1(p1 string, p2 int) (_unnamedRetVal_616481378_0 float32, _unnamedRetVal_616481378_1 error) {
-	//line <generated>:1
-	if OtelBeforeTrampoline_Func1616481378(&p1, &p2); false {
+	/*line <generated>:1*/ if OtelBeforeTrampoline_Func1616481378(&p1, &p2); false {
 	} else {
 	}
-	//line main.go:7:2
-	println("Hello, World!")
-	//line main.go:8:2
+	/*line /golden/work/main.go:7:1*/ println("Hello, World!")
 	return 0.0, nil
 }
 

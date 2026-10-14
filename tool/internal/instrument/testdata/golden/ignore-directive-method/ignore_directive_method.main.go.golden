@@ -3,20 +3,20 @@
 
 package main
 
+//line <generated>:1
 import _ "unsafe"
 
+//line /golden/work/main.go:6
 type T struct{}
 
 //otelc:ignore
 func (t *T) IgnoredMethod(p1 string) {}
 
 func (t *T) InstrumentedMethod(p1 string) {
-	//line <generated>:1
-	if hookContext3533141232, _ := OtelBeforeTrampoline_InstrumentedMethod3533141232(&t, &p1); false {
+	/*line <generated>:1*/ if hookContext3533141232, _ := OtelBeforeTrampoline_InstrumentedMethod3533141232(&t, &p1); false {
 	} else {
 		defer OtelAfterTrampoline_InstrumentedMethod3533141232(hookContext3533141232)
-	}
-	//line main.go:11:43
+	} /*line /golden/work/main.go:10*/
 }
 
 func main() {}

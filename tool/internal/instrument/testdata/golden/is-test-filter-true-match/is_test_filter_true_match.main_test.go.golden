@@ -3,21 +3,20 @@
 
 package main
 
+//line <generated>:1
 import _ "unsafe"
 
 // ProcessRequest lives in a _test.go file, so the Go toolchain compiles it only
 // as part of `go test`. The is_test: true rule matches that test build and the
 // golden captures the injected trampolines — the positive counterpart to
 // is-test-filter-no-match, where the same rule is gated out of a normal build.
+//line /golden/work/main_test.go:10
 func ProcessRequest(req string) (_unnamedRetVal_2587785677_0 error) {
-	//line <generated>:1
-	if hookContext2587785677, _ := OtelBeforeTrampoline_ProcessRequest2587785677(&req); false {
+	/*line <generated>:1*/ if hookContext2587785677, _ := OtelBeforeTrampoline_ProcessRequest2587785677(&req); false {
 	} else {
 		defer OtelAfterTrampoline_ProcessRequest2587785677(hookContext2587785677, &_unnamedRetVal_2587785677_0)
 	}
-	//line main_test.go:11:2
-	println("processing:", req)
-	//line main_test.go:12:2
+	/*line /golden/work/main_test.go:11:1*/ println("processing:", req)
 	return nil
 }
 

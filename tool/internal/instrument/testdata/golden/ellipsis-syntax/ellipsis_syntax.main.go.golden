@@ -3,14 +3,14 @@
 
 package main
 
+//line <generated>:1
 import _ "unsafe"
 
+//line /golden/work/main.go:6
 func EllipsisFunc(p1 ...string) {
-	//line <generated>:1
-	if OtelBeforeTrampoline_EllipsisFunc1782564695(&p1); false {
+	/*line <generated>:1*/ if OtelBeforeTrampoline_EllipsisFunc1782564695(&p1); false {
 	} else {
-	}
-	//line main.go:6:33
+	} /*line /golden/work/main.go:5*/
 }
 
 //line <generated>:1

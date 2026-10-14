@@ -3,26 +3,24 @@
 
 package main
 
+//line <generated>:1
 import _ "unsafe"
 
+//line /golden/work/main.go:6
 type T struct{}
 
 func (t *T) Func1(p1 string, p2 int) (_unnamedRetVal_3482884715_0 float32, _unnamedRetVal_3482884715_1 error) {
-	//line <generated>:1
-	if hookContext3482884715, _ := OtelBeforeTrampoline_Func13482884715(&t, &p1, &p2); false {
+	/*line <generated>:1*/ if hookContext3482884715, _ := OtelBeforeTrampoline_Func13482884715(&t, &p1, &p2); false {
 	} else {
 		defer OtelAfterTrampoline_Func13482884715(hookContext3482884715, &_unnamedRetVal_3482884715_0, &_unnamedRetVal_3482884715_1)
 	}
-	//line main.go:9:2
-	return 0.0, nil
+	/*line /golden/work/main.go:9:1*/ return 0.0, nil
 }
 
 func (_ignoredParam_1380706877_0 T) Func3() {
-	//line <generated>:1
-	if OtelBeforeTrampoline_Func31380706877(&_ignoredParam_1380706877_0); false {
+	/*line <generated>:1*/ if OtelBeforeTrampoline_Func31380706877(&_ignoredParam_1380706877_0); false {
 	} else {
-	}
-	//line main.go:12:18
+	} /*line /golden/work/main.go:11*/
 }
 
 //line <generated>:1

@@ -9,6 +9,7 @@ import (
 	"fmt"
 )
 
+//line /golden/work/main.go:8
 func CallSizeof() {
 	x := 42
 	size := (func() uintptr { fmt.Println("Wrapped!"); return unsafe.Sizeof(x) })()
