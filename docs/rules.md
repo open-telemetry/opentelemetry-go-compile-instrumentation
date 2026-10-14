@@ -790,6 +790,8 @@ The tool puts a `/*line <generated>:1*/` directive on the first statement of eac
 
 The same applies to the trampoline code of the [Function Hook Rule](#1-function-hook-rule).
 
+A `//line` comment of the user inside a function body (for example, in code that goyacc writes) stays in the file. The printer indents it, so Go would ignore it. The tool adds a restore directive after it, so the code keeps the line that the comment gives. This is done in every function of an instrumented file, also in a function that no rule changed. The same exceptions apply as above. Also, the tool cannot restore a statement directly after a comment that gives line 1 (for example `//line foo.go:1`), because its directive must give line 0, which Go does not accept. The tool then restores the next statement. Directives have a line and no column. A `/*line*/` comment of the user is not changed.
+
 With `go build -trimpath`, the Go compiler rewrites the original file path in the same way as for normal Go files. Injected code stays in `<generated>`.
 
 ### 4. Call Wrapping Rule

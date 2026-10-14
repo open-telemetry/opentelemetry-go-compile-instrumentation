@@ -9,7 +9,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	goast "go/ast"
 	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1605,6 +1607,19 @@ func TestMarkLineDirectives_CompilerLineOneIsNotRestoredAsLineZero(t *testing.T)
 		assert.Regexp(t, `/<generated>:\d+$`, got["S1"])
 		assert.Equal(t, file+":2", got["S2"])
 	})
+	t.Run("statement without injected code", func(t *testing.T) {
+		// The state was known. The pass cannot restore S1, so the state
+		// becomes stale, and the next statement S2, which has no comment, must
+		// be restored. S2 is on line 2 of foo.go, like in the original program.
+		src := preludeProgram + `func main() {
+//line ` + file + `:1:1
+	fmt.Println("S1", where())
+	fmt.Println("S2", where())
+}
+`
+		got := assertSamePositions(t, src, func(*dst.File) {}, "S2")
+		assert.Equal(t, file+":2", got["S2"])
+	})
 	t.Run("clause of a switch", func(t *testing.T) {
 		src := preludeProgram + `func main() {
 	for _, x := range []int{1, 2} {
@@ -1626,5 +1641,528 @@ func TestMarkLineDirectives_CompilerLineOneIsNotRestoredAsLineZero(t *testing.T)
 		got := positions(run.output)
 		assert.Regexp(t, `/<generated>:\d+$`, got["gen"])
 		assert.Equal(t, file+":2", got["C2"])
+	})
+}
+
+// --- User "//line" comments in function bodies ---
+
+// userLineSource is a program like the output of goyacc. The "//line"
+// comments are at column 1 inside function bodies. other is a function that
+// the test does not change.
+const userLineSource = preludeProgram + `func target(x int) {
+	switch x {
+	case 1:
+//line parser.y:42
+		fmt.Println("A", where())
+		fmt.Println("B", where())
+	case 2:
+//line parser.y:90
+		fmt.Println("C", where())
+	}
+	fmt.Println("D", where())
+}
+
+func other(x int) {
+	switch x {
+	case 1:
+//line other.y:10
+		fmt.Println("O1", where())
+		fmt.Println("O2", where())
+	}
+	fmt.Println("O3", where())
+}
+
+func main() {
+	target(1)
+	target(2)
+	other(1)
+}
+`
+
+// runOriginal runs src as the file orig.go of a module and returns the output
+// of the program.
+func runOriginal(t *testing.T, src string) string {
+	t.Helper()
+	dir := writeModule(t, "orig.go", src)
+	out, err := goTool(t, dir, "run", "orig.go")
+	require.NoError(t, err, out)
+	return out
+}
+
+// assertSamePositions checks that the instrumented program prints the same
+// position as the original program for each id in ids. The two programs are in
+// different directories, so the check compares the base name of the file and
+// the line. It returns the positions of the instrumented program.
+func assertSamePositions(t *testing.T, src string, edit func(root *dst.File), ids ...string) map[string]string {
+	t.Helper()
+	want := positions(runOriginal(t, src))
+	got := positions(runInjected(t, src, edit).output)
+	base := func(pos string) string {
+		file, line, _ := strings.Cut(filepath.Base(pos), ":")
+		if file == "inst.go" {
+			file = "orig.go"
+		}
+		return file + ":" + line
+	}
+	for _, id := range ids {
+		require.NotEmpty(t, want[id], id)
+		assert.Equal(t, base(want[id]), base(got[id]), id)
+	}
+	return got
+}
+
+func TestMarkLineDirectives_CompilerUserLineCommentInFunctionWithInjectedCode(t *testing.T) {
+	// The printer indents the "//line" comment, so Go ignores it. The pass
+	// must restore the position of the statement after it.
+	got := assertSamePositions(t, userLineSource, func(root *dst.File) {
+		body := findFunc(t, root, "target").Body
+		clause := body.List[0].(*dst.SwitchStmt).Body.List[0].(*dst.CaseClause)
+		clause.Body = insertStmts(t, clause.Body, 1, printWhere("gen-mid"))
+		body.List = insertStmts(t, body.List, 0, printWhere("gen-start"))
+		body.List = append(body.List, snippet(t, printWhere("gen-end"))...)
+	}, "A", "C", "D", "O1", "O2", "O3")
+	// Check that the test shows what it must: the position is in the user file.
+	assert.Contains(t, got["A"], "parser.y:42")
+	assert.Contains(t, got["C"], "parser.y:90")
+	assert.Contains(t, got["O1"], "other.y:10")
+	assert.Regexp(t, `/<generated>:\d+$`, got["gen-mid"])
+	assert.Regexp(t, `/<generated>:\d+$`, got["gen-start"])
+	assert.Regexp(t, `/<generated>:\d+$`, got["gen-end"])
+}
+
+func TestMarkLineDirectives_CompilerUserLineCommentInFunctionWithoutInjectedCode(t *testing.T) {
+	// No rule changed other. Its "//line" comment must work, as the printer
+	// indents the comment in every function of the file.
+	got := assertSamePositions(t, userLineSource, func(root *dst.File) {
+		prepend(t, findFunc(t, root, "target").Body, printWhere("gen"))
+	}, "A", "B", "C", "D", "O1", "O2", "O3")
+	assert.Contains(t, got["O1"], "other.y:10")
+	assert.Contains(t, got["O2"], "other.y:11")
+}
+
+func TestMarkLineDirectives_CompilerUserLineCommentWithoutAnyChange(t *testing.T) {
+	// The pass restores the position also when no node is generated.
+	assertSamePositions(t, userLineSource, func(*dst.File) {},
+		"A", "B", "C", "D", "O1", "O2", "O3")
+}
+
+func TestMarkLineDirectives_CompilerUserLineCommentAfterLastStatement(t *testing.T) {
+	// The "//line" comment is in the End decorations of the last statement
+	// of a block, or of a clause. The code after the block must be restored,
+	// and so must the closing brace.
+	const src = preludeProgram + `func main() {
+	defer func() {
+		_, file, line, _ := runtime.Caller(1)
+		fmt.Printf("closing %s:%d\n", file, line)
+	}()
+	x := len(fmt.Sprint())
+	if x == 0 {
+		fmt.Println("A", where())
+//line z.y:50
+	}
+	fmt.Println("B", where())
+	switch x {
+	case 0:
+		fmt.Println("C", where())
+//line c.y:80
+	case 1:
+		fmt.Println("D", where())
+	}
+	fmt.Println("E", where())
+	for range 1 {
+		fmt.Println("F", where())
+//line f.y:30
+	}
+//line g.y:100
+	fmt.Println("G", where())
+	fmt.Println("H", where())
+	for range 1 {
+		fmt.Println("I", where())
+//line i.y:60
+	}
+}
+`
+	got := assertSamePositions(t, src, func(*dst.File) {},
+		"A", "B", "C", "E", "F", "G", "H", "I", "closing")
+	assert.Contains(t, got["B"], "z.y:51")
+	assert.Contains(t, got["E"], "c.y:")
+	assert.Contains(t, got["G"], "g.y:100")
+	// The deferred function is called from the closing brace of main.
+	assert.Contains(t, got["closing"], "i.y:61")
+	t.Run("with injected code", func(t *testing.T) {
+		assertSamePositions(t, src, func(root *dst.File) {
+			body := findFunc(t, root, "main").Body
+			ifStmt := body.List[2].(*dst.IfStmt)
+			ifStmt.Body.List = append(ifStmt.Body.List, snippet(t, printWhere("gen"))...)
+			body.List = insertStmts(t, body.List, 3, printWhere("gen2"))
+			loop := body.List[len(body.List)-1].(*dst.RangeStmt)
+			loop.Body.List = append(loop.Body.List, snippet(t, printWhere("gen3"))...)
+		}, "B", "G", "H", "I", "closing")
+	})
+}
+
+func TestMarkLineDirectives_CompilerUserLineCommentWithNameThatEndsInNumber(t *testing.T) {
+	// The restore of S2 is skipped, because a directive with only a line
+	// cannot give the name "/tmp/foo:7" to Go (see directive). S2 keeps the
+	// position of S1, which is a line of the original file, and not
+	// "<generated>". S3 has no comment, but the state is still stale, so its
+	// restore is tried, and skipped. S4 is in a safe file, and it must be
+	// restored.
+	const ok = "/tmp/ok.go"
+	for _, name := range []string{"/tmp/foo:0", "/tmp/foo:7"} {
+		t.Run(name, func(t *testing.T) {
+			src := preludeProgram + `func main() {
+	fmt.Println("S1", where())
+//line ` + name + `:50:1
+	fmt.Println("S2", where())
+	fmt.Println("S3", where())
+//line ` + ok + `:70:1
+	fmt.Println("S4", where())
+	fmt.Println("S5", where())
+}
+`
+			edit := func(root *dst.File) {
+				prepend(t, findFunc(t, root, "main").Body, printWhere("gen"))
+			}
+			got := positions(runInjected(t, src, edit).output)
+			assert.Regexp(t, `/<generated>:\d+$`, got["gen"])
+			for _, id := range []string{"S2", "S3"} {
+				assert.NotContains(t, got[id], "/tmp/foo", id)
+				assert.NotContains(t, got[id], "<generated>", id)
+				assert.Contains(t, got[id], "orig.go:", id)
+			}
+			assert.Equal(t, ok+":70", got["S4"])
+			assert.Equal(t, ok+":71", got["S5"])
+			text := instrumentSource(t, src, edit)
+			assert.NotContains(t, text, "/*line "+name)
+			assert.Equal(t, 1, strings.Count(text, "<generated>"), text)
+		})
+	}
+}
+
+func TestMarkLineDirectives_CompilerUserLineCommentWithNameThatEndsInNumberNoInjectedCode(t *testing.T) {
+	// The state is stale, not generated. The restore of S2 is skipped, and
+	// the pass does not write "<generated>". S2 keeps the position that the
+	// printer gives (orig.go), which is the line in the instrumented file.
+	const ok = "/tmp/ok.go"
+	src := preludeProgram + `func main() {
+	fmt.Println("S1", where())
+//line /tmp/foo:7:50:1
+	fmt.Println("S2", where())
+//line ` + ok + `:70:1
+	fmt.Println("S3", where())
+}
+`
+	edit := func(*dst.File) {}
+	run := runInjected(t, src, edit)
+	got := positions(run.output)
+	assert.NotContains(t, got["S2"], "/tmp/foo")
+	assert.NotContains(t, got["S2"], "<generated>")
+	assert.Equal(t, ok+":70", got["S3"])
+	assert.NotContains(t, instrumentSource(t, src, edit), "<generated>")
+}
+
+func TestMarkLineDirectives_UserLineCommentInFunctionBody(t *testing.T) {
+	// The comment of the user stays. The restore directive follows it on a
+	// line of its own. The line is the line before the node, as the newline
+	// that follows the directive adds one.
+	src := `package main
+
+func f(x int) {
+	switch x {
+	case 1:
+//line parser.y:42
+		a()
+		b()
+//line next.y:10
+	case 2:
+		c() //line trailing.y:1
+	}
+	d()
+	if x > 1 {
+//line empty.y:20
+	}
+	e()
+//line last.y:30
+}
+
+func g() {
+	h()
+}
+`
+	got := instrumentSource(t, src, func(root *dst.File) {
+		prepend(t, findFunc(t, root, "f").Body, "gen()")
+	})
+	want := `package main
+
+func f(x int) {
+	/*line <generated>:1*/ gen()
+	/*line FILE:4*/ switch x {
+	case 1:
+		//line parser.y:42
+		/*line DIR/parser.y:41*/
+		a()
+		b()
+	//line next.y:10
+	/*line DIR/next.y:9*/
+	case 2:
+		c() //line trailing.y:1
+	}
+	d()
+	if x > 1 {
+		//line empty.y:20
+		/*line DIR/empty.y:19*/
+	}
+	e()
+	//line last.y:30
+	/*line DIR/last.y:29*/
+}
+
+func g() {
+	h()
+}
+`
+	assert.Equal(t, want, got)
+}
+
+func TestMarkLineDirectives_HasUserLineDirective(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		decs       dst.Decorations
+		startsLine bool
+		want       bool
+	}{
+		{"empty", nil, true, false},
+		{"first of start", dst.Decorations{"//line a.y:1"}, true, true},
+		{"first of end", dst.Decorations{"//line a.y:1"}, false, false},
+		{"after newline", dst.Decorations{"\n", "//line a.y:1"}, false, true},
+		{"after line comment", dst.Decorations{"// c", "//line a.y:1"}, false, true},
+		{"after block comment", dst.Decorations{"/* c */", "//line a.y:1"}, false, false},
+		{"block directive", dst.Decorations{"/*line a.y:1*/"}, true, false},
+		{"directive of the pass", dst.Decorations{"/*line <generated>:1*/"}, true, false},
+		{"not a directive", dst.Decorations{"//lines are long"}, true, false},
+		{"plain comment", dst.Decorations{"// line a.y:1"}, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, hasUserLineDirective(tc.decs, tc.startsLine))
+		})
+	}
+}
+
+func TestMarkLineDirectives_UserBlockLineCommentIsNotChanged(t *testing.T) {
+	// A "/*line*/" comment of the user is valid at any column, so the pass
+	// does not write a directive for it.
+	src := `package main
+
+func f() {
+	a()
+	/*line block.y:5*/ b()
+	c()
+}
+`
+	got := instrumentSource(t, src, func(*dst.File) {})
+	assert.Equal(t, src, got)
+}
+
+func TestMarkLineDirectives_CompilerUserLineCommentAfterLastClause(t *testing.T) {
+	// The comment is in the End decorations of the last clause, after the
+	// last statement of its body. It is the last thing before the closing
+	// brace of the switch statement, so the directive for the brace must
+	// follow it.
+	const src = preludeProgram + `func main() {
+	defer func() {
+		_, file, line, _ := runtime.Caller(1)
+		fmt.Printf("closing %s:%d\n", file, line)
+	}()
+	switch len(fmt.Sprint()) {
+	case 1:
+		fmt.Println("A", where())
+	default:
+		fmt.Println("B", where())
+//line s.y:40
+	}
+	for range 1 {
+		fmt.Println("C", where())
+		switch {
+		case true:
+			fmt.Println("D", where())
+//line t.y:70
+		}
+	}
+	fmt.Println("E", where())
+}
+`
+	got := assertSamePositions(t, src, func(*dst.File) {}, "B", "C", "D", "E", "closing")
+	assert.Contains(t, got["E"], "t.y:72")
+	assert.Contains(t, got["closing"], "t.y:73")
+}
+
+func TestMarkLineDirectives_CompilerGeneratedNodeAfterSkippedUserLineRestore(t *testing.T) {
+	// The restore of the closing brace is skipped, because the name of the
+	// comment is unsafe. The state is stale. A generated statement after the
+	// block must have a "<generated>" directive, as the position of the
+	// statement is not known. B is in the file of the unsafe comment, so its
+	// restore is skipped too. C is in a safe file, and it is restored.
+	const src = preludeProgram + `func main() {
+	if len(fmt.Sprint()) == 0 {
+		fmt.Println("A", where())
+` + unsafeDirective + `
+	}
+	fmt.Println("B", where())
+//line safe.go:80:1
+	fmt.Println("C", where())
+	fmt.Println("D", where())
+}
+`
+	edit := func(root *dst.File) {
+		body := findFunc(t, root, "main").Body
+		body.List = insertStmts(t, body.List, 1, printWhere("gen"))
+	}
+	run := runInjected(t, src, edit)
+	got := positions(run.output)
+	assert.Regexp(t, `/<generated>:\d+$`, got["gen"])
+	assert.Regexp(t, `/<generated>:\d+$`, got["B"])
+	safe := filepath.Join(filepath.Dir(run.origFile), "safe.go")
+	assert.Equal(t, safe+":80", got["C"])
+	assert.Equal(t, safe+":81", got["D"])
+	assert.NotContains(t, run.output, "INJECTED")
+}
+
+func TestMarkLineDirectives_CompilerUserLineCommentBetweenLabelAndStatement(t *testing.T) {
+	// The comment is in the decorations of the statement of the label, and not
+	// in those of the label. No generated node is before the label, so only
+	// the comment makes the statement need a restore.
+	const src = preludeProgram + `func main() {
+	n := 0
+loop:
+//line labeled.y:20
+	fmt.Println("A", where())
+	fmt.Println("B", where())
+	n++
+	if n < 2 {
+		goto loop
+	}
+outer:
+inner:
+//line nested.y:40
+	for range 1 {
+		fmt.Println("C", where())
+		if n > 5 {
+			goto outer
+		}
+		break inner
+	}
+	fmt.Println("D", where())
+}
+`
+	got := assertSamePositions(t, src, func(*dst.File) {}, "A", "B", "C", "D")
+	assert.Contains(t, got["A"], "labeled.y:20")
+	assert.Contains(t, got["B"], "labeled.y:21")
+	assert.Contains(t, got["C"], "nested.y:41")
+	t.Run("with injected code", func(t *testing.T) {
+		withGen := assertSamePositions(t, src, func(root *dst.File) {
+			body := findFunc(t, root, "main").Body
+			body.List = insertStmts(t, body.List, 1, printWhere("gen"))
+		}, "A", "B", "C", "D")
+		assert.Regexp(t, `/<generated>:\d+$`, withGen["gen"])
+	})
+}
+
+func TestMarkLineDirectives_UserLineCommentBetweenLabelAndStatement(t *testing.T) {
+	// The restore directive follows the comment of the user, before the
+	// statement. The label has no directive, because its position is known.
+	src := `package main
+
+func f() {
+loop:
+//line labeled.y:20
+	a()
+	goto loop
+}
+`
+	got := instrumentSource(t, src, func(*dst.File) {})
+	want := `package main
+
+func f() {
+loop:
+	//line labeled.y:20
+	/*line DIR/labeled.y:19*/
+	a()
+	goto loop
+}
+`
+	assert.Equal(t, want, got)
+}
+
+// rbraceOfIf parses the program text as the file name, and returns the
+// position of the closing brace of the first "if" statement in main. A parser
+// reads the directives of the file.
+func rbraceOfIf(t *testing.T, name, text string) token.Position {
+	t.Helper()
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, name, text, parser.ParseComments)
+	require.NoError(t, err, text)
+	var pos token.Position
+	found := false
+	goast.Inspect(findGoFunc(file, "main"), func(n goast.Node) bool {
+		if stmt, ok := n.(*goast.IfStmt); ok && !found {
+			pos, found = fset.Position(stmt.Body.Rbrace), true
+		}
+		return !found
+	})
+	require.True(t, found)
+	return pos
+}
+
+func findGoFunc(file *goast.File, name string) *goast.FuncDecl {
+	for _, decl := range file.Decls {
+		if fn, ok := decl.(*goast.FuncDecl); ok && fn.Name.Name == name {
+			return fn
+		}
+	}
+	return nil
+}
+
+func TestMarkLineDirectives_CompilerUserLineCommentInEmptyBlock(t *testing.T) {
+	// The comment is in the decorations of the opening brace of an empty
+	// block. The closing brace of the block must have the position that it has
+	// in the original program, and not only the code after the block.
+	const src = preludeProgram + `func main() {
+	defer func() {
+		_, file, line, _ := runtime.Caller(1)
+		fmt.Printf("closing %s:%d\n", file, line)
+	}()
+	if true {
+//line empty.y:50
+	}
+	fmt.Println("A", where())
+	if len(fmt.Sprint()) == 0 {
+//line /tmp/foo.go:1:1
+	}
+	fmt.Println("B", where())
+}
+`
+	checkBrace := func(t *testing.T, edit func(root *dst.File)) {
+		t.Helper()
+		file := filepath.Join(t.TempDir(), "orig.go")
+		text := instrumentSourceAt(t, file, src, edit)
+		text = strings.ReplaceAll(strings.ReplaceAll(text, fileMarker, file), dirMarker, filepath.Dir(file))
+		want := rbraceOfIf(t, file, src)
+		got := rbraceOfIf(t, file, text)
+		assert.Equal(t, want.Filename, filepath.Join(filepath.Dir(file), "empty.y"))
+		assert.Equal(t, 50, want.Line)
+		assert.Equal(t, want.Filename, got.Filename, text)
+		assert.Equal(t, want.Line, got.Line, text)
+		positionsGot := assertSamePositions(t, src, edit, "A", "B", "closing")
+		assert.Contains(t, positionsGot["A"], "empty.y:51")
+	}
+	t.Run("without injected code", func(t *testing.T) {
+		checkBrace(t, func(*dst.File) {})
+	})
+	t.Run("with injected code before the block", func(t *testing.T) {
+		checkBrace(t, func(root *dst.File) {
+			body := findFunc(t, root, "main").Body
+			body.List = insertStmts(t, body.List, 1, printWhere("gen"))
+		})
 	})
 }

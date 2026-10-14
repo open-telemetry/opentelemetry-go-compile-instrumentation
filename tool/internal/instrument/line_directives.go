@@ -61,7 +61,7 @@ import (
 // at the next clause.
 //
 // The pass keeps one state for the whole file: "the last token that was
-// printed is generated code". It follows the code in source order. A block
+// printed is generated code" (or, stale, "is code with a wrong position"). It follows the code in source order. A block
 // starts with the state that it has before its opening brace, and the state
 // after a statement is the state after its last block. So a restore that was
 // skipped (see below) is tried again at the next original node, also in the
@@ -79,6 +79,29 @@ import (
 // An import declaration with an added spec counts as generated, because the
 // printer sorts the specs. The next declaration is restored.
 //
+// A "//line" comment of the user can be in a function body (for example, the
+// code that goyacc writes). The printer indents it, so Go does not read it as
+// a directive, and the lines after it are off. The pass keeps the comment and
+// restores the position:
+//
+//   - An original node that has a user "//line" comment in its Start
+//     decorations gets a restore directive. The comment is on a line of its
+//     own, so the directive uses the own-line form (see above). The position of
+//     the node already has the effect of the user directive.
+//   - A user "//line" comment in the End decorations of a node makes the state
+//     "stale". The next original node, or the closing brace of the block, gets
+//     a restore directive.
+//   - A user "//line" comment in an empty block gets a restore directive after
+//     it, before the closing brace of the block, in the same way.
+//   - A user "//line" comment between a label and its statement is in the
+//     decorations of the statement. The statement gets a restore directive.
+//
+// A stale state is like a generated state, but the code is still in the user
+// file. So the pass does not write a "<generated>" directive for it, unless a
+// generated node follows. A "/*line*/" comment of the user is not changed: it
+// is valid at any column. A "//line" comment of the user at the top level is
+// at column 1, so it is also not changed.
+//
 // The pass does not enter a generated node. The pass uses the adjusted
 // position of a node, so a "//line" directive that is already in the source (for
 // example in a cgo file) keeps its effect.
@@ -93,6 +116,22 @@ const (
 	directiveBlockComment = "/*line "
 )
 
+// lineState is what the pass knows about the line of the last token that was
+// printed.
+type lineState int
+
+const (
+	// lineKnown means that Go gives the right position to the next token.
+	lineKnown lineState = iota
+	// lineStale means that the last token is user code, but Go does not give
+	// it the right position, because a user "//line" comment is ignored. The
+	// next original node needs a restore directive.
+	lineStale
+	// lineGenerated means that the last token is generated code. The next
+	// original node needs a restore directive.
+	lineGenerated
+)
+
 // lineDirectivePass adds the line directives to one file.
 type lineDirectivePass struct {
 	parser *ast.AstParser
@@ -105,9 +144,9 @@ type lineDirectivePass struct {
 // parser that read the original file at path file, and file must be absolute.
 func markLineDirectives(parser *ast.AstParser, root *dst.File, file string) {
 	p := &lineDirectivePass{parser: parser, dir: filepath.Dir(file)}
-	generated := false
+	state := lineKnown
 	for _, decl := range root.Decls {
-		original := p.stepDecl(decl, &generated)
+		original := p.stepDecl(decl, &state)
 		if !original {
 			continue
 		}
@@ -119,34 +158,76 @@ func markLineDirectives(parser *ast.AstParser, root *dst.File, file string) {
 			// is restored.
 			for _, spec := range gen.Specs {
 				if _, ok = p.parser.OriginalPosition(spec); !ok {
-					generated = true
+					state = lineGenerated
 				}
 			}
 			continue
 		}
 		// A block of the declaration can end in generated code, and its
 		// closing brace is not restored. Then generated stays true.
-		p.children(decl, &generated)
+		p.children(decl, &state)
 	}
 }
 
-// step looks at one node of a list. generated is true when the last token
-// that was printed is generated code. step adds the directive that the node
+// step looks at one node of a list. state describes the last token that was
+// printed. step adds the directive that the node
 // needs, updates generated, and reports whether the node is original. prev is
 // the node before it in the same list, or nil.
-func (p *lineDirectivePass) step(node, prev dst.Node, generated *bool) bool {
+func (p *lineDirectivePass) step(node, prev dst.Node, state *lineState) bool {
 	pos, original := p.parser.OriginalPosition(node)
 	if !original {
-		if !*generated && !hasLineDirective(node.Decorations().Start) {
+		if *state != lineGenerated && !hasLineDirective(node.Decorations().Start) {
 			prependDirective(node, prev, generatedDirective)
 		}
-		*generated = true
+		*state = lineGenerated
 		return false
 	}
-	if *generated && p.restore(node, prev, pos) {
-		*generated = false
+	// A user "//line" comment before the node is indented by the printer, so
+	// Go ignores it. The node then needs a restore, also if the state is known.
+	userDirective := hasUserLineDirective(node.Decorations().Start, true)
+	restored := false
+	if *state != lineKnown || userDirective {
+		restored = p.restore(node, prev, pos)
+		p.updateState(restored, state)
+	}
+	if labeled, isLabeled := node.(*dst.LabeledStmt); isLabeled {
+		p.stepLabeled(labeled, restored, state)
 	}
 	return true
+}
+
+// updateState sets the state after a restore of a node. restored is true when
+// the directive was written.
+func (*lineDirectivePass) updateState(restored bool, state *lineState) {
+	if restored {
+		*state = lineKnown
+	} else if *state == lineKnown {
+		// The directive was not written, so the position is wrong.
+		*state = lineStale
+	}
+}
+
+// stepLabeled looks at the statement of a label. The printer puts the label on
+// one line and the statement on the next line. So when the label got a
+// directive (labelRestored is true), the statement needs its own directive. It
+// needs one also when it has a user "//line" comment before it, because the
+// comment is in the decorations of the statement, and not in those of the
+// label.
+func (p *lineDirectivePass) stepLabeled(labeled *dst.LabeledStmt, labelRestored bool, state *lineState) {
+	inner := labeled.Stmt
+	pos, original := p.parser.OriginalPosition(inner)
+	if !original {
+		return
+	}
+	restored := false
+	if labelRestored || *state != lineKnown || hasUserLineDirective(inner.Decorations().Start, true) {
+		restored = p.restore(inner, nil, pos)
+		p.updateState(restored, state)
+	}
+	if next, isLabeled := inner.(*dst.LabeledStmt); isLabeled {
+		// A label on a label.
+		p.stepLabeled(next, restored, state)
+	}
 }
 
 // restore adds the directive that maps node to its original position pos. It
@@ -179,15 +260,6 @@ func (p *lineDirectivePass) restore(node, prev dst.Node, pos token.Position) boo
 		// "<generated>" file, which is safe.
 		return false
 	}
-	if labeled, isLabeled := node.(*dst.LabeledStmt); isLabeled {
-		// The printer puts the label on one line and the statement on the
-		// next line. The statement needs its own directive.
-		defer func() {
-			if innerPos, original := p.parser.OriginalPosition(labeled.Stmt); original {
-				p.restore(labeled.Stmt, nil, innerPos)
-			}
-		}()
-	}
 	if ownLine {
 		decs := node.Decorations()
 		decs.Before = dst.NewLine
@@ -202,21 +274,21 @@ func (p *lineDirectivePass) restore(node, prev dst.Node, pos token.Position) boo
 // blank line between most declarations, and then a /*...*/ comment would be on
 // a line of its own. So the directive is a "//line" comment, which is valid
 // at column 1, and applies to the next line. When the restore directive is not
-// written (see the top of this file), generated stays true.
-func (p *lineDirectivePass) stepDecl(decl dst.Decl, generated *bool) bool {
+// written (see the top of this file), state does not change.
+func (p *lineDirectivePass) stepDecl(decl dst.Decl, state *lineState) bool {
 	pos, original := p.parser.OriginalPosition(decl)
 	decs := decl.Decorations()
 	switch {
 	case !original:
-		if !*generated && !hasLineDirective(decs.Start) {
+		if *state != lineGenerated && !hasLineDirective(decs.Start) {
 			prependDeclDirective(decl, "//line <generated>:1")
 		}
-		*generated = true
-	case *generated:
+		*state = lineGenerated
+	case *state != lineKnown:
 		target, ok := directive(p.absolute(pos.Filename), pos.Line)
 		if ok {
 			prependDeclDirective(decl, "//line "+target)
-			*generated = false
+			*state = lineKnown
 		}
 	}
 	return original
@@ -232,32 +304,37 @@ func prependDeclDirective(decl dst.Decl, directive string) {
 
 // children processes the blocks that are inside the original node n, in source
 // order. It does not enter a node that is not original, as all its code is
-// generated. generated is the state before n. When children returns, generated
-// is the state after the last block of n: it is true when that block ended in
-// generated code, and the directive for its closing brace was not written.
-// Then the caller must treat the code that follows n as generated.
-func (p *lineDirectivePass) children(n dst.Node, generated *bool) {
+// generated. state is the state before n. When children returns, state is the
+// state after the last block of n. It is not lineKnown when that block ended
+// in code with a wrong position, and the directive for its closing brace was
+// not written. Then the caller must restore the code that follows n.
+func (p *lineDirectivePass) children(n dst.Node, state *lineState) {
 	dst.Inspect(n, func(c dst.Node) bool {
 		block, ok := c.(*dst.BlockStmt)
 		if !ok {
 			return true
 		}
-		p.block(block, generated)
+		p.block(block, state)
 		return false
 	})
 }
 
-// block processes the statements of an original block. generated is the state
-// before the opening brace of the block. When block returns, generated is the
-// state after the closing brace: it is true when the last token of the block
-// is generated code, and the directive for the closing brace was not written.
-func (p *lineDirectivePass) block(block *dst.BlockStmt, generated *bool) {
+// block processes the statements of an original block. state is the state
+// before the opening brace of the block. When block returns, state is the
+// state after the closing brace: it is not lineKnown when the last token of
+// the block has a wrong position, and the directive for the closing brace was
+// not written.
+func (p *lineDirectivePass) block(block *dst.BlockStmt, state *lineState) {
 	rbrace, original := p.parser.Rbrace(block)
 	if !original {
 		return
 	}
-	p.list(block.List, generated)
-	if !*generated || len(block.List) == 0 {
+	if len(block.List) == 0 {
+		p.emptyBlock(block, rbrace, state)
+		return
+	}
+	p.list(block.List, state)
+	if *state == lineKnown {
 		return
 	}
 	// The closing brace is original, but the last token is not. Put the
@@ -266,21 +343,39 @@ func (p *lineDirectivePass) block(block *dst.BlockStmt, generated *bool) {
 	if !ok {
 		return
 	}
-	decs := lastNode(block.List).Decorations()
+	decs := endNode(block.List).Decorations()
 	if decs.After == dst.EmptyLine {
 		decs.After = dst.NewLine
 	}
 	decs.End.Append("/*line " + target + "*/")
-	*generated = false
+	*state = lineKnown
+}
+
+// emptyBlock processes a block without statements. A user "//line" comment in
+// the block is ignored by Go, and then the closing brace has a wrong position.
+// The pass puts a restore directive after the comment, before the brace. If it
+// cannot write the directive, the code after the block needs a restore.
+func (p *lineDirectivePass) emptyBlock(block *dst.BlockStmt, rbrace token.Position, state *lineState) {
+	if !hasUserLineDirective(block.Decs.Lbrace, false) {
+		return
+	}
+	// The comment is on a line of its own, and the printer puts a newline after
+	// it. So the directive gives the line before the brace.
+	if target, ok := directive(p.absolute(rbrace.Filename), rbrace.Line-1); ok {
+		block.Decs.Lbrace.Append("/*line " + target + "*/")
+		*state = lineKnown
+	} else if *state == lineKnown {
+		*state = lineStale
+	}
 }
 
 // list processes the statements of a block, or the clauses of a switch or
-// select statement. The clauses share generated, because a clause has no
-// closing brace.
-func (p *lineDirectivePass) list(stmts []dst.Stmt, generated *bool) {
+// select statement. The clauses share state, because a clause has no closing
+// brace.
+func (p *lineDirectivePass) list(stmts []dst.Stmt, state *lineState) {
 	var prev dst.Node
 	for _, stmt := range stmts {
-		original := p.step(stmt, prev, generated)
+		original := p.step(stmt, prev, state)
 		prev = stmt
 		if !original {
 			continue
@@ -288,31 +383,43 @@ func (p *lineDirectivePass) list(stmts []dst.Stmt, generated *bool) {
 		switch clause := stmt.(type) {
 		case *dst.CaseClause:
 			for _, expr := range clause.List {
-				p.children(expr, generated)
+				p.children(expr, state)
 			}
-			p.list(clause.Body, generated)
+			p.list(clause.Body, state)
 		case *dst.CommClause:
 			if clause.Comm != nil {
-				p.children(clause.Comm, generated)
+				p.children(clause.Comm, state)
 			}
-			p.list(clause.Body, generated)
+			p.list(clause.Body, state)
 		default:
-			p.children(stmt, generated)
+			p.children(stmt, state)
+		}
+		// A user "//line" comment after the node is ignored by Go. The next
+		// original node needs a restore.
+		if *state == lineKnown && hasUserLineDirective(stmt.Decorations().End, false) {
+			*state = lineStale
 		}
 	}
 }
 
-// lastNode returns the node that the code of the last statement ends with.
-func lastNode(stmts []dst.Stmt) dst.Node {
+// endNode returns the node that gets the End decoration with the directive
+// for the closing brace of a block. It is the node that the code of the last
+// statement ends with. If a node on the way has a user "//line" comment in its
+// End decorations, it is this node, because the printer prints the directive
+// after the comment, and the comment is the last thing before the brace.
+func endNode(stmts []dst.Stmt) dst.Node {
 	last := stmts[len(stmts)-1]
+	if hasUserLineDirective(last.Decorations().End, false) {
+		return last
+	}
 	switch clause := last.(type) {
 	case *dst.CaseClause:
 		if len(clause.Body) > 0 {
-			return lastNode(clause.Body)
+			return endNode(clause.Body)
 		}
 	case *dst.CommClause:
 		if len(clause.Body) > 0 {
-			return lastNode(clause.Body)
+			return endNode(clause.Body)
 		}
 	}
 	return last
@@ -389,6 +496,23 @@ func hasLineDirective(decorations dst.Decorations) bool {
 		if strings.HasPrefix(d, directiveLineComment) || strings.HasPrefix(d, directiveBlockComment) {
 			return true
 		}
+	}
+	return false
+}
+
+// hasUserLineDirective reports whether decorations hold a "//line" comment of
+// the user that Go would read as a directive if the printer did not indent it.
+// Such a comment is at the start of a line: it is the first decoration of a
+// Start list (startsLine is true), or it follows a newline or a line comment.
+// A comment after code on the same line is not a directive. A directive that
+// the pass wrote is a "/*line*/" comment, so it does not match.
+func hasUserLineDirective(decorations dst.Decorations, startsLine bool) bool {
+	atLineStart := startsLine
+	for _, d := range decorations {
+		if atLineStart && strings.HasPrefix(d, directiveLineComment) {
+			return true
+		}
+		atLineStart = d == "\n" || strings.HasPrefix(d, "//")
 	}
 	return false
 }
