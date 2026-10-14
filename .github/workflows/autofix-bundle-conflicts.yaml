@@ -10,6 +10,11 @@ on:
     # picked up here on the next run.
     - cron: "23 * * * *"
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Log planned actions without pushing, commenting, or re-dispatching workflows
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -48,4 +53,5 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: ./.github/scripts/autofix-bundle-conflicts.sh

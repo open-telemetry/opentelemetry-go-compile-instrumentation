@@ -30,9 +30,14 @@ set -EeufCo pipefail
 #   GH_TOKEN  - GitHub token with contents:write, pull-requests:write and
 #               actions:write permissions
 #   REPO      - owner/name of the repository to operate on
+#
+# Optional environment variables:
+#   DRY_RUN   - set to "true" to log the planned actions without pushing,
+#               commenting, or re-dispatching workflows; useful for testing
 
 : "${GH_TOKEN:?GH_TOKEN must be set}"
 : "${REPO:?REPO must be set}"
+: "${DRY_RUN:=false}"
 
 BUNDLE="tool/data/otelc-bundle.tgz"
 MARKER="<!-- otelc-bundle-conflict-help -->"
@@ -89,6 +94,8 @@ while IFS= read -r num; do
     if gh pr view "${num}" --repo "${REPO}" --json comments --jq '.comments[].body' \
       | grep -Fq "${MARKER}"; then
       echo "help comment already present; not reposting"
+    elif [[ "${DRY_RUN}" == "true" ]]; then
+      echo "dry run: would post a one-time help comment"
     else
       echo "posting help comment"
       body="$(cat <<'EOF'
@@ -161,6 +168,16 @@ EOF
     echo "::endgroup::"
     continue
   fi
+
+  if [[ "${DRY_RUN}" == "true" ]]; then
+    echo "dry run: would commit and push 'chore: merge main and regenerate ${BUNDLE}' to '${branch}', then re-dispatch: ${REQUIRED_WORKFLOWS[*]}"
+    git merge --abort >/dev/null 2>&1 || true
+    git reset --hard --quiet
+    git clean -ffdxq
+    echo "::endgroup::"
+    continue
+  fi
+
   git commit -m "chore: merge main and regenerate ${BUNDLE}"
 
   # Re-check right before pushing so we never resurrect a branch whose PR was
