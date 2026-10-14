@@ -196,6 +196,9 @@ automatically. It runs on every push to `main`, hourly, and on demand:
   forks), so it posts a one-time comment with the manual steps above.
 - The `/regenerate-bundle` comment command merges `main` first as well, so it
   clears the conflict and refreshes the bundle in one step.
+- To observe the workflow without side effects, trigger it manually from the
+  Actions tab with the `dry_run` option enabled: it logs the merges, pushes,
+  and comments it would perform but changes nothing.
 
 Notes:
 
