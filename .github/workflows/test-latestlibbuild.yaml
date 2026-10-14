@@ -6,6 +6,11 @@ on:
   pull_request:
 permissions:
   contents: read
+# proxy.golang.org and sum.golang.org intermittently reset HTTP/2 streams
+# (INTERNAL_ERROR), which fails module downloads. Force HTTP/1.1 for Go's
+# HTTP client as a workaround. See golang/go#69544.
+env:
+  GODEBUG: http2client=0
 jobs:
   # This is a required workflow, so it must always run and report a status.
   # We use dorny/paths-filter at the job level instead of workflow-level path filters
