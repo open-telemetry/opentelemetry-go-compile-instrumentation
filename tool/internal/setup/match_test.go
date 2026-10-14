@@ -771,6 +771,11 @@ func TestRuleFileKey(t *testing.T) {
 			t.Skipf("cannot create symbolic link: %v", err)
 		}
 		assert.Equal(t, want, ruleFileKey(filepath.Join(link, "a.otelc.yml")))
+
+		t.Run("relative path from symbolic working directory", func(t *testing.T) {
+			t.Chdir(link)
+			assert.Equal(t, want, ruleFileKey("a.otelc.yml"))
+		})
 	})
 }
 
@@ -1430,6 +1435,62 @@ onlysecond:
 		require.NoError(t, err)
 		assert.ElementsMatch(t, []string{"_ = 1", "_ = 11"}, rawOf(t, rules, "dup"))
 	})
+}
+
+func TestLoadCustomRulesSymlinkParent(t *testing.T) {
+	first := writeCustomRules(t, "rules.yml", `dup:
+  target: main
+  func: Example
+  raw: "_ = 1"
+onlyfirst:
+  target: main
+  func: Example
+  raw: "_ = 3"`)
+	second := writeCustomRules(t, "rules.yml", `dup:
+  target: main
+  func: Example
+  raw: "_ = 2"
+onlysecond:
+  target: main
+  func: Example
+  raw: "_ = 4"`)
+
+	sub := filepath.Join(filepath.Dir(first), "sub")
+	require.NoError(t, os.Mkdir(sub, 0o755))
+	link := filepath.Join(filepath.Dir(second), "link")
+	if err := os.Symlink(sub, link); err != nil {
+		t.Skipf("cannot create symbolic link: %v", err)
+	}
+	t.Chdir(filepath.Dir(second))
+
+	// Joining would clean link/.. before the filesystem can resolve the link.
+	viaLink := link + string(os.PathSeparator) + ".." + string(os.PathSeparator) + "rules.yml"
+	for _, tt := range []struct {
+		name  string
+		paths string
+		want  string
+	}{
+		{"absolute paths", viaLink + "," + second, "_ = 2"},
+		{"relative paths", "link/../rules.yml,rules.yml", "_ = 2"},
+		{"reverse order", second + "," + viaLink, "_ = 1"},
+		{"repeated file", viaLink + "," + second + "," + first, "_ = 1"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			rules, err := loadCustomRules(t.Context(), tt.paths, util.Version)
+			require.NoError(t, err)
+			got := make(map[string]string)
+			for _, r := range rules {
+				raw, ok := r.(*rule.InstRawRule)
+				require.True(t, ok)
+				got[r.GetName()] = raw.Raw
+			}
+			assert.Equal(t, map[string]string{
+				"dup":        tt.want,
+				"onlyfirst":  "_ = 3",
+				"onlysecond": "_ = 4",
+			}, got)
+		})
+	}
 }
 
 func TestLoadCustomRulesLoadsEachFileOnce(t *testing.T) {
