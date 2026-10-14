@@ -85,6 +85,13 @@ jobs:
         uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b  # v3.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+      # macOS has GNU Make 3.81, which does not support .ONESHELL. The
+      # Makefile requires GNU Make 3.82 or later.
+      - name: Install GNU Make (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install make
+          echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
       - run: make test-e2e
         env:
           GOARCH: ${{ matrix.platform.arch }}
