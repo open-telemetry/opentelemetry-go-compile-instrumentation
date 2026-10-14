@@ -5,7 +5,9 @@ package k8s_client_go
 
 import (
 	"context"
+	"reflect"
 	"strings"
+	"sync"
 
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otelc/instrumentation/k8s.io/client-go/semconv"
@@ -89,6 +91,54 @@ func getSpanName(kind, action string) string {
 	return "k8s.informer.object." + action
 }
 
+// gvkCache caches GVK lookups for typed objects, keyed by reflect.Type.
+// Unstructured objects never reach this cache; see lookupGVK.
+var gvkCache sync.Map // reflect.Type -> gvkLookup
+
+type gvkLookup struct {
+	kind       string
+	apiVersion string
+	ok         bool
+}
+
+// objectKindsFunc is scheme.Scheme.ObjectKinds, indirected so tests can
+// substitute a counting stub to verify the cache actually avoids repeat
+// lookups rather than just asserting the returned values are correct.
+var objectKindsFunc = scheme.Scheme.ObjectKinds
+
+func lookupGVK(runtimeObj runtime.Object) gvkLookup {
+	// Unstructured objects carry their own GVK; every CRD shares the single
+	// Go type unstructured.Unstructured, so they must never touch the
+	// reflect.Type cache below, which would collide unrelated CRDs together.
+	if _, isUnstructured := runtimeObj.(runtime.Unstructured); isUnstructured {
+		gvk := runtimeObj.GetObjectKind().GroupVersionKind()
+		if gvk.Empty() {
+			return gvkLookup{}
+		}
+		return gvkLookup{kind: gvk.Kind, apiVersion: gvk.GroupVersion().String(), ok: true}
+	}
+
+	// Typed objects (e.g. *corev1.Pod) are safe to cache indefinitely by
+	// reflect.Type: the scheme registry is fixed once built at startup, so
+	// one Go type only ever maps to one GVK.
+	t := reflect.TypeOf(runtimeObj)
+	if cached, hit := gvkCache.Load(t); hit {
+		return cached.(gvkLookup) //nolint:forcetypeassert // only this function ever stores into gvkCache
+	}
+
+	gvks, _, err := objectKindsFunc(runtimeObj)
+	result := gvkLookup{}
+	if err == nil && len(gvks) > 0 {
+		result.kind = gvks[0].Kind
+		result.apiVersion = gvks[0].GroupVersion().String()
+		result.ok = true
+	} else {
+		logger.Debug("failed to get GVK for object", "error", err)
+	}
+	gvkCache.Store(t, result)
+	return result
+}
+
 func getObjectInfo(obj any) semconv.K8SObjectInfo {
 	objInfo := semconv.K8SObjectInfo{}
 
@@ -104,15 +154,12 @@ func getObjectInfo(obj any) semconv.K8SObjectInfo {
 		return objInfo
 	}
 
-	gvks, _, err := scheme.Scheme.ObjectKinds(runtimeObj)
-	if err != nil || len(gvks) == 0 {
-		logger.Debug("failed to get GVK for object", "error", err)
+	gvk := lookupGVK(runtimeObj)
+	if !gvk.ok {
 		return objInfo
 	}
-
-	gvk := gvks[0]
-	objInfo.Kind = gvk.Kind
-	objInfo.APIVersion = gvk.GroupVersion().String()
+	objInfo.Kind = gvk.kind
+	objInfo.APIVersion = gvk.apiVersion
 
 	if objInfo.Kind != "Pod" && objInfo.Kind != "HorizontalPodAutoscaler" {
 		return objInfo

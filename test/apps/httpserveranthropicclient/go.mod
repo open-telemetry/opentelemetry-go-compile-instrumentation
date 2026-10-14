@@ -1,8 +1,8 @@
 module go.opentelemetry.io/otelc/test/apps/httpserveranthropicclient
 
-go 1.25.0
+go 1.26.0
 
-require github.com/anthropics/anthropic-sdk-go v1.57.0
+require github.com/anthropics/anthropic-sdk-go v1.73.0
 
 require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
