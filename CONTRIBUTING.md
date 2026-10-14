@@ -18,7 +18,10 @@ This project uses several tools for development. Most tools will be automaticall
 
 - [Go](https://golang.org/dl/) 1.26 or later
 - [Git](https://git-scm.com/)
-- Make (usually pre-installed on macOS and Linux)
+- [GNU Make](https://www.gnu.org/software/make/) 3.82 or later. macOS has GNU Make
+  3.81, which is too old: install a newer version with `brew install make`, then use
+  `gmake` (or add `$(brew --prefix make)/libexec/gnubin` to your `PATH` to use it as
+  `make`)
 
 ### Getting Started
 
