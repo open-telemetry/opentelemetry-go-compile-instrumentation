@@ -383,8 +383,12 @@ func customRuleFiles(path string) ([]string, error) {
 }
 
 // loadCustomRuleFile reads and parses the rule file at file. It returns the
-// rules of the file, grouped by entry name.
-func loadCustomRuleFile(ctx context.Context, file string) (map[string][]rule.InstRule, error) {
+// rules of the file, grouped by entry name. otelcVersion is the version of
+// otelc that the rule file must support.
+func loadCustomRuleFile(
+	ctx context.Context,
+	file, otelcVersion string,
+) (map[string][]rule.InstRule, error) {
 	content, err := os.ReadFile(file)
 	if err != nil {
 		return nil, ex.Wrapf(err, "failed to read %s from -rules flag", file)
@@ -393,7 +397,7 @@ func loadCustomRuleFile(ctx context.Context, file string) (map[string][]rule.Ins
 	if err != nil {
 		return nil, ex.Wrapf(err, "parsing rule file %s", file)
 	}
-	if err = checkRuleFileVersion(ctx, file, doc, util.Version); err != nil {
+	if err = checkRuleFileVersion(ctx, file, doc, otelcVersion); err != nil {
 		return nil, err
 	}
 	rules, err := doc.Rules()
@@ -408,7 +412,7 @@ func loadCustomRuleFile(ctx context.Context, file string) (map[string][]rule.Ins
 	return grouped, nil
 }
 
-func loadCustomRules(ctx context.Context, ruleConfig string) ([]rule.InstRule, error) {
+func loadCustomRules(ctx context.Context, ruleConfig, otelcVersion string) ([]rule.InstRule, error) {
 	// Deduplicate by YAML-entry name. A single entry can expand into several
 	// rules (e.g. a do: sequence with multiple modifiers), all sharing that
 	// name, so each name maps to the full slice of rules it produced. When two
@@ -429,7 +433,7 @@ func loadCustomRules(ctx context.Context, ruleConfig string) ([]rule.InstRule, e
 			key := ruleFileKey(file)
 			grouped, loaded := loadedFiles[key]
 			if !loaded {
-				grouped, err = loadCustomRuleFile(ctx, file)
+				grouped, err = loadCustomRuleFile(ctx, file, otelcVersion)
 				if err != nil {
 					return nil, err
 				}
@@ -453,6 +457,7 @@ func loadCustomRules(ctx context.Context, ruleConfig string) ([]rule.InstRule, e
 func loadRulesFromToolFiles(
 	ctx context.Context,
 	toolFiles []string,
+	otelcVersion string,
 ) ([]rule.InstRule, error) {
 	ruleSet := make([]rule.InstRule, 0)
 	// Two imports can find the same rule file. For example, the walk of the
@@ -479,7 +484,7 @@ func loadRulesFromToolFiles(
 			if parseErr != nil {
 				return false, ex.Wrapf(parseErr, "parsing rule file %s", file)
 			}
-			if versionErr := checkRuleFileVersion(ctx, file, doc, util.Version); versionErr != nil {
+			if versionErr := checkRuleFileVersion(ctx, file, doc, otelcVersion); versionErr != nil {
 				return false, versionErr
 			}
 
@@ -520,13 +525,13 @@ func (sp *setupPhase) loadRules(ctx context.Context, moduleDirs []string) ([]rul
 	rulePath := os.Getenv(util.EnvOtelcRules)
 	if rulePath != "" {
 		sp.Debug("rules source: environment variable %s (%s)", util.EnvOtelcRules, rulePath)
-		return loadCustomRules(ctx, rulePath)
+		return loadCustomRules(ctx, rulePath, util.Version)
 	}
 
 	// Load custom rule(s) from config file if specified
 	if sp.ruleConfig != "" {
 		sp.Debug("rules source: ruleConfig (%s)", sp.ruleConfig)
-		return loadCustomRules(ctx, sp.ruleConfig)
+		return loadCustomRules(ctx, sp.ruleConfig, util.Version)
 	}
 
 	// Load rules from tool files if available
@@ -536,7 +541,7 @@ func (sp *setupPhase) loadRules(ctx context.Context, moduleDirs []string) ([]rul
 	}
 	if len(toolFiles) > 0 {
 		sp.Debug("rules source: tool files", "toolFiles", toolFiles)
-		return loadRulesFromToolFiles(ctx, toolFiles)
+		return loadRulesFromToolFiles(ctx, toolFiles, util.Version)
 	}
 
 	// No tool files generated? Currently this part is un-reachable because

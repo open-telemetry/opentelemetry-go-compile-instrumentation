@@ -613,7 +613,7 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 		})
 		writeInstrumentationModule(t, filepath.Join(tmp, "foo"), "example.com/foo", true, nil)
 
-		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool})
+		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
 		require.NoError(t, err)
 		require.Len(t, rules, 1)
 		require.Equal(t, "dummyrule", rules[0].GetName())
@@ -630,7 +630,7 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 		})
 		writeInstrumentationModule(t, filepath.Join(tmp, "bar"), "example.com/bar", true, nil)
 
-		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool})
+		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
 		require.NoError(t, err)
 		require.Len(t, rules, 1)
 		require.Equal(t, "dummyrule", rules[0].GetName())
@@ -648,7 +648,7 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 		writeInstrumentationModule(t, filepath.Join(tmp, "foo"), "example.com/foo", true, nil)
 		writeInstrumentationModule(t, filepath.Join(tmp, "bar"), "example.com/bar", true, nil)
 
-		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool})
+		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
 		require.NoError(t, err)
 		require.Len(t, rules, 2)
 		require.Equal(t, "dummyrule", rules[0].GetName())
@@ -675,7 +675,7 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 
 			rootTool := writeOverlapRootModule(t, tmp, fooDir, "example.com/foo", "example.com/foo/sub")
 
-			rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool})
+			rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
 			require.NoError(t, err)
 			require.ElementsMatch(t, []string{"dummyrule", "subrule"}, ruleNames(rules))
 		})
@@ -691,7 +691,7 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 		// The sub-package comes first in the tool file this time.
 		rootTool := writeOverlapRootModule(t, tmp, fooDir, "example.com/foo/sub", "example.com/foo")
 
-		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool})
+		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
 		require.NoError(t, err)
 		require.ElementsMatch(t, []string{"dummyrule", "subrule"}, ruleNames(rules))
 	})
@@ -707,7 +707,7 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 		writeInstrumentationModule(t, filepath.Join(tmp, "notinstrumentation"), "example.com/notinstrumentation",
 			false, nil)
 
-		_, err := loadRulesFromToolFiles(t.Context(), []string{rootTool})
+		_, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
 		require.ErrorIs(t, err, errNotInstrumentation)
 	})
 }
@@ -1353,7 +1353,7 @@ mangle:
 
 	p := writeCustomRules(t, "order.yaml", content)
 
-	rules, err := loadCustomRules(t.Context(), p)
+	rules, err := loadCustomRules(t.Context(), p, util.Version)
 	require.NoError(t, err)
 	require.Len(t, rules, 3)
 
@@ -1405,28 +1405,28 @@ onlysecond:
 	}
 
 	t.Run("last file in the list wins", func(t *testing.T) {
-		rules, err := loadCustomRules(t.Context(), first+","+second)
+		rules, err := loadCustomRules(t.Context(), first+","+second, util.Version)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"_ = 2"}, rawOf(t, rules, "dup"))
 		assert.ElementsMatch(t, []string{"dup", "onlyfirst", "onlysecond"}, ruleNames(rules))
 	})
 
 	t.Run("order of the list decides", func(t *testing.T) {
-		rules, err := loadCustomRules(t.Context(), second+","+first)
+		rules, err := loadCustomRules(t.Context(), second+","+first, util.Version)
 		require.NoError(t, err)
 		assert.ElementsMatch(t, []string{"_ = 1", "_ = 11"}, rawOf(t, rules, "dup"))
 		assert.ElementsMatch(t, []string{"dup", "dup", "onlyfirst", "onlysecond"}, ruleNames(rules))
 	})
 
 	t.Run("a file given again later wins", func(t *testing.T) {
-		rules, err := loadCustomRules(t.Context(), first+","+second+","+first)
+		rules, err := loadCustomRules(t.Context(), first+","+second+","+first, util.Version)
 		require.NoError(t, err)
 		assert.ElementsMatch(t, []string{"_ = 1", "_ = 11"}, rawOf(t, rules, "dup"))
 		assert.ElementsMatch(t, []string{"dup", "dup", "onlyfirst", "onlysecond"}, ruleNames(rules))
 	})
 
 	t.Run("a file found again through a directory wins", func(t *testing.T) {
-		rules, err := loadCustomRules(t.Context(), first+","+second+","+filepath.Dir(first))
+		rules, err := loadCustomRules(t.Context(), first+","+second+","+filepath.Dir(first), util.Version)
 		require.NoError(t, err)
 		assert.ElementsMatch(t, []string{"_ = 1", "_ = 11"}, rawOf(t, rules, "dup"))
 	})
@@ -1456,7 +1456,7 @@ func TestLoadCustomRulesLoadsEachFileOnce(t *testing.T) {
 			logger := slog.New(slog.NewTextHandler(&output, nil))
 			ctx := util.ContextWithLogger(t.Context(), logger)
 
-			rules, err := loadCustomRules(ctx, ruleConfig)
+			rules, err := loadCustomRules(ctx, ruleConfig, util.Version)
 			require.NoError(t, err)
 			assert.Equal(t, []string{"hook"}, ruleNames(rules))
 			assert.Equal(t, 1, strings.Count(output.String(), "no minimum otelc version"),
@@ -2193,9 +2193,120 @@ func TestRulesFromDirWalkError(t *testing.T) {
 	require.Error(t, err)
 }
 
+// brokenRuleFileCase writes a rule file that one of the load steps rejects.
+type brokenRuleFileCase struct {
+	name string
+	// write creates the broken rule file at path.
+	write func(t *testing.T, path string)
+	// wantErr is a part of the expected error message. readErr marks the
+	// case where the read fails: the two loaders wrap that error differently.
+	wantErr string
+	readErr bool
+	// otelcVersion, if set, is the otelc version for the test. The version
+	// check does nothing for development builds (util.Version in tests).
+	otelcVersion string
+}
+
+func writeRuleFileContent(content string) func(t *testing.T, path string) {
+	return func(t *testing.T, path string) {
+		t.Helper()
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+	}
+}
+
+func brokenRuleFileCases() []brokenRuleFileCase {
+	return []brokenRuleFileCase{
+		{
+			name: "file cannot be read",
+			write: func(t *testing.T, path string) {
+				t.Helper()
+				// A symbolic link to a file that does not exist: the walk of
+				// the directory finds it, but the read fails.
+				if err := os.Symlink(filepath.Join(filepath.Dir(path), "missing"), path); err != nil {
+					t.Skipf("cannot create symbolic link: %v", err)
+				}
+			},
+			readErr: true,
+		},
+		{
+			name:    "file is not valid YAML",
+			write:   writeRuleFileContent("broken: [\n"),
+			wantErr: "parsing rule file",
+		},
+		{
+			name: "file requires a newer otelc",
+			write: writeRuleFileContent(`version: "v99.0.0"
+hook:
+  target: main
+  func: Example
+  raw: "_ = 1"`),
+			wantErr:      "requires otelc >= v99.0.0, current version is v1.0.0",
+			otelcVersion: "v1.0.0",
+		},
+		{
+			name: "rule is not valid",
+			write: writeRuleFileContent(`hook:
+  target: main
+  version: "v1.0.0,"
+  func: Example
+  raw: "_ = 1"`),
+			wantErr: `version "v1.0.0,"`,
+		},
+	}
+}
+
+func TestLoadCustomRulesBrokenFile(t *testing.T) {
+	for _, tc := range brokenRuleFileCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			otelcVersion := util.Version
+			if tc.otelcVersion != "" {
+				otelcVersion = tc.otelcVersion
+			}
+			path := filepath.Join(t.TempDir(), "broken.otelc.yml")
+			tc.write(t, path)
+
+			// Give the directory, so that the walk finds a broken symbolic link.
+			_, err := loadCustomRules(t.Context(), filepath.Dir(path), otelcVersion)
+			require.Error(t, err)
+			if tc.readErr {
+				require.ErrorContains(t, err, "failed to read "+path+" from -rules flag")
+				return
+			}
+			require.ErrorContains(t, err, tc.wantErr)
+		})
+	}
+}
+
+func TestLoadRulesFromToolFilesBrokenFile(t *testing.T) {
+	for _, tc := range brokenRuleFileCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			otelcVersion := util.Version
+			if tc.otelcVersion != "" {
+				otelcVersion = tc.otelcVersion
+			}
+			tmp := t.TempDir()
+			fooDir := filepath.Join(tmp, "foo")
+			rootTool := writeInstrumentationModule(t, tmp, "example.com/root", false, map[string]string{
+				"example.com/foo": fooDir,
+			})
+			writeInstrumentationModule(t, fooDir, "example.com/foo", false, nil)
+			tc.write(t, filepath.Join(fooDir, "broken.otelc.yml"))
+
+			_, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, otelcVersion)
+			require.Error(t, err)
+			if tc.readErr {
+				require.ErrorContains(t, err, "reading ")
+				require.ErrorContains(t, err, "broken.otelc.yml")
+				return
+			}
+			require.ErrorContains(t, err, tc.wantErr)
+		})
+	}
+}
+
 func TestLoadCustomRulesStatError(t *testing.T) {
 	t.Setenv(util.EnvOtelcRules, "")
-	_, err := loadCustomRules(t.Context(), filepath.Join(t.TempDir(), "nope.yaml"))
+	_, err := loadCustomRules(t.Context(), filepath.Join(t.TempDir(), "nope.yaml"), util.Version)
 	require.Error(t, err)
 }
 
