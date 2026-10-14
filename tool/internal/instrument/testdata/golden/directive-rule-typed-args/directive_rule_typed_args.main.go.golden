@@ -10,7 +10,7 @@ func divide(ctx context.Context, a int, b int) (_unnamedRetVal_2257724966_0 int,
 	/*line <generated>:1*/ println("span name:", "custom-op")
 	println("ctx arg:", ctx != nil)
 	println("err ret:", _unnamedRetVal_2257724966_1 == nil)
-	/*line /golden/work/main.go:10:1*/ return a / b, nil
+	/*line /golden/work/main.go:10*/ return a / b, nil
 }
 
 func main() { divide(context.Background(), 4, 2) }

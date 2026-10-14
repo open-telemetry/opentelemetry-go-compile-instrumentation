@@ -19,7 +19,7 @@ func ProcessRequest(req string) (_unnamedRetVal_3868073204_0 error) {
 	} else {
 		defer OtelAfterTrampoline_ProcessRequest3868073204(hookContext3868073204, &_unnamedRetVal_3868073204_0)
 	}
-	/*line /golden/work/main_test.go:14:1*/ println("processing:", req)
+	/*line /golden/work/main_test.go:14*/ println("processing:", req)
 	return nil
 }
 

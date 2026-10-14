@@ -11,7 +11,7 @@ func GenericFuncBeforeOnly[T any](p1 T, p2 int) (_unnamedRetVal_3330034316_0 T, 
 	/*line <generated>:1*/ if OtelBeforeTrampoline_GenericFuncBeforeOnly3330034316[T](&p1, &p2); false {
 	} else {
 	}
-	/*line /golden/work/main.go:7:1*/ return p1, nil
+	/*line /golden/work/main.go:7*/ return p1, nil
 }
 
 //line <generated>:1

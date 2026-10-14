@@ -17,7 +17,7 @@ func Open(dsn string) (_unnamedRetVal_3522809524_0 error) {
 	} else {
 		defer OtelAfterTrampoline_Open3522809524(hookContext3522809524, &_unnamedRetVal_3522809524_0)
 	}
-	/*line /golden/work/main.go:12:1*/ println("opening " + dsn)
+	/*line /golden/work/main.go:12*/ println("opening " + dsn)
 	return nil
 }
 

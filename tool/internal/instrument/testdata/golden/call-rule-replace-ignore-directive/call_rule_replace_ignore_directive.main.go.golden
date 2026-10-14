@@ -29,7 +29,7 @@ func main() {
 	ignored := unsafe.Sizeof(x)
 	/*line <generated>:1*/ otelcIgnoreDone0 = true
 	runtime.UnsuppressHooks()
-	/*line /golden/work/main.go:17:1*/ _ = ignored
+	/*line /golden/work/main.go:17*/ _ = ignored
 
 	y := "hello"
 	kept := Wrapper(unsafe.Sizeof(y))

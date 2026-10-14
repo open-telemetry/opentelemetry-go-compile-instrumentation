@@ -13,7 +13,7 @@ func UnderscoreParamReturnFunc(_ignoredParam_1353090234_0 int) (_ignoredRetVal_1
 	} else {
 		defer OtelAfterTrampoline_UnderscoreParamReturnFunc1353090234(hookContext1353090234, &_ignoredRetVal_1353090234_0)
 	}
-	/*line /golden/work/main.go:8:1*/ return nil
+	/*line /golden/work/main.go:8*/ return nil
 }
 
 func main() {}

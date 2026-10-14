@@ -14,7 +14,7 @@ func InterfacePassthrough(v interface{}) (r any) {
 	} else {
 		defer OtelAfterTrampoline_InterfacePassthrough3881633898(hookContext3881633898, &r)
 	}
-	/*line /golden/work/main.go:9:1*/ return v
+	/*line /golden/work/main.go:9*/ return v
 }
 
 func main() {}

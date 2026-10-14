@@ -18,7 +18,7 @@ func ExternalHelper() (_unnamedRetVal_2215449730_0 error) {
 	} else {
 		defer OtelAfterTrampoline_ExternalHelper2215449730(hookContext2215449730, &_unnamedRetVal_2215449730_0)
 	}
-	/*line /golden/work/main_test.go:13:1*/ println("external helper")
+	/*line /golden/work/main_test.go:13*/ println("external helper")
 	return nil
 }
 

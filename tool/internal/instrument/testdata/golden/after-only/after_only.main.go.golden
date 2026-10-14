@@ -14,7 +14,7 @@ func (t *T) Func1(p1 string, p2 int) (_unnamedRetVal_3865747808_0 float32, _unna
 	} else {
 		defer OtelAfterTrampoline_Func13865747808(&HookContextImpl3865747808{params: []interface{}{&t, &p1, &p2}, returnVals: []interface{}{&_unnamedRetVal_3865747808_0, &_unnamedRetVal_3865747808_1}}, &_unnamedRetVal_3865747808_0, &_unnamedRetVal_3865747808_1)
 	}
-	/*line /golden/work/main.go:9:1*/ return 0.0, nil
+	/*line /golden/work/main.go:9*/ return 0.0, nil
 }
 
 func Func1(p1 string, p2 int) (_unnamedRetVal_1681024588_0 float32, _unnamedRetVal_1681024588_1 error) {
@@ -22,7 +22,7 @@ func Func1(p1 string, p2 int) (_unnamedRetVal_1681024588_0 float32, _unnamedRetV
 	} else {
 		defer OtelAfterTrampoline_Func11681024588(&HookContextImpl1681024588{params: []interface{}{&p1, &p2}, returnVals: []interface{}{&_unnamedRetVal_1681024588_0, &_unnamedRetVal_1681024588_1}}, &_unnamedRetVal_1681024588_0, &_unnamedRetVal_1681024588_1)
 	}
-	/*line /golden/work/main.go:13:1*/ println("Hello, World!")
+	/*line /golden/work/main.go:13*/ println("Hello, World!")
 	return 0.0, nil
 }
 

@@ -15,7 +15,7 @@ func Func1(p1 string, p2 int) (_unnamedRetVal_155800511_0 float32, _unnamedRetVa
 			defer OtelAfterTrampoline_Func11412092233(&HookContextImpl1412092233{params: []interface{}{&p1, &p2}, returnVals: []interface{}{&_unnamedRetVal_155800511_0, &_unnamedRetVal_155800511_1}}, &_unnamedRetVal_155800511_0, &_unnamedRetVal_155800511_1)
 		}
 	}
-	/*line /golden/work/main.go:7:1*/ println("Hello, World!")
+	/*line /golden/work/main.go:7*/ println("Hello, World!")
 	return 0.0, nil
 }
 

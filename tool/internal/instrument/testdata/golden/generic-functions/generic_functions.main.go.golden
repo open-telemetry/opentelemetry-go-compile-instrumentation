@@ -12,7 +12,7 @@ func GenericFunc[T any](p1 []T, p2 ...T) (_unnamedRetVal_1523734358_0 []T, _unna
 	} else {
 		defer OtelAfterTrampoline_GenericFunc1523734358[T](hookContext1523734358, &_unnamedRetVal_1523734358_0, &_unnamedRetVal_1523734358_1)
 	}
-	/*line /golden/work/main.go:7:1*/ return p1, nil
+	/*line /golden/work/main.go:7*/ return p1, nil
 }
 
 type GenStruct[T any] struct {
@@ -24,7 +24,7 @@ func (g *GenStruct[T]) GenericMethod(p1 T, p2 string) (_unnamedRetVal_1139503255
 	} else {
 		defer OtelAfterTrampoline_GenericMethod1139503255[T](hookContext1139503255, &_unnamedRetVal_1139503255_0, &_unnamedRetVal_1139503255_1)
 	}
-	/*line /golden/work/main.go:15:1*/ return p1, nil
+	/*line /golden/work/main.go:15*/ return p1, nil
 }
 
 //line <generated>:1

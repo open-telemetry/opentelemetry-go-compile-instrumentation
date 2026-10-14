@@ -12,7 +12,7 @@ func Handler(p1 string, p2 int) (_unnamedRetVal_4272340228_0 float32, _unnamedRe
 	} else {
 		defer OtelAfterTrampoline_Handler4272340228(hookContext4272340228, &_unnamedRetVal_4272340228_0, &_unnamedRetVal_4272340228_1)
 	}
-	/*line /golden/work/main.go:7:1*/ println("Hello, World!")
+	/*line /golden/work/main.go:7*/ println("Hello, World!")
 	return 0.0, nil
 }
 

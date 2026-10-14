@@ -105,7 +105,7 @@ func f() {
 func f() {
 	/*line <generated>:1*/ gen1()
 	gen2()
-	/*line FILE:4:1*/ a()
+	/*line FILE:4*/ a()
 	b()
 }
 `
@@ -161,7 +161,7 @@ func f() {
 func f() {
 	a()
 	/*line <generated>:1*/ genMiddle()
-	/*line FILE:5:1*/ b()
+	/*line FILE:5*/ b()
 	c()
 	/*line <generated>:1*/ genEnd() /*line FILE:6*/
 }
@@ -188,12 +188,12 @@ func f() {
 
 func f() {
 	/*line <generated>:1*/ gen1()
-	/*line FILE:4:1*/ a()
+	/*line FILE:4*/ a()
 	/*line <generated>:1*/ gen2a()
 	gen2b()
-	/*line FILE:5:1*/ b()
+	/*line FILE:5*/ b()
 	/*line <generated>:1*/ gen3()
-	/*line FILE:6:1*/ c()
+	/*line FILE:6*/ c()
 }
 `
 	assert.Equal(t, want, got)
@@ -248,25 +248,25 @@ func f(ch chan int, x any) {
 func f(ch chan int, x any) {
 	if ch != nil {
 		/*line <generated>:1*/ genIf()
-		/*line FILE:5:2*/ a()
+		/*line FILE:5*/ a()
 	}
 	for i := 0; i < 3; i++ {
 		/*line <generated>:1*/ genFor()
-		/*line FILE:8:2*/ b()
+		/*line FILE:8*/ b()
 	}
 	switch {
 	case true:
 		/*line <generated>:1*/ genCase()
-		/*line FILE:12:2*/ c()
+		/*line FILE:12*/ c()
 	}
 	select {
 	case <-ch:
 		/*line <generated>:1*/ genComm()
-		/*line FILE:16:2*/ d()
+		/*line FILE:16*/ d()
 	}
 	func() {
 		/*line <generated>:1*/ genLit()
-		/*line FILE:19:2*/ e()
+		/*line FILE:19*/ e()
 	}()
 }
 `
@@ -516,13 +516,13 @@ func f() {
 		gen1()
 		gen2()
 	}
-	/*line FILE:4:1*/ a()
+	/*line FILE:4*/ a()
 }
 `
 	assert.Equal(t, want, got)
 }
 
-func TestMarkLineDirectives_ColumnOneHasOnlyALine(t *testing.T) {
+func TestMarkLineDirectives_DirectiveHasOnlyALine(t *testing.T) {
 	// The statements are not indented.
 	src := "package main\n\nfunc f() {\na()\n\tb()\n}\n"
 	got := instrumentSource(t, src, func(root *dst.File) {
@@ -562,7 +562,7 @@ func f() {
 func f() {
 	a()
 	/*line <generated>:1*/ gen()
-	/*line FILE:6:1*/ b()
+	/*line FILE:6*/ b()
 
 	c()
 }
@@ -660,7 +660,7 @@ func f() {
 	a()
 	/*line <generated>:1*/ gen()
 	/*line FILE:5*/ loop:
-	/*line FILE:6:1*/ for {
+	/*line FILE:6*/ for {
 		b()
 		goto loop
 	}
@@ -842,7 +842,7 @@ func f() {
 
 func f() {
 	/*line <generated>:1*/ a()
-	/*line FILE:4:1*/ a()
+	/*line FILE:4*/ a()
 	b()
 }
 `
@@ -974,7 +974,7 @@ func TestMarkLineDirectives_CompilerHonoursDirectives(t *testing.T) {
 	assert.Equal(t, pos(lineOf(`"G"`)+1), got["closing"], "line of the closing brace")
 }
 
-func TestMarkLineDirectives_CompilerReportsOriginalColumns(t *testing.T) {
+func TestMarkLineDirectives_CompilerReportsOriginalLines(t *testing.T) {
 	// Each function has a statement with a type error. The compiler must
 	// report the same position as for the original file.
 	src := "package main\n\nfunc f() {\n\tvar a int = \"a\"\n\t_ = a\n}\n\n" +
@@ -1000,12 +1000,11 @@ func TestMarkLineDirectives_CompilerReportsOriginalColumns(t *testing.T) {
 	got := position.FindAllStringSubmatch(instOut, -1)
 	require.Len(t, want, 2, origOut)
 	require.Len(t, got, 2, instOut)
-	// The statement in f is indented: the line and the column are the same.
+	// The lines are the same as in the original file. A directive has no
+	// column, so the compiler does not give a column for the code after it.
 	assert.Equal(t, "4", got[0][1])
-	assert.Equal(t, "14", got[0][2])
-	assert.Equal(t, want[0][1:], got[0][1:])
-	// The statement in g is at column 1. The directive has no column, so the
-	// compiler gives only the line.
+	assert.Equal(t, want[0][1], got[0][1])
+	assert.Empty(t, got[0][2])
 	assert.Equal(t, "9", got[1][1])
 	assert.Equal(t, want[1][1], got[1][1])
 	assert.Empty(t, got[1][2])
@@ -1425,30 +1424,26 @@ func TestMarkLineDirectives_CompilerThreadsStateFromCommunication(t *testing.T) 
 
 func TestMarkLineDirectives_Directive(t *testing.T) {
 	tests := []struct {
-		name      string
-		file      string
-		line, col int
-		want      string
-		ok        bool
+		name string
+		file string
+		line int
+		want string
+		ok   bool
 	}{
 		{name: "line", file: "/a/b.go", line: 7, want: "/a/b.go:7", ok: true},
-		{name: "line and column", file: "/a/b.go", line: 7, col: 3, want: "/a/b.go:7:3", ok: true},
 		{name: "line zero", file: "/a/b.go", line: 0},
-		{name: "line zero with column", file: "/a/b.go", line: 0, col: 1},
-		{name: "negative column", file: "/a/b.go", line: 1, col: -1},
+		{name: "negative line", file: "/a/b.go", line: -1},
 		{name: "largest line", file: "/a/b.go", line: 1 << 30, want: "/a/b.go:1073741824", ok: true},
 		{name: "line too large", file: "/a/b.go", line: 1<<30 + 1},
-		{name: "largest column", file: "/a/b.go", line: 1, col: 1 << 30, want: "/a/b.go:1:1073741824", ok: true},
-		{name: "column too large", file: "/a/b.go", line: 1, col: 1<<30 + 1},
-		{name: "unsafe name", file: "/a/*/b.go", line: 1, col: 1},
+		{name: "unsafe name", file: "/a/*/b.go", line: 1},
 		{name: "name ends in a number", file: "/a/b:0", line: 7},
-		{name: "name ends in a number, with column", file: "/a/b:0", line: 7, col: 1, want: "/a/b:0:7:1", ok: true},
+		{name: "name ends in a nonzero number", file: "/a/b:7", line: 7},
 		{name: "name has a number inside", file: "/a/b:0/c.go", line: 7, want: "/a/b:0/c.go:7", ok: true},
 		{name: "name ends in a colon", file: "/a/b:", line: 7, want: "/a/b::7", ok: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ok := directive(tt.file, tt.line, tt.col)
+			got, ok := directive(tt.file, tt.line)
 			assert.Equal(t, tt.ok, ok)
 			assert.Equal(t, tt.want, got)
 		})
@@ -1464,12 +1459,21 @@ func genDecl(t *testing.T) dst.Decl {
 }
 
 func TestMarkLineDirectives_CompilerNameEndsInNumber(t *testing.T) {
-	// A name that ends in ":0" is valid in the source, because the directive
-	// has a line and a column. A directive with only a line would be read as
-	// line 0 and column 12 by Go, and Go rejects it.
-	const name = "/tmp/foo:0"
+	// A name that ends in ":" and digits is valid in the source, because the
+	// directive has a line and a column. Go reads a directive with only a line
+	// as the end of the name, then a line and a column. With ":0", Go rejects
+	// the directive. With ":7", Go accepts it, but the file and the line are
+	// wrong. So the pass does not restore a node in such a file, and the code
+	// stays in the "<generated>" file. A later node in a safe file is restored.
+	for _, name := range []string{"/tmp/foo:0", "/tmp/foo:7"} {
+		t.Run(name, func(t *testing.T) { compilerNameEndsInNumber(t, name) })
+	}
+}
+
+func compilerNameEndsInNumber(t *testing.T, name string) {
+	t.Helper()
+	const ok = "/tmp/ok.go"
 	t.Run("top-level declaration", func(t *testing.T) {
-		// g has no comment before it, so only the pass can restore it.
 		src := preludeProgram + `//line ` + name + `:12:1
 func h() {}
 
@@ -1477,28 +1481,31 @@ func g() {
 	fmt.Println("G", where())
 }
 
+//line ` + ok + `:40:1
+func k() {
+	fmt.Println("K", where())
+}
+
 func main() {
 	g()
+	k()
 }
 `
 		edit := func(root *dst.File) {
 			root.Decls = append(root.Decls[:4], append([]dst.Decl{genDecl(t)}, root.Decls[4:]...)...)
 		}
 		run := runInjected(t, src, edit)
-		// The pass restores g with a column, and not with a line only.
-		assert.Contains(t, instrumentSource(t, src, edit), "\n//line "+name+":14:1\nfunc g() {")
-		// h is at line 12 and g is at line 14. The first statement of g is at
-		// line 15.
-		assert.Equal(t, name+":15", positions(run.output)["G"])
+		got := positions(run.output)
+		assert.Regexp(t, `/<generated>:\d+$`, got["G"])
+		assert.Equal(t, ok+":41", got["K"])
+		assert.Contains(t, instrumentSource(t, src, edit), "\n//line "+ok+":40\nfunc k() {")
 	})
 	t.Run("statement", func(t *testing.T) {
-		// S1 is at column 1 and has no comment before it. A directive for it
-		// can have only a line, and it is not valid: the pass does not restore
-		// S1. S2 has a column, and it is restored.
 		src := preludeProgram + `func main() {
 //line ` + name + `:12:1
 fmt.Println("S0", where())
 fmt.Println("S1", where())
+//line ` + ok + `:50:1
 	fmt.Println("S2", where())
 	fmt.Println("S3", where())
 }
@@ -1510,8 +1517,8 @@ fmt.Println("S1", where())
 		got := positions(run.output)
 		assert.Regexp(t, `/<generated>:\d+$`, got["gen"])
 		assert.Regexp(t, `/<generated>:\d+$`, got["S1"])
-		assert.Equal(t, name+":14", got["S2"])
-		assert.Equal(t, name+":15", got["S3"])
+		assert.Equal(t, ok+":50", got["S2"])
+		assert.Equal(t, ok+":51", got["S3"])
 	})
 	t.Run("closing brace", func(t *testing.T) {
 		src := preludeProgram + `func main() {
@@ -1529,7 +1536,7 @@ fmt.Println("S1", where())
 		})
 		got := positions(run.output)
 		assert.Regexp(t, `/<generated>:\d+$`, got["gen"])
-		assert.Equal(t, name+":50", got["closing"])
+		assert.Regexp(t, `/<generated>:\d+$`, got["closing"])
 	})
 	t.Run("own-line directive", func(t *testing.T) {
 		// A statement with a comment before it, and a clause of a switch,
@@ -1547,6 +1554,8 @@ fmt.Println("S1", where())
 //line ` + name + `:60:1
 	// comment
 	fmt.Println("T", where())
+//line ` + ok + `:70:1
+	fmt.Println("U", where())
 }
 `
 		run := runInjected(t, src, func(root *dst.File) {
@@ -1558,7 +1567,8 @@ fmt.Println("S1", where())
 		got := positions(run.output)
 		assert.Regexp(t, `/<generated>:\d+$`, got["gen1"])
 		assert.Regexp(t, `/<generated>:\d+$`, got["gen2"])
-		assert.Equal(t, name+":61", got["T"])
+		assert.Regexp(t, `/<generated>:\d+$`, got["T"])
+		assert.Equal(t, ok+":70", got["U"])
 	})
 }
 

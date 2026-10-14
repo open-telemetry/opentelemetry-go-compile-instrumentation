@@ -12,7 +12,7 @@ func Func1(p1 string, p2 int) (_unnamedRetVal_195311172_0 float32, _unnamedRetVa
 	} else {
 		defer OtelAfterTrampoline_Func1195311172(hookContext195311172, &_unnamedRetVal_195311172_0, &_unnamedRetVal_195311172_1)
 	}
-	/*line /golden/work/main.go:7:1*/ println("Hello, World!")
+	/*line /golden/work/main.go:7*/ println("Hello, World!")
 	return 0.0, nil
 }
 

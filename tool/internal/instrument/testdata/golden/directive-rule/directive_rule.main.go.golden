@@ -7,7 +7,7 @@ package main
 func foo() {
 	/*line <generated>:1*/ println("span start: foo")
 	defer println("span end: foo")
-	/*line /golden/work/main.go:8:1*/ println("hello")
+	/*line /golden/work/main.go:8*/ println("hello")
 }
 
 func main() { foo() }

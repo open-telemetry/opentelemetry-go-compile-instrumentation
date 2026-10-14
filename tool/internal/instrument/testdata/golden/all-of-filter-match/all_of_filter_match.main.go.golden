@@ -21,7 +21,7 @@ func Connect(dsn string) (_unnamedRetVal_671999535_0 error) {
 	} else {
 		defer OtelAfterTrampoline_Connect671999535(hookContext671999535, &_unnamedRetVal_671999535_0)
 	}
-	/*line /golden/work/main.go:16:1*/ println("connecting to " + dsn)
+	/*line /golden/work/main.go:16*/ println("connecting to " + dsn)
 	return nil
 }
 

@@ -25,20 +25,21 @@ import (
 //
 // A "//line" comment is only valid at column 1, but the printer indents
 // comments in a function body. A "/*line*/" comment is valid at any column, and
-// it applies to the character that follows it. The printer puts exactly one
-// space between a "/*...*/" comment and the token after it, when they are on
-// the same line. So a directive that has a column applies to that space, and
-// the token starts one column later.
+// it applies to the character that follows it.
+//
+// A directive carries only a line. It has no column, so Go does not know the
+// column of the code after a directive. The reason is that the printer does not
+// always put a comment where the pass expects (for example, a comment on an
+// argument that is not the first goes before the ","). A column from the
+// source would then be wrong.
 //
 // The pass finds runs of generated code. A run is a sequence of nodes in the
 // same list that are not in the user source:
 //
 //   - The first node of a run gets "/*line <generated>:1*/". All the nodes of
 //     the run get a line number in the "<generated>" file.
-//   - The first original node after a run gets "/*line /abs/file.go:L:C-1*/",
-//     where L:C is the position of the node in the user source. The directive
-//     uses C-1 because of the space. When C is 1 there is no column to give, so
-//     the directive has only the line: "/*line /abs/file.go:L*/".
+//   - The first original node after a run gets "/*line /abs/file.go:L*/",
+//     where L is the line of the node in the user source.
 //   - A run can be the last thing in a block. Then the closing brace must be
 //     restored. The last node of the block gets an End decoration with a
 //     directive for the line before the closing brace. The printer puts a
@@ -50,7 +51,7 @@ import (
 //   - A blank line before the node. The pass removes the blank line.
 //   - A comment before the node, and the clause of a switch or select. The
 //     directive is on a line of its own, followed by a newline. It gives the
-//     line before the node, and the column is the printed column.
+//     line before the node.
 //   - A top-level declaration. The printer puts a blank line between most of
 //     them. The directive is a "//line" comment at column 1. It gives the line
 //     of the declaration and applies to the next line.
@@ -72,11 +73,8 @@ import (
 //
 //   - The file name has a character that is not safe in a comment.
 //   - The line is less than 1. Go does not accept it.
-//   - A directive has only a line, and the file name ends in ":" and digits. Go
-//     reads the end of the name as the line, and the line as the column. When
-//     the position of the directive is not important (a directive on a line
-//     of its own, a "//line" comment at column 1), the pass writes a column
-//     instead.
+//   - The file name ends in ":" and digits. A directive has only a line, so Go
+//     reads the end of the name as the line, and the line as the column.
 //
 // An import declaration with an added spec counts as generated, because the
 // printer sorts the specs. The next declaration is restored.
@@ -171,14 +169,10 @@ func (p *lineDirectivePass) restore(node, prev dst.Node, pos token.Position) boo
 	case ownLine:
 		// The printer puts the directive on a line of its own when the node
 		// has a comment before it, and for the clause of a switch. A newline
-		// follows the directive, so it gives the line before the node. The
-		// column is the column in the printed code.
-		target, ok = lineBefore(file, pos.Line)
-	case pos.Column <= 1:
-		target, ok = directive(file, pos.Line, 0)
+		// follows the directive, so it gives the line before the node.
+		target, ok = directive(file, pos.Line-1)
 	default:
-		// The printer puts one space between the directive and the token.
-		target, ok = directive(file, pos.Line, pos.Column-1)
+		target, ok = directive(file, pos.Line)
 	}
 	if !ok {
 		// Do not write this directive. Without it, the node stays in the
@@ -219,13 +213,7 @@ func (p *lineDirectivePass) stepDecl(decl dst.Decl, generated *bool) bool {
 		}
 		*generated = true
 	case *generated:
-		// The directive is at column 1 and applies to the next line, so a
-		// column of 1 gives the same position as no column.
-		file := p.absolute(pos.Filename)
-		target, ok := directive(file, pos.Line, 0)
-		if !ok {
-			target, ok = directive(file, pos.Line, 1)
-		}
+		target, ok := directive(p.absolute(pos.Filename), pos.Line)
 		if ok {
 			prependDeclDirective(decl, "//line "+target)
 			*generated = false
@@ -274,7 +262,7 @@ func (p *lineDirectivePass) block(block *dst.BlockStmt, generated *bool) {
 	}
 	// The closing brace is original, but the last token is not. Put the
 	// directive before the newline that precedes the brace.
-	target, ok := lineBefore(p.absolute(rbrace.Filename), rbrace.Line)
+	target, ok := directive(p.absolute(rbrace.Filename), rbrace.Line-1)
 	if !ok {
 		return
 	}
@@ -343,43 +331,24 @@ func safeDirectiveFile(file string) bool {
 		!strings.Contains(file, "*/")
 }
 
-// directive returns the target of a line directive, "file:line" or
-// "file:line:col", and reports whether Go can read it. col is 0 when the
-// directive has no column. It is not possible to write a directive when:
+// directive returns the target of a line directive, "file:line", and reports
+// whether Go can read it. It is not possible to write a directive when:
 //
 //   - the file name is not safe in a comment (see safeDirectiveFile),
-//   - the line or the column is less than 1 (a column of 0 means no column),
-//   - the directive has no column, and the file name ends in ":" and digits.
-//     Go reads the last two numbers as the line and the column, so it takes
-//     the end of the name as the line.
-func directive(file string, line, col int) (string, bool) {
-	if !safeDirectiveFile(file) || line < 1 || line > maxDirectiveLineCol || col < 0 || col > maxDirectiveLineCol {
+//   - the line is less than 1 or too large,
+//   - the file name ends in ":" and digits. Go reads the last two numbers as the
+//     line and the column, so it takes the end of the name as the line.
+func directive(file string, line int) (string, bool) {
+	if !safeDirectiveFile(file) || line < 1 || line > maxDirectiveLine || endsWithNumber(file) {
 		return "", false
 	}
-	if col == 0 {
-		if endsWithNumber(file) {
-			return "", false
-		}
-		return fmt.Sprintf("%s:%d", file, line), true
-	}
-	return fmt.Sprintf("%s:%d:%d", file, line, col), true
+	return fmt.Sprintf("%s:%d", file, line), true
 }
 
-// maxDirectiveLineCol is the largest line or column that Go accepts in a line
+// maxDirectiveLine is the largest line that Go accepts in a line
 // directive (syntax.PosMax in cmd/compile, maxLineCol in go/scanner). A user
 // directive near this limit can give later nodes a larger position.
-const maxDirectiveLineCol = 1 << 30
-
-// lineBefore returns the target of a directive that is on a line of its own,
-// and gives the line before line. The directive applies to the newline that
-// follows it, so its column is not important. When the file name ends in a
-// number, the directive has a column to prevent a wrong reading.
-func lineBefore(file string, line int) (string, bool) {
-	if target, ok := directive(file, line-1, 0); ok {
-		return target, true
-	}
-	return directive(file, line-1, 1)
-}
+const maxDirectiveLine = 1 << 30
 
 // endsWithNumber reports whether file ends in ":" and digits.
 func endsWithNumber(file string) bool {
