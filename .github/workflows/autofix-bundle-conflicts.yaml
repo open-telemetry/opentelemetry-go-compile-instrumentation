@@ -1,0 +1,51 @@
+name: Auto-fix Bundle Conflicts
+
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    # Hourly backstop; the push trigger covers the common case immediately.
+    # PRs whose "mergeable" flag was still UNKNOWN right after a push are
+    # picked up here on the next run.
+    - cron: "23 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  autofix:
+    name: Auto-fix bundle conflicts
+    runs-on: ubuntu-latest
+    # Only act on the upstream repository, never on forks of it.
+    if: github.repository == 'open-telemetry/opentelemetry-go-compile-instrumentation'
+    # Security: `make package` is executed only on same-repository PR branches.
+    # A same-repository branch can only be created by someone with push access
+    # to this repository, which matches the trust level of the existing
+    # regenerate-bundle workflow. Fork PR branches are never checked out or
+    # built; the script only posts a help comment for them.
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+        with:
+          fetch-depth: 0
+          # zizmor: ignore[artipacked]: credentials are required by the git push later in this job
+          persist-credentials: true
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Auto-fix conflicted pull request branches
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: ./.github/scripts/autofix-bundle-conflicts.sh

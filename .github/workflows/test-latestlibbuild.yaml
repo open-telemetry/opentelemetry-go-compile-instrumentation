@@ -4,6 +4,7 @@ on:
     branches:
       - main
   pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
 # proxy.golang.org and sum.golang.org intermittently reset HTTP/2 streams
