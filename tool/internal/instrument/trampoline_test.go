@@ -5,6 +5,7 @@ package instrument
 
 import (
 	"errors"
+	"go/token"
 	"os"
 	"path/filepath"
 	"testing"
@@ -1116,6 +1117,59 @@ func TestExtractReceiverTypeParamsNestedPointer(t *testing.T) {
 
 	require.NotNil(t, params)
 	assert.Equal(t, []string{"T"}, typeParamNames(t, params))
+}
+
+func TestHookGuardCond_WithoutBuildWideIgnoreUsage(t *testing.T) {
+	ip := &instrumentPhase{target: parseFile(t, "package main\n")}
+
+	cond, ok := ip.hookGuardCond("HBefore").(*dst.BinaryExpr)
+	require.True(t, ok)
+	assert.Equal(
+		t,
+		token.NEQ,
+		cond.Op,
+		"with no //otelc:ignore usage in this build, the guard checks only the hook var",
+	)
+}
+
+func TestHookGuardCond_WithBuildWideIgnoreUsage(t *testing.T) {
+	ip := &instrumentPhase{target: parseFile(t, "package main\n"), buildUsesIgnoreDirective: true}
+
+	cond, ok := ip.hookGuardCond("HBefore").(*dst.BinaryExpr)
+	require.True(t, ok)
+	require.Equal(t, token.LAND, cond.Op)
+
+	notSuppressed, ok := cond.Y.(*dst.UnaryExpr)
+	require.True(t, ok)
+	assert.Equal(t, token.NOT, notSuppressed.Op)
+
+	call, ok := notSuppressed.X.(*dst.CallExpr)
+	require.True(t, ok)
+	sel, ok := call.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expects a call qualified with the runtime package, got %T", call.Fun)
+	assert.Equal(t, "runtime", sel.X.(*dst.Ident).Name)
+	assert.Equal(t, "HooksSuppressed", sel.Sel.Name)
+}
+
+func TestHookGuardCond_InsideRuntimePackageItselfIsUnqualified(t *testing.T) {
+	ip := &instrumentPhase{
+		target:                   parseFile(t, "package runtime\n"),
+		buildUsesIgnoreDirective: true,
+		compileArgs:              []string{"-p", "runtime"},
+	}
+
+	cond, ok := ip.hookGuardCond("HBefore").(*dst.BinaryExpr)
+	require.True(t, ok)
+	notSuppressed, ok := cond.Y.(*dst.UnaryExpr)
+	require.True(t, ok)
+
+	call, ok := notSuppressed.X.(*dst.CallExpr)
+	require.True(t, ok)
+	_, isSelector := call.Fun.(*dst.SelectorExpr)
+	assert.False(t, isSelector, "a call inside package runtime itself must not qualify itself with a self-import")
+	ident, ok := call.Fun.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "HooksSuppressed", ident.Name)
 }
 
 // TestExtractReceiverTypeParamsConstraint_RenamedInterParam covers a receiver
