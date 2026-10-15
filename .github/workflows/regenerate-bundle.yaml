@@ -82,7 +82,12 @@ jobs:
           # Set the committer identity before merging: on a clean runner git
           # refuses to record the merge state without one. Attribute the commit
           # to the App's bot user, which EasyCLA knows about.
-          read -r bot_login bot_id <<<"$(gh api user --jq '[.login, (.id | tostring)] | join(" ")')"
+          bot_info="$(gh api user --jq '[.login, (.id | tostring)] | join(" ")')"
+          read -r bot_login bot_id <<<"${bot_info}"
+          if [[ -z "${bot_login}" || -z "${bot_id}" ]]; then
+            echo "cannot resolve the bot identity from the App token" >&2
+            exit 1
+          fi
           git config user.name "${bot_login}"
           git config user.email "${bot_id}+${bot_login}@users.noreply.github.com"
           # Only the bundle may use the custom driver, everything else keeps

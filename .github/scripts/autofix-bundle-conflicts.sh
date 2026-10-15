@@ -44,7 +44,12 @@ MARKER="<!-- otelc-bundle-conflict-help -->"
 
 # Attribute the merge commits to the App's bot user (which EasyCLA knows about)
 # instead of a hardcoded account.
-read -r bot_login bot_id <<<"$(gh api user --jq '[.login, (.id | tostring)] | join(" ")')"
+bot_info="$(gh api user --jq '[.login, (.id | tostring)] | join(" ")')"
+read -r bot_login bot_id <<<"${bot_info}"
+[[ -n "${bot_login}" && -n "${bot_id}" ]] || {
+  echo "cannot resolve the bot identity from the App token" >&2
+  exit 1
+}
 git config user.name "${bot_login}"
 git config user.email "${bot_id}+${bot_login}@users.noreply.github.com"
 
