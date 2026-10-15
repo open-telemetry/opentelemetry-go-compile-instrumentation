@@ -970,7 +970,7 @@ func TestMarkLineDirectives_CompilerHonoursDirectives(t *testing.T) {
 	// Injected statements are in the "<generated>" file.
 	for _, id := range []string{"gen-start", "gen-start-2", "gen-if-end", "gen-case-end", "gen-middle", "gen-end"} {
 		// The compiler puts the directory of the file before the name.
-		assert.Regexp(t, `/<generated>:\d+$`, got[id], id)
+		assert.Regexp(t, generatedPosition, got[id], id)
 	}
 	// The deferred function is called from the closing brace of target.
 	assert.Equal(t, pos(lineOf(`"G"`)+1), got["closing"], "line of the closing brace")
@@ -1136,7 +1136,7 @@ func TestMarkLineDirectives_CompilerHonoursLabelsGotoAndFallthrough(t *testing.T
 	for _, id := range []string{
 		"gen-start", "gen-before-fallthrough", "gen-case-start", "gen-before-g", "gen-before-done", "gen-before-loop",
 	} {
-		assert.Regexp(t, `/<generated>:\d+$`, got[id], id)
+		assert.Regexp(t, generatedPosition, got[id], id)
 	}
 }
 
@@ -1174,7 +1174,7 @@ retry: fmt.Println("B", where())
 		want := fmt.Sprintf("%s:%d", run.origFile, lineOfMarker(t, src, `"`+id+`"`))
 		assert.Equal(t, want, got[id], id)
 	}
-	assert.Regexp(t, `/<generated>:\d+$`, got["gen"])
+	assert.Regexp(t, generatedPosition, got["gen"])
 }
 
 func TestMarkLineDirectives_CompilerIgnoresUnsafeFileName(t *testing.T) {
@@ -1226,7 +1226,7 @@ func main() {
 	safe := filepath.Join(filepath.Dir(run.origFile), "safe.go")
 	assert.Equal(t, safe+":77", got["D"])
 	assert.Equal(t, safe+":78", got["E"])
-	assert.Regexp(t, `/<generated>:\d+$`, got["gen"])
+	assert.Regexp(t, generatedPosition, got["gen"])
 	assert.NotContains(t, run.output, "INJECTED")
 }
 
@@ -1266,7 +1266,7 @@ func main() {
 	safe := filepath.Join(filepath.Dir(run.origFile), "safe.go")
 	assert.Equal(t, safe+":80", got["D"])
 	assert.Equal(t, safe+":81", got["E"])
-	assert.Regexp(t, `/<generated>:\d+$`, got["gen"])
+	assert.Regexp(t, generatedPosition, got["gen"])
 	assert.NotContains(t, run.output, "INJECTED")
 }
 
@@ -1276,6 +1276,11 @@ const unsafeDirective = `//line /tmp/x/*/;println("INJECTED");/*orig.go:30:1`
 
 // preludeProgram is the start of the programs below. It has the function
 // where, which gives the position of its caller.
+// generatedPosition matches the position that runtime.Caller gives for
+// injected code. Some Go versions join the "<generated>" name with the
+// directory of the file (Go 1.27), and some do not (Go 1.26).
+const generatedPosition = `(^|/)<generated>:\d+$`
+
 const preludeProgram = `package main
 
 import (
@@ -1359,7 +1364,7 @@ func main() {
 	assert.Equal(t, safe+":90", got["D2"])
 	assert.Equal(t, safe+":92", got["E2"])
 	for _, id := range []string{"gen-if1", "gen-else1", "gen-after1", "gen-if2", "gen-after2"} {
-		assert.Regexp(t, `/<generated>:\d+$`, got[id], id)
+		assert.Regexp(t, generatedPosition, got[id], id)
 	}
 	assert.NotContains(t, run.output, "INJECTED")
 }
@@ -1390,7 +1395,7 @@ func TestMarkLineDirectives_CompilerThreadsStateFromCaseExpression(t *testing.T)
 	safe := filepath.Join(filepath.Dir(run.origFile), "safe.go")
 	assert.Equal(t, safe+":80", got["D"])
 	assert.Equal(t, safe+":81", got["E"])
-	assert.Regexp(t, `/<generated>:\d+$`, got["gen"])
+	assert.Regexp(t, generatedPosition, got["gen"])
 	assert.NotContains(t, run.output, "INJECTED")
 }
 
@@ -1420,7 +1425,7 @@ func TestMarkLineDirectives_CompilerThreadsStateFromCommunication(t *testing.T) 
 	safe := filepath.Join(filepath.Dir(run.origFile), "safe.go")
 	assert.Equal(t, safe+":80", got["D"])
 	assert.Equal(t, safe+":81", got["E"])
-	assert.Regexp(t, `/<generated>:\d+$`, got["gen"])
+	assert.Regexp(t, generatedPosition, got["gen"])
 	assert.NotContains(t, run.output, "INJECTED")
 }
 
@@ -1498,7 +1503,7 @@ func main() {
 		}
 		run := runInjected(t, src, edit)
 		got := positions(run.output)
-		assert.Regexp(t, `/<generated>:\d+$`, got["G"])
+		assert.Regexp(t, generatedPosition, got["G"])
 		assert.Equal(t, ok+":41", got["K"])
 		assert.Contains(t, instrumentSource(t, src, edit), "\n//line "+ok+":40\nfunc k() {")
 	})
@@ -1517,8 +1522,8 @@ fmt.Println("S1", where())
 			body.List = insertStmts(t, body.List, 1, printWhere("gen"))
 		})
 		got := positions(run.output)
-		assert.Regexp(t, `/<generated>:\d+$`, got["gen"])
-		assert.Regexp(t, `/<generated>:\d+$`, got["S1"])
+		assert.Regexp(t, generatedPosition, got["gen"])
+		assert.Regexp(t, generatedPosition, got["S1"])
 		assert.Equal(t, ok+":50", got["S2"])
 		assert.Equal(t, ok+":51", got["S3"])
 	})
@@ -1537,8 +1542,8 @@ fmt.Println("S1", where())
 			body.List = append(body.List, snippet(t, printWhere("gen"))...)
 		})
 		got := positions(run.output)
-		assert.Regexp(t, `/<generated>:\d+$`, got["gen"])
-		assert.Regexp(t, `/<generated>:\d+$`, got["closing"])
+		assert.Regexp(t, generatedPosition, got["gen"])
+		assert.Regexp(t, generatedPosition, got["closing"])
 	})
 	t.Run("own-line directive", func(t *testing.T) {
 		// A statement with a comment before it, and a clause of a switch,
@@ -1567,9 +1572,9 @@ fmt.Println("S1", where())
 			body.List = insertStmts(t, body.List, 3, printWhere("gen2"))
 		})
 		got := positions(run.output)
-		assert.Regexp(t, `/<generated>:\d+$`, got["gen1"])
-		assert.Regexp(t, `/<generated>:\d+$`, got["gen2"])
-		assert.Regexp(t, `/<generated>:\d+$`, got["T"])
+		assert.Regexp(t, generatedPosition, got["gen1"])
+		assert.Regexp(t, generatedPosition, got["gen2"])
+		assert.Regexp(t, generatedPosition, got["T"])
 		assert.Equal(t, ok+":70", got["U"])
 	})
 }
@@ -1589,7 +1594,7 @@ func TestMarkLineDirectives_CompilerLineOneIsNotRestoredAsLineZero(t *testing.T)
 			body := findFunc(t, root, "main").Body
 			body.List = append(body.List, snippet(t, printWhere("gen"))...)
 		})
-		assert.Regexp(t, `/<generated>:\d+$`, positions(run.output)["gen"])
+		assert.Regexp(t, generatedPosition, positions(run.output)["gen"])
 	})
 	t.Run("statement with a comment", func(t *testing.T) {
 		src := preludeProgram + `func main() {
@@ -1603,8 +1608,8 @@ func TestMarkLineDirectives_CompilerLineOneIsNotRestoredAsLineZero(t *testing.T)
 			body.List = insertStmts(t, body.List, 0, printWhere("gen"))
 		})
 		got := positions(run.output)
-		assert.Regexp(t, `/<generated>:\d+$`, got["gen"])
-		assert.Regexp(t, `/<generated>:\d+$`, got["S1"])
+		assert.Regexp(t, generatedPosition, got["gen"])
+		assert.Regexp(t, generatedPosition, got["S1"])
 		assert.Equal(t, file+":2", got["S2"])
 	})
 	t.Run("statement without injected code", func(t *testing.T) {
@@ -1639,7 +1644,7 @@ func TestMarkLineDirectives_CompilerLineOneIsNotRestoredAsLineZero(t *testing.T)
 			clause.Body = append(clause.Body, snippet(t, printWhere("gen"))...)
 		})
 		got := positions(run.output)
-		assert.Regexp(t, `/<generated>:\d+$`, got["gen"])
+		assert.Regexp(t, generatedPosition, got["gen"])
 		assert.Equal(t, file+":2", got["C2"])
 	})
 }
@@ -1725,9 +1730,9 @@ func TestMarkLineDirectives_CompilerUserLineCommentInFunctionWithInjectedCode(t 
 	assert.Contains(t, got["A"], "parser.y:42")
 	assert.Contains(t, got["C"], "parser.y:90")
 	assert.Contains(t, got["O1"], "other.y:10")
-	assert.Regexp(t, `/<generated>:\d+$`, got["gen-mid"])
-	assert.Regexp(t, `/<generated>:\d+$`, got["gen-start"])
-	assert.Regexp(t, `/<generated>:\d+$`, got["gen-end"])
+	assert.Regexp(t, generatedPosition, got["gen-mid"])
+	assert.Regexp(t, generatedPosition, got["gen-start"])
+	assert.Regexp(t, generatedPosition, got["gen-end"])
 }
 
 func TestMarkLineDirectives_CompilerUserLineCommentInFunctionWithoutInjectedCode(t *testing.T) {
@@ -1825,7 +1830,7 @@ func TestMarkLineDirectives_CompilerUserLineCommentWithNameThatEndsInNumber(t *t
 				prepend(t, findFunc(t, root, "main").Body, printWhere("gen"))
 			}
 			got := positions(runInjected(t, src, edit).output)
-			assert.Regexp(t, `/<generated>:\d+$`, got["gen"])
+			assert.Regexp(t, generatedPosition, got["gen"])
 			for _, id := range []string{"S2", "S3"} {
 				assert.NotContains(t, got[id], "/tmp/foo", id)
 				assert.NotContains(t, got[id], "<generated>", id)
@@ -2020,8 +2025,8 @@ func TestMarkLineDirectives_CompilerGeneratedNodeAfterSkippedUserLineRestore(t *
 	}
 	run := runInjected(t, src, edit)
 	got := positions(run.output)
-	assert.Regexp(t, `/<generated>:\d+$`, got["gen"])
-	assert.Regexp(t, `/<generated>:\d+$`, got["B"])
+	assert.Regexp(t, generatedPosition, got["gen"])
+	assert.Regexp(t, generatedPosition, got["B"])
 	safe := filepath.Join(filepath.Dir(run.origFile), "safe.go")
 	assert.Equal(t, safe+":80", got["C"])
 	assert.Equal(t, safe+":81", got["D"])
@@ -2064,7 +2069,7 @@ inner:
 			body := findFunc(t, root, "main").Body
 			body.List = insertStmts(t, body.List, 1, printWhere("gen"))
 		}, "A", "B", "C", "D")
-		assert.Regexp(t, `/<generated>:\d+$`, withGen["gen"])
+		assert.Regexp(t, generatedPosition, withGen["gen"])
 	})
 }
 
@@ -2199,7 +2204,7 @@ func TestMarkLineDirectives_CompilerSelectLastClauseBeforeClosingBrace(t *testin
 		clause.Body = append(clause.Body, snippet(t, printWhere("gen"))...)
 	}
 	got := assertSamePositions(t, src, edit, "A", "B", "C", "D", "closing")
-	assert.Regexp(t, `/<generated>:\d+$`, got["gen"])
+	assert.Regexp(t, generatedPosition, got["gen"])
 	// The comment gives line 40 to the closing brace, so D is at line 41.
 	assert.Contains(t, got["D"], "s.y:41")
 
@@ -2235,6 +2240,6 @@ func TestMarkLineDirectives_CompilerBlankLineBeforeRestoredClosingBrace(t *testi
 		ifBody.List = append(ifBody.List, gen...)
 	}
 	got := assertSamePositions(t, src, edit, "A", "B", "closing")
-	assert.Regexp(t, `/<generated>:\d+$`, got["gen"])
+	assert.Regexp(t, generatedPosition, got["gen"])
 	assert.NotContains(t, instrumentSource(t, src, edit), "*/\n\n", "blank line before the closing brace")
 }
