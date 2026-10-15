@@ -33,19 +33,25 @@ func OperationName(query string) string {
 	return strings.ToUpper(fields[0])
 }
 
+// dbClientRequestAttrCap is the most attributes DbClientRequestTraceAttrs
+// can return: five base attributes plus server.port and db.system.name.
+const dbClientRequestAttrCap = 7
+
+// DbClientRequestTraceAttrs returns trace attributes for a database/sql client request.
 func DbClientRequestTraceAttrs(req DatabaseSqlRequest) []attribute.KeyValue {
 	host, portStr, err := net.SplitHostPort(req.Endpoint)
 	if err != nil {
 		host = req.Endpoint
 	}
 
-	attrs := []attribute.KeyValue{
+	attrs := make([]attribute.KeyValue, 0, dbClientRequestAttrCap)
+	attrs = append(attrs,
 		semconv.DBOperationName(req.OpType),
 		semconv.DBNamespace(req.DbName),
 		semconv.ServerAddress(host),
 		semconv.NetworkTransportTCP,
 		semconv.DBQueryText(req.Sql),
-	}
+	)
 
 	if err == nil {
 		if port, convErr := strconv.Atoi(portStr); convErr == nil && port > 0 {

@@ -310,3 +310,61 @@ func TestDbClientRequestTraceAttrs_ContainsExpectedKeys(t *testing.T) {
 		assert.True(t, keySet[key], "expected key %s not found in attributes", key)
 	}
 }
+
+func TestDbClientRequestTraceAttrs_DoesNotGrowWhenPortPresent(t *testing.T) {
+	attrs := DbClientRequestTraceAttrs(DatabaseSqlRequest{
+		OpType:     "SELECT",
+		Sql:        "SELECT * FROM users WHERE id=?",
+		Endpoint:   "127.0.0.1:3306",
+		DriverName: "mysql",
+		DbName:     "testdb",
+	})
+
+	require.Len(t, attrs, 7)
+	assert.Equal(t, dbClientRequestAttrCap, cap(attrs),
+		"a 5-element literal that then appends server.port and db.system.name grows the slice")
+}
+
+func TestDbClientRequestTraceAttrs_DoesNotGrowWithoutPort(t *testing.T) {
+	attrs := DbClientRequestTraceAttrs(DatabaseSqlRequest{
+		OpType:     "SELECT",
+		Sql:        "SELECT * FROM users WHERE id=?",
+		Endpoint:   "127.0.0.1",
+		DriverName: "postgres",
+		DbName:     "testdb",
+	})
+
+	require.Len(t, attrs, 6)
+	assert.Equal(t, dbClientRequestAttrCap, cap(attrs),
+		"a 5-element literal that then appends db.system.name grows the slice")
+}
+
+func BenchmarkDbClientRequestTraceAttrs_WithPort(b *testing.B) {
+	req := DatabaseSqlRequest{
+		OpType:     "SELECT",
+		Sql:        "SELECT * FROM users WHERE id=?",
+		Endpoint:   "127.0.0.1:3306",
+		DriverName: "mysql",
+		DbName:     "testdb",
+	}
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = DbClientRequestTraceAttrs(req)
+	}
+}
+
+func BenchmarkDbClientRequestTraceAttrs_WithoutPort(b *testing.B) {
+	req := DatabaseSqlRequest{
+		OpType:     "SELECT",
+		Sql:        "SELECT * FROM users WHERE id=?",
+		Endpoint:   "127.0.0.1",
+		DriverName: "postgres",
+		DbName:     "testdb",
+	}
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = DbClientRequestTraceAttrs(req)
+	}
+}
