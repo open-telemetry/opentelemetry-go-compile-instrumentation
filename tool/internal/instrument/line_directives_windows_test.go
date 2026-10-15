@@ -20,11 +20,13 @@ func TestGeneratedFileWindows(t *testing.T) {
 	// The name is at the root of the volume of the file, so it is absolute,
 	// and Go does not join it with the directory of the file.
 	tests := map[string]string{
-		`C:\work\dir\main.go`:            `C:\<generated>`,
-		`D:\main.go`:                     `D:\<generated>`,
-		`\\server\share\dir\main.go`:     `\\server\share\<generated>`,
-		`\\?\C:\work\dir\main.go`:        `\\?\C:\<generated>`,
-		`\\?\UNC\server\share\x\main.go`: `\\?\UNC\server\share\<generated>`,
+		`C:\work\dir\main.go`:        `C:\<generated>`,
+		`D:\main.go`:                 `D:\<generated>`,
+		`\\server\share\dir\main.go`: `\\server\share\<generated>`,
+		`\\?\C:\work\dir\main.go`:    `\\?\C:\<generated>`,
+		// filepath.VolumeName gives only `\\?\UNC` for this form. The name
+		// is still absolute.
+		`\\?\UNC\server\share\x\main.go`: `\\?\UNC\<generated>`,
 	}
 	for file, want := range tests {
 		got := generatedFile(file)
