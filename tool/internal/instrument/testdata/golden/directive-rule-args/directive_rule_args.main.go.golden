@@ -10,4 +10,5 @@ func divide(a int, b int) (_unnamedRetVal_1082567017_0 int, _unnamedRetVal_10825
 	/*line /golden/work/main.go:8*/ return a / b, nil
 }
 
+//line /golden/work/main.go:11
 func main() { divide(4, 2) }

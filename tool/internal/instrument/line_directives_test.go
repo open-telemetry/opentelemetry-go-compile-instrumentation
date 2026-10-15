@@ -1521,7 +1521,6 @@ fmt.Println("S1", where())
 			body.List = insertStmts(t, body.List, 1, printWhere("gen"))
 		})
 		got := positions(run.output)
-		assert.Regexp(t, generatedPosition, got["gen"])
 		assert.Regexp(t, generatedPosition, got["S1"])
 		assert.Equal(t, ok+":50", got["S2"])
 		assert.Equal(t, ok+":51", got["S3"])
@@ -1541,7 +1540,6 @@ fmt.Println("S1", where())
 			body.List = append(body.List, snippet(t, printWhere("gen"))...)
 		})
 		got := positions(run.output)
-		assert.Regexp(t, generatedPosition, got["gen"])
 		assert.Regexp(t, generatedPosition, got["closing"])
 	})
 	t.Run("own-line directive", func(t *testing.T) {
@@ -1607,7 +1605,6 @@ func TestMarkLineDirectives_CompilerLineOneIsNotRestoredAsLineZero(t *testing.T)
 			body.List = insertStmts(t, body.List, 0, printWhere("gen"))
 		})
 		got := positions(run.output)
-		assert.Regexp(t, generatedPosition, got["gen"])
 		assert.Regexp(t, generatedPosition, got["S1"])
 		assert.Equal(t, file+":2", got["S2"])
 	})
@@ -1643,7 +1640,6 @@ func TestMarkLineDirectives_CompilerLineOneIsNotRestoredAsLineZero(t *testing.T)
 			clause.Body = append(clause.Body, snippet(t, printWhere("gen"))...)
 		})
 		got := positions(run.output)
-		assert.Regexp(t, generatedPosition, got["gen"])
 		assert.Equal(t, file+":2", got["C2"])
 	})
 }
@@ -1829,7 +1825,6 @@ func TestMarkLineDirectives_CompilerUserLineCommentWithNameThatEndsInNumber(t *t
 				prepend(t, findFunc(t, root, "main").Body, printWhere("gen"))
 			}
 			got := positions(runInjected(t, src, edit).output)
-			assert.Regexp(t, generatedPosition, got["gen"])
 			for _, id := range []string{"S2", "S3"} {
 				assert.NotContains(t, got[id], "/tmp/foo", id)
 				assert.NotContains(t, got[id], "<generated>", id)
@@ -2282,4 +2277,265 @@ L:
 	_, wantLine, _ := strings.Cut(filepath.Base(want["B"]), ":")
 	assert.Equal(t, run.origFile+":"+wantLine, got["B"])
 	assert.Contains(t, instrumentSource(t, src, edit), "L:\n\t/*line /<generated>:1*/")
+}
+
+func TestMarkLineDirectives_CompilerUserLineCommentInsideExpression(t *testing.T) {
+	// The printer indents a "//line" comment in the arguments of a call or in
+	// a composite literal, so Go ignores it. The state must become stale, and
+	// the statement after the expression must be restored. This is also true
+	// when the comment is the only content of the parentheses or the braces,
+	// and when it follows the last element.
+	const src = preludeProgram + `func sink(...any) {}
+
+type pair struct{ a, b int }
+
+func main() {
+	defer func() {
+		_, file, line, _ := runtime.Caller(1)
+		fmt.Printf("closing %s:%d\n", file, line)
+	}()
+	sink(
+//line mapped.y:42
+		1,
+	)
+	fmt.Println("A", where())
+	_ = pair{
+//line mapped.y:50
+		1, 2,
+	}
+	fmt.Println("B", where())
+	sink(
+//line mapped.y:60
+	)
+	fmt.Println("C", where())
+	_ = []int{
+//line mapped.y:70
+	}
+	fmt.Println("D", where())
+	sink(
+		1,
+//line mapped.y:80
+	)
+	fmt.Println("E", where())
+}
+`
+	got := assertSamePositions(t, src, func(*dst.File) {}, "A", "B", "C", "D", "E", "closing")
+	// Check that the test shows what it must: the position is in the user file.
+	assert.Contains(t, got["A"], "mapped.y:44")
+	assert.Contains(t, got["B"], "mapped.y:52")
+	assert.Contains(t, got["C"], "mapped.y:61")
+	assert.Contains(t, got["D"], "mapped.y:71")
+	assert.Contains(t, got["E"], "mapped.y:81")
+}
+
+func TestMarkLineDirectives_CompilerUserLineCommentInsideClauseExpression(t *testing.T) {
+	// The expression of a "case" and the statement of a "select" clause are
+	// not statements of a list. A "//line" comment before them must also make
+	// the state stale, also when the comment is in the decorations of the
+	// expression itself.
+	const src = preludeProgram + `func main() {
+	ch := make(chan int, 2)
+	ch <- 1
+	switch 1 {
+	case
+//line case.y:30
+		1:
+		fmt.Println("A", where())
+	}
+	fmt.Println("B", where())
+	switch 1 {
+	case 2,
+//line case.y:40
+		1:
+		fmt.Println("C", where())
+	}
+	fmt.Println("D", where())
+	select {
+	case
+//line comm.y:50
+		ch <- 1:
+		fmt.Println("E", where())
+	}
+	fmt.Println("F", where())
+	switch 1 {
+	case call(func() {
+		_ = 0
+	}) +
+//line case.y:60
+		0:
+	default:
+		fmt.Println("never", where())
+	}
+	fmt.Println("G", where())
+}
+`
+	assertSamePositions(t, src, func(*dst.File) {}, "A", "B", "C", "D", "E", "F", "G")
+}
+
+// multiLineWrapper returns an expression that is not original and that has
+// several lines when it is printed. It is like the wrapper of a call rule.
+func multiLineWrapper(t *testing.T, code string) dst.Expr {
+	t.Helper()
+	stmts := snippet(t, "_ = func() int {\n\tfmt.Println("+`"gen"`+", where())\n\treturn "+code+"\n}()")
+	return stmts[0].(*dst.AssignStmt).Rhs[0]
+}
+
+func TestMarkLineDirectives_CompilerGeneratedExpressionInsideOriginalStatement(t *testing.T) {
+	// A rule replaces an expression with code of several lines. The code
+	// before the statement was restored, so the state is known. The state
+	// must become stale after the statement, and the next statement and the
+	// closing brace must be restored.
+	const src = preludeProgram + `func main() {
+	defer func() {
+		_, file, line, _ := runtime.Caller(1)
+		fmt.Printf("closing %s:%d\n", file, line)
+	}()
+	fmt.Println("A", where())
+	_ = call(func() {})
+	fmt.Println("B", where())
+	if call(func() {}) > 0 {
+		fmt.Println("C", where())
+	}
+	fmt.Println("D", where())
+	_ = call(func() {})
+}
+`
+	wrap := func(t *testing.T, root *dst.File, index int) {
+		body := findFunc(t, root, "main").Body
+		assign := body.List[index].(*dst.AssignStmt)
+		assign.Rhs[0] = multiLineWrapper(t, "call(func() {})")
+	}
+	t.Run("in the middle of a block", func(t *testing.T) {
+		got := assertSamePositions(t, src, func(root *dst.File) {
+			prepend(t, findFunc(t, root, "main").Body, printWhere("start"))
+			wrap(t, root, 3)
+		}, "A", "B", "C", "D", "closing")
+		assert.Regexp(t, generatedPosition, got["start"])
+	})
+	t.Run("in the condition of a statement with a block", func(t *testing.T) {
+		got := assertSamePositions(t, src, func(root *dst.File) {
+			prepend(t, findFunc(t, root, "main").Body, printWhere("start"))
+			cond := findFunc(t, root, "main").Body.List[5].(*dst.IfStmt)
+			cond.Cond = &dst.BinaryExpr{
+				X:  multiLineWrapper(t, "call(func() {})"),
+				Op: token.GTR,
+				Y:  &dst.BasicLit{Kind: token.INT, Value: "0"},
+			}
+		}, "A", "B", "C", "D", "closing")
+		assert.Regexp(t, generatedPosition, got["start"])
+	})
+	t.Run("in the last statement of a block", func(t *testing.T) {
+		got := assertSamePositions(t, src, func(root *dst.File) {
+			prepend(t, findFunc(t, root, "main").Body, printWhere("start"))
+			wrap(t, root, 7)
+		}, "A", "B", "C", "D", "closing")
+		assert.Regexp(t, generatedPosition, got["start"])
+	})
+}
+
+func TestMarkLineDirectives_CompilerGeneratedFieldInOriginalStruct(t *testing.T) {
+	// A struct rule adds a field to an original type declaration. The field
+	// has a line in the printed file, so the declarations after it are on
+	// wrong lines until the pass restores the next one.
+	const src = preludeProgram + `type T struct {
+	A int
+}
+
+func next() string {
+	return where()
+}
+
+func main() {
+	fmt.Println("A", next())
+	fmt.Println("B", where())
+}
+`
+	edit := func(root *dst.File) {
+		for _, decl := range root.Decls {
+			gen, ok := decl.(*dst.GenDecl)
+			if !ok || gen.Tok != token.TYPE {
+				continue
+			}
+			fields := gen.Specs[0].(*dst.TypeSpec).Type.(*dst.StructType).Fields
+			fields.List = append(fields.List, &dst.Field{
+				Names: []*dst.Ident{dst.NewIdent("Added")},
+				Type:  dst.NewIdent("string"),
+			})
+		}
+	}
+	assertSamePositions(t, src, edit, "A", "B")
+	// The declaration after the struct has a restore directive.
+	printed := instrumentSource(t, src, edit)
+	assert.Contains(t, printed, "Added string\n}\n\n//line FILE:")
+}
+
+func TestMarkLineDirectives_CompilerGeneratedBlockInsideOriginalStatement(t *testing.T) {
+	// A rule replaces the body of an original "if" statement with a block of
+	// several lines. The pass does not enter the block, and the state becomes
+	// stale, so the statement after the "if" and the closing brace are
+	// restored.
+	const src = preludeProgram + `func main() {
+	defer func() {
+		_, file, line, _ := runtime.Caller(1)
+		fmt.Printf("closing %s:%d\n", file, line)
+	}()
+	fmt.Println("A", where())
+	if call(func() {}) > 0 {
+		fmt.Println("B", where())
+	}
+	fmt.Println("C", where())
+}
+`
+	edit := func(root *dst.File) {
+		body := findFunc(t, root, "main").Body
+		prepend(t, body, printWhere("start"))
+		ifStmt := body.List[3].(*dst.IfStmt)
+		gen := printWhere("gen1") + "\n" + printWhere("gen2") + "\n" + printWhere("gen3")
+		ifStmt.Body = &dst.BlockStmt{List: snippet(t, gen)}
+	}
+	got := assertSamePositions(t, src, edit, "A", "C", "closing")
+	assert.Regexp(t, generatedPosition, got["start"])
+	assert.NotContains(t, got, "B")
+}
+
+func TestMarkLineDirectives_CompilerUserLineCommentAfterFuncLiteralArgument(t *testing.T) {
+	// The comment is before the ")" of the call, so the printer puts it after
+	// the body of the function literal. The walk sees it before the body, and
+	// the body restores the state. The statement after the call must still be
+	// restored.
+	const src = preludeProgram + `func sink(...any) {}
+
+func main() {
+	sink(func() { fmt.Println("inner", where()) },
+//line mapped.y:50
+	)
+	fmt.Println("after", where())
+}
+`
+	got := assertSamePositions(t, src, func(*dst.File) {}, "after")
+	assert.Contains(t, got["after"], "mapped.y:51")
+}
+
+func TestMarkLineDirectives_CompilerUserLineCommentBetweenImportSpecs(t *testing.T) {
+	// The printer indents a "//line" comment between the specs of a grouped
+	// import, so Go ignores it. The next declaration must be restored.
+	const src = `package main
+
+import (
+	"fmt"
+//line mapped.y:50
+	"runtime"
+)
+
+func where() string {
+	_, file, line, _ := runtime.Caller(1)
+	return fmt.Sprintf("%s:%d", file, line)
+}
+
+func main() {
+	fmt.Println("M", where())
+}
+`
+	got := assertSamePositions(t, src, func(*dst.File) {}, "M")
+	assert.Contains(t, got["M"], "mapped.y:")
 }

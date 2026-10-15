@@ -13,5 +13,5 @@ func main() {
 	s := MyStruct{Field: 42}
 	// Test wrapping a call with a complex nested expression
 	size := (func() uintptr { return unsafe.Sizeof(s) })()
-	println(size)
+	/*line /golden/work/main.go:16*/ println(size)
 }

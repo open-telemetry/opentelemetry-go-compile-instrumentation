@@ -9,4 +9,5 @@ func divide(a int, b int) (_unnamedRetVal0 int, _unnamedRetVal1 error) {
 	/*line /golden/work/main.go:7*/ return a / b, nil
 }
 
+//line /golden/work/main.go:10
 func main() { divide(4, 2) }

@@ -12,8 +12,10 @@ import (
 //line /golden/work/main.go:8
 type T struct{ ExternalTag wrapper.Tag }
 
+//line /golden/work/main.go:10
 var GlobalVar interface{} = wrapper.WrapValue("original")
 
+//line /golden/work/main.go:12
 func RawFunc() {
 	/*line /<generated>:1*/ wrapper.Log("raw instrumented")
 	/*line /golden/work/main.go:13*/ println("raw func body")
@@ -28,10 +30,10 @@ func DirectiveFunc() {
 func CallSizeof() {
 	x := 42
 	size := wrapper.Wrapper(unsafe.Sizeof(x))
-	_ = size
+	/*line /golden/work/main.go:24*/ _ = size
 }
 
 func main() {
 	y := "hello"
-	_ = wrapper.Wrapper(unsafe.Sizeof(y))
+	_ = wrapper.Wrapper(unsafe.Sizeof(y)) /*line /golden/work/main.go:29*/
 }

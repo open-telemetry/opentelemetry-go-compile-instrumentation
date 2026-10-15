@@ -15,6 +15,7 @@ func GenericFunc[T any](p1 []T, p2 ...T) (_unnamedRetVal_1523734358_0 []T, _unna
 	/*line /golden/work/main.go:7*/ return p1, nil
 }
 
+//line /golden/work/main.go:10
 type GenStruct[T any] struct {
 	value T
 }

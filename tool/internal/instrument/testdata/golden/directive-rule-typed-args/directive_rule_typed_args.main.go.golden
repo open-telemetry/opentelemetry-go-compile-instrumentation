@@ -13,4 +13,5 @@ func divide(ctx context.Context, a int, b int) (_unnamedRetVal_2257724966_0 int,
 	/*line /golden/work/main.go:10*/ return a / b, nil
 }
 
+//line /golden/work/main.go:13
 func main() { divide(context.Background(), 4, 2) }

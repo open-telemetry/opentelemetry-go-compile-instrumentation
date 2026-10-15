@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"go/token"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"unicode/utf8"
 
@@ -98,6 +99,19 @@ import (
 //   - A user "//line" comment between a label and its statement is in the
 //     decorations of the statement. The statement gets a restore directive.
 //
+// Code in an original statement can also move the lines. This is the case for
+// a node that is not original (for example, the wrapper that a call rule puts
+// around a call, or a field that a struct rule adds to a type declaration),
+// and for a user "//line" comment inside an expression (for example, in the
+// arguments of a call). The pass finds this code in the statement, but not in
+// a block of the statement. A known state becomes "stale" when the pass finds
+// it, and again after the statement, because some comments of a node are
+// printed after its blocks. So the next original node, the closing brace of
+// the block, or the next top-level declaration is restored. A user "//line"
+// comment between the specs of a grouped import makes the next declaration
+// restored in the same way. The generated code itself is not marked:
+// it keeps the lines of the statement. This is a known limit.
+//
 // A stale state is like a generated state, but the code is still in the user
 // file. So the pass does not write a "<generated>" directive for it, unless a
 // generated node follows. A "/*line*/" comment of the user is not changed: it
@@ -143,6 +157,9 @@ type lineDirectivePass struct {
 	dir string
 	// generated is the file name of the generated code in a directive.
 	generated string
+	// decorationFields holds, for each type of node decorations, the indexes
+	// of the fields that are lists of decorations (see hasUserDirectiveInside).
+	decorationFields map[reflect.Type][]int
 }
 
 // generatedFile returns the file name that line directives give to generated
@@ -171,7 +188,12 @@ func generatedFileOnVolume(volume string) string {
 // markLineDirectives adds the line directives to root. parser must be the
 // parser that read the original file at path file, and file must be absolute.
 func markLineDirectives(parser *ast.AstParser, root *dst.File, file string) {
-	p := &lineDirectivePass{parser: parser, dir: filepath.Dir(file), generated: generatedFile(file)}
+	p := &lineDirectivePass{
+		parser:           parser,
+		dir:              filepath.Dir(file),
+		generated:        generatedFile(file),
+		decorationFields: map[reflect.Type][]int{},
+	}
 	state := lineKnown
 	for _, decl := range root.Decls {
 		original := p.stepDecl(decl, &state)
@@ -187,6 +209,10 @@ func markLineDirectives(parser *ast.AstParser, root *dst.File, file string) {
 			for _, spec := range gen.Specs {
 				if _, ok = p.parser.OriginalPosition(spec); !ok {
 					state = lineGenerated
+				} else if p.hasUserDirectiveInside(spec, true, true) {
+					// The printer indents a user "//line" comment between
+					// the specs, so Go ignores it.
+					p.markStale(&state)
 				}
 			}
 			continue
@@ -333,24 +359,111 @@ func prependDeclDirective(decl dst.Decl, directive string) {
 	decs.Start.Append(directive)
 }
 
-// children processes the blocks that are inside the original node n, in source
-// order. It does not enter a node that is not original, as all its code is
-// generated. state is the state before n. When children returns, state is the
-// state after the last block of n. It is not lineKnown when that block ended
-// in code with a wrong position, and the directive for its closing brace was
-// not written. Then the caller must restore the code that follows n.
+// children processes the code that is inside the original node n, in source
+// order. It processes the blocks, and it looks for code that moves the lines
+// of the printed file:
+//
+//   - A node that is not original (for example an expression or a block that
+//     a rule added). Its number of lines is not known, so the code after it
+//     has a wrong position. The pass does not enter this node.
+//   - A user "//line" comment inside an expression, for example in the
+//     arguments of a call. The printer indents it, so Go ignores it.
+//
+// For both, a known state becomes stale, and the next original node (or the
+// closing brace of the block) is restored. The code that was added is not
+// marked. This is a known limit: it stays in the position of the user file.
+// The decorations of n itself (Start and End) are not checked: step and list
+// do that.
+//
+// state is the state before n. When children returns, state is the state
+// after the last part of n. It is not lineKnown when that part ended in code
+// with a wrong position, and the directive for its closing brace was not
+// written. Then the caller must restore the code that follows n.
 func (p *lineDirectivePass) children(n dst.Node, state *lineState) {
+	// The Start decorations of the statement of a label are handled by
+	// stepLabeled.
+	var labeled dst.Node
+	// found is true when n has generated code or a user "//line" comment. Some
+	// decorations of a node are printed after its child blocks (for example the
+	// comment before ")" of a call), but Inspect sees them before. So the state
+	// is also made stale after the walk: the code after n is then restored.
+	found := false
 	dst.Inspect(n, func(c dst.Node) bool {
-		block, ok := c.(*dst.BlockStmt)
-		if !ok {
-			return true
+		if c == nil {
+			return false
 		}
-		p.block(block, state)
-		return false
+		if block, ok := c.(*dst.BlockStmt); ok {
+			p.block(block, state)
+			return false
+		}
+		if _, original := p.parser.OriginalPosition(c); !original {
+			found = true
+			p.markStale(state)
+			return false
+		}
+		if p.hasUserDirectiveInside(c, c != n && c != labeled, c != n) {
+			found = true
+			p.markStale(state)
+		}
+		if l, ok := c.(*dst.LabeledStmt); ok {
+			labeled = l.Stmt
+		}
+		return true
 	})
+	if found {
+		p.markStale(state)
+	}
 }
 
-// block processes the statements of an original block. state is the state
+// markStale changes a known state to stale. A generated state does not change.
+func (*lineDirectivePass) markStale(state *lineState) {
+	if *state == lineKnown {
+		*state = lineStale
+	}
+}
+
+// operand is like children, for an expression or a statement in the header of
+// a clause. No other function looks at its Start. Its End cannot have a user
+// "//line" comment, because a newline before the ":" is not valid.
+func (p *lineDirectivePass) operand(expr dst.Node, state *lineState) {
+	if hasUserLineDirective(expr.Decorations().Start, true) {
+		p.markStale(state)
+	}
+	p.children(expr, state)
+}
+
+// hasUserDirectiveInside reports whether the decorations of n hold a user
+// "//line" comment. The nodes keep some comments in fields of their own, for
+// example the comment after "(" of a call, so the function reads all the
+// fields of the type dst.Decorations. It reads Start only when start is true,
+// and End only when end is true.
+func (p *lineDirectivePass) hasUserDirectiveInside(n dst.Node, start, end bool) bool {
+	decs := n.Decorations()
+	if start && hasUserLineDirective(decs.Start, true) || end && hasUserLineDirective(decs.End, false) {
+		return true
+	}
+	inner := reflect.ValueOf(n).Elem().FieldByName("Decs")
+	typ := inner.Type()
+	fields, ok := p.decorationFields[typ]
+	if !ok {
+		for i := range typ.NumField() {
+			if typ.Field(i).Type == reflect.TypeFor[dst.Decorations]() {
+				fields = append(fields, i)
+			}
+		}
+		p.decorationFields[typ] = fields
+	}
+	for _, i := range fields {
+		list, isList := reflect.TypeAssert[dst.Decorations](inner.Field(i))
+		if isList && hasUserLineDirective(list, false) {
+			return true
+		}
+	}
+	return false
+}
+
+// block processes the statements of a block. If the block is not original,
+// it does not enter it, and a known state becomes stale. state is the state
 // before the opening brace of the block. When block returns, state is the
 // state after the closing brace: it is not lineKnown when the last token of
 // the block has a wrong position, and the directive for the closing brace was
@@ -358,6 +471,8 @@ func (p *lineDirectivePass) children(n dst.Node, state *lineState) {
 func (p *lineDirectivePass) block(block *dst.BlockStmt, state *lineState) {
 	rbrace, original := p.parser.Rbrace(block)
 	if !original {
+		// A rule added the block, so its number of lines is not known.
+		p.markStale(state)
 		return
 	}
 	if len(block.List) == 0 {
@@ -414,12 +529,12 @@ func (p *lineDirectivePass) list(stmts []dst.Stmt, state *lineState) {
 		switch clause := stmt.(type) {
 		case *dst.CaseClause:
 			for _, expr := range clause.List {
-				p.children(expr, state)
+				p.operand(expr, state)
 			}
 			p.list(clause.Body, state)
 		case *dst.CommClause:
 			if clause.Comm != nil {
-				p.children(clause.Comm, state)
+				p.operand(clause.Comm, state)
 			}
 			p.list(clause.Body, state)
 		default:

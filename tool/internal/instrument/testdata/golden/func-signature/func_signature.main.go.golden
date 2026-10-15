@@ -16,6 +16,7 @@ func Func1(p1 string, p2 int) (_unnamedRetVal_195311172_0 float32, _unnamedRetVa
 	return 0.0, nil
 }
 
+//line /golden/work/main.go:11
 func main() { Func1("hello", 123) }
 
 //line /<generated>:1

@@ -17,6 +17,7 @@ func (t *T) Func1(p1 string, p2 int) (_unnamedRetVal_3482884715_0 float32, _unna
 	/*line /golden/work/main.go:9*/ return 0.0, nil
 }
 
+//line /golden/work/main.go:12
 func (_ignoredParam_1380706877_0 T) Func3() {
 	/*line /<generated>:1*/ if OtelBeforeTrampoline_Func31380706877(&_ignoredParam_1380706877_0); false {
 	} else {

@@ -13,7 +13,7 @@ import (
 
 //line /golden/work/main.go:10
 func NewReader() *stdio.LimitedReader {
-	return &stdio.LimitedReader{R: strings.NewReader("hello"), N: 10}
+	return &stdio.LimitedReader{R: strings.NewReader("hello"), N: 10} /*line /golden/work/main.go:11*/
 }
 
 func main() {

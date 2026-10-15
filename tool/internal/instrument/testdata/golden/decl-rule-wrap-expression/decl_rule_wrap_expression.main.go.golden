@@ -11,4 +11,5 @@ func wrapTransport(t interface{}) interface{} {
 
 var DefaultTransport interface{} = wrapTransport(struct{ name string }{"default"})
 
+//line /golden/work/main.go:14
 func main() {}

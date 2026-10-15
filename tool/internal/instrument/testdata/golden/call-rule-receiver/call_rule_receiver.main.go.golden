@@ -11,7 +11,7 @@ func (h Handler) Serve(name string) {
 	(func() (int, error) {
 		println("handler recv:", h)
 		return fmt.Println("hello")
-	})()
+	})() /*line /golden/work/main.go:11*/
 }
 
 func main() { Handler("svc").Serve("world") }

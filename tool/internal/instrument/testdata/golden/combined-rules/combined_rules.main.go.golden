@@ -9,6 +9,7 @@ import _ "unsafe"
 //line /golden/work/main.go:6
 type T struct{ NewField string }
 
+//line /golden/work/main.go:8
 func Func1(p1 string, p2 int) (_unnamedRetVal_2706976935_0 float32, _unnamedRetVal_2706976935_1 error) {
 	/*line /<generated>:1*/ _ = 789
 	if hookContext2706976935, _ := OtelBeforeTrampoline_Func12706976935(&p1, &p2); false {

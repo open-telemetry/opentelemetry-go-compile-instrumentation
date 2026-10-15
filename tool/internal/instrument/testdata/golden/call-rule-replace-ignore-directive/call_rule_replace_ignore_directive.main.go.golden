@@ -33,5 +33,5 @@ func main() {
 
 	y := "hello"
 	kept := Wrapper(unsafe.Sizeof(y))
-	_ = kept
+	/*line /golden/work/main.go:21*/ _ = kept
 }
