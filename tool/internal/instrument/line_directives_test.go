@@ -2166,3 +2166,75 @@ func TestMarkLineDirectives_CompilerUserLineCommentInEmptyBlock(t *testing.T) {
 		})
 	})
 }
+
+func TestMarkLineDirectives_CompilerSelectLastClauseBeforeClosingBrace(t *testing.T) {
+	// The last clause of a select statement ends in injected code, or in a
+	// user "//line" comment. The directive for the closing brace of the select
+	// statement goes after the last statement of the clause body.
+	const src = preludeProgram + `func main() {
+	defer func() {
+		_, file, line, _ := runtime.Caller(1)
+		fmt.Printf("closing %s:%d\n", file, line)
+	}()
+	ch := make(chan int, 2)
+	ch <- 1
+	ch <- 2
+	select {
+	case <-ch:
+		fmt.Println("A", where())
+	}
+	fmt.Println("B", where())
+	select {
+	case <-ch:
+		fmt.Println("C", where())
+//line s.y:40
+	}
+	fmt.Println("D", where())
+}
+`
+	edit := func(root *dst.File) {
+		body := findFunc(t, root, "main").Body
+		sel := body.List[4].(*dst.SelectStmt)
+		clause := sel.Body.List[0].(*dst.CommClause)
+		clause.Body = append(clause.Body, snippet(t, printWhere("gen"))...)
+	}
+	got := assertSamePositions(t, src, edit, "A", "B", "C", "D", "closing")
+	assert.Regexp(t, `/<generated>:\d+$`, got["gen"])
+	// The comment gives line 40 to the closing brace, so D is at line 41.
+	assert.Contains(t, got["D"], "s.y:41")
+
+	// The directive is in the clause body, just before the closing brace.
+	printed := instrumentSource(t, src, edit)
+	assert.Regexp(t,
+		`\t\t/\*line <generated>:1\*/ fmt\.Println\("gen", where\(\)\) `+
+			`/\*line FILE:\d+\*/\n\t}\n\tfmt\.Println\("B"`,
+		printed)
+}
+
+func TestMarkLineDirectives_CompilerBlankLineBeforeRestoredClosingBrace(t *testing.T) {
+	// The injected statement is the last in its block, and a blank line
+	// follows it. The directive for the closing brace applies to the next
+	// newline, so the pass removes the blank line. Else the brace and the
+	// code after it are one line too low.
+	const src = preludeProgram + `func main() {
+	defer func() {
+		_, file, line, _ := runtime.Caller(1)
+		fmt.Printf("closing %s:%d\n", file, line)
+	}()
+	if len(fmt.Sprint()) == 0 {
+		fmt.Println("A", where())
+	}
+	fmt.Println("B", where())
+}
+`
+	edit := func(root *dst.File) {
+		body := findFunc(t, root, "main").Body
+		ifBody := body.List[1].(*dst.IfStmt).Body
+		gen := snippet(t, printWhere("gen"))
+		gen[len(gen)-1].Decorations().After = dst.EmptyLine
+		ifBody.List = append(ifBody.List, gen...)
+	}
+	got := assertSamePositions(t, src, edit, "A", "B", "closing")
+	assert.Regexp(t, `/<generated>:\d+$`, got["gen"])
+	assert.NotContains(t, instrumentSource(t, src, edit), "*/\n\n", "blank line before the closing brace")
+}
