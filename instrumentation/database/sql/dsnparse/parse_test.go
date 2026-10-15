@@ -146,6 +146,20 @@ func TestParseDSN_Postgres(t *testing.T) {
 			wantPort: "5433",
 			wantDB:   "mydb",
 		},
+		{
+			name:     "libpq empty first port keeps the default",
+			dsn:      "host=h1,h2 port=,5433 dbname=mydb",
+			wantHost: "h1",
+			wantPort: "5432",
+			wantDB:   "mydb",
+		},
+		{
+			name:     "libpq empty first host keeps the default",
+			dsn:      "host=,h2 port=5433 dbname=mydb",
+			wantHost: "localhost",
+			wantPort: "5433",
+			wantDB:   "mydb",
+		},
 		// ---- host and port given as query parameters ----
 		{
 			name:     "url with host and port in the query",

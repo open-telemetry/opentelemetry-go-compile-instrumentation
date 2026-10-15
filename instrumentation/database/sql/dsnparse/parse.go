@@ -292,10 +292,15 @@ func parseLibpqKV(dsn string) DSNInfo {
 		}
 	nextKV:
 		switch key {
+		// An empty list entry means "use the default", so it keeps the value above.
 		case "host":
-			info.Host = firstListItem(val)
+			if h := firstListItem(val); h != "" {
+				info.Host = h
+			}
 		case "port":
-			info.Port = firstListItem(val)
+			if p := firstListItem(val); p != "" {
+				info.Port = p
+			}
 		case "dbname":
 			info.DBName = val
 		}
