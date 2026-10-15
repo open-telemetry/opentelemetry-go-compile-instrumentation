@@ -10,29 +10,24 @@ import (
 	"github.com/dave/dst"
 
 	"go.opentelemetry.io/otelc/tool/ex"
-	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // applyLitRule sets fields on every composite literal of the rule's type found
-// in the target file.
-func (ip *instrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule, root *dst.File) error {
-	importAliases := ast.ImportAliasMap(root)
+// in the target file. It reports whether it changed root.
+func (ip *instrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule, root *dst.File) (bool, error) {
+	importAliases, aliasOverrides := ip.resolveImportOverrides(root, r.Imports)
 
-	setters, err := newLitFieldSetters(r)
+	setters, err := newLitFieldSetters(r, aliasOverrides)
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	var matched []*dst.CompositeLit
-	dst.Inspect(root, func(node dst.Node) bool {
-		lit, ok := node.(*dst.CompositeLit)
-		if !ok {
-			return true
-		}
+	var matched []litWithEnclosingFunc
+	walkLiteralsWithEnclosingFunc(root, func(lit *dst.CompositeLit, enclosing *dst.FuncDecl) bool {
 		if matchesLitRule(lit, r, importAliases) {
-			matched = append(matched, lit)
+			matched = append(matched, litWithEnclosingFunc{lit: lit, enclosing: enclosing})
 		}
 		return true
 	})
@@ -41,31 +36,69 @@ func (ip *instrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule
 	// Walk matched in reverse. dst.Inspect visits a literal before the literals
 	// nested inside it, so the reverse order edits the innermost literal first
 	// and an enclosing literal always wraps a finished subtree.
-	for _, lit := range slices.Backward(matched) {
+	for _, m := range slices.Backward(matched) {
+		lit, enclosing := m.lit, m.enclosing
 		// Go rejects a literal that mixes keyed and positional elements, so a
 		// positional literal cannot take the keyed elements this rule produces.
+		// The skip also precedes the shadowing check: a literal the rule never
+		// injects code into cannot resolve a rewritten alias to a local.
 		if hasPositionalElements(lit) {
 			ip.Warn("Skipping positional composite literal; set_fields requires keyed elements",
 				"rule", r.Name, "type", r.StructLiteral)
 			continue
 		}
-		litModified, setErr := ip.setLitFields(lit, setters, r)
+		if shadowErr := checkAliasOverrideShadowing(aliasOverrides, enclosing); shadowErr != nil {
+			return false, shadowErr
+		}
+		litModified, setErr := ip.setLitFields(lit, enclosing, setters, r, aliasOverrides)
 		if setErr != nil {
-			return setErr
+			return false, setErr
 		}
 		modified = modified || litModified
 	}
 
 	if !modified {
-		return nil
+		return false, nil
 	}
 
-	if err = ip.addRuleImports(ctx, root, r.Imports, r.Name); err != nil {
-		return err
+	if err = ip.addRuleImports(ctx, root, usedRuleImports(root, r.Imports, aliasOverrides), r.Name); err != nil {
+		return false, err
 	}
 	ip.Info("Apply literal rule", "rule", r)
 
-	return nil
+	return true, nil
+}
+
+// litWithEnclosingFunc pairs a matched composite literal with the top-level
+// function that contains it.
+type litWithEnclosingFunc struct {
+	lit       *dst.CompositeLit
+	enclosing *dst.FuncDecl
+}
+
+// walkLiteralsWithEnclosingFunc visits every *dst.CompositeLit in root and invokes
+// fn with the literal and the top-level *dst.FuncDecl that contains it. Returns
+// nil for literals outside any function body, e.g. an element of a package-level
+// variable initializer.
+func walkLiteralsWithEnclosingFunc(root *dst.File, fn func(lit *dst.CompositeLit, enclosing *dst.FuncDecl) bool) {
+	stopped := false
+	for _, decl := range root.Decls {
+		if stopped {
+			return
+		}
+		enclosing, _ := decl.(*dst.FuncDecl)
+		dst.Inspect(decl, func(node dst.Node) bool {
+			if stopped {
+				return false
+			}
+			lit, ok := node.(*dst.CompositeLit)
+			if ok && !fn(lit, enclosing) {
+				stopped = true
+				return false
+			}
+			return true
+		})
+	}
 }
 
 // litFieldSetter holds a field's parsed instructions, built once per rule.
@@ -81,7 +114,7 @@ type litFieldSetter struct {
 	wrap *callTemplate
 }
 
-func newLitFieldSetters(r *rule.InstLitRule) ([]*litFieldSetter, error) {
+func newLitFieldSetters(r *rule.InstLitRule, aliasOverrides map[string]string) ([]*litFieldSetter, error) {
 	setters := make([]*litFieldSetter, 0, len(r.Field))
 	for _, f := range r.Field {
 		setter := &litFieldSetter{name: f.Name}
@@ -90,6 +123,7 @@ func newLitFieldSetters(r *rule.InstLitRule) ([]*litFieldSetter, error) {
 			if err != nil {
 				return nil, ex.Wrapf(err, "failed to parse value %q for field %q", f.Value, f.Name)
 			}
+			replaceQualifierAliases(value, aliasOverrides)
 			setter.value = value
 		}
 		if f.Wrap != "" {
@@ -147,11 +181,14 @@ func hasPositionalElements(lit *dst.CompositeLit) bool {
 
 // setLitFields applies each setter to the literal, overriding fields already
 // present in place and prepending the rest. The literal's own elements are
-// otherwise left untouched. It reports whether the literal changed.
+// otherwise left untouched. enclosing is the function containing the literal,
+// or nil for a package-level literal. It reports whether the literal changed.
 func (ip *instrumentPhase) setLitFields(
 	lit *dst.CompositeLit,
+	enclosing *dst.FuncDecl,
 	setters []*litFieldSetter,
 	r *rule.InstLitRule,
+	aliasOverrides map[string]string,
 ) (bool, error) {
 	changed := false
 	var prepend []dst.Expr
@@ -164,8 +201,10 @@ func (ip *instrumentPhase) setLitFields(
 				changed = true
 				continue
 			}
-			// Composite literal fields have no enclosing function context.
-			wrapped, err := setter.wrap.compileExpression(existing.Value, nil, nil)
+			// enclosing, when the literal sits inside a function, makes the shared
+			// function template variables ({{ .FuncArgument N }} etc.) available
+			// in the wrap template alongside {{ . }}.
+			wrapped, err := setter.wrap.compileExpression(existing.Value, enclosing, nil, aliasOverrides)
 			if err != nil {
 				return false, ex.Wrapf(err, "failed to wrap field %q of %s", setter.name, r.StructLiteral)
 			}
