@@ -205,8 +205,7 @@ func parsePostgresDSN(dsn string) DSNInfo {
 	if strings.Contains(dsn, "://") {
 		if u, err := nurl.Parse(dsn); err == nil &&
 			(u.Scheme == "postgres" || u.Scheme == "postgresql") {
-			host := u.Hostname()
-			port := u.Port()
+			host, port := postgresURLEndpoint(u)
 			if port == "" {
 				port = "5432"
 			}
@@ -215,6 +214,35 @@ func parsePostgresDSN(dsn string) DSNInfo {
 		}
 	}
 	return parseLibpqKV(dsn)
+}
+
+// postgresURLEndpoint returns the first host and port of a PostgreSQL URL.
+//
+// libpq allows a comma separated host list in the authority
+// (postgres://h1:5432,h2:5433/db) and lets the host and port be given as query
+// parameters instead (postgres:///db?host=h1&port=5433). A client tries the
+// hosts in order, so the first one is reported, the same choice as parseLibpqKV.
+func postgresURLEndpoint(u *nurl.URL) (host, port string) {
+	first, _, _ := strings.Cut(u.Host, ",")
+	if h, p, err := net.SplitHostPort(first); err == nil {
+		host, port = h, p
+	} else {
+		host = trimHostBrackets(first)
+	}
+	q := u.Query()
+	if host == "" {
+		host = firstListItem(q.Get("host"))
+	}
+	if port == "" {
+		port = firstListItem(q.Get("port"))
+	}
+	return host, port
+}
+
+// firstListItem returns the first entry of a comma separated libpq list.
+func firstListItem(list string) string {
+	first, _, _ := strings.Cut(list, ",")
+	return trimHostBrackets(strings.TrimSpace(first))
 }
 
 // parseLibpqKV parses the PostgreSQL libpq keyword=value connection string.
@@ -265,9 +293,9 @@ func parseLibpqKV(dsn string) DSNInfo {
 	nextKV:
 		switch key {
 		case "host":
-			info.Host = trimHostBrackets(val)
+			info.Host = firstListItem(val)
 		case "port":
-			info.Port = val
+			info.Port = firstListItem(val)
 		case "dbname":
 			info.DBName = val
 		}
