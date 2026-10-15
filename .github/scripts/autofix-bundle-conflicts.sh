@@ -18,22 +18,22 @@ set -EeufCo pipefail
 # push a single commit back to the branch, which clears GitHub's server-side
 # conflict indicator.
 #
-# Fork pull requests cannot be pushed to with GITHUB_TOKEN; for those we post a
-# one-time (deduplicated) comment with manual instructions instead. Fork code is
-# never checked out or executed here.
+# Fork pull requests cannot be pushed to at all (the App is not installed on
+# forks); for those we post a one-time (deduplicated) comment with manual
+# instructions instead. Fork code is never checked out or executed here.
 #
-# Pushes made with GITHUB_TOKEN do not trigger other workflows, so after a
-# successful push we re-dispatch the repository's required workflows ourselves
-# (see REQUIRED_WORKFLOWS) to report the required status checks on the new head.
+# The push is made with a GitHub App installation token rather than
+# GITHUB_TOKEN, so the normal pull_request workflows are triggered on the new
+# head and re-report the required status checks automatically.
 #
 # Required environment variables:
-#   GH_TOKEN  - GitHub token with contents:write, pull-requests:write and
-#               actions:write permissions
+#   GH_TOKEN  - GitHub App installation token with contents:write and
+#               pull-requests:write permissions
 #   REPO      - owner/name of the repository to operate on
 #
 # Optional environment variables:
-#   DRY_RUN   - set to "true" to log the planned actions without pushing,
-#               commenting, or re-dispatching workflows; useful for testing
+#   DRY_RUN   - set to "true" to log the planned actions without pushing or
+#               commenting; useful for testing
 
 : "${GH_TOKEN:?GH_TOKEN must be set}"
 : "${REPO:?REPO must be set}"
@@ -42,24 +42,24 @@ set -EeufCo pipefail
 BUNDLE="tool/data/otelc-bundle.tgz"
 MARKER="<!-- otelc-bundle-conflict-help -->"
 
-# Required-workflow files to re-dispatch after the bot pushes, because
-# GITHUB_TOKEN pushes do not trigger them. Keep this list in sync with the
-# repository's required workflows.
-REQUIRED_WORKFLOWS=(
-  verify-bundle.yaml
-  check-consistency.yaml
-  check-license-headers.yaml
-  lint-golang.yaml
-  test-unit.yaml
-  test-integration.yaml
-  test-e2e.yaml
-  test-latestlibbuild.yaml
-)
+# Attribute the merge commits to the App's bot user (which EasyCLA knows about)
+# instead of a hardcoded account.
+read -r bot_login bot_id <<<"$(gh api user --jq '[.login, (.id | tostring)] | join(" ")')"
+git config user.name "${bot_login}"
+git config user.email "${bot_id}+${bot_login}@users.noreply.github.com"
 
 git config merge.otelc-bundle.name "Keep current otelc-bundle.tgz (regenerate with make package)"
 git config merge.otelc-bundle.driver ".github/scripts/merge-bundle.sh %A"
-git config user.name "github-actions[bot]"
-git config user.email "github-actions[bot]@users.noreply.github.com"
+
+# Pin the merge-driver policy in $GIT_DIR/info/attributes, which takes
+# precedence over any .gitattributes checked out from the PR: only the bundle
+# may use the custom driver, everything else keeps git's default merge
+# behavior. Without this a same-repository PR could map its own source files to
+# the driver and have real conflicts silently resolved in its favor.
+git_dir="$(git rev-parse --git-dir)"
+mkdir -p "${git_dir}/info"
+printf '%s\n%s\n' '* !merge' 'tool/data/otelc-bundle.tgz merge=otelc-bundle' \
+  >"${git_dir}/info/attributes"
 
 git fetch --force origin main
 
@@ -89,10 +89,12 @@ while IFS= read -r num; do
   fi
 
   if [[ "${cross}" == "true" ]]; then
-    # Fork PR: never check out or execute fork code, and GITHUB_TOKEN cannot
+    # Fork PR: never check out or execute fork code, and the App's token cannot
     # push to the fork. Post a one-time comment with manual instructions.
-    if gh pr view "${num}" --repo "${REPO}" --json comments --jq '.comments[].body' \
-      | grep -Fq "${MARKER}"; then
+    # Capture the bodies into a variable instead of piping into grep: with
+    # pipefail, grep exiting early on a match would kill the pipeline.
+    comments="$(gh pr view "${num}" --repo "${REPO}" --json comments --jq '.comments[].body')"
+    if [[ "${comments}" == *"${MARKER}"* ]]; then
       echo "help comment already present; not reposting"
     elif [[ "${DRY_RUN}" == "true" ]]; then
       echo "dry run: would post a one-time help comment"
@@ -100,9 +102,12 @@ while IFS= read -r num; do
       echo "posting help comment"
       body="$(cat <<'EOF'
 <!-- otelc-bundle-conflict-help -->
-This pull request conflicts with `main` on `tool/data/otelc-bundle.tgz`, a binary
-archive that is regenerated from the sources. The bot cannot fix fork pull
-requests (GITHUB_TOKEN cannot push to your fork), so please merge main locally:
+This pull request has merge conflicts with `main`, and the bot cannot fix fork
+pull requests (its token is only valid on this repository), so please merge
+`main` locally and resolve any source conflicts yourself. If the merge stops on
+`tool/data/otelc-bundle.tgz` — a binary archive that is regenerated from the
+sources — you can keep the local copy to let the merge proceed and regenerate
+it afterwards:
 
 ```sh
 git fetch origin main
@@ -162,15 +167,20 @@ EOF
   fi
 
   git add -- "${BUNDLE}"
-  if git diff --quiet --cached; then
-    echo "merge produced no changes; nothing to push"
+  # Only skip when there is no merge in progress AND nothing is staged: with a
+  # merge in progress the index may equal HEAD (e.g. the only changes were
+  # already contained in the branch) yet the merge commit still needs to be
+  # recorded so GitHub re-evaluates the conflict.
+  if ! git rev-parse -q --verify MERGE_HEAD >/dev/null \
+    && git diff --quiet --cached; then
+    echo "nothing to merge and nothing staged; nothing to push"
     git merge --abort >/dev/null 2>&1 || true
     echo "::endgroup::"
     continue
   fi
 
   if [[ "${DRY_RUN}" == "true" ]]; then
-    echo "dry run: would commit and push 'chore: merge main and regenerate ${BUNDLE}' to '${branch}', then re-dispatch: ${REQUIRED_WORKFLOWS[*]}"
+    echo "dry run: would commit and push 'chore: merge main and regenerate ${BUNDLE}' to '${branch}'"
     git merge --abort >/dev/null 2>&1 || true
     git reset --hard --quiet
     git clean -ffdxq
@@ -190,12 +200,9 @@ EOF
   fi
 
   if git push origin "HEAD:refs/heads/${branch}"; then
+    # The App token triggers the normal pull_request workflows on the new
+    # head, so the required status checks re-report themselves.
     echo "pushed merge commit to '${branch}'"
-    for wf in "${REQUIRED_WORKFLOWS[@]}"; do
-      if ! gh workflow run "${wf}" --repo "${REPO}" --ref "${branch}"; then
-        echo "::warning::failed to dispatch ${wf} on '${branch}'"
-      fi
-    done
   else
     echo "push rejected (branch moved meanwhile); skipping"
   fi

@@ -195,8 +195,9 @@ automatically. It runs on every push to `main`, hourly, and on demand:
   regenerates the bundle, and pushes a single
   `chore: merge main and regenerate otelc-bundle.tgz` commit. No action is
   needed from the author.
-- For **fork** pull requests it cannot push (GITHUB_TOKEN cannot write to
-  forks), so it posts a one-time comment with the manual steps above.
+- For **fork** pull requests it cannot push at all (the bot's GitHub App is not
+  installed on forks), so it posts a one-time comment with the manual steps
+  above.
 - The `/regenerate-bundle` comment command merges `main` first as well, so it
   clears the conflict and refreshes the bundle in one step.
 - To observe the workflow without side effects, trigger it manually from the
@@ -209,9 +210,10 @@ Notes:
   does **not** use your local merge driver. The automatic workflow above clears
   it by pushing an up-to-date branch; for fork PRs, merge `main` locally as
   shown above and push.
-- Pushes made with `GITHUB_TOKEN` do not trigger other workflows, so the
-  automatic workflow re-dispatches the required status checks itself after
-  pushing.
+- The push is made with the `otelbot` GitHub App installation token rather than
+  `GITHUB_TOKEN` (whose pushes do not trigger other workflows), so the normal
+  `pull_request` workflows run on the new head and the required status checks
+  re-report themselves.
 - The `verify-bundle` CI guarantees the committed bundle matches the sources, so
   a forgotten `make package` fails CI rather than shipping a stale bundle.
   Maintainers can also comment `/regenerate-bundle` on a PR to auto-fix it.
