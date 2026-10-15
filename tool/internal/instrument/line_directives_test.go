@@ -2249,3 +2249,37 @@ func TestGeneratedFile(t *testing.T) {
 	assert.Equal(t, "/<generated>", generatedFile("/work/dir/main.go"))
 	assert.True(t, filepath.IsAbs(generatedFile("/work/dir/main.go")))
 }
+
+func TestGeneratedFileOnUnsafeVolume(t *testing.T) {
+	// A volume that is not safe in a comment gives the relative name, which
+	// is always safe.
+	assert.Equal(t, generatedName, generatedFileOnVolume("bad\nvolume"))
+	assert.Equal(t, generatedName, generatedFileOnVolume("bad*/volume"))
+}
+
+func TestMarkLineDirectives_CompilerGeneratedStatementOfOriginalLabel(t *testing.T) {
+	// A rule replaces the statement of an original label with generated code.
+	// The generated statement is marked, and the original statement after it
+	// is restored.
+	const src = preludeProgram + `func main() {
+L:
+	for range 1 {
+		fmt.Println("A", where())
+		break L
+	}
+	fmt.Println("B", where())
+}
+`
+	edit := func(root *dst.File) {
+		labeled := findFunc(t, root, "main").Body.List[0].(*dst.LabeledStmt)
+		labeled.Stmt = snippet(t, "for range 1 {\n"+printWhere("gen")+"\nbreak L\n}")[0]
+	}
+	want := positions(runOriginal(t, src))
+	run := runInjected(t, src, edit)
+	got := positions(run.output)
+	assert.Regexp(t, generatedPosition, got["gen"])
+	// B is restored in the original file, with its original line.
+	_, wantLine, _ := strings.Cut(filepath.Base(want["B"]), ":")
+	assert.Equal(t, run.origFile+":"+wantLine, got["B"])
+	assert.Contains(t, instrumentSource(t, src, edit), "L:\n\t/*line /<generated>:1*/")
+}

@@ -5,6 +5,7 @@ package ast
 
 import (
 	"errors"
+	goast "go/ast"
 	"go/parser"
 	"go/token"
 	"os"
@@ -100,6 +101,26 @@ func TestOriginalPosition(t *testing.T) {
 		stmts, snippetErr := p.ParseSnippet("baz()")
 		require.NoError(t, snippetErr)
 		_, ok := p.OriginalPosition(stmts[0])
+		assert.False(t, ok)
+	})
+
+	t.Run("source of the same parser that Parse did not read", func(t *testing.T) {
+		// ParseSource uses the same decorator, so the node is in the map. But
+		// its position is in a file that Parse did not read.
+		other, srcErr := p.ParseSource("package main\n\nfunc Other() {}\n")
+		require.NoError(t, srcErr)
+		otherFn := FindFuncDeclWithoutRecv(other, "Other")
+		require.NotNil(t, otherFn)
+		_, ok := p.OriginalPosition(otherFn)
+		assert.False(t, ok)
+		_, ok = p.Rbrace(otherFn.Body)
+		assert.False(t, ok)
+	})
+
+	t.Run("node without a position", func(t *testing.T) {
+		node := Ident("noPos")
+		p.dec.Ast.Nodes[node] = &goast.Ident{Name: "noPos"}
+		_, ok := p.OriginalPosition(node)
 		assert.False(t, ok)
 	})
 

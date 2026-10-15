@@ -154,7 +154,14 @@ type lineDirectivePass struct {
 // is "/<generated>". If the name is not safe in a comment, the function
 // returns "<generated>".
 func generatedFile(absFile string) string {
-	name := filepath.VolumeName(absFile) + string(filepath.Separator) + generatedName
+	return generatedFileOnVolume(filepath.VolumeName(absFile))
+}
+
+// generatedFileOnVolume returns the generated file name at the root of
+// volume. It is separate from generatedFile, so that a test can give a volume
+// that is not safe on every OS.
+func generatedFileOnVolume(volume string) string {
+	name := volume + string(filepath.Separator) + generatedName
 	if !safeDirectiveFile(name) {
 		return generatedName
 	}
@@ -238,6 +245,9 @@ func (p *lineDirectivePass) stepLabeled(labeled *dst.LabeledStmt, labelRestored 
 	inner := labeled.Stmt
 	pos, original := p.parser.OriginalPosition(inner)
 	if !original {
+		// A rule replaced the statement of the label with generated code.
+		// Mark it like a generated statement in a list.
+		p.step(inner, nil, state)
 		return
 	}
 	restored := false

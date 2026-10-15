@@ -52,9 +52,7 @@ func (ap *AstParser) Parse(filePath string, mode parser.Mode) (*dst.File, error)
 	if err != nil {
 		return nil, ex.Wrapf(err, "failed to parse file %s", filePath)
 	}
-	if tf := ap.fset.File(astFile.Package); tf != nil {
-		ap.parsed[tf] = struct{}{}
-	}
+	ap.parsed[ap.fset.File(astFile.Package)] = struct{}{}
 	// Skip DST decoration when only the package clause is needed; decoration
 	// is expensive and unnecessary when the caller only reads astFile.Name.
 	if mode == parser.PackageClauseOnly {
