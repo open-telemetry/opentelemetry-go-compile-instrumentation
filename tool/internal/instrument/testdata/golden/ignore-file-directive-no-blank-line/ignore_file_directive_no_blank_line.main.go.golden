@@ -4,7 +4,7 @@
 //otelc:ignore
 package main
 
-//line <generated>:1
+//line /<generated>:1
 import _ "unsafe"
 
 //line /golden/work/main.go:7
@@ -12,7 +12,7 @@ func SkippedFunc(p1 string) {}
 
 //otelc:instrument
 func ForcedFunc(p1 string) {
-	/*line <generated>:1*/ if hookContext3499725793, _ := OtelBeforeTrampoline_ForcedFunc3499725793(&p1); false {
+	/*line /<generated>:1*/ if hookContext3499725793, _ := OtelBeforeTrampoline_ForcedFunc3499725793(&p1); false {
 	} else {
 		defer OtelAfterTrampoline_ForcedFunc3499725793(hookContext3499725793)
 	} /*line /golden/work/main.go:9*/
@@ -20,7 +20,7 @@ func ForcedFunc(p1 string) {
 
 func main() {}
 
-//line <generated>:1
+//line /<generated>:1
 type HookContextImpl3499725793 struct {
 	params      []interface{}
 	returnVals  []interface{}

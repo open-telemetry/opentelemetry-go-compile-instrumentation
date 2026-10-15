@@ -17,7 +17,7 @@ func Wrapper(size uintptr) uintptr {
 
 func main() {
 	x := 42
-	/*line <generated>:1*/ runtime.SuppressHooks()
+	/*line /<generated>:1*/ runtime.SuppressHooks()
 	otelcIgnoreDone0 := false
 	defer func() {
 		if !otelcIgnoreDone0 {
@@ -27,7 +27,7 @@ func main() {
 	//otelc:ignore
 	/*line /golden/work/main.go:15*/
 	ignored := unsafe.Sizeof(x)
-	/*line <generated>:1*/ otelcIgnoreDone0 = true
+	/*line /<generated>:1*/ otelcIgnoreDone0 = true
 	runtime.UnsuppressHooks()
 	/*line /golden/work/main.go:17*/ _ = ignored
 

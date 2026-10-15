@@ -7,14 +7,14 @@
 // here even though the MySQLDriver type lives in a different backend file.
 package main
 
-//line <generated>:1
+//line /<generated>:1
 import _ "unsafe"
 
 //line /golden/work/main.go:10
 type PostgresDriver struct{}
 
 func Open(dsn string) (_unnamedRetVal_2733714658_0 error) {
-	/*line <generated>:1*/ if hookContext2733714658, _ := OtelBeforeTrampoline_Open2733714658(&dsn); false {
+	/*line /<generated>:1*/ if hookContext2733714658, _ := OtelBeforeTrampoline_Open2733714658(&dsn); false {
 	} else {
 		defer OtelAfterTrampoline_Open2733714658(hookContext2733714658, &_unnamedRetVal_2733714658_0)
 	}
@@ -22,7 +22,7 @@ func Open(dsn string) (_unnamedRetVal_2733714658_0 error) {
 	return nil
 }
 
-//line <generated>:1
+//line /<generated>:1
 type HookContextImpl2733714658 struct {
 	params      []interface{}
 	returnVals  []interface{}

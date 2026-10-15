@@ -3,12 +3,12 @@
 
 package main
 
-//line <generated>:1
+//line /<generated>:1
 import _ "unsafe"
 
 //line /golden/work/main.go:6
 func Func1(p1 string, p2 int) (_unnamedRetVal_953758814_0 float32, _unnamedRetVal_953758814_1 error) {
-	/*line <generated>:1*/ if hookContext953758814, _ := OtelBeforeTrampoline_Func1953758814(&p1, &p2); false {
+	/*line /<generated>:1*/ if hookContext953758814, _ := OtelBeforeTrampoline_Func1953758814(&p1, &p2); false {
 	} else {
 		defer OtelAfterTrampoline_Func1953758814(hookContext953758814, &_unnamedRetVal_953758814_0, &_unnamedRetVal_953758814_1)
 	}
@@ -18,7 +18,7 @@ func Func1(p1 string, p2 int) (_unnamedRetVal_953758814_0 float32, _unnamedRetVa
 
 func main() { Func1("hello", 123) }
 
-//line <generated>:1
+//line /<generated>:1
 type HookContextImpl953758814 struct {
 	params      []interface{}
 	returnVals  []interface{}

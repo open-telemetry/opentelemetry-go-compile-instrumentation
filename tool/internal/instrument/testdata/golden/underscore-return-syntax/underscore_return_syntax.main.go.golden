@@ -3,12 +3,12 @@
 
 package main
 
-//line <generated>:1
+//line /<generated>:1
 import _ "unsafe"
 
 //line /golden/work/main.go:6
 func UnderscoreReturnFunc() (_ignoredRetVal_2035128499_0 int, _ignoredRetVal_2035128499_1 error) {
-	/*line <generated>:1*/ if false {
+	/*line /<generated>:1*/ if false {
 	} else {
 		defer OtelAfterTrampoline_UnderscoreReturnFunc2035128499(&HookContextImpl2035128499{params: []interface{}{}, returnVals: []interface{}{&_ignoredRetVal_2035128499_0, &_ignoredRetVal_2035128499_1}}, &_ignoredRetVal_2035128499_0, &_ignoredRetVal_2035128499_1)
 	}
@@ -17,7 +17,7 @@ func UnderscoreReturnFunc() (_ignoredRetVal_2035128499_0 int, _ignoredRetVal_203
 
 func main() {}
 
-//line <generated>:1
+//line /<generated>:1
 type HookContextImpl2035128499 struct {
 	params      []interface{}
 	returnVals  []interface{}

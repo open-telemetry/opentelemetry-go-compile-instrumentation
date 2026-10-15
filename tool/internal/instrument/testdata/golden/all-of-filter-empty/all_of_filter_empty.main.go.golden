@@ -6,14 +6,14 @@
 // gates nothing out and Open below IS instrumented.
 package main
 
-//line <generated>:1
+//line /<generated>:1
 import _ "unsafe"
 
 //line /golden/work/main.go:9
 type Driver struct{}
 
 func Open(dsn string) (_unnamedRetVal_3522809524_0 error) {
-	/*line <generated>:1*/ if hookContext3522809524, _ := OtelBeforeTrampoline_Open3522809524(&dsn); false {
+	/*line /<generated>:1*/ if hookContext3522809524, _ := OtelBeforeTrampoline_Open3522809524(&dsn); false {
 	} else {
 		defer OtelAfterTrampoline_Open3522809524(hookContext3522809524, &_unnamedRetVal_3522809524_0)
 	}
@@ -21,7 +21,7 @@ func Open(dsn string) (_unnamedRetVal_3522809524_0 error) {
 	return nil
 }
 
-//line <generated>:1
+//line /<generated>:1
 type HookContextImpl3522809524 struct {
 	params      []interface{}
 	returnVals  []interface{}

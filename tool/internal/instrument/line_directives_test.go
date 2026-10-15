@@ -105,7 +105,7 @@ func f() {
 	want := `package main
 
 func f() {
-	/*line <generated>:1*/ gen1()
+	/*line /<generated>:1*/ gen1()
 	gen2()
 	/*line FILE:4*/ a()
 	b()
@@ -131,11 +131,11 @@ func h() {}
 	want := `package main
 
 func f() {
-	/*line <generated>:1*/ gen() /*line FILE:2*/
+	/*line /<generated>:1*/ gen() /*line FILE:2*/
 }
 
 func g() {
-	/*line <generated>:1*/ gen() /*line FILE:5*/
+	/*line /<generated>:1*/ gen() /*line FILE:5*/
 }
 
 func h() {}
@@ -162,10 +162,10 @@ func f() {
 
 func f() {
 	a()
-	/*line <generated>:1*/ genMiddle()
+	/*line /<generated>:1*/ genMiddle()
 	/*line FILE:5*/ b()
 	c()
-	/*line <generated>:1*/ genEnd() /*line FILE:6*/
+	/*line /<generated>:1*/ genEnd() /*line FILE:6*/
 }
 `
 	assert.Equal(t, want, got)
@@ -189,12 +189,12 @@ func f() {
 	want := `package main
 
 func f() {
-	/*line <generated>:1*/ gen1()
+	/*line /<generated>:1*/ gen1()
 	/*line FILE:4*/ a()
-	/*line <generated>:1*/ gen2a()
+	/*line /<generated>:1*/ gen2a()
 	gen2b()
 	/*line FILE:5*/ b()
-	/*line <generated>:1*/ gen3()
+	/*line /<generated>:1*/ gen3()
 	/*line FILE:6*/ c()
 }
 `
@@ -249,25 +249,25 @@ func f(ch chan int, x any) {
 
 func f(ch chan int, x any) {
 	if ch != nil {
-		/*line <generated>:1*/ genIf()
+		/*line /<generated>:1*/ genIf()
 		/*line FILE:5*/ a()
 	}
 	for i := 0; i < 3; i++ {
-		/*line <generated>:1*/ genFor()
+		/*line /<generated>:1*/ genFor()
 		/*line FILE:8*/ b()
 	}
 	switch {
 	case true:
-		/*line <generated>:1*/ genCase()
+		/*line /<generated>:1*/ genCase()
 		/*line FILE:12*/ c()
 	}
 	select {
 	case <-ch:
-		/*line <generated>:1*/ genComm()
+		/*line /<generated>:1*/ genComm()
 		/*line FILE:16*/ d()
 	}
 	func() {
-		/*line <generated>:1*/ genLit()
+		/*line /<generated>:1*/ genLit()
 		/*line FILE:19*/ e()
 	}()
 }
@@ -309,18 +309,18 @@ func f(ch chan int) {
 func f(ch chan int) {
 	if ch != nil {
 		a()
-		/*line <generated>:1*/ genIf() /*line FILE:5*/
+		/*line /<generated>:1*/ genIf() /*line FILE:5*/
 	} else {
 		b()
-		/*line <generated>:1*/ genElse() /*line FILE:7*/
+		/*line /<generated>:1*/ genElse() /*line FILE:7*/
 	}
 	for i := 0; i < 3; i++ {
 		c()
-		/*line <generated>:1*/ genFor() /*line FILE:10*/
+		/*line /<generated>:1*/ genFor() /*line FILE:10*/
 	}
 	g := func() {
 		d()
-		/*line <generated>:1*/ genLit() /*line FILE:13*/
+		/*line /<generated>:1*/ genLit() /*line FILE:13*/
 	}
 	g()
 }
@@ -359,13 +359,13 @@ func f(x int) {
 	switch x {
 	case 1:
 		a()
-		/*line <generated>:1*/ genFirst()
+		/*line /<generated>:1*/ genFirst()
 	/*line FILE:6*/
 	case 2:
 		b()
 	default:
 		c()
-		/*line <generated>:1*/ genLast() /*line FILE:10*/
+		/*line /<generated>:1*/ genLast() /*line FILE:10*/
 	}
 	d()
 }
@@ -396,7 +396,7 @@ func G() {}
 	})
 	want := `package main
 
-//line <generated>:1
+//line /<generated>:1
 import _ "unsafe"
 
 //line FILE:3
@@ -409,7 +409,7 @@ func F() {
 
 func G() {}
 
-//line <generated>:1
+//line /<generated>:1
 type T int
 
 func H() {}
@@ -432,7 +432,7 @@ func F() {}
 	})
 	want := `package main
 
-//line <generated>:1
+//line /<generated>:1
 import _ "unsafe"
 
 // F is documented.
@@ -450,7 +450,7 @@ func TestMarkLineDirectives_ExistingDirectiveIsNotDuplicated(t *testing.T) {
 func F() {}
 `
 	got := instrumentSource(t, src, func(root *dst.File) {
-		extra, err := ast.NewAstParser().ParseSource("package main\n\n//line <generated>:1\ntype T int\n")
+		extra, err := ast.NewAstParser().ParseSource("package main\n\n//line /<generated>:1\ntype T int\n")
 		require.NoError(t, err)
 		root.Decls = append(root.Decls, extra.Decls[0])
 	})
@@ -458,7 +458,7 @@ func F() {}
 
 func F() {}
 
-//line <generated>:1
+//line /<generated>:1
 type T int
 `
 	assert.Equal(t, want, got)
@@ -514,7 +514,7 @@ func f() {
 	want := `package main
 
 func f() {
-	/*line <generated>:1*/ if cond() {
+	/*line /<generated>:1*/ if cond() {
 		gen1()
 		gen2()
 	}
@@ -533,7 +533,7 @@ func TestMarkLineDirectives_DirectiveHasOnlyALine(t *testing.T) {
 	want := `package main
 
 func f() {
-	/*line <generated>:1*/ gen()
+	/*line /<generated>:1*/ gen()
 	/*line FILE:4*/ a()
 	b()
 }
@@ -563,7 +563,7 @@ func f() {
 
 func f() {
 	a()
-	/*line <generated>:1*/ gen()
+	/*line /<generated>:1*/ gen()
 	/*line FILE:6*/ b()
 
 	c()
@@ -591,7 +591,7 @@ func f() {
 
 func f() {
 	a()
-	/*line <generated>:1*/ gen()
+	/*line /<generated>:1*/ gen()
 	// Comment about b.
 	/*line FILE:5*/
 	b()
@@ -619,7 +619,7 @@ func f() {
 
 //line other.go:100
 func f() {
-	/*line <generated>:1*/ gen()
+	/*line /<generated>:1*/ gen()
 	/*line DIR/other.go:101*/ a()
 	b()
 }
@@ -660,7 +660,7 @@ loop:
 
 func f() {
 	a()
-	/*line <generated>:1*/ gen()
+	/*line /<generated>:1*/ gen()
 	/*line FILE:5*/ loop:
 	/*line FILE:6*/ for {
 		b()
@@ -710,7 +710,7 @@ func g() {
 		}
 	}
 	// The injected code is still marked.
-	assert.Contains(t, got, "/*line <generated>:1*/ gen1()")
+	assert.Contains(t, got, "/*line /<generated>:1*/ gen1()")
 	// gen2 and gen4 are in the same run as gen1, because the restores were
 	// skipped. They do not need a directive.
 	assert.Contains(t, got, "\tgen4()\n")
@@ -778,7 +778,7 @@ func g() {
 	require.NoError(t, err)
 	assert.NotContains(t, string(got), "\uFEFF")
 	assert.NotContains(t, string(got), "orig.go")
-	assert.Contains(t, string(got), "/*line <generated>:1*/ gen1()")
+	assert.Contains(t, string(got), "/*line /<generated>:1*/ gen1()")
 }
 
 func TestMarkLineDirectives_TopLevelRestoreAfterSkippedRestore(t *testing.T) {
@@ -843,7 +843,7 @@ func f() {
 	want := `package main
 
 func f() {
-	/*line <generated>:1*/ a()
+	/*line /<generated>:1*/ a()
 	/*line FILE:4*/ a()
 	b()
 }
@@ -1277,9 +1277,8 @@ const unsafeDirective = `//line /tmp/x/*/;println("INJECTED");/*orig.go:30:1`
 // preludeProgram is the start of the programs below. It has the function
 // where, which gives the position of its caller.
 // generatedPosition matches the position that runtime.Caller gives for
-// injected code. Some Go versions join the "<generated>" name with the
-// directory of the file (Go 1.27), and some do not (Go 1.26).
-const generatedPosition = `(^|/)<generated>:\d+$`
+// injected code. The name is absolute, so it is the same in all Go versions.
+const generatedPosition = `^/<generated>:\d+$`
 
 const preludeProgram = `package main
 
@@ -1901,7 +1900,7 @@ func g() {
 	want := `package main
 
 func f(x int) {
-	/*line <generated>:1*/ gen()
+	/*line /<generated>:1*/ gen()
 	/*line FILE:4*/ switch x {
 	case 1:
 		//line parser.y:42
@@ -1944,7 +1943,7 @@ func TestMarkLineDirectives_HasUserLineDirective(t *testing.T) {
 		{"after line comment", dst.Decorations{"// c", "//line a.y:1"}, false, true},
 		{"after block comment", dst.Decorations{"/* c */", "//line a.y:1"}, false, false},
 		{"block directive", dst.Decorations{"/*line a.y:1*/"}, true, false},
-		{"directive of the pass", dst.Decorations{"/*line <generated>:1*/"}, true, false},
+		{"directive of the pass", dst.Decorations{"/*line /<generated>:1*/"}, true, false},
 		{"not a directive", dst.Decorations{"//lines are long"}, true, false},
 		{"plain comment", dst.Decorations{"// line a.y:1"}, true, false},
 	} {
@@ -2211,7 +2210,7 @@ func TestMarkLineDirectives_CompilerSelectLastClauseBeforeClosingBrace(t *testin
 	// The directive is in the clause body, just before the closing brace.
 	printed := instrumentSource(t, src, edit)
 	assert.Regexp(t,
-		`\t\t/\*line <generated>:1\*/ fmt\.Println\("gen", where\(\)\) `+
+		`\t\t/\*line /<generated>:1\*/ fmt\.Println\("gen", where\(\)\) `+
 			`/\*line FILE:\d+\*/\n\t}\n\tfmt\.Println\("B"`,
 		printed)
 }
@@ -2242,4 +2241,11 @@ func TestMarkLineDirectives_CompilerBlankLineBeforeRestoredClosingBrace(t *testi
 	got := assertSamePositions(t, src, edit, "A", "B", "closing")
 	assert.Regexp(t, generatedPosition, got["gen"])
 	assert.NotContains(t, instrumentSource(t, src, edit), "*/\n\n", "blank line before the closing brace")
+}
+
+func TestGeneratedFile(t *testing.T) {
+	// On Windows the formula adds the volume of the file, for example
+	// `C:\<generated>`. On Unix the volume is empty.
+	assert.Equal(t, "/<generated>", generatedFile("/work/dir/main.go"))
+	assert.True(t, filepath.IsAbs(generatedFile("/work/dir/main.go")))
 }

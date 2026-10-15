@@ -3,23 +3,23 @@
 
 package main
 
-//line <generated>:1
+//line /<generated>:1
 import _ "unsafe"
 
 //line /golden/work/main.go:6
 func OptGood() {
-	/*line <generated>:1*/ if OtelBeforeTrampoline_OptGood2195172342(); false {
+	/*line /<generated>:1*/ if OtelBeforeTrampoline_OptGood2195172342(); false {
 	} else {
 	} /*line /golden/work/main.go:5*/
 }
 func OptBad() {
-	/*line <generated>:1*/ if _, skip2498065262 := OtelBeforeTrampoline_OptBad2498065262(); skip2498065262 {
+	/*line /<generated>:1*/ if _, skip2498065262 := OtelBeforeTrampoline_OptBad2498065262(); skip2498065262 {
 		return
 	} else {
 	} /*line /golden/work/main.go:6*/
 }
 func OptBad2() {
-	/*line <generated>:1*/ if hookContext619637533, skip619637533 := OtelBeforeTrampoline_OptBad2619637533(); skip619637533 {
+	/*line /<generated>:1*/ if hookContext619637533, skip619637533 := OtelBeforeTrampoline_OptBad2619637533(); skip619637533 {
 		OtelAfterTrampoline_OptBad2619637533(hookContext619637533)
 		return
 	} else {
@@ -27,7 +27,7 @@ func OptBad2() {
 	} /*line /golden/work/main.go:7*/
 }
 
-//line <generated>:1
+//line /<generated>:1
 type HookContextImpl2498065262 struct {
 	params      []interface{}
 	returnVals  []interface{}
@@ -118,7 +118,6 @@ func OtelBeforeTrampoline_OptBad2498065262() (hookContext *HookContextImpl249806
 //go:linkname H6Before testdata/golden/opt-multiple-funcs.H6Before
 func H6Before(hookContext HookContext)
 
-//line <generated>:1
 type HookContextImpl619637533 struct {
 	params      []interface{}
 	returnVals  []interface{}
@@ -231,7 +230,6 @@ func H7Before(hookContext HookContext)
 //go:linkname H7After testdata/golden/opt-multiple-funcs.H7After
 func H7After(hookContext HookContext)
 
-//line <generated>:1
 type HookContextImpl2195172342 struct {
 	params      []interface{}
 	returnVals  []interface{}

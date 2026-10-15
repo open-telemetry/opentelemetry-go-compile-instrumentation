@@ -6,7 +6,7 @@ package main
 type Calculator struct{}
 
 func (c *Calculator) Divide(a int, b int) (_unnamedRetVal0 int, _unnamedRetVal1 error) {
-	/*line <generated>:1*/ println("enter Divide recv=c arg0=a")
+	/*line /<generated>:1*/ println("enter Divide recv=c arg0=a")
 	/*line /golden/work/main.go:9*/ return a / b, nil
 }
 

@@ -6,7 +6,7 @@
 // (and not the helper Connect in other files) by requiring both markers.
 package main
 
-//line <generated>:1
+//line /<generated>:1
 import _ "unsafe"
 
 //line /golden/work/main.go:9
@@ -17,7 +17,7 @@ func init() {
 }
 
 func Connect(dsn string) (_unnamedRetVal_671999535_0 error) {
-	/*line <generated>:1*/ if hookContext671999535, _ := OtelBeforeTrampoline_Connect671999535(&dsn); false {
+	/*line /<generated>:1*/ if hookContext671999535, _ := OtelBeforeTrampoline_Connect671999535(&dsn); false {
 	} else {
 		defer OtelAfterTrampoline_Connect671999535(hookContext671999535, &_unnamedRetVal_671999535_0)
 	}
@@ -25,7 +25,7 @@ func Connect(dsn string) (_unnamedRetVal_671999535_0 error) {
 	return nil
 }
 
-//line <generated>:1
+//line /<generated>:1
 type HookContextImpl671999535 struct {
 	params      []interface{}
 	returnVals  []interface{}

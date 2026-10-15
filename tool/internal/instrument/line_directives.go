@@ -36,8 +36,10 @@ import (
 // The pass finds runs of generated code. A run is a sequence of nodes in the
 // same list that are not in the user source:
 //
-//   - The first node of a run gets "/*line <generated>:1*/". All the nodes of
-//     the run get a line number in the "<generated>" file.
+//   - The first node of a run gets "/*line /<generated>:1*/". All the nodes of
+//     the run get a line number in the "/<generated>" file. The name is
+//     absolute and OS-specific (see generatedFile), so it is the same in all
+//     Go versions.
 //   - The first original node after a run gets "/*line /abs/file.go:L*/",
 //     where L is the line of the node in the user source.
 //   - A run can be the last thing in a block. Then the closing brace must be
@@ -107,9 +109,10 @@ import (
 // example in a cgo file) keeps its effect.
 // -----------------------------------------------------------------------------
 
+// generatedName is the base name of the file that holds the generated code.
+const generatedName = "<generated>"
+
 const (
-	// generatedDirective marks the first node of a run of generated code.
-	generatedDirective = "/*line <generated>:1*/"
 	// directiveLineComment and directiveBlockComment are the starts of a line
 	// directive in a comment.
 	directiveLineComment  = "//line "
@@ -138,12 +141,30 @@ type lineDirectivePass struct {
 	// dir is the directory of the original file. It is the base for a relative
 	// file name in a position.
 	dir string
+	// generated is the file name of the generated code in a directive.
+	generated string
+}
+
+// generatedFile returns the file name that line directives give to generated
+// code in the file absFile. The name is absolute, because Go 1.27 joins a
+// relative name in a directive with the directory of the file, and Go 1.26
+// does not. With an absolute name, the position is the same in all Go
+// versions. The name has the volume of absFile, because on Windows a name
+// without a volume is not absolute. On Unix the volume is empty, so the name
+// is "/<generated>". If the name is not safe in a comment, the function
+// returns "<generated>".
+func generatedFile(absFile string) string {
+	name := filepath.VolumeName(absFile) + string(filepath.Separator) + generatedName
+	if !safeDirectiveFile(name) {
+		return generatedName
+	}
+	return name
 }
 
 // markLineDirectives adds the line directives to root. parser must be the
 // parser that read the original file at path file, and file must be absolute.
 func markLineDirectives(parser *ast.AstParser, root *dst.File, file string) {
-	p := &lineDirectivePass{parser: parser, dir: filepath.Dir(file)}
+	p := &lineDirectivePass{parser: parser, dir: filepath.Dir(file), generated: generatedFile(file)}
 	state := lineKnown
 	for _, decl := range root.Decls {
 		original := p.stepDecl(decl, &state)
@@ -177,7 +198,7 @@ func (p *lineDirectivePass) step(node, prev dst.Node, state *lineState) bool {
 	pos, original := p.parser.OriginalPosition(node)
 	if !original {
 		if *state != lineGenerated && !hasLineDirective(node.Decorations().Start) {
-			prependDirective(node, prev, generatedDirective)
+			prependDirective(node, prev, "/*line "+p.generated+":1*/")
 		}
 		*state = lineGenerated
 		return false
@@ -281,7 +302,7 @@ func (p *lineDirectivePass) stepDecl(decl dst.Decl, state *lineState) bool {
 	switch {
 	case !original:
 		if *state != lineGenerated && !hasLineDirective(decs.Start) {
-			prependDeclDirective(decl, "//line <generated>:1")
+			prependDeclDirective(decl, "//line "+p.generated+":1")
 		}
 		*state = lineGenerated
 	case *state != lineKnown:

@@ -3,17 +3,17 @@
 
 package main
 
-//line <generated>:1
+//line /<generated>:1
 import _ "unsafe"
 
 //line /golden/work/main.go:6
 func UnderscoreFunc(_ignoredParam_418572368_0 int, _ignoredParam_418572368_1 float32) {
-	/*line <generated>:1*/ if OtelBeforeTrampoline_UnderscoreFunc418572368(&_ignoredParam_418572368_0, &_ignoredParam_418572368_1); false {
+	/*line /<generated>:1*/ if OtelBeforeTrampoline_UnderscoreFunc418572368(&_ignoredParam_418572368_0, &_ignoredParam_418572368_1); false {
 	} else {
 	} /*line /golden/work/main.go:5*/
 }
 
-//line <generated>:1
+//line /<generated>:1
 type HookContextImpl418572368 struct {
 	params      []interface{}
 	returnVals  []interface{}

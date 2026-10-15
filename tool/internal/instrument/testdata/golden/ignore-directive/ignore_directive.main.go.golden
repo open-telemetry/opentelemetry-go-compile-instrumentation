@@ -3,7 +3,7 @@
 
 package main
 
-//line <generated>:1
+//line /<generated>:1
 import _ "unsafe"
 
 //otelc:ignore
@@ -11,7 +11,7 @@ import _ "unsafe"
 func IgnoredFunc(p1 string) {}
 
 func InstrumentedFunc(p1 string) {
-	/*line <generated>:1*/ if hookContext1063730264, _ := OtelBeforeTrampoline_InstrumentedFunc1063730264(&p1); false {
+	/*line /<generated>:1*/ if hookContext1063730264, _ := OtelBeforeTrampoline_InstrumentedFunc1063730264(&p1); false {
 	} else {
 		defer OtelAfterTrampoline_InstrumentedFunc1063730264(hookContext1063730264)
 	} /*line /golden/work/main.go:8*/
@@ -19,7 +19,7 @@ func InstrumentedFunc(p1 string) {
 
 func main() {}
 
-//line <generated>:1
+//line /<generated>:1
 type HookContextImpl1063730264 struct {
 	params      []interface{}
 	returnVals  []interface{}
