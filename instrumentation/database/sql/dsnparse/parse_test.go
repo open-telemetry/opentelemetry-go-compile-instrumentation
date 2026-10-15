@@ -124,6 +124,64 @@ func TestParseDSN_Postgres(t *testing.T) {
 			wantPort: "5432",
 			wantDB:   "my db",
 		},
+		// ---- comma separated host lists: the first host is reported ----
+		{
+			name:     "url with two hosts",
+			dsn:      "postgres://user:pass@h1:5432,h2:5433/mydb",
+			wantHost: "h1",
+			wantPort: "5432",
+			wantDB:   "mydb",
+		},
+		{
+			name:     "url with two hosts, first has no port",
+			dsn:      "postgres://h1,h2:5433/mydb",
+			wantHost: "h1",
+			wantPort: "5432",
+			wantDB:   "mydb",
+		},
+		{
+			name:     "libpq key value with two hosts and ports",
+			dsn:      "host=h1,h2 port=5433,5434 dbname=mydb",
+			wantHost: "h1",
+			wantPort: "5433",
+			wantDB:   "mydb",
+		},
+		{
+			name:     "libpq empty first port keeps the default",
+			dsn:      "host=h1,h2 port=,5433 dbname=mydb",
+			wantHost: "h1",
+			wantPort: "5432",
+			wantDB:   "mydb",
+		},
+		{
+			name:     "libpq empty first host keeps the default",
+			dsn:      "host=,h2 port=5433 dbname=mydb",
+			wantHost: "localhost",
+			wantPort: "5433",
+			wantDB:   "mydb",
+		},
+		// ---- host and port given as query parameters ----
+		{
+			name:     "url with host and port in the query",
+			dsn:      "postgres://user@/mydb?host=dbhost&port=6543",
+			wantHost: "dbhost",
+			wantPort: "6543",
+			wantDB:   "mydb",
+		},
+		{
+			name:     "url with unix socket directory in the query",
+			dsn:      "postgres:///mydb?host=/var/run/postgresql",
+			wantHost: "/var/run/postgresql",
+			wantPort: "5432",
+			wantDB:   "mydb",
+		},
+		{
+			name:     "authority host wins over the query",
+			dsn:      "postgres://real:5432/mydb?host=other",
+			wantHost: "real",
+			wantPort: "5432",
+			wantDB:   "mydb",
+		},
 		// pgx uses the same DSN format
 		{
 			name:     "pgx driver url format",
