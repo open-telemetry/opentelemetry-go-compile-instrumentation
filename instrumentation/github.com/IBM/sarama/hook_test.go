@@ -114,7 +114,7 @@ func TestProducerInterceptor_OnSend(t *testing.T) {
 		Value: sarama.StringEncoder("hello"),
 	}
 
-	(&producerInterceptor{endpoint: "broker:9092"}).OnSend(msg)
+	(&producerInterceptor{endpoint: "broker:9092", headersSupported: true}).OnSend(msg)
 
 	spans := startedSpans(sr)
 	require.Len(t, spans, 1)
@@ -162,7 +162,7 @@ func TestProducerInterceptor_OnSend_MetadataContext(t *testing.T) {
 		Metadata: ctx,
 	}
 
-	(&producerInterceptor{endpoint: "broker:9092"}).OnSend(msg)
+	(&producerInterceptor{endpoint: "broker:9092", headersSupported: true}).OnSend(msg)
 
 	spans := startedSpans(sr)
 	require.Len(t, spans, 2) // caller + producer
@@ -179,11 +179,54 @@ func TestProducerInterceptor_OnSend_EmptyTopic(t *testing.T) {
 	sr := setupTest(t)
 
 	msg := &sarama.ProducerMessage{Value: sarama.StringEncoder("hello")}
-	(&producerInterceptor{endpoint: "broker:9092"}).OnSend(msg)
+	(&producerInterceptor{endpoint: "broker:9092", headersSupported: true}).OnSend(msg)
 
 	spans := startedSpans(sr)
 	require.Len(t, spans, 1)
 	assert.Equal(t, "send", spans[0].Name())
+}
+
+func TestProducerInterceptor_OnSend_OldProtocolSkipsInjection(t *testing.T) {
+	sr := setupTest(t)
+
+	msg := &sarama.ProducerMessage{
+		Topic: "orders",
+		Value: sarama.StringEncoder("hello"),
+	}
+
+	// headersSupported=false models Config.Version < V0_11_0_0: the span is
+	// still created, but no record headers must be injected, because the
+	// sarama dispatcher rejects messages with non-nil headers on old brokers.
+	(&producerInterceptor{endpoint: "broker:9092", headersSupported: false}).OnSend(msg)
+
+	spans := startedSpans(sr)
+	require.Len(t, spans, 1)
+	assert.Equal(t, "orders send", spans[0].Name())
+	assert.Empty(t, msg.Headers, "no headers may be injected when the protocol cannot carry them")
+}
+
+func TestProducerInterceptor_OnSend_IdempotentRetry(t *testing.T) {
+	sr := setupTest(t)
+
+	msg := &sarama.ProducerMessage{
+		Topic: "orders",
+		Value: sarama.StringEncoder("hello"),
+	}
+	p := &producerInterceptor{endpoint: "broker:9092", headersSupported: true}
+
+	// The dispatcher re-runs interceptors for retries of the same message.
+	p.OnSend(msg)
+	first := headerValue(t, msg.Headers, "traceparent")
+	require.NotEmpty(t, first)
+
+	p.OnSend(msg)
+
+	// Exactly one span for both dispatches, and the injected trace context is
+	// left untouched by the retry pass.
+	spans := startedSpans(sr)
+	require.Len(t, spans, 1)
+	assert.Equal(t, first, headerValue(t, msg.Headers, "traceparent"),
+		"the retry dispatch must not overwrite the injected trace context")
 }
 
 func TestConsumerInterceptor_OnConsume(t *testing.T) {
@@ -197,7 +240,7 @@ func TestConsumerInterceptor_OnConsume(t *testing.T) {
 		Key:   sarama.StringEncoder("order-1"),
 		Value: sarama.StringEncoder("hello"),
 	}
-	(&producerInterceptor{endpoint: "broker:9092"}).OnSend(produced)
+	(&producerInterceptor{endpoint: "broker:9092", headersSupported: true}).OnSend(produced)
 
 	producerSpan := startedSpans(sr)[0]
 

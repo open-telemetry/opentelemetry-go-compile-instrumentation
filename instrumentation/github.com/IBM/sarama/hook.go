@@ -109,7 +109,10 @@ func BeforeNewClient(ictx hook.HookContext, addrs []string, conf *sarama.Config)
 
 	if !hasProducerInterceptor(conf) {
 		conf.Producer.Interceptors = append(conf.Producer.Interceptors,
-			&producerInterceptor{endpoint: brokerEndpoint(addrs)})
+			&producerInterceptor{
+				endpoint:         brokerEndpoint(addrs),
+				headersSupported: conf.Version.IsAtLeast(sarama.V0_11_0_0),
+			})
 	}
 	if !hasConsumerInterceptor(conf) {
 		conf.Consumer.Interceptors = append(conf.Consumer.Interceptors,
@@ -154,6 +157,12 @@ func hasConsumerInterceptor(conf *sarama.Config) bool {
 // package-level documentation for the span semantics.
 type producerInterceptor struct {
 	endpoint string
+	// headersSupported records whether the configured Kafka protocol version
+	// can carry record headers (Kafka >= 0.11). When false, injecting the
+	// trace context would make msg.Headers non-nil, and the sarama dispatcher
+	// then rejects every message with
+	// ConfigurationError("Producing headers requires Kafka at least v0.11").
+	headersSupported bool
 }
 
 func (p *producerInterceptor) OnSend(msg *sarama.ProducerMessage) {
@@ -161,6 +170,18 @@ func (p *producerInterceptor) OnSend(msg *sarama.ProducerMessage) {
 		return
 	}
 	initInstrumentation()
+
+	carrier := recordHeaderCarrier{headers: &msg.Headers}
+	if carrier.Get("traceparent") != "" {
+		// sarama re-runs the interceptors for every message pulled from the
+		// producer input channel, including retries of the same
+		// *ProducerMessage (the interceptor loop sits outside the retries==0
+		// bookkeeping). A message that already carries an injected trace
+		// context has been seen on a previous dispatch, so starting another
+		// span here would create one duplicate producer span per retry and
+		// overwrite the propagated context. Skip.
+		return
+	}
 
 	// The message has no context; an application that wants the producer span
 	// under a caller's trace can carry the caller's context.Context in
@@ -185,8 +206,11 @@ func (p *producerInterceptor) OnSend(msg *sarama.ProducerMessage) {
 	// Inject before ending so an instrumented consumer can extract this
 	// span's trace context from the message headers. This is safe: the
 	// dispatcher owns the message at this point and encodes the headers after
-	// the interceptor returns.
-	propagator.Inject(spanCtx, recordHeaderCarrier{headers: &msg.Headers})
+	// the interceptor returns. Injection is skipped entirely when the
+	// configured protocol version cannot carry headers.
+	if p.headersSupported {
+		propagator.Inject(spanCtx, carrier)
+	}
 	span.End()
 }
 
