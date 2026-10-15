@@ -128,6 +128,7 @@ The following libraries are automatically instrumented:
 | `k8s.io/client-go` | K8s resource spans |
 | `github.com/openai/openai-go` (v1/v2/v3) | GenAI spans |
 | `github.com/anthropics/anthropic-sdk-go` | GenAI spans |
+| `github.com/modelcontextprotocol/go-sdk` | MCP client tool-call spans (GenAI semantic conventions) |
 | `github.com/segmentio/kafka-go` | Kafka messaging spans |
 | `github.com/rabbitmq/amqp091-go` | RabbitMQ messaging spans |
 | `github.com/aws/aws-sdk-go-v2` | AWS SDK client spans |
