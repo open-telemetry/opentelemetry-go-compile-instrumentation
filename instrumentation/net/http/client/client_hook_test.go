@@ -541,3 +541,71 @@ func BenchmarkRoundTripHooks(b *testing.B) {
 		AfterRoundTrip(mockCtx, res, nil)
 	}
 }
+
+// RoundTripper.RoundTrip must not modify the caller's request. The trace
+// context therefore has to go onto the request the hook hands to the real
+// RoundTrip, not onto the caller's own Header map.
+func TestBeforeRoundTrip_DoesNotMutateCallerRequest(t *testing.T) {
+	initOnce = *new(sync.Once)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+	setupTestTracer(t)
+
+	req, err := http.NewRequest(http.MethodGet, "http://example.com/path", nil)
+	require.NoError(t, err)
+	req.Header.Set("X-Custom", "keep")
+
+	mockCtx := hooktest.NewMockHookContext()
+	BeforeRoundTrip(mockCtx, &http.Transport{}, req)
+
+	newReq, ok := mockCtx.GetParam(1).(*http.Request)
+	require.True(t, ok, "param 1 should be the request handed to RoundTrip")
+	assert.NotEmpty(t, newReq.Header.Get("traceparent"), "outgoing request should carry the trace context")
+	assert.Equal(t, "keep", newReq.Header.Get("X-Custom"), "existing headers must still be sent")
+
+	assert.Empty(t, req.Header.Get("traceparent"), "caller's request must not be modified")
+	assert.Equal(t, http.Header{"X-Custom": {"keep"}}, req.Header)
+}
+
+func TestBeforeRoundTrip_NilHeaderCallerRequestStaysNil(t *testing.T) {
+	initOnce = *new(sync.Once)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+	setupTestTracer(t)
+
+	u, _ := url.Parse("http://example.com/path")
+	req := &http.Request{Method: http.MethodGet, URL: u}
+
+	mockCtx := hooktest.NewMockHookContext()
+	BeforeRoundTrip(mockCtx, &http.Transport{}, req)
+
+	newReq, ok := mockCtx.GetParam(1).(*http.Request)
+	require.True(t, ok)
+	assert.NotEmpty(t, newReq.Header.Get("traceparent"))
+	assert.Nil(t, req.Header, "caller's request must not be modified")
+}
+
+// Sharing one Header map across requests is common (a base set of headers
+// assigned to every request). Injecting into that shared map from concurrent
+// RoundTrips is a data race and can crash with "concurrent map writes".
+func TestBeforeRoundTrip_SharedHeaderMapIsNotWritten(t *testing.T) {
+	initOnce = *new(sync.Once)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+	setupTestTracer(t)
+
+	shared := http.Header{"X-Shared": {"1"}}
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req, err := http.NewRequest(http.MethodGet, "http://example.com/path", nil)
+			if err != nil {
+				return
+			}
+			req.Header = shared
+			BeforeRoundTrip(hooktest.NewMockHookContext(), &http.Transport{}, req)
+		}()
+	}
+	wg.Wait()
+
+	assert.Equal(t, http.Header{"X-Shared": {"1"}}, shared)
+}
