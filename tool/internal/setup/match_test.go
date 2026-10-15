@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -1438,6 +1439,10 @@ onlysecond:
 }
 
 func TestLoadCustomRulesSymlinkParent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows resolves .. before following the symlink; this regression requires POSIX path resolution")
+	}
+
 	first := writeCustomRules(t, "rules.otelc.yml", `dup:
   target: main
   func: Example
