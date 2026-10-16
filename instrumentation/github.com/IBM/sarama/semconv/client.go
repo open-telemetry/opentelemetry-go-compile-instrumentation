@@ -5,6 +5,7 @@ package semconv
 
 import (
 	"net"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -50,26 +51,23 @@ type KafkaRequest struct {
 	HasPartition bool
 	// HasOffset indicates whether Offset holds a meaningful value.
 	HasOffset bool
-	// Async indicates the producer span only covers local hand-off to the
-	// client library, not confirmed delivery. sarama always has this property
-	// because the OnSend callback used by this instrumentation cannot observe a
-	// later broker outcome; it is ignored on the consumer side.
+	// Async indicates whether the producer is an asynchronous one (no
+	// Produce ack wait in the application path). Sync producers omit the
+	// messaging.kafka.async attribute entirely.
 	Async bool
-}
 
-// messagingKafkaAsyncKey has no OpenTelemetry semantic convention yet; it marks
-// producer spans so consumers of the trace data don't mistake enqueue-time
-// duration and Unset/Ok status for confirmed broker delivery (see
-// KafkaRequest.Async).
-//
-// Deliberately emitted only as `true`, never as an explicit `false` for the
-// synchronous path: keeping the attribute absent avoids adding an attribute to
-// every producer span just to say "this one is trustworthy", which is the
-// default assumption anyway.
-const messagingKafkaAsyncKey = attribute.Key("messaging.kafka.async")
+	// ConsumerGroup is the consumer group name, when the consumer belongs to
+	// one. Empty for plain partition consumers.
+	ConsumerGroup string
+}
 
 // KafkaMessageKey returns a Kafka message key as a valid UTF-8 string.
 // Invalid UTF-8 sequences are replaced with the Unicode replacement character.
+// messagingKafkaAsyncKey marks spans for asynchronous producers. It is a
+// sarama-specific hint (not part of the stable messaging conventions) and is
+// emitted only when true; sync producers omit it.
+const messagingKafkaAsyncKey = attribute.Key("messaging.kafka.async")
+
 func KafkaMessageKey(key []byte) string {
 	return strings.ToValidUTF8(string(key), "\uFFFD")
 }
@@ -118,6 +116,32 @@ func KafkaRequestTraceAttrs(req KafkaRequest) []attribute.KeyValue {
 	if req.HasOffset {
 		attrs = append(attrs, semconv.MessagingKafkaOffset(int(req.Offset)))
 	}
+	if req.ConsumerGroup != "" {
+		attrs = append(attrs, semconv.MessagingConsumerGroupName(req.ConsumerGroup))
+	}
 
 	return attrs
+}
+
+// MessagingErrorType returns the error.type attribute for a failed send.
+func MessagingErrorType(err error) attribute.KeyValue {
+	if err == nil {
+		return semconv.ErrorTypeKey.String("")
+	}
+	return semconv.ErrorTypeKey.String(errorTypeName(err))
+}
+
+func errorTypeName(err error) string {
+	t := reflect.TypeOf(err)
+	if t == nil {
+		return ""
+	}
+	if t.PkgPath() == "" {
+		return t.String()
+	}
+	name := t.Name()
+	if name == "" {
+		return t.String()
+	}
+	return name
 }

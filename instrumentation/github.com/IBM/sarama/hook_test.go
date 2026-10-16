@@ -12,6 +12,7 @@ import (
 	"github.com/IBM/sarama"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -114,7 +115,7 @@ func TestProducerInterceptor_OnSend(t *testing.T) {
 		Value: sarama.StringEncoder("hello"),
 	}
 
-	(&producerInterceptor{endpoint: "broker:9092", headersSupported: true}).OnSend(msg)
+	(&producerInterceptor{endpoint: "broker:9092", headersSupported: true, async: true}).OnSend(msg)
 
 	spans := startedSpans(sr)
 	require.Len(t, spans, 1)
@@ -162,7 +163,7 @@ func TestProducerInterceptor_OnSend_MetadataContext(t *testing.T) {
 		Metadata: ctx,
 	}
 
-	(&producerInterceptor{endpoint: "broker:9092", headersSupported: true}).OnSend(msg)
+	(&producerInterceptor{endpoint: "broker:9092", headersSupported: true, async: true}).OnSend(msg)
 
 	spans := startedSpans(sr)
 	require.Len(t, spans, 2) // caller + producer
@@ -179,7 +180,7 @@ func TestProducerInterceptor_OnSend_EmptyTopic(t *testing.T) {
 	sr := setupTest(t)
 
 	msg := &sarama.ProducerMessage{Value: sarama.StringEncoder("hello")}
-	(&producerInterceptor{endpoint: "broker:9092", headersSupported: true}).OnSend(msg)
+	(&producerInterceptor{endpoint: "broker:9092", headersSupported: true, async: true}).OnSend(msg)
 
 	spans := startedSpans(sr)
 	require.Len(t, spans, 1)
@@ -320,4 +321,96 @@ func headerValue(t *testing.T, headers []sarama.RecordHeader, key string) string
 		}
 	}
 	return ""
+}
+
+func TestProducerInterceptor_SpanStaysOpenUntilSuccess(t *testing.T) {
+	sr := setupTest(t)
+
+	p := &producerInterceptor{endpoint: "broker:9092", headersSupported: true, async: false}
+	msg := &sarama.ProducerMessage{Topic: "orders", Value: sarama.StringEncoder("hello")}
+	p.OnSend(msg)
+
+	// Before the broker result, the span is started but not ended.
+	started := sr.Started()
+	require.Len(t, started, 1)
+	assert.Empty(t, sr.Ended(), "span must stay open until the send result arrives")
+
+	BeforeReturnSuccesses(hooktest.NewMockHookContext(), nil, []*sarama.ProducerMessage{msg})
+
+	ended := sr.Ended()
+	require.Len(t, ended, 1)
+	assert.Equal(t, "orders send", ended[0].Name())
+	// Sync producer: messaging.kafka.async must be absent.
+	_, hasAsync := spanAttrs(ended[0])["messaging.kafka.async"]
+	assert.False(t, hasAsync)
+	if _, ok := spanStateFor(msg); ok {
+		t.Fatal("span state must be removed after completion")
+	}
+}
+
+func TestProducerInterceptor_AsyncSpanCarriesAsync(t *testing.T) {
+	sr := setupTest(t)
+
+	p := &producerInterceptor{endpoint: "broker:9092", headersSupported: true, async: true}
+	msg := &sarama.ProducerMessage{Topic: "orders", Value: sarama.StringEncoder("hello")}
+	p.OnSend(msg)
+	BeforeReturnSuccesses(hooktest.NewMockHookContext(), nil, []*sarama.ProducerMessage{msg})
+
+	ended := sr.Ended()
+	require.Len(t, ended, 1)
+	assert.Equal(t, true, spanAttrs(ended[0])["messaging.kafka.async"])
+}
+
+func TestProducerInterceptor_SendErrorRecorded(t *testing.T) {
+	sr := setupTest(t)
+
+	p := &producerInterceptor{endpoint: "broker:9092", headersSupported: true, async: false}
+	msg := &sarama.ProducerMessage{Topic: "orders", Value: sarama.StringEncoder("hello")}
+	p.OnSend(msg)
+
+	BeforeReturnErrors(hooktest.NewMockHookContext(), nil, []*sarama.ProducerMessage{msg}, sarama.ErrBrokerNotAvailable)
+
+	ended := sr.Ended()
+	require.Len(t, ended, 1)
+	assert.Equal(t, codes.Error, ended[0].Status().Code)
+	assert.Equal(t, sarama.ErrBrokerNotAvailable.Error(), ended[0].Status().Description)
+	assert.Equal(t, "KError", spanAttrs(ended[0])["error.type"])
+	require.Len(t, ended[0].Events(), 1, "the send error must be recorded as an exception event")
+}
+
+func TestConsumerInterceptor_GroupName(t *testing.T) {
+	sr := setupTest(t)
+
+	consumed := &sarama.ConsumerMessage{
+		Topic:     "orders",
+		Partition: 0,
+		Offset:    1,
+		Value:     []byte("hello"),
+	}
+	(&consumerInterceptor{endpoint: "broker:9092", group: "checkout-svc"}).OnConsume(consumed)
+
+	span := sr.Ended()[0]
+	assert.Equal(t, "checkout-svc", spanAttrs(span)["messaging.consumer.group.name"])
+}
+
+func TestInstallInterceptors_SyncVsAsync(t *testing.T) {
+	syncConf := sarama.NewConfig()
+	syncConf.Producer.Return.Successes = true
+	installInterceptors(syncConf, "broker:9092", "")
+	assert.False(t, syncConf.Producer.Interceptors[0].(*producerInterceptor).async)
+
+	asyncConf := sarama.NewConfig()
+	asyncConf.Producer.Return.Successes = false
+	installInterceptors(asyncConf, "broker:9092", "g1")
+	pi := asyncConf.Producer.Interceptors[0].(*producerInterceptor)
+	assert.True(t, pi.async)
+	ci := asyncConf.Consumer.Interceptors[0].(*consumerInterceptor)
+	assert.Equal(t, "g1", ci.group)
+
+	// Calling again for the same config does not duplicate interceptors, and
+	// setting a group updates the existing consumer interceptor in place.
+	installInterceptors(asyncConf, "broker:9092", "g2")
+	assert.Len(t, asyncConf.Producer.Interceptors, 1)
+	assert.Len(t, asyncConf.Consumer.Interceptors, 1)
+	assert.Equal(t, "g2", asyncConf.Consumer.Interceptors[0].(*consumerInterceptor).group)
 }
