@@ -481,8 +481,8 @@ func F() {
 		spec := &dst.ImportSpec{Name: dst.NewIdent("_"), Path: &dst.BasicLit{Kind: 9, Value: `"unsafe"`}}
 		importDecl.Specs = append([]dst.Spec{importDecl.Specs[0], spec}, importDecl.Specs[1:]...)
 	})
-	// The printer sorts the specs, so the declaration as a whole counts as
-	// generated, and the next declaration is restored.
+	// The printer sorts the specs, so the lines after the declaration are off.
+	// The state becomes stale, and the next declaration is restored.
 	want := `package main
 
 import (
@@ -709,13 +709,14 @@ func g() {
 			assert.True(t, strings.HasPrefix(strings.TrimSpace(line), "//line /tmp/"), line)
 		}
 	}
-	// The injected code is still marked.
+	// The injected code is still marked. After original code that the pass
+	// does not restore, the state is stale, so each generated node gets its
+	// own directive.
 	assert.Contains(t, got, "/*line /<generated>:1*/ gen1()")
-	// gen2 and gen4 are in the same run as gen1, because the restores were
-	// skipped. They do not need a directive.
-	assert.Contains(t, got, "\tgen4()\n")
-	assert.Contains(t, got, "\tgen2()\n")
-	assert.Equal(t, 1, strings.Count(got, "<generated>"), got)
+	assert.Contains(t, got, "/*line /<generated>:1*/ gen2()")
+	assert.Contains(t, got, "//line /<generated>:1\nfunc gen3() {}")
+	assert.Contains(t, got, "/*line /<generated>:1*/ gen4()")
+	assert.Equal(t, 4, strings.Count(got, "<generated>"), got)
 }
 
 func TestMarkLineDirectives_SafeDirectiveFile(t *testing.T) {
@@ -2784,4 +2785,556 @@ func f() {
 }
 `
 	assert.Equal(t, want, got)
+}
+
+func TestMarkLineDirectives_CompilerGeneratedStatementWithLeadingLineComment(t *testing.T) {
+	// A generated statement starts with a "//line" comment, or with a comment
+	// that only looks like one. The printer indents the comment in the
+	// function body, so Go ignores it. The statement must still be in the
+	// "<generated>" file.
+	for _, comment := range []string{"//line foo.go:10", "//line of the rule"} {
+		t.Run(comment, func(t *testing.T) {
+			const src = preludeProgram + `func main() {
+	fmt.Println("A", where())
+}
+`
+			got := assertSamePositions(t, src, func(root *dst.File) {
+				gen := snippet(t, printWhere("gen"))
+				gen[0].Decorations().Start.Append(comment)
+				body := findFunc(t, root, "main").Body
+				body.List = append(gen, body.List...)
+			}, "A")
+			assert.Regexp(t, generatedPosition, got["gen"])
+		})
+	}
+}
+
+func TestMarkLineDirectives_GeneratedNodeWithLeadingDirective(t *testing.T) {
+	// The pass does not add a "<generated>" directive before a directive that
+	// Go reads: a "/*line*/" comment in a function body, and a "//line" or
+	// "/*line*/" comment before a top-level declaration. It adds one before a
+	// comment that Go does not read.
+	src := `package main
+
+func f() {
+	a()
+	b()
+	c()
+}
+
+type A int
+
+type B int
+
+type C int
+`
+	got := instrumentSource(t, src, func(root *dst.File) {
+		body := findFunc(t, root, "f").Body
+		list := make([]dst.Stmt, 0, 2*len(body.List))
+		for i, comment := range []string{"/*line foo.go:10*/", "//line foo.go:20", "/*line of the rule*/"} {
+			stmt := snippet(t, "gen()")[0]
+			stmt.Decorations().Before = dst.NewLine
+			stmt.Decorations().Start.Append(comment)
+			list = append(list, stmt, body.List[i])
+		}
+		body.List = list
+		decls := make([]dst.Decl, 0, 2*len(root.Decls))
+		decls = append(decls, root.Decls[0])
+		for i, comment := range []string{"//line foo.go:30", "/*line foo.go:40*/", "//line of the rule"} {
+			extra, err := ast.NewAstParser().ParseSource("package main\n\n" + comment + "\nvar _ int\n")
+			require.NoError(t, err)
+			decls = append(decls, extra.Decls[0], root.Decls[i+1])
+		}
+		root.Decls = decls
+	})
+	want := `package main
+
+func f() {
+	/*line foo.go:10*/ gen()
+	/*line FILE:4*/ a()
+	//line foo.go:20
+	/*line /<generated>:1*/
+	gen()
+	/*line FILE:5*/ b()
+	/*line of the rule*/ /*line /<generated>:1*/ gen()
+	/*line FILE:6*/ c()
+}
+
+//line foo.go:30
+var _ int
+
+//line FILE:9
+type A int
+
+/*line foo.go:40*/
+var _ int
+
+//line FILE:11
+type B int
+
+//line of the rule
+//line /<generated>:1
+var _ int
+
+//line FILE:13
+type C int
+`
+	assert.Equal(t, want, got)
+}
+
+func TestMarkLineDirectives_CompilerAddedImportBeforeSkippedRestore(t *testing.T) {
+	// A rule adds an import spec. The pass does not write a "<generated>"
+	// directive for it, so the code after it is still in the user file. The
+	// restore of the next declaration is skipped, because its file name ends
+	// in a number. A generated statement in that declaration must still be in
+	// the "<generated>" file.
+	const src = `package main
+
+import (
+	"fmt"
+	"runtime"
+)
+
+//line /tmp/foo:7:50:1
+func main() {
+	fmt.Println("A", where())
+}
+
+//line /tmp/ok.go:10:1
+func where() string {
+	_, file, line, _ := runtime.Caller(1)
+	return fmt.Sprintf("%s:%d", file, line)
+}
+`
+	edit := func(root *dst.File) {
+		importDecl := root.Decls[0].(*dst.GenDecl)
+		spec := &dst.ImportSpec{Name: dst.NewIdent("_"), Path: &dst.BasicLit{Kind: token.STRING, Value: `"unsafe"`}}
+		importDecl.Specs = append(importDecl.Specs, spec)
+		prepend(t, findFunc(t, root, "main").Body, printWhere("gen"))
+	}
+	// A is not compared: the added spec moves the lines, and its restore is
+	// skipped, so it is off. This is a known limit (see the top of
+	// line_directives.go).
+	got := positions(runInjected(t, src, edit).output)
+	assert.Regexp(t, generatedPosition, got["gen"])
+}
+
+func TestMarkLineDirectives_CompilerUserLineCommentBeforeElseBlock(t *testing.T) {
+	// The "//line" comment is between "else" and its block. It is in the Start
+	// decorations of the block. The printer indents it, so Go ignores it. The
+	// statements of the "else" block must be restored, also when the first
+	// block was restored. The same applies to a "switch" with the comment
+	// before "{".
+	const src = preludeProgram + `func main() {
+	if len(fmt.Sprint()) > 0 {
+		fmt.Println("A", where())
+	} else
+//line mapped.go:100
+	{
+		fmt.Println("B", where())
+	}
+	if len(fmt.Sprint()) > 0 {
+		fmt.Println("C", where())
+	} else
+//line mapped.go:200
+	{
+		fmt.Println("D", where())
+	}
+	fmt.Println("E", where())
+	switch
+//line mapped.go:300
+	{
+	case true:
+		fmt.Println("F", where())
+	}
+	fmt.Println("G", where())
+}
+`
+	got := assertSamePositions(t, src, func(*dst.File) {}, "B", "D", "E", "F", "G")
+	assert.Contains(t, got["B"], "mapped.go:101")
+	assert.Contains(t, got["D"], "mapped.go:201")
+	assert.Contains(t, got["F"], "mapped.go:302")
+	t.Run("with injected code", func(t *testing.T) {
+		withGen := assertSamePositions(t, src, func(root *dst.File) {
+			prepend(t, findFunc(t, root, "main").Body, printWhere("gen"))
+		}, "B", "D", "E", "F", "G")
+		assert.Regexp(t, generatedPosition, withGen["gen"])
+	})
+}
+
+func TestMarkLineDirectives_CompilerGeneratedRunAfterOwnDirective(t *testing.T) {
+	// The first generated statement has its own "/*line*/" directive, and Go
+	// reads it. The next generated statement is not in the "<generated>" file
+	// then, so it needs a "<generated>" directive.
+	const src = preludeProgram + `func main() {
+	fmt.Println("A", where())
+}
+`
+	got := assertSamePositions(t, src, func(root *dst.File) {
+		own := snippet(t, printWhere("own"))[0]
+		own.Decorations().Before = dst.NewLine
+		own.Decorations().Start.Append("/*line foo.go:10*/")
+		body := findFunc(t, root, "main").Body
+		body.List = append([]dst.Stmt{own, snippet(t, printWhere("gen"))[0]}, body.List...)
+	}, "A")
+	assert.Equal(t, "foo.go:10", filepath.Base(got["own"]))
+	assert.Regexp(t, generatedPosition, got["gen"])
+}
+
+func TestMarkLineDirectives_GeneratedDeclarationRunAfterOwnDirective(t *testing.T) {
+	// The same rule applies at the top level.
+	src := `package main
+
+func f() {}
+`
+	got := instrumentSource(t, src, func(root *dst.File) {
+		for _, code := range []string{"//line foo.go:30\nvar _ int", "var _ int"} {
+			extra, err := ast.NewAstParser().ParseSource("package main\n\n" + code + "\n")
+			require.NoError(t, err)
+			root.Decls = append(root.Decls, extra.Decls[0])
+		}
+	})
+	want := `package main
+
+func f() {}
+
+//line foo.go:30
+var _ int
+
+//line /<generated>:1
+var _ int
+`
+	assert.Equal(t, want, got)
+}
+
+func TestMarkLineDirectives_CompilerGeneratedDeclarationBeforeSkippedRestore(t *testing.T) {
+	// A generated declaration is before an original function. The restore of
+	// the function is skipped, because its file name ends in a number. Go reads
+	// the "//line" comment of the user before the function, so the code of the
+	// function is not in the "<generated>" file. A generated statement in the
+	// function needs a "<generated>" directive.
+	const src = `package main
+
+import (
+	"fmt"
+	"runtime"
+)
+
+//line /tmp/foo:7:50:1
+func main() {
+	fmt.Println("A", where())
+}
+
+//line /tmp/ok.go:10:1
+func where() string {
+	_, file, line, _ := runtime.Caller(1)
+	return fmt.Sprintf("%s:%d", file, line)
+}
+`
+	edit := func(root *dst.File) {
+		extra, err := ast.NewAstParser().ParseSource("package main\n\nvar _ int\n")
+		require.NoError(t, err)
+		root.Decls = append(root.Decls[:1], append([]dst.Decl{extra.Decls[0]}, root.Decls[1:]...)...)
+		prepend(t, findFunc(t, root, "main").Body, printWhere("gen"))
+	}
+	// A is not compared: its restore is skipped, so its position is wrong.
+	// This is a known limit (see the top of line_directives.go).
+	got := positions(runInjected(t, src, edit).output)
+	assert.Regexp(t, generatedPosition, got["gen"])
+}
+
+func TestMarkLineDirectives_IsLineDirective(t *testing.T) {
+	for _, tc := range []struct {
+		comment string
+		want    bool
+	}{
+		{"//line foo.go:10", true},
+		{"//line foo.go:10:2", true},
+		{"//line :10", true},
+		{"/*line foo.go:10*/", true},
+		{"/*line foo.go:10:2*/", true},
+		{"//line of the rule", false},
+		{"//line foo.go:0", false},
+		{"//line foo.go:abc", false},
+		{"//line foo.go:+1", false},
+		{"//line foo.go:1073741825", false},
+		{"//line foo.go:10\n//line bar.go:1", false},
+		{"//linefoo.go:10", false},
+		{"// line foo.go:10", false},
+		{"/*line foo.go:10", false},
+		{"/*line plain*/ /* note:1*/", false},
+		{"/*line */", false},
+		{"/* line foo.go:10*/", false},
+		{"", false},
+	} {
+		assert.Equal(t, tc.want, isLineDirective(tc.comment), "%q", tc.comment)
+	}
+}
+
+func TestMarkLineDirectives_CompilerUserBlockDirectiveWithSkippedRestore(t *testing.T) {
+	// An original node has a "/*line*/" comment of the user, and Go reads it.
+	// Its file name ends in a number, so the restore is skipped. The code
+	// after the comment is then not in the "<generated>" file, so the next
+	// generated statement needs a "<generated>" directive. The comment can be
+	// before a statement, before the statement of a label, or inside a
+	// statement (here, after the condition of an "if").
+	const src = preludeProgram + `func main() {
+	fmt.Println("A", where())
+	/*line /tmp/foo:7:50:1*/ fmt.Println("B", where())
+	fmt.Println("C", where())
+	n := 0
+loop:
+	/*line /tmp/foo:7:60:1*/ fmt.Println("D", where())
+	n++
+	if n < 1 {
+		goto loop
+	}
+//line /tmp/foo:7:70:1
+	if n > 0 /*line /tmp/bar.go:90*/ {
+		fmt.Println("E", where())
+	}
+}
+`
+	edit := func(root *dst.File) {
+		body := findFunc(t, root, "main").Body
+		ifStmt := body.List[7].(*dst.IfStmt)
+		ifStmt.Body.List = insertStmts(t, ifStmt.Body.List, 0, printWhere("gen-if"))
+		labeled := body.List[4].(*dst.LabeledStmt)
+		body.List = insertStmts(t, body.List, 7, printWhere("gen-before-if"))
+		body.List = insertStmts(t, body.List, 5, printWhere("gen-after-label"))
+		body.List = insertStmts(t, body.List, 4, printWhere("gen-before-label"))
+		body.List = insertStmts(t, body.List, 2, printWhere("gen-after-B"))
+		body.List = insertStmts(t, body.List, 1, printWhere("gen-before-B"))
+		require.Same(t, labeled, body.List[7])
+	}
+	// The other statements are not compared: their restores are skipped, so
+	// they keep a wrong position. This is a known limit.
+	got := positions(runInjected(t, src, edit).output)
+	for _, id := range []string{"gen-before-B", "gen-after-B", "gen-before-label", "gen-after-label", "gen-before-if", "gen-if"} {
+		assert.Regexp(t, generatedPosition, got[id], id)
+	}
+	assert.Equal(t, "/tmp/foo:7:50", got["B"])
+	assert.Equal(t, "/tmp/foo:7:60", got["D"])
+	assert.Equal(t, "/tmp/bar.go:91", got["E"])
+}
+
+func TestMarkLineDirectives_TopLevelDirectiveAfterBlockComment(t *testing.T) {
+	// A top-level declaration starts with a "/*...*/" comment, and no newline
+	// follows it. Go reads a "//line" directive only at column 1, so the pass
+	// puts the directive on a new line. This applies to a generated
+	// declaration and to the restore of an original declaration.
+	src := `package main
+
+/* a */ /* b */ func f() {}
+`
+	got := instrumentSource(t, src, func(root *dst.File) {
+		extra, err := ast.NewAstParser().ParseSource("package main\n\nvar _ int\n")
+		require.NoError(t, err)
+		gen := extra.Decls[0]
+		gen.Decorations().Start.Append("/* note */")
+		root.Decls = append([]dst.Decl{gen}, root.Decls...)
+	})
+	want := `package main
+
+/* note */
+//line /<generated>:1
+var _ int
+
+/* a */ /* b */
+//line FILE:3
+func f() {}
+`
+	assert.Equal(t, want, got)
+}
+
+func TestMarkLineDirectives_CompilerDirectiveInsideOrAfterGeneratedNode(t *testing.T) {
+	// Go reads a "/*line*/" comment inside or after a generated node. The code
+	// after it is then not in the "<generated>" file, so the next generated
+	// node needs a "<generated>" directive.
+	const src = preludeProgram + `func main() {
+	fmt.Println("A", where()) /*line other.go:50*/
+	fmt.Println("B", where())
+}
+`
+	for name, edit := range map[string]func(root *dst.File){
+		"after a generated statement": func(root *dst.File) {
+			body := findFunc(t, root, "main").Body
+			first := snippet(t, printWhere("first"))[0]
+			first.Decorations().End.Append("/*line other.go:50*/")
+			body.List = append([]dst.Stmt{first, snippet(t, printWhere("gen"))[0]}, body.List...)
+		},
+		"in one decoration with other comments": func(root *dst.File) {
+			body := findFunc(t, root, "main").Body
+			first := snippet(t, printWhere("first"))[0]
+			first.Decorations().End.Append("/* note */ /*line other.go:50*/")
+			body.List = append([]dst.Stmt{first, snippet(t, printWhere("gen"))[0]}, body.List...)
+		},
+		"in a parsed snippet": func(root *dst.File) {
+			body := findFunc(t, root, "main").Body
+			first := snippet(t, printWhere("first")+" /*line other.go:50*/")[0]
+			require.Equal(t, dst.Decorations{"/*line other.go:50*/"}, first.Decorations().End)
+			body.List = append([]dst.Stmt{first, snippet(t, printWhere("gen"))[0]}, body.List...)
+		},
+		"in an original statement that a rule wrapped": func(root *dst.File) {
+			body := findFunc(t, root, "main").Body
+			wrapper := &dst.BlockStmt{List: []dst.Stmt{body.List[0]}}
+			body.List = append([]dst.Stmt{wrapper, snippet(t, printWhere("gen"))[0]}, body.List[1:]...)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := positions(runInjected(t, src, edit).output)
+			assert.Regexp(t, generatedPosition, got["gen"])
+		})
+	}
+}
+
+func TestMarkLineDirectives_CompilerUserBlockDirectiveAfterNestedBlock(t *testing.T) {
+	// The "/*line*/" comment of the user is after the body of a function
+	// literal. Go reads it after the body, but the pass sees it before the
+	// body. The body ends in generated code, and the restore of its closing
+	// brace is skipped, because the file name ends in a number. The next
+	// generated statement must still get a "<generated>" directive.
+	const src = preludeProgram + `func sink(f func()) { f() }
+
+//line /tmp/foo:7:50:1
+func main() {
+	sink(func() {
+		fmt.Println("inner", where())
+	} /*line /tmp/special.go:90*/)
+	fmt.Println("after", where())
+}
+`
+	got := positions(runInjected(t, src, func(root *dst.File) {
+		body := findFunc(t, root, "main").Body
+		lit := body.List[0].(*dst.ExprStmt).X.(*dst.CallExpr).Args[0].(*dst.FuncLit)
+		lit.Body.List = append(lit.Body.List, snippet(t, printWhere("innergen"))...)
+		body.List = insertStmts(t, body.List, 1, printWhere("outergen"))
+	}).output)
+	assert.Regexp(t, generatedPosition, got["innergen"])
+	assert.Regexp(t, generatedPosition, got["outergen"])
+}
+
+func TestMarkLineDirectives_CompilerDirectiveInOriginalCodeAfterSkippedRestore(t *testing.T) {
+	// The function is in a file whose name ends in a number, so no restore in
+	// it can be written. Go reads a "/*line*/" comment that is in original
+	// code, or in a node that a rule added around original code. The code
+	// after the comment is then not in the "<generated>" file, so the next
+	// generated statement needs a "<generated>" directive.
+	const prefix = preludeProgram + "//line /tmp/foo:7:50:1\n"
+	ifSource := prefix + `func main() {
+	if true {
+		fmt.Println("inside", where())
+	}
+	fmt.Println("after", where())
+}
+`
+	for _, tc := range []struct {
+		name string
+		src  string
+		edit func(t *testing.T, body *dst.BlockStmt)
+	}{
+		{
+			name: "after the opening brace of a block",
+			src: prefix + `func main() {
+	if true { /*line /tmp/bar.go:90*/
+		fmt.Println("inside", where())
+	}
+	fmt.Println("after", where())
+}
+`,
+			edit: func(t *testing.T, body *dst.BlockStmt) {
+				stmt := body.List[0].(*dst.IfStmt)
+				stmt.Body.List = insertStmts(t, stmt.Body.List, 0, printWhere("gen"))
+			},
+		},
+		{
+			name: "after the closing brace of a block",
+			src:  ifSource,
+			edit: func(t *testing.T, body *dst.BlockStmt) {
+				stmt := body.List[0].(*dst.IfStmt)
+				stmt.Body.Decs.End.Append("/*line /tmp/bar.go:90*/")
+				body.List = insertStmts(t, body.List, 1, printWhere("gen"))
+			},
+		},
+		{
+			name: "in a block that a rule added",
+			src:  ifSource,
+			edit: func(t *testing.T, body *dst.BlockStmt) {
+				stmt := body.List[0].(*dst.IfStmt)
+				block := &dst.BlockStmt{List: stmt.Body.List}
+				block.Decs.Lbrace.Append("/*line /tmp/bar.go:90*/")
+				stmt.Body = block
+				body.List = insertStmts(t, body.List, 1, printWhere("gen"))
+			},
+		},
+		{
+			name: "in an expression that a rule added",
+			src:  ifSource,
+			edit: func(t *testing.T, body *dst.BlockStmt) {
+				stmt := body.List[0].(*dst.IfStmt)
+				call := stmt.Body.List[0].(*dst.ExprStmt).X.(*dst.CallExpr)
+				arg := call.Args[1]
+				arg.Decorations().End.Append("/*line /tmp/bar.go:90*/")
+				call.Args[1] = &dst.ParenExpr{X: arg}
+				stmt.Body.List = append(stmt.Body.List, snippet(t, printWhere("gen"))...)
+			},
+		},
+		{
+			name: "after other comments",
+			src: prefix + `func main() {
+	fmt.Println("inside", where()) /* note */ /*line /tmp/bar.go:90*/
+	fmt.Println("after", where())
+}
+`,
+			edit: func(t *testing.T, body *dst.BlockStmt) {
+				body.List = insertStmts(t, body.List, 1, printWhere("gen"))
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := positions(runInjected(t, tc.src, func(root *dst.File) {
+				body := findFunc(t, root, "main").Body
+				tc.edit(t, body)
+				// A generated statement before the code makes the state
+				// generated. The restore of the code is skipped.
+				body.List = insertStmts(t, body.List, 0, printWhere("pre"))
+			}).output)
+			assert.Regexp(t, generatedPosition, got["pre"])
+			assert.Regexp(t, generatedPosition, got["gen"])
+		})
+	}
+}
+
+func TestMarkLineDirectives_CompilerDeclarationEndDirectiveAfterSkippedRestore(t *testing.T) {
+	// The original function ends in generated code, and the restore of its
+	// closing brace is skipped. Go reads the "/*line*/" comment after the
+	// function. The next generated declaration needs a "<generated>"
+	// directive.
+	const src = preludeProgram + `//line /tmp/foo:7:50:1
+func f() {
+	fmt.Println("A", where())
+} /*line /tmp/special.go:90*/
+
+func main() {
+	f()
+	generated()
+}
+`
+	got := positions(runInjected(t, src, func(root *dst.File) {
+		f := findFunc(t, root, "f")
+		require.Equal(t, dst.Decorations{"/*line /tmp/special.go:90*/"}, f.Decorations().End)
+		f.Body.List = append(f.Body.List, snippet(t, printWhere("inner"))...)
+		extra, err := ast.NewAstParser().ParseSource(
+			"package main\n\nfunc generated() {\n\t" + printWhere("outer") + "\n}\n",
+		)
+		require.NoError(t, err)
+		decls := append([]dst.Decl{}, root.Decls...)
+		for i, decl := range decls {
+			if decl == f {
+				root.Decls = append(append(decls[:i+1:i+1], extra.Decls[0]), decls[i+1:]...)
+			}
+		}
+	}).output)
+	assert.Regexp(t, generatedPosition, got["inner"])
+	assert.Regexp(t, generatedPosition, got["outer"])
 }
