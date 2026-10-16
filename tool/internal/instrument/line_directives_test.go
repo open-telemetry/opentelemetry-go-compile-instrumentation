@@ -2667,3 +2667,121 @@ func f(x int) {
 `
 	assert.Equal(t, want, got)
 }
+
+func TestMarkLineDirectives_CompilerEmptyBlockAfterGeneratedExpression(t *testing.T) {
+	// A rule replaces the condition of an "if" statement with code of several
+	// lines. The block of the statement is empty, so no statement in it can
+	// restore the position. The closing brace of the block must be restored,
+	// else the condition of the "else if" is on a wrong line.
+	const src = preludeProgram + `func at(id string) bool {
+	_, file, line, _ := runtime.Caller(1)
+	fmt.Printf("%s %s:%d\n", id, file, line)
+	return true
+}
+
+func main() {
+	fmt.Println("A", where())
+	if call(func() {}) < 0 {
+	} else if at("B") {
+		fmt.Println("C", where())
+	}
+	if call(func() {}) < 0 {} else if at("D") {
+		fmt.Println("E", where())
+	}
+}
+`
+	got := assertSamePositions(t, src, func(root *dst.File) {
+		body := findFunc(t, root, "main").Body
+		prepend(t, body, printWhere("start"))
+		for _, index := range []int{2, 3} {
+			cond := body.List[index].(*dst.IfStmt)
+			cond.Cond = &dst.BinaryExpr{
+				X:  multiLineWrapper(t, "call(func() {})"),
+				Op: token.LSS,
+				Y:  &dst.BasicLit{Kind: token.INT, Value: "0"},
+			}
+		}
+	}, "A", "B", "C", "D", "E")
+	assert.Regexp(t, generatedPosition, got["start"])
+}
+
+func TestMarkLineDirectives_CompilerUserLineCommentWithoutFileName(t *testing.T) {
+	// A "//line :L" comment of the user has no file name and no column, so Go
+	// gives an empty file name to the code after it. A restore directive must
+	// keep the empty file name, and not replace it with the directory of the
+	// file.
+	const src = preludeProgram + `func main() {
+	fmt.Println("A", where())
+//line :100
+	fmt.Println("B", where())
+	fmt.Println("C", where())
+}
+`
+	for name, edit := range map[string]func(root *dst.File){
+		"without injected code": func(*dst.File) {},
+		"with injected code": func(root *dst.File) {
+			body := findFunc(t, root, "main").Body
+			body.List = insertStmts(t, body.List, 1, printWhere("gen"))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := assertSamePositions(t, src, edit, "A", "B", "C")
+			assert.Equal(t, "??:100", got["B"])
+			assert.Equal(t, "??:101", got["C"])
+		})
+	}
+}
+
+func TestMarkLineDirectives_EmptyBlockAfterGeneratedExpression(t *testing.T) {
+	// The directive for the closing brace of an empty block is after the
+	// opening brace and its comments. A newline follows the directive, so the
+	// closing brace is on the next line.
+	src := `package main
+
+func f() {
+	if g() < 0 {
+	} else if h() {
+	}
+	if g() < 0 {} else if h() {
+	}
+	if g() < 0 { /* c */ }
+	k()
+}
+`
+	got := instrumentSource(t, src, func(root *dst.File) {
+		body := findFunc(t, root, "f").Body
+		for i := range 3 {
+			stmt := body.List[i].(*dst.IfStmt)
+			stmt.Cond = &dst.BinaryExpr{
+				X:  multiLineWrapper(t, "g()"),
+				Op: token.LSS,
+				Y:  &dst.BasicLit{Kind: token.INT, Value: "0"},
+			}
+		}
+	})
+	want := `package main
+
+func f() {
+	if func() int {
+		fmt.Println("gen", where())
+		return g()
+	}() < 0 {
+		/*line FILE:4*/
+	} else if h() {
+	}
+	/*line FILE:7*/ if func() int {
+		fmt.Println("gen", where())
+		return g()
+	}() < 0 { /*line FILE:6*/
+	} else if h() {
+	}
+	/*line FILE:9*/ if func() int {
+		fmt.Println("gen", where())
+		return g()
+	}() < 0 { /* c */ /*line FILE:8*/
+	}
+	/*line FILE:10*/ k()
+}
+`
+	assert.Equal(t, want, got)
+}

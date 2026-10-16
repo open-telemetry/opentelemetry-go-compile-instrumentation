@@ -497,18 +497,25 @@ func (p *lineDirectivePass) block(block *dst.BlockStmt, state *lineState) {
 	*state = lineKnown
 }
 
-// emptyBlock processes a block without statements. A user "//line" comment in
-// the block is ignored by Go, and then the closing brace has a wrong position.
-// The pass puts a restore directive after the comment, before the brace. If it
-// cannot write the directive, the code after the block needs a restore.
+// emptyBlock processes a block without statements. The closing brace has a
+// wrong position in two cases:
+//
+//   - The state before the block is not known. For example, a rule put code
+//     of several lines in the condition of an "if" statement.
+//   - A user "//line" comment is in the block. Go ignores it.
+//
+// Then the pass puts a restore directive after the opening brace (and after the
+// comments), before the closing brace. If it cannot write the directive, the
+// code after the block needs a restore.
 func (p *lineDirectivePass) emptyBlock(block *dst.BlockStmt, rbrace token.Position, state *lineState) {
-	if !hasUserLineDirective(block.Decs.Lbrace, false) {
+	userDirective := hasUserLineDirective(block.Decs.Lbrace, false)
+	if *state == lineKnown && !userDirective {
 		return
 	}
-	// The comment is on a line of its own, and the printer puts a newline after
-	// it. So the directive gives the line before the brace.
+	// The pass puts a newline after the directive, so the directive gives the
+	// line before the brace.
 	if target, ok := directive(p.absolute(rbrace.Filename), rbrace.Line-1); ok {
-		block.Decs.Lbrace.Append("/*line " + target + "*/")
+		block.Decs.Lbrace.Append("/*line "+target+"*/", "\n")
 		*state = lineKnown
 	} else if *state == lineKnown {
 		*state = lineStale
@@ -613,8 +620,11 @@ func endsWithNumber(file string) bool {
 	return i < len(file) && i > 0 && file[i-1] == ':'
 }
 
+// absolute returns the absolute name of file. An empty name stays empty: it
+// comes from a "//line :L" comment of the user, and Go gives the empty name to
+// the code after it.
 func (p *lineDirectivePass) absolute(file string) string {
-	if filepath.IsAbs(file) {
+	if file == "" || filepath.IsAbs(file) {
 		return file
 	}
 	return filepath.Join(p.dir, file)
