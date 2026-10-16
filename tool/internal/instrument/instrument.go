@@ -12,6 +12,7 @@ import (
 	"github.com/dave/dst"
 
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -30,7 +31,26 @@ func groupRules(workDir string, rset *rule.InstRuleSet) (map[string][]rule.InstR
 	addRulesToMap(rset.LitRules, file2rules, rset.CgoFileMap, workDir)
 	addRulesToMap(rset.DirectiveRules, file2rules, rset.CgoFileMap, workDir)
 	addRulesToMap(rset.DeclRules, file2rules, rset.CgoFileMap, workDir)
+	addIgnoredCallFilesToMap(rset.IgnoredCallFiles, file2rules, rset.CgoFileMap, workDir)
 	return file2rules, slices.Sorted(maps.Keys(file2rules))
+}
+
+// addIgnoredCallFilesToMap gives every file in files an entry in file2rules,
+// even one with no rule of its own.
+func addIgnoredCallFilesToMap(
+	files []string,
+	file2rules map[string][]rule.InstRule,
+	cgoMap map[string]string,
+	workDir string,
+) {
+	for _, file := range files {
+		if cgoBase, ok := cgoMap[file]; ok {
+			file = filepath.Join(workDir, cgoBase)
+		}
+		if _, exists := file2rules[file]; !exists {
+			file2rules[file] = nil
+		}
+	}
 }
 
 func addRulesToMap[T rule.InstRule](
@@ -63,10 +83,16 @@ type ruleResult struct {
 }
 
 // applyOneRule applies a single rule to the target file.
-func (ip *instrumentPhase) applyOneRule(ctx context.Context, r rule.InstRule, root *dst.File) (ruleResult, error) {
+func (ip *instrumentPhase) applyOneRule(ctx context.Context, r rule.InstRule, root *dst.File,
+	funcDecl *dst.FuncDecl, found bool,
+) (ruleResult, error) {
 	switch rt := r.(type) {
 	case *rule.InstFuncRule:
-		return ruleResult{needsGlobals: true, modified: true}, ip.applyFuncRule(ctx, rt, root)
+		// applyFuncRule reports whether it actually instrumented a function; a
+		// func rule skipped via //otelc:ignore returns false so no globals file
+		// is written for a package whose only func rules were ignored.
+		modified, err := ip.applyFuncRule(ctx, rt, root, funcDecl, found)
+		return ruleResult{needsGlobals: modified, modified: modified}, err
 	case *rule.InstStructRule:
 		return ruleResult{needsGlobals: false, modified: true}, ip.applyStructRule(ctx, rt, root)
 	case *rule.InstDeclRule:
@@ -88,6 +114,30 @@ func (ip *instrumentPhase) applyOneRule(ctx context.Context, r rule.InstRule, ro
 	}
 }
 
+// skipRuleForFileIgnore reports whether r must be skipped because a file-level
+// //otelc:ignore is in effect and r does not opt back in via //otelc:instrument.
+//
+// Only function rules are overridable: the //otelc:instrument opt-in is a
+// leading comment on a function declaration, so there is no way to force a
+// non-func rule (struct/raw/call/decl/directive) through a file-level ignore.
+// Such rules are always skipped when the file is ignored.
+//
+// Precedence: a function carrying both //otelc:instrument and //otelc:ignore
+// passes this override check, but applyFuncRule then re-checks //otelc:ignore
+// and skips it, so the closest-to-declaration //otelc:ignore wins.
+func (ip *instrumentPhase) skipRuleForFileIgnore(r rule.InstRule, funcDecl *dst.FuncDecl, found bool) bool {
+	fr, isFuncRule := r.(*rule.InstFuncRule)
+	if !isFuncRule {
+		ip.Debug("Skip non-func rule due to file-level //otelc:ignore (not overridable)", "rule", r.GetName())
+		return true
+	}
+	if !found || !ast.FuncLeadHasDirective(funcDecl, util.DirectiveInstrument) {
+		ip.Debug("Skip func rule due to file-level //otelc:ignore", "func", fr.Func, "rule", r.GetName())
+		return true
+	}
+	return false
+}
+
 // rsetHasMethodCallRule reports whether rset contains at least one
 // method_call rule.
 func rsetHasMethodCallRule(rset *rule.InstRuleSet) bool {
@@ -99,6 +149,69 @@ func rsetHasMethodCallRule(rset *rule.InstRuleSet) bool {
 		}
 	}
 	return false
+}
+
+// instrumentFile applies rules to a single file and reports whether any of
+// them is a function rule (i.e. whether a globals file is needed).
+func (ip *instrumentPhase) instrumentFile(ctx context.Context, file string, rules []rule.InstRule) (bool, error) {
+	// Group rules by file, then parse the target file once
+	root, err := ip.parseFile(file)
+	if err != nil {
+		return false, ex.Wrapf(err, "parsing file %s", file)
+	}
+	fileIgnored := ast.FileHasLeadingDirective(root, util.DirectiveIgnore)
+	if fileIgnored {
+		ip.Debug("File-level //otelc:ignore found, only //otelc:instrument functions will be instrumented",
+			"file", file)
+	}
+
+	hasFuncRule := false
+	modified := false
+	for _, r := range rules {
+		var funcDecl *dst.FuncDecl
+		var found bool
+		if fr, ok := r.(*rule.InstFuncRule); ok {
+			funcDecl, found, err = ast.FindFuncDecl(root, fr, ip.importNames)
+			if err != nil {
+				return false, ex.Wrapf(err, "finding function %s", fr.Func)
+			}
+		}
+		if fileIgnored && ip.skipRuleForFileIgnore(r, funcDecl, found) {
+			continue
+		}
+		res, err1 := ip.applyOneRule(ctx, r, root, funcDecl, found)
+		if err1 != nil {
+			return false, ex.Wrapf(err1, "applying rule %s", r.GetName())
+		}
+		hasFuncRule = hasFuncRule || res.needsGlobals
+		modified = modified || res.modified
+	}
+
+	ignoredSitesModified, err := ip.applyIgnoredCallSites(ctx, root)
+	if err != nil {
+		return false, ex.Wrapf(err, "applying //otelc:ignore call sites in %s", file)
+	}
+	modified = modified || ignoredSitesModified
+
+	// Leave a file no rule changed out of the compile command. A glob
+	// target attaches call and literal rules to every file of every
+	// package it matches, and rewriting those would needlessly reprint
+	// them, including cgo and standard library files.
+	if !modified {
+		return hasFuncRule, nil
+	}
+
+	// Since trampoline-jump-if is performance-critical, perform AST level
+	// optimization for them before writing to file
+	if err = ip.optimizeTJumps(); err != nil {
+		return false, ex.Wrapf(err, "optimizing trampoline jumps for %s", file)
+	}
+	// Once all func rules targeting this file are applied, write instrumented
+	// AST to new file and replace the original file in the compile command
+	if err = ip.writeInstrumented(root, file); err != nil {
+		return false, ex.Wrapf(err, "writing instrumented file %s", file)
+	}
+	return hasFuncRule, nil
 }
 
 func (ip *instrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSet) error {
@@ -119,42 +232,11 @@ func (ip *instrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSe
 
 	file2rules, files := groupRules(ip.workDir, rset)
 	for _, file := range files {
-		rules := file2rules[file]
-		// Group rules by file, then parse the target file once
-		root, err := ip.parseFile(file)
+		fileHasFuncRule, err := ip.instrumentFile(ctx, file, file2rules[file])
 		if err != nil {
-			return ex.Wrapf(err, "parsing file %s", file)
+			return err
 		}
-
-		// Apply the rules to the target file
-		modified := false
-		for _, r := range rules {
-			res, err1 := ip.applyOneRule(ctx, r, root)
-			if err1 != nil {
-				return ex.Wrapf(err1, "applying rule %s", r.GetName())
-			}
-			hasFuncRule = hasFuncRule || res.needsGlobals
-			modified = modified || res.modified
-		}
-		// Leave a file no rule changed out of the compile command. A glob
-		// target attaches call and literal rules to every file of every
-		// package it matches, and rewriting those would needlessly reprint
-		// them, including cgo and standard library files.
-		if !modified {
-			// Phase state (target, parser, tjumps) still describes this file.
-			// Nothing reads it past this point, and the next parseFile resets it.
-			continue
-		}
-		// Since trampoline-jump-if is performance-critical, perform AST level
-		// optimization for them before writing to file
-		if err = ip.optimizeTJumps(); err != nil {
-			return ex.Wrapf(err, "optimizing trampoline jumps for %s", file)
-		}
-		// Once all func rules targeting this file are applied, write instrumented
-		// AST to new file and replace the original file in the compile command
-		if err = ip.writeInstrumented(root, file); err != nil {
-			return ex.Wrapf(err, "writing instrumented file %s", file)
-		}
+		hasFuncRule = hasFuncRule || fileHasFuncRule
 	}
 
 	// Write globals file if any function is instrumented because injected code

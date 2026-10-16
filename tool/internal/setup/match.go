@@ -83,6 +83,28 @@ func (sp *setupPhase) matchGlobRules(
 	return matched
 }
 
+// markIgnoredCallFiles records source files in dep that hold a
+// //otelc:ignore comment directly above a call.
+func markIgnoredCallFiles(dep *Dependency, set *rule.InstRuleSet) error {
+	for _, source := range dep.Sources {
+		maybe, err := ast.FileContainsDirectiveText(source, util.DirectiveIgnore)
+		if err != nil {
+			return ex.Wrapf(err, "scanning %s for %s", source, util.DirectiveIgnore)
+		}
+		if !maybe {
+			continue
+		}
+		tree, err := ast.ParseFileFast(source)
+		if err != nil {
+			return ex.Wrapf(err, "parsing %s for %s", source, util.DirectiveIgnore)
+		}
+		if ast.FileHasIgnoredCall(tree, util.DirectiveIgnore) {
+			set.AddIgnoredCallFile(source)
+		}
+	}
+	return nil
+}
+
 // runMatch performs precise matching of rules against the dependency's source code.
 // It parses source files and matches rules by examining AST nodes.
 //
@@ -103,6 +125,10 @@ func (sp *setupPhase) runMatch(
 	if len(dep.CgoFiles) > 0 {
 		set.SetCgoFileMap(dep.CgoFiles)
 		sp.Debug("Set CGO file map", "dep", dep.ImportPath, "cgoFiles", dep.CgoFiles)
+	}
+
+	if err := markIgnoredCallFiles(dep, set); err != nil {
+		return nil, err
 	}
 
 	// Fast path: exact-target rules via a single map lookup.
@@ -210,6 +236,8 @@ func (sp *setupPhase) preciseMatching(
 	// shares it), so compute it once and reuse it across each file's context.
 	isTest := isTestBuild(dep.Sources)
 
+	known := knownDirectiveNames(rules)
+
 	for _, source := range dep.Sources {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -228,6 +256,8 @@ func (sp *setupPhase) preciseMatching(
 		// All files in a Go package share the same declared package name, so
 		// this is idempotent across iterations; SetPackageName asserts non-empty.
 		set.SetPackageName(tree.Name.Name)
+
+		sp.warnUnknownDirectives(source, tree, known)
 
 		// mctx is allocated once per source file and reused across all rules
 		// evaluated against that file. All fields are constant for a given
@@ -251,6 +281,27 @@ func (sp *setupPhase) preciseMatching(
 		}
 	}
 	return set, nil
+}
+
+func knownDirectiveNames(rules []rule.InstRule) map[string]bool {
+	known := make(map[string]bool, len(util.BuiltinDirectives))
+	for _, name := range util.BuiltinDirectives {
+		known[name] = true
+	}
+	for _, r := range rules {
+		if dr, ok := r.(*rule.InstDirectiveRule); ok {
+			known[dr.Directive] = true
+		}
+	}
+	return known
+}
+
+// warnUnknownDirectives logs a warning for every otelc: directive comment in
+// tree that matches no name in known.
+func (sp *setupPhase) warnUnknownDirectives(source string, tree *dst.File, known map[string]bool) {
+	for _, name := range ast.UnknownDirectiveNames(tree, known) {
+		sp.Warn("Unrecognized directive comment", "directive", name, "file", source)
+	}
 }
 
 // isTestBuild reports whether a compile invocation is part of a `go test` run.

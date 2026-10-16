@@ -72,6 +72,9 @@ type instrumentPhase struct {
 	// rules (one file implementing dozens of before/after pairs), so caching
 	// by file avoids re-parsing it once per rule.
 	parsedHookFiles map[string]*dst.File
+	// buildUsesIgnoreDirective is true when some package in this build has a
+	// //otelc:ignore comment above a call, found during setup.
+	buildUsesIgnoreDirective bool
 	// methodCallInfo is built lazily by ensureMethodCallInfo.
 	methodCallInfo       *methodCallPackageInfo
 	methodCallInfoLoaded bool
@@ -136,6 +139,7 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	ip.buildUsesIgnoreDirective = anyRuleSetHasIgnoredCallFiles(allSet)
 
 	// Load the import name table, if one exists. A missing table is
 	// not fatal.
