@@ -2539,3 +2539,131 @@ func main() {
 	got := assertSamePositions(t, src, func(*dst.File) {}, "M")
 	assert.Contains(t, got["M"], "mapped.y:")
 }
+
+func TestMarkLineDirectives_CompilerCommentAfterGeneratedCodeInLastClause(t *testing.T) {
+	// The last clause of each switch or select ends with generated code, and a
+	// comment follows it. The comment is in the End decorations of the clause.
+	// The printer prints it after the body of the clause, so the directive for
+	// the closing brace must follow the comment.
+	const src = preludeProgram + `func main() {
+	defer func() {
+		_, file, line, _ := runtime.Caller(1)
+		fmt.Printf("closing %s:%d\n", file, line)
+	}()
+	switch len(fmt.Sprint()) {
+	case 1:
+		fmt.Println("A", where())
+	default:
+		fmt.Println("B", where())
+		// A comment after the last statement.
+
+		// One more comment.
+	}
+	fmt.Println("C", where())
+	ch := make(chan int, 1)
+	ch <- 1
+	select {
+	case <-ch:
+		fmt.Println("D", where())
+		/* A block comment. */
+	}
+	fmt.Println("E", where())
+}
+`
+	edit := func(root *dst.File) {
+		body := findFunc(t, root, "main").Body
+		sw := body.List[1].(*dst.SwitchStmt)
+		last := sw.Body.List[len(sw.Body.List)-1].(*dst.CaseClause)
+		last.Body = append(last.Body, snippet(t, printWhere("gen-switch"))...)
+		sel := body.List[5].(*dst.SelectStmt)
+		comm := sel.Body.List[0].(*dst.CommClause)
+		comm.Body = append(comm.Body, snippet(t, printWhere("gen-select"))...)
+	}
+	got := assertSamePositions(t, src, edit, "B", "C", "D", "E", "closing")
+	assert.Regexp(t, generatedPosition, got["gen-switch"])
+	assert.Regexp(t, generatedPosition, got["gen-select"])
+}
+
+func TestMarkLineDirectives_CompilerUserLineCommentInEmptyImportGroup(t *testing.T) {
+	// The "//line" comment is in an empty import group. It is in the
+	// decorations of the declaration, and not in those of a spec. The pass
+	// does not look at these decorations. The printer does not indent a
+	// comment in an empty group, so Go still reads it, and the positions after
+	// it are correct without a restore.
+	const src = `package main
+
+import (
+//line mapped.go:100
+)
+
+import (
+	"fmt"
+	"runtime"
+)
+
+func where() string {
+	_, file, line, _ := runtime.Caller(1)
+	return fmt.Sprintf("%s:%d", file, line)
+}
+
+func main() {
+	fmt.Println("A", where())
+}
+`
+	got := assertSamePositions(t, src, func(*dst.File) {}, "A")
+	assert.Contains(t, got["A"], "mapped.go:")
+	t.Run("with injected code", func(t *testing.T) {
+		withGen := assertSamePositions(t, src, func(root *dst.File) {
+			prepend(t, findFunc(t, root, "main").Body, printWhere("gen"))
+		}, "A")
+		assert.Regexp(t, generatedPosition, withGen["gen"])
+	})
+}
+
+func TestMarkLineDirectives_CommentAfterGeneratedCodeInLastClause(t *testing.T) {
+	// A comment after the last statement of a clause is in the End decorations
+	// of the clause. The directive for the closing brace must follow it, for
+	// a comment on a line of its own and for a comment on the same line.
+	src := `package main
+
+func f(x int) {
+	switch x {
+	case 1:
+		a()
+		// Own line.
+	}
+	switch x {
+	case 1:
+		b() // Same line.
+	}
+}
+`
+	got := instrumentSource(t, src, func(root *dst.File) {
+		body := findFunc(t, root, "f").Body
+		for i, name := range []string{"genOwn()", "genSame()"} {
+			clause := body.List[i].(*dst.SwitchStmt).Body.List[0].(*dst.CaseClause)
+			clause.Body = append(clause.Body, snippet(t, name)...)
+		}
+	})
+	want := `package main
+
+func f(x int) {
+	switch x {
+	case 1:
+		a()
+		/*line /<generated>:1*/ genOwn()
+
+		// Own line.
+		/*line FILE:7*/
+	}
+	switch x {
+	case 1:
+		b()
+		/*line /<generated>:1*/ genSame()
+		// Same line.
+		/*line FILE:11*/
+	}
+}
+`
+	assert.Equal(t, want, got)
+}

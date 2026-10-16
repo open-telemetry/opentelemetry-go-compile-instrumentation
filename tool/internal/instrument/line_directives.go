@@ -550,12 +550,13 @@ func (p *lineDirectivePass) list(stmts []dst.Stmt, state *lineState) {
 
 // endNode returns the node that gets the End decoration with the directive
 // for the closing brace of a block. It is the node that the code of the last
-// statement ends with. If a node on the way has a user "//line" comment in its
-// End decorations, it is this node, because the printer prints the directive
-// after the comment, and the comment is the last thing before the brace.
+// statement ends with. If a node on the way has End decorations, it is this
+// node. The printer prints the End decorations of a clause after its body, so
+// a comment there is the last thing before the brace. The directive must follow
+// the comment, else the newlines of the comment move the brace.
 func endNode(stmts []dst.Stmt) dst.Node {
 	last := stmts[len(stmts)-1]
-	if hasUserLineDirective(last.Decorations().End, false) {
+	if len(last.Decorations().End) > 0 {
 		return last
 	}
 	switch clause := last.(type) {
