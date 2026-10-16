@@ -660,5 +660,8 @@ func (sp *setupPhase) matchDeps(
 	if err = g.Wait(); err != nil {
 		return nil, err
 	}
+	slices.SortStableFunc(matched, func(a, b *rule.InstRuleSet) int {
+		return strings.Compare(a.ModulePath, b.ModulePath)
+	})
 	return matched, nil
 }
