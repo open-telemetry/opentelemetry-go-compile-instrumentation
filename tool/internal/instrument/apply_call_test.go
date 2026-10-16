@@ -236,6 +236,61 @@ func TestApplyCallRule_AppendArgsWithoutMatch(t *testing.T) {
 	assert.False(t, fileImportsPath(file, "example.com/traced"))
 }
 
+func TestApplyCallRule_ReplaceHonorsIgnoreDirective(t *testing.T) {
+	root := parseFile(t, `package main
+
+import "net/http"
+
+func Run() {
+	//otelc:ignore
+	http.Get("ignored")
+	http.Get("kept")
+}
+`)
+	r := httpGetRule("traced({{ . }})")
+
+	_, err := newTestPhase().applyCallRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	fn := findFuncDeclInFile(t, root, "Run")
+	ignoredStmt := fn.Body.List[0].(*dst.ExprStmt)
+	_, ignoredStillBare := ignoredStmt.X.(*dst.CallExpr)
+	assert.True(t, ignoredStillBare, "annotated call site must keep its original form")
+
+	keptStmt := fn.Body.List[1].(*dst.ExprStmt)
+	keptCall, ok := keptStmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr after wrap, got %T", keptStmt.X)
+	fnIdent, ok := keptCall.Fun.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "traced", fnIdent.Name, "the other call site to the same function must stay instrumented")
+}
+
+func TestApplyCallRule_AppendArgsHonorsIgnoreDirective(t *testing.T) {
+	root := parseFile(t, `package main
+
+import "net/http"
+
+func Run() {
+	//otelc:ignore
+	http.Get("ignored")
+	http.Get("kept")
+}
+`)
+	r := httpGetRule("")
+	r.AppendArgs = []string{"traced.Context()"}
+	r.Imports = map[string]string{"traced": "fmt"}
+
+	_, err := newTestPhase().applyCallRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	fn := findFuncDeclInFile(t, root, "Run")
+	ignoredCall := fn.Body.List[0].(*dst.ExprStmt).X.(*dst.CallExpr)
+	assert.Len(t, ignoredCall.Args, 1, "annotated call site must not gain the appended argument")
+
+	keptCall := fn.Body.List[1].(*dst.ExprStmt).X.(*dst.CallExpr)
+	assert.Len(t, keptCall.Args, 2, "the other call site to the same function must gain the appended argument")
+}
+
 func TestApplyCallRule_AppendArgsFailureIsUnmodified(t *testing.T) {
 	// The call matches, but append_args on an ellipsis call needs
 	// variadic_type, so the rule fails and leaves the call unchanged.
@@ -1113,6 +1168,398 @@ func TestApplyCallRule_WrapFailureReturnsError(t *testing.T) {
 	require.Error(t, err)
 	require.False(t, modified, "a rule that matched nothing or failed must not report a change")
 	assert.Contains(t, err.Error(), "failed to parse generated code")
+}
+
+func TestApplyIgnoredCallSites_BracketsAnnotatedStatement(t *testing.T) {
+	root := parseFile(t, `package main
+
+import "net/http"
+
+func Run() {
+	//otelc:ignore
+	http.Get("ignored")
+	http.Get("kept")
+}
+`)
+
+	_, err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+	require.NoError(t, err)
+
+	src := renderFile(t, root)
+	assert.Contains(
+		t,
+		src,
+		"runtime.SuppressHooks()\n"+
+			"\totelcIgnoreDone0 := false\n"+
+			"\tdefer func() {\n"+
+			"\t\tif !otelcIgnoreDone0 {\n"+
+			"\t\t\truntime.UnsuppressHooks()\n"+
+			"\t\t}\n"+
+			"\t}()\n"+
+			"\t//otelc:ignore\n"+
+			"\thttp.Get(\"ignored\")\n"+
+			"\totelcIgnoreDone0 = true\n"+
+			"\truntime.UnsuppressHooks()",
+	)
+	assert.NotContains(t, src, "runtime.SuppressHooks()\n\thttp.Get(\"kept\")")
+}
+
+func TestApplyIgnoredCallSites_NoDirectiveNoChange(t *testing.T) {
+	root := parseFile(t, `package main
+
+import "net/http"
+
+func Run() {
+	http.Get("kept")
+}
+`)
+
+	_, err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+	require.NoError(t, err)
+
+	src := renderFile(t, root)
+	assert.NotContains(t, src, "SuppressHooks")
+	assert.NotContains(t, src, `"runtime"`)
+}
+
+func TestApplyIgnoredCallSites_BracketsInsideNestedBlock(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run() {
+	if true {
+		//otelc:ignore
+		hooked()
+	}
+}
+
+func hooked() {}
+`)
+
+	_, err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+	require.NoError(t, err)
+
+	src := renderFile(t, root)
+	assert.Contains(
+		t,
+		src,
+		"runtime.SuppressHooks()\n"+
+			"\t\totelcIgnoreDone0 := false\n"+
+			"\t\tdefer func() {\n"+
+			"\t\t\tif !otelcIgnoreDone0 {\n"+
+			"\t\t\t\truntime.UnsuppressHooks()\n"+
+			"\t\t\t}\n"+
+			"\t\t}()\n"+
+			"\t\t//otelc:ignore\n"+
+			"\t\thooked()\n"+
+			"\t\totelcIgnoreDone0 = true\n"+
+			"\t\truntime.UnsuppressHooks()",
+	)
+}
+
+func TestApplyIgnoredCallSites_RejectsBareReturn(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run() error {
+	//otelc:ignore
+	return hooked()
+}
+
+func hooked() error { return nil }
+`)
+
+	_, err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returns, breaks, continues, or jumps out of")
+}
+
+func TestApplyIgnoredCallSites_RejectsBreakInside(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run() {
+	for {
+		//otelc:ignore
+		if hooked() {
+			break
+		}
+	}
+}
+
+func hooked() bool { return false }
+`)
+
+	_, err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returns, breaks, continues, or jumps out of")
+}
+
+func TestApplyIgnoredCallSites_RejectsMultipleCallsInOneStatement(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run() {
+	//otelc:ignore
+	combine(a(), b())
+}
+
+func combine(x, y int) int { return x + y }
+func a() int                { return 1 }
+func b() int                { return 2 }
+`)
+
+	_, err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "holds more than one call")
+}
+
+func TestApplyIgnoredCallSites_AllowsReturnInsideNestedClosure(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run() {
+	//otelc:ignore
+	wrap(func() bool {
+		return hooked()
+	})
+}
+
+func wrap(f func() bool) {}
+func hooked() bool       { return false }
+`)
+
+	_, err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+	require.NoError(t, err)
+
+	src := renderFile(t, root)
+	assert.Contains(t, src, "runtime.SuppressHooks()")
+}
+
+func TestApplyIgnoredCallSites_PreservesAssignmentScope(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run() {
+	//otelc:ignore
+	v, err := hooked()
+	_ = v
+	_ = err
+}
+
+func hooked() (int, error) { return 0, nil }
+`)
+
+	_, err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+	require.NoError(t, err)
+
+	src := renderFile(t, root)
+	assert.Contains(t, src, "v, err := hooked()")
+	assert.Contains(t, src, "_ = v")
+	assert.Contains(t, src, "_ = err")
+}
+
+func TestApplyIgnoredCallSites_DistinctGuardNamesAcrossStatements(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run() {
+	//otelc:ignore
+	hooked()
+	//otelc:ignore
+	hooked()
+}
+
+func hooked() {}
+`)
+
+	_, err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+	require.NoError(t, err)
+
+	src := renderFile(t, root)
+	assert.Contains(t, src, "otelcIgnoreDone0")
+	assert.Contains(t, src, "otelcIgnoreDone1")
+}
+
+func TestApplyIgnoredCallSites_BracketsEvenWhenAWrapCallRuleAlsoSkippedTheCall(t *testing.T) {
+	root := parseFile(t, `package main
+
+import "unsafe"
+
+func Run() {
+	x := 42
+	//otelc:ignore
+	_ = unsafe.Sizeof(x)
+}
+`)
+
+	ip := newTestPhase()
+	r := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_sizeof"},
+		FunctionCall: "unsafe.Sizeof",
+		ImportPath:   "unsafe",
+		FuncName:     "Sizeof",
+		Replace:      "Wrapper({{ . }})",
+	}
+	_, err := ip.applyCallRule(context.Background(), r, root)
+	require.NoError(t, err)
+
+	_, err = ip.applyIgnoredCallSites(context.Background(), root)
+	require.NoError(t, err)
+
+	src := renderFile(t, root)
+	assert.Contains(t, src, "runtime.SuppressHooks()")
+	assert.NotContains(t, src, "Wrapper(")
+}
+
+func TestApplyIgnoredCallSites_BracketsSwitchCaseBody(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run() {
+	switch true {
+	case true:
+		//otelc:ignore
+		hooked()
+	}
+}
+
+func hooked() {}
+`)
+
+	_, err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+	require.NoError(t, err)
+
+	src := renderFile(t, root)
+	assert.Contains(t, src, "runtime.SuppressHooks()")
+	assert.Contains(t, src, `"runtime"`)
+}
+
+func TestApplyIgnoredCallSites_BracketsSelectCommBody(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run(ch chan int) {
+	select {
+	case <-ch:
+		//otelc:ignore
+		hooked()
+	}
+}
+
+func hooked() {}
+`)
+
+	_, err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+	require.NoError(t, err)
+
+	src := renderFile(t, root)
+	assert.Contains(t, src, "runtime.SuppressHooks()")
+	assert.Contains(t, src, `"runtime"`)
+}
+
+func TestApplyIgnoredCallSites_SelfImportUsesUnqualifiedCalls(t *testing.T) {
+	root := parseFile(t, `package runtime
+
+func Run() {
+	//otelc:ignore
+	hooked()
+}
+
+func hooked() {}
+`)
+
+	ip := newTestPhase()
+	ip.compileArgs = []string{"-p", "runtime"}
+	_, err := ip.applyIgnoredCallSites(context.Background(), root)
+	require.NoError(t, err)
+
+	src := renderFile(t, root)
+	assert.Contains(
+		t,
+		src,
+		"SuppressHooks()\n"+
+			"\totelcIgnoreDone0 := false\n"+
+			"\tdefer func() {\n"+
+			"\t\tif !otelcIgnoreDone0 {\n"+
+			"\t\t\tUnsuppressHooks()\n"+
+			"\t\t}\n"+
+			"\t}()\n"+
+			"\t//otelc:ignore\n"+
+			"\thooked()\n"+
+			"\totelcIgnoreDone0 = true\n"+
+			"\tUnsuppressHooks()",
+	)
+	assert.NotContains(t, src, `"runtime"`)
+}
+
+func TestApplyIgnoredCallSites_PackageClauseNamedRuntimeAtOtherImportPathIsQualified(t *testing.T) {
+	root := parseFile(t, `package runtime
+
+func Run() {
+	//otelc:ignore
+	hooked()
+}
+
+func hooked() {}
+`)
+
+	ip := newTestPhase()
+	ip.compileArgs = []string{"-p", "example.com/vendored/runtime"}
+	_, err := ip.applyIgnoredCallSites(context.Background(), root)
+	require.NoError(t, err)
+
+	src := renderFile(t, root)
+	assert.Contains(
+		t,
+		src,
+		"runtime.SuppressHooks()\n"+
+			"\totelcIgnoreDone0 := false\n"+
+			"\tdefer func() {\n"+
+			"\t\tif !otelcIgnoreDone0 {\n"+
+			"\t\t\truntime.UnsuppressHooks()\n"+
+			"\t\t}\n"+
+			"\t}()\n"+
+			"\t//otelc:ignore\n"+
+			"\thooked()\n"+
+			"\totelcIgnoreDone0 = true\n"+
+			"\truntime.UnsuppressHooks()",
+	)
+	assert.Contains(t, src, `"runtime"`)
+}
+
+func TestHasEscapingControlFlow(t *testing.T) {
+	tests := []struct {
+		name     string
+		src      string
+		expected bool
+	}{
+		{
+			name:     "plain call",
+			src:      `hooked()`,
+			expected: false,
+		},
+		{
+			name:     "bare return",
+			src:      `return hooked()`,
+			expected: true,
+		},
+		{
+			name:     "break",
+			src:      `break`,
+			expected: true,
+		},
+		{
+			name:     "continue",
+			src:      `continue`,
+			expected: true,
+		},
+		{
+			name:     "return inside func literal is scoped to it",
+			src:      `wrap(func() bool { return hooked() })`,
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := parseFile(t, "package main\nfunc Run() {\n"+tt.src+"\n}\n")
+			fn := findFuncDeclInFile(t, root, "Run")
+			stmt := fn.Body.List[0]
+			assert.Equal(t, tt.expected, hasEscapingControlFlow(stmt))
+		})
+	}
 }
 
 func writeTempGoFile(t *testing.T, dir, name, content string) string {
