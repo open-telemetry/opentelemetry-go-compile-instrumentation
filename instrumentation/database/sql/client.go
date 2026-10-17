@@ -186,9 +186,6 @@ func beforePingContextInstrumentation(ictx hook.HookContext, db *sql.DB, ctx con
 }
 
 func afterPingContextInstrumentation(ictx hook.HookContext, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	instrumentEnd(ictx, err)
 }
 
@@ -209,9 +206,6 @@ func beforePrepareContextInstrumentation(ictx hook.HookContext, db *sql.DB, ctx 
 }
 
 func afterPrepareContextInstrumentation(ictx hook.HookContext, stmt *sql.Stmt, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	if stmt == nil {
 		return
 	}
@@ -245,9 +239,6 @@ func beforeExecContextInstrumentation(
 }
 
 func afterExecContextInstrumentation(ictx hook.HookContext, result sql.Result, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	instrumentEnd(ictx, err)
 }
 
@@ -268,9 +259,6 @@ func beforeQueryContextInstrumentation(
 }
 
 func afterQueryContextInstrumentation(ictx hook.HookContext, rows *sql.Rows, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	instrumentEnd(ictx, err)
 }
 
@@ -285,9 +273,6 @@ func beforeTxInstrumentation(ictx hook.HookContext, db *sql.DB, ctx context.Cont
 }
 
 func afterTxInstrumentation(ictx hook.HookContext, tx *sql.Tx, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	defer instrumentEnd(ictx, err)
 	if tx == nil {
 		return
@@ -344,9 +329,6 @@ func beforeConnInstrumentation(ictx hook.HookContext, db *sql.DB, ctx context.Co
 }
 
 func afterConnInstrumentation(ictx hook.HookContext, conn *sql.Conn, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	if conn == nil {
 		return
 	}
@@ -383,9 +365,6 @@ func beforeConnPingContextInstrumentation(ictx hook.HookContext, conn *sql.Conn,
 }
 
 func afterConnPingContextInstrumentation(ictx hook.HookContext, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	instrumentEnd(ictx, err)
 }
 
@@ -406,9 +385,6 @@ func beforeConnPrepareContextInstrumentation(ictx hook.HookContext, conn *sql.Co
 }
 
 func afterConnPrepareContextInstrumentation(ictx hook.HookContext, stmt *sql.Stmt, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	if stmt == nil {
 		return
 	}
@@ -442,9 +418,6 @@ func beforeConnExecContextInstrumentation(
 }
 
 func afterConnExecContextInstrumentation(ictx hook.HookContext, result sql.Result, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	instrumentEnd(ictx, err)
 }
 
@@ -465,9 +438,6 @@ func beforeConnQueryContextInstrumentation(
 }
 
 func afterConnQueryContextInstrumentation(ictx hook.HookContext, rows *sql.Rows, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	instrumentEnd(ictx, err)
 }
 
@@ -482,9 +452,6 @@ func beforeConnTxInstrumentation(ictx hook.HookContext, conn *sql.Conn, ctx cont
 }
 
 func afterConnTxInstrumentation(ictx hook.HookContext, tx *sql.Tx, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	defer instrumentEnd(ictx, err)
 	if tx == nil {
 		return
@@ -509,9 +476,6 @@ func beforeTxPrepareContextInstrumentation(ictx hook.HookContext, tx *sql.Tx, ct
 }
 
 func afterTxPrepareContextInstrumentation(ictx hook.HookContext, stmt *sql.Stmt, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	if stmt == nil {
 		return
 	}
@@ -545,9 +509,6 @@ func beforeTxStmtContextInstrumentation(ictx hook.HookContext, tx *sql.Tx, ctx c
 }
 
 func afterTxStmtContextInstrumentation(ictx hook.HookContext, stmt *sql.Stmt) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	if stmt == nil {
 		return
 	}
@@ -581,9 +542,6 @@ func beforeTxExecContextInstrumentation(
 }
 
 func afterTxExecContextInstrumentation(ictx hook.HookContext, result sql.Result, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	instrumentEnd(ictx, err)
 }
 
@@ -604,9 +562,6 @@ func beforeTxQueryContextInstrumentation(
 }
 
 func afterTxQueryContextInstrumentation(ictx hook.HookContext, rows *sql.Rows, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	instrumentEnd(ictx, err)
 }
 
@@ -621,9 +576,6 @@ func beforeTxCommitInstrumentation(ictx hook.HookContext, tx *sql.Tx) {
 }
 
 func afterTxCommitInstrumentation(ictx hook.HookContext, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	instrumentEnd(ictx, err)
 }
 
@@ -649,9 +601,6 @@ func txContext(tx *sql.Tx) context.Context {
 }
 
 func afterTxRollbackInstrumentation(ictx hook.HookContext, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	instrumentEnd(ictx, err)
 }
 
@@ -675,9 +624,6 @@ func beforeStmtExecContextInstrumentation(
 }
 
 func afterStmtExecContextInstrumentation(ictx hook.HookContext, result sql.Result, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	instrumentEnd(ictx, err)
 }
 
@@ -701,9 +647,6 @@ func beforeStmtQueryContextInstrumentation(
 }
 
 func afterStmtQueryContextInstrumentation(ictx hook.HookContext, rows *sql.Rows, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	instrumentEnd(ictx, err)
 }
 
@@ -750,10 +693,6 @@ func instrumentStart(
 }
 
 func instrumentEnd(ictx hook.HookContext, err error) {
-	if !clientEnabler.Enable() {
-		logger.Debug("Db client instrumentation disabled")
-		return
-	}
 	if ictx.GetData() == nil {
 		return
 	}
