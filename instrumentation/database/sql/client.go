@@ -555,23 +555,13 @@ func afterTxStmtContextInstrumentation(ictx hook.HookContext, stmt *sql.Stmt) {
 	if !ok {
 		return
 	}
-	stmt.Data = map[string]string{}
-	endpoint, ok := data["endpoint"]
-	if ok {
-		stmt.Data["endpoint"] = endpoint
+	stmt.Data = map[string]string{
+		"endpoint": data["endpoint"],
+		"driver":   data["driver"],
+		"sql":      data["sql"],
+		"dbName":   data["dbName"],
 	}
-	driverName, ok := data["driver"]
-	if ok {
-		stmt.Data["driver"] = driverName
-	}
-	dsn, ok := data["dsn"]
-	if ok {
-		stmt.Data["dsn"] = dsn
-	}
-	dbName, ok := data["dbName"]
-	if ok {
-		stmt.Data["dbName"] = dbName
-	}
+	stmt.DSN = data["dsn"]
 }
 
 func beforeTxExecContextInstrumentation(
