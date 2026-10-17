@@ -9,7 +9,7 @@ func Handler(name string) {
 	(func() (int, error) {
 		println("handler arg:", name)
 		return fmt.Println("hello")
-	})()
+	})() /*line /golden/work/main.go:9*/
 }
 
 func main() { Handler("world") }

@@ -587,6 +587,10 @@ hook_fallible:
         path: example.com/hooks/db
 ```
 
+**Stack frames and line markers:**
+
+The trampoline call that the tool adds to the target function gets the same line markers as the code of the Raw Code Injection Rule. In stack traces, it shows the file `/<generated>` (on Windows, `<generated>` at the root of the volume). The original statements of the function keep their original file path and line number. See "Stack frames and line markers" in the [Raw Code Injection Rule](#3-raw-code-injection-rule) section.
+
 ### 2. Struct Field Injection Rule
 
 This rule adds one or more new fields to a specified struct type.
@@ -779,6 +783,18 @@ The injected code will be placed immediately before the `println("hello")` state
 Note the pattern starts with `^`. During AST traversal, outer statements (such as `if`, `for`, or `go func`) are visited before their inner statements. Since matching is performed on the formatted string of each statement, a loose pattern may accidentally match a parent statement if it contains the target code.
 
 Anchoring the pattern with `^` (and usually `$`) ensures that only the exact statement is matched, preventing insertion at the wrong level (e.g., before an entire block instead of the intended inner statement).
+
+**Stack frames and line markers:**
+
+The tool puts a `/*line /<generated>:1*/` directive on the first statement of each run of injected statements. The next injected lines get the next line numbers in `/<generated>`: 2, 3, and so on. These numbers count printed lines, not statements. An injected statement that uses several lines takes several numbers. In stack traces, injected code shows the file `/<generated>`. On Windows, the file is at the root of the volume of the instrumented file, for example `C:\<generated>`, or `\\server\share\<generated>` for a UNC path. The name is absolute, so it is the same in all Go versions. A stack filter can match it exactly, or by the suffix `<generated>`. The first original statement after a run gets a directive that restores its original absolute file path and line number. The next original statements keep their original lines. Exception: the tool cannot restore an original file name (from a `//line` directive in the source) that has characters that cannot be in a comment, or that ends in `:` and digits (for example `foo:7`), because Go would read these digits as a line number. Then the code after the injected code can show `/<generated>` until the next valid position.
+
+The same applies to the trampoline code of the [Function Hook Rule](#1-function-hook-rule).
+
+A `//line` comment of the user inside a function body (for example, in code that goyacc writes) stays in the file. The printer indents it, so Go would ignore it. The tool adds a restore directive after it, so the code keeps the line that the comment gives. This is done in every function of an instrumented file, also in a function that no rule changed. The same exceptions apply as above. Also, the tool cannot restore a statement directly after a comment that gives line 1 (for example `//line foo.go:1`), because its directive must give line 0, which Go does not accept. The tool then restores the next statement. Directives have a line and no column. A `/*line*/` comment of the user is not changed.
+
+A rule can also put generated code inside a statement that the user wrote (for example, a call rule that replaces a call with a wrapper of several lines, or a struct rule that adds a field to a type declaration). The tool does not put a directive on this code: it keeps the line of the statement. Known limit: a stack frame in this code shows the user file, and not `/<generated>`. The extra printed lines move the lines after it, so the tool restores the next original statement (or the closing brace of the block, or the next top-level declaration). The same is true for a `//line` comment of the user inside an expression (for example, in the arguments of a call or in a composite literal): the printer indents it, so the tool restores the code after it.
+
+With `go build -trimpath`, the Go compiler rewrites the original file path in the same way as for normal Go files. Injected code stays in `/<generated>` (on Windows, `<generated>` at the root of the volume), because the compiler does not rewrite this name. For a UNC path, the name includes the server and the share.
 
 ### 4. Call Wrapping Rule
 

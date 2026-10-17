@@ -5,4 +5,5 @@ package main
 
 const MaxRetries = 99
 
+//line /golden/work/main.go:8
 func main() {}

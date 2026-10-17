@@ -6,26 +6,24 @@ package main
 import "fmt"
 
 func func1() {
-	print("Hello")
-	println(", World!")
+	/*line /<generated>:1*/ print("Hello")
+	/*line /golden/work/main.go:9*/ println(", World!")
 	println(", World!")
 }
 
 func func2() {
-	print("Before go func")
-	go func() {
-		print("Inside goroutine")
-		println("goroutine!")
+	/*line /<generated>:1*/ print("Before go func")
+	/*line /golden/work/main.go:14*/ go func() {
+		/*line /<generated>:1*/ print("Inside goroutine")
+		/*line /golden/work/main.go:15*/ println("goroutine!")
 	}()
 	println("goroutine!")
 }
 
 func func3() {
 	ch := make(chan int)
-
-	print("Before select")
-
-	select {
+	/*line /<generated>:1*/ print("Before select")
+	/*line /golden/work/main.go:23*/ select {
 	case <-ch:
 		println("Hello, World!")
 	}
@@ -33,35 +31,35 @@ func func3() {
 
 func func4() {
 	if true {
-		print("Inside if")
-		println("IF BLOCK")
+		/*line /<generated>:1*/ print("Inside if")
+		/*line /golden/work/main.go:31*/ println("IF BLOCK")
 	}
 }
 
 func func5() {
 	for i := 0; i < 3; i++ {
-		print("Loop hit")
-		println("loop")
+		/*line /<generated>:1*/ print("Loop hit")
+		/*line /golden/work/main.go:37*/ println("loop")
 	}
 }
 
 func func6() {
-	print("Multiline match")
-	fmt.Println(
+	/*line /<generated>:1*/ print("Multiline match")
+	/*line /golden/work/main.go:42*/ fmt.Println(
 		"multiline",
 	)
 }
 
 func func7() {
-	print("Exact only")
-	println("exact")
+	/*line /<generated>:1*/ print("Exact only")
+	/*line /golden/work/main.go:48*/ println("exact")
 	println("exact ")
 }
 
 func func8() {
 	if true {
 		println("after this")
-		print("Insert After")
+		/*line /<generated>:1*/ print("Insert After") /*line /golden/work/main.go:54*/
 	}
 	println("before this")
 }

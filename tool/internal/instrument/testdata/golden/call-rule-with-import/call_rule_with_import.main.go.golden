@@ -9,13 +9,14 @@ import (
 	"fmt"
 )
 
+//line /golden/work/main.go:8
 func CallSizeof() {
 	x := 42
 	size := (func() uintptr { fmt.Println("Wrapped!"); return unsafe.Sizeof(x) })()
-	_ = size
+	/*line /golden/work/main.go:11*/ _ = size
 }
 
 func main() {
 	y := "hello"
-	_ = (func() uintptr { fmt.Println("Wrapped!"); return unsafe.Sizeof(y) })()
+	_ = (func() uintptr { fmt.Println("Wrapped!"); return unsafe.Sizeof(y) })() /*line /golden/work/main.go:16*/
 }

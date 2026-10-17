@@ -4,9 +4,10 @@
 package main
 
 func divide(a int, b int) (_unnamedRetVal0 int, _unnamedRetVal1 error) {
-	println("enter divide args=2 arg0=a arg1=b")
+	/*line /<generated>:1*/ println("enter divide args=2 arg0=a arg1=b")
 	defer println("exit divide rets=2 ret0=_unnamedRetVal0 ret1=_unnamedRetVal1")
-	return a / b, nil
+	/*line /golden/work/main.go:7*/ return a / b, nil
 }
 
+//line /golden/work/main.go:10
 func main() { divide(4, 2) }

@@ -5,6 +5,7 @@ package ast
 
 import (
 	"errors"
+	goast "go/ast"
 	"go/parser"
 	"go/token"
 	"os"
@@ -59,6 +60,81 @@ func TestFindPosition(t *testing.T) {
 		pos := p.FindPosition(Ident("orphan"))
 		assert.Equal(t, token.Position{}, pos)
 		assert.False(t, pos.IsValid())
+	})
+}
+
+func TestOriginalPosition(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "orig.go")
+	src := "package main\n\nfunc Foo() {\n\tbar(1)\n}\n"
+	require.NoError(t, os.WriteFile(path, []byte(src), 0o600))
+	p := NewAstParser()
+	file, err := p.Parse(path, parser.ParseComments)
+	require.NoError(t, err)
+	fn := FindFuncDeclWithoutRecv(file, "Foo")
+	require.NotNil(t, fn)
+	call := fn.Body.List[0]
+
+	t.Run("node of the parsed file", func(t *testing.T) {
+		pos, ok := p.OriginalPosition(call)
+		require.True(t, ok)
+		assert.Equal(t, "orig.go", pos.Filename)
+		assert.Equal(t, 4, pos.Line)
+		assert.Equal(t, 2, pos.Column)
+	})
+
+	t.Run("closing brace of a block", func(t *testing.T) {
+		pos, ok := p.Rbrace(fn.Body)
+		require.True(t, ok)
+		assert.Equal(t, 5, pos.Line)
+		assert.Equal(t, 1, pos.Column)
+	})
+
+	t.Run("node that is not in a map", func(t *testing.T) {
+		_, ok := p.OriginalPosition(Ident("orphan"))
+		assert.False(t, ok)
+		_, ok = p.Rbrace(&dst.BlockStmt{})
+		assert.False(t, ok)
+	})
+
+	t.Run("snippet of the same parser", func(t *testing.T) {
+		// The snippet has its own file in the same file set.
+		stmts, snippetErr := p.ParseSnippet("baz()")
+		require.NoError(t, snippetErr)
+		_, ok := p.OriginalPosition(stmts[0])
+		assert.False(t, ok)
+	})
+
+	t.Run("source of the same parser that Parse did not read", func(t *testing.T) {
+		// ParseSource uses the same decorator, so the node is in the map. But
+		// its position is in a file that Parse did not read.
+		other, srcErr := p.ParseSource("package main\n\nfunc Other() {}\n")
+		require.NoError(t, srcErr)
+		otherFn := FindFuncDeclWithoutRecv(other, "Other")
+		require.NotNil(t, otherFn)
+		_, ok := p.OriginalPosition(otherFn)
+		assert.False(t, ok)
+		_, ok = p.Rbrace(otherFn.Body)
+		assert.False(t, ok)
+	})
+
+	t.Run("node without a position", func(t *testing.T) {
+		node := Ident("noPos")
+		p.dec.Ast.Nodes[node] = &goast.Ident{Name: "noPos"}
+		_, ok := p.OriginalPosition(node)
+		assert.False(t, ok)
+	})
+
+	t.Run("source with a line directive", func(t *testing.T) {
+		lineFile := filepath.Join(t.TempDir(), "gen.go")
+		lineSrc := "package main\n\n//line other.go:100\nfunc Foo() {\n\tbar(1)\n}\n"
+		require.NoError(t, os.WriteFile(lineFile, []byte(lineSrc), 0o600))
+		lineParser := NewAstParser()
+		lineRoot, parseErr := lineParser.Parse(lineFile, parser.ParseComments)
+		require.NoError(t, parseErr)
+		pos, ok := lineParser.OriginalPosition(FindFuncDeclWithoutRecv(lineRoot, "Foo").Body.List[0])
+		require.True(t, ok)
+		assert.Equal(t, "other.go", pos.Filename)
+		assert.Equal(t, 101, pos.Line)
 	})
 }
 

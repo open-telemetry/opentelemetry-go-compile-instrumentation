@@ -9,5 +9,5 @@ func tracedInfo(s string) {}
 
 func main() {
 	var l logger.Logger
-	tracedInfo(l.Info("hello"))
+	tracedInfo(l.Info("hello")) /*line /golden/work/main.go:12*/
 }

@@ -13,10 +13,10 @@ func Wrapper(size uintptr) uintptr {
 func CallSizeof() {
 	x := 42
 	size := Wrapper(unsafe.Sizeof(x))
-	_ = size
+	/*line /golden/work/main.go:16*/ _ = size
 }
 
 func main() {
 	y := "hello"
-	_ = Wrapper(unsafe.Sizeof(y))
+	_ = Wrapper(unsafe.Sizeof(y)) /*line /golden/work/main.go:21*/
 }
