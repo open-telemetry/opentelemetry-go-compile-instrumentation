@@ -15,8 +15,8 @@
 // Metrics:
 //
 //   - linodego.client.operation.duration — public API method latency, labeled by
-//     operation name and status code (bounded). Raw paths with resource IDs are
-//     not used as metric labels.
+//     operation name, status code, and error type (bounded). Raw paths with
+//     resource IDs are not used as metric labels.
 //
 // When net/http client instrumentation is also enabled, RoundTrip spans nest
 // under the doRequest span via context propagation.
@@ -24,12 +24,14 @@ package v2
 
 import (
 	"context"
+	"strconv"
 	"sync"
 
 	"github.com/linode/linodego/v2"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
+	otelsemconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 	"go.opentelemetry.io/otel/trace"
 
 	"go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2/semconv"
@@ -135,34 +137,30 @@ func AfterDoRequest(ictx hook.HookContext, err error) {
 	defer span.End()
 
 	if err != nil {
-		span.RecordError(err)
-		if code, ok := semconv.StatusCodeFromError(err); ok {
-			span.SetAttributes(semconv.LinodegoErrorTraceAttrs(err)...)
-			if sc, desc := semconv.HTTPClientStatus(code); sc != codes.Unset {
-				span.SetStatus(sc, desc)
-			}
-		} else {
-			span.SetStatus(codes.Error, err.Error())
-		}
+		finishSpanWithError(span, err)
 		logger.Debug("AfterDoRequest error", "error", err)
 	}
 
 	logger.Debug("AfterDoRequest completed")
 }
 
-// finishSpanWithError records error details on a span (shared by public methods).
-func finishSpanWithError(span trace.Span, err error) int {
+// finishSpanWithError records error details and returns the status code and
+// error.type value for the operation duration metric. The error type is empty on success.
+func finishSpanWithError(span trace.Span, err error) (int, string) {
 	if err == nil {
-		return 0
+		return 0, ""
 	}
 	span.RecordError(err)
 	if code, ok := semconv.StatusCodeFromError(err); ok {
 		span.SetAttributes(semconv.LinodegoErrorTraceAttrs(err)...)
 		if sc, desc := semconv.HTTPClientStatus(code); sc != codes.Unset {
 			span.SetStatus(sc, desc)
+			return code, strconv.Itoa(code)
 		}
-		return code
+		return code, ""
 	}
+	et := otelsemconv.ErrorType(err)
+	span.SetAttributes(et)
 	span.SetStatus(codes.Error, err.Error())
-	return 0
+	return 0, et.Value.AsString()
 }
