@@ -1331,6 +1331,8 @@ func TestGenerateRuntimePerPackageSkipsSelfImport(t *testing.T) {
 	hooksDir := filepath.Join(appDir, "hooks")
 	mustWriteFile(t, filepath.Join(appDir, "answer.go"), "package app\n")
 	mustWriteFile(t, filepath.Join(hooksDir, "hooks.go"), "package hooks\n")
+	mustWriteFile(t, filepath.Join(appDir, "go.mod"), "module example.com/app\n\ngo 1.25.0\n")
+	sp.buildFlags = []string{"-C", appDir}
 
 	pkgs := []*packages.Package{
 		{
@@ -1647,5 +1649,29 @@ func TestRuntime(t *testing.T) {
 			require.NoError(t, err, "%s", output)
 			assert.Contains(t, string(output), "ok")
 		})
+	}
+}
+
+func TestHookImportsError(t *testing.T) {
+	matched := []*rule.InstRuleSet{
+		{
+			FileRules: []*rule.InstFileRule{{Path: "example.com/app/hooks"}},
+		},
+	}
+	_, err := hookImports(context.Background(), []string{"-C"}, matched)
+	if err == nil {
+		t.Fatal("expected error for malformed build flags, got nil")
+	}
+}
+
+func TestHookImportsErrorOnBrokenHookPackage(t *testing.T) {
+	matched := []*rule.InstRuleSet{
+		{
+			FileRules: []*rule.InstFileRule{{Path: "example.com/this-package-does-not-exist"}},
+		},
+	}
+	_, err := hookImports(context.Background(), nil, matched)
+	if err == nil {
+		t.Fatal("expected error for a hook package that fails to load, got nil")
 	}
 }
