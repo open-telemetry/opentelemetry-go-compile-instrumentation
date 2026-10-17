@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/dave/dst"
+	"github.com/dave/dst/dstutil"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
@@ -209,53 +210,200 @@ func stripDynamicIdents(node dst.Node) {
 
 // checkAliasOverrideShadowing reports an error when an override's file
 // alias names a receiver, parameter, named return value, or body-level
-// variable of `enclosing`.
+// variable of `enclosing`, all of which shadow code injected at the function's
+// top level.
 //
-// Identifiers bound in nested statements and closures are not checked,
-// because they do not shadow code injected at the function's top level.
+// It is checkAliasOverrideShadowingAt without an injection point.
 //
 // checkAliasOverrideShadowing reports no error when enclosing is nil.
 func checkAliasOverrideShadowing(overrides map[string]string, enclosing *dst.FuncDecl) error {
+	return checkAliasOverrideShadowingAt(overrides, enclosing, nil)
+}
+
+// checkAliasOverrideShadowingAt reports an error when an override's file alias
+// would resolve to a local instead of the import at target's injection point.
+//
+// The override substitutes the file's alias for the rule's alias in generated
+// code. Code injected at the function's top level is guarded by the receiver,
+// parameter, named return, and body-level names alone. Rules that inject
+// deeper — call rules at the call site, raw rules with a pattern, and literal
+// rules at the literal — can also be shadowed by a name bound between the
+// function body and target: a nested block, a for/range/if/switch init
+// statement, a case or select clause, or a closure parameter.
+//
+// As with the top-level names, a name bound anywhere within a scope on the
+// path is reported even when it is declared after target, which keeps the
+// check conservative without relying on source positions.
+//
+// A nil target checks only the function top level.
+//
+// checkAliasOverrideShadowingAt reports no error when enclosing is nil.
+func checkAliasOverrideShadowingAt(overrides map[string]string, enclosing *dst.FuncDecl, target dst.Node) error {
 	if len(overrides) == 0 || enclosing == nil {
 		return nil
 	}
 	localNames := signatureNames(enclosing)
-	for name := range topLevelBodyNames(enclosing) {
-		localNames[name] = true
+	mergeNamesInto(localNames, topLevelBodyNames(enclosing))
+	if err := reportAliasOverrideConflict(overrides, enclosing.Name.Name, localNames,
+		"a parameter, receiver, named return, or body-level variable"); err != nil {
+		return err
 	}
+	if target == nil {
+		return nil
+	}
+	return reportAliasOverrideConflict(overrides, enclosing.Name.Name, scopeNamesBetween(enclosing, target),
+		"a local declared between the function's top level and the injection point")
+}
+
+// reportAliasOverrideConflict returns an error when any of overrides' file
+// aliases names a local in localNames. description names what the alias would
+// resolve to.
+func reportAliasOverrideConflict(
+	overrides map[string]string,
+	funcName string,
+	localNames map[string]bool,
+	description string,
+) error {
 	for ruleAlias, fileAlias := range overrides {
 		if localNames[fileAlias] {
 			return ex.Newf(
 				"alias override conflict in %s: substituting the file's alias %q for "+
-					"rule alias %q would resolve to a parameter, receiver, named "+
-					"return, or body-level variable instead of the import; rename the "+
+					"rule alias %q would resolve to %s instead of the import; rename the "+
 					"local identifier or the file's import alias",
-				enclosing.Name.Name, fileAlias, ruleAlias)
+				funcName, fileAlias, ruleAlias, description)
 		}
 	}
 	return nil
 }
 
+// scopeNamesBetween returns every name bound by a scope on the path from
+// enclosing's body to target. Since the path starts at the function, the
+// result includes the signature and top-level body names.
+func scopeNamesBetween(enclosing *dst.FuncDecl, target dst.Node) map[string]bool {
+	names := make(map[string]bool)
+	var stack []map[string]bool
+	found := false
+	dstutil.Apply(enclosing, func(cursor *dstutil.Cursor) bool {
+		if found {
+			return false
+		}
+		node := cursor.Node()
+		if node == target {
+			for _, frame := range stack {
+				mergeNamesInto(names, frame)
+			}
+			found = true
+			return false
+		}
+		if frame, ok := scopeFrame(node); ok {
+			stack = append(stack, frame)
+		}
+		return true
+	}, func(cursor *dstutil.Cursor) bool {
+		if _, ok := scopeFrame(cursor.Node()); ok {
+			stack = stack[:len(stack)-1]
+		}
+		return true
+	})
+	return names
+}
+
+// scopeFrame returns the names bound by node for the scopes node introduces,
+// and reports whether node introduces a scope on the path from a function body
+// to an injection point. The frames cover every construct that binds names
+// between a function body and a nested statement: the function itself, blocks,
+// case and select clauses, for/range/if/switch init statements, range
+// variables, and closures.
+func scopeFrame(node dst.Node) (map[string]bool, bool) {
+	switch n := node.(type) {
+	case *dst.FuncDecl:
+		return signatureNames(n), true
+	case *dst.FuncLit:
+		return funcTypeNames(n.Type), true
+	case *dst.BlockStmt:
+		return stmtDeclNames(n.List), true
+	case *dst.CaseClause:
+		return stmtDeclNames(n.Body), true
+	case *dst.CommClause:
+		names := stmtDeclNames(n.Body)
+		mergeNamesInto(names, initDeclNames(n.Comm))
+		return names, true
+	case *dst.IfStmt:
+		return initDeclNames(n.Init), true
+	case *dst.ForStmt:
+		names := initDeclNames(n.Init)
+		mergeNamesInto(names, initDeclNames(n.Post))
+		return names, true
+	case *dst.SwitchStmt:
+		return initDeclNames(n.Init), true
+	case *dst.TypeSwitchStmt:
+		names := initDeclNames(n.Init)
+		mergeNamesInto(names, initDeclNames(n.Assign))
+		return names, true
+	case *dst.RangeStmt:
+		return rangeDeclNames(n), true
+	}
+	return nil, false
+}
+
+// initDeclNames returns the names bound by a scope-introducing init, post, or
+// comm statement. It returns an empty map when stmt is nil.
+func initDeclNames(stmt dst.Stmt) map[string]bool {
+	if stmt == nil {
+		return make(map[string]bool)
+	}
+	return stmtDeclNames([]dst.Stmt{stmt})
+}
+
+// rangeDeclNames returns the names a range statement binds in its own scope.
+func rangeDeclNames(n *dst.RangeStmt) map[string]bool {
+	names := make(map[string]bool)
+	if n.Tok != token.DEFINE {
+		return names
+	}
+	for _, keyOrVal := range []dst.Expr{n.Key, n.Value} {
+		if ident, ok := keyOrVal.(*dst.Ident); ok {
+			addLocalName(names, ident)
+		}
+	}
+	return names
+}
+
 // signatureNames returns the names bound by funcDecl's receiver, parameters,
 // and named return values.
 func signatureNames(funcDecl *dst.FuncDecl) map[string]bool {
+	names := fieldListNames(funcDecl.Recv)
+	mergeNamesInto(names, funcTypeNames(funcDecl.Type))
+	return names
+}
+
+// funcTypeNames returns the names bound by a function type's parameters and
+// named return values.
+func funcTypeNames(funcType *dst.FuncType) map[string]bool {
+	names := fieldListNames(funcType.Params)
+	mergeNamesInto(names, fieldListNames(funcType.Results))
+	return names
+}
+
+// fieldListNames returns the names bound by a field list.
+func fieldListNames(list *dst.FieldList) map[string]bool {
 	names := make(map[string]bool)
-	addFieldNames := func(list *dst.FieldList) {
-		if list == nil {
-			return
-		}
-		for _, field := range list.List {
-			for _, name := range field.Names {
-				if name.Name != "" && name.Name != "_" {
-					names[name.Name] = true
-				}
-			}
+	if list == nil {
+		return names
+	}
+	for _, field := range list.List {
+		for _, name := range field.Names {
+			addLocalName(names, name)
 		}
 	}
-	addFieldNames(funcDecl.Recv)
-	addFieldNames(funcDecl.Type.Params)
-	addFieldNames(funcDecl.Type.Results)
 	return names
+}
+
+// mergeNamesInto adds every name of src to dst.
+func mergeNamesInto(dst, src map[string]bool) {
+	for name := range src {
+		dst[name] = true
+	}
 }
 
 // topLevelBodyNames returns the names bound directly by funcDecl's body
@@ -264,11 +412,18 @@ func signatureNames(funcDecl *dst.FuncDecl) map[string]bool {
 // returned, because they do not shadow code injected at the function's top
 // level.
 func topLevelBodyNames(funcDecl *dst.FuncDecl) map[string]bool {
-	names := make(map[string]bool)
 	if funcDecl.Body == nil {
-		return names
+		return make(map[string]bool)
 	}
-	for _, stmt := range funcDecl.Body.List {
+	return stmtDeclNames(funcDecl.Body.List)
+}
+
+// stmtDeclNames returns the names bound directly by stmts: var, const, and
+// type declarations, plus short variable declarations. Identifiers bound in
+// nested statements are not returned.
+func stmtDeclNames(stmts []dst.Stmt) map[string]bool {
+	names := make(map[string]bool)
+	for _, stmt := range stmts {
 		switch s := stmt.(type) {
 		case *dst.DeclStmt:
 			decl, ok := s.Decl.(*dst.GenDecl)
