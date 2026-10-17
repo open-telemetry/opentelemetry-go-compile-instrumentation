@@ -34,6 +34,11 @@ func stripBuildIgnoreTag(content string) string {
 
 // applyFileRule introduces the new file to the target package at compile time.
 func (ip *instrumentPhase) applyFileRule(ctx context.Context, rule *rule.InstFileRule, pkgName string) error {
+	if pkgName == "" {
+		return ex.Newf("cannot resolve the package name for rule %q; refusing to add %s",
+			rule.Name, rule.File)
+	}
+
 	file := filepath.Join(rule.ResolvedPath, rule.File)
 	if !util.PathExists(file) {
 		return ex.Newf("file %s not found in %s", rule.File, rule.ResolvedPath)
