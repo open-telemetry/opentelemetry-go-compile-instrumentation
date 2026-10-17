@@ -75,9 +75,9 @@ func afterAPICall(ictx hook.HookContext, err error) {
 		ctx = context.Background()
 	}
 
-	statusCode := finishSpanWithError(span, err)
+	statusCode, errorType := finishSpanWithError(span, err)
 	if !start.IsZero() {
-		metrics.RecordOperationDuration(ctx, time.Since(start).Seconds(), operation, statusCode)
+		metrics.RecordOperationDuration(ctx, time.Since(start).Seconds(), operation, statusCode, errorType)
 	}
 
 	logger.Debug("AfterAPICall completed", "operation", operation)
