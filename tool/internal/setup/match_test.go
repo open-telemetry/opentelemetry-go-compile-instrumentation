@@ -1337,6 +1337,24 @@ func TestCheckRuleFileVersion(t *testing.T) {
 	})
 }
 
+func TestParseRuleFile(t *testing.T) {
+	t.Run("parse error", func(t *testing.T) {
+		_, err := parseRuleFile(t.Context(), "bad.yaml", []byte("not: valid: yaml:"), util.Version)
+		require.ErrorContains(t, err, "bad.yaml")
+	})
+
+	t.Run("valid file returns its rules", func(t *testing.T) {
+		content := []byte(`my_rule:
+  target: main
+  func: Example
+  raw: "_ = 1"`)
+		rules, err := parseRuleFile(t.Context(), "rules.yaml", content, util.Version)
+		require.NoError(t, err)
+		require.Len(t, rules, 1)
+		assert.Equal(t, "my_rule", rules[0].GetName())
+	})
+}
+
 func TestLoadCustomRulesDeterministicOrder(t *testing.T) {
 	content := `zebra:
   target: main
