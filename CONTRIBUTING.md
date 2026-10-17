@@ -173,10 +173,10 @@ without stopping. You then regenerate the bundle from the fully-merged sources:
 
 ```sh
 git fetch origin main
-git rebase origin/main   # no longer halts on the bundle
+git merge origin/main    # no longer halts on the bundle
 make package             # regenerate tool/data/otelc-bundle.tgz from merged sources
-git add tool/data/otelc-bundle.tgz && git commit --amend --no-edit
-git push --force-with-lease
+git add tool/data/otelc-bundle.tgz && git commit
+git push
 ```
 
 Why the driver doesn't regenerate the bundle for you: when git invokes a merge
@@ -185,11 +185,35 @@ tree, so running `make package` at that moment would embed stale sources and
 miss the incoming changes. Regenerating after the rebase/merge completes is the
 only reliable point, hence the explicit `make package` step above.
 
+#### Automatic conflict resolution
+
+The `Auto-fix Bundle Conflicts` workflow keeps pull requests mergeable
+automatically. It runs on every push to `main`, hourly, and on demand:
+
+- For open, non-draft **same-repository** pull requests whose only conflict is
+  `tool/data/otelc-bundle.tgz`, the workflow merges `main` into the branch,
+  regenerates the bundle, and pushes a single
+  `chore: merge main and regenerate otelc-bundle.tgz` commit. No action is
+  needed from the author.
+- For **fork** pull requests it cannot push at all (the bot's GitHub App is not
+  installed on forks), so it posts a one-time comment with the manual steps
+  above.
+- The `/regenerate-bundle` comment command merges `main` first as well, so it
+  clears the conflict and refreshes the bundle in one step.
+- To observe the workflow without side effects, trigger it manually from the
+  Actions tab with the `dry_run` option enabled: it logs the merges, pushes,
+  and comments it would perform but changes nothing.
+
 Notes:
 
 - GitHub's "This branch has conflicts" indicator is computed server-side and
-  does **not** use your local merge driver. Rebase locally as above and push;
-  the conflict disappears once your branch is up to date.
+  does **not** use your local merge driver. The automatic workflow above clears
+  it by pushing an up-to-date branch; for fork PRs, merge `main` locally as
+  shown above and push.
+- The push is made with the `otelbot` GitHub App installation token rather than
+  `GITHUB_TOKEN` (whose pushes do not trigger other workflows), so the normal
+  `pull_request` workflows run on the new head and the required status checks
+  re-report themselves.
 - The `verify-bundle` CI guarantees the committed bundle matches the sources, so
   a forgotten `make package` fails CI rather than shipping a stale bundle.
   Maintainers can also comment `/regenerate-bundle` on a PR to auto-fix it.

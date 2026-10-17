@@ -4,9 +4,7 @@ on:
   issue_comment:
     types: [created]
 
-permissions:
-  contents: write
-  pull-requests: write
+permissions: {}
 
 jobs:
   regenerate:
@@ -16,10 +14,25 @@ jobs:
       github.event.issue.pull_request && contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
       && github.event.comment.body == '/regenerate-bundle'
     steps:
+      # All privileged operations (reactions, comments, checkout, push) use the
+      # otelbot GitHub App token instead of GITHUB_TOKEN: pushes made with
+      # GITHUB_TOKEN do not trigger other workflows, so the required status
+      # checks would never re-report on the pushed head.
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510  # v3.3.0
+        id: app-token
+        with:
+          client-id: ${{ vars.OTELBOT_COMPILE_INSTRUMENTATION_CLIENT_ID }}
+          private-key: ${{ secrets.OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          # Pushes that carry workflow-file changes (merged from main) are
+          # rejected without this permission.
+          permission-workflows: write
+
       - name: Get PR details
         id: pr
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           pr_json=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.issue.number }})
           head_ref=$(echo "$pr_json" | jq -r '.head.ref')
@@ -34,15 +47,15 @@ jobs:
       - name: Abort if fork PR
         if: steps.pr.outputs.is_fork == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           gh api repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments \
-            -f body="Cannot regenerate bundle for fork PRs (GITHUB_TOKEN cannot push to forks). Please run \`make package\` locally and push the updated archive."
+            -f body="Cannot regenerate bundle for fork PRs (the bot's token cannot push to forks). Please run \`make package\` locally and push the updated archive."
           exit 1
 
       - name: Add reaction
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           gh api repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions \
             -f content='+1'
@@ -51,25 +64,60 @@ jobs:
         with:
           # zizmor: ignore[artipacked]: credentials are required by the git push later in this job
           persist-credentials: true
+          fetch-depth: 0
           ref: ${{ steps.pr.outputs.head_ref }}
           repository: ${{ steps.pr.outputs.head_repo_full }}
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
+
+      - name: Merge main into the PR branch
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          git config merge.otelc-bundle.name "Keep current otelc-bundle.tgz (regenerate with make package)"
+          git config merge.otelc-bundle.driver ".github/scripts/merge-bundle.sh %A"
+          # Set the committer identity before merging: on a clean runner git
+          # refuses to record the merge state without one. Attribute the commit
+          # to the App's bot user, which EasyCLA knows about.
+          bot_info="$(gh api user --jq '[.login, (.id | tostring)] | join(" ")')"
+          read -r bot_login bot_id <<<"${bot_info}"
+          if [[ -z "${bot_login}" || -z "${bot_id}" ]]; then
+            echo "cannot resolve the bot identity from the App token" >&2
+            exit 1
+          fi
+          git config user.name "${bot_login}"
+          git config user.email "${bot_id}+${bot_login}@users.noreply.github.com"
+          # Only the bundle may use the custom driver, everything else keeps
+          # git's default merge behavior.
+          git_dir="$(git rev-parse --git-dir)"
+          mkdir -p "${git_dir}/info"
+          printf '%s\n%s\n' '* !merge' 'tool/data/otelc-bundle.tgz merge=otelc-bundle' \
+            >"${git_dir}/info/attributes"
+          git fetch --force origin main
+          if ! git merge --no-ff --no-commit origin/main >/dev/null; then
+            git merge --abort || true
+            gh api "repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments" \
+              -f body="Cannot auto-merge: this PR has conflicts with \`main\` beyond \`tool/data/otelc-bundle.tgz\`. Please resolve them manually; see [Keeping the bundle in sync](https://github.com/${{ github.repository }}/blob/main/CONTRIBUTING.md#keeping-the-bundle-in-sync)."
+            exit 1
+          fi
 
       - name: Regenerate bundle
         run: make package
 
       - name: Commit and push if changed
         run: |
-          if git diff --quiet -- tool/data/otelc-bundle.tgz; then
-            echo "Bundle is already up to date."
+          git add tool/data/otelc-bundle.tgz
+          # Only skip when there is no merge in progress AND nothing is staged:
+          # with a merge in progress the index may equal HEAD (e.g. the only
+          # changes were already contained in the branch) yet the merge commit
+          # still needs to be recorded so GitHub re-evaluates the conflict.
+          if ! git rev-parse -q --verify MERGE_HEAD >/dev/null \
+            && git diff --quiet --cached; then
+            echo "Nothing to commit; bundle is already up to date."
             exit 0
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add tool/data/otelc-bundle.tgz
-          git commit -m "chore: regenerate otelc-bundle.tgz"
+          git commit -m "chore: merge main and regenerate otelc-bundle.tgz"
           git push
