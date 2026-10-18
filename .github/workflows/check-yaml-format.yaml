@@ -5,11 +5,15 @@ on:
     paths:
       - "**/*.yml"
       - "**/*.yaml"
+      - ".tools/yamlfmt"
+      - ".github/workflows/check-yaml-format.yaml"
   push:
     branches: [main]
     paths:
       - "**/*.yml"
       - "**/*.yaml"
+      - ".tools/yamlfmt"
+      - ".github/workflows/check-yaml-format.yaml"
 
 permissions:
   contents: read
