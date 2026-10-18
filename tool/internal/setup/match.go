@@ -4,7 +4,9 @@
 package setup
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"io/fs"
 	"maps"
 	"os"
@@ -667,8 +669,40 @@ func (sp *setupPhase) matchDeps(
 	if err = g.Wait(); err != nil {
 		return nil, err
 	}
-	slices.SortStableFunc(matched, func(a, b *rule.InstRuleSet) int {
-		return strings.Compare(a.ModulePath, b.ModulePath)
-	})
+	err = sortMatchedRuleSets(matched)
+	if err != nil {
+		return nil, err
+	}
 	return matched, nil
+}
+
+// sortMatchedRuleSets gives the matched-rule file a stable order. Matching is
+// concurrent, so the order in which rule sets finish is not part of the build
+// input. ModulePath is the primary key; the encoded rule set breaks ties for
+// separate source variants of the same package (for example, test builds).
+func sortMatchedRuleSets(matched []*rule.InstRuleSet) error {
+	type keyedRuleSet struct {
+		set *rule.InstRuleSet
+		key []byte
+	}
+
+	keyed := make([]keyedRuleSet, len(matched))
+	for i, set := range matched {
+		key, err := json.Marshal(set)
+		if err != nil {
+			return ex.Wrapf(err, "failed to marshal matched rules for sorting")
+		}
+		keyed[i] = keyedRuleSet{set: set, key: key}
+	}
+
+	slices.SortStableFunc(keyed, func(a, b keyedRuleSet) int {
+		if cmp := strings.Compare(a.set.ModulePath, b.set.ModulePath); cmp != 0 {
+			return cmp
+		}
+		return bytes.Compare(a.key, b.key)
+	})
+	for i, item := range keyed {
+		matched[i] = item.set
+	}
+	return nil
 }

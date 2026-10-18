@@ -1696,6 +1696,50 @@ second:
 	}
 }
 
+func TestMatchDeps_DeterministicOrderSameModulePath(t *testing.T) {
+	t.Setenv(util.EnvOtelcRules, "")
+	sp := newTestSetupPhase()
+	sp.ruleConfig = writeCustomRules(t, "same-module.yaml", `first:
+  target: example.com/svc
+  version: v1.0.0,v2.0.0
+  file: z.go
+  path: example.com/hooks
+second:
+  target: example.com/svc
+  version: v2.0.0,v3.0.0
+  file: a.go
+  path: example.com/hooks
+`)
+
+	deps := []*Dependency{
+		{ImportPath: "example.com/svc", Version: "v1.5.0"},
+		{ImportPath: "example.com/svc", Version: "v2.5.0"},
+	}
+
+	var baseline []byte
+	for range 20 {
+		matched, err := sp.matchDeps(t.Context(), deps, nil)
+		require.NoError(t, err)
+		require.Len(t, matched, 2)
+		files := make(map[string]bool, len(matched))
+		for _, set := range matched {
+			require.Len(t, set.FileRules, 1)
+			files[set.FileRules[0].File] = true
+		}
+		assert.True(t, files["a.go"])
+		assert.True(t, files["z.go"])
+
+		encoded, err := json.Marshal(matched)
+		require.NoError(t, err)
+		if baseline == nil {
+			baseline = encoded
+		} else {
+			assert.Equal(t, string(baseline), string(encoded))
+		}
+		deps = append(deps[1:], deps[0])
+	}
+}
+
 func TestMatchDeps_GlobTargetSplit(t *testing.T) {
 	// A single rule file with a glob target must match every dependency in the
 	// targeted family, proving matchDeps routes glob rules through the evaluated
