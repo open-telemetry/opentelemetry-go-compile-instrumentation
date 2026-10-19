@@ -116,6 +116,12 @@ import (
 //     example between "else" and "{") is in the Start decorations of the
 //     block. The state becomes stale, so the first statement of the block
 //     gets a restore directive.
+//   - A user "//line" comment after the opening brace of a block, with a
+//     blank line after it, is in the Lbrace decorations of the block. It is
+//     handled in the same way.
+//   - A user "//line" comment after "(" of an import group, with a blank
+//     line after it, is in the Lparen decorations of the declaration. The
+//     next declaration gets a restore directive.
 //
 // Code in an original statement can also move the lines. This is the case for
 // a node that is not original (for example, the wrapper that a call rule puts
@@ -196,6 +202,11 @@ type lineDirectivePass struct {
 	// decorationFields holds, for each type of node decorations, the indexes
 	// of the fields that are lists of decorations (see userDirectivesInside).
 	decorationFields map[reflect.Type][]int
+	// afterComment holds the first statements of the blocks and clauses where
+	// a comment is just before the statement: after "{" or after the ":" of a
+	// clause. The printer puts a directive before such a statement on a line
+	// of its own, so restore uses the own-line form.
+	afterComment map[dst.Node]bool
 }
 
 // generatedFile returns the file name that line directives give to generated
@@ -229,6 +240,7 @@ func markLineDirectives(parser *ast.AstParser, root *dst.File, file string) {
 		dir:              filepath.Dir(file),
 		generated:        generatedFile(file),
 		decorationFields: map[reflect.Type][]int{},
+		afterComment:     map[dst.Node]bool{},
 	}
 	state := lineKnown
 	for _, decl := range root.Decls {
@@ -246,6 +258,11 @@ func markLineDirectives(parser *ast.AstParser, root *dst.File, file string) {
 			// because no "<generated>" directive was written. If the
 			// restore is skipped, a generated node after it must still get
 			// its directive.
+			// A user "//line" comment after "(", with a blank line after
+			// it, is in the decorations of the declaration, and not in
+			// those of a spec. The printer indents it when the group has
+			// specs, so Go ignores it.
+			p.noteUserDirectives(p.userDirectivesInside(gen, false, false), &state)
 			for _, spec := range gen.Specs {
 				if _, ok = p.parser.OriginalPosition(spec); !ok {
 					p.markStale(&state)
@@ -343,7 +360,7 @@ func (p *lineDirectivePass) restore(node, prev dst.Node, pos token.Position) boo
 	file := p.absolute(pos.Filename)
 	_, isClause := node.(*dst.CaseClause)
 	_, isComm := node.(*dst.CommClause)
-	ownLine := len(node.Decorations().Start) > 0 || isClause || isComm
+	ownLine := len(node.Decorations().Start) > 0 || isClause || isComm || p.afterComment[node]
 	var target string
 	var ok bool
 	switch {
@@ -652,6 +669,11 @@ func (p *lineDirectivePass) block(block *dst.BlockStmt, state *lineState) {
 		p.emptyBlock(block, rbrace, state)
 		return
 	}
+	// A user "//line" comment after the opening brace, with a blank line
+	// after it, is in the Lbrace decorations, and not in the decorations of
+	// the first statement. The printer indents it, so Go ignores it.
+	p.noteUserDirectives(userDirectivesIn(block.Decs.Lbrace, false), state)
+	p.markAfterComment(block.Decs.Lbrace, block.List)
 	p.list(block.List, state)
 	if *state == lineKnown {
 		return
@@ -715,11 +737,13 @@ func (p *lineDirectivePass) list(stmts []dst.Stmt, state *lineState) {
 			for _, expr := range clause.List {
 				p.operand(expr, state)
 			}
+			p.clauseColon(clause.Decs.Colon, clause.Body, state)
 			p.list(clause.Body, state)
 		case *dst.CommClause:
 			if clause.Comm != nil {
 				p.operand(clause.Comm, state)
 			}
+			p.clauseColon(clause.Decs.Colon, clause.Body, state)
 			p.list(clause.Body, state)
 		default:
 			p.children(stmt, state)
@@ -727,6 +751,35 @@ func (p *lineDirectivePass) list(stmts []dst.Stmt, state *lineState) {
 		// A user "//line" comment after the node is ignored by Go. The next
 		// original node needs a restore.
 		p.noteUserDirectives(userDirectivesIn(stmt.Decorations().End, false), state)
+	}
+}
+
+// clauseColon processes the decorations after the ":" of a clause. A user
+// "//line" comment there, with a blank line after it, is not in the
+// decorations of the first statement. The printer indents it, so Go ignores
+// it.
+func (p *lineDirectivePass) clauseColon(colon dst.Decorations, body []dst.Stmt, state *lineState) {
+	p.noteUserDirectives(userDirectivesIn(colon, false), state)
+	p.markAfterComment(colon, body)
+}
+
+// markAfterComment adds the first statement of stmts to afterComment when
+// decorations, which are printed just before it, hold a comment on a line of
+// its own. A comment on the line of "{" or ":" does not move the directive,
+// so the first statement keeps the usual form. This is important for a
+// statement on line 1: the own-line form gives line 0, which is not valid.
+func (p *lineDirectivePass) markAfterComment(decorations dst.Decorations, stmts []dst.Stmt) {
+	if len(stmts) == 0 {
+		return
+	}
+	atLineStart := false
+	for _, d := range decorations {
+		comment := strings.HasPrefix(d, "//") || strings.HasPrefix(d, "/*")
+		if comment && atLineStart {
+			p.afterComment[stmts[0]] = true
+			return
+		}
+		atLineStart = d == "\n" || strings.HasPrefix(d, "//")
 	}
 }
 

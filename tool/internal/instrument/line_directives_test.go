@@ -3338,3 +3338,173 @@ func main() {
 	assert.Regexp(t, generatedPosition, got["inner"])
 	assert.Regexp(t, generatedPosition, got["outer"])
 }
+
+func TestMarkLineDirectives_CompilerUserLineCommentAfterOpeningBrace(t *testing.T) {
+	// The "//line" comment follows "{" of a block that is not empty, and a
+	// blank line is between the comment and the first statement. The comment
+	// is then in the Lbrace decorations of the block. The printer indents it,
+	// so Go ignores it. The first statement must be restored.
+	const src = preludeProgram + `func main() {
+	if true {
+//line mapped.go:100
+
+		fmt.Println("A", where())
+	}
+	fmt.Println("B", where())
+}
+
+func other() {
+	fmt.Println("C", where())
+}
+`
+	edit := func(root *dst.File) {
+		ifStmt := findFunc(t, root, "main").Body.List[0].(*dst.IfStmt)
+		require.Equal(t, dst.Decorations{"\n", "//line mapped.go:100"}, ifStmt.Body.Decs.Lbrace)
+		prepend(t, findFunc(t, root, "other").Body, printWhere("gen"))
+	}
+	got := assertSamePositions(t, src, edit, "A", "B")
+	assert.Contains(t, got["A"], "mapped.go:101")
+}
+
+func TestMarkLineDirectives_CompilerUserLineCommentAfterImportParen(t *testing.T) {
+	// The "//line" comment follows "(" of an import group that is not empty,
+	// and a blank line is between the comment and the first spec. The comment
+	// is then in the Lparen decorations of the declaration. The printer
+	// indents it, so Go ignores it. The next declaration must be restored.
+	const src = `package main
+
+import (
+//line mapped.go:100
+
+	"fmt"
+	"runtime"
+)
+
+func first() {
+	fmt.Println("A", where())
+}
+
+func main() {
+	first()
+	fmt.Println("B", where())
+}
+
+func where() string {
+	_, file, line, _ := runtime.Caller(1)
+	return fmt.Sprintf("%s:%d", file, line)
+}
+`
+	edit := func(root *dst.File) {
+		importDecl := root.Decls[0].(*dst.GenDecl)
+		require.Equal(t, dst.Decorations{"\n", "//line mapped.go:100"}, importDecl.Decs.Lparen)
+		prepend(t, findFunc(t, root, "main").Body, printWhere("gen"))
+	}
+	got := assertSamePositions(t, src, edit, "A", "B")
+	assert.Contains(t, got["A"], "mapped.go:")
+	assert.Regexp(t, generatedPosition, got["gen"])
+}
+
+func TestMarkLineDirectives_CompilerRestoreAfterCommentOnOpeningLine(t *testing.T) {
+	// A comment follows "{" of a block, or ":" of a clause, on the same line.
+	// A rule puts code of several lines before it, so the first statement
+	// after the comment needs a restore. The pass uses the own-line form of
+	// the directive after such a comment (see afterComment). The lines must be
+	// right also in this case.
+	const src = preludeProgram + `func main() {
+	if call(func() {}) > 0 { // A comment.
+		fmt.Println("A", where())
+	}
+	switch call(func() {}) {
+	case call(func() {}): /* A comment. */
+		fmt.Println("B", where())
+	}
+	if call(func() {}) > 0 { /* A comment. */
+		fmt.Println("C", where())
+	}
+	fmt.Println("D", where())
+}
+`
+	got := assertSamePositions(t, src, func(root *dst.File) {
+		body := findFunc(t, root, "main").Body
+		for _, index := range []int{0, 2} {
+			stmt := body.List[index].(*dst.IfStmt)
+			stmt.Cond = &dst.BinaryExpr{
+				X:  multiLineWrapper(t, "call(func() {})"),
+				Op: token.GTR,
+				Y:  &dst.BasicLit{Kind: token.INT, Value: "0"},
+			}
+		}
+		clause := body.List[1].(*dst.SwitchStmt).Body.List[0].(*dst.CaseClause)
+		clause.List[0] = multiLineWrapper(t, "call(func() {})")
+	}, "A", "B", "C", "D")
+	require.NotEmpty(t, got["A"])
+}
+
+func TestMarkLineDirectives_CompilerUserLineCommentAfterClauseColon(t *testing.T) {
+	// The "//line" comment follows ":" of a clause, and a blank line is
+	// between the comment and the first statement. The comment is then in the
+	// Colon decorations of the clause. The printer indents it, so Go ignores
+	// it. The first statement must be restored, with the own-line form.
+	const src = preludeProgram + `func main() {
+	switch {
+	case true:
+//line mapped.go:100
+
+		fmt.Println("A", where())
+		fmt.Println("B", where())
+	}
+	ch := make(chan int, 1)
+	ch <- 1
+	select {
+	case <-ch:
+//line select.go:90
+
+		fmt.Println("C", where())
+		fmt.Println("D", where())
+	}
+}
+
+func other() {
+	fmt.Println("E", where())
+}
+`
+	edit := func(root *dst.File) {
+		body := findFunc(t, root, "main").Body
+		clause := body.List[0].(*dst.SwitchStmt).Body.List[0].(*dst.CaseClause)
+		require.Equal(t, dst.Decorations{"\n", "//line mapped.go:100"}, clause.Decs.Colon)
+		comm := body.List[3].(*dst.SelectStmt).Body.List[0].(*dst.CommClause)
+		require.Equal(t, dst.Decorations{"\n", "//line select.go:90"}, comm.Decs.Colon)
+		prepend(t, findFunc(t, root, "other").Body, printWhere("gen"))
+	}
+	got := assertSamePositions(t, src, edit, "A", "B", "C", "D")
+	assert.Contains(t, got["A"], "mapped.go:101")
+	assert.Contains(t, got["C"], "select.go:91")
+}
+
+func TestMarkLineDirectives_CompilerUserBlockDirectiveOnOpeningLine(t *testing.T) {
+	// A "/*line*/" comment of the user follows "{" or ":" on the same line,
+	// and it gives line 1 to the first statement. A rule puts code of several
+	// lines before it, so the first statement needs a restore. The restore
+	// must use the usual form, because the own-line form gives line 0.
+	const src = preludeProgram + `func main() {
+	if call(func() {}) > 0 { /*line mapped.go:1*/ fmt.Println("A", where())
+	}
+	switch call(func() {}) {
+	case call(func() {}): /*line clause.go:1*/ fmt.Println("B", where())
+	}
+}
+`
+	got := assertSamePositions(t, src, func(root *dst.File) {
+		body := findFunc(t, root, "main").Body
+		stmt := body.List[0].(*dst.IfStmt)
+		stmt.Cond = &dst.BinaryExpr{
+			X:  multiLineWrapper(t, "call(func() {})"),
+			Op: token.GTR,
+			Y:  &dst.BasicLit{Kind: token.INT, Value: "0"},
+		}
+		clause := body.List[1].(*dst.SwitchStmt).Body.List[0].(*dst.CaseClause)
+		clause.List[0] = multiLineWrapper(t, "call(func() {})")
+	}, "A", "B")
+	assert.Contains(t, got["A"], "mapped.go:1")
+	assert.Contains(t, got["B"], "clause.go:1")
+}
