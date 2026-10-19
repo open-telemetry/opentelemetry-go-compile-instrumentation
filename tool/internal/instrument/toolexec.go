@@ -72,6 +72,12 @@ type instrumentPhase struct {
 	// rules (one file implementing dozens of before/after pairs), so caching
 	// by file avoids re-parsing it once per rule.
 	parsedHookFiles map[string]*dst.File
+	// buildUsesIgnoreDirective is true when some package in this build has a
+	// //otelc:ignore comment above a call, found during setup.
+	buildUsesIgnoreDirective bool
+	// methodCallInfo is built lazily by ensureMethodCallInfo.
+	methodCallInfo       *methodCallPackageInfo
+	methodCallInfoLoaded bool
 }
 
 func (ip *instrumentPhase) Info(msg string, args ...any)  { ip.logger.Info(msg, args...) }
@@ -133,6 +139,7 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	ip.buildUsesIgnoreDirective = anyRuleSetHasIgnoredCallFiles(allSet)
 
 	// Load the import name table, if one exists. A missing table is
 	// not fatal.
@@ -231,12 +238,19 @@ type resolution struct {
 	added string
 }
 
+// maxResolutionChain bounds how deep added imports may nest. Realistic rules
+// close onto a waiting package within two levels; anything past this bound is
+// an adversarial rule set evading cycle detection.
+const maxResolutionChain = 32
+
 // enterNestedResolution records, for the nested build about to resolve added,
 // that the package being compiled waits on it. It fails when added is a
 // package already waiting further up the chain: the nested build would compile
 // it again, add the same import, and never end. Go cannot catch this itself,
-// because a nested build only sees each package's original imports. The
-// returned function restores the previous chain.
+// because a nested build only sees each package's original imports. It also
+// fails when the chain grows past maxResolutionChain, which rules could
+// otherwise do without ever closing a cycle. The returned function restores
+// the previous chain.
 func (ip *instrumentPhase) enterNestedResolution(added string) (func(), error) {
 	prev, hadPrev := os.LookupEnv(util.EnvOtelcNestedResolving)
 	chain := parseResolutionChain(prev)
@@ -246,11 +260,21 @@ func (ip *instrumentPhase) enterNestedResolution(added string) (func(), error) {
 			return nil, ex.Newf("rules add an import cycle: %s", describeResolutionChain(chain))
 		}
 	}
+	if len(chain) > maxResolutionChain {
+		return nil, ex.Newf(
+			"rules add imports nested deeper than %d: %s",
+			maxResolutionChain,
+			describeResolutionChain(chain),
+		)
+	}
 
 	if err := os.Setenv(util.EnvOtelcNestedResolving, encodeResolutionChain(chain)); err != nil {
 		return nil, ex.Wrapf(err, "setting %s", util.EnvOtelcNestedResolving)
 	}
 	return func() {
+		// The variable name is fixed and valid, so this cannot meaningfully
+		// fail; if it did, a leaked chain can only cause a spurious cycle error
+		// later in this same process, never unbounded nesting.
 		if hadPrev {
 			_ = os.Setenv(util.EnvOtelcNestedResolving, prev)
 		} else {
@@ -272,6 +296,11 @@ func parseResolutionChain(s string) []resolution {
 	return chain
 }
 
+// encodeResolutionChain encodes chain as comma-separated "pkg>added" entries.
+// No escaping is needed: cmd/go rejects ",", ">", and spaces in import paths
+// ("malformed import path ... invalid char"), so the separators cannot occur
+// inside either field. Keep it that way rather than switching to an escaped
+// format such as JSON.
 func encodeResolutionChain(chain []resolution) string {
 	entries := make([]string, len(chain))
 	for i, r := range chain {
@@ -673,6 +702,12 @@ var executablePath = os.Executable
 // instrument compiles the same way and share this build's cache keys. Any
 // existing -toolexec was stripped at startup. Must only be called from the
 // real otelc binary, since os.Executable is what nested go commands will run.
+//
+// Nested mode assumes its go commands are `go list -export` spawned from
+// updateImportConfig: those run compile (instrumented), asm, cgo, and pack,
+// and answer -V=full probes, but never link or vet. A new go command spawned
+// during the instrumentation phase must be audited for the tools it runs
+// before it can rely on nested mode.
 func EnableNestedToolexec() error {
 	execPath, err := executablePath()
 	if err != nil {
