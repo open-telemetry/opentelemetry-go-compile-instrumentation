@@ -559,13 +559,19 @@ func loadRulesFromToolFiles(
 // paths to the same file (relative paths, symbolic links) give the same key.
 // If the path cannot be resolved, the key is the cleaned path.
 func ruleFileKey(path string) string {
-	// Make the path absolute first: EvalSymlinks keeps a relative path
-	// relative, and the working directory can itself contain a symbolic link.
-	if abs, err := filepath.Abs(path); err == nil {
-		path = abs
-	}
+	// Resolve symbolic links first, on the raw (possibly relative) path:
+	// filepath.Abs cleans ".." components lexically, so running it before
+	// EvalSymlinks would delete a ".." path segment's preceding component
+	// without ever resolving the symbolic link it might have named, letting
+	// two different files collide on the same key. EvalSymlinks still
+	// resolves correctly on a relative path, and filepath.Abs below anchors
+	// the result, covering a working directory that itself contains a
+	// symbolic link.
 	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		return resolved
+		path = resolved
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
 	}
 	return filepath.Clean(path)
 }
