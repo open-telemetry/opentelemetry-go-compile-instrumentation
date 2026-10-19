@@ -157,6 +157,34 @@ func TestParseDSN_Oracle(t *testing.T) {
 			wantPort: "1521",
 			wantDB:   "",
 		},
+		{
+			name:     "easy connect with parameters",
+			dsn:      "user/pass@dbhost:1521/ORCL?connect_timeout=5&retry_count=3",
+			wantHost: "dbhost",
+			wantPort: "1521",
+			wantDB:   "ORCL",
+		},
+		{
+			name:     "easy connect with server type and instance name",
+			dsn:      "user/pass@//dbhost:1521/ORCL:dedicated/inst1",
+			wantHost: "dbhost",
+			wantPort: "1521",
+			wantDB:   "ORCL",
+		},
+		{
+			name:     "easy connect with parameters and no service name",
+			dsn:      "user/pass@dbhost:1521?connect_timeout=5",
+			wantHost: "dbhost",
+			wantPort: "1521",
+			wantDB:   "",
+		},
+		{
+			name:     "url with server type and instance name",
+			dsn:      "oracle://user:pass@dbhost:1521/ORCL:pooled/inst1?x=1",
+			wantHost: "dbhost",
+			wantPort: "1521",
+			wantDB:   "ORCL",
+		},
 	}
 
 	for _, tt := range tests {
