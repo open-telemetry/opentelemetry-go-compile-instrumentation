@@ -38,8 +38,8 @@ func writeGoMod(gomod string, modfile *modfile.File) error {
 	if err != nil {
 		return ex.Wrapf(err, "failed to format go.mod file")
 	}
-	const perm = 0o644
-	return util.WriteFileAtomic(gomod, data, perm)
+	// The mode of an existing go.mod file is kept (0644 for a new file).
+	return util.WriteFileAtomic(gomod, data)
 }
 
 func runModTidy(ctx context.Context, moduleDir string) error {
@@ -164,21 +164,11 @@ func discoverNestedModuleReplaces(dir string) (map[string]string, error) {
 	return nested, nil
 }
 
-func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) error {
-	if len(modPaths) == 0 {
-		return nil
-	}
-
-	logger := util.LoggerFromContext(ctx)
-
-	goModFile := filepath.Join(moduleDir, goModFileName)
-	modfile, err := parseGoMod(goModFile)
-	if err != nil {
-		return err
-	}
-
-	before := snapshotVersion(modfile)
-
+// otelcReplaces returns the replace directives that the modules of otelc
+// need: the otelc modules are not published, so each one is replaced by its
+// copy in the build temp directory. modPaths are the imports of
+// otel.instrumentation.go. The map goes from module path to directory.
+func otelcReplaces(modPaths map[string]bool) (map[string]string, error) {
 	// Add replace directives for modules imported to otel.instrumentation.go
 	replaces := make(map[string]string, len(modPaths))
 	for m := range modPaths {
@@ -208,7 +198,7 @@ func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) e
 	for dir := range walkDirs {
 		nested, nestedErr := discoverNestedModuleReplaces(dir)
 		if nestedErr != nil {
-			return ex.Wrapf(nestedErr, "discovering nested modules under %s", dir)
+			return nil, ex.Wrapf(nestedErr, "discovering nested modules under %s", dir)
 		}
 		maps.Copy(replaces, nested)
 	}
@@ -227,6 +217,29 @@ func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) e
 	// Add replace directive for instrumentation module
 	// instrumentation module contains shared semconv packages.
 	replaces[util.OtelcInstRoot] = filepath.Join(util.GetBuildTempDir(), unzippedInstDir)
+
+	return replaces, nil
+}
+
+func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) error {
+	if len(modPaths) == 0 {
+		return nil
+	}
+
+	logger := util.LoggerFromContext(ctx)
+
+	goModFile := filepath.Join(moduleDir, goModFileName)
+	modfile, err := parseGoMod(goModFile)
+	if err != nil {
+		return err
+	}
+
+	before := snapshotVersion(modfile)
+
+	replaces, err := otelcReplaces(modPaths)
+	if err != nil {
+		return err
+	}
 
 	// Okay, now add all the replace directives to go.mod in deterministic sorted order
 	changed := false

@@ -76,6 +76,27 @@ var commandPin = cli.Command{
 }
 
 //nolint:gochecknoglobals // Implementation of a CLI command
+var commandVendor = cli.Command{
+	Name: "vendor",
+	Description: "Add the modules of the instrumentation hook code to vendor/ of the current module. " +
+		"After this, otelc go build needs no network and no module cache. " +
+		"When the hook code needs a higher version of a vendored module, otelc vendor updates it " +
+		"(like go get) and prints the change.",
+	ArgsUsage:       "[go build flags] [packages]",
+	SkipFlagParsing: true,
+	Before:          addLoggerPhaseAttribute,
+	Action: func(ctx context.Context, cmd *cli.Command) error {
+		args := cmd.Args().Slice()
+		// SkipFlagParsing passes all the arguments to Vendor, so the help
+		// flags are handled here.
+		if len(args) == 1 && isHelpFlag(args[0]) {
+			return cli.ShowSubcommandHelp(cmd)
+		}
+		return setup.Vendor(ctx, args)
+	},
+}
+
+//nolint:gochecknoglobals // Implementation of a CLI command
 var commandSetup = cli.Command{
 	Name:        "setup",
 	Description: "Set up the environment for instrumentation",
@@ -148,4 +169,14 @@ var commandVersion = cli.Command{
 
 		return nil
 	},
+}
+
+// isHelpFlag reports whether arg asks for the help of a command.
+func isHelpFlag(arg string) bool {
+	switch arg {
+	case "-h", "--h", "-help", "--help":
+		return true
+	default:
+		return false
+	}
 }

@@ -107,6 +107,7 @@ func newVendoredGinApp(t *testing.T, goMod, mainGo string) vendorFixture {
 
 	env := vendorTestEnv()
 	runGo(t, appDir, env, "mod", "tidy")
+	goGetHookDeps(t, appDir, env)
 	runGo(t, appDir, env, "mod", "vendor")
 	return vendorFixture{appsDir: appsDir, dir: appDir}
 }

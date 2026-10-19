@@ -329,7 +329,9 @@ func TestCleanup_KeepsSnapshotsWhenRevertFails(t *testing.T) {
 	// Sabotage one snapshot so Revert fails partially.
 	require.NoError(t, os.Remove(filepath.Join(util.GetBuildTemp(stateDir), stateSnapshotPath(otherFile))))
 
-	require.NoError(t, Cleanup(t.Context(), true))
+	err := Cleanup(t.Context(), true)
+	require.Error(t, err, "a failed restore must be reported")
+	assert.Contains(t, err.Error(), "otelc cleanup", "the error tells how to try again")
 
 	// Even with cleanAll, a failed revert must not delete the remaining
 	// snapshots as they are the only path left to recovery.
@@ -337,6 +339,43 @@ func TestCleanup_KeepsSnapshotsWhenRevertFails(t *testing.T) {
 		"manifest must survive a failed revert even with cleanAll")
 	assert.True(t, util.PathExists(filepath.Join(util.GetBuildTemp(stateDir), stateSnapshotPath(goMod))),
 		"snapshots must survive a failed revert even with cleanAll")
+}
+
+func TestRecoverLeftoverState(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+
+	require.NoError(t, recoverLeftoverState(t.Context()), "no manifest: nothing to do")
+
+	goMod := filepath.Join(tmp, "go.mod")
+	mustWriteFile(t, goMod, "module example.com/app\n")
+	dying := newStateManager()
+	require.NoError(t, dying.Track(goMod))
+	mustWriteFile(t, goMod, "module example.com/app\n\nreplace x => ./.otelc-build/x\n")
+
+	require.NoError(t, recoverLeftoverState(t.Context()))
+	content, err := os.ReadFile(goMod)
+	require.NoError(t, err)
+	assert.Equal(t, "module example.com/app\n", string(content))
+	assert.False(t, util.PathExists(util.GetBuildTemp(stateFileName)), "consumed manifest must be discarded")
+}
+
+func TestRecoverLeftoverStateFailureKeepsManifest(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+
+	goMod := filepath.Join(tmp, "go.mod")
+	mustWriteFile(t, goMod, "module example.com/app\n")
+	dying := newStateManager()
+	require.NoError(t, dying.Track(goMod))
+	require.NoError(t, os.Remove(filepath.Join(util.GetBuildTemp(stateDir), stateSnapshotPath(goMod))))
+
+	err := recoverLeftoverState(t.Context())
+	require.Error(t, err, "a build must not start when the old changes cannot be restored")
+	assert.Contains(t, err.Error(), "previous otelc build")
+	assert.True(t, util.PathExists(util.GetBuildTemp(stateFileName)), "the manifest must stay for recovery")
 }
 
 // mustWriteFile creates a file with the given content, creating parent dirs as needed.

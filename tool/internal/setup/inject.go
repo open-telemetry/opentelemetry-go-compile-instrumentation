@@ -95,6 +95,7 @@ func injectedDeps(
 	if loadErr != nil {
 		return nil, loadErr
 	}
+	fillVendoredVersions(ctx, deps)
 	return deps, nil
 }
 

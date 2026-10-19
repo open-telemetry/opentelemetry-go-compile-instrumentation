@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -538,4 +539,242 @@ func TestStateManagerTrack_CopyFails(t *testing.T) {
 	sm := newStateManager()
 	err := sm.Track(src)
 	require.Error(t, err)
+}
+
+func TestRevertRemovesCreatedFilesAndDirs(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	existing := filepath.Join(tmp, "vendor", "modules.txt")
+	mustWriteFile(t, existing, "before")
+	newDir := filepath.Join(tmp, "vendor", "example.com")
+	newSubDir := filepath.Join(newDir, "m")
+	newFile := filepath.Join(newSubDir, "a.go")
+
+	s := newStateManager()
+	require.NoError(t, s.TrackAll(existing, newDir, newSubDir, newFile))
+	// TrackAll persists the state one time, with all the paths.
+	loaded, err := loadStateManager()
+	require.NoError(t, err)
+	require.NotNil(t, loaded)
+	assert.Len(t, loaded.files, 4)
+
+	mustWriteFile(t, existing, "after")
+	mustWriteFile(t, newFile, "package m")
+
+	require.NoError(t, s.Revert())
+
+	data, err := os.ReadFile(existing)
+	require.NoError(t, err)
+	assert.Equal(t, "before", string(data))
+	assert.NoFileExists(t, newFile)
+	assert.NoDirExists(t, newSubDir)
+	assert.NoDirExists(t, newDir)
+}
+
+func TestRevertKeepsCreatedDirWithUnknownFiles(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	newDir := filepath.Join(tmp, "created")
+	s := newStateManager()
+	require.NoError(t, s.Track(newDir))
+	mustWriteFile(t, filepath.Join(newDir, "user.txt"), "not tracked")
+
+	require.NoError(t, s.Revert())
+	assert.FileExists(t, filepath.Join(newDir, "user.txt"))
+}
+
+// TestRevertDoesNotFollowLinks: a tracked path, or a tracked directory, that
+// is a symbolic link at the time of Revert must not make Revert write or
+// remove files at the target of the link.
+func TestRevertDoesNotFollowLinks(t *testing.T) {
+	skipWithoutSymlinks(t)
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+	outside := t.TempDir()
+
+	existing := filepath.Join(tmp, "vendor", "modules.txt")
+	mustWriteFile(t, existing, "before")
+	newDir := filepath.Join(tmp, "vendor", "example.com")
+	newFile := filepath.Join(newDir, "a.go")
+
+	s := newStateManager()
+	require.NoError(t, s.TrackAll(existing, newDir, newFile))
+
+	// The tracked file and the tracked directory become links to files
+	// outside the module.
+	outsideFile := filepath.Join(outside, "target.txt")
+	mustWriteFile(t, outsideFile, "outside")
+	require.NoError(t, os.Remove(existing))
+	require.NoError(t, os.Symlink(outsideFile, existing))
+	mustWriteFile(t, filepath.Join(outside, "a.go"), "outside a.go")
+	require.NoError(t, os.Symlink(outside, newDir))
+
+	err := s.Revert()
+	require.Error(t, err, "a tracked directory that is a link now is an error")
+
+	data, readErr := os.ReadFile(outsideFile)
+	require.NoError(t, readErr)
+	assert.Equal(t, "outside", string(data), "Revert must not write through a link")
+	assert.FileExists(t, filepath.Join(outside, "a.go"), "Revert must not remove files through a link")
+
+	info, statErr := os.Lstat(existing)
+	require.NoError(t, statErr)
+	assert.True(t, info.Mode().IsRegular(), "the link is replaced by the restored file")
+	data, readErr = os.ReadFile(existing)
+	require.NoError(t, readErr)
+	assert.Equal(t, "before", string(data))
+}
+
+// TestLoadStateManagerRejectsOutsidePaths: the manifest is a file in the
+// project, so it is not trusted. A path outside the project must not be
+// restored or removed.
+func TestLoadStateManagerRejectsOutsidePaths(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+	t.Setenv("GOWORK", "off")
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	mustWriteFile(t, outside, "keep me")
+
+	for name, entry := range map[string]string{
+		"outside path":  "-" + outside,
+		"relative path": "-relative/x",
+		"unclean path":  "-" + tmp + "/a/../../x",
+	} {
+		t.Run(name, func(t *testing.T) {
+			data, err := json.Marshal([]string{entry})
+			require.NoError(t, err)
+			mustWriteFile(t, util.GetBuildTemp(stateFileName), string(data))
+
+			_, err = loadStateManager()
+			require.Error(t, err)
+			require.Error(t, recoverLeftoverState(t.Context()))
+			assert.FileExists(t, outside, "a file outside the project is never removed")
+		})
+	}
+}
+
+// TestRevertDoesNotFollowUntrackedLinkedParent: an existing vendor directory
+// (not tracked) becomes a symbolic link to a directory outside the project.
+// Revert must not write the snapshot through the link.
+func TestRevertDoesNotFollowUntrackedLinkedParent(t *testing.T) {
+	skipWithoutSymlinks(t)
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+	t.Setenv("GOWORK", "off")
+	outside := t.TempDir()
+
+	file := filepath.Join(tmp, "vendor", "example.com", "dep", "file.go")
+	mustWriteFile(t, file, "original")
+	s := newStateManager()
+	require.NoError(t, s.Track(file))
+
+	mustWriteFile(t, filepath.Join(outside, "dep", "file.go"), "outside")
+	require.NoError(t, os.RemoveAll(filepath.Join(tmp, "vendor", "example.com")))
+	require.NoError(t, os.Symlink(outside, filepath.Join(tmp, "vendor", "example.com")))
+
+	require.Error(t, s.Revert())
+	data, err := os.ReadFile(filepath.Join(outside, "dep", "file.go"))
+	require.NoError(t, err)
+	assert.Equal(t, "outside", string(data), "Revert must not write through a linked parent directory")
+}
+
+// TestRevertReplacesSwappedLinkWithSameContent: a tracked regular file that
+// is a symbolic link now is a regular file again after Revert, also when the
+// target has the same content.
+func TestRevertReplacesSwappedLinkWithSameContent(t *testing.T) {
+	skipWithoutSymlinks(t)
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+	t.Setenv("GOWORK", "off")
+
+	goMod := filepath.Join(tmp, "go.mod")
+	mustWriteFile(t, goMod, "module example.com/app\n")
+	s := newStateManager()
+	require.NoError(t, s.Track(goMod))
+
+	outside := filepath.Join(t.TempDir(), "go.mod")
+	mustWriteFile(t, outside, "module example.com/app\n")
+	require.NoError(t, os.Remove(goMod))
+	require.NoError(t, os.Symlink(outside, goMod))
+
+	require.NoError(t, s.Revert())
+	info, err := os.Lstat(goMod)
+	require.NoError(t, err)
+	assert.True(t, info.Mode().IsRegular())
+}
+
+// TestStateManagerDiscardFailureKeepsState: when the manifest cannot be
+// removed, the snapshots stay, so the state on disk stays complete.
+func TestStateManagerDiscardFailureKeepsState(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory permissions are different on Windows")
+	}
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+
+	goMod := filepath.Join(tmp, "go.mod")
+	mustWriteFile(t, goMod, "module example.com/app\n")
+	s := newStateManager()
+	require.NoError(t, s.Track(goMod))
+
+	// A directory without write permission: its entries cannot be removed.
+	require.NoError(t, os.Chmod(util.GetBuildTempDir(), 0o555))
+	t.Cleanup(func() { _ = os.Chmod(util.GetBuildTempDir(), 0o755) })
+
+	require.Error(t, s.Discard())
+	assert.FileExists(t, util.GetBuildTemp(stateFileName))
+	assert.FileExists(t, filepath.Join(util.GetBuildTemp(stateDir), stateSnapshotPath(goMod)),
+		"the snapshots stay with the manifest")
+}
+
+// TestStateScopeWorkspace: in a workspace, a manifest can name the
+// go.work.sum file of the workspace, but no other file outside the otelc work
+// directory, also not a file next to go.work.
+func TestStateScopeWorkspace(t *testing.T) {
+	ws := t.TempDir()
+	workDir := filepath.Join(ws, "app")
+	mustWriteFile(t, filepath.Join(ws, "go.work"), "go 1.25.0\n\nuse ./app\n")
+	mustWriteFile(t, filepath.Join(workDir, "go.mod"), "module example.com/app\n")
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	t.Setenv("GOWORK", "")
+
+	scope := newStateScope()
+	assert.True(t, scope.allows(filepath.Join(workDir, "go.mod")))
+	assert.True(t, scope.allows(filepath.Join(ws, goWorkSumFileName)))
+	assert.False(t, scope.allows(filepath.Join(ws, "sibling", "important.txt")),
+		"a file next to go.work is not in the scope")
+	assert.False(t, scope.allows(filepath.Join(ws, "go.work")))
+
+	other := t.TempDir()
+	t.Setenv("GOWORK", filepath.Join(other, "go.work"))
+	scope = newStateScope()
+	assert.True(t, scope.allows(filepath.Join(other, goWorkSumFileName)), "GOWORK names the workspace")
+	assert.False(t, scope.allows(filepath.Join(other, "victim.txt")))
+	assert.False(t, scope.allows(filepath.Join(ws, goWorkSumFileName)), "GOWORK wins over the go.work file")
+}
+
+// TestCleanupRejectsWorkspaceSiblingInManifest: a crafted manifest names a
+// file next to the go.work file. otelc cleanup must not remove it.
+func TestCleanupRejectsWorkspaceSiblingInManifest(t *testing.T) {
+	ws := t.TempDir()
+	workDir := filepath.Join(ws, "app")
+	mustWriteFile(t, filepath.Join(ws, "go.work"), "go 1.25.0\n\nuse ./app\n")
+	victim := filepath.Join(ws, "sibling", "important.txt")
+	mustWriteFile(t, victim, "keep me")
+	t.Chdir(t.TempDir())
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	t.Setenv("GOWORK", "")
+
+	data, err := json.Marshal([]string{"-" + victim})
+	require.NoError(t, err)
+	mustWriteFile(t, util.GetBuildTemp(stateFileName), string(data))
+
+	require.Error(t, Cleanup(t.Context(), true))
+	assert.FileExists(t, victim)
 }

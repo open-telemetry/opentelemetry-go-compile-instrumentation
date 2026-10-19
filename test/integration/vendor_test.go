@@ -62,6 +62,7 @@ func TestVendoredBuild(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(app, "main.go"), []byte(vendoredAppMain), 0o644))
 
 	goMod(t, app, "tidy")
+	goGetHookDeps(t, app, os.Environ())
 	goMod(t, app, "vendor")
 	modulesTxt := filepath.Join(app, "vendor", "modules.txt")
 	before, err := os.ReadFile(modulesTxt)

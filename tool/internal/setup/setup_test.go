@@ -41,6 +41,40 @@ func TestGoBuild_RejectsUnsupportedSubcommand(t *testing.T) {
 	}
 }
 
+// TestGoBuild_RestoresLeftoverState: a build that was killed left a manifest
+// and a changed go.mod. The next build must restore the original go.mod
+// first, so that it does not snapshot the changed go.mod as the original one.
+func TestGoBuild_RestoresLeftoverState(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv(util.EnvOtelcWorkDir, dir)
+	t.Setenv("GOFLAGS", "")
+	t.Setenv("GOWORK", "off")
+
+	goMod := filepath.Join(dir, "go.mod")
+	original := "module example.com/app\n\ngo 1.25.0\n"
+	require.NoError(t, os.WriteFile(goMod, []byte(original), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644))
+
+	killed := newStateManager()
+	require.NoError(t, killed.Track(goMod))
+	changed := original + "\nreplace example.com/x => ./.otelc-build/x\n"
+	require.NoError(t, os.WriteFile(goMod, []byte(changed), 0o644))
+
+	originalCmd := runBuildCmd
+	t.Cleanup(func() { runBuildCmd = originalCmd })
+	runBuildCmd = func(context.Context, []string, ...string) error { return nil }
+
+	cmd := &cli.Command{Name: "go", SkipFlagParsing: true, Action: GoBuild}
+	// The build result does not matter here: only the restore does.
+	_ = cmd.Run(t.Context(), []string{"go", "build", "."})
+
+	content, err := os.ReadFile(goMod)
+	require.NoError(t, err)
+	assert.Equal(t, original, string(content), "the go.mod before the killed build must be restored")
+	assert.NoFileExists(t, util.GetBuildTemp(stateFileName), "no manifest may stay after the build")
+}
+
 func TestToolexecInsertArg(t *testing.T) {
 	t.Run("builds the -toolexec flag for a normal path", func(t *testing.T) {
 		insert, err := toolexecInsertArg("/usr/local/bin/otelc")
