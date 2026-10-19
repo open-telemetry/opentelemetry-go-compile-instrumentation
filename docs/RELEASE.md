@@ -5,9 +5,9 @@ This document describes how to cut a new release of
 
 ## Release Cadence
 
-Releases are cut approximately every **6 weeks**, following the broader
-OpenTelemetry release cadence. Patch releases (hotfixes) are cut as needed
-between scheduled releases when a critical bug or security issue is found.
+Releases are cut approximately every **4 weeks** (monthly). Patch releases
+(hotfixes) are cut as needed between scheduled releases when a critical bug or
+security issue is found.
 
 ## Release Shepherd
 
@@ -17,6 +17,21 @@ driving the release end-to-end: creating the release checklist issue, running
 the preparation workflow, coordinating review, and verifying the final release.
 
 Shepherds rotate among maintainers across releases to share the load.
+
+## Release Schedule
+
+Releases follow a 4-week cadence.
+
+| Version | Target Date | Release Shepherd                                             |
+| ------- | ----------- | ------------------------------------------------------------ |
+| v1.2.0  | 2026-10-12  | Yi Yang ([@y1yang0](https://github.com/y1yang0))             |
+| v1.3.0  | 2026-11-09  | Azhar Momin ([@amazingakai](https://github.com/amazingakai)) |
+| v1.4.0  | 2026-12-07  | Kemal Akkoyun ([@kakkoyun](https://github.com/kakkoyun))     |
+| v1.5.0  | 2027-01-04  | **volunteer welcome**                                        |
+| v1.6.0  | 2027-02-01  | **volunteer welcome**                                        |
+
+If you are interested in volunteering to shepherd an upcoming release, please
+create a pull request proposing yourself for that release.
 
 ## Before You Release
 

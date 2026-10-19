@@ -12,5 +12,3 @@ assignees: ''
 - [ ] Merge the release PR
 - [ ] Verify release artifacts on the [Releases page](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/releases)
 - [ ] [Sync website documentation](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/blob/main/docs/RELEASE.md#post-release)
-
-<sub>**Tip**: [React](https://github.blog/news-insights/product-news/add-reactions-to-pull-requests-issues-and-comments/) with 👍 to help prioritize this issue. Please use comments to provide useful context, avoiding `+1` or `me too`, to help us triage it. Learn more [here](https://opentelemetry.io/community/end-user/issue-participation/).</sub>
