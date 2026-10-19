@@ -882,10 +882,8 @@ func copyVendoredModules(dir string, in vendorScratchInput) (map[string]bool, ma
 	moduleDir := filepath.Dir(in.userVendorDir)
 	for i, mod := range in.user.usedModules() {
 		// A module without packages is copied too (only its go.mod file), so
-		// that the go command does not download its go.mod file.
-		if mod.Version == "" {
-			continue
-		}
+		// that the go command does not download its go.mod file. A used
+		// module always has a version (see usedModules).
 		if _, isOtelc := in.replaces[mod.Path]; isOtelc {
 			// The scratch module takes the otelc modules from the bundle.
 			continue
@@ -1125,9 +1123,6 @@ func writeScratchGoMod(s *vendorScratch, in vendorScratchInput) error {
 		}
 	}
 	for _, mod := range in.user.usedModules() {
-		if mod.Version == "" {
-			continue
-		}
 		if _, isOtelc := in.replaces[mod.Path]; isOtelc {
 			continue
 		}

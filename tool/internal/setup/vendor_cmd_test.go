@@ -6,7 +6,6 @@ package setup
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/dave/dst"
@@ -167,9 +166,7 @@ func TestVendorPinOptions(t *testing.T) {
 // result is an error (and Vendor reverts its changes). Snapshots that stay
 // without a manifest are only a warning.
 func TestFinishVendor(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("directory permissions are different on Windows")
-	}
+	skipWithoutPermissions(t)
 	setup := func(t *testing.T) *stateManager {
 		t.Helper()
 		dir := t.TempDir()
@@ -197,4 +194,60 @@ func TestFinishVendor(t *testing.T) {
 		require.NoError(t, finishVendor(t.Context(), s))
 		assert.NoFileExists(t, util.GetBuildTemp(stateFileName), "the manifest is removed first")
 	})
+}
+
+// TestVendorWithToolFile: otelc vendor with an existing tool file adds the
+// modules of its imports to vendor/ and keeps them. An import that is not an
+// instrumentation package is pruned from the tool file. No manifest stays.
+func TestVendorWithToolFile(t *testing.T) {
+	appDir := newVendorSyncApp(t)
+	toolFile := filepath.Join(appDir, toolFileCanonical)
+	mustWriteFile(t, toolFile, "//go:build tools\n\npackage tools\n\nimport _ \"example.com/extra\"\n")
+
+	require.NoError(t, Vendor(t.Context(), []string{"."}))
+
+	assert.Contains(t, readAppFile(t, appDir, "vendor/modules.txt"), "# example.com/extra v1.0.0\n")
+	assert.Contains(t, readAppFile(t, appDir, goModFileName), "example.com/extra v1.0.0")
+	assert.NotContains(t, readAppFile(t, appDir, toolFileCanonical), "example.com/extra",
+		"example.com/extra is not an instrumentation package")
+	assert.NoFileExists(t, util.GetBuildTemp(stateFileName), "no manifest stays after success")
+	assert.Equal(t, "-modcacherw", os.Getenv("GOFLAGS"), "GOFLAGS is restored")
+}
+
+func TestVendorFailsOnBadManifest(t *testing.T) {
+	dir := newVendoredModule(t, "1.25.0")
+	outside := filepath.Join(t.TempDir(), "x")
+	mustWriteFile(t, util.GetBuildTemp(stateFileName), `["-`+filepath.ToSlash(outside)+`"]`)
+
+	err := Vendor(t.Context(), []string{"."})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "outside the otelc work directory")
+	assert.NoFileExists(t, filepath.Join(dir, toolFileCanonical), "nothing is written")
+}
+
+func TestSetGoflagsModVendorUnset(t *testing.T) {
+	t.Setenv("GOFLAGS", "")
+	require.NoError(t, os.Unsetenv("GOFLAGS"))
+	restore, err := setGoflagsModVendor()
+	require.NoError(t, err)
+	assert.Equal(t, "-mod=vendor", os.Getenv("GOFLAGS"))
+	restore()
+	_, set := os.LookupEnv("GOFLAGS")
+	assert.False(t, set, "an unset GOFLAGS is unset again")
+}
+
+func TestVendorPinOptionsWithoutGoMod(t *testing.T) {
+	generate := true
+	got := vendorPinOptions(contextWithVendorMode(t.Context(), true), t.TempDir(), PinOptions{Generate: &generate})
+	require.NotNil(t, got.Generate)
+	assert.False(t, *got.Generate, "without a go.mod file there is no tool directive")
+
+	require.Error(t, vendorSyncToolFiles(t.Context(), []string{filepath.Join(t.TempDir(), "absent.go")}))
+}
+
+func TestVendorBadPackage(t *testing.T) {
+	newVendoredModule(t, "1.25.0")
+	err := Vendor(t.Context(), []string{"./absent"})
+	require.Error(t, err)
+	assert.NoFileExists(t, util.GetBuildTemp(stateFileName))
 }

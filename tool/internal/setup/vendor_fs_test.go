@@ -216,9 +216,7 @@ func TestApplyVendorMergeReplacesDeletedFiles(t *testing.T) {
 // old files of an updated module and copied some new files. The tracked
 // state restores the module of the user exactly.
 func TestApplyVendorMergeFailureIsReverted(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("file modes are different on Windows")
-	}
+	skipWithoutPermissions(t)
 	moduleDir := t.TempDir()
 	t.Chdir(moduleDir)
 	t.Setenv(util.EnvOtelcWorkDir, moduleDir)
@@ -266,4 +264,71 @@ func TestApplyVendorMergeFailureIsReverted(t *testing.T) {
 	data, err = os.ReadFile(filepath.Join(moduleDir, goModFileName))
 	require.NoError(t, err)
 	assert.Equal(t, goMod, string(data))
+}
+
+func TestVendorFSErrors(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "vendor", "dir")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	file := filepath.Join(root, "vendor", "file.go")
+	mustWriteFile(t, file, "package x")
+
+	require.Error(t, copyNewFile(root, dir, root, filepath.Join(root, "vendor", "copy")),
+		"a directory is not a regular file")
+	require.Error(t, copyNewFile(root, filepath.Join(root, "absent.go"), root, filepath.Join(root, "vendor", "c.go")),
+		"a missing source")
+	require.Error(t, copyNewFile(root, file, root, filepath.Join(file, "below.go")),
+		"the parent of the destination is a file")
+	require.Error(t, copyNewFile(root, file, root, filepath.Join(t.TempDir(), "outside.go")),
+		"a destination outside root")
+
+	require.NoError(t, removeVendoredFile(root, filepath.Join(root, "vendor", "absent.go")),
+		"a file that does not exist is not an error")
+	require.Error(t, removeVendoredFile(root, dir), "a directory is not removed")
+	require.Error(t, removeVendoredFile(root, filepath.Join(t.TempDir(), "x")), "a path outside root")
+	require.NoError(t, removeVendoredFile(root, file))
+	assert.NoFileExists(t, file)
+
+	files, err := regularFiles(root, filepath.Join(root, "vendor", "absent"))
+	require.NoError(t, err)
+	assert.Empty(t, files, "a directory that does not exist has no files")
+	mustWriteFile(t, file, "package x")
+	_, err = regularFiles(root, file)
+	require.Error(t, err, "a file is not a directory")
+}
+
+func TestRemoveVendoredFileRejectsLink(t *testing.T) {
+	skipWithoutSymlinks(t)
+	root := t.TempDir()
+	target := filepath.Join(t.TempDir(), "target.go")
+	mustWriteFile(t, target, "package x")
+	link := filepath.Join(root, "vendor", "link.go")
+	require.NoError(t, os.MkdirAll(filepath.Dir(link), 0o755))
+	require.NoError(t, os.Symlink(target, link))
+
+	require.Error(t, removeVendoredFile(root, link))
+	assert.FileExists(t, target)
+	_, err := regularFiles(root, filepath.Dir(link))
+	require.Error(t, err, "a link in a vendored directory is an error")
+}
+
+func TestVendorFSPermissionErrors(t *testing.T) {
+	skipWithoutPermissions(t)
+	root := t.TempDir()
+	src := filepath.Join(root, "src.go")
+	mustWriteFile(t, src, "package x")
+	locked := filepath.Join(root, "vendor", "locked")
+	require.NoError(t, os.MkdirAll(locked, 0o755))
+	file := filepath.Join(locked, "file.go")
+	mustWriteFile(t, file, "package x")
+	require.NoError(t, os.Chmod(locked, 0o555))
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	require.Error(t, copyNewFile(root, filepath.Join(t.TempDir(), "x.go"), root, filepath.Join(root, "vendor", "c.go")),
+		"a source outside its root")
+	require.Error(t, copyNewFile(root, src, root, filepath.Join(locked, "sub", "x.go")),
+		"the directory cannot be made")
+	require.Error(t, copyNewFile(root, src, root, filepath.Join(locked, "x.go")),
+		"the file cannot be made")
+	require.Error(t, removeVendoredFile(root, file), "the file cannot be removed")
 }

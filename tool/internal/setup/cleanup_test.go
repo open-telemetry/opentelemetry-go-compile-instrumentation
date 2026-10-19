@@ -12,6 +12,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/urfave/cli/v3"
+
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -387,4 +389,41 @@ func mustWriteFile(t *testing.T, path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("failed to write file %s: %v", path, err)
 	}
+}
+
+// TestBuildAndSetupFailOnBadManifest: a manifest that otelc cannot trust
+// stops otelc go build and a standalone otelc setup before they change
+// anything.
+func TestBuildAndSetupFailOnBadManifest(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+	t.Setenv("GOWORK", "off")
+	outside := filepath.Join(t.TempDir(), "x")
+	mustWriteFile(t, util.GetBuildTemp(stateFileName), `["-`+filepath.ToSlash(outside)+`"]`)
+
+	err := GoBuild(t.Context(), newParsedCommand(t, "go", "build", "."))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "outside the otelc work directory")
+
+	err = Setup(t.Context(), newParsedCommand(t, "setup"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "outside the otelc work directory")
+}
+
+// newParsedCommand returns the command name after it parsed args (args[0]
+// is the name).
+func newParsedCommand(t *testing.T, args ...string) *cli.Command {
+	t.Helper()
+	var parsed *cli.Command
+	cmd := &cli.Command{
+		Name:            args[0],
+		SkipFlagParsing: true,
+		Action: func(_ context.Context, c *cli.Command) error {
+			parsed = c
+			return nil
+		},
+	}
+	require.NoError(t, cmd.Run(t.Context(), args))
+	return parsed
 }

@@ -711,9 +711,7 @@ func TestRevertReplacesSwappedLinkWithSameContent(t *testing.T) {
 // TestStateManagerDiscardFailureKeepsState: when the manifest cannot be
 // removed, the snapshots stay, so the state on disk stays complete.
 func TestStateManagerDiscardFailureKeepsState(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("directory permissions are different on Windows")
-	}
+	skipWithoutPermissions(t)
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 	t.Setenv(util.EnvOtelcWorkDir, tmp)
@@ -777,4 +775,78 @@ func TestCleanupRejectsWorkspaceSiblingInManifest(t *testing.T) {
 
 	require.Error(t, Cleanup(t.Context(), true))
 	assert.FileExists(t, victim)
+}
+
+// TestRevertWorkspaceSumAndExternalPath: Revert restores the go.work.sum file
+// of the workspace. For a path outside the work directory (only in the build
+// that tracked it), a tracked directory that is a link now is an error.
+func TestRevertWorkspaceSumAndExternalPath(t *testing.T) {
+	ws := t.TempDir()
+	workDir := filepath.Join(ws, "app")
+	mustWriteFile(t, filepath.Join(ws, "go.work"), "go 1.25.0\n\nuse ./app\n")
+	sum := filepath.Join(ws, goWorkSumFileName)
+	mustWriteFile(t, sum, "before")
+	t.Chdir(t.TempDir())
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	t.Setenv("GOWORK", "")
+
+	s := newStateManager()
+	require.NoError(t, s.Track(sum))
+	mustWriteFile(t, sum, "after")
+	require.NoError(t, s.Revert())
+	data, err := os.ReadFile(sum)
+	require.NoError(t, err)
+	assert.Equal(t, "before", string(data))
+
+	if runtime.GOOS == "windows" {
+		return
+	}
+	external := filepath.Join(t.TempDir(), "mod")
+	file := filepath.Join(external, "vendor", "a.go")
+	s = newStateManager()
+	require.NoError(t, s.TrackAll(external, file))
+	mustWriteFile(t, filepath.Join(t.TempDir(), "x"), "")
+	outside := t.TempDir()
+	require.NoError(t, os.Symlink(outside, external))
+	require.Error(t, s.Revert(), "a tracked directory outside the work directory that is a link now")
+}
+
+func TestRemoveCreated(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, removeCreated(filepath.Join(dir, "absent")), "a path that does not exist")
+	empty := filepath.Join(dir, "empty")
+	require.NoError(t, os.MkdirAll(empty, 0o755))
+	require.NoError(t, removeCreated(empty))
+	assert.NoDirExists(t, empty)
+}
+
+func TestRevertPermissionErrors(t *testing.T) {
+	skipWithoutPermissions(t)
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+	t.Setenv("GOWORK", "off")
+
+	locked := filepath.Join(tmp, "locked")
+	require.NoError(t, os.MkdirAll(locked, 0o755))
+	existing := filepath.Join(locked, "go.mod")
+	mustWriteFile(t, existing, "module x\n")
+	created := filepath.Join(locked, "created.go")
+	unreadable := filepath.Join(tmp, "unreadable")
+
+	s := newStateManager()
+	require.NoError(t, s.TrackAll(existing, created, unreadable))
+	require.NoError(t, os.Remove(existing))
+	require.NoError(t, os.Symlink(filepath.Join(t.TempDir(), "target"), existing))
+	mustWriteFile(t, created, "package x")
+	require.NoError(t, os.MkdirAll(filepath.Join(unreadable, "sub"), 0o755))
+	require.NoError(t, os.Chmod(unreadable, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(unreadable, 0o755) })
+	require.NoError(t, os.Chmod(locked, 0o555))
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	err := s.Revert()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "symbolic link", "the link cannot be removed")
+	assert.FileExists(t, created, "the created file cannot be removed")
 }

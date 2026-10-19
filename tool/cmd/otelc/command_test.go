@@ -6,6 +6,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -49,4 +51,21 @@ func TestCommandVendorHelp(t *testing.T) {
 			assert.Contains(t, buf.String(), "go build flags")
 		})
 	}
+}
+
+// TestCommandVendorRuns: other arguments go to otelc vendor, which fails in a
+// module without a vendor directory.
+func TestCommandVendorRuns(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv(util.EnvOtelcWorkDir, dir)
+	t.Setenv("GOWORK", "off")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module m\n\ngo 1.25.0\n"), 0o644))
+	vendor := commandVendor
+	vendor.Before = nil
+	app := &cli.Command{Name: "otelc", Commands: []*cli.Command{&vendor}}
+	err := app.Run(context.Background(), []string{"otelc", "vendor", "-v", "."})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "go mod vendor")
+	assert.False(t, isHelpFlag("-v"))
 }
