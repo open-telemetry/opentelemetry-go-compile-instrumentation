@@ -19,21 +19,15 @@ import (
 	"go.opentelemetry.io/otelc/pkg/hook/hooktest"
 )
 
-// Two unreachable endpoints on distinct hosts. Nothing listens on either, so
-// every command fails during dial. The hook starts its span before handing off
-// to the next hook in the chain, so a failed command still exercises the full
-// instrumentation path without needing a Redis server. Distinct hosts let a
-// multi-shard test tell one shard's span from another by server.address.
+// Nothing listens on these, so commands fail at dial time but still produce
+// spans. Distinct hosts let a ring test tell its shards apart.
 const (
 	unreachableAddr  = "127.0.0.1:1"
 	unreachableAddr2 = "127.0.0.2:1"
-	// The hook splits the endpoint, so only the host reaches server.address.
 	unreachableHost  = "127.0.0.1"
 	unreachableHost2 = "127.0.0.2"
 )
 
-// failFastOptions keeps the dial attempt short and stops go-redis retrying, so
-// a test that expects a connection failure does not spend seconds getting one.
 func failFastOptions() *redis.Options {
 	return &redis.Options{
 		Addr:        unreachableAddr,
@@ -42,13 +36,7 @@ func failFastOptions() *redis.Options {
 	}
 }
 
-// ringOptions builds RingOptions for the given shards with the background
-// heartbeat pushed far into the future. NewRing otherwise spawns a heartbeat
-// goroutine that pings every shard on a 500ms ticker; those background pings
-// run through the instrumentation hook and would keep touching the global
-// tracer state this package's tests reset between runs, both polluting the span
-// recorder and racing the reset. Disabling the ticker leaves each test to drive
-// its shards explicitly, which is what it means to assert.
+// ringOptions pushes the heartbeat out so background pings do not add spans.
 func ringOptions(addrs map[string]string) *redis.RingOptions {
 	return &redis.RingOptions{
 		Addrs:              addrs,
@@ -58,26 +46,14 @@ func ringOptions(addrs map[string]string) *redis.RingOptions {
 	}
 }
 
-// newRecordingClient prepares a span recorder and resets the package-level
-// init guard, which otherwise leaks state between tests in this package.
-//
-// It mutates package-level state (initOnce) and installs a process-global
-// TracerProvider, so every test that uses it must run serially. Do not add
-// t.Parallel() to those tests: parallel execution would race the shared
-// recorder and the init guard and make span capture nondeterministic. A
-// longer-term fix is to give initInstrumentation an injectable tracer so the
-// reset trick and this constraint both go away.
+// newRecordingClient resets global tracer state, so its callers must not run
+// in parallel.
 func newRecordingClient(t *testing.T) *tracetest.SpanRecorder {
 	t.Helper()
 	initOnce = sync.Once{}
 	return setupTestTracer(t)
 }
 
-// hostOf returns the host portion of a redis endpoint the same way the
-// instrumentation's semconv layer does: the part before the port, or the whole
-// string when there is no port. A failover client that has not resolved a
-// master yet reports a placeholder addr with no port, so the expected host has
-// to be derived rather than hard-coded.
 func hostOf(addr string) string {
 	if host, _, err := net.SplitHostPort(addr); err == nil {
 		return host
@@ -85,25 +61,17 @@ func hostOf(addr string) string {
 	return addr
 }
 
-// pingAndCollect runs a command that is expected to fail at dial time and
-// returns the spans the hook produced along the way.
 func pingAndCollect(t *testing.T, ping func(context.Context) error, sr *tracetest.SpanRecorder) []tracetest.SpanStub {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	// The error is expected and carries no information worth asserting on. What
-	// matters is whether the hook ran, which the recorded spans answer.
 	_ = ping(ctx)
 
 	return tracetest.SpanStubsFromReadOnlySpans(sr.Ended())
 }
 
-// collectRingSpans fires a command against every shard the ring currently holds
-// and returns the spans the hooks produced. Driving each shard directly through
-// ForEachShard is deterministic; ring.Ping routes by key and would touch only
-// the one shard the key hashes to, which is not what a per-shard test wants to
-// assert.
+// collectRingSpans pings every shard directly; ring.Ping would reach only one.
 func collectRingSpans(t *testing.T, ring *redis.Ring, sr *tracetest.SpanRecorder) []tracetest.SpanStub {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -117,13 +85,8 @@ func collectRingSpans(t *testing.T, ring *redis.Ring, sr *tracetest.SpanRecorder
 	return tracetest.SpanStubsFromReadOnlySpans(sr.Ended())
 }
 
-// assertRedisSpan checks that the instrumentation produced a client span
-// carrying the host the hook was built from.
-//
-// The assertion deliberately does not pin the span name. Each client type
-// issues a different first command once it starts talking to a server, and a
-// cluster client sends its topology query before anything the caller asked
-// for. What identifies the hook is the endpoint on the span, not the verb.
+// assertRedisSpan matches on server.address rather than the span name, since
+// the first command differs by client type.
 func assertRedisSpan(t *testing.T, spans []tracetest.SpanStub, wantHost string) {
 	t.Helper()
 	require.NotEmpty(t, spans, "expected the hook to record a span for the command")
@@ -145,8 +108,6 @@ func assertRedisSpan(t *testing.T, spans []tracetest.SpanStub, wantHost string) 
 	t.Fatalf("no client span carried server.address=%q; recorded spans: %v", wantHost, names)
 }
 
-// attrValues flattens a span's attribute values so a test can look for one
-// without caring which key holds it.
 func attrValues(span tracetest.SpanStub) []string {
 	values := make([]string, 0, len(span.Attributes))
 	for _, attr := range span.Attributes {
@@ -172,11 +133,6 @@ func TestAfterNewRedisClientV9_AttachesHook(t *testing.T) {
 func TestAfterNewFailOverRedisClientV9_AttachesHook(t *testing.T) {
 	sr := newRecordingClient(t)
 
-	// Build through the real failover constructor so the test exercises the
-	// failover-specific construction path rather than a plain client standing
-	// in for it. The sentinel address is unreachable; sentinel discovery fails
-	// fast (well under a second, measured) so no Redis or Sentinel server is
-	// needed and the test stays deterministic.
 	client := redis.NewFailoverClient(&redis.FailoverOptions{
 		MasterName:    "mymaster",
 		SentinelAddrs: []string{unreachableAddr},
@@ -185,9 +141,7 @@ func TestAfterNewFailOverRedisClientV9_AttachesHook(t *testing.T) {
 	})
 	t.Cleanup(func() { _ = client.Close() })
 
-	// The hook records whatever Options().Addr holds when it runs. A failover
-	// client whose master has not resolved reports a placeholder there, so the
-	// expected host comes from the client rather than a literal.
+	// An unresolved failover client reports a placeholder addr.
 	wantHost := hostOf(client.Options().Addr)
 	afterNewFailOverRedisClientV9(hooktest.NewMockHookContext(), client)
 
@@ -200,10 +154,7 @@ func TestAfterNewFailOverRedisClientV9_AttachesHook(t *testing.T) {
 func TestAfterNewRingClientV9_AttachesHookToEachNode(t *testing.T) {
 	sr := newRecordingClient(t)
 
-	// Two shards configured up front. NewRing builds both during construction,
-	// before afterNewRingClientV9 runs, which is exactly the case OnNewNode
-	// alone never reaches. The fix's ForEachShard pass has to instrument both,
-	// so a span must appear for each distinct endpoint.
+	// Both shards exist before the hook runs, so only ForEachShard reaches them.
 	ring := redis.NewRing(ringOptions(map[string]string{"shard0": unreachableAddr, "shard1": unreachableAddr2}))
 	t.Cleanup(func() { _ = ring.Close() })
 
@@ -217,12 +168,7 @@ func TestAfterNewRingClientV9_AttachesHookToEachNode(t *testing.T) {
 func TestAfterNewRingClientV9_InstrumentsShardAddedViaSetAddrs(t *testing.T) {
 	sr := newRecordingClient(t)
 
-	// Start with one shard and install the hook, then add a second shard at
-	// runtime the way a caller would. The new shard is created after the hook
-	// is registered, so it goes through the retained OnNewNode path rather than
-	// the ForEachShard pass. This pins that half of the fix: a refactor that
-	// dropped OnNewNode, assuming ForEachShard alone was enough, would silently
-	// stop instrumenting dynamically added shards and this test would catch it.
+	// A shard added after the hook runs must still go through OnNewNode.
 	ring := redis.NewRing(ringOptions(map[string]string{"shard0": unreachableAddr}))
 	t.Cleanup(func() { _ = ring.Close() })
 
@@ -257,8 +203,6 @@ func TestAfterNewSentinelClientV9_AttachesHook(t *testing.T) {
 	sentinel := redis.NewSentinelClient(failFastOptions())
 	t.Cleanup(func() { _ = sentinel.Close() })
 
-	// The sentinel hook labels spans with the client's String() form rather
-	// than a bare address, so the expected endpoint comes from the client.
 	wantAddr := sentinel.String()
 	afterNewSentinelClientV9(hooktest.NewMockHookContext(), sentinel)
 
