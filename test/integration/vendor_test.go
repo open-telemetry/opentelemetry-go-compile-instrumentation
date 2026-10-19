@@ -67,8 +67,8 @@ func TestVendoredBuild(t *testing.T) {
 	before, err := os.ReadFile(modulesTxt)
 	require.NoError(t, err)
 
-	// setup edits go.mod but not vendor/modules.txt, so the build needs -mod=mod
-	// to pass the vendor consistency check.
+	// The build adds the hook modules for the time of the build only, so
+	// vendor/modules.txt must be the same after the build.
 	testutil.Build(t, appsDir, vendoredApp, "go", "build")
 
 	port := testutil.FreePort(t)
