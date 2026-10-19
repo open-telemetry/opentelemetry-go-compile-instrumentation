@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
 // fileMarker stands for the absolute path of the original file in the expected
@@ -2736,7 +2737,8 @@ func TestMarkLineDirectives_CompilerUserLineCommentWithoutFileName(t *testing.T)
 func TestMarkLineDirectives_EmptyBlockAfterGeneratedExpression(t *testing.T) {
 	// The directive for the closing brace of an empty block is after the
 	// opening brace and its comments. A newline follows the directive, so the
-	// closing brace is on the next line.
+	// closing brace is on the next line. The statement has generated code, so
+	// the "else if" block also starts stale, and its brace is restored too.
 	src := `package main
 
 func f() {
@@ -2769,14 +2771,18 @@ func f() {
 	}() < 0 {
 		/*line FILE:4*/
 	} else if h() {
+		/*line FILE:5*/
 	}
-	/*line FILE:7*/ if func() int {
+	/*line FILE:6*/
+	if func() int {
 		fmt.Println("gen", where())
 		return g()
 	}() < 0 { /*line FILE:6*/
 	} else if h() {
+		/*line FILE:7*/
 	}
-	/*line FILE:9*/ if func() int {
+	/*line FILE:8*/
+	if func() int {
 		fmt.Println("gen", where())
 		return g()
 	}() < 0 { /* c */ /*line FILE:8*/
@@ -3507,4 +3513,120 @@ func TestMarkLineDirectives_CompilerUserBlockDirectiveOnOpeningLine(t *testing.T
 	}, "A", "B")
 	assert.Contains(t, got["A"], "mapped.go:1")
 	assert.Contains(t, got["B"], "clause.go:1")
+}
+
+func TestMarkLineDirectives_CompilerUserLineCommentInOtherPlaces(t *testing.T) {
+	// A column-1 "//line" comment can be in many places of a statement. The
+	// printer indents it, so Go ignores it, and the code after it must be
+	// restored. A blank line after the comment keeps it out of the
+	// decorations of the next node. A comment on a line of its own before a
+	// node also moves the restore directive of the node to a line of its own.
+	const line = "\n//line slot.go:100\n\n"
+	const extra = `func sink(fs ...func()) {
+	for _, f := range fs {
+		f()
+	}
+}
+
+`
+	for _, tc := range []struct {
+		name string
+		code string
+	}{
+		// After the "case" or "default" keyword of a clause.
+		{"case keyword", "switch 1 {\ncase" + line + "1:\nfmt.Println(\"A\", where())\n}"},
+		{"comm keyword", "ch := make(chan int, 1)\nch <- 1\nselect {\ncase" + line + "<-ch:\nfmt.Println(\"A\", where())\n}"},
+		{"type case keyword", "var v any = 1\nswitch v.(type) {\ncase" + line + "int:\nfmt.Println(\"A\", where())\n}"},
+		{"default keyword", "switch {\ndefault" + line + ":\nfmt.Println(\"A\", where())\n}"},
+		// Between two blocks of a statement, or after a block.
+		{"after else", "if false {\n} else" + line + "{\nfmt.Println(\"A\", where())\n}"},
+		{"after a block", "if true {\nfmt.Println(\"B\", where())\n}" + line + "fmt.Println(\"A\", where())"},
+		{"between two function literals", "sink(func() {\nfmt.Println(\"B\", where())\n}," + line + "func() {\nfmt.Println(\"A\", where())\n})"},
+		{"after a function literal in a condition", "if call(func() {\nfmt.Println(\"B\", where())\n}) >" + line + "0 {\nfmt.Println(\"A\", where())\n}"},
+		{"after a function literal in a for init", "for i := call(func() {\nfmt.Println(\"B\", where())\n});" + line + "i < 2; i++ {\nfmt.Println(\"A\", where())\n}"},
+		{"after a function literal in a switch init", "switch i := call(func() {\nfmt.Println(\"B\", where())\n});" + line + "i {\ncase 1:\nfmt.Println(\"A\", where())\n}"},
+		// After the colon of a label, also of a label on a label.
+		{"label colon", "L:" + line + "fmt.Println(\"A\", where())\nif false {\ngoto L\n}"},
+		{"nested label colon", "L1:\nL2:" + line + "fmt.Println(\"A\", where())\nif false {\ngoto L1\n}\nif false {\ngoto L2\n}"},
+		// Before "range". dst does not keep the newline before the comment.
+		{"range after define", "for _, v :=\n//line slot.go:100\nrange []int{1} {\n_ = v\n}\nfmt.Println(\"A\", where())"},
+		{"range after define with blank line", "for _, v :=" + line + "range []int{1} {\n_ = v\n}\nfmt.Println(\"A\", where())"},
+		{"range after assign", "var v int\nfor _, v =" + line + "range []int{1} {\n_ = v\n}\nfmt.Println(\"A\", where())"},
+		// In a continued expression. The restore of the next statement is
+		// on a line of its own.
+		{"after define", "x :=" + line + "1\n_ = x\nfmt.Println(\"A\", where())"},
+		{"after operator", "_ = 1 +" + line + "2\nfmt.Println(\"A\", where())"},
+		{"after selector dot", "fmt." + line + "Print()\nfmt.Println(\"A\", where())"},
+		// After a statement, with a blank line after the comment.
+		{"after statement", "_ = 1" + line + "fmt.Println(\"A\", where())"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := preludeProgram + extra + "func main() {\n" + tc.code + "\n}\n"
+			// No rule changes main, but the file is instrumented.
+			assertSamePositions(t, src, func(*dst.File) {}, "A")
+		})
+	}
+}
+
+func TestMarkLineDirectives_CompilerCommentOnOwnLineAfterGeneratedCode(t *testing.T) {
+	// Generated code ends with a comment on a line of its own. The printer
+	// puts the restore directive of the next original statement on a line of
+	// its own too, so the directive must give the line before the statement.
+	const src = preludeProgram + `func main() {
+	fmt.Println("A", where())
+}
+`
+	for _, tc := range []struct {
+		name string
+		edit func(root *dst.File)
+	}{
+		{"raw rule", func(root *dst.File) {
+			raw := &rule.InstRawRule{Func: "main", Raw: "_ = 1\n// end of hook"}
+			require.NoError(t, insertRaw(context.Background(), raw, findFunc(t, root, "main"), root, rawAliasContext{}))
+		}},
+		{"line comment", func(root *dst.File) {
+			prepend(t, findFunc(t, root, "main").Body, "_ = 1\n// tail")
+		}},
+		{"block comment", func(root *dst.File) {
+			prepend(t, findFunc(t, root, "main").Body, "_ = 1\n/* tail */")
+		}},
+		{"raw rule with a multi-line comment", func(root *dst.File) {
+			raw := &rule.InstRawRule{Func: "main", Raw: "_ = 1 /* head\nanother line */"}
+			require.NoError(t, insertRaw(context.Background(), raw, findFunc(t, root, "main"), root, rawAliasContext{}))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assertSamePositions(t, src, tc.edit, "A")
+		})
+	}
+}
+
+func TestMarkLineDirectives_CompilerCommentOnOwnLineAfterWrappedStatement(t *testing.T) {
+	// A rule wraps an expression of an original statement, so the next
+	// statement needs a restore. A comment on a line of its own, or a comment
+	// on more than one line, is just before the next statement. The restore
+	// directive is then on a line of its own.
+	wrap := func(t *testing.T, root *dst.File) {
+		body := findFunc(t, root, "main").Body
+		switch stmt := body.List[0].(type) {
+		case *dst.AssignStmt:
+			stmt.Rhs[0] = multiLineWrapper(t, "1")
+		case *dst.IfStmt:
+			stmt.Cond = &dst.BinaryExpr{
+				X:  multiLineWrapper(t, "call(func() {})"),
+				Op: token.GTR,
+				Y:  &dst.BasicLit{Kind: token.INT, Value: "0"},
+			}
+		}
+	}
+	for name, code := range map[string]string{
+		"comment after the statement": "_ = 1\n// tail\n\nfmt.Println(\"A\", where())",
+		"multi-line comment after a brace": "if call(func() {}) > 0 { /* head\nanother line */\n" +
+			"fmt.Println(\"A\", where())\n}",
+	} {
+		t.Run(name, func(t *testing.T) {
+			src := preludeProgram + "func main() {\n" + code + "\n}\n"
+			assertSamePositions(t, src, func(root *dst.File) { wrap(t, root) }, "A")
+		})
+	}
 }

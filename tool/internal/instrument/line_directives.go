@@ -111,7 +111,8 @@ import (
 //   - A user "//line" comment in an empty block gets a restore directive after
 //     it, before the closing brace of the block, in the same way.
 //   - A user "//line" comment between a label and its statement is in the
-//     decorations of the statement. The statement gets a restore directive.
+//     decorations of the statement, or, with a blank line after it, in the
+//     Colon decorations of the label. The statement gets a restore directive.
 //   - A user "//line" comment before the opening brace of a block (for
 //     example between "else" and "{") is in the Start decorations of the
 //     block. The state becomes stale, so the first statement of the block
@@ -329,6 +330,12 @@ func (*lineDirectivePass) updateState(restored bool, state *lineState) {
 // label.
 func (p *lineDirectivePass) stepLabeled(labeled *dst.LabeledStmt, labelRestored bool, state *lineState) {
 	inner := labeled.Stmt
+	// A user "//line" comment after "L:", with a blank line after it, is in
+	// the Colon decorations of the label. The printer prints it before the
+	// statement of the label. This applies to each label of a label on a
+	// label.
+	p.noteUserDirectives(p.userDirectivesInside(labeled, false, false), state)
+	p.markAfterComment(labeled.Decs.Colon, []dst.Stmt{inner})
 	pos, original := p.parser.OriginalPosition(inner)
 	if !original {
 		// A rule replaced the statement of the label with generated code.
@@ -352,10 +359,17 @@ func (p *lineDirectivePass) stepLabeled(labeled *dst.LabeledStmt, labelRestored 
 // position that Go gives to it without the directive.
 //
 // Known limitation: a directive gives the position of one token, and the
-// printer then counts lines by itself. If the user source has two statements on
-// the same line ("a(); b()"), the printer puts them on two lines, and the
-// lines after them are off by one until the next directive. gofmt does not
-// produce such code.
+// printer then counts lines by itself. When the printer changes the layout of
+// user code, the lines after it are off until the next directive. Examples:
+// two statements on the same line ("a(); b()") go on two lines, a block or a
+// struct type on one line ("if x { a() }") goes on more lines, two blank lines
+// become one, and a doc comment is formatted again. gofmt keeps some of these
+// forms, for example a short function body on one line
+// ("func f() { a(); b() }").
+//
+// Known limitation: the own-line form cannot give line 1, because it gives the
+// line before the node, and Go does not accept line 0. Then the restore is
+// skipped.
 func (p *lineDirectivePass) restore(node, prev dst.Node, pos token.Position) bool {
 	file := p.absolute(pos.Filename)
 	_, isClause := node.(*dst.CaseClause)
@@ -527,6 +541,14 @@ func (p *lineDirectivePass) children(n dst.Node, state *lineState) {
 			return false
 		}
 		if block, ok := c.(*dst.BlockStmt); ok {
+			// The pass reads the decorations of n before its blocks, but
+			// the printer can print them between two blocks (for example
+			// a comment after "else"). An earlier block can then restore
+			// the position before the comment. So when n has code that
+			// moves the lines, every block of n starts stale.
+			if found {
+				p.markStale(state)
+			}
 			p.block(block, state)
 			return false
 		}
@@ -617,8 +639,13 @@ func (p *lineDirectivePass) userDirectivesInside(n dst.Node, start, end bool) us
 	if end {
 		add(userDirectivesIn(decs.End, false))
 	}
+	// dst does not always keep the newline before a comment in an inner
+	// field (for example between ":=" and "range"). So a "//line" comment at
+	// the start of an inner field counts as a user directive. If it was not
+	// at column 1 in the source, Go ignored it there too, and the restore
+	// that follows is correct, also when it is not necessary.
 	for _, list := range p.innerDecorations(n) {
-		add(userDirectivesIn(list, false))
+		add(userDirectivesIn(list, true))
 	}
 	return result
 }
@@ -727,6 +754,12 @@ func (p *lineDirectivePass) emptyBlock(block *dst.BlockStmt, rbrace token.Positi
 func (p *lineDirectivePass) list(stmts []dst.Stmt, state *lineState) {
 	var prev dst.Node
 	for _, stmt := range stmts {
+		if prev != nil && p.hasOwnLineComment(prev) {
+			// A comment on a line of its own in the previous node (for
+			// example after it, or in a continued expression) moves the
+			// restore directive of this node to a line of its own too.
+			p.afterComment[stmt] = true
+		}
 		original := p.step(stmt, prev, state)
 		prev = stmt
 		if !original {
@@ -734,12 +767,16 @@ func (p *lineDirectivePass) list(stmts []dst.Stmt, state *lineState) {
 		}
 		switch clause := stmt.(type) {
 		case *dst.CaseClause:
+			// A user "//line" comment after "case" or "default".
+			p.noteUserDirectives(userDirectivesIn(clause.Decs.Case, true), state)
 			for _, expr := range clause.List {
 				p.operand(expr, state)
 			}
 			p.clauseColon(clause.Decs.Colon, clause.Body, state)
 			p.list(clause.Body, state)
 		case *dst.CommClause:
+			p.noteUserDirectives(userDirectivesIn(clause.Decs.Case, true), state)
+			p.noteUserDirectives(userDirectivesIn(clause.Decs.Comm, true), state)
 			if clause.Comm != nil {
 				p.operand(clause.Comm, state)
 			}
@@ -769,18 +806,46 @@ func (p *lineDirectivePass) clauseColon(colon dst.Decorations, body []dst.Stmt, 
 // so the first statement keeps the usual form. This is important for a
 // statement on line 1: the own-line form gives line 0, which is not valid.
 func (p *lineDirectivePass) markAfterComment(decorations dst.Decorations, stmts []dst.Stmt) {
-	if len(stmts) == 0 {
-		return
+	if len(stmts) > 0 && hasCommentOnOwnLine(decorations) {
+		p.afterComment[stmts[0]] = true
 	}
+}
+
+// hasOwnLineComment reports whether n, or a node inside n, has a comment on a
+// line of its own (see hasCommentOnOwnLine), other than in the Start
+// decorations of n.
+func (p *lineDirectivePass) hasOwnLineComment(n dst.Node) bool {
+	found := false
+	dst.Inspect(n, func(c dst.Node) bool {
+		if c == nil || found {
+			return false
+		}
+		lists := append(p.innerDecorations(c), c.Decorations().End)
+		if c != n {
+			lists = append(lists, c.Decorations().Start)
+		}
+		for _, list := range lists {
+			found = found || hasCommentOnOwnLine(list)
+		}
+		return !found
+	})
+	return found
+}
+
+// hasCommentOnOwnLine reports whether decorations hold a comment that starts
+// a line (it follows a newline or a line comment in the same list), or a
+// "/*...*/" comment on more than one line. After such a comment, the printer
+// puts the next comment on a line of its own.
+func hasCommentOnOwnLine(decorations dst.Decorations) bool {
 	atLineStart := false
 	for _, d := range decorations {
 		comment := strings.HasPrefix(d, "//") || strings.HasPrefix(d, "/*")
-		if comment && atLineStart {
-			p.afterComment[stmts[0]] = true
-			return
+		if comment && (atLineStart || strings.Contains(d, "\n")) {
+			return true
 		}
 		atLineStart = d == "\n" || strings.HasPrefix(d, "//")
 	}
+	return false
 }
 
 // endNode returns the node that gets the End decoration with the directive
