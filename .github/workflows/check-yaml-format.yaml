@@ -6,6 +6,8 @@ on:
       - "**/*.yml"
       - "**/*.yaml"
       - ".tools/yamlfmt"
+      - ".tools/go.mod"
+      - ".tools/go.sum"
       - ".github/workflows/check-yaml-format.yaml"
   push:
     branches: [main]
@@ -13,6 +15,8 @@ on:
       - "**/*.yml"
       - "**/*.yaml"
       - ".tools/yamlfmt"
+      - ".tools/go.mod"
+      - ".tools/go.sum"
       - ".github/workflows/check-yaml-format.yaml"
 
 permissions:
