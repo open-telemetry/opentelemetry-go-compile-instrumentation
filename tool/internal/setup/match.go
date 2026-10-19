@@ -570,7 +570,16 @@ func ruleFileKey(path string) string {
 	if resolved, err := filepath.EvalSymlinks(path); err == nil {
 		path = resolved
 	}
-	if abs, err := filepath.Abs(path); err == nil {
+	if abs, absErr := filepath.Abs(path); absErr == nil {
+		// Abs joins a relative path using the working directory as Getwd
+		// reports it, which on some platforms doesn't itself resolve every
+		// symbolic link (macOS's /var -> /private/var APFS firmlink is one:
+		// Getwd keeps the firmlinked form, but an explicit EvalSymlinks call
+		// on the resulting absolute path still sees through it). Resolve
+		// again on the now-absolute result to catch that.
+		if resolved, evalErr := filepath.EvalSymlinks(abs); evalErr == nil {
+			return resolved
+		}
 		return abs
 	}
 	return filepath.Clean(path)
