@@ -60,9 +60,9 @@ func TestIsCompileCommand(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:     "PGO compile command should be excluded",
-			line:     "/usr/local/go/pkg/tool/linux_amd64/compile -o /tmp/output.a -p main -buildid abc123 -pgoprofile /tmp/default.pgo",
-			expected: false,
+			name:     "PGO compile command",
+			line:     "/usr/local/go/pkg/tool/linux_amd64/compile -o /tmp/output.a -p main -buildid abc123 -pgoprofile=/tmp/pgo.preprofile",
+			expected: true,
 		},
 		{
 			name:     "complete compile command with additional flags",
@@ -204,7 +204,7 @@ func TestIsCompileArgs(t *testing.T) {
 			expected: false,
 		},
 		{
-			name: "PGO compile should be excluded",
+			name: "PGO compile command",
 			args: []string{
 				"/usr/local/go/pkg/tool/linux_amd64/compile",
 				"-o",
@@ -213,10 +213,9 @@ func TestIsCompileArgs(t *testing.T) {
 				"main",
 				"-buildid",
 				"abc123",
-				"-pgoprofile",
-				"/tmp/default.pgo",
+				"-pgoprofile=/tmp/pgo.preprofile",
 			},
-			expected: false,
+			expected: true,
 		},
 		{
 			name: "link command should not match",
