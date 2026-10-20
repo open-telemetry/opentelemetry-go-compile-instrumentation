@@ -35,6 +35,17 @@ func (ip *instrumentPhase) load() ([]*rule.InstRuleSet, error) {
 	return rset, nil
 }
 
+// anyRuleSetHasIgnoredCallFiles reports whether any package in this build has
+// a //otelc:ignore comment above a call, found during setup.
+func anyRuleSetHasIgnoredCallFiles(allSet []*rule.InstRuleSet) bool {
+	for _, rset := range allSet {
+		if len(rset.IgnoredCallFiles) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // loadImportNames loads the import name table. A missing file is not
 // an error, since the table only improves a fallback guess.
 func loadImportNames() (map[string]string, error) {
