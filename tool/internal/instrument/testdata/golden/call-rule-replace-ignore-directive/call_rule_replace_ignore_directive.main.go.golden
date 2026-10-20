@@ -1,0 +1,35 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+import (
+	"unsafe"
+
+	"runtime"
+)
+
+func Wrapper(size uintptr) uintptr {
+	println("Wrapped!")
+	return size
+}
+
+func main() {
+	x := 42
+	runtime.SuppressHooks()
+	otelcIgnoreDone0 := false
+	defer func() {
+		if !otelcIgnoreDone0 {
+			runtime.UnsuppressHooks()
+		}
+	}()
+	//otelc:ignore
+	ignored := unsafe.Sizeof(x)
+	otelcIgnoreDone0 = true
+	runtime.UnsuppressHooks()
+	_ = ignored
+
+	y := "hello"
+	kept := Wrapper(unsafe.Sizeof(y))
+	_ = kept
+}
