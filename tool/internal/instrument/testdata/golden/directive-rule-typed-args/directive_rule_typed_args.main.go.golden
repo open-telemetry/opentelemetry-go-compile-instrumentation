@@ -3,6 +3,7 @@
 
 package main
 
+//line /golden/work/main.go:6
 import "context"
 
 //otelc:span span.name:"custom-op"

@@ -105,6 +105,7 @@ func f() {
 	})
 	want := `package main
 
+//line FILE:3
 func f() {
 	/*line /<generated>:1*/ gen1()
 	gen2()
@@ -131,6 +132,7 @@ func h() {}
 	})
 	want := `package main
 
+//line FILE:3
 func f() {
 	/*line /<generated>:1*/ gen() /*line FILE:2*/
 }
@@ -161,6 +163,7 @@ func f() {
 	})
 	want := `package main
 
+//line FILE:3
 func f() {
 	a()
 	/*line /<generated>:1*/ genMiddle()
@@ -189,6 +192,7 @@ func f() {
 	})
 	want := `package main
 
+//line FILE:3
 func f() {
 	/*line /<generated>:1*/ gen1()
 	/*line FILE:4*/ a()
@@ -248,6 +252,7 @@ func f(ch chan int, x any) {
 	})
 	want := `package main
 
+//line FILE:3
 func f(ch chan int, x any) {
 	if ch != nil {
 		/*line /<generated>:1*/ genIf()
@@ -307,6 +312,7 @@ func f(ch chan int) {
 	})
 	want := `package main
 
+//line FILE:3
 func f(ch chan int) {
 	if ch != nil {
 		a()
@@ -356,6 +362,7 @@ func f(x int) {
 	})
 	want := `package main
 
+//line FILE:3
 func f(x int) {
 	switch x {
 	case 1:
@@ -457,6 +464,7 @@ func F() {}
 	})
 	want := `package main
 
+//line FILE:3
 func F() {}
 
 //line /<generated>:1
@@ -486,6 +494,7 @@ func F() {
 	// The state becomes stale, and the next declaration is restored.
 	want := `package main
 
+//line FILE:3
 import (
 	"fmt"
 	"os"
@@ -514,6 +523,7 @@ func f() {
 	})
 	want := `package main
 
+//line FILE:3
 func f() {
 	/*line /<generated>:1*/ if cond() {
 		gen1()
@@ -533,6 +543,7 @@ func TestMarkLineDirectives_DirectiveHasOnlyALine(t *testing.T) {
 	})
 	want := `package main
 
+//line FILE:3
 func f() {
 	/*line /<generated>:1*/ gen()
 	/*line FILE:4*/ a()
@@ -562,6 +573,7 @@ func f() {
 	// pass removes the blank line before a directive.
 	want := `package main
 
+//line FILE:3
 func f() {
 	a()
 	/*line /<generated>:1*/ gen()
@@ -590,6 +602,7 @@ func f() {
 	// The newline after the directive is on the line before b.
 	want := `package main
 
+//line FILE:3
 func f() {
 	a()
 	/*line /<generated>:1*/ gen()
@@ -604,7 +617,9 @@ func f() {
 func TestMarkLineDirectives_FollowsExistingLineDirective(t *testing.T) {
 	// A cgo file has a line directive that maps the code to another file. The
 	// restore directive must use the mapped position, and the name is
-	// relative to the directory of the file.
+	// relative to the directory of the file. The first declaration gets a
+	// restore directive also when it has a directive of the user. The two
+	// directives give the same position.
 	src := `package main
 
 //line other.go:100
@@ -619,6 +634,7 @@ func f() {
 	want := `package main
 
 //line other.go:100
+//line DIR/other.go:100
 func f() {
 	/*line /<generated>:1*/ gen()
 	/*line DIR/other.go:101*/ a()
@@ -636,7 +652,114 @@ func f() {
 }
 `
 	got := instrumentSource(t, src, func(*dst.File) {})
+	// The compiler reads a copy of the file in the work directory, so the
+	// first declaration gets a restore directive. No other directive is
+	// written.
+	want := `package main
+
+//line FILE:3
+func f() {
+	a()
+}
+`
+	assert.Equal(t, want, got)
+}
+
+func TestMarkLineDirectives_FirstDeclarationWithoutInjection(t *testing.T) {
+	// The compiler reads a copy of the file in the work directory. So a
+	// function above the first injected code gets a restore directive.
+	src := `package main
+
+func a() {
+	x()
+}
+
+func f() {
+	y()
+}
+`
+	got := instrumentSource(t, src, func(root *dst.File) {
+		prepend(t, findFunc(t, root, "f").Body, "gen()")
+	})
+	want := `package main
+
+//line FILE:3
+func a() {
+	x()
+}
+
+func f() {
+	/*line /<generated>:1*/ gen()
+	/*line FILE:8*/ y()
+}
+`
+	assert.Equal(t, want, got)
+}
+
+func TestMarkLineDirectives_FirstDeclarationIsImport(t *testing.T) {
+	// The import declaration has no added spec, so only the import
+	// declaration gets a restore directive. The next declaration does not
+	// need one.
+	src := `package main
+
+import "fmt"
+
+func f() {
+	fmt.Println()
+}
+`
+	got := instrumentSource(t, src, func(root *dst.File) {
+		prepend(t, findFunc(t, root, "f").Body, "gen()")
+	})
+	want := `package main
+
+//line FILE:3
+import "fmt"
+
+func f() {
+	/*line /<generated>:1*/ gen()
+	/*line FILE:6*/ fmt.Println()
+}
+`
+	assert.Equal(t, want, got)
+}
+
+func TestMarkLineDirectives_NoDeclarations(t *testing.T) {
+	// A file with no declarations gets no directive.
+	src := `package main
+
+// A comment.
+`
+	got := instrumentSource(t, src, func(*dst.File) {})
 	assert.Equal(t, src, got)
+}
+
+func TestMarkLineDirectives_FirstRestoreSkipped(t *testing.T) {
+	// The file name ends in ":" and digits, so the pass cannot write a
+	// restore directive. The state stays stale, so the first generated node
+	// still gets its "<generated>" directive.
+	file := filepath.Join(t.TempDir(), "orig.go:12")
+	src := `package main
+
+func a() {}
+
+func f() {
+	x()
+}
+`
+	got := instrumentSourceAt(t, file, src, func(root *dst.File) {
+		prepend(t, findFunc(t, root, "f").Body, "gen()")
+	})
+	want := `package main
+
+func a() {}
+
+func f() {
+	/*line /<generated>:1*/ gen()
+	x()
+}
+`
+	assert.Equal(t, want, got)
 }
 
 func TestMarkLineDirectives_LabeledStatement(t *testing.T) {
@@ -659,6 +782,7 @@ loop:
 	// directive.
 	want := `package main
 
+//line FILE:3
 func f() {
 	a()
 	/*line /<generated>:1*/ gen()
@@ -844,6 +968,7 @@ func f() {
 	})
 	want := `package main
 
+//line FILE:3
 func f() {
 	/*line /<generated>:1*/ a()
 	/*line FILE:4*/ a()
@@ -864,6 +989,11 @@ import (
 
 func where() string {
 	_, file, line, _ := runtime.Caller(1)
+	return fmt.Sprintf("%s:%d", file, line)
+}
+
+func here() string {
+	_, file, line, _ := runtime.Caller(0)
 	return fmt.Sprintf("%s:%d", file, line)
 }
 
@@ -888,6 +1018,7 @@ func target() {
 }
 
 func main() {
+	fmt.Println("H", here())
 	target()
 }
 `
@@ -962,6 +1093,11 @@ func TestMarkLineDirectives_CompilerHonoursDirectives(t *testing.T) {
 		require.Failf(t, "marker not found", "marker: %s", marker)
 		return 0
 	}
+	// here is not changed, and it is above the first injected code. The
+	// compiler reads inst.go, and not orig.go, so here has the position in
+	// orig.go only because of the restore directive of the first
+	// declaration.
+	assert.Equal(t, pos(lineOf(`runtime.Caller(0)`)), got["H"], "untouched code above the injected code")
 	// Original statements keep their line in the original file.
 	assert.Equal(t, pos(lineOf(`"A"`)), got["A"])
 	assert.Equal(t, pos(lineOf(`"B"`)), got["B"])
@@ -1012,6 +1148,32 @@ func TestMarkLineDirectives_CompilerReportsOriginalLines(t *testing.T) {
 	assert.Equal(t, "9", got[1][1])
 	assert.Equal(t, want[1][1], got[1][1])
 	assert.Empty(t, got[1][2])
+}
+
+func TestMarkLineDirectives_CompilerFirstDeclarationWithoutInjection(t *testing.T) {
+	// first is the first declaration, and no rule changes it. It has a type
+	// error. The compiler reads inst.go, in a different directory, and it
+	// must report the error in orig.go.
+	src := "package main\n\nfunc first() {\n\tvar a int = \"a\"\n\t_ = a\n}\n\n" +
+		"func main() {\n\tfirst()\n}\n"
+	origDir := writeModule(t, "orig.go", src)
+	origFile := filepath.Join(origDir, "orig.go")
+
+	p := ast.NewAstParser()
+	root, err := p.Parse(origFile, parser.ParseComments)
+	require.NoError(t, err)
+	prepend(t, findFunc(t, root, "main").Body, "println(1)")
+	markLineDirectives(p, root, origFile)
+	instDir := writeModule(t, "inst.go", "")
+	require.NoError(t, ast.WriteFile(filepath.Join(instDir, "inst.go"), root))
+	out, err := goTool(t, instDir, "build", "-gcflags=-e", "-o", os.DevNull, "inst.go")
+	require.Error(t, err)
+
+	position := regexp.MustCompile(`(\S+):(\d+)(?::\d+)?: cannot use`)
+	got := position.FindAllStringSubmatch(out, -1)
+	require.Len(t, got, 1, out)
+	assert.Equal(t, origFile, got[0][1], out)
+	assert.Equal(t, "4", got[0][2], out)
 }
 
 // runInjected parses src as the file orig.go of a module, calls edit, runs the
@@ -1896,6 +2058,7 @@ func g() {
 	})
 	want := `package main
 
+//line FILE:3
 func f(x int) {
 	/*line /<generated>:1*/ gen()
 	/*line FILE:4*/ switch x {
@@ -1962,7 +2125,18 @@ func f() {
 }
 `
 	got := instrumentSource(t, src, func(*dst.File) {})
-	assert.Equal(t, src, got)
+	// Only the first declaration gets a restore directive (see
+	// TestMarkLineDirectives_NothingGenerated).
+	want := `package main
+
+//line FILE:3
+func f() {
+	a()
+	/*line block.y:5*/ b()
+	c()
+}
+`
+	assert.Equal(t, want, got)
 }
 
 func TestMarkLineDirectives_CompilerUserLineCommentAfterLastClause(t *testing.T) {
@@ -2084,6 +2258,7 @@ loop:
 	got := instrumentSource(t, src, func(*dst.File) {})
 	want := `package main
 
+//line FILE:3
 func f() {
 loop:
 	//line labeled.y:20
@@ -2649,6 +2824,7 @@ func f(x int) {
 	})
 	want := `package main
 
+//line FILE:3
 func f(x int) {
 	switch x {
 	case 1:
@@ -2764,6 +2940,7 @@ func f() {
 	})
 	want := `package main
 
+//line FILE:3
 func f() {
 	if func() int {
 		fmt.Println("gen", where())
@@ -2855,6 +3032,7 @@ type C int
 	})
 	want := `package main
 
+//line FILE:3
 func f() {
 	/*line foo.go:10*/ gen()
 	/*line FILE:4*/ a()
@@ -3002,6 +3180,7 @@ func f() {}
 	})
 	want := `package main
 
+//line FILE:3
 func f() {}
 
 //line foo.go:30

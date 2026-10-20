@@ -3,6 +3,7 @@
 
 package main
 
+//line /golden/work/main.go:6
 func divide(a int, b int) (_unnamedRetVal0 int, _unnamedRetVal1 error) {
 	/*line /<generated>:1*/ println("enter divide args=2 arg0=a arg1=b")
 	defer println("exit divide rets=2 ret0=_unnamedRetVal0 ret1=_unnamedRetVal1")

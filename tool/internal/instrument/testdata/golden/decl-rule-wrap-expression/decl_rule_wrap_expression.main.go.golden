@@ -5,6 +5,7 @@ package main
 
 // wrapTransport simulates an OTel instrumentation wrapper in the test.
 // In production rules this would be an imported package function.
+//line /golden/work/main.go:8
 func wrapTransport(t interface{}) interface{} {
 	return t
 }

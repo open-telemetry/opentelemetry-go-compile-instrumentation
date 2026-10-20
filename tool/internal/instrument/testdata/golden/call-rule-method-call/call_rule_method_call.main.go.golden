@@ -3,6 +3,7 @@
 
 package main
 
+//line /golden/work/main.go:6
 import "go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/call-rule-method-call/helpers/logger"
 
 func tracedInfo(s string) {}

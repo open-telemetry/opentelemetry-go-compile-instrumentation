@@ -4,6 +4,7 @@
 package main
 
 //otelc:span
+//line /golden/work/main.go:7
 func foo() {
 	/*line /<generated>:1*/ println("span start: foo")
 	defer println("span end: foo")

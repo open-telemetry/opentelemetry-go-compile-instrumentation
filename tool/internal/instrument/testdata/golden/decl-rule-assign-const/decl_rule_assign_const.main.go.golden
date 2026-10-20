@@ -3,6 +3,7 @@
 
 package main
 
+//line /golden/work/main.go:6
 const MaxRetries = 99
 
 //line /golden/work/main.go:8

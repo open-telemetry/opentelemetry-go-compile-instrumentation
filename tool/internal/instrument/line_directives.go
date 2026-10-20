@@ -72,9 +72,16 @@ import (
 // The pass keeps one state for the whole file: "the last token that was
 // printed is in the <generated> file" (generated), "has a position that is
 // not the user position, and is not in the <generated> file" (stale), or
-// "has the user position" (known). It follows the code in source order. A block
-// starts with the state that it has before its opening brace, and the state
-// after a statement is the state after its last block. So a restore that was
+// "has the user position" (known). It follows the code in source order.
+// The state at the start of the file is stale. The reason is that the
+// compiler does not read the user file: it reads a copy in the work
+// directory, at a different path (see writeInstrumented). Without a
+// directive, the code above the first generated node has the path of the
+// copy. So the first original declaration gets a restore directive, also
+// when no rule changed it. A file without declarations gets no directive.
+//
+// A block starts with the state that it has before its opening brace, and
+// the state after a statement is the state after its last block. So a restore that was
 // skipped (see below) is tried again at the next original node, also in the
 // next block.
 //
@@ -182,8 +189,10 @@ const (
 	lineKnown lineState = iota
 	// lineStale means that the pass does not know the position. It can be
 	// in the user file at a wrong line, in another file, or in the
-	// "<generated>" file. For example, a user "//line" comment is ignored, a
-	// rule added code that the pass does not mark, or a restore was skipped.
+	// "<generated>" file. For example, the pass is at the start of the file
+	// (the compiler reads a copy of the file in the work directory), a user
+	// "//line" comment is ignored, a rule added code that the pass does not
+	// mark, or a restore was skipped.
 	// The next original node needs a restore directive, and the next
 	// generated node needs a "<generated>" directive.
 	lineStale
@@ -243,7 +252,13 @@ func markLineDirectives(parser *ast.AstParser, root *dst.File, file string) {
 		decorationFields: map[reflect.Type][]int{},
 		afterComment:     map[dst.Node]bool{},
 	}
-	state := lineKnown
+	// The compiler does not read the original file. It reads a copy in the
+	// work directory (see writeInstrumented), so the position of the first
+	// token is in this copy, and not in the user file. The pass starts stale,
+	// so the first original declaration gets a restore directive. If this
+	// restore is skipped, the state stays stale, and the first generated node
+	// still gets its "<generated>" directive.
+	state := lineStale
 	for _, decl := range root.Decls {
 		original := p.stepDecl(decl, &state)
 		if !original {
