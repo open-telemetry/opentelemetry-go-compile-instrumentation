@@ -10,26 +10,18 @@ here are places where the two disagree.
 
 ## Fidelity with the go command
 
-- `packages.Load` calls that need to see packages the way the user's build does (the build
-  targets, or local packages that build tags can affect) should get the user's build flags through
-  `extractBuildFlags` in `tool/internal/setup`. It keeps `-C`, `-overlay`, `-tags`, `-mod`,
-  `-modfile` and boolean flags such as `-race`. Loads that only resolve instrumentation packages
-  (`config.go`, `store.go`) don't need them.
-- `classifyArgs` in `tool/internal/setup/args.go` classifies command-line arguments. New code
-  should use it instead of splitting arguments again.
-- `-C` becomes `packages.Config.Dir` in `loadDirFromBuildFlags` (`tool/internal/pkgload`).
-  `go` changes to the `-C` directory before anything else, so relative paths in other flags are
-  resolved against it.
-- In `GOFLAGS`, value flags are only valid as `-flag=value`. Entries are split like
-  `cmd/internal/quoted.Split` (see `tool/util/go.go`): any whitespace, including `\n` and `\r`,
-  separates entries, and quotes have no escapes.
-- `go test` has its own flags (`go help testflags`). Arguments after `-args` go to the test
-  binary; with `--`, the `--` itself is passed along too. Argument handling has to cover both.
-- A nil error from `packages.Load` doesn't mean every package loaded. Check `len(pkg.Errors) > 0`
-  for each package that is used.
-- The compiler can remap imports through `importmap` lines in the importcfg, for example vendored
-  `vendor/golang.org/x/net/...` packages in the standard library. Lookups by import path have to
-  apply that map.
+- Code that loads the user's packages, runs `go list` on them or interprets the user's arguments
+  has to see the build the way the user's `go` command does: the same build flags, build tags,
+  working directory (`-C`) and environment, including `GOFLAGS`. Loads that only resolve
+  instrumentation packages don't need the user's flags. Reuse the existing argument and flag
+  handling in `tool/internal/setup` and `tool/internal/pkgload` instead of parsing arguments again.
+- Check flag handling against the `go` command itself (`go help build`, `go help testflag`, and
+  cmd/go for the Go version in `go.mod`), not against assumptions: both the `-flag value` and
+  `-flag=value` forms, boolean flags, `GOFLAGS` syntax, and arguments meant for the test binary.
+- A nil error from `packages.Load` doesn't mean every package loaded. Check each used package's
+  `Errors`.
+- Lookups by import path have to account for the ways the compiler can remap imports, such as
+  vendored packages and `importmap` entries in the importcfg.
 - Each `packages.Load` or `go list` call starts a subprocess. Flag new calls in loops that could
   be batched, and repeated loads of the same directory.
 

@@ -33,9 +33,8 @@ otelc can rewrite the AST of matched packages and inject hook code. `AGENTS.md` 
 
 CI already checks these:
 
-- Diagnostics the `golangci-lint` CI run already reports for this PR (`.tools/golangci.yml`
-  enables 77 linters, including `govet`, `errcheck`, `bodyclose`, `spancheck`, `copyloopvar` and
-  `gosec`). A real problem is still worth raising if the linter doesn't report it.
+- Diagnostics the `golangci-lint` CI run already reports for this PR. The enabled linters are in
+  `.tools/golangci.yml`. A real problem is still worth raising if the linter doesn't report it.
 - Formatting, typos, markdown lint, license headers, conventional-commit PR titles, an outdated
   `tool/data/otelc-bundle.tgz` or outdated golden files, test file names and the coverage floor.
 
@@ -47,8 +46,9 @@ Also skip:
 ## Before you claim something
 
 - Read the code at the PR head. Don't report a case as unhandled when the code already handles it.
-- The Go version is the `go` directive in `go.mod`. Since Go 1.22 each loop iteration has its own
-  variables, so don't flag loop-variable capture.
+- The minimum supported Go version is the `go` directive in `go.mod`. Before claiming how the
+  language or standard library behaves, check what that version supports in the Go release notes
+  (<https://go.dev/doc/devel/release>), for example per-iteration loop variables.
 - Check the Go documentation before claiming platform-specific behavior. For example,
   `os.Rename` replaces an existing file on Windows too.
 - Code that keeps compatibility with released otelc versions is usually deliberate. Look for a
