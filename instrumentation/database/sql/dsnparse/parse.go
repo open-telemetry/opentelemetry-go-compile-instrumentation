@@ -482,6 +482,8 @@ func parseSQLServerDSN(dsn string) DSNInfo {
 }
 
 // parseSQLServerKV parses the ADO.NET semicolon-delimited key=value format.
+// The server value may carry the "tcp:" transport prefix, which is not part of
+// the address.
 func parseSQLServerKV(dsn string) DSNInfo {
 	var host, port, dbName string
 	for _, pair := range strings.Split(dsn, ";") {
@@ -497,6 +499,7 @@ func parseSQLServerKV(dsn string) DSNInfo {
 		val = strings.TrimSpace(val)
 		switch key {
 		case "server", "data source":
+			val = sqlServerStripProtocol(val)
 			// Accept both "host,port" and "host\instance" forms.
 			if comma := strings.IndexByte(val, ','); comma >= 0 {
 				host = val[:comma]
@@ -517,6 +520,24 @@ func parseSQLServerKV(dsn string) DSNInfo {
 		port = "1433"
 	}
 	return DSNInfo{Host: host, Port: port, DBName: dbName}
+}
+
+// sqlServerTCPPrefix is the one ADO.NET transport prefix that leaves the value
+// a TCP host, as in "Server=tcp:db.example.com,1433". The other prefixes (np:,
+// lpc:, admin:) select a different transport, which this parser cannot
+// represent: semconv.DbClientRequestTraceAttrs sets network.transport to tcp
+// for every SQL Server DSN and the address is emitted as host and port. They
+// are deliberately left alone rather than turned into a TCP host.
+const sqlServerTCPPrefix = "tcp:"
+
+// sqlServerStripProtocol removes a leading "tcp:" from an ADO.NET server
+// value, case-insensitively, so the keyword is not reported as the host.
+func sqlServerStripProtocol(val string) string {
+	if len(val) >= len(sqlServerTCPPrefix) &&
+		strings.EqualFold(val[:len(sqlServerTCPPrefix)], sqlServerTCPPrefix) {
+		return val[len(sqlServerTCPPrefix):]
+	}
+	return val
 }
 
 // ---- ClickHouse --------------------------------------------------------------
@@ -549,7 +570,8 @@ func parseClickHouseDSN(dsn string) DSNInfo {
 // ---- Oracle ------------------------------------------------------------------
 
 // parseOracleDSN handles Oracle DSNs in URL format or the traditional
-// user/pass@host:port/service notation.
+// user/pass@host:port/service notation, which may also carry an Easy Connect
+// Plus protocol prefix: user/pass@[protocol://]host:port/service.
 func parseOracleDSN(dsn string) DSNInfo {
 	if strings.Contains(dsn, "://") {
 		if u, err := nurl.Parse(dsn); err == nil && u.Host != "" {
@@ -566,7 +588,7 @@ func parseOracleDSN(dsn string) DSNInfo {
 	if atIdx < 0 {
 		return DSNInfo{}
 	}
-	connStr := strings.TrimPrefix(dsn[atIdx+1:], "//")
+	connStr := strings.TrimPrefix(oracleStripProtocol(dsn[atIdx+1:]), "//")
 	var hostPort, dbName string
 	if sl := strings.IndexByte(connStr, '/'); sl >= 0 {
 		hostPort = connStr[:sl]
@@ -576,6 +598,23 @@ func parseOracleDSN(dsn string) DSNInfo {
 	}
 	host, port := oracleSplitHostPort(hostPort)
 	return DSNInfo{Host: host, Port: port, DBName: dbName}
+}
+
+// oracleStripProtocol removes a leading "proto://" when proto is one of the
+// Easy Connect Plus transport keywords, tcp or tcps, so the keyword is not
+// reported as the host. A bare "//" is left to the caller, which trims it
+// separately. Only the first "://" is considered: one further along belongs to
+// the service name or a parameter.
+func oracleStripProtocol(addr string) string {
+	i := strings.Index(addr, "://")
+	if i < 0 {
+		return addr
+	}
+	proto := addr[:i]
+	if strings.EqualFold(proto, "tcp") || strings.EqualFold(proto, "tcps") {
+		return addr[i+3:]
+	}
+	return addr
 }
 
 func oracleSplitHostPort(hp string) (host, port string) {
