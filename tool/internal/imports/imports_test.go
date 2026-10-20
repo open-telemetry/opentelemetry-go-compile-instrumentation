@@ -340,10 +340,13 @@ func TestAddToFile(t *testing.T) {
 			checkResult: func(t *testing.T, root *dst.File) {
 				require.Len(t, root.Decls, 1)
 				genDecl := root.Decls[0].(*dst.GenDecl)
-				assert.Len(t, genDecl.Specs, 1)
-				spec := genDecl.Specs[0].(*dst.ImportSpec)
-				require.NotNil(t, spec.Name)
-				assert.Equal(t, "ctx", spec.Name.Name)
+				require.Len(t, genDecl.Specs, 2)
+				first := genDecl.Specs[0].(*dst.ImportSpec)
+				second := genDecl.Specs[1].(*dst.ImportSpec)
+				require.NotNil(t, first.Name)
+				require.NotNil(t, second.Name)
+				assert.Equal(t, "ctx", first.Name.Name)
+				assert.Equal(t, "c", second.Name.Name)
 			},
 		},
 		{
@@ -492,7 +495,7 @@ func TestFindNew(t *testing.T) {
 				},
 			},
 			ruleImports:      map[string]string{"c": "context"},
-			expectedNew:      map[string]string{},
+			expectedNew:      map[string]string{"c": "context"},
 			expectedAliases:  map[string]string{"context": "ctx"},
 			expectedExplicit: map[string]bool{"context": true},
 		},
@@ -511,9 +514,29 @@ func TestFindNew(t *testing.T) {
 				},
 			},
 			ruleImports:      map[string]string{"ctx": "context"},
-			expectedNew:      map[string]string{},
+			expectedNew:      map[string]string{"ctx": "context"},
 			expectedAliases:  map[string]string{"context": "context"},
 			expectedExplicit: map[string]bool{},
+		},
+		{
+			name: "same path same alias - nothing to add",
+			root: &dst.File{
+				Decls: []dst.Decl{
+					&dst.GenDecl{
+						Tok: token.IMPORT,
+						Specs: []dst.Spec{
+							&dst.ImportSpec{
+								Name: dst.NewIdent("ctx"),
+								Path: &dst.BasicLit{Value: `"context"`},
+							},
+						},
+					},
+				},
+			},
+			ruleImports:      map[string]string{"ctx": "context"},
+			expectedNew:      map[string]string{},
+			expectedAliases:  map[string]string{"context": "ctx"},
+			expectedExplicit: map[string]bool{"context": true},
 		},
 		{
 			name: "blank import - explicit alias",

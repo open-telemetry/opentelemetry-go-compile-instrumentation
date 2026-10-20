@@ -110,10 +110,11 @@ func FindNew(ctx context.Context, root *dst.File, ruleImports map[string]string,
 			continue
 		}
 
-		if _, pathExists := existing.PathToAlias[importPath]; !pathExists {
+		// Add the import unless the file already imports this path under this
+		// alias. A file may import one path under several aliases.
+		if !slices.Contains(existing.PathToAliases[importPath], alias) {
 			result.NewImports[alias] = importPath
 		}
-		// If path exists (even with different alias), skip - don't add duplicate
 	}
 
 	return result
@@ -163,13 +164,7 @@ func AddToFile(ctx context.Context, root *dst.File, newImports map[string]string
 
 	existingImports := getExisting(ctx, root, buildFlags...)
 
-	// Create reverse lookup: path -> alias
-	existingByPath := make(map[string]string)
-	for alias, importPath := range existingImports {
-		existingByPath[importPath] = alias
-	}
-
-	// Check for conflicts: same alias but different path, or same path with different alias
+	// Check for conflicts: same alias but different path
 	for alias, newPath := range newImports {
 		if alias == "_" || alias == "." {
 			continue
@@ -179,8 +174,6 @@ func AddToFile(ctx context.Context, root *dst.File, newImports map[string]string
 				return ex.Newf("import conflict: alias %q already imports %q, cannot import %q",
 					alias, existingPath, newPath)
 			}
-			delete(newImports, alias)
-		} else if _, exists = existingByPath[newPath]; exists {
 			delete(newImports, alias)
 		}
 	}
