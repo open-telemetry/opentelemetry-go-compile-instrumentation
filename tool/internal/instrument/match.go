@@ -35,6 +35,35 @@ func (ip *instrumentPhase) load() ([]*rule.InstRuleSet, error) {
 	return rset, nil
 }
 
+// anyRuleSetHasIgnoredCallFiles reports whether any package in this build has
+// a //otelc:ignore comment above a call, found during setup.
+func anyRuleSetHasIgnoredCallFiles(allSet []*rule.InstRuleSet) bool {
+	for _, rset := range allSet {
+		if len(rset.IgnoredCallFiles) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// loadImportNames loads the import name table. A missing file is not
+// an error, since the table only improves a fallback guess.
+func loadImportNames() (map[string]string, error) {
+	f := util.GetImportNamesFile()
+	content, err := os.ReadFile(f)
+	if os.IsNotExist(err) {
+		return map[string]string{}, nil
+	}
+	if err != nil {
+		return nil, ex.Wrapf(err, "failed to read file %s", f)
+	}
+	names := make(map[string]string)
+	if jsonErr := json.Unmarshal(content, &names); jsonErr != nil {
+		return nil, ex.Wrapf(jsonErr, "failed to unmarshal JSON")
+	}
+	return names, nil
+}
+
 // match matches the rules with the compile command.
 func (ip *instrumentPhase) match(allSet []*rule.InstRuleSet, args []string) *rule.InstRuleSet {
 	// One package can only be matched with one rule set, so it's safe to return

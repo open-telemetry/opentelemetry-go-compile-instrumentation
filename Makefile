@@ -4,6 +4,14 @@
 # Use bash for all shell commands (required for pipefail and other bash features)
 SHELL := /bin/bash
 
+# Many recipes use .ONESHELL, so that "set -euo pipefail" applies to all the
+# lines of the recipe. GNU Make 3.81 (the default on macOS) does not support
+# .ONESHELL: it runs each line in a different shell, and failures can be
+# hidden. Thus GNU Make 3.82 or later is required.
+ifeq ($(filter oneshell,$(.FEATURES)),)
+$(error GNU Make 3.82 or later is required (found $(MAKE_VERSION)). On macOS, run "brew install make", then use "gmake")
+endif
+
 .PHONY: all test test-unit test-integration test-e2e format lint build build-all build/pkg install package manifest verify-manifest clean setup-git \
         build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
         lint/action lint/makefile lint/license-header lint/license-header/fix lint/dockerfile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
@@ -295,7 +303,8 @@ lint/dockerfile: hadolint
 	elif [ -f /opt/homebrew/bin/hadolint ]; then \
 		HADOLINT_CMD="/opt/homebrew/bin/hadolint"; \
 	fi; \
-	$$HADOLINT_CMD -c .tools/hadolint.yaml demo/app/grpc/client/Dockerfile demo/app/grpc/server/Dockerfile demo/app/http/client/Dockerfile demo/app/http/server/Dockerfile
+	DOCKERFILES=$$(find demo/app -name "Dockerfile" | sort); \
+	$$HADOLINT_CMD --failure-threshold warning -c .tools/hadolint.yaml $$DOCKERFILES
 
 lint/makefile: ## Lint Makefile
 lint/makefile: $(CHECKMAKE)
