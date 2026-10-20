@@ -10,7 +10,6 @@ import (
 	"reflect"
 	"strings"
 	"sync"
-	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
@@ -40,6 +39,43 @@ func (n dbClientEnabler) Enable() bool {
 
 var clientEnabler = dbClientEnabler{}
 
+// connInfo carries a connection's identity from a before hook to its after
+// hook, which copies it onto the *sql.DB, *sql.Conn or *sql.Stmt being returned.
+// Both ends are in this file and agree on every field, so a struct does the job
+// a map with string keys did, without allocating the map or hashing its keys.
+type connInfo struct {
+	endpoint string
+	driver   string
+	dsn      string
+	dbName   string
+	// sql is the statement text. Only the Prepare and Tx.Stmt hooks set it.
+	sql string
+}
+
+// applyToStmt copies the connection identity onto a statement, which keeps it in
+// its injected Data map for the Stmt hooks that run each time it is used.
+func (c *connInfo) applyToStmt(stmt *sql.Stmt) {
+	stmt.Data = map[string]string{
+		"endpoint": c.endpoint,
+		"sql":      c.sql,
+		"driver":   c.driver,
+		"dbName":   c.dbName,
+	}
+	stmt.DSN = c.dsn
+}
+
+// queryState is what instrumentStart hands to instrumentEnd and to the BeginTx
+// after hooks.
+type queryState struct {
+	// ctx is the context of the span instrumentStart started.
+	ctx context.Context
+	// parentCtx is the caller's context from before the span started. BeginTx
+	// keeps it on the Tx so commit and rollback spans are siblings of begin.
+	parentCtx context.Context
+	span      trace.Span
+	req       semconv.DatabaseSqlRequest
+}
+
 func beforeOpenInstrumentation(ictx hook.HookContext, driverName, dataSourceName string) {
 	info := ParseDSN(driverName, dataSourceName)
 	addr := info.Addr()
@@ -56,38 +92,26 @@ func beforeOpenInstrumentation(ictx hook.HookContext, driverName, dataSourceName
 	if dbName == "" && dataSourceName != "" {
 		dbName = ParseDbName(dataSourceName)
 	}
-	ictx.SetData(map[string]string{
-		"endpoint": addr,
-		"driver":   driverName,
-		"dsn":      dataSourceName,
-		"dbName":   dbName,
+	ictx.SetData(&connInfo{
+		endpoint: addr,
+		driver:   driverName,
+		dsn:      dataSourceName,
+		dbName:   dbName,
 	})
 }
 
 func afterOpenInstrumentation(ictx hook.HookContext, db *sql.DB, err error) {
-	if db == nil || ictx.GetData() == nil {
+	if db == nil {
 		return
 	}
-	data, ok := ictx.GetData().(map[string]string)
+	info, ok := ictx.GetData().(*connInfo)
 	if !ok {
 		return
 	}
-	endpoint, ok := data["endpoint"]
-	if ok {
-		db.Endpoint = endpoint
-	}
-	driver, ok := data["driver"]
-	if ok {
-		db.DriverName = driver
-	}
-	dsn, ok := data["dsn"]
-	if ok {
-		db.DSN = dsn
-	}
-	dbName, ok := data["dbName"]
-	if ok {
-		db.DbName = dbName
-	}
+	db.Endpoint = info.endpoint
+	db.DriverName = info.driver
+	db.DSN = info.dsn
+	db.DbName = info.dbName
 }
 
 // resolveDriverName maps a driver.Driver instance back to the standard driver
@@ -163,11 +187,11 @@ func beforeOpenDBInstrumentation(ictx hook.HookContext, c driver.Connector) {
 		dbName = ParseDbName(dsn)
 	}
 
-	ictx.SetData(map[string]string{
-		"endpoint": addr,
-		"driver":   driverName,
-		"dsn":      dsn,
-		"dbName":   dbName,
+	ictx.SetData(&connInfo{
+		endpoint: addr,
+		driver:   driverName,
+		dsn:      dsn,
+		dbName:   dbName,
 	})
 }
 
@@ -196,12 +220,12 @@ func beforePrepareContextInstrumentation(ictx hook.HookContext, db *sql.DB, ctx 
 	if db == nil {
 		return
 	}
-	ictx.SetData(map[string]string{
-		"endpoint": db.Endpoint,
-		"sql":      query,
-		"driver":   db.DriverName,
-		"dsn":      db.DSN,
-		"dbName":   db.DbName,
+	ictx.SetData(&connInfo{
+		endpoint: db.Endpoint,
+		sql:      query,
+		driver:   db.DriverName,
+		dsn:      db.DSN,
+		dbName:   db.DbName,
 	})
 }
 
@@ -209,17 +233,9 @@ func afterPrepareContextInstrumentation(ictx hook.HookContext, stmt *sql.Stmt, e
 	if stmt == nil {
 		return
 	}
-	callDataMap, ok := ictx.GetData().(map[string]string)
-	if !ok {
-		return
+	if info, ok := ictx.GetData().(*connInfo); ok {
+		info.applyToStmt(stmt)
 	}
-	stmt.Data = map[string]string{
-		"endpoint": callDataMap["endpoint"],
-		"sql":      callDataMap["sql"],
-		"driver":   callDataMap["driver"],
-		"dbName":   callDataMap["dbName"],
-	}
-	stmt.DSN = callDataMap["dsn"]
 }
 
 func beforeExecContextInstrumentation(
@@ -290,26 +306,20 @@ func afterTxInstrumentation(ictx hook.HookContext, tx *sql.Tx, err error) {
 // Commit/Rollback are siblings of the begin span. Otherwise the begin span's own
 // context is stored so they stay in the same trace. txContext reads it back.
 func populateTxFromBeginHook(ictx hook.HookContext, tx *sql.Tx) {
-	if ictx.GetData() == nil {
-		return
-	}
-	callData, ok := ictx.GetData().(map[string]interface{})
+	st, ok := ictx.GetData().(*queryState)
 	if !ok {
 		return
 	}
-	if dbRequest, ok := callData["req"].(semconv.DatabaseSqlRequest); ok {
-		tx.Endpoint = dbRequest.Endpoint
-		tx.DriverName = dbRequest.DriverName
-		tx.DSN = dbRequest.Dsn
-		tx.DbName = dbRequest.DbName
-	}
-	parent, _ := callData["parentCtx"].(context.Context)
-	if parent != nil && trace.SpanContextFromContext(parent).IsValid() {
-		tx.OtelCtx = parent
-	} else if ctx, ok := callData["ctx"].(context.Context); ok {
+	tx.Endpoint = st.req.Endpoint
+	tx.DriverName = st.req.DriverName
+	tx.DSN = st.req.Dsn
+	tx.DbName = st.req.DbName
+	if st.parentCtx != nil && trace.SpanContextFromContext(st.parentCtx).IsValid() {
+		tx.OtelCtx = st.parentCtx
+	} else if st.ctx != nil {
 		// The caller had no span, so there is no parent to be a sibling of. Use
 		// the begin span's context to keep commit and rollback in the same trace.
-		tx.OtelCtx = ctx
+		tx.OtelCtx = st.ctx
 	}
 }
 
@@ -320,11 +330,11 @@ func beforeConnInstrumentation(ictx hook.HookContext, db *sql.DB, ctx context.Co
 	if db == nil {
 		return
 	}
-	ictx.SetData(map[string]string{
-		"endpoint": db.Endpoint,
-		"driver":   db.DriverName,
-		"dsn":      db.DSN,
-		"dbName":   db.DbName,
+	ictx.SetData(&connInfo{
+		endpoint: db.Endpoint,
+		driver:   db.DriverName,
+		dsn:      db.DSN,
+		dbName:   db.DbName,
 	})
 }
 
@@ -332,26 +342,14 @@ func afterConnInstrumentation(ictx hook.HookContext, conn *sql.Conn, err error) 
 	if conn == nil {
 		return
 	}
-	data, ok := ictx.GetData().(map[string]string)
+	info, ok := ictx.GetData().(*connInfo)
 	if !ok {
 		return
 	}
-	endpoint, ok := data["endpoint"]
-	if ok {
-		conn.Endpoint = endpoint
-	}
-	driverName, ok := data["driver"]
-	if ok {
-		conn.DriverName = driverName
-	}
-	dsn, ok := data["dsn"]
-	if ok {
-		conn.DSN = dsn
-	}
-	dbName, ok := data["dbName"]
-	if ok {
-		conn.DbName = dbName
-	}
+	conn.Endpoint = info.endpoint
+	conn.DriverName = info.driver
+	conn.DSN = info.dsn
+	conn.DbName = info.dbName
 }
 
 func beforeConnPingContextInstrumentation(ictx hook.HookContext, conn *sql.Conn, ctx context.Context) {
@@ -375,12 +373,12 @@ func beforeConnPrepareContextInstrumentation(ictx hook.HookContext, conn *sql.Co
 	if conn == nil {
 		return
 	}
-	ictx.SetData(map[string]string{
-		"endpoint": conn.Endpoint,
-		"sql":      query,
-		"driver":   conn.DriverName,
-		"dsn":      conn.DSN,
-		"dbName":   conn.DbName,
+	ictx.SetData(&connInfo{
+		endpoint: conn.Endpoint,
+		sql:      query,
+		driver:   conn.DriverName,
+		dsn:      conn.DSN,
+		dbName:   conn.DbName,
 	})
 }
 
@@ -388,17 +386,9 @@ func afterConnPrepareContextInstrumentation(ictx hook.HookContext, stmt *sql.Stm
 	if stmt == nil {
 		return
 	}
-	callDataMap, ok := ictx.GetData().(map[string]string)
-	if !ok {
-		return
+	if info, ok := ictx.GetData().(*connInfo); ok {
+		info.applyToStmt(stmt)
 	}
-	stmt.Data = map[string]string{
-		"endpoint": callDataMap["endpoint"],
-		"sql":      callDataMap["sql"],
-		"driver":   callDataMap["driver"],
-		"dbName":   callDataMap["dbName"],
-	}
-	stmt.DSN = callDataMap["dsn"]
 }
 
 func beforeConnExecContextInstrumentation(
@@ -466,12 +456,12 @@ func beforeTxPrepareContextInstrumentation(ictx hook.HookContext, tx *sql.Tx, ct
 	if tx == nil {
 		return
 	}
-	ictx.SetData(map[string]string{
-		"endpoint": tx.Endpoint,
-		"sql":      query,
-		"driver":   tx.DriverName,
-		"dsn":      tx.DSN,
-		"dbName":   tx.DbName,
+	ictx.SetData(&connInfo{
+		endpoint: tx.Endpoint,
+		sql:      query,
+		driver:   tx.DriverName,
+		dsn:      tx.DSN,
+		dbName:   tx.DbName,
 	})
 }
 
@@ -479,17 +469,9 @@ func afterTxPrepareContextInstrumentation(ictx hook.HookContext, stmt *sql.Stmt,
 	if stmt == nil {
 		return
 	}
-	callDataMap, ok := ictx.GetData().(map[string]string)
-	if !ok {
-		return
+	if info, ok := ictx.GetData().(*connInfo); ok {
+		info.applyToStmt(stmt)
 	}
-	stmt.Data = map[string]string{
-		"endpoint": callDataMap["endpoint"],
-		"sql":      callDataMap["sql"],
-		"driver":   callDataMap["driver"],
-		"dbName":   callDataMap["dbName"],
-	}
-	stmt.DSN = callDataMap["dsn"]
 }
 
 func beforeTxStmtContextInstrumentation(ictx hook.HookContext, tx *sql.Tx, ctx context.Context, stmt *sql.Stmt) {
@@ -499,12 +481,12 @@ func beforeTxStmtContextInstrumentation(ictx hook.HookContext, tx *sql.Tx, ctx c
 	if stmt == nil || stmt.Data == nil {
 		return
 	}
-	ictx.SetData(map[string]string{
-		"endpoint": stmt.Data["endpoint"],
-		"driver":   stmt.Data["driver"],
-		"dsn":      stmt.DSN,
-		"sql":      stmt.Data["sql"],
-		"dbName":   stmt.Data["dbName"],
+	ictx.SetData(&connInfo{
+		endpoint: stmt.Data["endpoint"],
+		driver:   stmt.Data["driver"],
+		dsn:      stmt.DSN,
+		sql:      stmt.Data["sql"],
+		dbName:   stmt.Data["dbName"],
 	})
 }
 
@@ -512,17 +494,9 @@ func afterTxStmtContextInstrumentation(ictx hook.HookContext, stmt *sql.Stmt) {
 	if stmt == nil {
 		return
 	}
-	data, ok := ictx.GetData().(map[string]string)
-	if !ok {
-		return
+	if info, ok := ictx.GetData().(*connInfo); ok {
+		info.applyToStmt(stmt)
 	}
-	stmt.Data = map[string]string{
-		"endpoint": data["endpoint"],
-		"driver":   data["driver"],
-		"sql":      data["sql"],
-		"dbName":   data["dbName"],
-	}
-	stmt.DSN = data["dsn"]
 }
 
 func beforeTxExecContextInstrumentation(
@@ -680,15 +654,11 @@ func instrumentStart(
 		trace.WithAttributes(attrs...),
 	)
 
-	// Store data for after hook
-	ictx.SetData(map[string]interface{}{
-		"ctx": spanCtx,
-		// parentCtx is the caller's context from before the span started. BeginTx
-		// keeps it on the Tx so commit and rollback spans are siblings of begin.
-		"parentCtx": ctx,
-		"span":      span,
-		"req":       req,
-		"start":     time.Now(),
+	ictx.SetData(&queryState{
+		ctx:       spanCtx,
+		parentCtx: ctx,
+		span:      span,
+		req:       req,
 	})
 }
 
@@ -696,11 +666,12 @@ func instrumentEnd(ictx hook.HookContext, err error) {
 	if ictx.GetData() == nil {
 		return
 	}
-	span, ok := ictx.GetKeyData("span").(trace.Span)
-	if !ok || span == nil {
+	st, ok := ictx.GetData().(*queryState)
+	if !ok || st.span == nil {
 		logger.Debug("instrumentEnd: no span from before hook")
 		return
 	}
+	span := st.span
 	defer span.End()
 	if err != nil {
 		span.RecordError(err)
