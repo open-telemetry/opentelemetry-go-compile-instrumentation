@@ -79,10 +79,10 @@ create a pull request proposing yourself for that release.
 Merging the approved release PR automatically triggers the
 [Release workflow](../.github/workflows/release.yml), which:
 
-1. Tags the merge commit with the version
-2. Cross-compiles `otelc` for all supported platforms (see
+1. Cross-compiles `otelc` for all supported platforms (see
    [Cross-Compilation Targets](#cross-compilation-targets))
-3. Generates SHA256 checksums for all binaries
+2. Generates SHA256 checksums for all binaries
+3. Tags the merge commit with the version
 4. Publishes the GitHub release with binaries, checksums, and the curated
    release notes
 
@@ -97,31 +97,29 @@ To cut a pre-release (e.g. a release candidate for integration testing):
 
 ## Patch Releases (Hotfixes)
 
-No permanent release or maintenance branches are kept. For critical bug fixes
-between scheduled releases:
+No permanent release or maintenance branches are kept. Critical bug fixes
+should always land on `main` first. For patch releases between scheduled
+releases:
 
-1. If the fix is on `main` and no unrelated changes have landed since the last
-   release, simply run the Prepare Release workflow targeting `main` with the
-   next patch version (e.g. `v1.2.1`).
+1. If no unrelated changes have landed on `main` since the last release, simply
+   run the Prepare Release workflow targeting `main` with the next patch
+   version (e.g. `v1.2.1`).
 
 2. If `main` has moved on with changes that should not be included, create a
-   temporary hotfix branch from the previous release tag and cherry-pick the
-   fix onto it. For example:
+   temporary hotfix branch `release/v<MAJOR>.<MINOR>.x` from the previous
+   release tag and cherry-pick the fix commit from `main`:
 
    ```sh
    git fetch origin --tags
    git checkout -b release/v1.2.x v1.2.0
-   git cherry-pick <fix-commit-sha>
+   git cherry-pick <fix-commit-from-main>
    git push origin release/v1.2.x
    ```
 
    Then run the Prepare Release workflow with `v1.2.1` targeting
-   `release/v1.2.x`. The branch exists only to prepare and publish this hotfix;
-   it is not a persistent maintenance branch. Delete it after the hotfix release
-   is published and verified.
-
-3. After the patch release, open a PR to merge the fix back to `main` to avoid
-   regression.
+   `release/v1.2.x`, review and merge the resulting release PR into
+   `release/v1.2.x`, and delete the temporary branch once the release is
+   published and verified.
 
 ## Cross-Compilation Targets
 

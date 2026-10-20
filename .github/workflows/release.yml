@@ -22,6 +22,10 @@ jobs:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           VERSION="${HEAD_REF#release/}"
+          if [[ ! "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "Branch '${HEAD_REF}' is not a valid release version (must match ^v<semver>). Skipping release."
+            exit 1
+          fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Determine if pre-release
@@ -47,22 +51,39 @@ jobs:
           go-version-file: 'go.mod'
           cache: false
 
-      - name: Create and push tag
+      - name: Build binaries
         env:
           VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "${VERSION}" -m "Release ${VERSION}"
-          git push origin "${VERSION}"
-
-      - name: Build binaries
-        run: make build-all
+        run: make build-all VERSION="${VERSION}"
 
       - name: Generate SHA256 checksums
         run: |
           cd dist
           sha256sum otelc-* > checksums.txt
+
+      - name: Create and push tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          HEAD_COMMIT=$(git rev-parse HEAD)
+          REMOTE_COMMIT=$(git ls-remote --tags origin "refs/tags/${VERSION}^{}" | awk '{print $1}')
+          if [ -z "${REMOTE_COMMIT}" ]; then
+            REMOTE_COMMIT=$(git ls-remote --tags origin "refs/tags/${VERSION}" | awk '{print $1}')
+          fi
+
+          if [ -n "${REMOTE_COMMIT}" ]; then
+            if [ "${REMOTE_COMMIT}" = "${HEAD_COMMIT}" ]; then
+              echo "Tag '${VERSION}' already exists on origin pointing to current commit (${HEAD_COMMIT}). Skipping tag creation."
+            else
+              echo "Tag '${VERSION}' already exists on remote pointing to a different commit!" >&2
+              exit 1
+            fi
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "${VERSION}" -m "Release ${VERSION}"
+            git push origin "${VERSION}"
+          fi
 
       - name: Create GitHub release
         env:
