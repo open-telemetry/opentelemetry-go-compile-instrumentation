@@ -345,6 +345,32 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 	})
 }
 
+func (sp *setupPhase) matchAllDeps(
+	ctx context.Context,
+	deps []*Dependency,
+	moduleDirs []string,
+	buildFlags []string,
+) ([]*rule.InstRuleSet, error) {
+	matched, err := sp.matchDeps(ctx, deps, moduleDirs)
+	if err != nil {
+		return nil, ex.Wrapf(err, "matching dependencies to hook rules")
+	}
+
+	// The hook packages the pass above selected get blank-imported into the
+	// application below, which compiles their dependencies too. The build plan
+	// never saw those, so match them now.
+	injected, err := sp.matchInjectedDeps(ctx, matched, deps, moduleDirs, buildFlags)
+	if err != nil {
+		return nil, err
+	}
+	matched = append(matched, injected...)
+	err = sortMatchedRuleSets(matched)
+	if err != nil {
+		return nil, ex.Wrapf(err, "sorting matched rules")
+	}
+	return matched, nil
+}
+
 func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	// Since Setup can be invoked in different contexts (i.e, via `otelc setup` or as part of `otelc go build`),
 	// we need to handle the arguments accordingly. If the command is `go build` or `go install`, we should trim the first argument
@@ -436,22 +462,12 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		}
 	}
 
-	// Match the hook code with these dependencies
-	matched, err := sp.matchDeps(ctx, deps, moduleDirs)
-	if err != nil {
-		return ex.Wrapf(err, "matching dependencies to hook rules")
-	}
-
-	// The hook packages the pass above selected get blank-imported into the
-	// application below, which compiles their dependencies too. The build plan
-	// never saw those, so match them now.
-	injected, err := sp.matchInjectedDeps(
-		ctx, matched, deps, moduleDirs, extractBuildFlags(subcommand, args),
-	)
+	// Match the hook code with these dependencies, including dependencies
+	// introduced by the generated runtime imports.
+	matched, err := sp.matchAllDeps(ctx, deps, moduleDirs, extractBuildFlags(subcommand, args))
 	if err != nil {
 		return err
 	}
-	matched = append(matched, injected...)
 
 	// Reported here rather than per matching pass: an individual pass matching
 	// nothing is normal, it is the combined result that tells the user whether
