@@ -400,9 +400,11 @@ func TestBuildAndSetupFailOnBadManifest(t *testing.T) {
 	t.Setenv(util.EnvOtelcWorkDir, tmp)
 	t.Setenv("GOWORK", "off")
 	outside := filepath.Join(t.TempDir(), "x")
-	mustWriteFile(t, util.GetBuildTemp(stateFileName), `["-`+filepath.ToSlash(outside)+`"]`)
+	manifest, err := json.Marshal([]string{"-" + outside})
+	require.NoError(t, err)
+	mustWriteFile(t, util.GetBuildTemp(stateFileName), string(manifest))
 
-	err := GoBuild(t.Context(), newParsedCommand(t, "go", "build", "."))
+	err = GoBuild(t.Context(), newParsedCommand(t, "go", "build", "."))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "outside the otelc work directory")
 

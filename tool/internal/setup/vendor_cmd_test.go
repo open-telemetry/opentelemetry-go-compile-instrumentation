@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -217,9 +218,11 @@ func TestVendorWithToolFile(t *testing.T) {
 func TestVendorFailsOnBadManifest(t *testing.T) {
 	dir := newVendoredModule(t, "1.25.0")
 	outside := filepath.Join(t.TempDir(), "x")
-	mustWriteFile(t, util.GetBuildTemp(stateFileName), `["-`+filepath.ToSlash(outside)+`"]`)
+	manifest, err := json.Marshal([]string{"-" + outside})
+	require.NoError(t, err)
+	mustWriteFile(t, util.GetBuildTemp(stateFileName), string(manifest))
 
-	err := Vendor(t.Context(), []string{"."})
+	err = Vendor(t.Context(), []string{"."})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "outside the otelc work directory")
 	assert.NoFileExists(t, filepath.Join(dir, toolFileCanonical), "nothing is written")

@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -153,6 +154,15 @@ func runGo(t *testing.T, dir string, env []string, args ...string) {
 	require.NoError(t, err, "go %s failed:\n%s", strings.Join(args, " "), out)
 }
 
+// vendorModesBin returns the name of the binary of the test app. On
+// Windows it has the .exe extension, as testutil.Start expects.
+func vendorModesBin() string {
+	if runtime.GOOS == "windows" {
+		return "app.exe"
+	}
+	return "app"
+}
+
 // otelcGoBuild runs `otelc go build -o app .` in appDir with env. It returns
 // the combined output and the error, so that a test can examine a failed
 // build.
@@ -164,12 +174,12 @@ func otelcGoBuild(t *testing.T, appDir string, env []string) (string, error) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_ = os.Remove(filepath.Join(appDir, "app"))
+		_ = os.Remove(filepath.Join(appDir, vendorModesBin()))
 		_ = os.RemoveAll(filepath.Join(appDir, ".otelc-build"))
 		_ = os.Remove(filepath.Join(appDir, ".otelc-build.lock"))
 	})
 
-	cmd := exec.CommandContext(t.Context(), otelc, "go", "build", "-o", "app", ".")
+	cmd := exec.CommandContext(t.Context(), otelc, "go", "build", "-o", vendorModesBin(), ".")
 	cmd.Dir = appDir
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
@@ -205,7 +215,7 @@ func sourceTree(t *testing.T, appDir string) map[string]string {
 	t.Helper()
 	return hashTree(t, appDir, func(rel string) bool {
 		switch {
-		case rel == "app", rel == "plain.bin", rel == ".otelc-build.lock":
+		case rel == vendorModesBin(), rel == "plain.bin", rel == ".otelc-build.lock":
 			return false
 		case rel == ".otelc-build" || strings.HasPrefix(rel, ".otelc-build/"):
 			return false
@@ -414,7 +424,7 @@ func TestVendoredOfflineWithPrimedCache(t *testing.T) {
 	// Remove the otelc work directory, so that the second build must resolve
 	// the hook modules again, from the module cache only.
 	require.NoError(t, os.RemoveAll(filepath.Join(appDir, ".otelc-build")))
-	require.NoError(t, os.Remove(filepath.Join(appDir, "app")))
+	require.NoError(t, os.Remove(filepath.Join(appDir, vendorModesBin())))
 
 	out, err = otelcGoBuild(t, appDir, vendorTestEnv(offlineEnv(modCache)...))
 	require.NoError(t, err, "otelc go build without network failed:\n%s", out)
