@@ -21,7 +21,7 @@ func TestHandleRuleImports_AliasMismatch(t *testing.T) {
 		errorMsg    string
 	}{
 		{
-			name: "alias mismatch - file uses ctx but rule expects context",
+			name: "different alias - file uses ctx, rule adds context as a second import",
 			root: &dst.File{
 				Decls: []dst.Decl{
 					&dst.GenDecl{
@@ -36,11 +36,10 @@ func TestHandleRuleImports_AliasMismatch(t *testing.T) {
 				},
 			},
 			imports:     map[string]string{"context": "context"},
-			expectError: true,
-			errorMsg:    "import alias mismatch",
+			expectError: false,
 		},
 		{
-			name: "implicit alias mismatch - file uses context but rule expects ctx",
+			name: "implicit alias - file uses context, rule adds ctx as a second import",
 			root: &dst.File{
 				Decls: []dst.Decl{
 					&dst.GenDecl{
@@ -54,8 +53,7 @@ func TestHandleRuleImports_AliasMismatch(t *testing.T) {
 				},
 			},
 			imports:     map[string]string{"ctx": "context"},
-			expectError: true,
-			errorMsg:    "import alias mismatch",
+			expectError: false,
 		},
 		{
 			name: "versioned path - no mismatch for implicit alias",
@@ -218,9 +216,9 @@ func TestHandleRuleImports_AliasMismatch(t *testing.T) {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errorMsg)
 			} else if err != nil {
-				// Note: This may still fail at updateImportConfig step since we don't have
-				// a real importcfg setup. We're only testing the alias mismatch detection.
-				// If there's an error, it shouldn't be about alias mismatch.
+				// Note: This may still fail at updateImportConfig since we don't have
+				// a real importcfg setup. If there's an error, it must not be about
+				// an alias mismatch, which is no longer an error.
 				assert.NotContains(t, err.Error(), "import alias mismatch")
 			}
 		})
@@ -385,9 +383,18 @@ func run() {}
 			"rule alias %q is one of the file's aliases for fmt", ruleAlias)
 	}
 
+	// A rule alias the file doesn't use is added as another import.
 	err := ip.addRuleImports(t.Context(), root, map[string]string{"c": "fmt"}, "test-rule")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "import alias mismatch")
+	require.NoError(t, err)
+
+	var found bool
+	dst.Inspect(root, func(n dst.Node) bool {
+		if spec, ok := n.(*dst.ImportSpec); ok && spec.Name != nil && spec.Name.Name == "c" {
+			found = true
+		}
+		return true
+	})
+	assert.True(t, found, "rule alias c should be added as a second import of fmt")
 }
 
 // --- resolveAliasOverrides tests ---
