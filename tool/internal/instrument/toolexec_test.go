@@ -1061,4 +1061,3 @@ func TestToolexecEmptyArgs(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no tool command specified")
 }
-
