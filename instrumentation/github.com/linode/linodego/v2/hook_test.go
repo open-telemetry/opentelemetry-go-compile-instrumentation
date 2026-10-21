@@ -189,6 +189,8 @@ func TestBeforeAfterDoRequest_PlainError(t *testing.T) {
 	got := spans[0]
 	assert.Equal(t, codes.Error, got.Status().Code)
 	assert.Equal(t, "network down", got.Status().Description)
+	attrs := attrMap(got.Attributes())
+	assert.Equal(t, "*errors.errorString", attrs["error.type"])
 }
 
 func TestBeforeDoRequest_Disabled(t *testing.T) {
@@ -203,6 +205,28 @@ func TestBeforeDoRequest_Disabled(t *testing.T) {
 
 	assert.Empty(t, sr.Ended())
 	assert.Nil(t, ictx.GetKeyData(keySpan))
+}
+
+// TestAfterDoRequest_DisabledAfterStart_Regression covers a span created while
+// instrumentation was enabled and then disabled before the after hook runs. The
+// span must still be ended, otherwise it leaks.
+func TestAfterDoRequest_DisabledAfterStart_Regression(t *testing.T) {
+	sr, _ := setupTestProviders(t)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "linodego")
+
+	parent := context.Background()
+	ictx := hooktest.NewMockHookContext(nil, parent, "GET", "linode/instances/1", nil, nil)
+	BeforeDoRequest(ictx, nil, parent, "GET", "linode/instances/1", nil, nil)
+
+	span, ok := ictx.GetKeyData(keySpan).(trace.Span)
+	require.True(t, ok, "before hook should have created a span while enabled")
+	require.NotNil(t, span)
+
+	// Disable mid-operation, then run the after hook.
+	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "linodego")
+	AfterDoRequest(ictx, nil)
+
+	require.Len(t, sr.Ended(), 1, "span created by the before hook must be ended even after a mid-operation disable")
 }
 
 func TestPublicMethodHooks_Success(t *testing.T) {
@@ -233,10 +257,11 @@ func TestPublicMethodHooks_Success(t *testing.T) {
 	require.NoError(t, reader.Collect(context.Background(), &rm))
 	require.True(t, hasMetric(rm, "linodego.client.operation.duration"))
 	require.False(t, hasMetric(rm, "linodego.client.request.duration"))
+	assert.NotContains(t, requireOperationMetricAttrs(t, reader), "error.type")
 }
 
 func TestPublicMethodHooks_Error(t *testing.T) {
-	sr, _ := setupTestProviders(t)
+	sr, reader := setupTestProviders(t)
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "linodego")
 
 	parent := context.Background()
@@ -252,6 +277,53 @@ func TestPublicMethodHooks_Error(t *testing.T) {
 	assert.Equal(t, codes.Error, got.Status().Code)
 	attrs := attrMap(got.Attributes())
 	assert.Equal(t, int64(404), attrs["http.response.status_code"])
+	assert.Equal(t, "404", attrs["error.type"])
+	metricAttrs := requireOperationMetricAttrs(t, reader)
+	assert.Equal(t, int64(404), metricAttrs["http.response.status_code"])
+	assert.Equal(t, attrs["error.type"], metricAttrs["error.type"])
+}
+
+func TestPublicMethodHooks_PlainError(t *testing.T) {
+	sr, reader := setupTestProviders(t)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "linodego")
+
+	parent := context.Background()
+	ictx := hooktest.NewMockHookContext(nil, parent, 123)
+	ictx.FuncName = "GetInstance"
+
+	BeforeAPICall2(ictx, nil, parent, 123)
+	AfterAPICall2(ictx, nil, errors.New("network down"))
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	got := spans[0]
+	assert.Equal(t, codes.Error, got.Status().Code)
+	assert.Equal(t, "network down", got.Status().Description)
+	attrs := attrMap(got.Attributes())
+	assert.Equal(t, "*errors.errorString", attrs["error.type"])
+	assert.NotContains(t, attrs, "http.response.status_code")
+	metricAttrs := requireOperationMetricAttrs(t, reader)
+	assert.NotContains(t, metricAttrs, "http.response.status_code")
+	assert.Equal(t, attrs["error.type"], metricAttrs["error.type"])
+}
+
+func TestPublicMethodHooks_NonErrorHTTPStatusOmitsErrorType(t *testing.T) {
+	sr, reader := setupTestProviders(t)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "linodego")
+
+	ctx := context.Background()
+	ictx := hooktest.NewMockHookContext(nil, ctx, 123)
+	ictx.FuncName = "GetInstance"
+	BeforeAPICall2(ictx, nil, ctx, 123)
+	AfterAPICall2(ictx, nil, linodego.Error{Code: 200, Message: "OK"})
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	assert.Equal(t, codes.Unset, spans[0].Status().Code)
+	assert.NotContains(t, attrMap(spans[0].Attributes()), "error.type")
+	metricAttrs := requireOperationMetricAttrs(t, reader)
+	assert.Equal(t, int64(200), metricAttrs["http.response.status_code"])
+	assert.NotContains(t, metricAttrs, "error.type")
 }
 
 func TestPublicMethodHooks_Disabled(t *testing.T) {
@@ -263,6 +335,28 @@ func TestPublicMethodHooks_Disabled(t *testing.T) {
 	BeforeAPICall1(ictx, nil, context.Background())
 	AfterAPICall2(ictx, nil, nil)
 	assert.Empty(t, sr.Ended())
+}
+
+// TestPublicMethodHooks_DisabledAfterStart_Regression covers the public-method
+// path: a span created while enabled must still be ended when instrumentation is
+// disabled before the after hook runs.
+func TestPublicMethodHooks_DisabledAfterStart_Regression(t *testing.T) {
+	sr, _ := setupTestProviders(t)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "linodego")
+
+	parent := context.Background()
+	ictx := hooktest.NewMockHookContext(nil, parent, 123)
+	ictx.FuncName = "GetInstance"
+	BeforeAPICall2(ictx, nil, parent, 123)
+
+	span, ok := ictx.GetKeyData(keySpan).(trace.Span)
+	require.True(t, ok, "before hook should have created a span while enabled")
+	require.NotNil(t, span)
+
+	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "linodego")
+	AfterAPICall2(ictx, nil, nil)
+
+	require.Len(t, sr.Ended(), 1, "span created by the before hook must be ended even after a mid-operation disable")
 }
 
 func attrMap(attrs []attribute.KeyValue) map[string]interface{} {
@@ -289,4 +383,24 @@ func hasMetric(rm metricdata.ResourceMetrics, name string) bool {
 		}
 	}
 	return false
+}
+
+func requireOperationMetricAttrs(t *testing.T, reader *sdkmetric.ManualReader) map[string]any {
+	t.Helper()
+	var rm metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &rm))
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != "linodego.client.operation.duration" {
+				continue
+			}
+			hist, ok := m.Data.(metricdata.Histogram[float64])
+			require.True(t, ok)
+			require.Len(t, hist.DataPoints, 1)
+			assert.Equal(t, uint64(1), hist.DataPoints[0].Count)
+			return attrMap(hist.DataPoints[0].Attributes.ToSlice())
+		}
+	}
+	t.Fatal("operation duration metric not found")
+	return nil
 }

@@ -98,6 +98,26 @@ func TestDBClient(t *testing.T) {
 		require.Equal(t, "SELECT", stmtSpan.Name())
 	})
 
+	t.Run("TxStmtContext", func(t *testing.T) {
+		// A statement reused inside a transaction via (*Tx).StmtContext must
+		// keep its span name and db.query.text (issue #1469).
+		f := testutil.NewTestFixture(t)
+
+		f.Run("dbclient", "-op=tx-stmt")
+
+		stmtSpan := testutil.RequireSpan(t, f.Traces(),
+			testutil.IsClient,
+			testutil.HasAttribute(string(semconv.DBOperationNameKey), "SELECT"),
+		)
+		require.Equal(t, "SELECT", stmtSpan.Name())
+		testutil.RequireDBClientSemconv(t, stmtSpan,
+			"SELECT",
+			"SELECT id FROM users WHERE name = ?",
+			"unknown", 0,
+			"testdb",
+		)
+	})
+
 	t.Run("Transaction", func(t *testing.T) {
 		f := testutil.NewTestFixture(t)
 
