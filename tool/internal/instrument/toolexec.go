@@ -660,6 +660,10 @@ func interceptToolVersion(ctx context.Context, args []string) error {
 // a rule added. Those invocations instrument compiles and run every other
 // command unchanged.
 func Toolexec(ctx context.Context, args []string, nested bool) error {
+	if len(args) == 0 {
+		return ex.New("no tool command specified")
+	}
+
 	// Use slice-based detection to correctly handle tool paths with spaces
 	// (common on Windows, e.g., "C:\Program Files\Go\pkg\tool\...")
 
