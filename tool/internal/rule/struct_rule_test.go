@@ -85,6 +85,55 @@ new_field:
 			yaml:    "target: main\n  bad: [unterminated",
 			wantErr: true,
 		},
+		{
+			name:   "null new_field entry is rejected",
+			ruleID: "struct_null",
+			yaml: `
+target: main
+struct: MyStruct
+new_field:
+  - null
+`,
+			wantErr: true,
+		},
+		{
+			name:   "empty new_field name is rejected",
+			ruleID: "struct_empty_name",
+			yaml: `
+target: main
+struct: MyStruct
+new_field:
+  - name: ""
+    type: string
+`,
+			wantErr: true,
+		},
+		{
+			name:   "empty new_field type is rejected",
+			ruleID: "struct_empty_type",
+			yaml: `
+target: main
+struct: MyStruct
+new_field:
+  - name: Valid
+    type: ""
+`,
+			wantErr: true,
+		},
+		{
+			name:   "duplicate new_field is rejected",
+			ruleID: "struct_dup",
+			yaml: `
+target: main
+struct: MyStruct
+new_field:
+  - name: A
+    type: string
+  - name: A
+    type: int
+`,
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
