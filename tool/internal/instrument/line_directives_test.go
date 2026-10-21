@@ -1172,7 +1172,14 @@ func TestMarkLineDirectives_CompilerFirstDeclarationWithoutInjection(t *testing.
 	position := regexp.MustCompile(`(\S+):(\d+)(?::\d+)?: cannot use`)
 	got := position.FindAllStringSubmatch(out, -1)
 	require.Len(t, got, 1, out)
-	assert.Equal(t, origFile, got[0][1], out)
+	// The go command can give the file name relative to its directory (for
+	// example "../001/orig.go" when the two temporary directories are next to
+	// each other). Make it absolute before the comparison.
+	reported := got[0][1]
+	if !filepath.IsAbs(reported) {
+		reported = filepath.Join(instDir, reported)
+	}
+	assert.Equal(t, origFile, reported, out)
 	assert.Equal(t, "4", got[0][2], out)
 }
 
