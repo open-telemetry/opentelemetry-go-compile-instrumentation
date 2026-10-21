@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 func TestNewInstFileRule(t *testing.T) {
@@ -27,7 +27,7 @@ path: github.com/example/pkg
 `,
 			check: func(t *testing.T, r *InstFileRule) {
 				assert.Equal(t, "my_file.go", r.File)
-				assert.Equal(t, "example.com/pkg", r.Target)
+				assert.Equal(t, "example.com/pkg", r.Target.String())
 				assert.Equal(t, "github.com/example/pkg", r.Path)
 			},
 		},

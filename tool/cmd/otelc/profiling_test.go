@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
-	"go.opentelemetry.io/otelc/tool/internal/profile"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -82,29 +81,29 @@ func TestInitProfiling(t *testing.T) {
 		activeSession = nil
 		workDir := t.TempDir()
 		t.Setenv(util.EnvOtelcWorkDir, workDir)
-		t.Setenv(profile.EnvProfilePath, "")
-		t.Setenv(profile.EnvEnabledProfiles, "")
+		t.Setenv(envProfilePath, "")
+		t.Setenv(envEnabledProfiles, "")
 		sibling := util.GetBuildTempDir() + "-profiles"
 
 		require.NoError(t, runInitProfiling(t, "--profile", "cpu", "--profile-path", sibling))
 		require.NotNil(t, activeSession)
 
-		require.NoError(t, activeSession.Stop())
+		require.NoError(t, activeSession.stop())
 		activeSession = nil
 	})
 
 	t.Run("valid profile starts a session and sets env", func(t *testing.T) {
 		activeSession = nil
 		t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
-		t.Setenv(profile.EnvProfilePath, "")
-		t.Setenv(profile.EnvEnabledProfiles, "")
+		t.Setenv(envProfilePath, "")
+		t.Setenv(envEnabledProfiles, "")
 		profDir := filepath.Join(t.TempDir(), "profiles")
 
 		require.NoError(t, runInitProfiling(t, "--profile", "cpu", "--profile-path", profDir))
 		require.NotNil(t, activeSession)
 
 		// Clean up the session started above so it does not leak into other tests.
-		require.NoError(t, activeSession.Stop())
+		require.NoError(t, activeSession.stop())
 		activeSession = nil
 	})
 }

@@ -4,12 +4,13 @@
 package rule
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/util"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // InstDirectiveRule represents a rule that instruments functions annotated with
@@ -18,8 +19,8 @@ import (
 type InstDirectiveRule struct {
 	InstBaseRule `yaml:",inline"`
 
-	Directive string `json:"directive" yaml:"directive"` // The directive name to match (without //)
-	Template  string `json:"template"  yaml:"template"`  // Go text/template rendered into code prepended to matching functions
+	Directive string `json:"directive" yaml:"directive"`
+	Template  string `json:"template"  yaml:"template"`
 }
 
 // NewInstDirectiveRule loads and validates an InstDirectiveRule from YAML data.
@@ -47,6 +48,9 @@ func (r *InstDirectiveRule) validate() error {
 	if strings.HasPrefix(r.Directive, "//") {
 		return ex.Newf("directive should not start with //")
 	}
+	if slices.Contains(util.BuiltinDirectives, r.Directive) {
+		return ex.Newf("directive %q is reserved for otelc", r.Directive)
+	}
 	if strings.TrimSpace(r.Template) == "" {
 		return ex.Newf("template cannot be empty")
 	}
@@ -64,6 +68,6 @@ func (r *InstDirectiveRule) validate() error {
 // template — never of the rule's name.
 func (r *InstDirectiveRule) Identity() string {
 	enc := func(s string) string { return strconv.Itoa(len(s)) + ":" + s }
-	parts := []string{enc(r.Target), enc(r.Version), enc(r.Directive), enc(r.Template)}
+	parts := []string{enc(r.Target.String()), enc(r.Version), enc(r.Directive), enc(r.Template)}
 	return util.CRC32(strings.Join(parts, ""))
 }

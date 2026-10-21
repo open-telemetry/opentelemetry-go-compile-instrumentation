@@ -11,7 +11,9 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -40,9 +42,100 @@ func Target(value string) error { return nil }
 		Signature:    &sig,
 	}
 
-	err = newTestPhase().applyFuncRule(context.Background(), funcRule, root)
+	funcDecl, found, err := ast.FindFuncDecl(root, funcRule, map[string]string{})
+	require.NoError(t, err)
+	require.False(t, found)
+
+	_, err = newTestPhase().applyFuncRule(context.Background(), funcRule, root, funcDecl, found)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "can not find function Target")
+}
+
+func TestApplyFuncRule_ImportAliasMismatchDoesNotError(t *testing.T) {
+	root := parseFile(t, `package main
+
+import (
+	f "fmt"
+)
+
+func Target(value string) error { return nil }
+`)
+	r := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "mismatch",
+			Imports: map[string]string{"traced": "fmt"},
+		},
+		Func:   "Target",
+		Before: "BeforeTarget",
+		Path:   "example.com/hook",
+	}
+
+	ip := newTestPhase()
+	ip.appliedFuncIdentities = map[string]struct{}{r.Identity(): {}}
+
+	funcDecl, found, err := ast.FindFuncDecl(root, r, ip.importNames)
+	require.NoError(t, err)
+
+	_, err = ip.applyFuncRule(context.Background(), r, root, funcDecl, found)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, countImportSpecs(root),
+		"must not add a redundant import for an alias never referenced by generated code")
+}
+
+func TestApplyFuncRule_BlankImportKept(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Target(value string) error { return nil }
+`)
+	r := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "side-effect-driver",
+			Imports: map[string]string{"_": "net/http/pprof"},
+		},
+		Func:   "Target",
+		Before: "BeforeTarget",
+		Path:   "example.com/hook",
+	}
+
+	ip := newTestPhase()
+	ip.appliedFuncIdentities = map[string]struct{}{r.Identity(): {}}
+
+	funcDecl, found, err := ast.FindFuncDecl(root, r, ip.importNames)
+	require.NoError(t, err)
+
+	_, err = ip.applyFuncRule(context.Background(), r, root, funcDecl, found)
+
+	require.NoError(t, err)
+	assert.True(t, fileImportsPath(root, "net/http/pprof"),
+		"blank import must still be added for a de-duplicated rule")
+}
+
+func TestApplyFuncRule_DotImportConflictStillErrors(t *testing.T) {
+	root := parseFile(t, `package main
+
+import rt "runtime"
+
+func Target(value string) error { return nil }
+`)
+	r := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "dot-conflict",
+			Imports: map[string]string{".": "runtime"},
+		},
+		Func:   "Target",
+		Before: "BeforeTarget",
+		Path:   "example.com/hook",
+	}
+
+	ip := newTestPhase()
+	funcDecl, found, err := ast.FindFuncDecl(root, r, ip.importNames)
+	require.NoError(t, err)
+
+	_, err = ip.applyFuncRule(context.Background(), r, root, funcDecl, found)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dot-import conflict")
 }
 
 // testHash stands in for InstFuncRule.Identity() in these unit tests, since
@@ -272,9 +365,7 @@ func TestSyntheticNamesDoNotShadowBareStyleGlobal(t *testing.T) {
 // function declaration it contains.
 func parseFileFunc(t *testing.T, source string) (*dst.File, *dst.FuncDecl) {
 	t.Helper()
-	parser := ast.NewAstParser()
-	file, err := parser.ParseSource(source)
-	require.NoError(t, err)
+	file := parseFile(t, source)
 	for _, decl := range file.Decls {
 		if funcDecl, ok := decl.(*dst.FuncDecl); ok {
 			return file, funcDecl
@@ -410,4 +501,212 @@ func TestAPITemplateMatchesHookContext(t *testing.T) {
 		"%s and api.tmpl have drifted; re-sync with `make build` "+
 			"(or `cp %s tool/internal/instrument/api.tmpl`)",
 		hookContextSource, hookContextSource)
+}
+
+func TestParseFileMissingFile(t *testing.T) {
+	ip := &instrumentPhase{}
+	_, err := ip.parseFile("/nonexistent/path/source.go")
+	require.Error(t, err)
+}
+
+func TestInstrumentParseFileError(t *testing.T) {
+	ip := &instrumentPhase{}
+
+	rset := rule.NewInstRuleSet("example.com/pkg")
+	rset.FuncRules["/nonexistent/does-not-exist.go"] = []*rule.InstFuncRule{
+		{
+			InstBaseRule: rule.InstBaseRule{Name: "test-rule"},
+			Func:         "Foo",
+			Before:       "BeforeFoo",
+			Path:         "example.com/hook",
+		},
+	}
+
+	err := ip.instrument(context.Background(), rset)
+	require.Error(t, err)
+}
+
+func TestInstrument_WriteInstrumentedError(t *testing.T) {
+	// A valid source file whose path does not match compileArgs causes writeInstrumented to fail.
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "source.go")
+	require.NoError(t, os.WriteFile(src, []byte("package main\nvar X = 1\n"), 0o644))
+
+	ip := &instrumentPhase{
+		logger:      slog.New(slog.DiscardHandler),
+		workDir:     tmp,
+		compileArgs: []string{"other.go"}, // doesn't match src, causing writeInstrumented to error
+	}
+
+	rset := rule.NewInstRuleSet("main")
+	rset.DeclRules[src] = []*rule.InstDeclRule{
+		{
+			InstBaseRule: rule.InstBaseRule{Name: "test-rule"},
+			Identifier:   "X",
+			Replace:      "2",
+		},
+	}
+
+	err := ip.instrument(context.Background(), rset)
+	require.Error(t, err)
+}
+
+func TestCreateTJumpIfGenericReceiverTypeArgs(t *testing.T) {
+	file, funcDecl := parseFileFunc(t, `package main
+type GenStruct[T any] struct{}
+func (g *GenStruct[T]) Reset() error { return nil }
+`)
+
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "reset-rule"},
+		Func:         "Reset",
+		Before:       "BeforeReset",
+		After:        "AfterReset",
+		Path:         "example.com/hook",
+	}
+
+	retVals := collectReturnValues(funcDecl, funcRule.Identity())
+	args := collectArguments(funcDecl, funcRule.Identity())
+	tjump := createTJumpIf(file, funcRule, funcDecl, args, retVals)
+	require.NotNil(t, tjump)
+
+	// Verify beforeCall contains type argument [T]
+	assignStmt, ok := tjump.Init.(*dst.AssignStmt)
+	require.True(t, ok)
+	require.Len(t, assignStmt.Rhs, 1)
+	beforeCall, ok := assignStmt.Rhs[0].(*dst.CallExpr)
+	require.True(t, ok)
+	beforeIndex, ok := beforeCall.Fun.(*dst.IndexExpr)
+	require.True(t, ok, "beforeCall should be an IndexExpr with type argument")
+	assert.Equal(t, "T", beforeIndex.Index.(*dst.Ident).Name)
+
+	// Verify afterCall contains type argument [T]
+	elseBlock, ok := tjump.Else.(*dst.BlockStmt)
+	require.True(t, ok)
+	require.Len(t, elseBlock.List, 1)
+	deferStmt, ok := elseBlock.List[0].(*dst.DeferStmt)
+	require.True(t, ok)
+	afterCall := deferStmt.Call
+	afterIndex, ok := afterCall.Fun.(*dst.IndexExpr)
+	require.True(t, ok, "afterCall should be an IndexExpr with type argument")
+	assert.Equal(t, "T", afterIndex.Index.(*dst.Ident).Name)
+}
+
+func TestCreateTJumpIfMultipleGenericReceiverTypeArgs(t *testing.T) {
+	file, funcDecl := parseFileFunc(t, `package main
+type GenStruct[K comparable, V any] struct{}
+func (g *GenStruct[K, V]) Clear() error { return nil }
+`)
+
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "clear-rule"},
+		Func:         "Clear",
+		Before:       "BeforeClear",
+		After:        "AfterClear",
+		Path:         "example.com/hook",
+	}
+
+	retVals := collectReturnValues(funcDecl, funcRule.Identity())
+	args := collectArguments(funcDecl, funcRule.Identity())
+	tjump := createTJumpIf(file, funcRule, funcDecl, args, retVals)
+	require.NotNil(t, tjump)
+
+	elseBlock, ok := tjump.Else.(*dst.BlockStmt)
+	require.True(t, ok)
+	deferStmt, ok := elseBlock.List[0].(*dst.DeferStmt)
+	require.True(t, ok)
+	afterCall := deferStmt.Call
+	afterIndexList, ok := afterCall.Fun.(*dst.IndexListExpr)
+	require.True(t, ok, "afterCall should be an IndexListExpr with type arguments")
+	require.Len(t, afterIndexList.Indices, 2)
+	assert.Equal(t, "K", afterIndexList.Indices[0].(*dst.Ident).Name)
+	assert.Equal(t, "V", afterIndexList.Indices[1].(*dst.Ident).Name)
+}
+
+func TestApplyFuncRule_RuntimeImportFollowsBuildWideIgnoreUsage(t *testing.T) {
+	hookDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(hookDir, "hook.go"),
+		[]byte("package hook\n\nfunc HBefore(ctx HookContext, p1 string) {}\n"),
+		0o600,
+	))
+
+	newTargetRoot := func(t *testing.T) (*dst.File, *dst.FuncDecl) {
+		t.Helper()
+		root := parseFile(t, `package main
+
+func HookedFunc(p1 string) {}
+`)
+		return root, findFuncDeclInFile(t, root, "HookedFunc")
+	}
+
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "hook-rule"},
+		Func:         "HookedFunc",
+		Before:       "HBefore",
+		ResolvedPath: hookDir,
+	}
+
+	t.Run("build never uses //otelc:ignore", func(t *testing.T) {
+		root, funcDecl := newTargetRoot(t)
+		ip := newTestPhase()
+		ip.target = root
+		ip.parser = ast.NewAstParser()
+
+		_, err := ip.applyFuncRule(context.Background(), funcRule, root, funcDecl, true)
+		require.NoError(t, err)
+
+		src := renderFile(t, root)
+		assert.NotContains(
+			t,
+			src,
+			`"runtime"`,
+			"no otelc:ignore anywhere in the build means no reason to import runtime",
+		)
+		assert.NotContains(t, src, "HooksSuppressed")
+	})
+
+	t.Run("build uses //otelc:ignore somewhere", func(t *testing.T) {
+		root, funcDecl := newTargetRoot(t)
+		ip := newTestPhase()
+		ip.target = root
+		ip.parser = ast.NewAstParser()
+		ip.buildUsesIgnoreDirective = true
+
+		_, err := ip.applyFuncRule(context.Background(), funcRule, root, funcDecl, true)
+		require.NoError(t, err)
+
+		src := renderFile(t, root)
+		assert.Contains(t, src, `"runtime"`)
+		assert.Contains(t, src, "runtime.HooksSuppressed()")
+	})
+}
+
+func TestInstrumentFile_FindFuncDeclErrorIsWrapped(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "source.go")
+	require.NoError(t, os.WriteFile(path, []byte("package main\n\nfunc Target(x int) {}\n"), 0o600))
+
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "bad-filter"},
+		Func:         "Target",
+		Param:        "[]invalid",
+	}
+
+	ip := newTestPhase()
+	_, err := ip.instrumentFile(context.Background(), path, []rule.InstRule{funcRule})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "finding function Target")
+}
+
+func TestInstrumentFile_ApplyIgnoredCallSitesErrorIsWrapped(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "source.go")
+	src := "package main\n\nfunc Run() error {\n\t//otelc:ignore\n\treturn hooked()\n}\n\nfunc hooked() error { return nil }\n"
+	require.NoError(t, os.WriteFile(path, []byte(src), 0o600))
+
+	ip := newTestPhase()
+	_, err := ip.instrumentFile(context.Background(), path, nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "applying //otelc:ignore call sites")
 }

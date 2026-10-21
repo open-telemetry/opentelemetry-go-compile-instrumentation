@@ -4,6 +4,8 @@
 package server
 
 import (
+	"context"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -43,6 +45,13 @@ func initInstrumentation() {
 	})
 }
 
+// debugEnabled gates per-request Debug calls: slog evaluates arguments before
+// checking the level, so an unguarded call pays for r.URL.String() and
+// attribute boxing on every request even when debug logging is off.
+func debugEnabled() bool {
+	return logger.Enabled(context.Background(), slog.LevelDebug)
+}
+
 // netHttpServerEnabler controls whether server instrumentation is enabled
 type netHttpServerEnabler struct{}
 
@@ -52,18 +61,28 @@ func (n netHttpServerEnabler) Enable() bool {
 
 var serverEnabler = netHttpServerEnabler{}
 
+// hookData carries span state from BeforeServeHTTP to AfterServeHTTP. A typed
+// struct instead of SetKeyData's map[string]interface{} keeps the per-request
+// cost to a single small allocation with no map or string hashing.
+type hookData struct {
+	span  trace.Span
+	start time.Time
+}
+
 func BeforeServeHTTP(ictx hook.HookContext, recv interface{}, w http.ResponseWriter, r *http.Request) {
+	// This runs once per request; keep the disabled path free of logging.
 	if !serverEnabler.Enable() {
-		logger.Debug("HTTP server instrumentation disabled")
 		return
 	}
 
 	initInstrumentation()
 
-	logger.Debug("BeforeServeHTTP called",
-		"method", r.Method,
-		"url", r.URL.String(),
-		"remote_addr", r.RemoteAddr)
+	if debugEnabled() {
+		logger.Debug("BeforeServeHTTP called",
+			"method", r.Method,
+			"url", r.URL.String(),
+			"remote_addr", r.RemoteAddr)
+	}
 
 	// Extract trace context from incoming request headers
 	ctx := propagator.Extract(r.Context(), propagation.HeaderCarrier(r.Header))
@@ -93,19 +112,19 @@ func BeforeServeHTTP(ictx hook.HookContext, recv interface{}, w http.ResponseWri
 	ictx.SetParam(requestIndex, newReq)
 
 	// Store data for after hook
-	ictx.SetData(map[string]interface{}{
-		"ctx":   ctx,
-		"span":  span,
-		"start": time.Now(),
+	ictx.SetData(&hookData{
+		span:  span,
+		start: time.Now(),
 	})
 }
 
 func AfterServeHTTP(ictx hook.HookContext) {
-	span, ok := ictx.GetKeyData("span").(trace.Span)
-	if !ok || span == nil {
+	data, ok := ictx.GetData().(*hookData)
+	if !ok || data == nil || data.span == nil {
 		logger.Debug("AfterServeHTTP: no span from before hook")
 		return
 	}
+	span := data.span
 	defer span.End()
 
 	// ServeMux fills in r.Pattern on the same request after the span was created.
@@ -135,10 +154,9 @@ func AfterServeHTTP(ictx hook.HookContext) {
 		span.SetStatus(code, desc)
 	}
 
-	startTime, _ := ictx.GetKeyData("start").(time.Time)
-	logger.Debug("AfterServeHTTP called",
-		"status_code", statusCode,
-		"duration_ms", time.Since(startTime).Milliseconds())
-
-	logger.Debug("AfterServeHTTP completed")
+	if debugEnabled() {
+		logger.Debug("AfterServeHTTP called",
+			"status_code", statusCode,
+			"duration_ms", time.Since(data.start).Milliseconds())
+	}
 }

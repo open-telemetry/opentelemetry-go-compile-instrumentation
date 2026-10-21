@@ -28,6 +28,8 @@ instrumentation/google.golang.org/grpc/client/client.otelc.yaml
 Below is an example configuration for instrumenting a function `NewServer`:
 
 ```yaml
+version: "v1.0.0"
+
 inject_to_grpc_newserver:
   target: google.golang.org/grpc
   version: v1.63.0,v1.70.0
@@ -40,8 +42,9 @@ inject_to_grpc_newserver:
         path: go.opentelemetry.io/otelc/instrumentation/google.golang.org/grpc/server
 ```
 
+- Top-level `version`: Minimum released `otelc` version required to read this file.
 - `target`: Import path of the package to instrument.
-- `version`: Version range to match. The left bound is inclusive, the right bound is exclusive. If version is not specified, the rule is applicable to all versions.
+- Rule-level `version`: Target package version range to match. The left bound is inclusive, the right bound is exclusive. If it is not specified, the rule is applicable to all versions.
 - `where`: Non-package selectors. `func` names the function to hook.
 - `do`: Ordered list of modifiers. `inject_hooks` declares this rule type and carries:
   - `before` / `after`: names of the hook functions.
@@ -154,7 +157,24 @@ When implementing hooks, we must adhere to certain limitations:
 
    Importing other third-party libraries is not allowed.
 
-2. **Generic Functions**: If the target function is generic, we cannot use `HookContext` APIs to modify parameters or return values (e.g., `SetParam`, `SetReturnVal`).
+2. **Generic Functions**: If the target function or method receiver is generic, we cannot use the `HookContext` parameter and return value APIs.
+
+   `GetParam`, `SetParam`, `GetReturnVal`, and `SetReturnVal` are each replaced with a body
+   that panics, so reading panics just as writing does. Instead, we read the values from the
+   hook's own parameters, which already receive them positionally:
+
+   ```go
+   // Target: func GenericFunc[T any](p1 T, p2 int) (T, error)
+
+   // We read p1 and p2 from the hook's parameters, never through ictx.GetParam.
+   func GenericFuncBefore(ictx hook.HookContext, p1 interface{}, p2 int) {}
+
+   // The after hook likewise reads the return values from its own parameters.
+   func GenericFuncAfter(ictx hook.HookContext, r1 interface{}, r2 error) {}
+   ```
+
+   Nothing catches this at build time: a hook that calls one of these four methods on a
+   generic target compiles cleanly, and only panics once the instrumented function runs.
 
 ### GLS Operation for OTel SDK Instrumentation
 

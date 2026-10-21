@@ -13,17 +13,29 @@ import (
 	"log"
 	"log/slog"
 
-	_ "go.opentelemetry.io/otelc/test/shared/testdb"
+	"go.opentelemetry.io/otelc/test/shared/testdb"
 )
 
 var (
 	driverName = flag.String("driver", "testdb", "The database driver name")
 	dsn        = flag.String("dsn", "user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8", "The data source name")
-	op         = flag.String("op", "all", "The operation to perform: ping, exec, query, tx, tx-fail, prepare, all")
+	op         = flag.String("op", "all", "The operation to perform: ping, exec, query, tx, tx-rollback, tx-fail, prepare, tx-stmt, opendb, all")
 )
 
 func main() {
 	flag.Parse()
+
+	if *op == "opendb" {
+		// Exercises sql.OpenDB's driver.Connector path (hook_opendb), as
+		// opposed to sql.Open's driver-name-string path exercised by every
+		// other op: the connector wraps the registered "mysql" test driver
+		// without going through sql.Open's driverName argument at all.
+		db := sql.OpenDB(testdb.NewConnector(*dsn))
+		defer db.Close()
+		doPing(context.Background(), db)
+		slog.Info("database operations completed successfully")
+		return
+	}
 
 	db, err := sql.Open(*driverName, *dsn)
 	if err != nil {
@@ -42,6 +54,8 @@ func main() {
 		doQuery(ctx, db)
 	case "tx":
 		doTx(ctx, db)
+	case "tx-rollback":
+		doTxRollback(ctx, db)
 	case "tx-fail":
 		// Use a dedicated db connection with the fail-tx driver.
 		// The outer 'db' uses the default driver, so we open a new one here.
@@ -54,6 +68,8 @@ func main() {
 		doTxFail(ctx, failDB)
 	case "prepare":
 		doPrepare(ctx, db)
+	case "tx-stmt":
+		doTxStmt(ctx, db)
 	case "all":
 		doPing(ctx, db)
 		doExec(ctx, db)
@@ -115,6 +131,39 @@ func doPrepare(ctx context.Context, db *sql.DB) {
 	slog.Info("prepare and stmt query succeeded")
 }
 
+// doTxStmt exercises reusing a connection-level prepared statement inside a
+// transaction via (*Tx).StmtContext. The single max-open-conn is required so
+// the prepared statement and the transaction share one connection, which lets
+// database/sql reuse the driver statement instead of re-preparing it.
+func doTxStmt(ctx context.Context, db *sql.DB) {
+	db.SetMaxOpenConns(1)
+	stmt, err := db.PrepareContext(ctx, "SELECT id FROM users WHERE name = ?")
+	if err != nil {
+		log.Fatalf("failed to prepare: %v", err)
+	}
+	defer stmt.Close()
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		log.Fatalf("failed to begin tx: %v", err)
+	}
+
+	txStmt := tx.StmtContext(ctx, stmt)
+	defer txStmt.Close()
+
+	rows, err := txStmt.QueryContext(ctx, "alice")
+	if err != nil {
+		tx.Rollback()
+		log.Fatalf("failed to query with tx stmt: %v", err)
+	}
+	rows.Close()
+
+	if err := tx.Commit(); err != nil {
+		log.Fatalf("failed to commit: %v", err)
+	}
+	slog.Info("tx prepared statement query succeeded")
+}
+
 func doTx(ctx context.Context, db *sql.DB) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -131,6 +180,22 @@ func doTx(ctx context.Context, db *sql.DB) {
 		log.Fatalf("failed to commit: %v", err)
 	}
 	slog.Info("transaction committed")
+}
+
+// doTxRollback exercises a deliberate rollback (not one taken on an ExecContext
+// error, as doTx's is), to isolate the ROLLBACK span for issue #1187 assertions.
+func doTxRollback(ctx context.Context, db *sql.DB) {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		log.Fatalf("failed to begin tx: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx, "INSERT INTO orders (user_id, amount) VALUES (?, ?)", 1, 99.99); err != nil {
+		log.Fatalf("failed to exec in tx: %v", err)
+	}
+	if err := tx.Rollback(); err != nil {
+		log.Fatalf("failed to rollback: %v", err)
+	}
+	slog.Info("transaction rolled back")
 }
 
 func doTxFail(ctx context.Context, db *sql.DB) {

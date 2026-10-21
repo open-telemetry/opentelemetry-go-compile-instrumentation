@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -24,6 +25,7 @@ var (
 	addr      = flag.String("addr", "http://localhost:8080/v1", "The OpenAI API base URL")
 	apiKey    = flag.String("api-key", "test-key", "The API key")
 	model     = flag.String("model", "gpt-4", "The model to use")
+	stream    = flag.Bool("stream", false, "use streaming chat completions")
 )
 
 func main() {
@@ -36,14 +38,41 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/hello", func(w http.ResponseWriter, r *http.Request) {
-		completion, err := client.Chat.Completions.New(r.Context(), openai.ChatCompletionNewParams{
+		params := openai.ChatCompletionNewParams{
 			Messages: []openai.ChatCompletionMessageParamUnion{
 				openai.UserMessage("Say hello in one word"),
 			},
 			Model: openai.ChatModel(*model),
-		})
+		}
+
+		if *stream {
+			streamResp := client.Chat.Completions.NewStreaming(r.Context(), params)
+			defer streamResp.Close()
+
+			var content strings.Builder
+			for streamResp.Next() {
+				chunk := streamResp.Current()
+				if len(chunk.Choices) > 0 {
+					content.WriteString(chunk.Choices[0].Delta.Content)
+				}
+			}
+			if err := streamResp.Err(); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(content.String()))
+			return
+		}
+
+		completion, err := client.Chat.Completions.New(r.Context(), params)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if len(completion.Choices) == 0 {
+			http.Error(w, "no completion choices returned", http.StatusInternalServerError)
 			return
 		}
 

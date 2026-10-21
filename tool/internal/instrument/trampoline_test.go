@@ -5,13 +5,77 @@ package instrument
 
 import (
 	"errors"
+	"go/token"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/dave/dst"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
+
+func TestGetHookFuncCachesParsedFile(t *testing.T) {
+	dir := t.TempDir()
+	hookFile := filepath.Join(dir, "hook.go")
+	// Two hook functions in one file, as a real instrumentation package
+	// typically has many rules sharing one hook file.
+	require.NoError(t, os.WriteFile(
+		hookFile,
+		[]byte("package hook\n\nfunc beforeA() {}\nfunc beforeB() {}\n"),
+		0o600,
+	))
+
+	ip := &instrumentPhase{}
+	ruleA := &rule.InstFuncRule{Before: "beforeA", ResolvedPath: dir}
+	first, err := ip.getHookFunc(ruleA, true)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+
+	// Corrupt the file so a real re-parse would fail; a second lookup for a
+	// *different* rule sharing the same file only succeeds if it reuses the
+	// cached parse instead of re-reading and re-parsing hook.go.
+	require.NoError(t, os.WriteFile(hookFile, []byte("not valid go"), 0o600))
+
+	ruleB := &rule.InstFuncRule{Before: "beforeB", ResolvedPath: dir}
+	second, err := ip.getHookFunc(ruleB, true)
+	require.NoError(t, err)
+	assert.Equal(t, "beforeB", second.Name.Name)
+}
+
+func TestGetHookFuncPropagatesParseError(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "hook.go"),
+		[]byte("not valid go"),
+		0o600,
+	))
+
+	ip := &instrumentPhase{}
+	r := &rule.InstFuncRule{Before: "beforeA", ResolvedPath: dir}
+	_, err := ip.getHookFunc(r, true)
+	require.Error(t, err)
+}
+
+func TestMaterializeTemplateClonesIndependently(t *testing.T) {
+	ip1 := &instrumentPhase{target: &dst.File{}}
+	require.NoError(t, ip1.materializeTemplate())
+
+	ip2 := &instrumentPhase{target: &dst.File{}}
+	require.NoError(t, ip2.materializeTemplate())
+
+	// Mutate ip1's hook context type name, as implementHookContext does per
+	// instrumented function, and confirm ip2's independently-cloned copy is
+	// unaffected by it.
+	typeSpec1 := ip1.hookCtxDecl.Specs[0].(*dst.TypeSpec) //nolint:forcetypeassert // test
+	originalName := typeSpec1.Name.Name
+	typeSpec1.Name.Name += "Suffix"
+
+	typeSpec2 := ip2.hookCtxDecl.Specs[0].(*dst.TypeSpec) //nolint:forcetypeassert // test
+	assert.Equal(t, originalName, typeSpec2.Name.Name)
+}
 
 func TestBaseTypeName(t *testing.T) {
 	tests := []struct {
@@ -50,39 +114,124 @@ func TestBaseTypeName(t *testing.T) {
 			expected: "interface{}",
 		},
 		{
+			name:     "non-empty interface type",
+			typeSrc:  "interface{ Read(p []byte) (n int, err error) }",
+			expected: "interface{Read([]byte) (int, error)}",
+		},
+		{
+			name:     "interface type with embedded interface",
+			typeSrc:  "interface{ pkg.Reader }",
+			expected: "interface{Reader}",
+		},
+		{
+			name:     "empty struct type",
+			typeSrc:  "struct{}",
+			expected: "struct{}",
+		},
+		{
+			name:     "non-empty struct type",
+			typeSrc:  "struct{ Name string }",
+			expected: "struct{Name string}",
+		},
+		{
+			name:     "struct type with embedded field",
+			typeSrc:  "struct{ pkg.Base }",
+			expected: "struct{Base}",
+		},
+		{
+			name:     "fixed-size array type with literal length",
+			typeSrc:  "[5]int",
+			expected: "[5]int",
+		},
+		{
+			name:     "fixed-size array type with named length",
+			typeSrc:  "[N]int",
+			expected: "[N]int",
+		},
+		{
+			name:     "func type with no params or results",
+			typeSrc:  "func()",
+			expected: "func()",
+		},
+		{
+			name:     "func type with unnamed params and multiple results",
+			typeSrc:  "func(int, string) (bool, error)",
+			expected: "func(int, string) (bool, error)",
+		},
+		{
+			name:     "func type with a single result",
+			typeSrc:  "func(int) string",
+			expected: "func(int) string",
+		},
+		{
+			name:     "generic type with one type argument",
+			typeSrc:  "Foo[int]",
+			expected: "Foo[int]",
+		},
+		{
+			name:     "generic type with multiple type arguments",
+			typeSrc:  "Foo[int, string]",
+			expected: "Foo[int, string]",
+		},
+		{
 			name:     "array type",
 			typeSrc:  "[]int",
-			expected: "int",
+			expected: "[]int",
 		},
 		{
 			name:     "nested array type",
 			typeSrc:  "[][]string",
-			expected: "string",
+			expected: "[][]string",
 		},
 		{
 			name:     "array of pointer type",
 			typeSrc:  "[]*int",
-			expected: "int",
+			expected: "[]int",
 		},
 		{
 			name:     "array of package qualified type",
 			typeSrc:  "[]pkg.Type",
-			expected: "Type",
+			expected: "[]Type",
 		},
 		{
 			name:     "ellipsis type",
 			typeSrc:  "...int",
-			expected: "int",
+			expected: "...int",
 		},
 		{
 			name:     "ellipsis of pointer type",
 			typeSrc:  "...*string",
-			expected: "string",
+			expected: "...string",
 		},
 		{
 			name:     "ellipsis of package qualified type",
 			typeSrc:  "...pkg.Type",
-			expected: "Type",
+			expected: "...Type",
+		},
+		{
+			name:     "map type",
+			typeSrc:  "map[string]int",
+			expected: "map[string]int",
+		},
+		{
+			name:     "map of package qualified types",
+			typeSrc:  "map[pkg.Key]*pkg.Val",
+			expected: "map[Key]Val",
+		},
+		{
+			name:     "channel type",
+			typeSrc:  "chan bool",
+			expected: "chan bool",
+		},
+		{
+			name:     "receive channel type",
+			typeSrc:  "<-chan int",
+			expected: "<-chan int",
+		},
+		{
+			name:     "send channel type",
+			typeSrc:  "chan<- string",
+			expected: "chan<- string",
 		},
 	}
 
@@ -106,6 +255,10 @@ func TestBaseTypeName(t *testing.T) {
 	}
 }
 
+func TestBaseTypeName_NilExpr(t *testing.T) {
+	assert.Empty(t, baseTypeName(nil))
+}
+
 func TestCheckHookDecl(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -127,6 +280,61 @@ func H1Before(ctx hook.HookContext, p1 string, p2 int) {}`,
 			before: true,
 		},
 		{
+			name: "valid before hook - slice and variadic compatibility",
+			trampSrc: `
+package main
+func OtelBeforeTrampoline(param0 *[]string, param1 *[]int) (hookContext *HookContext, skipCall bool) { return nil, false }`,
+			hookSrc: `
+package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, p1 []string, p2 ...int) {}`,
+			before: true,
+		},
+		{
+			name: "valid before hook - map and chan types",
+			trampSrc: `
+package main
+func OtelBeforeTrampoline(param0 *map[string]int, param1 *chan bool) (hookContext *HookContext, skipCall bool) { return nil, false }`,
+			hookSrc: `
+package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, p1 map[string]int, p2 chan bool) {}`,
+			before: true,
+		},
+		{
+			name: "valid before hook - any/interface{} wildcard",
+			trampSrc: `
+package main
+func OtelBeforeTrampoline(param0 *string) (hookContext *HookContext, skipCall bool) { return nil, false }`,
+			hookSrc: `
+package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, p1 any) {}`,
+			before: true,
+		},
+		{
+			name: "valid before hook - slice of any matching variadic interface{}",
+			trampSrc: `
+package main
+func OtelBeforeTrampoline(param0 *[]any) (hookContext *HookContext, skipCall bool) { return nil, false }`,
+			hookSrc: `
+package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, p1 ...interface{}) {}`,
+			before: true,
+		},
+		{
+			name: "valid before hook - slice of concrete type matching variadic interface{}",
+			trampSrc: `
+package main
+func OtelBeforeTrampoline(param0 *[]SpanEndOption) (hookContext *HookContext, skipCall bool) { return nil, false }`,
+			hookSrc: `
+package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, p1 ...interface{}) {}`,
+			before: true,
+		},
+		{
 			name: "valid after hook - pointer types match value types",
 			trampSrc: `
 package main
@@ -136,6 +344,44 @@ package testdata
 import "go.opentelemetry.io/otelc/pkg/hook"
 func H1After(ctx hook.HookContext, r1 float32, r2 error) {}`,
 			before: false,
+		},
+		{
+			name: "invalid - before hook first param is not HookContext",
+			trampSrc: `
+package main
+func OtelBeforeTrampoline(param0 *string) (hookContext *HookContext, skipCall bool) { return nil, false }`,
+			hookSrc: `
+package testdata
+func H1Before(notCtx int, p1 string) {}`,
+			before:      true,
+			expectError: true,
+			errorMsg:    "hook func first param must be HookContext, got int",
+		},
+		{
+			name: "invalid - after hook param count mismatch",
+			trampSrc: `
+package main
+func OtelAfterTrampoline(hookContext *HookContext, ret0 *string) {}`,
+			hookSrc: `
+package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1After(ctx hook.HookContext) {}`,
+			before:      false,
+			expectError: true,
+			errorMsg:    "expected 2 params, got 1",
+		},
+		{
+			name: "invalid - after hook type mismatch",
+			trampSrc: `
+package main
+func OtelAfterTrampoline(hookContext *HookContext, ret0 *string) {}`,
+			hookSrc: `
+package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1After(ctx hook.HookContext, r1 int) {}`,
+			before:      false,
+			expectError: true,
+			errorMsg:    "type mismatch, expected string, got int",
 		},
 		{
 			name: "invalid - missing HookContext in hook",
@@ -150,7 +396,7 @@ func H1Before(p1 string) {}`,
 			errorMsg:    "expected 2 params, got 1",
 		},
 		{
-			name: "invalid - type mismatch",
+			name: "invalid - type mismatch basic",
 			trampSrc: `
 package main
 func OtelBeforeTrampoline(param0 *string, param1 *int) (hookContext *HookContext, skipCall bool) { return nil, false }`,
@@ -158,6 +404,87 @@ func OtelBeforeTrampoline(param0 *string, param1 *int) (hookContext *HookContext
 package testdata
 import "go.opentelemetry.io/otelc/pkg/hook"
 func H1Before(ctx hook.HookContext, p1 string, p2 string) {}`,
+			before:      true,
+			expectError: true,
+			errorMsg:    "type mismatch, expected int, got string",
+		},
+		{
+			name: "invalid - scalar vs slice mismatch",
+			trampSrc: `
+package main
+func OtelBeforeTrampoline(param0 *string) (hookContext *HookContext, skipCall bool) { return nil, false }`,
+			hookSrc: `
+package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, p1 []string) {}`,
+			before:      true,
+			expectError: true,
+			errorMsg:    "type mismatch, expected string, got []string",
+		},
+		{
+			name: "invalid - map vs chan mismatch",
+			trampSrc: `
+package main
+func OtelBeforeTrampoline(param0 *map[string]int) (hookContext *HookContext, skipCall bool) { return nil, false }`,
+			hookSrc: `
+package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, p1 chan bool) {}`,
+			before:      true,
+			expectError: true,
+			errorMsg:    "type mismatch, expected map[string]int, got chan bool",
+		},
+		{
+			name: "invalid - slice element type mismatch",
+			trampSrc: `
+package main
+func OtelBeforeTrampoline(param0 *[]string) (hookContext *HookContext, skipCall bool) { return nil, false }`,
+			hookSrc: `
+package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, p1 []int) {}`,
+			before:      true,
+			expectError: true,
+			errorMsg:    "type mismatch, expected []string, got []int",
+		},
+		{
+			// Regression: baseTypeName used to normalize every non-empty
+			// interface to the literal placeholder "interface{...}", so
+			// structurally distinct interfaces collided and falsely matched.
+			name: "invalid - distinct anonymous interfaces don't collide",
+			trampSrc: `
+package main
+func OtelBeforeTrampoline(param0 *interface{ Read(p []byte) (n int, err error) }) (hookContext *HookContext, skipCall bool) { return nil, false }`,
+			hookSrc: `
+package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, p1 interface{ Write(p []byte) (n int, err error) }) {}`,
+			before:      true,
+			expectError: true,
+			errorMsg:    "type mismatch",
+		},
+		{
+			name: "valid before hook - matching anonymous interfaces",
+			trampSrc: `
+package main
+func OtelBeforeTrampoline(param0 *interface{ Read(p []byte) (n int, err error) }) (hookContext *HookContext, skipCall bool) { return nil, false }`,
+			hookSrc: `
+package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, p1 interface{ Read(p []byte) (n int, err error) }) {}`,
+			before: true,
+		},
+		{
+			// Same class of bug as the anonymous interface case above, but for
+			// anonymous struct types.
+			name: "invalid - distinct anonymous structs don't collide",
+			trampSrc: `
+package main
+func OtelBeforeTrampoline(param0 *struct{ Name string }) (hookContext *HookContext, skipCall bool) { return nil, false }`,
+			hookSrc: `
+package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, p1 struct{ Age int }) {}`,
 			before:      true,
 			expectError: true,
 			errorMsg:    "type mismatch",
@@ -203,16 +530,16 @@ type genHookContext struct {
 func (c *genHookContext) SetParam(idx int, val any) {
 	if idx == 0 {
 		if val == nil {
-			*(c.params[0].(*int)) = 0
+			*c.params[0].(*int) = 0
 		} else {
-			*(c.params[0].(*int)) = val.(int)
+			*c.params[0].(*int) = val.(int)
 		}
 	}
 }
 
 func (c *genHookContext) GetParam(idx int) any {
 	if idx == 0 {
-		return *(c.params[0].(*int))
+		return *c.params[0].(*int)
 	}
 	return nil
 }
@@ -220,16 +547,16 @@ func (c *genHookContext) GetParam(idx int) any {
 func (c *genHookContext) SetReturnVal(idx int, val any) {
 	if idx == 0 {
 		if val == nil {
-			*(c.returnVals[0].(*error)) = nil
+			*c.returnVals[0].(*error) = nil
 		} else {
-			*(c.returnVals[0].(*error)) = val.(error)
+			*c.returnVals[0].(*error) = val.(error)
 		}
 	}
 }
 
 func (c *genHookContext) GetReturnVal(idx int) any {
 	if idx == 0 {
-		return *(c.returnVals[0].(*error))
+		return *c.returnVals[0].(*error)
 	}
 	return nil
 }
@@ -303,6 +630,79 @@ func TestIsTypeParameter(t *testing.T) {
 	assert.False(t, isTypeParameter(&dst.StarExpr{X: dst.NewIdent("T")}, tp))
 }
 
+func TestContainsTypeParameter(t *testing.T) {
+	tp := typeParamsT()
+
+	// Real nested cases must work
+	assert.True(t, containsTypeParameter(dst.NewIdent("T"), tp))
+	assert.True(t, containsTypeParameter(&dst.StarExpr{X: dst.NewIdent("T")}, tp))
+	assert.True(t, containsTypeParameter(&dst.ArrayType{Elt: dst.NewIdent("T")}, tp))
+	assert.True(t, containsTypeParameter(&dst.MapType{Key: dst.NewIdent("string"), Value: dst.NewIdent("T")}, tp))
+
+	// Generic index expressions
+	assert.True(t, containsTypeParameter(&dst.IndexExpr{X: dst.NewIdent("Container"), Index: dst.NewIdent("T")}, tp))
+	assert.False(t, containsTypeParameter(&dst.IndexExpr{X: dst.NewIdent("Container"), Index: dst.NewIdent("int")}, tp))
+	assert.True(t, containsTypeParameter(
+		&dst.IndexListExpr{X: dst.NewIdent("Container"), Indices: []dst.Expr{dst.NewIdent("T"), dst.NewIdent("U")}},
+		tp,
+	))
+	assert.False(t, containsTypeParameter(
+		&dst.IndexListExpr{
+			X:       dst.NewIdent("Container"),
+			Indices: []dst.Expr{dst.NewIdent("int"), dst.NewIdent("string")},
+		},
+		tp,
+	))
+
+	// Non-matching identifiers
+	assert.False(t, containsTypeParameter(dst.NewIdent("string"), tp))
+	assert.False(t, containsTypeParameter(dst.NewIdent("T"), nil))
+
+	// False-positive risks must return false
+	assert.False(
+		t,
+		containsTypeParameter(
+			&dst.SelectorExpr{
+				X:   dst.NewIdent("pkg"),
+				Sel: dst.NewIdent("T"),
+			}, tp,
+		),
+		"selector name pkg.T should not match",
+	)
+
+	funcType := &dst.FuncType{
+		Params: &dst.FieldList{List: []*dst.Field{
+			{Names: []*dst.Ident{dst.NewIdent("T")}, Type: dst.NewIdent("int")},
+		}},
+	}
+	assert.False(t, containsTypeParameter(funcType, tp), "parameter named T should not match")
+
+	// Anonymous composite types containing type parameters
+	assert.True(
+		t,
+		containsTypeParameter(&dst.ParenExpr{X: dst.NewIdent("T")}, tp),
+		"parenthesized type (T) should match",
+	)
+
+	structType := &dst.StructType{
+		Fields: &dst.FieldList{List: []*dst.Field{
+			{Names: []*dst.Ident{dst.NewIdent("X")}, Type: dst.NewIdent("T")},
+		}},
+	}
+	assert.True(t, containsTypeParameter(structType, tp), "struct{ X T } should match")
+
+	interfaceType := &dst.InterfaceType{
+		Methods: &dst.FieldList{List: []*dst.Field{
+			{Names: []*dst.Ident{dst.NewIdent("M")}, Type: &dst.FuncType{
+				Params: &dst.FieldList{List: []*dst.Field{
+					{Type: dst.NewIdent("T")},
+				}},
+			}},
+		}},
+	}
+	assert.True(t, containsTypeParameter(interfaceType, tp), "interface{ M(T) } should match")
+}
+
 func TestReplaceTypeParamsWithAny(t *testing.T) {
 	tp := typeParamsT()
 
@@ -311,34 +711,24 @@ func TestReplaceTypeParamsWithAny(t *testing.T) {
 		assert.IsType(t, &dst.InterfaceType{}, got)
 	})
 
-	t.Run("pointer to type parameter", func(t *testing.T) {
+	t.Run("pointer to type parameter becomes interface{}", func(t *testing.T) {
 		got := replaceTypeParamsWithAny(&dst.StarExpr{X: dst.NewIdent("T")}, tp)
-		star, ok := got.(*dst.StarExpr)
-		require.True(t, ok)
-		assert.IsType(t, &dst.InterfaceType{}, star.X)
+		assert.IsType(t, &dst.InterfaceType{}, got)
 	})
 
-	t.Run("slice of type parameter", func(t *testing.T) {
+	t.Run("slice of type parameter becomes interface{}", func(t *testing.T) {
 		got := replaceTypeParamsWithAny(&dst.ArrayType{Elt: dst.NewIdent("T")}, tp)
-		arr, ok := got.(*dst.ArrayType)
-		require.True(t, ok)
-		assert.IsType(t, &dst.InterfaceType{}, arr.Elt)
+		assert.IsType(t, &dst.InterfaceType{}, got)
 	})
 
-	t.Run("map with type parameter key and value", func(t *testing.T) {
+	t.Run("map with type parameter key and value becomes interface{}", func(t *testing.T) {
 		got := replaceTypeParamsWithAny(&dst.MapType{Key: dst.NewIdent("T"), Value: dst.NewIdent("T")}, tp)
-		m, ok := got.(*dst.MapType)
-		require.True(t, ok)
-		assert.IsType(t, &dst.InterfaceType{}, m.Key)
-		assert.IsType(t, &dst.InterfaceType{}, m.Value)
+		assert.IsType(t, &dst.InterfaceType{}, got)
 	})
 
-	t.Run("channel of type parameter", func(t *testing.T) {
+	t.Run("channel of type parameter becomes interface{}", func(t *testing.T) {
 		got := replaceTypeParamsWithAny(&dst.ChanType{Dir: dst.SEND, Value: dst.NewIdent("T")}, tp)
-		ch, ok := got.(*dst.ChanType)
-		require.True(t, ok)
-		assert.Equal(t, dst.SEND, ch.Dir)
-		assert.IsType(t, &dst.InterfaceType{}, ch.Value)
+		assert.IsType(t, &dst.InterfaceType{}, got)
 	})
 
 	t.Run("generic index expression becomes interface{}", func(t *testing.T) {
@@ -354,14 +744,12 @@ func TestReplaceTypeParamsWithAny(t *testing.T) {
 		assert.IsType(t, &dst.InterfaceType{}, got)
 	})
 
-	t.Run("variadic type parameter preserves ellipsis", func(t *testing.T) {
+	t.Run("variadic type parameter becomes interface{}", func(t *testing.T) {
 		got := replaceTypeParamsWithAny(&dst.Ellipsis{Elt: dst.NewIdent("T")}, tp)
-		ell, ok := got.(*dst.Ellipsis)
-		require.True(t, ok)
-		assert.IsType(t, &dst.InterfaceType{}, ell.Elt)
+		assert.IsType(t, &dst.InterfaceType{}, got)
 	})
 
-	t.Run("func type processes params and results", func(t *testing.T) {
+	t.Run("func type with type parameter becomes interface{}", func(t *testing.T) {
 		fn := &dst.FuncType{
 			Params: &dst.FieldList{List: []*dst.Field{
 				{Names: []*dst.Ident{dst.NewIdent("x")}, Type: dst.NewIdent("T")},
@@ -371,15 +759,7 @@ func TestReplaceTypeParamsWithAny(t *testing.T) {
 			}},
 		}
 		got := replaceTypeParamsWithAny(fn, tp)
-		newFn, ok := got.(*dst.FuncType)
-		require.True(t, ok)
-		require.Len(t, newFn.Params.List, 1)
-		require.Len(t, newFn.Results.List, 1)
-		// The named parameter keeps its name but its type becomes interface{}.
-		require.Len(t, newFn.Params.List[0].Names, 1)
-		assert.Equal(t, "x", newFn.Params.List[0].Names[0].Name)
-		assert.IsType(t, &dst.InterfaceType{}, newFn.Params.List[0].Type)
-		assert.IsType(t, &dst.InterfaceType{}, newFn.Results.List[0].Type)
+		assert.IsType(t, &dst.InterfaceType{}, got)
 	})
 
 	t.Run("non-type-param identifier is returned unchanged", func(t *testing.T) {
@@ -618,6 +998,75 @@ func TestExtractReceiverTypeParamsConstraint_MultipleParams(t *testing.T) {
 	}
 }
 
+// TestExtractReceiverTypeParamsConstraint_NameCollision covers a declaration
+// whose type parameter shares its name with the selector of a qualified
+// constraint. Remapping to the receiver's names must rewrite only genuine type
+// parameter references, so fmt.Stringer keeps its selector instead of becoming
+// the nonexistent fmt.A.
+func TestExtractReceiverTypeParamsConstraint_NameCollision(t *testing.T) {
+	file, recvType := parseReceiverTypeWithDecl(t, `import "fmt"`,
+		"type GenStruct[Stringer any, V fmt.Stringer] struct{}",
+		"GenStruct[A, B]")
+
+	params := extractReceiverTypeParams(file, recvType)
+	require.NotNil(t, params)
+	require.Len(t, params.List, 2)
+	assert.Equal(t, []string{"A", "B"}, typeParamNames(t, params))
+
+	sel, ok := params.List[1].Type.(*dst.SelectorExpr)
+	require.True(t, ok, "expected the constraint to be a package-qualified selector")
+	pkgIdent, ok := sel.X.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "fmt", pkgIdent.Name)
+	assert.Equal(t, "Stringer", sel.Sel.Name,
+		"the selector names fmt.Stringer and must not be renamed to the receiver's parameter")
+}
+
+// TestExtractReceiverTypeParamsConstraint_MethodNameCollision covers the same
+// hazard for a name a constraint declares rather than references: an interface
+// method whose name matches a type parameter must keep its own name.
+func TestExtractReceiverTypeParamsConstraint_MethodNameCollision(t *testing.T) {
+	file, recvType := parseReceiverTypeWithDecl(t, "",
+		"type GenStruct[T any, V interface{ T() string }] struct{}",
+		"GenStruct[A, B]")
+
+	params := extractReceiverTypeParams(file, recvType)
+	require.NotNil(t, params)
+	require.Len(t, params.List, 2)
+	assert.Equal(t, []string{"A", "B"}, typeParamNames(t, params))
+
+	iface, ok := params.List[1].Type.(*dst.InterfaceType)
+	require.True(t, ok, "expected the constraint to be an interface")
+	require.Len(t, iface.Methods.List, 1)
+	require.Len(t, iface.Methods.List[0].Names, 1)
+	assert.Equal(t, "T", iface.Methods.List[0].Names[0].Name,
+		"the interface declares the method name and must not be renamed")
+}
+
+// TestExtractReceiverTypeParamsConstraint_SingleParamNameCollision covers the
+// single type parameter path, which builds its field list separately from the
+// multi-parameter one. A one parameter receiver cannot carry an inter-parameter
+// constraint, having no sibling to reference, but it can still collide with the
+// selector of its own qualified constraint.
+func TestExtractReceiverTypeParamsConstraint_SingleParamNameCollision(t *testing.T) {
+	file, recvType := parseReceiverTypeWithDecl(t, `import "fmt"`,
+		"type GenStruct[Stringer fmt.Stringer] struct{}",
+		"GenStruct[A]")
+
+	params := extractReceiverTypeParams(file, recvType)
+	require.NotNil(t, params)
+	require.Len(t, params.List, 1)
+	assert.Equal(t, []string{"A"}, typeParamNames(t, params))
+
+	sel, ok := params.List[0].Type.(*dst.SelectorExpr)
+	require.True(t, ok, "expected the constraint to be a package-qualified selector")
+	pkgIdent, ok := sel.X.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "fmt", pkgIdent.Name)
+	assert.Equal(t, "Stringer", sel.Sel.Name,
+		"the selector names fmt.Stringer and must not be renamed to the receiver's parameter")
+}
+
 // TestReceiverBaseTypeName_NonIdent covers the defensive fallback directly: a
 // non-identifier base expression, which no valid Go receiver form actually
 // produces, returns "" rather than panicking.
@@ -668,4 +1117,103 @@ func TestExtractReceiverTypeParamsNestedPointer(t *testing.T) {
 
 	require.NotNil(t, params)
 	assert.Equal(t, []string{"T"}, typeParamNames(t, params))
+}
+
+func TestHookGuardCond_WithoutBuildWideIgnoreUsage(t *testing.T) {
+	ip := &instrumentPhase{target: parseFile(t, "package main\n")}
+
+	cond, ok := ip.hookGuardCond("HBefore").(*dst.BinaryExpr)
+	require.True(t, ok)
+	assert.Equal(
+		t,
+		token.NEQ,
+		cond.Op,
+		"with no //otelc:ignore usage in this build, the guard checks only the hook var",
+	)
+}
+
+func TestHookGuardCond_WithBuildWideIgnoreUsage(t *testing.T) {
+	ip := &instrumentPhase{target: parseFile(t, "package main\n"), buildUsesIgnoreDirective: true}
+
+	cond, ok := ip.hookGuardCond("HBefore").(*dst.BinaryExpr)
+	require.True(t, ok)
+	require.Equal(t, token.LAND, cond.Op)
+
+	notSuppressed, ok := cond.Y.(*dst.UnaryExpr)
+	require.True(t, ok)
+	assert.Equal(t, token.NOT, notSuppressed.Op)
+
+	call, ok := notSuppressed.X.(*dst.CallExpr)
+	require.True(t, ok)
+	sel, ok := call.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expects a call qualified with the runtime package, got %T", call.Fun)
+	assert.Equal(t, "runtime", sel.X.(*dst.Ident).Name)
+	assert.Equal(t, "HooksSuppressed", sel.Sel.Name)
+}
+
+func TestHookGuardCond_InsideRuntimePackageItselfIsUnqualified(t *testing.T) {
+	ip := &instrumentPhase{
+		target:                   parseFile(t, "package runtime\n"),
+		buildUsesIgnoreDirective: true,
+		compileArgs:              []string{"-p", "runtime"},
+	}
+
+	cond, ok := ip.hookGuardCond("HBefore").(*dst.BinaryExpr)
+	require.True(t, ok)
+	notSuppressed, ok := cond.Y.(*dst.UnaryExpr)
+	require.True(t, ok)
+
+	call, ok := notSuppressed.X.(*dst.CallExpr)
+	require.True(t, ok)
+	_, isSelector := call.Fun.(*dst.SelectorExpr)
+	assert.False(t, isSelector, "a call inside package runtime itself must not qualify itself with a self-import")
+	ident, ok := call.Fun.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "HooksSuppressed", ident.Name)
+}
+
+// TestExtractReceiverTypeParamsConstraint_RenamedInterParam covers a receiver
+// that renames the type parameters while a constraint refers to a sibling
+// parameter. type M[K any, V ~[]K] used as func (m M[A, B]) must recover V's
+// constraint as ~[]A, following the receiver's names, not the declaration's ~[]K.
+// A verbatim ~[]K would refer to a name the trampoline never declares and would
+// not compile.
+func TestExtractReceiverTypeParamsConstraint_RenamedInterParam(t *testing.T) {
+	file, recvType := parseReceiverTypeWithDecl(t, "",
+		"type M[K any, V ~[]K] struct{ k K; v V }", "M[A, B]")
+
+	params := extractReceiverTypeParams(file, recvType)
+	require.NotNil(t, params)
+	assert.Equal(t, []string{"A", "B"}, typeParamNames(t, params))
+	require.Len(t, params.List, 2)
+
+	// The second parameter's constraint is ~[]A: a ~ over a slice of the first
+	// receiver parameter, re-scoped from the declaration's ~[]K.
+	tilde, ok := params.List[1].Type.(*dst.UnaryExpr)
+	require.True(t, ok, "constraint should be a ~ expression")
+	slice, ok := tilde.X.(*dst.ArrayType)
+	require.True(t, ok, "constraint should be ~[]T")
+	elem, ok := slice.Elt.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "A", elem.Name,
+		"inter-parameter constraint must use the receiver name A, not the declaration name K")
+}
+
+// TestTypeParamDeclNames covers the positional flattening directly: a nil list
+// yields no names, a grouped field (type M[K, V any] declares K then V under
+// one field) contributes each name in order, and a field with no names, which
+// valid Go does not produce, still advances by one empty slot rather than being
+// dropped.
+func TestTypeParamDeclNames(t *testing.T) {
+	assert.Nil(t, typeParamDeclNames(nil))
+
+	params := &dst.FieldList{
+		List: []*dst.Field{
+			{Names: []*dst.Ident{ast.Ident("K"), ast.Ident("V")}, Type: ast.Ident("any")},
+			{Names: nil, Type: ast.Ident("comparable")},
+			{Names: []*dst.Ident{ast.Ident("T")}, Type: ast.Ident("any")},
+		},
+	}
+
+	assert.Equal(t, []string{"K", "V", "", "T"}, typeParamDeclNames(params))
 }

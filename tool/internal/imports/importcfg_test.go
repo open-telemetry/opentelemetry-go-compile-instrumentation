@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -32,6 +33,12 @@ modinfo "abc123"
 	assert.Equal(t, "/path/to/pkg.a", cfg.PackageFile["example.com/pkg/v2"])
 	assert.Equal(t, "example.com/pkg/v2", cfg.ImportMap["example.com/pkg"])
 	assert.Equal(t, []string{`modinfo "abc123"`}, cfg.Extras)
+}
+
+func TestParseImportCfg_MissingFile(t *testing.T) {
+	_, err := ParseImportCfg(filepath.Join(t.TempDir(), "does-not-exist"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "opening importcfg file")
 }
 
 func TestParseFile(t *testing.T) {
@@ -96,15 +103,110 @@ func TestWriteFile_CreateError(t *testing.T) {
 	cfg := ImportConfig{}
 	err := cfg.WriteFile(filepath.Join(t.TempDir(), "nonexistent", "importcfg"))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to create file")
+	assert.Contains(t, err.Error(), "failed to create temporary file")
+}
+
+// TestWriteFile_ReplacesExistingFile covers the case the callers actually hit:
+// the importcfg already exists and is being rewritten. This runs on every
+// platform in the unit matrix, Windows included, since replacing an existing
+// file through a rename is the part that differs most across platforms.
+func TestWriteFile_ReplacesExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	filename := filepath.Join(dir, "importcfg")
+	require.NoError(t, os.WriteFile(filename, []byte("packagefile fmt=/old/fmt.a\n"), 0o644))
+
+	cfg := ImportConfig{PackageFile: map[string]string{
+		"fmt":     "/new/fmt.a",
+		"strings": "/new/strings.a",
+	}}
+	require.NoError(t, cfg.WriteFile(filename))
+
+	content, err := os.ReadFile(filename)
+	require.NoError(t, err)
+	assert.Equal(t,
+		"packagefile fmt=/new/fmt.a\npackagefile strings=/new/strings.a\n",
+		string(content))
+
+	// The rewritten file must still parse back into the same config.
+	reparsed, err := ParseImportCfg(filename)
+	require.NoError(t, err)
+	assert.Equal(t, cfg.PackageFile, reparsed.PackageFile)
+}
+
+// TestWriteFile_UnwritableDirFailsWithoutTouchingTarget documents a deliberate
+// behaviour change from the atomic write. The temporary file needs a writable
+// directory, whereas os.Create only needed a writable target, so a read-only
+// directory now fails instead of rewriting the file in place. The importcfg
+// always lives in the toolchain's $WORK tree, which is writable by the same
+// user, so this does not affect real builds. What matters is the guarantee it
+// buys: when the write cannot be completed, the existing file is left exactly
+// as it was rather than truncated.
+func TestWriteFile_UnwritableDirFailsWithoutTouchingTarget(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory permissions do not gate file creation the same way on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("running as root bypasses the directory permission bits this test relies on")
+	}
+
+	dir := t.TempDir()
+	filename := filepath.Join(dir, "importcfg")
+	original := "packagefile fmt=/original/fmt.a\n"
+	require.NoError(t, os.WriteFile(filename, []byte(original), 0o644))
+
+	require.NoError(t, os.Chmod(dir, 0o555))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	cfg := ImportConfig{PackageFile: map[string]string{"fmt": "/replacement/fmt.a"}}
+	require.Error(t, cfg.WriteFile(filename))
+
+	content, err := os.ReadFile(filename)
+	require.NoError(t, err)
+	assert.Equal(t, original, string(content), "target must be untouched when the write cannot proceed")
+}
+
+func TestWriteFile_PreservesPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits are not preserved on Windows")
+	}
+
+	dir := t.TempDir()
+	filename := filepath.Join(dir, "importcfg")
+	require.NoError(t, os.WriteFile(filename, []byte("packagefile fmt=/old.a\n"), 0o640))
+
+	cfg := ImportConfig{PackageFile: map[string]string{"fmt": "/new.a"}}
+	require.NoError(t, cfg.WriteFile(filename))
+
+	info, err := os.Stat(filename)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o640), info.Mode().Perm())
+}
+
+// The atomic write goes through a temporary file; none may survive the call.
+func TestWriteFile_LeavesNoTempFiles(t *testing.T) {
+	dir := t.TempDir()
+	filename := filepath.Join(dir, "importcfg")
+
+	cfg := ImportConfig{PackageFile: map[string]string{"fmt": "/path/to/fmt.a"}}
+	require.NoError(t, cfg.WriteFile(filename))
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "importcfg", entries[0].Name())
 }
 
 type mockWriteCloser struct {
-	writeErr error
-	closeErr error
+	writeErr     error
+	closeErr     error
+	panicOnWrite bool
+	closed       bool
 }
 
 func (m *mockWriteCloser) Write(p []byte) (int, error) {
+	if m.panicOnWrite {
+		panic("simulated write panic")
+	}
 	if m.writeErr != nil {
 		return 0, m.writeErr
 	}
@@ -112,6 +214,7 @@ func (m *mockWriteCloser) Write(p []byte) (int, error) {
 }
 
 func (m *mockWriteCloser) Close() error {
+	m.closed = true
 	return m.closeErr
 }
 
@@ -263,4 +366,13 @@ func TestWrite_DeterministicOrder(t *testing.T) {
 		"packagefile net/http=/path/to/net/http.a",
 		"packagefile strings=/path/to/strings.a",
 	}, packageFileLines)
+}
+
+func TestWriteFile_PanicSafety(t *testing.T) {
+	cfg := ImportConfig{
+		PackageFile: map[string]string{"fmt": "/path/to/fmt.a"},
+	}
+	mock := &mockWriteCloser{panicOnWrite: true}
+	require.Panics(t, func() { _ = cfg.writeFile(mock, "importcfg") })
+	assert.True(t, mock.closed, "the file must be closed even when writing panics")
 }

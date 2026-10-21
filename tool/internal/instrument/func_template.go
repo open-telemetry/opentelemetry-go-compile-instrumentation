@@ -19,6 +19,9 @@ type funcTemplateData struct {
 	imports       map[string]string
 	hash          string
 
+	fullArgsCollected bool
+	fullArgs          []string
+
 	argsCollected bool
 	args          []string
 
@@ -46,11 +49,21 @@ func (d *funcTemplateData) FuncName() string {
 	return d.funcDecl.Name.Name
 }
 
+// fullArguments returns the matched function's parameter identifiers,
+// including the receiver (as element 0) if present.
+func (d *funcTemplateData) fullArguments() []string {
+	if !d.fullArgsCollected {
+		d.fullArgs = collectArguments(d.funcDecl, d.hash)
+		d.fullArgsCollected = true
+	}
+	return d.fullArgs
+}
+
 // arguments returns the matched function's parameter identifiers, excluding
 // the receiver.
 func (d *funcTemplateData) arguments() []string {
 	if !d.argsCollected {
-		args := collectArguments(d.funcDecl, d.hash)
+		args := d.fullArguments()
 		if ast.HasReceiver(d.funcDecl) {
 			args = args[1:]
 		}
@@ -58,6 +71,16 @@ func (d *funcTemplateData) arguments() []string {
 		d.argsCollected = true
 	}
 	return d.args
+}
+
+// Receiver returns the identifier of the target method's receiver, or an
+// error if the target is a plain function with no receiver. Template usage:
+// {{.Receiver}}
+func (d *funcTemplateData) Receiver() (string, error) {
+	if !ast.HasReceiver(d.funcDecl) {
+		return "", ex.Newf("Receiver: function %s has no receiver", d.funcDecl.Name.Name)
+	}
+	return d.fullArguments()[0], nil
 }
 
 func (d *funcTemplateData) returns() []string {
@@ -158,4 +181,52 @@ func (d *funcTemplateData) DirectiveArg(key string) string {
 		}
 	}
 	return ""
+}
+
+// dynamicIdentMarker prefixes an identifier name that comes from the target
+// function when the name is rendered by renderingFuncTemplateData.
+const dynamicIdentMarker = "_OTELCDYN_"
+
+// markDynamicIdent adds dynamicIdentMarker to name, or returns name
+// unchanged if name is empty.
+func markDynamicIdent(name string) string {
+	if name == "" {
+		return name
+	}
+	return dynamicIdentMarker + name
+}
+
+// renderingFuncTemplateData wraps funcTemplateData for use as text/template
+// render data.
+type renderingFuncTemplateData struct {
+	*funcTemplateData
+}
+
+func (d renderingFuncTemplateData) FuncName() string {
+	return markDynamicIdent(d.funcTemplateData.FuncName())
+}
+
+func (d renderingFuncTemplateData) FuncArgument(idx int) (string, error) {
+	name, err := d.funcTemplateData.FuncArgument(idx)
+	return markDynamicIdent(name), err
+}
+
+func (d renderingFuncTemplateData) FuncReturn(idx int) (string, error) {
+	name, err := d.funcTemplateData.FuncReturn(idx)
+	return markDynamicIdent(name), err
+}
+
+func (d renderingFuncTemplateData) Receiver() (string, error) {
+	name, err := d.funcTemplateData.Receiver()
+	return markDynamicIdent(name), err
+}
+
+func (d renderingFuncTemplateData) FuncArgumentOfType(typeStr string) (string, error) {
+	name, err := d.funcTemplateData.FuncArgumentOfType(typeStr)
+	return markDynamicIdent(name), err
+}
+
+func (d renderingFuncTemplateData) FuncReturnOfType(typeStr string) (string, error) {
+	name, err := d.funcTemplateData.FuncReturnOfType(typeStr)
+	return markDynamicIdent(name), err
 }

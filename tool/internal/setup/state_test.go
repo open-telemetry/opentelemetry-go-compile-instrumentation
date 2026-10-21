@@ -218,8 +218,8 @@ func TestGetBackupFiles(t *testing.T) {
 
 			moduleDir := tt.setup(t, tmp)
 
-			files, err := getBackupFiles(t.Context(), map[string]bool{
-				moduleDir: true,
+			files, err := getBackupFiles(t.Context(), []string{
+				moduleDir,
 			})
 
 			require.NoError(t, err)
@@ -472,11 +472,13 @@ func TestGetBackupFiles_DeterministicOrder(t *testing.T) {
 	mustWriteFile(t, filepath.Join(modB, "go.mod"), "module dirB")
 	mustWriteFile(t, filepath.Join(modC, "go.mod"), "module dirC")
 
-	moduleDirs := map[string]bool{
-		modC: true,
-		modA: true,
-		modB: true,
+	moduleDirs := []string{
+		modC,
+		modA,
+		modB,
+		modA, // duplicate to verify deduplication
 	}
+	callerOrig := append([]string(nil), moduleDirs...)
 
 	var firstResult []string
 	for range 20 {
@@ -485,10 +487,17 @@ func TestGetBackupFiles_DeterministicOrder(t *testing.T) {
 
 		if firstResult == nil {
 			firstResult = files
+			// Assert that files contains no duplicates
+			seenFiles := make(map[string]bool)
+			for _, f := range files {
+				assert.False(t, seenFiles[f], "duplicate backup file: %s", f)
+				seenFiles[f] = true
+			}
 		} else {
 			assert.Equal(t, firstResult, files, "getBackupFiles output must be deterministic across multiple calls")
 		}
 	}
+	assert.Equal(t, callerOrig, moduleDirs, "caller slice must not be mutated")
 }
 
 func TestStateManagerDiscard(t *testing.T) {
@@ -511,4 +520,22 @@ func TestStateManagerDiscard(t *testing.T) {
 func TestStateManagerDiscardEmpty(t *testing.T) {
 	// Discarding an empty state manager is a no-op.
 	require.NoError(t, newStateManager().Discard())
+}
+
+func TestStateManagerTrack_CopyFails(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	src := filepath.Join(tmp, "go.mod")
+	mustWriteFile(t, src, "module example.com")
+
+	// Make stateDir a regular file so CopyFile fails on all platforms (including Windows)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	snapshotDir := util.GetBuildTemp(stateDir)
+	_ = os.RemoveAll(snapshotDir)
+	require.NoError(t, os.WriteFile(snapshotDir, []byte("file"), 0o644))
+
+	sm := newStateManager()
+	err := sm.Track(src)
+	require.Error(t, err)
 }

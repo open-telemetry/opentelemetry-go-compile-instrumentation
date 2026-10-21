@@ -448,6 +448,92 @@ func TestServerStatsHandler_OTELExporterFiltering(t *testing.T) {
 	}
 }
 
+// TestServerStatsHandler_SkippedRPC_DoesNotTouchCallerSpan is the regression test for the
+// caller-span corruption bug on the server side. When TagRPC opts out of an OTLP export
+// path, HandleRPC must be a complete no-op: it must not stamp gRPC attributes onto, set
+// the status of, or end any span that happens to be active on the caller's context.
+func TestServerStatsHandler_SkippedRPC_DoesNotTouchCallerSpan(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "grpc")
+
+	initInstrumentation()
+
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSyncer(exporter),
+	)
+	oldTP := otel.GetTracerProvider()
+	otel.SetTracerProvider(tp)
+	t.Cleanup(func() {
+		_ = tp.Shutdown(context.Background())
+		otel.SetTracerProvider(oldTP)
+	})
+	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(runtime.ModuleVersion()))
+
+	// Simulate the caller starting its own span — e.g. "graceful-shutdown".
+	baseCtx, callerSpan := tp.Tracer("test").Start(t.Context(), "graceful-shutdown")
+
+	// TagRPC skips instrumentation for the OTLP export path and returns ctx unchanged.
+	handler := newServerStatsHandler()
+	skippedCtx := handler.TagRPC(baseCtx, &stats.RPCTagInfo{
+		FullMethodName: "/opentelemetry.proto.collector.trace.v1.TraceService/Export",
+	})
+
+	// The returned context must carry no gRPCContext — the skip sentinel.
+	require.Nil(t, skippedCtx.Value(gRPCContextKey{}), "TagRPC must not attach gRPCContext for OTLP paths")
+
+	// Drive every HandleRPC branch that previously touched the span directly.
+	handler.HandleRPC(skippedCtx, &stats.Begin{BeginTime: time.Now()})
+	handler.HandleRPC(skippedCtx, &stats.OutHeader{})
+	handler.HandleRPC(skippedCtx, &stats.InPayload{Length: 64})
+	handler.HandleRPC(skippedCtx, &stats.OutPayload{Length: 128})
+	handler.HandleRPC(skippedCtx, &stats.End{
+		BeginTime: time.Now().Add(-10 * time.Millisecond),
+		EndTime:   time.Now(),
+	})
+
+	// The caller span must still be recording — HandleRPC must not have ended it.
+	require.True(t, callerSpan.IsRecording(), "HandleRPC must not end the caller's span on a skipped RPC")
+
+	// End it ourselves and check the export is clean.
+	callerSpan.End()
+	spans := exporter.GetSpans()
+	require.Len(t, spans, 1, "only the caller span should be exported")
+	assert.Equal(t, "graceful-shutdown", spans[0].Name, "exported span must be the caller's span")
+
+	// Verify no gRPC status attribute was written onto the caller span.
+	for _, attr := range spans[0].Attributes {
+		assert.NotEqual(t, "rpc.grpc.status_code", string(attr.Key),
+			"HandleRPC must not stamp rpc.grpc.status_code onto the caller's span")
+	}
+}
+
+// TestServerStatsHandler_NilGRPCContext_IsSafeNoOp pins the invariant that the early
+// return in HandleRPC is load-bearing for memory safety, not just correctness. Every
+// branch below that guard dereferences gctx without a nil check (gctx.inMessages,
+// gctx.metricAttrs), so moving or dropping the guard turns a skipped RPC into a nil
+// pointer panic inside the instrumented application rather than a silent no-op.
+func TestServerStatsHandler_NilGRPCContext_IsSafeNoOp(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "grpc")
+
+	initInstrumentation()
+
+	handler := newServerStatsHandler()
+	ctx := t.Context() // no gRPCContext attached, and no span either
+
+	require.Nil(t, ctx.Value(gRPCContextKey{}), "precondition: context carries no gRPCContext")
+
+	require.NotPanics(t, func() {
+		handler.HandleRPC(ctx, &stats.Begin{BeginTime: time.Now()})
+		handler.HandleRPC(ctx, &stats.OutHeader{})
+		handler.HandleRPC(ctx, &stats.InPayload{Length: 64})
+		handler.HandleRPC(ctx, &stats.OutPayload{Length: 128})
+		handler.HandleRPC(ctx, &stats.End{
+			BeginTime: time.Now().Add(-10 * time.Millisecond),
+			EndTime:   time.Now(),
+		})
+	}, "HandleRPC must return before dereferencing a nil gRPCContext")
+}
+
 type nonRecordingSpan struct {
 	trace.Span
 	ended bool
@@ -466,6 +552,7 @@ func TestServerStatsHandler_HandleRPC_NonRecordingSpan(t *testing.T) {
 
 	mockSpan := &nonRecordingSpan{Span: trace.SpanFromContext(t.Context())}
 	ctx := trace.ContextWithSpan(t.Context(), mockSpan)
+	ctx = context.WithValue(ctx, gRPCContextKey{}, &gRPCContext{})
 
 	handler.HandleRPC(ctx, &stats.End{
 		BeginTime: time.Now().Add(-10 * time.Millisecond),
@@ -473,4 +560,36 @@ func TestServerStatsHandler_HandleRPC_NonRecordingSpan(t *testing.T) {
 	})
 
 	assert.True(t, mockSpan.ended, "span.End() must be called for non-recording spans")
+}
+
+func TestServerStatsHandler_UnsampledSpanEnded(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "grpc")
+	initInstrumentation()
+
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSyncer(exporter),
+		sdktrace.WithSampler(sdktrace.NeverSample()),
+	)
+	oldTP := otel.GetTracerProvider()
+	otel.SetTracerProvider(tp)
+	t.Cleanup(func() {
+		_ = tp.Shutdown(context.Background())
+		otel.SetTracerProvider(oldTP)
+	})
+	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(runtime.ModuleVersion()))
+
+	handler := newServerStatsHandler()
+	ctx := handler.TagRPC(t.Context(), &stats.RPCTagInfo{
+		FullMethodName: "/test.Service/Method",
+	})
+	span := trace.SpanFromContext(ctx)
+	require.False(t, span.IsRecording(), "sampler should have marked the span non-recording")
+
+	handler.HandleRPC(ctx, &stats.End{
+		BeginTime: time.Now().Add(-50 * time.Millisecond),
+		EndTime:   time.Now(),
+	})
+
+	require.Empty(t, exporter.GetSpans(), "NeverSample spans are not exported, but End() must still run without panicking")
 }

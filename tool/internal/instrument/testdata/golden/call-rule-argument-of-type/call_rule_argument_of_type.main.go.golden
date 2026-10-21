@@ -1,0 +1,18 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+import (
+	"fmt"
+	"io"
+)
+
+func Handler(r io.Reader, name string) {
+	(func() (int, error) {
+		println("call arg0:", "hello", "nargs:", 2, "reader ok:", r != nil)
+		return fmt.Println("hello", name)
+	})()
+}
+
+func main() { Handler(nil, "world") }
