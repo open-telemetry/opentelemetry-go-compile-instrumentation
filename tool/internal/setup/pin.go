@@ -751,35 +751,34 @@ func Pin(ctx context.Context, opts PinOptions) (*PinResult, error) {
 }
 
 func pinLocked(ctx context.Context, opts PinOptions) (*PinResult, error) {
+	subcommand := opts.Subcommand
+	if subcommand == "" {
+		subcommand = subcmdBuild
+	}
+
+	// A vendored project keeps vendor mode. The modules of the hook code are
+	// added to vendor/ (see vendorSync) instead of a "go mod tidy", which
+	// would load all the modules of the user from the module cache.
+	ctx, err := contextWithBuildMode(ctx, subcommand, opts.Args)
+	if err != nil {
+		return nil, err
+	}
+
 	moduleDirs := normalizeModuleDirs(opts.ModuleDirs)
 	// moduleDirs being empty means Pin was invoked as a standalone command
 	// (not as part of a setup run), so use opts.Args to find module directories.
 	if len(moduleDirs) == 0 {
-		subcommand := opts.Subcommand
-		if subcommand == "" {
-			subcommand = subcmdBuild
-		}
 		// Use opts.Args to find module directories
 		buildPkgs, _, getErr := getBuildPackages(ctx, subcommand, opts.Args)
 		if getErr != nil {
 			return nil, getErr
 		}
 
-		var err error
 		moduleDirs, err = pkgload.FindModuleDirs(ctx, buildPkgs)
 		if err != nil {
 			return nil, err
 		}
 	}
-
-	// A vendored project keeps vendor mode. The modules of the hook code are
-	// added to vendor/ (see vendorSync) instead of a "go mod tidy", which
-	// would load all the modules of the user from the module cache.
-	subcommand := opts.Subcommand
-	if subcommand == "" {
-		subcommand = subcmdBuild
-	}
-	ctx = contextWithVendorMode(ctx, vendorMode(ctx, util.GetOtelcWorkDir(), subcommand, opts.Args))
 
 	toolFiles, findToolErr := findToolFiles(moduleDirs)
 	if findToolErr != nil {

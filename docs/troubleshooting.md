@@ -172,15 +172,43 @@ directive. These changes are in `go.mod`, `go.sum` and `vendor/` together. To un
 restore all three, for example `git restore go.mod go.sum vendor/`. If you restore only
 `go.mod` and `go.sum`, the go command reports `inconsistent vendoring`.
 
+### `otelc needs go 1.14 or higher in .../go.mod for vendor mode`
+
+You used `-mod=vendor` (in the arguments or in `GOFLAGS`) or `otelc vendor`,
+and the `go` directive of `go.mod` is lower than 1.14 (or missing). The go
+command does not support the vendor directory of such a module in the same
+way, and `otelc` does not support it. Raise the go version and vendor again:
+
+```bash
+go mod edit -go=1.14
+go mod vendor
+```
+
+Without a `-mod` flag, `otelc` builds such a module in module mode, as the go
+command does.
+
 ### `state file ... outside the otelc work directory`
 
 A build stopped before it restored the files that it changed (for example after a kill or
-an out-of-memory error). The next `otelc` command restores them from `.otelc-build/`. It
-restores only files in the otelc work directory and the `go.work.sum` file of the workspace:
-`.otelc-build/` is part of the project, so `otelc` does not trust other paths in it. If the
-build changed a module outside the work directory, restore that module by hand (the
-original files are in `.otelc-build/state/`), then remove `.otelc-build/`. To prevent this,
-run `otelc` from the root directory of the workspace.
+an out-of-memory error). The next `otelc` command restores them from `.otelc-build/`.
+`.otelc-build/` is part of the project, so `otelc` does not trust all the paths in it. It
+restores only these files:
+
+- All the files in the otelc work directory, but not the files in `.otelc-build/`. When
+  the work directory is the module root, this includes all the files of the module.
+- When the module root (the directory of the nearest `go.mod` file) is a parent of the
+  work directory: in the module root, only `go.mod`, `go.sum`, `otel.instrumentation.go`,
+  `otelc.tool.go` and the files in `vendor/`.
+- The `go.work.sum` file of the workspace.
+
+If the build changed a different file (for example in a different module of the
+workspace), restore it by hand (the original files are in `.otelc-build/state/`), then
+remove `.otelc-build/`. To prevent this, run `otelc` from the root directory of the
+workspace.
+
+The message `state file ... in the otelc build directory` tells that the state file names
+a path in `.otelc-build/`. `otelc` never tracks such a path, so the state file is not from
+`otelc`. Remove `.otelc-build/`.
 
 ### `vendor conflict`
 

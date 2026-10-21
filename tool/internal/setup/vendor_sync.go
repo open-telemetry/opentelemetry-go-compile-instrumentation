@@ -9,6 +9,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	goast "go/ast"
+	"go/build/constraint"
 	"go/parser"
 	"go/token"
 	goversion "go/version"
@@ -23,12 +25,14 @@ import (
 	"strings"
 	"sync"
 
-	"go.yaml.in/yaml/v3"
 	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
 
 	"go.opentelemetry.io/otelc/tool/data"
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -40,7 +44,11 @@ import (
 //     module imports the packages of the hook code. It requires each module
 //     that the user vendors, at the vendored version. Each of these modules
 //     is replaced by a copy of its vendored packages (with a generated
-//     go.mod), so the go command does not download it.
+//     go.mod), so the go command does not download it. On Linux, the copy
+//     uses hard links when possible. A module that go.mod replaces with a local
+//     directory is replaced by this directory. The go.sum file of the user
+//     is copied too, so that the go command checks a module that it gets
+//     against the checksums of the user.
 //  2. It runs "go mod tidy" and "go mod vendor" in the scratch module. Only
 //     the modules that the user does not vendor are downloaded (or taken from
 //     the module cache). There is one exception: when the hook code needs a
@@ -123,12 +131,25 @@ func vendorSync(ctx context.Context, imports map[string]bool, moduleDir string) 
 	if err != nil {
 		return err
 	}
-
-	needed, err := vendorScratchImports(imports)
+	userMod, err := parseGoMod(filepath.Join(moduleDir, goModFileName))
 	if err != nil {
 		return err
 	}
-	replaces, err := otelcReplaces(imports)
+	sources := &hookSources{
+		moduleDir: moduleDir,
+		user:      user,
+		localDirs: localModuleDirs(user, moduleDir),
+	}
+	if userMod.Module != nil {
+		sources.mainPath = userMod.Module.Mod.Path
+	}
+
+	scratchImports, err := vendorScratchImports(imports, sources)
+	if err != nil {
+		return err
+	}
+	needed := scratchImports.packages
+	replaces, err := otelcReplaces(scratchImports.toolImports)
 	if err != nil {
 		return err
 	}
@@ -149,11 +170,12 @@ func vendorSync(ctx context.Context, imports map[string]bool, moduleDir string) 
 
 	return syncVendorModules(ctx, vendorSyncInput{
 		moduleDir:   moduleDir,
-		imports:     imports,
+		userMod:     userMod,
 		needed:      needed,
 		user:        user,
 		stale:       stale,
 		replaces:    replaces,
+		localDirs:   sources.localDirs,
 		fingerprint: fingerprint,
 	})
 }
@@ -161,8 +183,9 @@ func vendorSync(ctx context.Context, imports map[string]bool, moduleDir string) 
 // vendorSyncInput is the input of syncVendorModules.
 type vendorSyncInput struct {
 	moduleDir string
-	// imports are the imports of otel.instrumentation.go.
-	imports map[string]bool
+	// userMod is the parsed go.mod file of the user. syncVendorModules
+	// changes it.
+	userMod *modfile.File
 	// needed are the packages that the scratch module imports.
 	needed []string
 	// user is the vendor/modules.txt of the user.
@@ -171,6 +194,9 @@ type vendorSyncInput struct {
 	stale map[string]bool
 	// replaces are the otelc modules and their directories in the bundle.
 	replaces map[string]string
+	// localDirs are the vendored modules that go.mod replaces with a local
+	// directory, and their absolute directories (see localModuleDirs).
+	localDirs map[string]string
 	// fingerprint is the fingerprint of the otelc bundle.
 	fingerprint string
 }
@@ -178,10 +204,7 @@ type vendorSyncInput struct {
 // syncVendorModules resolves the modules of the hook code in the scratch
 // module, and merges them into the module of the user.
 func syncVendorModules(ctx context.Context, in vendorSyncInput) error {
-	userMod, err := parseGoMod(filepath.Join(in.moduleDir, goModFileName))
-	if err != nil {
-		return err
-	}
+	userMod := in.userMod
 	goVersion := ""
 	if userMod.Go != nil {
 		goVersion = userMod.Go.Version
@@ -194,6 +217,7 @@ func syncVendorModules(ctx context.Context, in vendorSyncInput) error {
 		userVendorDir: filepath.Join(in.moduleDir, vendorDirName),
 		imports:       in.needed,
 		replaces:      in.replaces,
+		localDirs:     in.localDirs,
 		goVersion:     goVersion,
 		update:        vendorUpdateFromContext(ctx),
 	})
@@ -307,7 +331,10 @@ func reportVendorBumps(ctx context.Context, user *modulesTxt, scratch *vendorScr
 //
 // These modules come from a different otelc version (or from the user), so
 // their code can be different from the code of the bundle. The other otelc
-// modules of the user (for example the otelc tool) stay.
+// modules of the user (for example the otelc tool) stay. A module that is not
+// in the bundle and that go.mod replaces with a local directory is the code
+// of the user (for example the local instrumentation of a test app below
+// go.opentelemetry.io/otelc/test), so it stays too.
 func staleOtelcModules(
 	user *modulesTxt,
 	needed []string,
@@ -330,7 +357,11 @@ func staleOtelcModules(
 		if mod == nil || !isOtelcModule(mod.Path) {
 			continue
 		}
-		if mod.annotation(annotationBundlePrefix) != fingerprint {
+		annotation := mod.annotation(annotationBundlePrefix)
+		if _, inBundle := replaces[mod.Path]; annotation == "" && !inBundle && isDirReplacement(mod.Replacement) {
+			continue
+		}
+		if annotation != fingerprint {
 			stale[mod.Path] = true
 		}
 	}
@@ -366,16 +397,13 @@ func dropStaleReplaces(mf *modfile.File, user *modulesTxt, stale map[string]bool
 }
 
 // vendoredModuleFiles returns the vendored files of the modules in paths:
-// the files of their packages, and the files of the parent directories (up to
-// the module root) that are not packages, such as LICENSE.
+// the files of their packages (with the embedded files in subdirectories,
+// see packageFiles), and the files of the parent directories (up to the
+// module root) that are not packages, such as LICENSE.
 func vendoredModuleFiles(user *modulesTxt, paths map[string]bool, moduleDir string) ([]string, error) {
 	vendorDir := filepath.Join(moduleDir, vendorDirName)
-	isPackage := make(map[string]bool)
-	for _, mod := range user.usedModules() {
-		for _, pkg := range mod.Packages {
-			isPackage[pkg] = true
-		}
-	}
+	own := vendoredDirsOf(user)
+	isPackage := vendoredPackages(user)
 	seenDirs := make(map[string]bool)
 	var files []string
 	for _, mod := range user.usedModules() {
@@ -383,27 +411,32 @@ func vendoredModuleFiles(user *modulesTxt, paths map[string]bool, moduleDir stri
 			continue
 		}
 		for _, pkg := range mod.Packages {
-			dirs := []string{pkg}
-			for _, parent := range parentDirs(pkg, mod.Path) {
-				if !isPackage[parent] {
-					dirs = append(dirs, parent)
-				}
+			if seenDirs[pkg] {
+				continue
 			}
-			for _, importDir := range dirs {
-				if seenDirs[importDir] {
+			seenDirs[pkg] = true
+			pkgFiles, err := packageFiles(moduleDir, filepath.Join(vendorDir, filepath.FromSlash(pkg)), pkg, own)
+			if err != nil {
+				return nil, err
+			}
+			files = append(files, pkgFiles...)
+			for _, parent := range parentDirs(pkg, mod.Path) {
+				if isPackage[parent] || seenDirs[parent] {
 					continue
 				}
-				seenDirs[importDir] = true
-				dirFiles, err := regularFiles(moduleDir, filepath.Join(vendorDir, filepath.FromSlash(importDir)))
-				if err != nil {
-					return nil, err
+				seenDirs[parent] = true
+				dirFiles, dirErr := regularFiles(moduleDir, filepath.Join(vendorDir, filepath.FromSlash(parent)))
+				if dirErr != nil {
+					return nil, dirErr
 				}
 				files = append(files, dirFiles...)
 			}
 		}
 	}
+	// A file of a parent directory can also be an embedded file of a
+	// package above it.
 	slices.Sort(files)
-	return files, nil
+	return slices.Compact(files), nil
 }
 
 // regularFiles returns the regular files in dir, which is below root. A
@@ -449,16 +482,26 @@ func mergedGoSum(moduleDir, scratchDir string) ([]byte, error) {
 	if err != nil {
 		return nil, ex.Wrap(err)
 	}
+	out, changed := mergeGoSumLines(userSum, scratchSum)
+	if !changed {
+		return nil, nil
+	}
+	return out, nil
+}
+
+// mergeGoSumLines returns base with the lines of extra that it does not
+// have, and reports whether lines were added.
+func mergeGoSumLines(base, extra []byte) ([]byte, bool) {
 	have := make(map[string]bool)
-	for line := range strings.Lines(string(userSum)) {
+	for line := range strings.Lines(string(base)) {
 		have[strings.TrimSpace(line)] = true
 	}
-	out := slices.Clone(userSum)
+	out := slices.Clone(base)
 	if len(out) > 0 && !bytes.HasSuffix(out, []byte("\n")) {
 		out = append(out, '\n')
 	}
 	changed := false
-	for line := range strings.Lines(string(scratchSum)) {
+	for line := range strings.Lines(string(extra)) {
 		line = strings.TrimSpace(line)
 		const goSumFields = 3
 		if len(strings.Fields(line)) != goSumFields || have[line] {
@@ -468,10 +511,32 @@ func mergedGoSum(moduleDir, scratchDir string) ([]byte, error) {
 		have[line] = true
 		changed = true
 	}
-	if !changed {
-		return nil, nil
+	return out, changed
+}
+
+// writeScratchGoSum puts the lines of the go.sum file of the module in
+// moduleDir (if it exists) first in the go.sum file of the scratch module.
+// Then the go command checks a module that it gets at a vendored version
+// (see vendorScratch.pin) against the checksums of the user, also when
+// GONOSUMDB or GOPRIVATE disable the checksum database for it. It is
+// necessary before each round: "go mod tidy" removes the lines of the modules
+// that the scratch module replaces with a directory. mergedGoSum adds the new
+// lines to the user.
+func writeScratchGoSum(moduleDir, scratchDir string) error {
+	userSum, err := os.ReadFile(filepath.Join(moduleDir, goSumFileName))
+	if os.IsNotExist(err) {
+		return nil
 	}
-	return out, nil
+	if err != nil {
+		return ex.Wrapf(err, "reading %s", filepath.Join(moduleDir, goSumFileName))
+	}
+	scratchPath := filepath.Join(scratchDir, goSumFileName)
+	scratchSum, err := os.ReadFile(scratchPath)
+	if err != nil && !os.IsNotExist(err) {
+		return ex.Wrap(err)
+	}
+	out, _ := mergeGoSumLines(userSum, scratchSum)
+	return util.WriteFileAtomic(scratchPath, out, vendorFilePerm)
 }
 
 // vendorMergeResult is the new state of the module of the user.
@@ -576,29 +641,78 @@ func applyVendorMerge(ctx context.Context, moduleDir, scratchVendor string, res 
 	return nil
 }
 
-// vendorScratchImports returns the sorted packages that the scratch module
-// imports: the imports of otel.instrumentation.go, and the packages that the
-// rules of the embedded instrumentation modules name (hook packages, imports
-// and the imports of the files that the rules add).
-func vendorScratchImports(imports map[string]bool) ([]string, error) {
+// scratchImports is the result of vendorScratchImports.
+type scratchImports struct {
+	// packages are the sorted packages that the scratch module imports.
+	packages []string
+	// toolImports are the imports of otel.instrumentation.go and of the
+	// tool files of the instrumentation modules that it imports. They are
+	// the instrumentation packages, like in walkInstrumentation.
+	toolImports map[string]bool
+}
+
+// vendorScratchImports returns the packages that the scratch module imports.
+// It walks the instrumentation packages like walkInstrumentation: the imports
+// of otel.instrumentation.go, and the imports of the tool file in the module
+// of each instrumentation package. The packages are:
+//   - the instrumentation packages.
+//   - the packages that their rules name (see collectRulePackages).
+//
+// The scratch module cannot import a package of the main module (the module
+// of the user). Such a package (local instrumentation) is replaced by the
+// packages that it imports (see expandMainPackages).
+func vendorScratchImports(imports map[string]bool, sources *hookSources) (*scratchImports, error) {
 	set := make(map[string]bool, len(imports))
-	for p := range imports {
-		set[p] = true
-	}
-	for p := range imports {
-		dir, ok := embeddedSourceDir(p)
+	toolImports := maps.Clone(imports)
+	visited := make(map[string]bool, len(imports))
+	seenToolFiles := make(map[string]bool)
+	p := ast.NewAstParser()
+	for queue := slices.Sorted(maps.Keys(imports)); len(queue) > 0; {
+		importPath := queue[0]
+		queue = queue[1:]
+		if visited[importPath] {
+			continue
+		}
+		visited[importPath] = true
+		set[importPath] = true
+
+		src, ok := sources.packageDir(importPath)
 		if !ok {
 			continue
 		}
-		ruleFiles, err := rulesFromDir(dir, true)
+		ruleFiles, err := rulesFromDir(src.dir, true)
 		if err != nil {
 			return nil, err
 		}
 		for _, ruleFile := range ruleFiles {
-			if err = collectRulePackages(ruleFile, set); err != nil {
+			if err = collectRulePackages(ruleFile, set, sources); err != nil {
 				return nil, err
 			}
 		}
+
+		toolFile, err := findToolFile(src.moduleDir)
+		if err != nil {
+			return nil, err
+		}
+		if toolFile == "" || seenToolFiles[toolFile] {
+			continue
+		}
+		seenToolFiles[toolFile] = true
+		f, err := p.Parse(toolFile, parser.ImportsOnly)
+		if err != nil {
+			return nil, err
+		}
+		nested, err := collectImports(toolFile, f, make(map[string]bool))
+		if err != nil {
+			return nil, err
+		}
+		for _, imp := range nested {
+			toolImports[imp] = true
+			queue = append(queue, imp)
+		}
+	}
+	if err := sources.expandMainPackages(set); err != nil {
+		return nil, err
 	}
 
 	out := make([]string, 0, len(set))
@@ -608,7 +722,7 @@ func vendorScratchImports(imports map[string]bool) ([]string, error) {
 		}
 	}
 	slices.Sort(out)
-	return out, nil
+	return &scratchImports{packages: out, toolImports: toolImports}, nil
 }
 
 // isStdImportPath reports whether p is a package of the standard library: the
@@ -619,85 +733,371 @@ func isStdImportPath(p string) bool {
 }
 
 // collectRulePackages adds to set the packages that the rule file names: the
-// "path" values (hook packages), the values of "imports" maps, and the imports
-// of the files that an "add_file" rule adds.
-func collectRulePackages(ruleFile string, set map[string]bool) error {
+// hook packages of the function rules ("path"), the packages of the files
+// that the file rules add ("path") and the imports of these files, and the
+// values of the "imports" maps of all the rules. The other fields of the
+// rules do not name packages: their code uses the packages of "imports".
+func collectRulePackages(ruleFile string, set map[string]bool, sources *hookSources) error {
 	data, err := os.ReadFile(ruleFile)
 	if err != nil {
 		return ex.Wrapf(err, "reading rule file %s", ruleFile)
 	}
-	var doc any
-	if err = yaml.Unmarshal(data, &doc); err != nil {
+	doc, err := rule.ParseFile(data)
+	if err != nil {
 		return ex.Wrapf(err, "parsing rule file %s", ruleFile)
 	}
-	return collectNodePackages(doc, set)
-}
-
-// collectNodePackages walks a decoded YAML node for collectRulePackages.
-func collectNodePackages(node any, set map[string]bool) error {
-	var err error
-	switch n := node.(type) {
-	case map[string]any:
-		err = collectMapPackages(n, set)
-		for _, v := range n {
-			err = ex.Join(err, collectNodePackages(v, set))
-		}
-	case []any:
-		for _, v := range n {
-			err = ex.Join(err, collectNodePackages(v, set))
-		}
+	rules, err := doc.Rules()
+	if err != nil {
+		return ex.Wrapf(err, "parsing rule file %s", ruleFile)
 	}
-	return err
-}
-
-// collectMapPackages adds the packages that one YAML map names.
-func collectMapPackages(n map[string]any, set map[string]bool) error {
-	path, _ := n["path"].(string)
-	if path != "" {
-		set[path] = true
-	}
-	if imports, ok := n["imports"].(map[string]any); ok {
-		for _, v := range imports {
-			if s, isString := v.(string); isString && s != "" {
-				set[s] = true
+	for _, r := range rules {
+		if base := ruleBase(r); base != nil {
+			for _, p := range base.Imports {
+				if p != "" {
+					set[p] = true
+				}
+			}
+		}
+		switch rt := r.(type) {
+		case *rule.InstFuncRule:
+			set[rt.Path] = true
+		case *rule.InstFileRule:
+			set[rt.Path] = true
+			if err = collectFileImports(rt.Path, rt.File, set, sources); err != nil {
+				return err
 			}
 		}
 	}
-	if file, _ := n["file"].(string); file != "" && path != "" {
-		return collectFileImports(path, file, set)
+	return nil
+}
+
+// ruleBase returns the base rule of r, or nil for an unknown rule type.
+func ruleBase(r rule.InstRule) *rule.InstBaseRule {
+	switch rt := r.(type) {
+	case *rule.InstFuncRule:
+		return &rt.InstBaseRule
+	case *rule.InstFileRule:
+		return &rt.InstBaseRule
+	case *rule.InstRawRule:
+		return &rt.InstBaseRule
+	case *rule.InstStructRule:
+		return &rt.InstBaseRule
+	case *rule.InstCallRule:
+		return &rt.InstBaseRule
+	case *rule.InstLitRule:
+		return &rt.InstBaseRule
+	case *rule.InstDirectiveRule:
+		return &rt.InstBaseRule
+	case *rule.InstDeclRule:
+		return &rt.InstBaseRule
 	}
 	return nil
 }
 
-// collectFileImports adds to set the imports of the file that an "add_file"
-// rule adds. The file is in the package importPath of the embedded bundle.
-func collectFileImports(importPath, file string, set map[string]bool) error {
-	dir, ok := embeddedSourceDir(importPath)
+// collectFileImports adds to set the imports of the file that a file rule
+// adds. The file is in the package importPath.
+func collectFileImports(importPath, file string, set map[string]bool, sources *hookSources) error {
+	src, ok := sources.packageDir(importPath)
 	if !ok {
 		return nil
 	}
-	path := filepath.Join(dir, file)
+	path := filepath.Join(src.dir, file)
 	if !util.PathExists(path) {
 		return nil
 	}
-	f, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+	imports, err := goFileImports(path)
 	if err != nil {
-		return ex.Wrapf(err, "parsing the imports of %s", path)
+		return err
 	}
-	for _, imp := range f.Imports {
-		p, unquoteErr := strconv.Unquote(imp.Path.Value)
-		if unquoteErr != nil {
-			return ex.Wrapf(unquoteErr, "parsing the imports of %s", path)
-		}
+	for _, p := range imports {
 		set[p] = true
 	}
 	return nil
+}
+
+// goFileImports returns the imports of the Go file at path.
+func goFileImports(path string) ([]string, error) {
+	f, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+	if err != nil {
+		return nil, ex.Wrapf(err, "parsing the imports of %s", path)
+	}
+	imports := make([]string, 0, len(f.Imports))
+	for _, imp := range f.Imports {
+		p, unquoteErr := strconv.Unquote(imp.Path.Value)
+		if unquoteErr != nil {
+			return nil, ex.Wrapf(unquoteErr, "parsing the imports of %s", path)
+		}
+		imports = append(imports, p)
+	}
+	return imports, nil
+}
+
+// hookSources finds the source files of the packages of the hook code. A
+// package can be:
+//   - in the extracted otelc bundle.
+//   - in the main module (the module of the user).
+//   - in a vendored module that go.mod replaces with a local directory: the
+//     files are in this directory, also the files that vendor/ does not have.
+//   - in a different vendored module: the files are in vendor/.
+type hookSources struct {
+	// moduleDir is the directory of the main module.
+	moduleDir string
+	// mainPath is the module path of the main module.
+	mainPath string
+	// user is the vendor/modules.txt of the user.
+	user *modulesTxt
+	// localDirs are the vendored modules that go.mod replaces with a local
+	// directory, and their absolute directories (see localModuleDirs).
+	localDirs map[string]string
+}
+
+// packageSource are the directories of a package.
+type packageSource struct {
+	// dir is the directory of the package.
+	dir string
+	// moduleDir is the root directory of its module.
+	moduleDir string
+}
+
+// owner returns the path of the module (the main module, or a vendored
+// module) that has the package importPath. When two modules can have it, the
+// longest module path wins, like in the go command. vendored is nil for the
+// main module. The path is "" when no module can have the package.
+func (h *hookSources) owner(importPath string) (string, *vendorModule) {
+	modPath := ""
+	var vendored *vendorModule
+	if inModule(importPath, h.mainPath) {
+		modPath = h.mainPath
+	}
+	for _, mod := range h.user.usedModules() {
+		if len(mod.Path) > len(modPath) && inModule(importPath, mod.Path) {
+			modPath, vendored = mod.Path, mod
+		}
+	}
+	return modPath, vendored
+}
+
+// inModule reports whether the package importPath can be in the module
+// modPath.
+func inModule(importPath, modPath string) bool {
+	return modPath != "" && (importPath == modPath || strings.HasPrefix(importPath, modPath+"/"))
+}
+
+// isMainPackage reports whether importPath is a package of the main module.
+func (h *hookSources) isMainPackage(importPath string) bool {
+	modPath, vendored := h.owner(importPath)
+	return modPath != "" && vendored == nil
+}
+
+// packageDir returns the directories of the package importPath. ok is false
+// when otelc does not find the package directory. The import paths come from
+// rule files and Go files, so an import path that is not valid (for example
+// with "..") is not used to make a file path.
+func (h *hookSources) packageDir(importPath string) (packageSource, bool) {
+	if module.CheckImportPath(importPath) != nil {
+		return packageSource{}, false
+	}
+	if dir, ok := embeddedSourceDir(importPath); ok {
+		modDir, found := enclosingModuleDir(dir)
+		if !found {
+			modDir = dir
+		}
+		return packageSource{dir: dir, moduleDir: modDir}, true
+	}
+	modPath, vendored := h.owner(importPath)
+	var root string
+	switch {
+	case modPath == "":
+		return packageSource{}, false
+	case vendored == nil:
+		root = h.moduleDir
+	case h.localDirs[modPath] != "":
+		root = h.localDirs[modPath]
+	default:
+		root = filepath.Join(h.moduleDir, vendorDirName, filepath.FromSlash(modPath))
+	}
+	rel := strings.TrimPrefix(strings.TrimPrefix(importPath, modPath), "/")
+	dir := filepath.Join(root, filepath.FromSlash(rel))
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		return packageSource{}, false
+	}
+	return packageSource{dir: dir, moduleDir: root}, true
+}
+
+// expandMainPackages replaces each package of the main module in set with
+// the packages that it imports. The imports of a package of the main module
+// are expanded too. The scratch module cannot import the packages of the main
+// module, but it must have their imports: for example the otelc hook API that
+// a local hook package imports. The main module is not in vendor/, so it
+// never goes into vendor/modules.txt or into the require directives.
+func (h *hookSources) expandMainPackages(set map[string]bool) error {
+	var queue []string
+	for p := range set {
+		if h.isMainPackage(p) {
+			queue = append(queue, p)
+		}
+	}
+	slices.Sort(queue)
+	visited := make(map[string]bool)
+	for len(queue) > 0 {
+		pkg := queue[0]
+		queue = queue[1:]
+		delete(set, pkg)
+		if visited[pkg] {
+			continue
+		}
+		visited[pkg] = true
+		imports, err := packageImports(filepath.Join(h.moduleDir,
+			filepath.FromSlash(strings.TrimPrefix(strings.TrimPrefix(pkg, h.mainPath), "/"))))
+		if err != nil {
+			return err
+		}
+		for _, imp := range imports {
+			// A module path can have no dot (for example "myapp"), so the
+			// main module is checked before the standard library.
+			switch {
+			case h.isMainPackage(imp):
+				queue = append(queue, imp)
+			case isStdImportPath(imp):
+			default:
+				set[imp] = true
+			}
+		}
+	}
+	return nil
+}
+
+// packageImports returns the imports of the Go files of the package in dir.
+// Like "go mod vendor", it uses the files of all the platforms and all the
+// build tags, but not the test files and not the files with the "ignore"
+// build tag. A directory that does not exist has no imports.
+func packageImports(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, ex.Wrapf(err, "reading %s", dir)
+	}
+	var imports []string
+	for _, e := range entries {
+		name := e.Name()
+		if !e.Type().IsRegular() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") ||
+			strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
+			continue
+		}
+		path := filepath.Join(dir, name)
+		f, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly|parser.ParseComments)
+		if parseErr != nil {
+			return nil, ex.Wrapf(parseErr, "parsing the imports of %s", path)
+		}
+		if ignoredGoFile(f) {
+			continue
+		}
+		for _, imp := range f.Imports {
+			p, unquoteErr := strconv.Unquote(imp.Path.Value)
+			if unquoteErr != nil {
+				return nil, ex.Wrapf(unquoteErr, "parsing the imports of %s", path)
+			}
+			imports = append(imports, p)
+		}
+	}
+	return imports, nil
+}
+
+// ignoredGoFile reports whether the build constraints of f exclude f for all
+// the build tags but "ignore", like "go mod vendor" does. When f has a
+// //go:build line, only this line counts. Else the "// +build" lines count,
+// and f must match all of them. As for the go command, a "// +build" line in
+// the doc comment of the package clause is not a build constraint.
+func ignoredGoFile(f *goast.File) bool {
+	var plusBuild []constraint.Expr
+	for _, group := range f.Comments {
+		if group.Pos() > f.Package {
+			break
+		}
+		for _, c := range group.List {
+			switch {
+			case constraint.IsGoBuild(c.Text):
+				expr, err := constraint.Parse(c.Text)
+				if err != nil {
+					// The go command reports the bad line.
+					return false
+				}
+				return !matchAnyTag(expr, true)
+			case constraint.IsPlusBuild(c.Text) && group != f.Doc:
+				// Like the go command, otelc does not use a bad
+				// "// +build" line.
+				if expr, err := constraint.Parse(c.Text); err == nil {
+					plusBuild = append(plusBuild, expr)
+				}
+			}
+		}
+	}
+	for _, expr := range plusBuild {
+		if !matchAnyTag(expr, true) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchAnyTag evaluates expr like the go command does for "go mod vendor":
+// each build tag, except "ignore", has the value that makes the file match
+// (prefer). A negation inverts prefer.
+func matchAnyTag(expr constraint.Expr, prefer bool) bool {
+	switch x := expr.(type) {
+	case *constraint.TagExpr:
+		return x.Tag != "ignore" && prefer
+	case *constraint.NotExpr:
+		return !matchAnyTag(x.X, !prefer)
+	case *constraint.AndExpr:
+		return matchAnyTag(x.X, prefer) && matchAnyTag(x.Y, prefer)
+	case *constraint.OrExpr:
+		return matchAnyTag(x.X, prefer) || matchAnyTag(x.Y, prefer)
+	}
+	return false
+}
+
+// localModuleDirs returns the vendored modules of user that go.mod replaces
+// with a local directory (for example "replace example.com/hooks =>
+// ./hooks"), and the absolute path of the directory. A relative directory is
+// relative to moduleDir. A directory is returned only when its go.mod file
+// has the module path: else otelc uses the vendored files.
+func localModuleDirs(user *modulesTxt, moduleDir string) map[string]string {
+	dirs := make(map[string]string)
+	for _, mod := range user.usedModules() {
+		if !isDirReplacement(mod.Replacement) {
+			continue
+		}
+		dir := filepath.FromSlash(mod.Replacement)
+		if !filepath.IsAbs(dir) {
+			dir = filepath.Join(moduleDir, dir)
+		}
+		mf, err := parseGoMod(filepath.Join(dir, goModFileName))
+		if err != nil || mf.Module == nil || mf.Module.Mod.Path != mod.Path {
+			continue
+		}
+		dirs[mod.Path] = dir
+	}
+	return dirs
+}
+
+// isDirReplacement reports whether the replacement text of vendor/modules.txt
+// is a local directory. A module replacement has a version after the path.
+func isDirReplacement(replacement string) bool {
+	return replacement != "" && !strings.Contains(replacement, " ") && modfile.IsDirectoryPath(replacement)
 }
 
 // embeddedSourceDir returns the directory of the package importPath in the
 // extracted otelc bundle, when importPath is a package of an otelc module and
 // the directory exists.
 func embeddedSourceDir(importPath string) (string, bool) {
+	// An import path can come from a rule file. A valid import path has no
+	// ".." element, so dir is always below the extracted bundle.
+	if module.CheckImportPath(importPath) != nil {
+		return "", false
+	}
 	var dir string
 	switch {
 	case importPath == util.OtelcInstRoot:
@@ -713,7 +1113,7 @@ func embeddedSourceDir(importPath string) (string, bool) {
 	default:
 		return "", false
 	}
-	info, err := os.Stat(dir)
+	info, err := os.Stat(dir) //nolint:gosec // dir is below the bundle: importPath is valid (see above)
 	if err != nil || !info.IsDir() {
 		return "", false
 	}
@@ -750,6 +1150,10 @@ type vendorScratchInput struct {
 	imports []string
 	// replaces are the otelc modules and their directories in the bundle.
 	replaces map[string]string
+	// localDirs are the vendored modules that go.mod replaces with a local
+	// directory, and their absolute directories. The scratch module uses
+	// these directories, not a copy of vendor/.
+	localDirs map[string]string
 	// goVersion is the go version of the module of the user.
 	goVersion string
 	// update permits a higher version of a vendored module, when the hook
@@ -874,12 +1278,18 @@ func buildVendorScratch(ctx context.Context, in vendorScratchInput) (*vendorScra
 }
 
 // copyVendoredModules copies each vendored module of the user (but not the
-// otelc modules) into the scratch module in dir. It returns the vendored
-// modules, and the relative directory of each copy.
+// otelc modules, and not the modules in in.localDirs) into the scratch module
+// in dir. It returns the vendored modules, and the relative directory of each
+// copy.
 func copyVendoredModules(dir string, in vendorScratchInput) (map[string]bool, map[string]string, error) {
 	userMods := make(map[string]bool)
 	copies := make(map[string]string)
 	moduleDir := filepath.Dir(in.userVendorDir)
+	copied := in.original
+	if copied == nil {
+		copied = in.user
+	}
+	own := vendoredDirsOf(copied)
 	for i, mod := range in.user.usedModules() {
 		// A module without packages is copied too (only its go.mod file), so
 		// that the go command does not download its go.mod file. A used
@@ -888,8 +1298,13 @@ func copyVendoredModules(dir string, in vendorScratchInput) (map[string]bool, ma
 			// The scratch module takes the otelc modules from the bundle.
 			continue
 		}
+		if in.localDirs[mod.Path] != "" {
+			// The scratch module takes the module from its local directory.
+			userMods[mod.Path] = true
+			continue
+		}
 		rel := filepath.Join(vendorScratchDepsDir, fmt.Sprintf("%04d", i))
-		if err := copyVendoredModule(mod, moduleDir, dir, filepath.Join(dir, rel)); err != nil {
+		if err := copyVendoredModule(mod, moduleDir, dir, filepath.Join(dir, rel), own); err != nil {
 			return nil, nil, err
 		}
 		userMods[mod.Path] = true
@@ -908,6 +1323,9 @@ func runScratchRound(ctx context.Context, s *vendorScratch, in vendorScratchInpu
 		return false, err
 	}
 	if err := writeScratchGoMod(s, in); err != nil {
+		return false, err
+	}
+	if err := writeScratchGoSum(filepath.Dir(in.userVendorDir), s.dir); err != nil {
 		return false, err
 	}
 	// -e continues after errors (for example a package that is not in a
@@ -1109,9 +1527,10 @@ func writeScratchSource(dir string, imports []string) error {
 // writeScratchGoMod writes the go.mod file of the scratch module. It requires
 // each module of the user at its version in s. A vendored module is replaced
 // by its copy, or, when it is pinned, by the same module at the vendored
-// version. The replacements apply to all the versions, so the vendored
-// version is always used. An updated module is not replaced. The otelc
-// modules come from the bundle.
+// version. A module that go.mod replaces with a local directory is replaced
+// by this directory. The replacements apply to all the versions, so the
+// vendored version is always used. An updated module is not replaced. The
+// otelc modules come from the bundle.
 func writeScratchGoMod(s *vendorScratch, in vendorScratchInput) error {
 	mf, err := modfile.Parse(goModFileName, []byte("module "+vendorScratchModule+"\n"), nil)
 	if err != nil {
@@ -1138,6 +1557,8 @@ func writeScratchGoMod(s *vendorScratch, in vendorScratchInput) error {
 			// The go command gets the higher version.
 		case s.pinned[mod.Path]:
 			err = mf.AddReplace(mod.Path, "", mod.Path, mod.Version)
+		case in.localDirs[mod.Path] != "":
+			err = mf.AddReplace(mod.Path, "", in.localDirs[mod.Path], "")
 		case s.copies[mod.Path] != "":
 			err = mf.AddReplace(mod.Path, "", s.copies[mod.Path], "")
 		}
@@ -1357,8 +1778,13 @@ func atVendoredVersions(injected, user *modulesTxt, userMods map[string]bool) *m
 // copyVendoredModule copies the vendored packages of mod to dst, and writes a
 // go.mod file for it. The scratch module replaces mod with this copy. The
 // files come from the vendor directory of the module in moduleDir, and dst is
-// in the scratch module in scratchDir.
-func copyVendoredModule(mod *vendorModule, moduleDir, scratchDir, dst string) error {
+// in the scratch module in scratchDir. own are the vendored packages and
+// module roots of the user (see packageFiles).
+//
+// On Linux, the files are hard links to the files of vendor/ when possible
+// (see linkNewFile): a copy of a large vendor/ takes time. Only the go
+// command reads the files of the copy, and the go.mod file is a new file.
+func copyVendoredModule(mod *vendorModule, moduleDir, scratchDir, dst string, own vendoredDirs) error {
 	userVendorDir := filepath.Join(moduleDir, vendorDirName)
 	if err := checkInside(scratchDir, dst); err != nil {
 		return err
@@ -1366,6 +1792,7 @@ func copyVendoredModule(mod *vendorModule, moduleDir, scratchDir, dst string) er
 	if err := os.MkdirAll(dst, 0o755); err != nil {
 		return ex.Wrap(err)
 	}
+	made := map[string]bool{dst: true}
 	for _, pkg := range mod.Packages {
 		// parseModulesTxt checks that pkg is mod.Path or below it.
 		rel := strings.TrimPrefix(strings.TrimPrefix(pkg, mod.Path), "/")
@@ -1374,16 +1801,38 @@ func copyVendoredModule(mod *vendorModule, moduleDir, scratchDir, dst string) er
 		if err := checkInside(dst, dstDir); err != nil {
 			return err
 		}
-		files, err := regularFiles(moduleDir, srcDir)
+		// packageFiles checks srcDir, and returns only regular files below
+		// it. dst is a new directory of the scratch module. Thus the files
+		// do not need the checks of linkNewFile, which take time for a
+		// large vendor/.
+		files, err := packageFiles(moduleDir, srcDir, pkg, own)
 		if err != nil {
 			return err
 		}
 		for _, src := range files {
-			if err = copyNewFile(moduleDir, src, scratchDir, filepath.Join(dstDir, filepath.Base(src))); err != nil {
+			fileRel, relErr := filepath.Rel(srcDir, src)
+			if relErr != nil {
+				return ex.Wrap(relErr)
+			}
+			if pkg == mod.Path && fileRel == goModFileName {
+				// "go mod vendor" of go < 1.17 copies go.mod. The copy gets
+				// a new go.mod file below.
+				continue
+			}
+			target := filepath.Join(dstDir, fileRel)
+			if parent := filepath.Dir(target); !made[parent] {
+				if err = os.MkdirAll(parent, 0o755); err != nil {
+					return ex.Wrap(err)
+				}
+				made[parent] = true
+			}
+			if err = linkOrCopyFile(moduleDir, src, scratchDir, target); err != nil {
 				return err
 			}
 		}
 	}
+	// util.WriteFileAtomic makes a new file (it renames a temporary file), so
+	// it never writes through a hard link to vendor/.
 	goMod := "module " + mod.Path + "\n"
 	if v := mod.goVersion(); v != "" {
 		goMod += "\ngo " + v + "\n"
@@ -1543,22 +1992,22 @@ type vendorCopyRoots struct {
 
 // planVendorCopies returns the files to copy from the vendor directory of the
 // scratch module to the vendor directory of the user, and the directories to
-// make (parents first). It copies the files of each added package, and the
-// files (such as LICENSE) of the parent directories up to the module root
-// that are not packages. A file that already exists (and is not deleted) is
-// never replaced. A symbolic link in a destination path is an error.
+// make (parents first). It copies the files of each added package (with the
+// embedded files in subdirectories, see packageFiles), and the files (such as
+// LICENSE) of the parent directories up to the module root that are not
+// packages. A file that already exists (and is not deleted) is never
+// replaced. A symbolic link in a destination path is an error.
 func planVendorCopies(merged *modulesTxt, added []string, roots vendorCopyRoots) ([]vendorCopy, []string, error) {
-	isPackage := make(map[string]bool)
-	for _, mod := range merged.usedModules() {
-		for _, pkg := range mod.Packages {
-			isPackage[pkg] = true
-		}
-	}
-
+	isPackage := vendoredPackages(merged)
 	userVendor := filepath.Join(roots.moduleDir, vendorDirName)
-	plan := &copyPlan{roots: roots, userVendor: userVendor, seen: make(map[string]bool)}
+	plan := &copyPlan{
+		roots:      roots,
+		userVendor: userVendor,
+		own:        vendoredDirsOf(merged),
+		seen:       make(map[string]bool),
+	}
 	for _, pkg := range added {
-		if err := plan.addDir(pkg); err != nil {
+		if err := plan.addPackage(pkg); err != nil {
 			return nil, nil, err
 		}
 		mod := merged.moduleOfPackage(pkg)
@@ -1609,20 +2058,44 @@ func missingDirs(copies []vendorCopy, userVendor string) []string {
 type copyPlan struct {
 	roots      vendorCopyRoots
 	userVendor string
-	seen       map[string]bool
-	copies     []vendorCopy
+	// own are the packages and module roots of the merged modules.txt.
+	own    vendoredDirs
+	seen   map[string]bool
+	copies []vendorCopy
+}
+
+// addPackage adds the files of the package pkg (see packageFiles) that the
+// vendor directory of the user does not have.
+func (p *copyPlan) addPackage(pkg string) error {
+	srcDir := filepath.Join(p.roots.scratchVendor, filepath.FromSlash(pkg))
+	files, err := packageFiles(p.roots.scratchVendor, srcDir, pkg, p.own)
+	if err != nil {
+		return err
+	}
+	return p.add(files)
 }
 
 // addDir adds the regular files of the directory importDir (an import path
-// below vendor/) that the vendor directory of the user does not have.
+// below vendor/, not its subdirectories) that the vendor directory of the
+// user does not have.
 func (p *copyPlan) addDir(importDir string) error {
 	srcDir := filepath.Join(p.roots.scratchVendor, filepath.FromSlash(importDir))
 	files, err := regularFiles(p.roots.scratchVendor, srcDir)
 	if err != nil {
 		return err
 	}
+	return p.add(files)
+}
+
+// add adds the files (in the vendor directory of the scratch module) that
+// the vendor directory of the user does not have.
+func (p *copyPlan) add(files []string) error {
 	for _, src := range files {
-		dst := filepath.Join(p.userVendor, filepath.FromSlash(importDir), filepath.Base(src))
+		rel, err := filepath.Rel(p.roots.scratchVendor, src)
+		if err != nil {
+			return ex.Wrap(err)
+		}
+		dst := filepath.Join(p.userVendor, rel)
 		if err = checkNoSymlink(p.roots.moduleDir, dst); err != nil {
 			return err
 		}

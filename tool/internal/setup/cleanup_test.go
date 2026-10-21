@@ -429,3 +429,26 @@ func newParsedCommand(t *testing.T, args ...string) *cli.Command {
 	require.NoError(t, cmd.Run(t.Context(), args))
 	return parsed
 }
+
+// TestCleanupFromPackageDir: otelc cleanup in a package directory below the
+// module root restores go.mod at the module root from the manifest.
+func TestCleanupFromPackageDir(t *testing.T) {
+	modRoot := t.TempDir()
+	workDir := filepath.Join(modRoot, "cmd", "app")
+	require.NoError(t, os.MkdirAll(workDir, 0o755))
+	t.Chdir(workDir)
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	t.Setenv("GOWORK", "off")
+
+	goMod := filepath.Join(modRoot, "go.mod")
+	mustWriteFile(t, goMod, "module example.com/mod\n")
+	s := newStateManager()
+	require.NoError(t, s.Track(goMod))
+	mustWriteFile(t, goMod, "module example.com/mod\n\nreplace x => ./x\n")
+
+	require.NoError(t, Cleanup(t.Context(), true))
+	data, err := os.ReadFile(goMod)
+	require.NoError(t, err)
+	assert.Equal(t, "module example.com/mod\n", string(data))
+	assert.NoDirExists(t, util.GetBuildTempDir())
+}

@@ -81,7 +81,13 @@ var commandVendor = cli.Command{
 	Description: "Add the modules of the instrumentation hook code to vendor/ of the current module. " +
 		"After this, otelc go build needs no network and no module cache. " +
 		"When the hook code needs a higher version of a vendored module, otelc vendor updates it " +
-		"(like go get) and prints the change.",
+		"(like go get) and prints the change. " +
+		"The go.mod file then has replace directives to ./.otelc-build, which is not committed: " +
+		"go build and otelc go build work without it, but go mod tidy, go mod vendor and " +
+		"go mod verify need it, so run otelc vendor again first (for example in a new checkout). " +
+		"This stays until the instrumentation modules are published " +
+		"(https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/585). " +
+		"The module needs go 1.14 or higher in go.mod.",
 	ArgsUsage:       "[go build flags] [packages]",
 	SkipFlagParsing: true,
 	Before:          addLoggerPhaseAttribute,

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -367,6 +368,20 @@ func TestBuildWithToolexec(t *testing.T) {
 		require.NotEmpty(t, buildFlags, "context-affecting flags are forwarded to the toolexec child")
 		assert.Equal(t, util.EncodeBuildFlags([]string{"-mod=vendor", "-race"}), buildFlags[len(buildFlags)-1],
 			"the toolexec child gets -mod=vendor unchanged")
+	})
+
+	t.Run("gives the -mod flag of the command line to the toolexec processes in GOFLAGS", func(t *testing.T) {
+		t.Setenv("GOFLAGS", "-trimpath -mod=vendor")
+		got := runBuildWithToolexec(t, []string{"go", "build", "-mod=mod", "."}, enterVendoredModule)
+
+		goflags := ""
+		for _, e := range got.env {
+			if v, ok := strings.CutPrefix(e, "GOFLAGS="); ok {
+				goflags = v // exec.Cmd uses the last value.
+			}
+		}
+		assert.Equal(t, "-trimpath -mod=mod", goflags,
+			"the loads of the toolexec processes must not use vendor mode")
 	})
 
 	t.Run("does not build when the go cache cannot be prepared", func(t *testing.T) {
@@ -1720,4 +1735,54 @@ func TestRuntime(t *testing.T) {
 			assert.Contains(t, string(output), "ok")
 		})
 	}
+}
+
+// TestKeepForDebugDoesNotWriteThroughLinks: on Linux, the files of the
+// vendor scratch module can be hard links to the files in vendor/. A
+// symbolic link at the debug copy can point to such a file. keepForDebug
+// must not write through the link: the vendored file must not change. A
+// hard link at the debug copy must not change either.
+func TestKeepForDebugDoesNotWriteThroughLinks(t *testing.T) {
+	work := t.TempDir()
+	t.Chdir(work)
+	t.Setenv(util.EnvOtelcWorkDir, work)
+	src := filepath.Join(work, goModFileName)
+	mustWriteFile(t, src, "module example.com/app\n")
+	vendorFile := filepath.Join(work, vendorDirName, "example.com", "pkg", "p.go")
+	mustWriteFile(t, vendorFile, "package pkg\n")
+	debug := filepath.Join(util.GetBuildTemp("debug"), "main", goModFileName)
+	require.NoError(t, os.MkdirAll(filepath.Dir(debug), 0o755))
+
+	// A hard link at the debug copy.
+	if err := os.Link(vendorFile, debug); err != nil {
+		t.Skipf("no hard links: %v", err)
+	}
+	keepForDebug(t.Context(), src)
+	assert.Equal(t, "package pkg\n", readAppFile(t, work, filepath.Join(vendorDirName, "example.com", "pkg", "p.go")),
+		"the hard link is replaced, not written")
+	data, err := os.ReadFile(debug)
+	require.NoError(t, err)
+	assert.Equal(t, "module example.com/app\n", string(data), "the debug copy is made")
+
+	if runtime.GOOS == "windows" {
+		return
+	}
+	// The probe of the security review: a symbolic link at the debug copy
+	// points to a scratch file, which is a hard link to the vendored file.
+	scratch := filepath.Join(util.GetBuildTemp(vendorScratchDir), "deps", "0000", "p.go")
+	require.NoError(t, os.MkdirAll(filepath.Dir(scratch), 0o755))
+	require.NoError(t, os.Link(vendorFile, scratch))
+	require.NoError(t, os.Remove(debug))
+	require.NoError(t, os.Symlink(scratch, debug))
+	keepForDebug(t.Context(), src)
+	assert.Equal(t, "package pkg\n", readAppFile(t, work, filepath.Join(vendorDirName, "example.com", "pkg", "p.go")),
+		"keepForDebug must not write through a symbolic link")
+
+	// A linked parent directory of the debug copy.
+	outside := t.TempDir()
+	require.NoError(t, os.RemoveAll(util.GetBuildTemp("debug")))
+	require.NoError(t, os.Symlink(outside, util.GetBuildTemp("debug")))
+	keepForDebug(t.Context(), src)
+	assert.NoFileExists(t, filepath.Join(outside, "main", goModFileName),
+		"keepForDebug must not write through a linked directory")
 }

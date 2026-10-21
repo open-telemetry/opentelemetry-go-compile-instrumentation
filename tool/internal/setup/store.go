@@ -56,10 +56,13 @@ func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDi
 			break
 		}
 
+		// otelc changed go.mod before this load, so the load uses the -mod
+		// flag of the build (see modBuildFlags).
 		pkgs, loadErr := packages.Load(&packages.Config{
-			Mode:    packages.NeedName | packages.NeedFiles,
-			Context: ctx,
-			Dir:     moduleDir,
+			Mode:       packages.NeedName | packages.NeedFiles,
+			Context:    ctx,
+			Dir:        moduleDir,
+			BuildFlags: modBuildFlags(ctx),
 		}, pending...)
 		if loadErr != nil {
 			lastErr = loadErr

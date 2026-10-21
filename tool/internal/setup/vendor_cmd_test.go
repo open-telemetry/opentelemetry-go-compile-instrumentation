@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dave/dst"
@@ -107,32 +108,48 @@ func TestVendorRecoversAndRevertsOnFailure(t *testing.T) {
 	assert.NoFileExists(t, util.GetBuildTemp(stateFileName), "no manifest stays")
 }
 
-func TestSetGoflagsModVendor(t *testing.T) {
-	t.Setenv("GOFLAGS", "-trimpath -mod=readonly")
-	restore, err := setGoflagsModVendor()
-	require.NoError(t, err)
-	assert.Equal(t, "-trimpath -mod=vendor", os.Getenv("GOFLAGS"))
-	restore()
-	assert.Equal(t, "-trimpath -mod=readonly", os.Getenv("GOFLAGS"))
+// TestVendorRejectsOldGoVersion: otelc vendor needs go 1.14 or higher in
+// go.mod. For a lower version (or no go directive) the go command ignores
+// vendor/ by default, and otelc does not support this.
+func TestVendorRejectsOldGoVersion(t *testing.T) {
+	for _, goDirective := range []string{"1.13", ""} {
+		dir := newVendoredModule(t, "1.13")
+		if goDirective == "" {
+			mustWriteFile(t, filepath.Join(dir, goModFileName),
+				"module example.com/app\n\nrequire corp.example/private v1.0.0\n")
+		}
+
+		err := Vendor(t.Context(), []string{"."})
+		require.Error(t, err, "go %q", goDirective)
+		assert.Contains(t, err.Error(), "otelc needs go 1.14 or higher in "+filepath.Join(dir, goModFileName))
+		assert.Contains(t, err.Error(), `run "go mod edit -go=1.14 && go mod vendor"`)
+		assert.NoFileExists(t, filepath.Join(dir, toolFileCanonical), "nothing is written")
+	}
 }
 
-// TestVendorGoflagsLoadOldGoModule: with a go version lower than 1.14 in
-// go.mod, the go command does not use vendor/ by default. otelc vendor sets
-// -mod=vendor, so the package load does not try to download the vendored
-// module.
-func TestVendorGoflagsLoadOldGoModule(t *testing.T) {
-	newVendoredModule(t, "1.13")
+// TestVendorDirFlag: otelc vendor uses the module of the -C directory, also
+// when the otelc work directory is a module that does not vendor. The go
+// command accepts the flag with one or two dashes.
+func TestVendorDirFlag(t *testing.T) {
+	for _, flags := range [][]string{{"-C", "./app"}, {"--C=./app"}} {
+		t.Run(strings.Join(flags, " "), func(t *testing.T) {
+			app := newVendorSyncApp(t)
+			parent := t.TempDir()
+			appDir := filepath.Join(parent, "app")
+			require.NoError(t, os.Rename(app, appDir))
+			mustWriteFile(t, filepath.Join(parent, goModFileName), "module example.com/parent\n\ngo 1.25.0\n")
+			t.Chdir(parent)
+			t.Setenv(util.EnvOtelcWorkDir, parent)
+			mustWriteFile(t, filepath.Join(appDir, toolFileCanonical),
+				"//go:build tools\n\npackage tools\n\nimport _ \"example.com/extra\"\n")
 
-	_, _, err := getBuildPackages(t.Context(), subcmdBuild, []string{"."})
-	require.Error(t, err, "the fixture must need -mod=vendor")
+			require.NoError(t, Vendor(t.Context(), append(flags, ".")))
 
-	restore, err := setGoflagsModVendor()
-	require.NoError(t, err)
-	t.Cleanup(restore)
-	pkgs, _, err := getBuildPackages(t.Context(), subcmdBuild, []string{"."})
-	require.NoError(t, err)
-	require.Len(t, pkgs, 1)
-	assert.Empty(t, pkgs[0].Errors)
+			assert.Contains(t, readAppFile(t, appDir, "vendor/modules.txt"), "# example.com/extra v1.0.0\n")
+			assert.Contains(t, readAppFile(t, appDir, goModFileName), "example.com/extra v1.0.0")
+			assert.NoDirExists(t, filepath.Join(parent, vendorDirName), "the parent module does not change")
+		})
+	}
 }
 
 // TestVendorPinOptions: in vendor mode, otelc does not add the tool directive
@@ -226,17 +243,6 @@ func TestVendorFailsOnBadManifest(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "outside the otelc work directory")
 	assert.NoFileExists(t, filepath.Join(dir, toolFileCanonical), "nothing is written")
-}
-
-func TestSetGoflagsModVendorUnset(t *testing.T) {
-	t.Setenv("GOFLAGS", "")
-	require.NoError(t, os.Unsetenv("GOFLAGS"))
-	restore, err := setGoflagsModVendor()
-	require.NoError(t, err)
-	assert.Equal(t, "-mod=vendor", os.Getenv("GOFLAGS"))
-	restore()
-	_, set := os.LookupEnv("GOFLAGS")
-	assert.False(t, set, "an unset GOFLAGS is unset again")
 }
 
 func TestVendorPinOptionsWithoutGoMod(t *testing.T) {

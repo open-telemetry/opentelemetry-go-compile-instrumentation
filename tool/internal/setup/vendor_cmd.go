@@ -7,7 +7,6 @@ import (
 	"context"
 	"os"
 	"slices"
-	"strings"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
@@ -35,10 +34,19 @@ func Vendor(ctx context.Context, args []string) error {
 }
 
 func vendorLocked(ctx context.Context, args []string) (err error) {
-	workDir := util.GetOtelcWorkDir()
-	if !vendoringActive(ctx, workDir) {
+	// The directory of the build is the -C directory of args, else the otelc
+	// work directory, as for package loading.
+	workDir, err := buildWorkDir(subcmdBuild, args)
+	if err != nil {
+		return ex.Wrapf(err, "otelc vendor")
+	}
+	root := vendoredModuleRoot(ctx, workDir)
+	if root == "" {
 		return ex.Newf("otelc vendor: the module in %s does not vendor its dependencies "+
 			"(no vendor/modules.txt, or workspace mode); run \"go mod vendor\" first", workDir)
+	}
+	if err = requireVendorGoVersion(root); err != nil {
+		return ex.Wrapf(err, "otelc vendor")
 	}
 	if mode := lastModFlag(subcmdBuild, args); mode != "" && mode != vendorDirName {
 		return ex.Newf("otelc vendor: -mod=%s is not supported: otelc vendor uses the vendor directory "+
@@ -55,17 +63,10 @@ func vendorLocked(ctx context.Context, args []string) (err error) {
 		return err
 	}
 
-	// All the go commands that load the packages of the user must use
-	// vendor/. The go command does not use vendor/ by default when the go
-	// version of go.mod is lower than 1.14, so the flag is explicit. The go
-	// commands in the scratch module remove it (see scratchGo).
-	restore, err := setGoflagsModVendor()
-	if err != nil {
-		return err
-	}
-	defer restore()
-
-	// Vendor mode is forced: otelc must not tidy the module of the user.
+	// The go commands that load the packages of the user use vendor/: the go
+	// version of go.mod is 1.14 or higher, and no -mod flag is set (else the
+	// checks above fail). Vendor mode is forced in the context too: otelc
+	// must not tidy the module of the user.
 	ctx = contextWithVendorMode(ctx, true)
 	ctx = contextWithVendorUpdate(ctx)
 
@@ -144,21 +145,4 @@ func hasModfileFlag(args []string) bool {
 		}
 	}
 	return slices.ContainsFunc(args, isModfileFlag)
-}
-
-// setGoflagsModVendor adds -mod=vendor to the GOFLAGS environment variable of
-// the process. The returned function sets the old value again.
-func setGoflagsModVendor() (func(), error) {
-	old, had := os.LookupEnv("GOFLAGS")
-	goflags := strings.TrimSpace(goflagsWithoutMod(old) + " " + flagMod + "=" + vendorDirName)
-	if err := os.Setenv("GOFLAGS", goflags); err != nil {
-		return nil, ex.Wrapf(err, "setting GOFLAGS")
-	}
-	return func() {
-		if had {
-			_ = os.Setenv("GOFLAGS", old)
-		} else {
-			_ = os.Unsetenv("GOFLAGS")
-		}
-	}, nil
 }

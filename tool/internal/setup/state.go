@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -29,6 +30,7 @@ const (
 // stateManager tracks the original state of files so they can later be restored.
 //
 // Files that exist when tracked are snapshotted into the build state directory.
+// A symbolic link is snapshotted as a symbolic link with the same target.
 // Files that do not exist when tracked are recorded and removed during Revert if
 // they are later created.
 //
@@ -77,8 +79,15 @@ func loadStateManager() (*stateManager, error) {
 			return nil, ex.Newf("the state file %s has an invalid path %q; "+
 				"remove %s if otelc did not make it", f, path, util.GetBuildTempDir())
 		}
+		if scope.inBuildTemp(path) {
+			return nil, ex.Newf("the state file %s has the path %s, "+
+				"which is in the otelc build directory: otelc never tracks such a path; "+
+				"remove %s", f, path, util.GetBuildTempDir())
+		}
 		if !scope.allows(path) {
-			return nil, ex.Newf("the state file %s has the path %s, which is outside the otelc work directory. "+
+			return nil, ex.Newf("the state file %s has the path %s, "+
+				"which is outside the otelc work directory, and is not a go.mod, go.sum, "+
+				"tool or vendor file of its module. "+
 				"otelc restores such a path only in the build that changed it. "+
 				"If a build stopped, restore %s by hand (the original files are in %s), "+
 				"then remove %s", f, path, path, util.GetBuildTemp(stateDir), util.GetBuildTempDir())
@@ -89,15 +98,30 @@ func loadStateManager() (*stateManager, error) {
 	return s, nil
 }
 
-// stateScope tells which paths a manifest on disk can name: the paths in the
-// otelc work directory, and the go.work.sum file of the active workspace.
+// stateScope tells which paths a manifest on disk can name:
+//   - the paths in the otelc work directory, but not the paths in the build
+//     temp directory (.otelc-build);
+//   - in the module root (the nearest directory at or above the work
+//     directory with a go.mod file), only the paths that otelc tracks there:
+//     go.mod, go.sum, the tool files, and the paths in vendor/;
+//   - the go.work.sum file of the active workspace.
+//
 // Each path has the form with and without symbolic links resolved.
 type stateScope struct {
+	// roots are the work directory: all the paths in it are in the scope.
 	roots []string
-	files map[string]bool
+	// moduleRoots are the module root, when it is not the work directory.
+	moduleRoots []string
+	// buildTemp is the build temp directory.
+	buildTemp []string
+	files     map[string]bool
 }
 
 // newStateScope returns the stateScope of the current otelc work directory.
+//
+// rootOf gives the work directory for a path in it, before the module root.
+// Thus checkNoLinkedParent does not examine the parent directories of the
+// work directory: the user selects them, and they can be symbolic links.
 func newStateScope() stateScope {
 	scope := stateScope{files: make(map[string]bool)}
 	workDir, err := filepath.Abs(util.GetOtelcWorkDir())
@@ -105,6 +129,13 @@ func newStateScope() stateScope {
 		return scope
 	}
 	scope.roots = pathForms(workDir)
+	scope.buildTemp = pathForms(filepath.Join(workDir, util.BuildTempDir))
+	// otelc can run in a package directory below the module root (for
+	// example cmd/app). Setup then changes go.mod, go.sum and vendor/ at the
+	// module root, so the manifest names these paths.
+	if modDir, found := enclosingModuleDir(workDir); found && modDir != workDir {
+		scope.moduleRoots = pathForms(modDir)
+	}
 	if ws := workspaceDir(workDir); ws != "" {
 		for _, dir := range pathForms(ws) {
 			scope.files[filepath.Join(dir, goWorkSumFileName)] = true
@@ -126,18 +157,53 @@ func pathForms(path string) []string {
 
 // allows reports whether a manifest on disk can name path.
 func (sc stateScope) allows(path string) bool {
+	if sc.inBuildTemp(path) {
+		return false
+	}
 	_, inRoot := sc.rootOf(path)
 	return inRoot || sc.files[path]
 }
 
-// rootOf returns the root that has path inside it.
+// inBuildTemp reports whether path is the build temp directory or a path in
+// it. otelc never tracks such a path.
+func (sc stateScope) inBuildTemp(path string) bool {
+	for _, dir := range sc.buildTemp {
+		if checkInside(dir, path) == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// rootOf returns the root that has path inside it: the work directory, or
+// the module root for a path that otelc tracks in the module root (see
+// isModuleRootPath).
 func (sc stateScope) rootOf(path string) (string, bool) {
 	for _, root := range sc.roots {
 		if checkInside(root, path) == nil {
 			return root, true
 		}
 	}
+	for _, root := range sc.moduleRoots {
+		if checkInside(root, path) != nil {
+			continue
+		}
+		if rel, err := filepath.Rel(root, path); err == nil && isModuleRootPath(rel) {
+			return root, true
+		}
+	}
 	return "", false
+}
+
+// isModuleRootPath reports whether rel (relative to the module root) is a
+// path that otelc tracks in the module root: go.mod, go.sum, a tool file,
+// or vendor/ and the paths in it.
+func isModuleRootPath(rel string) bool {
+	switch rel {
+	case goModFileName, goSumFileName, toolFileCanonical, toolFileAlias, vendorDirName:
+		return true
+	}
+	return strings.HasPrefix(rel, vendorDirName+string(filepath.Separator))
 }
 
 // workspaceDir returns the directory of the go.work file for workDir, or "".
@@ -288,14 +354,83 @@ func (s *stateManager) track(path string) (bool, error) {
 		return true, nil
 	}
 
-	// If the file exists, snapshot it
+	// If the file exists, snapshot it. The snapshot replaces a snapshot
+	// that a previous build left, also when that snapshot is read-only.
 	dst := filepath.Join(util.GetBuildTemp(stateDir), stateSnapshotPath(abs))
-	if err = util.CopyFile(abs, dst); err != nil {
+	if err = snapshotPath(abs, dst); err != nil {
 		return false, err
 	}
 
 	s.files[abs] = true
 	return true, nil
+}
+
+// snapshotPath copies path to the snapshot dst. When path is a symbolic
+// link, the snapshot is a symbolic link with the same target. When otelc
+// cannot make a symbolic link (for example on Windows without the necessary
+// privilege), the snapshot is a copy of the contents of the target.
+func snapshotPath(path, dst string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return ex.Wrapf(err, "creating the directory of the snapshot %s", dst)
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return ex.Wrapf(err, "reading %s", path)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		if target, linkErr := os.Readlink(path); linkErr == nil {
+			if linkErr = replaceWithSymlink(target, dst); linkErr == nil {
+				return nil
+			}
+		}
+	}
+	return replaceWithCopy(path, dst)
+}
+
+// replaceWithCopy replaces dst atomically with a copy of the contents and
+// the permissions of src. It reads src through a symbolic link. When dst is
+// a symbolic link, the link is replaced, and its target does not change.
+// When dst is read-only, it is replaced too.
+func replaceWithCopy(src, dst string) error {
+	info, err := os.Stat(src)
+	if err != nil {
+		return ex.Wrapf(err, "reading %s", src)
+	}
+	if !info.Mode().IsRegular() {
+		return ex.Newf("%s is not a regular file", src)
+	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return ex.Wrapf(err, "reading %s", src)
+	}
+	return util.WriteFileAtomic(dst, data, info.Mode().Perm())
+}
+
+// replaceWithSymlink replaces path atomically with a symbolic link to
+// target. It makes the link at a temporary name in the directory of path,
+// and then renames it to path. When path is a symbolic link, the link is
+// replaced, and its target does not change.
+func replaceWithSymlink(target, path string) error {
+	dir := filepath.Dir(path)
+	// os.CreateTemp gives a name that is not used. The file is removed, and
+	// the link is made with this name.
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".link-*")
+	if err != nil {
+		return ex.Wrapf(err, "creating a temporary file for %s", path)
+	}
+	tmpPath := tmp.Name()
+	_ = tmp.Close()
+	if err = os.Remove(tmpPath); err != nil {
+		return ex.Wrapf(err, "removing the temporary file %s", tmpPath)
+	}
+	if err = os.Symlink(target, tmpPath); err != nil {
+		return ex.Wrapf(err, "creating a symbolic link for %s", path)
+	}
+	if err = util.RenameReplace(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return ex.Wrapf(err, "replacing %s with a symbolic link", path)
+	}
+	return nil
 }
 
 // Commit persists the tracked state to disk so it can be restored by a future
@@ -358,7 +493,10 @@ func (s *stateManager) Discard() error {
 // Revert restores all tracked files to the state they were in when tracked.
 //
 // Files that originally existed are restored from their snapshots. Files that
-// did not exist when tracked are removed if they exist.
+// did not exist when tracked are removed if they exist. A path that was a
+// symbolic link when tracked is a symbolic link again, with the same target.
+// A restored file gets the permissions of its snapshot, also when the file
+// is read-only.
 //
 // Revert never writes or removes through a symbolic link: a tracked path
 // that is a symbolic link now is replaced (restore) or removed itself, and a
@@ -373,14 +511,22 @@ func (s *stateManager) Revert() error {
 	stateDir := util.GetBuildTemp(stateDir)
 
 	scope := newStateScope()
+	// Restore the paths in sorted order: a directory comes before the paths
+	// in it. Thus, when a snapshot makes a directory a symbolic link again,
+	// the check of a path in it sees the link.
+	paths := make([]string, 0, len(s.files))
+	for path := range s.files {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
 	created := make([]string, 0, len(s.files))
-	for path, existed := range s.files {
-		if linkErr := s.checkNoLinkedParent(scope, path); linkErr != nil {
-			err = ex.Join(err, linkErr)
+	for _, path := range paths {
+		if !s.files[path] {
+			created = append(created, path)
 			continue
 		}
-		if !existed {
-			created = append(created, path)
+		if linkErr := s.checkNoLinkedParent(scope, path); linkErr != nil {
+			err = ex.Join(err, linkErr)
 			continue
 		}
 
@@ -390,8 +536,15 @@ func (s *stateManager) Revert() error {
 
 	// Remove the created paths in reverse order: a path inside a directory
 	// sorts after the directory, so the files go before their directories.
-	sort.Sort(sort.Reverse(sort.StringSlice(created)))
+	// Each path is examined immediately before its removal, after all the
+	// restores: a restored symbolic link can be a parent directory of the
+	// path now, and otelc must not remove a file at the target of the link.
+	slices.Reverse(created)
 	for _, path := range created {
+		if linkErr := s.checkNoLinkedParent(scope, path); linkErr != nil {
+			err = ex.Join(err, linkErr)
+			continue
+		}
 		err = ex.Join(err, removeCreated(path))
 	}
 
@@ -400,8 +553,9 @@ func (s *stateManager) Revert() error {
 
 // checkNoLinkedParent returns an error when a parent directory of path is a
 // symbolic link now: a change below this directory changes files at the
-// target of the link. For a path in the otelc work directory, all the parent
-// directories below it are checked. The go.work.sum file of the workspace is
+// target of the link. For a path in the otelc work directory or in its
+// module root (see stateScope), all the parent directories below this root
+// are checked. The go.work.sum file of the workspace is
 // in a directory of the user, and only the file itself is replaced (see
 // restoreSnapshot). For a different path (only in the build that tracked
 // it), the parent directories that are tracked are checked.
@@ -426,16 +580,38 @@ func (s *stateManager) checkNoLinkedParent(scope stateScope, path string) error 
 	return nil
 }
 
-// restoreSnapshot copies the snapshot src to path. When path is a symbolic
-// link now, otelc does not write through it: the link is replaced by a
-// regular file, and its target does not change.
+// restoreSnapshot replaces path atomically with the snapshot src. When the
+// snapshot is a symbolic link, path becomes a symbolic link with the same
+// target. Else path becomes a regular file with the contents and the
+// permissions of the snapshot, also when path is read-only now.
+//
+// The snapshot is not trusted (see loadStateManager), but the caller makes
+// sure that path is in the scope. When path is a symbolic link now, otelc
+// does not write through it: the link is replaced, and its target does not
+// change.
 func restoreSnapshot(src, path string) error {
-	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		if rmErr := os.Remove(path); rmErr != nil {
-			return ex.Wrapf(rmErr, "removing the symbolic link %s", path)
-		}
+	srcInfo, err := os.Lstat(src)
+	if err != nil {
+		return ex.Wrapf(err, "reading the snapshot of %s", path)
 	}
-	return util.CopyFile(src, path)
+	if err = os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return ex.Wrapf(err, "creating the directory of %s", path)
+	}
+	if srcInfo.Mode()&os.ModeSymlink != 0 {
+		var target string
+		if target, err = os.Readlink(src); err == nil {
+			err = replaceWithSymlink(target, path)
+		}
+	} else {
+		err = replaceWithCopy(src, path)
+	}
+	if err != nil {
+		if info, lstatErr := os.Lstat(path); lstatErr == nil && info.Mode()&os.ModeSymlink != 0 {
+			return ex.Wrapf(err, "replacing the symbolic link %s", path)
+		}
+		return ex.Wrapf(err, "restoring %s", path)
+	}
+	return nil
 }
 
 // removeCreated removes a file or a directory that did not exist when it was

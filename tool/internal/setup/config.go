@@ -94,10 +94,13 @@ func resolveInstrumentationConfigs(
 	ctx, cancel := context.WithTimeout(ctx, packagesLoadTimeout)
 	defer cancel()
 
+	// otelc can have changed go.mod before this load, so the load uses the
+	// -mod flag of the build (see modBuildFlags).
 	pkgs, loadErr := packages.Load(&packages.Config{
-		Mode:    packages.NeedFiles | packages.NeedModule | packages.NeedName,
-		Context: ctx,
-		Dir:     dir,
+		Mode:       packages.NeedFiles | packages.NeedModule | packages.NeedName,
+		Context:    ctx,
+		Dir:        dir,
+		BuildFlags: modBuildFlags(ctx),
 	}, importPaths...)
 	if loadErr != nil {
 		return nil, ex.Wrapf(loadErr, "failed to load instrumentation packages")

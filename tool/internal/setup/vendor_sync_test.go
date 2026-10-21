@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -341,9 +342,9 @@ func TestVendorModeFlags(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte("module m\n\ngo 1.25.0\n"), 0o644))
 	mustWriteFile(t, filepath.Join(root, "vendor", "modules.txt"), "")
 	t.Setenv("GOWORK", "off")
-	assert.True(t, vendorMode(t.Context(), root, "build", nil))
-	assert.False(t, vendorMode(t.Context(), root, "build", []string{"-mod=mod"}))
-	assert.False(t, vendorMode(contextWithVendorMode(t.Context(), false), root, "build", nil),
+	assert.True(t, mustVendorMode(t.Context(), t, root, nil))
+	assert.False(t, mustVendorMode(t.Context(), t, root, []string{"-mod=mod"}))
+	assert.False(t, mustVendorMode(contextWithVendorMode(t.Context(), false), t, root, nil),
 		"the mode in the context wins")
 }
 
@@ -370,15 +371,26 @@ func TestCollectRulePackages(t *testing.T) {
 	mustWriteFile(t, filepath.Join(initDir, "init.go"),
 		"//go:build ignore\n\npackage main\n\nimport _ \""+util.OtelcPkgRoot+"/runtime\"\n")
 	ruleFile := filepath.Join(workDir, "rules.yaml")
+	// Each rule type can have imports. Only the function rules and the file
+	// rules name a hook package.
 	mustWriteFile(t, ruleFile, `version: "v1.0.0"
 hook_rule:
   target: example.com/lib
+  where:
+    func: Run
   do:
     - inject_hooks:
         before: Before
         path: "example.com/hooks"
+  imports:
+    hookimp: "example.com/hookimp"
 raw_rule:
   target: example.com/lib
+  where:
+    func: Run
+  do:
+    - inject_code:
+        raw: "_ = extra.V"
   imports:
     ctx: "context"
     extra: "example.com/extra"
@@ -388,16 +400,66 @@ file_rule:
     - add_file:
         file: init.go
         path: "`+util.OtelcInstRoot+`/init"
+struct_rule:
+  target: example.com/lib
+  struct: Server
+  new_field:
+    - name: Span
+      type: trace.Span
+  imports:
+    trace: "example.com/structimp"
+call_rule:
+  target: example.com/lib
+  function_call: net/http.Get
+  replace: "callimp.Get({{ . }})"
+  imports:
+    callimp: "example.com/callimp"
+lit_rule:
+  target: example.com/lib
+  struct_literal: example.com/lib.Client
+  field:
+    - name: Transport
+      value: litimp.T
+  imports:
+    litimp: "example.com/litimp"
+directive_rule:
+  target: example.com/lib
+  directive: otelc:span
+  template: "_ = dirimp.V"
+  imports:
+    dirimp: "example.com/dirimp"
+decl_rule:
+  target: example.com/lib
+  identifier: DefaultClient
+  replace: declimp.Client
+  imports:
+    declimp: "example.com/declimp"
 `)
 	set := map[string]bool{}
-	require.NoError(t, collectRulePackages(ruleFile, set))
+	require.NoError(t, collectRulePackages(ruleFile, set, &hookSources{user: &modulesTxt{}}))
 	assert.Equal(t, map[string]bool{
 		"example.com/hooks":            true,
+		"example.com/hookimp":          true,
 		"context":                      true,
 		"example.com/extra":            true,
 		util.OtelcInstRoot + "/init":   true,
 		util.OtelcPkgRoot + "/runtime": true,
+		"example.com/structimp":        true,
+		"example.com/callimp":          true,
+		"example.com/litimp":           true,
+		"example.com/dirimp":           true,
+		"example.com/declimp":          true,
 	}, set)
+
+	// The typed loader rejects a rule that the instrumentation cannot use.
+	mustWriteFile(t, ruleFile, "bad_rule:\n  target: example.com/lib\n  imports:\n    x: example.com/x\n")
+	err := collectRulePackages(ruleFile, map[string]bool{}, &hookSources{user: &modulesTxt{}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no recognised selector")
+	mustWriteFile(t, ruleFile, "a: [")
+	require.Error(t, collectRulePackages(ruleFile, map[string]bool{}, &hookSources{user: &modulesTxt{}}))
+	require.Error(t, collectRulePackages(filepath.Join(workDir, "absent.yaml"), map[string]bool{},
+		&hookSources{user: &modulesTxt{}}))
 }
 
 func TestEmbeddedSourceDir(t *testing.T) {
@@ -413,6 +475,8 @@ func TestEmbeddedSourceDir(t *testing.T) {
 	assert.False(t, ok)
 	_, ok = embeddedSourceDir("example.com/x")
 	assert.False(t, ok)
+	_, ok = embeddedSourceDir(util.OtelcInstRoot + "/net/../net/http")
+	assert.False(t, ok, "an import path with .. is not valid")
 
 	assert.True(t, isInVendorDir(filepath.Join(workDir, "vendor", "example.com", "x")))
 	assert.False(t, isInVendorDir(instDir))
@@ -427,8 +491,9 @@ func TestVendorSyncNothingToAdd(t *testing.T) {
 	require.NoError(t, extractOtelcBundle())
 
 	imports := map[string]bool{util.OtelcInstRoot + "/net/http/server": true}
-	needed, err := vendorScratchImports(imports)
+	scratchImports, err := vendorScratchImports(imports, &hookSources{moduleDir: workDir, user: &modulesTxt{}})
 	require.NoError(t, err)
+	needed := scratchImports.packages
 	require.Contains(t, needed, util.OtelcInstRoot+"/net/http/server")
 
 	// The otelc packages are in an otelc module with the fingerprint of this
@@ -588,10 +653,10 @@ func TestVendorModeQuotedGoflags(t *testing.T) {
 	for _, goflags := range []string{`'-mod=readonly'`, `"-mod=mod"`, `-trimpath '-mod=readonly'`} {
 		t.Setenv("GOFLAGS", goflags)
 		assert.NotEmpty(t, lastModFlag("build", nil), goflags)
-		assert.False(t, vendorMode(t.Context(), root, "build", nil), goflags)
+		assert.False(t, mustVendorMode(t.Context(), t, root, nil), goflags)
 	}
 	t.Setenv("GOFLAGS", `'-mod=vendor'`)
-	assert.True(t, vendorMode(t.Context(), root, "build", nil))
+	assert.True(t, mustVendorMode(t.Context(), t, root, nil))
 }
 
 // The tests below run vendorSync with real go commands, but with no network:
@@ -649,6 +714,11 @@ func newTestProxy(t *testing.T, mods ...proxyModule) string {
 //   - example.com/newgo needs go 1.26.0.
 //   - example.com/hookpriv imports corp.example/private/sub, which no proxy
 //     has.
+//   - example.com/embedlib v1.0.0 and v1.1.0 embed assets/* (a
+//     subdirectory): v1.0.0 has assets/old.txt, v1.1.0 has assets/new.txt.
+//   - example.com/embedhook imports embedlib (v1.0.0), and embeds data/*.
+//   - example.com/embedhooknew imports embedlib and requires v1.1.0.
+//   - example.com/ruledep and example.com/tooldep have no dependencies.
 func testProxyModules() []proxyModule {
 	goMod := func(path string, requires ...string) string {
 		var out strings.Builder
@@ -704,7 +774,44 @@ func testProxyModules() []proxyModule {
 			goModFileName: goMod("example.com/hookpriv", "corp.example/private v1.0.0"),
 			"hook.go":     "package hookpriv\n\nimport _ \"corp.example/private/sub\"\n",
 		}},
+		{path: "example.com/embedlib", version: "v1.0.0", files: map[string]string{
+			goModFileName:    goMod("example.com/embedlib"),
+			"embedlib.go":    embedSource("embedlib", "assets/*", ""),
+			"assets/old.txt": "old",
+		}},
+		{path: "example.com/embedlib", version: "v1.1.0", files: map[string]string{
+			goModFileName:    goMod("example.com/embedlib"),
+			"embedlib.go":    embedSource("embedlib", "assets/*", ""),
+			"assets/new.txt": "new",
+		}},
+		{path: "example.com/embedhook", version: "v1.0.0", files: map[string]string{
+			goModFileName: goMod("example.com/embedhook", "example.com/embedlib v1.0.0"),
+			"hook.go":     embedSource("embedhook", "data/*", "example.com/embedlib"),
+			"data/d.txt":  "data",
+		}},
+		{path: "example.com/embedhooknew", version: "v1.0.0", files: map[string]string{
+			goModFileName: goMod("example.com/embedhooknew", "example.com/embedlib v1.1.0"),
+			"hook.go":     "package embedhooknew\n\nimport _ \"example.com/embedlib\"\n",
+		}},
+		{path: "example.com/ruledep", version: "v1.0.0", files: map[string]string{
+			goModFileName: goMod("example.com/ruledep"),
+			"ruledep.go":  "package ruledep\n",
+		}},
+		{path: "example.com/tooldep", version: "v1.0.0", files: map[string]string{
+			goModFileName: goMod("example.com/tooldep"),
+			"tooldep.go":  "package tooldep\n",
+		}},
 	}
+}
+
+// embedSource returns a Go file of package name that embeds the files of
+// pattern, and that imports imp (if not "").
+func embedSource(name, pattern, imp string) string {
+	src := "package " + name + "\n\nimport (\n\t\"embed\"\n"
+	if imp != "" {
+		src += "\n\t_ \"" + imp + "\"\n"
+	}
+	return src + ")\n\n//go:embed " + pattern + "\nvar Files embed.FS\n"
 }
 
 // patchedDep is the content of the vendored dep.go file of the test app: the
@@ -1163,9 +1270,12 @@ func TestEmbeddedSourceDirRoots(t *testing.T) {
 	}
 
 	set := map[string]bool{}
-	require.NoError(t, collectFileImports(util.OtelcPkgRoot+"/runtime", "absent.go", set))
+	require.NoError(
+		t,
+		collectFileImports(util.OtelcPkgRoot+"/runtime", "absent.go", set, &hookSources{user: &modulesTxt{}}),
+	)
 	assert.Empty(t, set, "a file that does not exist adds no imports")
-	require.NoError(t, collectFileImports("example.com/other", "a.go", set))
+	require.NoError(t, collectFileImports("example.com/other", "a.go", set, &hookSources{user: &modulesTxt{}}))
 	assert.Empty(t, set, "a package that is not in the bundle adds no imports")
 }
 
@@ -1322,11 +1432,13 @@ func TestVendorSyncFailures(t *testing.T) {
 		)
 	})
 
-	t.Run("a vendored file cannot be read", func(t *testing.T) {
+	// The copy of vendor/ uses hard links, so it does not read the vendored
+	// files. It must read the vendored directories.
+	t.Run("a vendored directory cannot be read", func(t *testing.T) {
 		appDir := newVendorSyncApp(t)
-		file := filepath.Join(appDir, "vendor", "example.com", "dep", "dep.go")
-		require.NoError(t, os.Chmod(file, 0o000))
-		t.Cleanup(func() { _ = os.Chmod(file, 0o644) })
+		dir := filepath.Join(appDir, "vendor", "example.com", "dep")
+		require.NoError(t, os.Chmod(dir, 0o300))
+		t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
 		require.Error(t, vendorSync(t.Context(), map[string]bool{"example.com/extra": true}, appDir))
 	})
 
@@ -1358,5 +1470,447 @@ func TestCollectFileImportsBadFile(t *testing.T) {
 	t.Setenv(util.EnvOtelcWorkDir, workDir)
 	dir := filepath.Join(workDir, util.BuildTempDir, unzippedPkgDir, "bad")
 	mustWriteFile(t, filepath.Join(dir, "bad.go"), "this is not Go")
-	require.Error(t, collectFileImports(util.OtelcPkgRoot+"/bad", "bad.go", map[string]bool{}))
+	require.Error(
+		t,
+		collectFileImports(util.OtelcPkgRoot+"/bad", "bad.go", map[string]bool{}, &hookSources{user: &modulesTxt{}}),
+	)
+}
+
+// vendoredTestModule is a module that addVendoredModule adds to an app.
+type vendoredTestModule struct {
+	path    string
+	version string
+	// replace is the directory of a replace of all the versions, or "".
+	replace string
+	pkgs    []string
+	// files are the files below vendor/<path>, with slash-separated names.
+	files map[string]string
+}
+
+// addVendoredModule adds a vendored module to the app of newVendorSyncApp:
+// a require (and a replace, if mod.replace is not "") in go.mod, a block in
+// vendor/modules.txt, and the files.
+func addVendoredModule(t *testing.T, appDir string, mod vendoredTestModule) {
+	t.Helper()
+	goMod := readAppFile(t, appDir, goModFileName) + "\nrequire " + mod.path + " " + mod.version + "\n"
+	block := "# " + mod.path + " " + mod.version
+	if mod.replace != "" {
+		goMod += "\nreplace " + mod.path + " => " + mod.replace + "\n"
+		block += " => " + mod.replace
+	}
+	mustWriteFile(t, filepath.Join(appDir, goModFileName), goMod)
+	block += "\n## explicit; go 1.21\n" + strings.Join(mod.pkgs, "\n") + "\n"
+	if mod.replace != "" {
+		// "go mod vendor" writes a replacement-only line for a replace
+		// without a version.
+		block += "# " + mod.path + " => " + mod.replace + "\n"
+	}
+	mustWriteFile(t, filepath.Join(appDir, vendorDirName, modulesTxtFileName),
+		readAppFile(t, appDir, "vendor/modules.txt")+block)
+	for name, content := range mod.files {
+		mustWriteFile(t, filepath.Join(appDir, vendorDirName, filepath.FromSlash(mod.path), filepath.FromSlash(name)),
+			content)
+	}
+}
+
+// vendoredEmbedLib is example.com/embedlib v1.0.0 (see testProxyModules).
+func vendoredEmbedLib() vendoredTestModule {
+	return vendoredTestModule{
+		path: "example.com/embedlib", version: "v1.0.0", pkgs: []string{"example.com/embedlib"},
+		files: map[string]string{
+			"embedlib.go":    embedSource("embedlib", "assets/*", ""),
+			"assets/old.txt": "old",
+		},
+	}
+}
+
+// TestVendorSyncEmbeddedSubdirectories: "go mod vendor" copies the files that
+// a package embeds, also in subdirectories. otelc must copy them too: from
+// vendor/ to the scratch module (a vendored module with embedded files), and
+// from the scratch module to vendor/ (a hook module with embedded files).
+// Else the scratch module or the build fails with "pattern ...: no matching
+// files found".
+func TestVendorSyncEmbeddedSubdirectories(t *testing.T) {
+	appDir := newVendorSyncApp(t)
+	addVendoredModule(t, appDir, vendoredEmbedLib())
+	requireVendorBuild(t, appDir, "example.com/embedlib")
+
+	require.NoError(t, vendorSync(t.Context(), map[string]bool{"example.com/embedhook": true}, appDir))
+	assert.Equal(t, "data", readAppFile(t, appDir, "vendor/example.com/embedhook/data/d.txt"),
+		"the embedded file of the hook module is copied to vendor/")
+	assert.Equal(t, "old", readAppFile(t, appDir, "vendor/example.com/embedlib/assets/old.txt"))
+	requireVendorBuild(t, appDir, "example.com/embedhook")
+}
+
+// TestVendorSyncUpdateEmbeddedSubdirectories: otelc vendor updates a module
+// with embedded files in a subdirectory. The old embedded files are removed,
+// and the new ones are copied.
+func TestVendorSyncUpdateEmbeddedSubdirectories(t *testing.T) {
+	appDir := newVendorSyncApp(t)
+	addVendoredModule(t, appDir, vendoredEmbedLib())
+
+	require.NoError(t, vendorSync(contextWithVendorUpdate(t.Context()),
+		map[string]bool{"example.com/embedhooknew": true}, appDir))
+	assert.Contains(t, readAppFile(t, appDir, "vendor/modules.txt"), "# example.com/embedlib v1.1.0\n")
+	assert.Equal(t, "new", readAppFile(t, appDir, "vendor/example.com/embedlib/assets/new.txt"))
+	assert.NoFileExists(t, filepath.Join(appDir, "vendor", "example.com", "embedlib", "assets", "old.txt"),
+		"the embedded file of the old version is removed")
+	requireVendorBuild(t, appDir, "example.com/embedhooknew")
+}
+
+// localInstrumentationRules is a rule file of local instrumentation: the hook
+// package is hooksPath.
+func localInstrumentationRules(hooksPath string) string {
+	return `version: "v1.0.0"
+local_rule:
+  target: example.com/dep
+  where:
+    func: Run
+  do:
+    - inject_hooks:
+        before: Before
+        path: "` + hooksPath + `"
+`
+}
+
+// TestVendorSyncMainModuleInstrumentation: otel.instrumentation.go imports
+// local instrumentation that is a package of the main module. Its rules name
+// a hook package of the main module. The scratch module cannot import the
+// packages of the main module, so otelc adds their imports: the imports of
+// the hook package (example.com/ruledep) and of the instrumentation package
+// (example.com/extra). The main module never goes into vendor/modules.txt or
+// go.mod.
+func TestVendorSyncMainModuleInstrumentation(t *testing.T) {
+	appDir := newVendorSyncApp(t)
+	mustWriteFile(
+		t,
+		filepath.Join(appDir, "instr", "instr.go"),
+		"package instr\n\nimport (\n\t\"fmt\"\n\n\t_ \"example.com/app/instr/shared\"\n\t_ \"example.com/extra\"\n)\n\nvar _ = fmt.Sprint\n",
+	)
+	mustWriteFile(t, filepath.Join(appDir, "instr", "instr_test.go"),
+		"package instr\n\nimport _ \"example.com/testonly\"\n")
+	mustWriteFile(t, filepath.Join(appDir, "instr", "ignored.go"),
+		"//go:build ignore\n\npackage main\n\nimport _ \"example.com/ignored\"\n")
+	mustWriteFile(t, filepath.Join(appDir, "instr", "shared", "shared.go"), "package shared\n")
+	mustWriteFile(t, filepath.Join(appDir, "instr", "otelc.yaml"),
+		localInstrumentationRules("example.com/app/hooks"))
+	mustWriteFile(t, filepath.Join(appDir, "hooks", "hooks.go"),
+		"package hooks\n\nimport _ \"example.com/ruledep\"\n\nfunc Before() {}\n")
+	goMod := readAppFile(t, appDir, goModFileName)
+
+	require.NoError(t, vendorSync(t.Context(), map[string]bool{"example.com/app/instr": true}, appDir))
+
+	modulesTxt := readAppFile(t, appDir, "vendor/modules.txt")
+	assert.Contains(t, modulesTxt, "# example.com/extra v1.0.0\n", "an import of the instrumentation package")
+	assert.Contains(t, modulesTxt, "# example.com/ruledep v1.0.0\n", "an import of the hook package of the rules")
+	assert.NotContains(t, modulesTxt, "example.com/app\n", "the main module is not vendored")
+	assert.NotContains(t, modulesTxt, "example.com/app ", "the main module is not vendored")
+	gotGoMod := readAppFile(t, appDir, goModFileName)
+	assert.NotContains(t, gotGoMod, "require example.com/app ", "the main module does not require itself")
+	assert.NotContains(t, gotGoMod, "\texample.com/app ", "the main module does not require itself")
+	assert.NotContains(t, gotGoMod, "replace example.com/app", "the main module is not replaced")
+	assert.NotEqual(t, goMod, gotGoMod)
+	requireVendorBuild(t, appDir, "example.com/app/instr", "example.com/app/hooks")
+
+	// vendor/ has all the imports now: a second run is fast, and makes no
+	// scratch module.
+	require.NoError(t, os.RemoveAll(util.GetBuildTemp(vendorScratchDir)))
+	before := appTree(t, appDir)
+	require.NoError(t, vendorSync(t.Context(), map[string]bool{"example.com/app/instr": true}, appDir))
+	assert.Equal(t, before, appTree(t, appDir))
+	assert.NoDirExists(t, util.GetBuildTemp(vendorScratchDir))
+}
+
+// addLocalInstrumentationModule adds the module example.com/localinst to the
+// app. go.mod replaces it with the directory ./localinst. vendor/ has only
+// its package example.com/localinst. Its rules name the hook package
+// example.com/localinst/hooks, which vendor/ does not have, and its tool file
+// imports example.com/tooldep.
+func addLocalInstrumentationModule(t *testing.T, appDir string) {
+	t.Helper()
+	const version = "v0.0.0-00010101000000-000000000000"
+	instr := "package localinst\n\nimport _ \"example.com/dep\"\n"
+	rules := localInstrumentationRules("example.com/localinst/hooks")
+	localDir := filepath.Join(appDir, "localinst")
+	mustWriteFile(t, filepath.Join(localDir, goModFileName), "module example.com/localinst\n\ngo 1.21\n")
+	mustWriteFile(t, filepath.Join(localDir, "localinst.go"), instr)
+	mustWriteFile(t, filepath.Join(localDir, "otelc.yaml"), rules)
+	mustWriteFile(t, filepath.Join(localDir, "hooks", "hooks.go"),
+		"package hooks\n\nimport _ \"example.com/ruledep\"\n\nfunc Before() {}\n")
+	mustWriteFile(t, filepath.Join(localDir, toolFileCanonical),
+		"//go:build tools\n\npackage tools\n\nimport _ \"example.com/tooldep\"\n")
+	addVendoredModule(t, appDir, vendoredTestModule{
+		path: "example.com/localinst", version: version, replace: "./localinst",
+		pkgs: []string{"example.com/localinst"},
+		files: map[string]string{
+			"localinst.go":    instr,
+			"otelc.yaml":      rules,
+			toolFileCanonical: "//go:build tools\n\npackage tools\n\nimport _ \"example.com/tooldep\"\n",
+		},
+	})
+}
+
+// TestVendorSyncLocalModuleInstrumentation: otel.instrumentation.go imports
+// local instrumentation in a nested module that go.mod replaces with a local
+// directory (like test/apps/gincustom). Its hook package is not in vendor/,
+// and the go command cannot download the module. The scratch module uses the
+// local directory, so it finds the hook package. The rules and the tool file
+// of the module add their packages.
+func TestVendorSyncLocalModuleInstrumentation(t *testing.T) {
+	appDir := newVendorSyncApp(t)
+	addLocalInstrumentationModule(t, appDir)
+	requireVendorBuild(t, appDir, "example.com/localinst")
+
+	require.NoError(t, vendorSync(t.Context(), map[string]bool{"example.com/localinst": true}, appDir))
+
+	modulesTxt := readAppFile(t, appDir, "vendor/modules.txt")
+	assert.Contains(t, modulesTxt,
+		"# example.com/localinst v0.0.0-00010101000000-000000000000 => ./localinst\n"+
+			"## explicit; go 1.21\nexample.com/localinst\nexample.com/localinst/hooks\n",
+		"the hook package comes from the local directory; the replacement of the user stays")
+	assert.FileExists(t, filepath.Join(appDir, "vendor", "example.com", "localinst", "hooks", "hooks.go"))
+	assert.Contains(t, modulesTxt, "# example.com/ruledep v1.0.0\n", "an import of the hook package")
+	assert.Contains(t, modulesTxt, "# example.com/tooldep v1.0.0\n", "an import of the tool file of the module")
+	goMod := readAppFile(t, appDir, goModFileName)
+	assert.Contains(t, goMod, "replace example.com/localinst => ./localinst")
+	assert.NotContains(t, goMod, filepath.ToSlash(appDir), "go.mod has no absolute path")
+	requireVendorBuild(t, appDir, "example.com/localinst/hooks", "example.com/tooldep")
+}
+
+// TestVendorSyncKeepsLocalOtelcPathModule: a module below the otelc module
+// path that go.mod replaces with a local directory (like the instrumentation
+// module of test/apps/gincustom) is code of the user. It is not a stale otelc
+// module, so it stays in the scratch module.
+func TestVendorSyncKeepsLocalOtelcPathModule(t *testing.T) {
+	const localPath = util.OtelcRoot + "/test/apps/x/instrumentation"
+	user := mustParseModulesTxt(t, "# "+localPath+" v0.0.0-00010101000000-000000000000 => ./instrumentation\n"+
+		"## explicit; go 1.21\n"+localPath+"\n"+
+		"# "+util.OtelcRoot+"/other v0.1.0\n## explicit; go 1.21\n"+util.OtelcRoot+"/other\n")
+	assert.Empty(t, staleOtelcModules(user, []string{localPath}, nil, bundleFingerprint()))
+	assert.Equal(t, map[string]bool{util.OtelcRoot + "/other": true},
+		staleOtelcModules(user, []string{util.OtelcRoot + "/other"}, nil, bundleFingerprint()),
+		"an otelc module from a proxy is stale")
+}
+
+// TestVendorSyncChecksUserGoSum: the scratch module has the go.sum file of the
+// user. A module that the go command gets at the vendored version is checked
+// against it: a different content is an error.
+func TestVendorSyncChecksUserGoSum(t *testing.T) {
+	appDir := newVendorSyncApp(t)
+	const badSum = "example.com/dep v1.0.0 h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n"
+	mustWriteFile(t, filepath.Join(appDir, goSumFileName), badSum)
+	before := appTree(t, appDir)
+
+	// The hook code needs dep/sub, which vendor/ does not have: otelc gets
+	// example.com/dep v1.0.0.
+	err := vendorSync(t.Context(), map[string]bool{"example.com/hooksub": true}, appDir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "checksum mismatch")
+	assert.Equal(t, before, appTree(t, appDir))
+	assert.Equal(t, badSum, readAppFile(t, appDir, goSumFileName))
+}
+
+func TestWriteScratchGoSum(t *testing.T) {
+	moduleDir := t.TempDir()
+	scratchDir := t.TempDir()
+	require.NoError(t, writeScratchGoSum(moduleDir, scratchDir), "no go.sum: nothing to write")
+	assert.NoFileExists(t, filepath.Join(scratchDir, goSumFileName))
+
+	mustWriteFile(t, filepath.Join(moduleDir, goSumFileName), "example.com/dep v1.0.0 h1:user=")
+	require.NoError(t, writeScratchGoSum(moduleDir, scratchDir))
+	assert.Equal(t, "example.com/dep v1.0.0 h1:user=\n", readAppFile(t, scratchDir, goSumFileName))
+
+	// go mod tidy removed the line of the user, and added a different one.
+	mustWriteFile(t, filepath.Join(scratchDir, goSumFileName),
+		"example.com/dep v1.0.0 h1:other=\nexample.com/new v1.0.0 h1:new=\n")
+	require.NoError(t, writeScratchGoSum(moduleDir, scratchDir))
+	assert.Equal(
+		t,
+		"example.com/dep v1.0.0 h1:user=\nexample.com/dep v1.0.0 h1:other=\nexample.com/new v1.0.0 h1:new=\n",
+		readAppFile(t, scratchDir, goSumFileName),
+		"the lines of the user come first",
+	)
+
+	require.NoError(t, os.Remove(filepath.Join(moduleDir, goSumFileName)))
+	require.NoError(t, os.MkdirAll(filepath.Join(moduleDir, goSumFileName), 0o755))
+	require.Error(t, writeScratchGoSum(moduleDir, scratchDir), "go.sum is a directory")
+}
+
+func TestHookSources(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	moduleDir := filepath.Join(workDir, "app")
+	user := mustParseModulesTxt(t, `# example.com/app/nested v0.0.0-00010101000000-000000000000 => ./nested
+## explicit
+example.com/app/nested
+# example.com/abs v0.0.0-00010101000000-000000000000 => `+filepath.ToSlash(filepath.Join(workDir, "abs"))+`
+## explicit
+example.com/abs
+# example.com/wrongmod v0.0.0-00010101000000-000000000000 => ./wrongmod
+## explicit
+example.com/wrongmod
+# example.com/fork v1.0.0 => example.com/forked v1.0.1
+## explicit
+example.com/fork
+# example.com/lib v1.0.0
+## explicit
+example.com/lib
+`)
+	mustWriteFile(t, filepath.Join(moduleDir, "nested", goModFileName), "module example.com/app/nested\n")
+	mustWriteFile(t, filepath.Join(moduleDir, "nested", "sub", "sub.go"), "package sub\n")
+	mustWriteFile(t, filepath.Join(workDir, "abs", goModFileName), "module example.com/abs\n")
+	mustWriteFile(t, filepath.Join(moduleDir, "wrongmod", goModFileName), "module example.com/other\n")
+	mustWriteFile(t, filepath.Join(moduleDir, "pkg", "pkg.go"), "package pkg\n")
+	mustWriteFile(t, filepath.Join(moduleDir, vendorDirName, "example.com", "lib", "lib.go"), "package lib\n")
+	instDir := filepath.Join(workDir, util.BuildTempDir, unzippedInstDir)
+	mustWriteFile(t, filepath.Join(instDir, goModFileName), "module "+util.OtelcInstRoot+"\n")
+	mustWriteFile(t, filepath.Join(instDir, "net", "http", "http.go"), "package http\n")
+
+	localDirs := localModuleDirs(user, moduleDir)
+	assert.Equal(t, map[string]string{
+		"example.com/app/nested": filepath.Join(moduleDir, "nested"),
+		"example.com/abs":        filepath.Join(workDir, "abs"),
+	}, localDirs, "only directory replacements with the right module path")
+
+	h := &hookSources{moduleDir: moduleDir, mainPath: "example.com/app", user: user, localDirs: localDirs}
+	for importPath, want := range map[string]packageSource{
+		"example.com/app/pkg":        {dir: filepath.Join(moduleDir, "pkg"), moduleDir: moduleDir},
+		"example.com/app/nested/sub": {dir: filepath.Join(moduleDir, "nested", "sub"), moduleDir: filepath.Join(moduleDir, "nested")},
+		"example.com/lib": {
+			dir:       filepath.Join(moduleDir, vendorDirName, "example.com", "lib"),
+			moduleDir: filepath.Join(moduleDir, vendorDirName, "example.com", "lib"),
+		},
+		util.OtelcInstRoot + "/net/http": {dir: filepath.Join(instDir, "net", "http"), moduleDir: instDir},
+	} {
+		got, ok := h.packageDir(importPath)
+		assert.True(t, ok, importPath)
+		assert.Equal(t, want, got, importPath)
+	}
+	for _, importPath := range []string{
+		"example.com/app/absent", "example.com/unknown", "example.com/fork",
+		"example.com/app/../app/pkg", util.OtelcInstRoot + "/../../../app/pkg",
+	} {
+		_, ok := h.packageDir(importPath)
+		assert.False(t, ok, importPath)
+	}
+	assert.True(t, h.isMainPackage("example.com/app/pkg"))
+	assert.True(t, h.isMainPackage("example.com/app"))
+	assert.False(t, h.isMainPackage("example.com/app/nested/sub"), "the longest module path wins")
+	assert.False(t, h.isMainPackage("example.com/application"))
+	assert.False(t, h.isMainPackage("example.com/lib"))
+
+	assert.True(t, isDirReplacement("./x"))
+	assert.True(t, isDirReplacement("../x"))
+	assert.True(t, isDirReplacement("/abs/x"))
+	assert.False(t, isDirReplacement(""))
+	assert.False(t, isDirReplacement("example.com/forked v1.0.1"))
+}
+
+func TestPackageImports(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "a.go"), "package a\n\nimport (\n\t\"fmt\"\n\t_ \"example.com/a\"\n)\n")
+	mustWriteFile(t, filepath.Join(dir, "linux.go"),
+		"//go:build linux && !cgo\n\npackage a\n\nimport _ \"example.com/linux\"\n")
+	mustWriteFile(t, filepath.Join(dir, "notignore.go"),
+		"//go:build !ignore\n\npackage a\n\nimport _ \"example.com/notignore\"\n")
+	mustWriteFile(t, filepath.Join(dir, "ignore.go"),
+		"// A comment.\n\n//go:build ignore\n\npackage main\n\nimport _ \"example.com/ignored\"\n")
+	mustWriteFile(t, filepath.Join(dir, "ignoreor.go"),
+		"//go:build ignore || tools\n\npackage a\n\nimport _ \"example.com/tools\"\n")
+	mustWriteFile(t, filepath.Join(dir, "a_test.go"), "package a\n\nimport _ \"example.com/test\"\n")
+	mustWriteFile(t, filepath.Join(dir, "_hidden.go"), "package a\n\nimport _ \"example.com/hidden\"\n")
+	mustWriteFile(t, filepath.Join(dir, "notes.txt"), "import _ \"example.com/txt\"\n")
+
+	imports, err := packageImports(dir)
+	require.NoError(t, err)
+	slices.Sort(imports)
+	assert.Equal(t, []string{"example.com/a", "example.com/linux", "example.com/notignore", "example.com/tools", "fmt"},
+		imports, "all the build tags but ignore; no test files")
+
+	imports, err = packageImports(filepath.Join(dir, "absent"))
+	require.NoError(t, err)
+	assert.Empty(t, imports)
+
+	mustWriteFile(t, filepath.Join(dir, "bad.go"), "not Go")
+	_, err = packageImports(dir)
+	require.Error(t, err)
+}
+
+// TestVendorScratchImportsNestedToolFile: the tool file in the module of an
+// instrumentation package adds its imports, and their rules, like
+// walkInstrumentation does. The tool file imports are the instrumentation
+// packages (toolImports).
+func TestVendorScratchImportsNestedToolFile(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	moduleDir := filepath.Join(workDir, "app")
+	localDir := filepath.Join(moduleDir, "local")
+	mustWriteFile(t, filepath.Join(localDir, goModFileName), "module example.com/local\n")
+	mustWriteFile(t, filepath.Join(localDir, toolFileCanonical),
+		"//go:build tools\n\npackage tools\n\nimport _ \"example.com/other\"\n")
+	mustWriteFile(t, filepath.Join(moduleDir, vendorDirName, "example.com", "other", "otelc.yaml"),
+		localInstrumentationRules("example.com/other/hooks"))
+	user := mustParseModulesTxt(t, "# example.com/local v0.0.0-00010101000000-000000000000 => ./local\n"+
+		"## explicit\nexample.com/local\n# example.com/other v1.0.0\n## explicit\nexample.com/other\n")
+	h := &hookSources{
+		moduleDir: moduleDir, mainPath: "example.com/app", user: user,
+		localDirs: localModuleDirs(user, moduleDir),
+	}
+
+	got, err := vendorScratchImports(map[string]bool{"example.com/local": true}, h)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"example.com/local", "example.com/other", "example.com/other/hooks"}, got.packages)
+	assert.Equal(t, map[string]bool{"example.com/local": true, "example.com/other": true}, got.toolImports)
+
+	mustWriteFile(t, filepath.Join(localDir, toolFileCanonical),
+		"//go:build tools\n\npackage tools\n\nimport x \"example.com/other\"\n\nvar _ = x.V\n")
+	_, err = vendorScratchImports(map[string]bool{"example.com/local": true}, h)
+	require.Error(t, err, "a named import in a tool file")
+}
+
+// TestExpandMainPackagesWithoutDot: the path of the main module can have no
+// dot. Its packages are not packages of the standard library.
+func TestExpandMainPackagesWithoutDot(t *testing.T) {
+	moduleDir := t.TempDir()
+	mustWriteFile(t, filepath.Join(moduleDir, "instr", "instr.go"),
+		"package instr\n\nimport (\n\t\"fmt\"\n\n\t_ \"myapp/instr/shared\"\n)\n\nvar _ = fmt.Sprint\n")
+	mustWriteFile(t, filepath.Join(moduleDir, "instr", "shared", "shared.go"),
+		"package shared\n\nimport _ \"example.com/lib\"\n")
+	h := &hookSources{moduleDir: moduleDir, mainPath: "myapp", user: &modulesTxt{}}
+
+	got, err := vendorScratchImports(map[string]bool{"myapp/instr": true}, h)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"example.com/lib"}, got.packages)
+}
+
+// TestPackageImportsBuildConstraints: packageImports reads the build
+// constraints like "go mod vendor": both the //go:build form and the legacy
+// "// +build" form. A file with the "ignore" tag has no imports. All the other
+// tags (and their negations) match.
+func TestPackageImportsBuildConstraints(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"plain.go":          "package p\n\nimport _ \"example.com/plain\"\n",
+		"goignore.go":       "//go:build ignore\n\npackage p\n\nimport _ \"example.com/goignore\"\n",
+		"plusignore.go":     "// +build ignore\n\npackage p\n\nimport _ \"example.com/plusignore\"\n",
+		"plusignoreand.go":  "// +build linux\n// +build ignore\n\npackage p\n\nimport _ \"example.com/plusignoreand\"\n",
+		"pluslinux.go":      "// +build linux,!windows\n\npackage p\n\nimport _ \"example.com/pluslinux\"\n",
+		"plusnotignore.go":  "// +build !ignore\n\npackage p\n\nimport _ \"example.com/plusnotignore\"\n",
+		"gobuildwins.go":    "//go:build linux\n// +build ignore\n\npackage p\n\nimport _ \"example.com/gobuildwins\"\n",
+		"plusdoccomment.go": "// +build ignore\npackage p\n\nimport _ \"example.com/plusdoccomment\"\n",
+	}
+	for name, content := range files {
+		mustWriteFile(t, filepath.Join(dir, name), content)
+	}
+
+	imports, err := packageImports(dir)
+	require.NoError(t, err)
+	slices.Sort(imports)
+	assert.Equal(t, []string{
+		"example.com/gobuildwins",
+		"example.com/plain",
+		"example.com/plusdoccomment",
+		"example.com/pluslinux",
+		"example.com/plusnotignore",
+	}, imports)
 }

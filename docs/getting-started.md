@@ -105,7 +105,10 @@ If no instrumentation file exists, `otelc go build` automatically analyzes the a
 
 ## Vendored Projects
 
-When your module has a `vendor/` directory, `otelc` keeps vendor mode. Your
+When your module has a `vendor/` directory, `otelc` keeps vendor mode in the
+same cases as the go command: `go.mod` has go 1.14 or higher, the build is
+not in workspace mode, and no `-mod=mod` or `-mod=readonly` flag is set (see
+[the go version rules](#go-version-for-vendor-mode) below). Your
 dependencies come from `vendor/`, and `otelc` keeps your changes to vendored
 files: it never replaces a file that is in `vendor/`.
 
@@ -134,13 +137,20 @@ otelc vendor
 ```
 
 `otelc vendor` writes `otel.instrumentation.go`, and adds the modules to
-`vendor/`, `go.mod` and `go.sum`. Commit these changes. Then `otelc go build`
-and `go build` work without network.
+`vendor/`, `go.mod` and `go.sum`. You can commit these files, but know what
+works in a new checkout (a checkout without `.otelc-build/`):
 
-The `replace` directives that `otelc vendor` adds point to `./.otelc-build`,
-which you do not commit. The go commands that read these directories
-(`go mod vendor`, `go mod tidy`, `go mod verify`) fail without it, for example
-in a new checkout. Run `otelc vendor` first: it makes the directory again.
+- `otelc go build` and `go build` work, also without network.
+- `go mod tidy`, `go mod vendor` and `go mod verify` fail. The `replace`
+  directives that `otelc vendor` adds point to `./.otelc-build`, which you do
+  not commit, and these commands read the directories. Run `otelc vendor`
+  first: it makes the directory again. This also applies to tools that run
+  these commands, for example Dependabot or a CI job.
+
+This stays until the instrumentation modules are published (see
+[#585](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/585)),
+the same as for `otelc pin` above.
+
 `go mod vendor` writes a new `vendor/modules.txt` without the `otelc-bundle`
 annotations (see below), so run `otelc vendor` again after `go mod vendor`.
 If `otelc vendor` fails, it reverts all its changes.
@@ -161,9 +171,25 @@ it). When a different `otelc` version builds the project, it finds that the
 otelc modules in `vendor/` are old, and adds its own modules for the time of
 the build. Run `otelc vendor` again after you update `otelc`.
 
-`otelc vendor` uses only the vendor directory (`-mod=vendor`), also for a
-`go.mod` with a go version lower than 1.14. It rejects `-mod=mod`,
+<a id="go-version-for-vendor-mode"></a>
+Vendor mode needs go 1.14 or higher in `go.mod`, as for the go command:
+
+- With a lower go version (or no `go` directive) and no `-mod` flag, the go
+  command does not use `vendor/`, so `otelc` does not use it either.
+- With a lower go version, `-mod=vendor` (in the arguments or in `GOFLAGS`)
+  and `otelc vendor` stop with an error. To fix it, run
+  `go mod edit -go=1.14 && go mod vendor`.
+
+`otelc vendor` uses only the vendor directory. It rejects `-mod=mod`,
 `-mod=readonly` and `-modfile`.
+
+`otelc` finds the vendor mode in the directory of the build: the `-C`
+directory when you give one, else the current directory. A `-mod` flag on the
+command line applies to all the go commands that `otelc` runs for the build.
+
+Custom rules (`--rules` or `OTELC_RULES`) also work in vendor mode: `otelc`
+adds the hook packages of the matched rules to `vendor/` for the time of the
+build, as for the built-in instrumentation.
 
 If the hook code (or one of its dependencies) needs a higher version of a
 module than the one in `vendor/`, `otelc go build` stops with a
@@ -175,9 +201,11 @@ Limitations:
 - The vendor directory of a workspace (`go work vendor`) is not supported.
   In workspace mode, `otelc` uses module mode.
 - For each build that adds modules to `vendor/`, `otelc` copies the vendored
-  packages of your modules into `.otelc-build/vendor-scratch`. With a large
-  `vendor/` directory, this uses disk space and time. After `otelc vendor`,
-  no copy is necessary.
+  packages of your modules into `.otelc-build/vendor-scratch`. On macOS
+  (APFS) the copies are clones, and on Linux hard links, when the file system
+  supports them; else they are full copies. With a large `vendor/` directory
+  (about 20,000 files), this step takes about 3 s on macOS, and less than
+  1 s on Linux with hard links. After `otelc vendor`, no copy is necessary.
 - `otelc` does not follow symbolic links in `vendor/`. A symbolic link at a
   path that `otelc` reads or writes stops the build. `otelc` checks the paths
   before it uses them. It does not protect against a different process that
