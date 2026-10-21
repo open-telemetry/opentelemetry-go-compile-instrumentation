@@ -908,6 +908,11 @@ func TestFindModVersion(t *testing.T) {
 			want: "v2.0.0-Beta.1",
 		},
 		{
+			name: "module cache path with invalid escape falls back to raw",
+			path: "/go/pkg/mod/github.com/foo/bar@v1.2.0-!/pkg/foo.go",
+			want: "v1.2.0-!",
+		},
+		{
 			name: "windows-style module cache path",
 			// Use /-separated form so this exercises the same path shape
 			// filepath.ToSlash produces on Windows, without depending on GOOS
