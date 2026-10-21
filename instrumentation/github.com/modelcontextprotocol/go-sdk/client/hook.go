@@ -6,7 +6,7 @@ package client
 import (
 	"context"
 	"errors"
-	"fmt"
+	"strconv"
 	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
@@ -149,9 +149,9 @@ func (c metaCarrier) Keys() []string {
 // return) and a successful response that reports a logical tool failure via
 // CallToolResult.IsError. Both mark the span as ERROR and both set error.type:
 // the IsError case uses the well-known value "tool_error" mandated by the
-// GenAI semantic conventions; a JSON-RPC error uses its wire code (e.g.
-// "jsonrpc_-32601"), and any other (transport) error uses the stable
-// low-cardinality value "transport_error".
+// GenAI semantic conventions; a JSON-RPC error uses its bare wire code string
+// (e.g. "-32601") for error.type and rpc.response.status_code, and any other
+// (transport) error uses the stable low-cardinality value "transport_error".
 func AfterCallTool(
 	ictx hook.HookContext,
 	result *mcp.CallToolResult,
@@ -166,12 +166,19 @@ func AfterCallTool(
 	switch {
 	case err != nil:
 		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
 		var rpcErr *jsonrpc.Error
 		if errors.As(err, &rpcErr) {
-			span.SetAttributes(attribute.String("error.type", fmt.Sprintf("jsonrpc_%d", rpcErr.Code)))
+			// JSON-RPC semconv: error.type carries the bare wire code string,
+			// and rpc.response.status_code records the error.code as a string.
+			code := strconv.FormatInt(rpcErr.Code, 10)
+			span.SetAttributes(
+				attribute.String("error.type", code),
+				attribute.String("rpc.response.status_code", code),
+			)
+			span.SetStatus(codes.Error, rpcErr.Message)
 		} else {
 			span.SetAttributes(attribute.String("error.type", "transport_error"))
+			span.SetStatus(codes.Error, err.Error())
 		}
 	case result != nil && result.IsError:
 		span.SetAttributes(attribute.String("error.type", mcpsemconv.ToolError))

@@ -138,7 +138,13 @@ func TestCallTool_JSONRPCErrorCarriesCode(t *testing.T) {
 	spans := sr.Ended()
 	require.Len(t, spans, 1)
 	assert.Equal(t, codes.Error, spans[0].Status().Code)
-	assert.Equal(t, "jsonrpc_-32601", spanAttrs(spans[0])["error.type"])
+	attrs := spanAttrs(spans[0])
+	// JSON-RPC semconv: error.type carries the bare wire code string, and
+	// rpc.response.status_code records the error.code as a string.
+	assert.Equal(t, "-32601", attrs["error.type"])
+	assert.Equal(t, "-32601", attrs["rpc.response.status_code"])
+	// The span status description uses the JSON-RPC message, not the wrapped error.
+	assert.Equal(t, "no such tool", spans[0].Status().Description)
 }
 
 func TestCallTool_IsErrorResult(t *testing.T) {
