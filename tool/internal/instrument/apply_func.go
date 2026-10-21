@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"go/parser"
 	"path/filepath"
+	"strings"
 
 	"github.com/dave/dst"
 
@@ -164,7 +165,7 @@ func createTrampArgs(names []string) []dst.Expr {
 	return exprs
 }
 
-func createTJumpIf(t *rule.InstFuncRule, funcDecl *dst.FuncDecl,
+func createTJumpIf(file *dst.File, t *rule.InstFuncRule, funcDecl *dst.FuncDecl,
 	args, retVals []string,
 ) *dst.IfStmt {
 	funcSuffix := t.Identity()
@@ -174,8 +175,9 @@ func createTJumpIf(t *rule.InstFuncRule, funcDecl *dst.FuncDecl,
 	argsToAfter = append([]dst.Expr{argHookContext}, argsToAfter...)
 	beforeCallName := makeName(t, funcDecl, true)
 	afterCallName := makeName(t, funcDecl, false)
-	beforeCall := ast.CallTo(beforeCallName, funcDecl.Type.TypeParams, argsToBefore)
-	afterCall := ast.CallTo(afterCallName, funcDecl.Type.TypeParams, argsToAfter)
+	typeParams := findTargetGenericType(file, funcDecl)
+	beforeCall := ast.CallTo(beforeCallName, typeParams, argsToBefore)
+	afterCall := ast.CallTo(afterCallName, typeParams, argsToAfter)
 	tjumpInit := ast.DefineStmts(
 		ast.Exprs(
 			ast.Ident(trampolineHookContextName+funcSuffix),
@@ -270,7 +272,7 @@ func (ip *instrumentPhase) insertTJump(t *rule.InstFuncRule, funcDecl *dst.FuncD
 	// the context, handles exceptions, etc, and ultimately jumps to the real
 	// hook code. By inserting trampoline-jump-if at the target function entry,
 	// we can intercept the original function and execute before/after hooks.
-	tjump := createTJumpIf(t, funcDecl, args, retVals)
+	tjump := createTJumpIf(ip.target, t, funcDecl, args, retVals)
 
 	// Record the trampoline-jump-if as they can be optimized later, they are
 	// performance-critical
@@ -338,6 +340,14 @@ func (ip *instrumentPhase) writeGlobals(pkgName string) error {
 func (ip *instrumentPhase) writeInstrumented(root *dst.File, oldFile string) error {
 	// Write the instrumented AST to the new file in the working directory
 	newFile := filepath.Join(ip.workDir, filepath.Base(oldFile))
+	if strings.HasSuffix(oldFile, ".cgo1.go") {
+		// The vet configuration refers to cgo's generated source. Preserve that
+		// source because vet must not analyze otelc's injected declarations.
+		vetFile := cgoVetSourcePath(oldFile)
+		if err := util.CopyFile(oldFile, vetFile); err != nil {
+			return ex.Wrapf(err, "preserving cgo source for vet %s", oldFile)
+		}
+	}
 	err := ast.WriteFile(newFile, root)
 	if err != nil {
 		return ex.Wrapf(err, "writing instrumented file %s", newFile)
@@ -380,20 +390,38 @@ func (ip *instrumentPhase) parseFile(file string) (*dst.File, error) {
 	return root, nil
 }
 
-func (ip *instrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFuncRule, root *dst.File) error {
-	funcDecl, ok, err := ast.FindFuncDecl(root, rule)
-	if err != nil {
-		return err
+// applyFuncRule instruments the function targeted by rule and reports whether a
+// trampoline was actually inserted (true) or the rule was skipped (false). The
+// bool lets the caller avoid writing an otelc.globals.go file for a package
+// whose only func rules were skipped via //otelc:ignore.
+func (ip *instrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFuncRule, root *dst.File,
+	funcDecl *dst.FuncDecl, found bool,
+) (bool, error) {
+	if !found {
+		return false, ex.Newf("can not find function %s", rule.Func)
 	}
-	if !ok {
-		return ex.Newf("can not find function %s", rule.Func)
+	var err error
+	// A function-level //otelc:ignore opts this function out even when a rule
+	// matches it. The func rule then contributes no instrumented function, so it
+	// must not force a globals file to be written for the package.
+	if ast.FuncLeadHasDirective(funcDecl, util.DirectiveIgnore) {
+		ip.Debug("Skip func rule due to //otelc:ignore", "func", rule.Func, "rule", rule.Name)
+		return false, nil
 	}
 
 	// Apply imports for every matching rule, including ones de-duplicated below:
 	// two rules with the same content identity may still declare different
 	// imports, and skipping them could drop an import the hook code needs.
-	if err = ip.addRuleImports(ctx, root, rule.Imports, rule.Name); err != nil {
-		return err
+	if err = ip.addRuleImports(ctx, root, usedRuleImports(root, rule.Imports, nil), rule.Name); err != nil {
+		return false, err
+	}
+
+	// Skip package runtime itself to avoid a self-import.
+	if ip.buildUsesIgnoreDirective && !ip.isSuppressHooksPackage() {
+		suppressImport := map[string]string{suppressHooksPackage: suppressHooksPackage}
+		if err = ip.addRuleImports(ctx, root, suppressImport, rule.Name); err != nil {
+			return false, err
+		}
 	}
 
 	// De-duplicate trampoline/HookContext emission for rules that resolve to the
@@ -404,16 +432,18 @@ func (ip *instrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFun
 	if _, seen := ip.appliedFuncIdentities[id]; seen {
 		ip.Debug("Skipping duplicate func rule trampoline (imports already applied)",
 			"rule", rule.Name, "func", rule.Func)
-		return nil
+		// The identical rule already inserted a trampoline for this function, so
+		// the function is instrumented and the globals file is still required.
+		return true, nil
 	}
 
 	if err = ip.insertTJump(rule, funcDecl); err != nil {
-		return err
+		return false, err
 	}
 	if ip.appliedFuncIdentities == nil {
 		ip.appliedFuncIdentities = make(map[string]struct{})
 	}
 	ip.appliedFuncIdentities[id] = struct{}{}
 	ip.Info("Apply func rule", "rule", rule)
-	return nil
+	return true, nil
 }

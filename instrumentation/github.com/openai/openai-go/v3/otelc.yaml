@@ -1,3 +1,5 @@
+version: "v1.0.0"
+
 openai_v3_new_client:
   target: github.com/openai/openai-go/v3
   where:

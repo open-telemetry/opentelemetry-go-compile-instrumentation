@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"reflect"
 	"strconv"
-	"strings"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -146,12 +145,13 @@ func (n HTTPClient) RequestTraceAttrs(req *http.Request) []attribute.KeyValue {
 
 	var u string
 	if req.URL != nil {
-		// Remove any username/password info that may be in the URL.
-		userinfo := req.URL.User
-		req.URL.User = nil
-		u = req.URL.String()
-		// Restore any username/password info that was removed.
-		req.URL.User = userinfo
+		// Redact on a copy: writing to the caller's URL would be visible to any
+		// other goroutine holding the same request. Removes userinfo and sensitive
+		// query values per the URL semantic conventions.
+		redacted := *req.URL
+		redacted.User = nil
+		redacted.RawQuery = redactQuery(redacted.RawQuery)
+		u = redacted.String()
 	}
 	attrs = append(attrs, semconv.URLFull(u))
 
@@ -221,18 +221,7 @@ func (HTTPClient) ErrorType(err error) attribute.KeyValue {
 
 // method returns the HTTP method attribute and optional original method attribute.
 func (HTTPClient) method(method string) (attribute.KeyValue, attribute.KeyValue) {
-	if method == "" {
-		return semconv.HTTPRequestMethodGet, attribute.KeyValue{}
-	}
-	if attr, ok := MethodLookup[method]; ok {
-		return attr, attribute.KeyValue{}
-	}
-
-	orig := semconv.HTTPRequestMethodOriginal(method)
-	if attr, ok := MethodLookup[strings.ToUpper(method)]; ok {
-		return attr, orig
-	}
-	return semconv.HTTPRequestMethodGet, orig
+	return requestMethodAttrs(method)
 }
 
 // MetricAttributes returns attributes for HTTP client metrics.
@@ -377,4 +366,10 @@ func HTTPClientStatus(code int) (codes.Code, string) {
 // HTTPClientErrorType returns the error.type attribute for a given error.
 func HTTPClientErrorType(err error) attribute.KeyValue {
 	return defaultHTTPClient.ErrorType(err)
+}
+
+// HTTPClientSpanName returns the span name for an HTTP client request.
+// Unknown methods use "HTTP" so names stay low-cardinality and match semconv.
+func HTTPClientSpanName(method string) string {
+	return SpanMethod(method)
 }

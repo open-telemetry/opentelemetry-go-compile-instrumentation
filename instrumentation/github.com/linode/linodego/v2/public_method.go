@@ -66,10 +66,6 @@ func beforeAPICall(ictx hook.HookContext, params ...interface{}) {
 }
 
 func afterAPICall(ictx hook.HookContext, err error) {
-	if !enabler.Enable() {
-		return
-	}
-
 	span, ok := ictx.GetKeyData(keySpan).(trace.Span)
 	if !ok || span == nil {
 		logger.Debug("AfterAPICall: no span from before hook")
@@ -85,9 +81,9 @@ func afterAPICall(ictx hook.HookContext, err error) {
 	}
 	serverAddress, _ := ictx.GetKeyData(keyServerAddress).(string)
 
-	statusCode := finishSpanWithError(span, err)
+	statusCode, errorType := finishSpanWithError(span, err)
 	if !start.IsZero() {
-		metrics.RecordOperationDuration(ctx, time.Since(start).Seconds(), operation, statusCode, serverAddress)
+		metrics.RecordOperationDuration(ctx, time.Since(start).Seconds(), operation, statusCode, errorType, serverAddress)
 	}
 
 	logger.Debug("AfterAPICall completed", "operation", operation)

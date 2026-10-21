@@ -9,16 +9,19 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"strings"
 	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 func TestShutdownSignals(t *testing.T) {
@@ -137,10 +140,113 @@ func TestShutdownProviders(t *testing.T) {
 	require.NoError(t, Shutdown(context.Background()))
 }
 
+type errLogProcessor struct{ err error }
+
+func (errLogProcessor) Enabled(context.Context, sdklog.EnabledParameters) bool { return true }
+func (errLogProcessor) OnEmit(context.Context, *sdklog.Record) error           { return nil }
+func (p errLogProcessor) Shutdown(context.Context) error                       { return p.err }
+func (errLogProcessor) ForceFlush(context.Context) error                       { return nil }
+
+type customErrSpanProcessor struct{ err error }
+
+func (customErrSpanProcessor) OnStart(context.Context, sdktrace.ReadWriteSpan) {}
+func (customErrSpanProcessor) OnEnd(sdktrace.ReadOnlySpan)                     {}
+func (customErrSpanProcessor) ForceFlush(context.Context) error                { return nil }
+func (p customErrSpanProcessor) Shutdown(context.Context) error                { return p.err }
+
+func TestShutdownMultipleErrors(t *testing.T) {
+	origTracer, origMeter, origLogger := tracerProvider, meterProvider, loggerProvider
+	t.Cleanup(func() { tracerProvider, meterProvider, loggerProvider = origTracer, origMeter, origLogger })
+
+	tracerErr := errors.New("tracer shutdown failed")
+	loggerErr := errors.New("logger shutdown failed")
+
+	tracerProvider = sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(customErrSpanProcessor{err: tracerErr}))
+	meterProvider = nil
+	loggerProvider = sdklog.NewLoggerProvider(sdklog.WithProcessor(errLogProcessor{err: loggerErr}))
+
+	err := Shutdown(context.Background())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, tracerErr)
+	assert.ErrorIs(t, err, loggerErr)
+}
+
 // restoreProviders resets the global providers after a test that configures them.
 func restoreProviders(t *testing.T) {
 	origTracer, origMeter, origLogger := tracerProvider, meterProvider, loggerProvider
 	t.Cleanup(func() { tracerProvider, meterProvider, loggerProvider = origTracer, origMeter, origLogger })
+}
+
+func TestNewResourceIncludesTelemetrySDK(t *testing.T) {
+	// WithFromEnv runs last in newResource, so OTEL_RESOURCE_ATTRIBUTES can
+	// override these values. Pin it to keep the test hermetic.
+	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "")
+
+	res := newResource(context.Background())
+	set := res.Set()
+
+	name, ok := set.Value(attribute.Key("telemetry.sdk.name"))
+	require.True(t, ok, "auto-configured resource must set telemetry.sdk.name")
+	assert.Equal(t, "opentelemetry", name.AsString())
+
+	lang, ok := set.Value(attribute.Key("telemetry.sdk.language"))
+	require.True(t, ok, "auto-configured resource must set telemetry.sdk.language")
+	assert.Equal(t, "go", lang.AsString())
+
+	ver, ok := set.Value(attribute.Key("telemetry.sdk.version"))
+	require.True(t, ok, "auto-configured resource must set telemetry.sdk.version")
+	assert.NotEmpty(t, ver.AsString())
+
+	// resource.Default() (the fallback in newResource) also stamps the
+	// telemetry.sdk.* attributes, so the assertions above cannot tell the
+	// happy path from the fallback. process.pid is only set on the happy
+	// path and the environment cannot remove it.
+	pid, ok := set.Value(attribute.Key("process.pid"))
+	require.True(t, ok, "resource must include detector attributes; this fails if newResource fell back to resource.Default()")
+	assert.NotZero(t, pid.AsInt64())
+}
+
+func TestNewResourceIncludesService(t *testing.T) {
+	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "")
+	t.Setenv("OTEL_SERVICE_NAME", "")
+
+	res := newResource(context.Background())
+	set := res.Set()
+
+	name, ok := set.Value(attribute.Key("service.name"))
+	require.True(t, ok, "auto-configured resource must set service.name")
+	assert.True(t, strings.HasPrefix(name.AsString(), "unknown_service:"),
+		"default service.name = %q, want unknown_service:<executable>", name.AsString())
+
+	id, ok := set.Value(attribute.Key("service.instance.id"))
+	require.True(t, ok, "auto-configured resource must set service.instance.id")
+	assert.NotEmpty(t, id.AsString())
+}
+
+func TestNewResourceServiceNameFromEnv(t *testing.T) {
+	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "")
+	t.Setenv("OTEL_SERVICE_NAME", "checkout")
+
+	res := newResource(context.Background())
+	name, ok := res.Set().Value(attribute.Key("service.name"))
+	require.True(t, ok)
+	assert.Equal(t, "checkout", name.AsString())
+}
+
+func TestNewResourceFallsBackToDefaultOnError(t *testing.T) {
+	// A pair missing "=" makes resource.New fail with ErrPartialResource,
+	// so newResource must warn and return resource.Default().
+	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "key")
+
+	var buf bytes.Buffer
+	origLogger := logger
+	t.Cleanup(func() { logger = origLogger })
+	logger = slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	res := newResource(context.Background())
+	_, ok := res.Set().Value(attribute.Key("service.name"))
+	require.True(t, ok, "fallback resource should be resource.Default(), which sets service.name")
+	assert.Contains(t, buf.String(), "failed to create resource")
 }
 
 func TestSetupOpenTelemetry(t *testing.T) {
@@ -325,6 +431,40 @@ func TestSetupTraceProviderNoneExporter(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Nil(t, tracerProvider, "no trace provider should be installed for OTEL_TRACES_EXPORTER=none")
+}
+
+func TestUseSimpleSpanProcessor(t *testing.T) {
+	tests := []struct {
+		name     string
+		envValue string
+		want     bool
+	}{
+		{"literal true", "true", true},
+		{"uppercase TRUE", "TRUE", true},
+		{"mixed case True", "True", true},
+		{"literal false", "false", false},
+		{"arbitrary value", "1", false},
+		{"unset", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("OTEL_GO_SIMPLE_SPAN_PROCESSOR", tt.envValue)
+			assert.Equal(t, tt.want, useSimpleSpanProcessor())
+		})
+	}
+}
+
+func TestNewSpanProcessorUsesSimpleSpanProcessor(t *testing.T) {
+	t.Setenv("OTEL_GO_SIMPLE_SPAN_PROCESSOR", "TRUE")
+	exporter := tracetest.NewInMemoryExporter()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(newSpanProcessor(exporter)))
+	t.Cleanup(func() { require.NoError(t, provider.Shutdown(context.Background())) })
+
+	_, span := provider.Tracer("test").Start(context.Background(), "test")
+	span.End()
+
+	assert.Len(t, exporter.GetSpans(), 1, "simple processor should export completed spans immediately")
 }
 
 func TestSetupMeterProviderNoneExporter(t *testing.T) {

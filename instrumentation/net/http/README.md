@@ -116,6 +116,21 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 export OTEL_LOG_LEVEL=debug  # debug, info, warn, error
 ```
 
+### HTTP known methods
+
+By default, this instrumentation treats the [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110.html#name-methods)
+methods plus `PATCH` as known. Any other method (including `QUERY`) is recorded as
+`http.request.method=_OTHER`.
+
+To fully override that list (for example to restore `QUERY`), set:
+
+```bash
+export OTEL_INSTRUMENTATION_HTTP_KNOWN_METHODS=CONNECT,DELETE,GET,HEAD,OPTIONS,PATCH,POST,PUT,TRACE,QUERY
+```
+
+The value is a comma-separated, case-sensitive list and **replaces** the defaults
+entirely (it is not additive).
+
 ## Package Structure
 
 ```
@@ -322,15 +337,22 @@ type writerWrapper struct {
 }
 
 func (w *writerWrapper) WriteHeader(statusCode int) {
-    if !w.wroteHeader {
-        w.statusCode = statusCode
-        w.wroteHeader = true
-        w.ResponseWriter.WriteHeader(statusCode)
+    if w.wroteHeader {
+        return
     }
+    if statusCode >= 100 && statusCode <= 199 && statusCode != http.StatusSwitchingProtocols {
+        w.ResponseWriter.WriteHeader(statusCode)
+        return
+    }
+    w.statusCode = statusCode
+    w.wroteHeader = true
+    w.ResponseWriter.WriteHeader(statusCode)
 }
 ```
 
-This wrapper implements common interfaces: `http.Hijacker`, `http.Flusher`, `http.Pusher`.
+Informational responses are forwarded without replacing the final status. The wrapper also implements
+common interfaces including `http.Hijacker`, `http.Flusher`, `http.Pusher`, `io.ReaderFrom`, and
+`io.StringWriter`.
 
 ## Testing
 

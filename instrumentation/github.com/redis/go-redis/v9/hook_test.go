@@ -75,6 +75,61 @@ func TestGetRedisV9Statement(t *testing.T) {
 			cmd:      redis.NewCmd(context.Background(), "set", "mykey", false),
 			expected: "set mykey false",
 		},
+		{
+			name:     "AUTH password",
+			cmd:      redis.NewCmd(context.Background(), "auth", "s3cret"),
+			expected: "auth ?",
+		},
+		{
+			name:     "AUTH username password",
+			cmd:      redis.NewCmd(context.Background(), "auth", "default", "s3cret"),
+			expected: "auth ? ?",
+		},
+		{
+			name:     "AUTH mixed case with byte password",
+			cmd:      redis.NewCmd(context.Background(), "AUTH", []byte("s3cret")),
+			expected: "AUTH ?",
+		},
+		{
+			name:     "HELLO without AUTH",
+			cmd:      redis.NewCmd(context.Background(), "hello", 3),
+			expected: "hello 3",
+		},
+		{
+			name:     "HELLO AUTH password",
+			cmd:      redis.NewCmd(context.Background(), "hello", 3, "auth", "default", "s3cret"),
+			expected: "hello 3 auth ? ?",
+		},
+		{
+			name:     "HELLO AUTH then SETNAME",
+			cmd:      redis.NewCmd(context.Background(), "hello", 3, "AUTH", "user", "s3cret", "SETNAME", "myclient"),
+			expected: "hello 3 AUTH ? ? SETNAME myclient",
+		},
+		{
+			name:     "HELLO SETNAME then AUTH",
+			cmd:      redis.NewCmd(context.Background(), "hello", 3, "setname", "myclient", "auth", "user", "s3cret"),
+			expected: "hello 3 setname myclient auth ? ?",
+		},
+		{
+			name:     "HELLO SETNAME client named auth then AUTH",
+			cmd:      redis.NewCmd(context.Background(), "hello", 3, "setname", "auth", "auth", "user", "s3cret"),
+			expected: "hello 3 setname auth auth ? ?",
+		},
+		{
+			name:     "AUTH StatusCmd as Auth() sends",
+			cmd:      redis.NewStatusCmd(context.Background(), "auth", "s3cret"),
+			expected: "auth ?",
+		},
+		{
+			name:     "HELLO MapStringInterfaceCmd as Hello() sends",
+			cmd:      redis.NewMapStringInterfaceCmd(context.Background(), "hello", 3, "auth", "default", "s3cret"),
+			expected: "hello 3 auth ? ?",
+		},
+		{
+			name:     "HELLO AUTH truncated (missing password)",
+			cmd:      redis.NewCmd(context.Background(), "hello", 3, "auth", "user"),
+			expected: "hello 3 auth ?",
+		},
 	}
 
 	for _, tt := range tests {
@@ -234,6 +289,58 @@ func TestProcessHook_CreatesSpan(t *testing.T) {
 	assert.Equal(t, "get", attrMap["db.operation.name"])
 	assert.Equal(t, "localhost", attrMap["server.address"])
 	assert.Equal(t, int64(6379), attrMap["server.port"])
+}
+
+func TestProcessHook_RedactsAuthCredentials(t *testing.T) {
+	tests := []struct {
+		name      string
+		cmd       redis.Cmder
+		spanName  string
+		wantQuery string
+	}{
+		{
+			name:      "AUTH",
+			cmd:       redis.NewCmd(context.Background(), "auth", "s3cret"),
+			spanName:  "auth",
+			wantQuery: "auth ?",
+		},
+		{
+			name:      "HELLO AUTH",
+			cmd:       redis.NewCmd(context.Background(), "hello", 3, "auth", "default", "s3cret"),
+			spanName:  "hello",
+			wantQuery: "hello 3 auth ? ?",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			initOnce = *new(sync.Once)
+			t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "redis")
+
+			sr := setupTestTracer(t)
+			hook := newOtelRedisHook("localhost:6379")
+			processHook := hook.ProcessHook(func(ctx context.Context, cmd redis.Cmder) error {
+				return nil
+			})
+
+			err := processHook(context.Background(), tt.cmd)
+			assert.NoError(t, err)
+
+			spans := sr.Ended()
+			require.Len(t, spans, 1)
+			assert.Equal(t, tt.spanName, spans[0].Name())
+
+			queryText := ""
+			for _, attr := range spans[0].Attributes() {
+				if string(attr.Key) == "db.query.text" {
+					queryText = attr.Value.AsString()
+					break
+				}
+			}
+			assert.Equal(t, tt.wantQuery, queryText)
+			assert.NotContains(t, queryText, "s3cret")
+		})
+	}
 }
 
 func TestProcessHook_RecordsError(t *testing.T) {

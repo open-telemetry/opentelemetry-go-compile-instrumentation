@@ -9,6 +9,7 @@ import (
 	"go/token"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/dave/dst"
 
@@ -35,6 +36,7 @@ const (
 	trampolineAfterName             = "OtelAfterTrampoline"
 	trampolineHookContextName       = "hookContext"
 	trampolineHookContextType       = "HookContext"
+	trampolineAnyName               = "any"
 	trampolineInterfaceType         = "interface{}"
 	trampolineEmptyStructType       = "struct{}"
 	trampolineSkipName              = "skip"
@@ -55,6 +57,10 @@ const (
 	trampolineBefore                = true
 	trampolineAfter                 = false
 	unsafePackageName               = "unsafe"
+	suppressHooksPackage            = "runtime"
+	suppressHooksFuncName           = "SuppressHooks"
+	unsuppressHooksFuncName         = "UnsuppressHooks"
+	hooksSuppressedFuncName         = "HooksSuppressed"
 )
 
 // @@ Modification on this trampoline template should be cautious, as it imposes
@@ -94,14 +100,25 @@ func (ip *instrumentPhase) ensureUnsafeImport() {
 	ip.target.Decls = append([]dst.Decl{unsafeImport}, ip.target.Decls...)
 }
 
+// parsedTemplateImpl parses the static impl.tmpl source once per process;
+// materializeTemplate runs once per instrumented func rule and clones this
+// prototype instead of re-parsing, since cloning is significantly cheaper.
+//
+//nolint:gochecknoglobals // memoized parse of an embedded constant, not mutable state
+var parsedTemplateImpl = sync.OnceValues(func() (*dst.File, error) {
+	return ast.NewAstParser().ParseSource(templateImpl)
+})
+
 func (ip *instrumentPhase) materializeTemplate() error {
 	// Read trampoline template and materialize before and after function
 	// declarations based on that
-	p := ast.NewAstParser()
-	astRoot, err := p.ParseSource(templateImpl)
+	proto, err := parsedTemplateImpl()
 	if err != nil {
+		// Defensive: templateImpl is an embedded constant, so this error branch
+		// is unreachable in practice unless the binary was built broken.
 		return err
 	}
+	astRoot := util.AssertType[*dst.File](dst.Clone(proto))
 
 	ip.varDecls = make([]dst.Decl, 0)
 	ip.hookCtxMethods = make([]*dst.FuncDecl, 0)
@@ -181,42 +198,55 @@ func isHookDefined(root *dst.File, rule *rule.InstFuncRule) bool {
 	return true
 }
 
-func findHookFile(rule *rule.InstFuncRule) (string, error) {
+// parseHookFileCached parses file once per process and reuses the result
+// across every hook lookup that touches it, whether for the same func rule
+// looked up twice (createTrampoline and optimizeTJumps) or a different rule
+// whose hook happens to live in a file already scanned for another rule.
+func (ip *instrumentPhase) parseHookFileCached(file string) (*dst.File, error) {
+	if root, ok := ip.parsedHookFiles[file]; ok {
+		return root, nil
+	}
+	root, err := ast.ParseFileFast(file)
+	if err != nil {
+		return nil, err
+	}
+	if ip.parsedHookFiles == nil {
+		ip.parsedHookFiles = make(map[string]*dst.File)
+	}
+	ip.parsedHookFiles[file] = root
+	return root, nil
+}
+
+// findHookFile locates the file in rule.ResolvedPath defining rule's hooks
+// and returns it already parsed, since the caller needs both.
+func (ip *instrumentPhase) findHookFile(rule *rule.InstFuncRule) (string, *dst.File, error) {
 	files, err0 := util.ListFiles(rule.ResolvedPath)
 	if err0 != nil {
-		return "", err0
+		return "", nil, err0
 	}
 	for _, file := range files {
 		if !util.IsGoFile(file) {
 			continue
 		}
-		root, err := ast.ParseFileFast(file)
+		root, err := ip.parseHookFileCached(file)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		if isHookDefined(root, rule) {
-			return file, nil
+			return file, root, nil
 		}
 	}
-	return "", ex.Newf("no hook {%s,%s} found for %s from %v",
+	return "", nil, ex.Newf("no hook {%s,%s} found for %s from %v",
 		rule.Before, rule.After, rule.Func, files)
 }
 
-func getHookFunc(t *rule.InstFuncRule, before bool) (*dst.FuncDecl, error) {
-	file, err := findHookFile(t)
+// getHookFunc resolves the Before/After hook function declaration for t.
+func (ip *instrumentPhase) getHookFunc(t *rule.InstFuncRule, before bool) (*dst.FuncDecl, error) {
+	file, root, err := ip.findHookFile(t)
 	if err != nil {
 		return nil, err
 	}
-	root, err := ast.ParseFile(file) // Complete parse
-	if err != nil {
-		return nil, err
-	}
-	var target *dst.FuncDecl
-	if before {
-		target = ast.FindFuncDeclWithoutRecv(root, t.Before)
-	} else {
-		target = ast.FindFuncDeclWithoutRecv(root, t.After)
-	}
+	target := ast.FindFuncDeclWithoutRecv(root, getHookFuncName(t, before))
 	if target == nil {
 		return nil, ex.Newf("hook %s or %s not found from %s",
 			t.Before, t.After, file)
@@ -328,7 +358,7 @@ func interfaceTypeName(t *dst.InterfaceType) string {
 func baseTypeName(expr dst.Expr) string {
 	switch t := expr.(type) {
 	case *dst.Ident:
-		if t.Name == "any" {
+		if t.Name == trampolineAnyName {
 			return trampolineInterfaceType
 		}
 		return t.Name
@@ -371,7 +401,7 @@ func indexListType(x dst.Expr, indices []dst.Expr) string {
 
 // isAnyOrInterface reports whether the type string represents an empty interface (any / interface{}).
 func isAnyOrInterface(s string) bool {
-	return s == "any" || s == trampolineInterfaceType
+	return s == trampolineAnyName || s == trampolineInterfaceType
 }
 
 // sliceOrEllipsisElt returns the element type and true if s is a slice or ellipsis type.
@@ -465,7 +495,11 @@ func (ip *instrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, before bool) er
 func (ip *instrumentPhase) callBeforeHook(t *rule.InstFuncRule) {
 	// Query whether the parameter is a variadic parameter in the target function
 	targetParams := findTargetParamType(ip.targetFunc)
-	isEllipsis := func(i int) bool { return ast.IsEllipsis(targetParams.List[i].Type) }
+	genericTypes := findTargetGenericType(ip.target, ip.targetFunc)
+	isEllipsis := func(i int) bool {
+		return ast.IsEllipsis(targetParams.List[i].Type) &&
+			!containsTypeParameter(targetParams.List[i].Type, genericTypes)
+	}
 
 	args := []dst.Expr{ast.Ident(trampolineHookContextName)}
 	for i, field := range ip.beforeTrampFunc.Type.Params.List {
@@ -481,11 +515,7 @@ func (ip *instrumentPhase) callBeforeHook(t *rule.InstFuncRule) {
 	}
 	fnName := getHookFuncName(t, trampolineBefore)
 	call := ast.ExprStmt(ast.CallTo(fnName, nil, args))
-	iff := ast.IfNotNilStmt(
-		ast.Ident(fnName),
-		ast.Block(call),
-		nil,
-	)
+	iff := &dst.IfStmt{Cond: ip.hookGuardCond(fnName), Body: ast.Block(call)}
 	insertAt(ip.beforeTrampFunc, iff, len(ip.beforeTrampFunc.Body.List)-1)
 }
 
@@ -506,12 +536,37 @@ func (ip *instrumentPhase) callAfterHook(t *rule.InstFuncRule) {
 	}
 	fnName := getHookFuncName(t, trampolineAfter)
 	call := ast.ExprStmt(ast.CallTo(fnName, nil, args))
-	iff := ast.IfNotNilStmt(
-		ast.Ident(fnName),
-		ast.Block(call),
-		nil,
-	)
+	iff := &dst.IfStmt{Cond: ip.hookGuardCond(fnName), Body: ast.Block(call)}
 	insertAtEnd(ip.afterTrampFunc, iff)
+}
+
+// hookGuardCond builds the condition that gates a trampoline's call to its
+// real hook function
+func (ip *instrumentPhase) hookGuardCond(fnName string) dst.Expr {
+	notNil := &dst.BinaryExpr{X: ast.Ident(fnName), Op: token.NEQ, Y: ast.Nil()}
+	if !ip.buildUsesIgnoreDirective {
+		return notNil
+	}
+	notSuppressed := &dst.UnaryExpr{
+		Op: token.NOT,
+		X:  suppressHooksCall(hooksSuppressedFuncName, ip.isSuppressHooksPackage()),
+	}
+	return &dst.BinaryExpr{X: notNil, Op: token.LAND, Y: notSuppressed}
+}
+
+// isSuppressHooksPackage reports whether the package currently being
+// compiled is the runtime package itself
+func (ip *instrumentPhase) isSuppressHooksPackage() bool {
+	return util.FindFlagValue(ip.compileArgs, "-p") == suppressHooksPackage
+}
+
+// suppressHooksCall builds a call to funcName in the runtime package,
+// unqualified when selfPackage is true.
+func suppressHooksCall(funcName string, selfPackage bool) *dst.CallExpr {
+	if selfPackage {
+		return ast.CallTo(funcName, nil, nil)
+	}
+	return &dst.CallExpr{Fun: ast.SelectorExpr(ast.Ident(suppressHooksPackage), funcName)}
 }
 
 func (ip *instrumentPhase) addHookDecl(t *rule.InstFuncRule, paramTypes *dst.FieldList, before bool) error {
@@ -524,7 +579,8 @@ func (ip *instrumentPhase) addHookDecl(t *rule.InstFuncRule, paramTypes *dst.Fie
 		},
 		Decs: dst.FuncDeclDecorations{
 			NodeDecs: ast.LineComments(
-				fmt.Sprintf("//go:linkname %s %s.%s", fnName, t.Path, fnName)),
+				fmt.Sprintf("//go:linkname %s %s.%s", fnName, t.Path, fnName),
+			),
 		},
 	}
 
@@ -707,7 +763,7 @@ func (ip *instrumentPhase) buildHookSignature(t *rule.InstFuncRule, before bool)
 		field.Type = replaceTypeParamsWithAny(field.Type, genericTypes)
 	}
 	// Get the hook function declaration
-	hookFunc, err := getHookFunc(t, before)
+	hookFunc, err := ip.getHookFunc(t, before)
 	if err != nil {
 		return nil, err
 	}
@@ -923,22 +979,24 @@ func extractReceiverTypeParams(file *dst.File, recvType dst.Expr) *dst.FieldList
 		// GenStruct[T] - single type parameter
 		if ident, ok := t.Index.(*dst.Ident); ok {
 			original := findGenericTypeDecl(file, receiverBaseTypeName(t.X))
+			nameMap := receiverNameMap(original, []dst.Expr{t.Index})
 			return &dst.FieldList{
 				List: []*dst.Field{{
 					Names: []*dst.Ident{ident},
-					Type:  receiverConstraintAt(original, 0),
+					Type:  remapConstraintNames(receiverConstraintAt(original, 0), nameMap),
 				}},
 			}
 		}
 	case *dst.IndexListExpr:
 		// GenStruct[T, U, ...] - multiple type parameters
 		original := findGenericTypeDecl(file, receiverBaseTypeName(t.X))
+		nameMap := receiverNameMap(original, t.Indices)
 		fields := make([]*dst.Field, 0, len(t.Indices))
 		for i, idx := range t.Indices {
 			if ident, ok := idx.(*dst.Ident); ok {
 				fields = append(fields, &dst.Field{
 					Names: []*dst.Ident{ident},
-					Type:  receiverConstraintAt(original, i),
+					Type:  remapConstraintNames(receiverConstraintAt(original, i), nameMap),
 				})
 			}
 		}
@@ -947,6 +1005,98 @@ func extractReceiverTypeParams(file *dst.File, recvType dst.Expr) *dst.FieldList
 		}
 	}
 	return nil
+}
+
+// receiverNameMap maps a generic type declaration's parameter names to the
+// names the method receiver uses for them. A receiver is free to rename the
+// type parameters (type M[K any, V any] with func (m M[A, B]) M()), and the
+// mapping is positional, so declaration parameter K at position 0 maps to
+// receiver name A. Only genuine renames are recorded; identical names are left
+// out so the returned map is empty in the common case.
+func receiverNameMap(declParams *dst.FieldList, recvArgs []dst.Expr) map[string]string {
+	declNames := typeParamDeclNames(declParams)
+	nameMap := make(map[string]string)
+	for i, arg := range recvArgs {
+		ident, ok := arg.(*dst.Ident)
+		if !ok || i >= len(declNames) {
+			continue
+		}
+		if declNames[i] != "" && declNames[i] != ident.Name {
+			nameMap[declNames[i]] = ident.Name
+		}
+	}
+	return nameMap
+}
+
+// typeParamDeclNames returns a type parameter list's names in positional order,
+// flattening grouped parameters (type M[K, V any] declares K then V).
+func typeParamDeclNames(params *dst.FieldList) []string {
+	if params == nil {
+		return nil
+	}
+	var names []string
+	for _, field := range params.List {
+		if len(field.Names) == 0 {
+			names = append(names, "")
+			continue
+		}
+		for _, name := range field.Names {
+			names = append(names, name.Name)
+		}
+	}
+	return names
+}
+
+// remapConstraintNames rewrites type parameter identifiers inside a constraint
+// so it reads in the receiver's naming rather than the declaration's. An
+// inter-parameter constraint refers to a sibling parameter by the declaration's
+// name (type M[K any, V ~[]K] carries ~[]K on V), and the receiver may have
+// renamed that sibling. Cloning the constraint verbatim would leave the
+// trampoline referring to a name it never declares, so the generated code would
+// not compile; renaming the identifiers keeps every reference in scope. With no
+// renames the constraint is returned untouched.
+func remapConstraintNames(constraint dst.Expr, nameMap map[string]string) dst.Expr {
+	if len(nameMap) == 0 {
+		return constraint
+	}
+	// Not every identifier inside a constraint references a type parameter.
+	// A qualified type names a package and a symbol (the fmt and Stringer in
+	// fmt.Stringer), and an interface method or struct field declares its own
+	// name. Those positions belong to unrelated symbols that may happen to
+	// match a declaration parameter's name, so renaming them would rewrite the
+	// wrong thing: with type M[Stringer any, V fmt.Stringer] and receiver
+	// M[A, B], a blanket rename turns fmt.Stringer into the nonexistent fmt.A.
+	// Collect them first, then rename only what is left.
+	named := make(map[*dst.Ident]struct{})
+	dst.Inspect(constraint, func(node dst.Node) bool {
+		switch n := node.(type) {
+		case *dst.SelectorExpr:
+			named[n.Sel] = struct{}{}
+			if pkg, ok := n.X.(*dst.Ident); ok {
+				named[pkg] = struct{}{}
+			}
+		case *dst.Field:
+			for _, name := range n.Names {
+				named[name] = struct{}{}
+			}
+		}
+		return true
+	})
+
+	dst.Inspect(constraint, func(node dst.Node) bool {
+		ident, ok := node.(*dst.Ident)
+		if !ok {
+			return true
+		}
+		if _, isName := named[ident]; isName {
+			return true
+		}
+		if renamed, found := nameMap[ident.Name]; found {
+			ident.Name = renamed
+		}
+		return true
+	})
+	return constraint
 }
 
 // receiverBaseTypeName returns the local identifier naming a receiver's generic
@@ -1003,7 +1153,7 @@ func receiverConstraintAt(original *dst.FieldList, idx int) dst.Expr {
 			pos += n
 		}
 	}
-	return ast.Ident("any") // Type constraint for the parameter
+	return ast.Ident(trampolineAnyName) // Type constraint for the parameter
 }
 
 // desugarType desugars parameter type to its original type, if parameter
@@ -1109,6 +1259,69 @@ func makeMethodPanic(method *dst.FuncDecl, message string) {
 	method.Body.List = []dst.Stmt{panicStmt}
 }
 
+// containsTypeParameterInExprs checks if any expression in exprs contains a type parameter
+func containsTypeParameterInExprs(exprs []dst.Expr, typeParams *dst.FieldList) bool {
+	for _, expr := range exprs {
+		if containsTypeParameter(expr, typeParams) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsTypeParameterInFields checks if any field in fields contains a type parameter
+func containsTypeParameterInFields(fields, typeParams *dst.FieldList) bool {
+	if fields == nil {
+		return false
+	}
+	for _, field := range fields.List {
+		if containsTypeParameter(field.Type, typeParams) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsTypeParameter checks if a type expression contains any type parameters
+func containsTypeParameter(t dst.Expr, typeParams *dst.FieldList) bool {
+	if typeParams == nil {
+		return false
+	}
+	if isTypeParameter(t, typeParams) {
+		return true
+	}
+
+	switch tType := t.(type) {
+	case *dst.StarExpr:
+		return containsTypeParameter(tType.X, typeParams)
+	case *dst.ArrayType:
+		return containsTypeParameter(tType.Elt, typeParams)
+	case *dst.MapType:
+		return containsTypeParameter(tType.Key, typeParams) || containsTypeParameter(tType.Value, typeParams)
+	case *dst.ChanType:
+		return containsTypeParameter(tType.Value, typeParams)
+	case *dst.Ellipsis:
+		return containsTypeParameter(tType.Elt, typeParams)
+	case *dst.IndexExpr:
+		return containsTypeParameter(tType.X, typeParams) || containsTypeParameter(tType.Index, typeParams)
+	case *dst.IndexListExpr:
+		return containsTypeParameter(tType.X, typeParams) || containsTypeParameterInExprs(tType.Indices, typeParams)
+	case *dst.ParenExpr:
+		return containsTypeParameter(tType.X, typeParams)
+	case *dst.StructType:
+		return containsTypeParameterInFields(tType.Fields, typeParams)
+	case *dst.InterfaceType:
+		return containsTypeParameterInFields(tType.Methods, typeParams)
+	case *dst.FuncType:
+		return containsTypeParameterInFields(tType.Params, typeParams) ||
+			containsTypeParameterInFields(tType.Results, typeParams)
+	case *dst.Ident, *dst.SelectorExpr:
+		return false
+	default:
+		return false
+	}
+}
+
 // isTypeParameter checks if a type expression is a bare type parameter identifier
 func isTypeParameter(t dst.Expr, typeParams *dst.FieldList) bool {
 	if typeParams == nil {
@@ -1129,83 +1342,20 @@ func isTypeParameter(t dst.Expr, typeParams *dst.FieldList) bool {
 	return false
 }
 
-// replaceTypeParamsWithAny replaces type parameters with interface{} for use in
-// non-generic contexts like HookContextImpl methods
+// replaceTypeParamsWithAny widens any type expression containing type parameters to interface{}.
+//
+// Widening is intentionally all-or-nothing: composite types containing type parameters
+// (such as []T, map[K]V, or chan T) must not be structurally rewritten into corresponding
+// interface-containing composite types (e.g. []interface{}), because in Go a concrete
+// parameterized type like []T is not assignable to []interface{}. Instead, the entire parameter
+// type is widened to interface{} to preserve assignability at the hook boundary so the
+// trampoline can pass concrete argument values directly to the hook function.
 func replaceTypeParamsWithAny(t dst.Expr, typeParams *dst.FieldList) dst.Expr {
-	if isTypeParameter(t, typeParams) {
+	if containsTypeParameter(t, typeParams) {
 		return ast.InterfaceType()
 	}
 
-	// For complex types like *T, []T, map[K]V, etc., handle them recursively
-	switch tType := t.(type) {
-	case *dst.StarExpr:
-		// *T -> *interface{}
-		return ast.DereferenceOf(replaceTypeParamsWithAny(tType.X, typeParams))
-	case *dst.ArrayType:
-		// []T -> []interface{}
-		return ast.ArrayType(replaceTypeParamsWithAny(tType.Elt, typeParams))
-	case *dst.MapType:
-		// map[K]V -> map[interface{}]interface{}
-		return &dst.MapType{
-			Key:   replaceTypeParamsWithAny(tType.Key, typeParams),
-			Value: replaceTypeParamsWithAny(tType.Value, typeParams),
-		}
-	case *dst.ChanType:
-		// chan T, <-chan T, chan<- T -> chan interface{}, etc.
-		return &dst.ChanType{
-			Dir:   tType.Dir,
-			Value: replaceTypeParamsWithAny(tType.Value, typeParams),
-		}
-	case *dst.IndexExpr:
-		// GenStruct[T] -> interface{} (for generic receiver methods)
-		// The hook function expects interface{} for generic types
-		return ast.InterfaceType()
-	case *dst.IndexListExpr:
-		// GenStruct[T, U] -> interface{} (for generic receiver methods with multiple type params)
-		return ast.InterfaceType()
-	case *dst.Ellipsis:
-		// ...T -> []T
-		// Preserve variadic syntax. This maintains variadic semantics in the
-		// generated hook signatures
-		return ast.Ellipsis(replaceTypeParamsWithAny(tType.Elt, typeParams))
-	case *dst.FuncType:
-		newFuncType := &dst.FuncType{}
-		if tType.Params != nil {
-			newFuncType.Params = &dst.FieldList{
-				List: processFieldList(tType.Params.List, typeParams),
-			}
-		}
-		if tType.Results != nil {
-			newFuncType.Results = &dst.FieldList{
-				List: processFieldList(tType.Results.List, typeParams),
-			}
-		}
-		return newFuncType
-	case *dst.Ident, *dst.SelectorExpr, *dst.InterfaceType:
-		// Base types without type parameters, return as-is
-		return t
-	default:
-		// Unsupported cases:
-		// - Other uncommon type expressions
-		util.Unimplemented(fmt.Sprintf("unexpected generic type: %T", tType))
-		return t
-	}
-}
-
-func processFieldList(fields []*dst.Field, typeParams *dst.FieldList) []*dst.Field {
-	result := make([]*dst.Field, len(fields))
-	for i, field := range fields {
-		newField := &dst.Field{}
-		if field.Names != nil {
-			newField.Names = make([]*dst.Ident, len(field.Names))
-			for j, name := range field.Names {
-				newField.Names[j] = dst.NewIdent(name.Name)
-			}
-		}
-		newField.Type = replaceTypeParamsWithAny(field.Type, typeParams)
-		result[i] = newField
-	}
-	return result
+	return t
 }
 
 func (ip *instrumentPhase) callHookFunc(t *rule.InstFuncRule, before bool) error {

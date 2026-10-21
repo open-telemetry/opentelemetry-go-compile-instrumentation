@@ -34,6 +34,26 @@ func TestDBClient(t *testing.T) {
 		)
 	})
 
+	t.Run("OpenDB", func(t *testing.T) {
+		// Exercises sql.OpenDB's driver.Connector path (hook_opendb):
+		// beforeOpenDBInstrumentation must resolve the connector's driver
+		// back to the registered "mysql" name so the DSN is parsed with the
+		// MySQL parser instead of falling to "unknown"/other_sql.
+		f := testutil.NewTestFixture(t)
+
+		f.Run("dbclient", "-op=opendb")
+
+		span := f.RequireSingleSpan()
+		require.Equal(t, "PING", span.Name())
+		testutil.RequireDBClientSemconv(t, span,
+			"PING",
+			"ping",
+			"127.0.0.1", 3306,
+			"testdb",
+		)
+		testutil.RequireAttribute(t, span, "db.system.name", "mysql")
+	})
+
 	t.Run("Exec", func(t *testing.T) {
 		f := testutil.NewTestFixture(t)
 
@@ -78,6 +98,26 @@ func TestDBClient(t *testing.T) {
 		require.Equal(t, "SELECT", stmtSpan.Name())
 	})
 
+	t.Run("TxStmtContext", func(t *testing.T) {
+		// A statement reused inside a transaction via (*Tx).StmtContext must
+		// keep its span name and db.query.text (issue #1469).
+		f := testutil.NewTestFixture(t)
+
+		f.Run("dbclient", "-op=tx-stmt")
+
+		stmtSpan := testutil.RequireSpan(t, f.Traces(),
+			testutil.IsClient,
+			testutil.HasAttribute(string(semconv.DBOperationNameKey), "SELECT"),
+		)
+		require.Equal(t, "SELECT", stmtSpan.Name())
+		testutil.RequireDBClientSemconv(t, stmtSpan,
+			"SELECT",
+			"SELECT id FROM users WHERE name = ?",
+			"unknown", 0,
+			"testdb",
+		)
+	})
+
 	t.Run("Transaction", func(t *testing.T) {
 		f := testutil.NewTestFixture(t)
 
@@ -104,6 +144,37 @@ func TestDBClient(t *testing.T) {
 			testutil.HasAttribute("db.operation.name", "COMMIT"),
 		)
 		require.Equal(t, "COMMIT", commitSpan.Name())
+
+		// Regression for #1187: Commit must land in the same trace as BeginTx,
+		// not get orphaned onto its own trace by starting from
+		// context.Background(). (ExecContext's span isn't asserted here: it
+		// takes its own ctx argument from the caller, independent of the
+		// transaction's begin context, so it isn't guaranteed to match.)
+		require.Equal(t, beginSpan.TraceID(), commitSpan.TraceID(),
+			"commit span must share the transaction's trace, not start a new one")
+	})
+
+	t.Run("TransactionRollback", func(t *testing.T) {
+		f := testutil.NewTestFixture(t)
+
+		f.Run("dbclient", "-op=tx-rollback")
+
+		beginSpan := testutil.RequireSpan(t, f.Traces(),
+			testutil.IsClient,
+			testutil.HasAttribute("db.operation.name", "START"),
+		)
+
+		rollbackSpan := testutil.RequireSpan(t, f.Traces(),
+			testutil.IsClient,
+			testutil.HasAttribute("db.operation.name", "ROLLBACK"),
+		)
+		require.Equal(t, "ROLLBACK", rollbackSpan.Name())
+
+		// Regression for #1187: same fix as Commit, via the same txContext
+		// helper, but exercised independently so a change that fixes one and
+		// breaks the other doesn't slip through untested.
+		require.Equal(t, beginSpan.TraceID(), rollbackSpan.TraceID(),
+			"rollback span must share the transaction's trace, not start a new one")
 	})
 
 	t.Run("TransactionFailure", func(t *testing.T) {
@@ -243,6 +314,20 @@ func TestDBClient(t *testing.T) {
 				wantAddr:   "localhost",
 				wantPort:   1433,
 				wantDb:     "master",
+			},
+			{
+				// Regression test for #1131: the address/database separator
+				// for a non-parenthesized "unix:" DSN is the last '/', not
+				// the first, because the socket path owns every '/' before
+				// it. Asserted end-to-end here so the parsed DSNInfo is
+				// verified to reach the span attributes, not just the
+				// parser output in isolation.
+				name:       "MySQL non-parenthesized unix socket",
+				driverName: "mysql",
+				dsn:        "user:pass@unix:/tmp/mysql.sock/inventory",
+				wantAddr:   "/tmp/mysql.sock",
+				wantPort:   0,
+				wantDb:     "inventory",
 			},
 			{
 				name:       "SQLite3 local file",

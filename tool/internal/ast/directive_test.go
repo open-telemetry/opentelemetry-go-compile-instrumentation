@@ -5,8 +5,10 @@ package ast
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/dave/dst"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -90,10 +92,10 @@ func TestMatchDirective(t *testing.T) {
 
 func TestScanArgs(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		expected []DirectiveArg
-		hasError bool
+		name        string
+		input       string
+		expected    []DirectiveArg
+		errContains string // non-empty pins the error to the expected branch
 	}{
 		{
 			name:     "simple key:value",
@@ -116,14 +118,14 @@ func TestScanArgs(t *testing.T) {
 			},
 		},
 		{
-			name:     "single quotes rejected",
-			input:    "key:'single'",
-			hasError: true,
+			name:        "single quotes rejected",
+			input:       "key:'single'",
+			errContains: "single-quoted values are not supported",
 		},
 		{
-			name:     "unclosed quote",
-			input:    `key:"unclosed`,
-			hasError: true,
+			name:        "unclosed quote",
+			input:       `key:"unclosed`,
+			errContains: "unclosed double quote",
 		},
 		{
 			name:     "empty input",
@@ -139,9 +141,9 @@ func TestScanArgs(t *testing.T) {
 			},
 		},
 		{
-			name:     "missing colon",
-			input:    "nocolon",
-			hasError: true,
+			name:        "missing colon",
+			input:       "nocolon",
+			errContains: "has no unquoted colon separator",
 		},
 		{
 			name:  "empty value",
@@ -150,13 +152,71 @@ func TestScanArgs(t *testing.T) {
 				{Key: "key", Value: ""},
 			},
 		},
+		{
+			name:        "empty key rejected",
+			input:       ":value",
+			errContains: "has an empty key",
+		},
+		{
+			name:        "bare colon rejected",
+			input:       ":",
+			errContains: "has an empty key",
+		},
+		{
+			name:        "fully quoted token has no unquoted colon separator",
+			input:       `"key:value"`,
+			errContains: "has no unquoted colon separator",
+		},
+		{
+			name:        "quoted key rejected",
+			input:       `"k":v`,
+			errContains: "has a quoted or malformed key",
+		},
+		{
+			name:        "escaped quote inside quoted key does not end the quote early",
+			input:       `"a\"b":value`,
+			errContains: "has a quoted or malformed key",
+		},
+		{
+			name:  "quoted value containing colon",
+			input: `url:"https://example.com/path"`,
+			expected: []DirectiveArg{
+				{Key: "url", Value: "https://example.com/path"},
+			},
+		},
+		{
+			name:  "bare value containing colon splits at first colon only",
+			input: "key:a:b:c",
+			expected: []DirectiveArg{
+				{Key: "key", Value: "a:b:c"},
+			},
+		},
+		{
+			name:  "multiple args one with quoted colon value",
+			input: `op:"http:post" tag:foo`,
+			expected: []DirectiveArg{
+				{Key: "op", Value: "http:post"},
+				{Key: "tag", Value: "foo"},
+			},
+		},
+		{
+			// Backslash outside a quoted region is not an escape in either
+			// tokenize or cutUnquoted. This is a characterization test: it
+			// records today's behaviour so the change is visible if someone
+			// later adds bare-backslash escaping.
+			name:  "backslash in a bare key is not an escape",
+			input: `k\:v`,
+			expected: []DirectiveArg{
+				{Key: `k\`, Value: "v"},
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := scanArgs(tt.input)
-			if tt.hasError {
-				require.Error(t, err)
+			if tt.errContains != "" {
+				require.ErrorContains(t, err, tt.errContains)
 				return
 			}
 			require.NoError(t, err)
@@ -407,13 +467,33 @@ func Foo() {}
 			expected:  false,
 		},
 		{
-			name: "file level directive",
+			name: "file level directive, no blank line before package",
 			src: `//otelc:span
 package p
 func Foo() {}
 `,
 			directive: "otelc:span",
 			expected:  true,
+		},
+		{
+			name: "file level directive, blank line before package",
+			src: `//otelc:span
+
+package p
+func Foo() {}
+`,
+			directive: "otelc:span",
+			expected:  true,
+		},
+		{
+			name: "different file level directive",
+			src: `//otelc:ignore
+
+package p
+func Foo() {}
+`,
+			directive: "otelc:span",
+			expected:  false,
 		},
 	}
 
@@ -425,4 +505,368 @@ func Foo() {}
 			assert.Equal(t, tt.expected, FileHasLeadingDirective(tree, tt.directive))
 		})
 	}
+}
+
+// lastFuncDecl returns the last top-level function declaration in the file,
+// which is the target function in the single-function test sources below.
+func lastFuncDecl(t *testing.T, file *dst.File) *dst.FuncDecl {
+	t.Helper()
+	var fn *dst.FuncDecl
+	for _, d := range file.Decls {
+		if f, ok := d.(*dst.FuncDecl); ok {
+			fn = f
+		}
+	}
+	require.NotNil(t, fn, "test source must contain a function declaration")
+	return fn
+}
+
+func TestFuncLeadHasDirective(t *testing.T) {
+	tests := []struct {
+		name      string
+		src       string
+		directive string
+		expected  bool
+	}{
+		{
+			name: "directive on function",
+			src: `package p
+//otelc:ignore
+func Foo() {}
+`,
+			directive: "otelc:ignore",
+			expected:  true,
+		},
+		{
+			name: "no directive",
+			src: `package p
+func Foo() {}
+`,
+			directive: "otelc:ignore",
+			expected:  false,
+		},
+		{
+			name: "different directive",
+			src: `package p
+//otelc:instrument
+func Foo() {}
+`,
+			directive: "otelc:ignore",
+			expected:  false,
+		},
+		{
+			name: "directive on method with receiver",
+			src: `package p
+type T struct{}
+//otelc:ignore
+func (T) Bar() {}
+`,
+			directive: "otelc:ignore",
+			expected:  true,
+		},
+		{
+			name: "multiple leading comments, one matches",
+			src: `package p
+// a plain doc comment
+//otelc:ignore
+func Foo() {}
+`,
+			directive: "otelc:ignore",
+			expected:  true,
+		},
+		{
+			name: "space after slashes rejected",
+			src: `package p
+// otelc:ignore
+func Foo() {}
+`,
+			directive: "otelc:ignore",
+			expected:  false,
+		},
+		{
+			// When both directives are present, each is independently detectable;
+			// the ignore-wins precedence is resolved by the instrument phase.
+			name: "both instrument and ignore present, ignore is found",
+			src: `package p
+//otelc:instrument
+//otelc:ignore
+func Foo() {}
+`,
+			directive: "otelc:ignore",
+			expected:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeGoTempFile(t, tt.src)
+			tree, err := ParseFileFast(path)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, FuncLeadHasDirective(lastFuncDecl(t, tree), tt.directive))
+		})
+	}
+}
+
+func lastStmt(t *testing.T, file *dst.File) dst.Stmt {
+	t.Helper()
+	fn := lastFuncDecl(t, file)
+	require.NotEmpty(t, fn.Body.List, "test source must contain a statement")
+	return fn.Body.List[len(fn.Body.List)-1]
+}
+
+func TestStmtHasLeadingDirective(t *testing.T) {
+	tests := []struct {
+		name      string
+		src       string
+		directive string
+		expected  bool
+	}{
+		{
+			name: "directive on statement",
+			src: `package p
+func Foo() {
+	//otelc:ignore
+	Bar()
+}
+`,
+			directive: "otelc:ignore",
+			expected:  true,
+		},
+		{
+			name: "no directive",
+			src: `package p
+func Foo() {
+	Bar()
+}
+`,
+			directive: "otelc:ignore",
+			expected:  false,
+		},
+		{
+			name: "different directive",
+			src: `package p
+func Foo() {
+	//otelc:instrument
+	Bar()
+}
+`,
+			directive: "otelc:ignore",
+			expected:  false,
+		},
+		{
+			name: "directive on assignment statement",
+			src: `package p
+func Foo() {
+	//otelc:ignore
+	v := Bar()
+}
+`,
+			directive: "otelc:ignore",
+			expected:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeGoTempFile(t, tt.src)
+			tree, err := ParseFileFast(path)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, HasLeadingDirective(lastStmt(t, tree), tt.directive))
+		})
+	}
+}
+
+func TestStmtHasLeadingDirective_NilStmt(t *testing.T) {
+	assert.False(t, HasLeadingDirective(nil, "otelc:ignore"))
+}
+
+func TestFileHasIgnoredCall(t *testing.T) {
+	tests := []struct {
+		name     string
+		src      string
+		expected bool
+	}{
+		{
+			name: "directive above a call",
+			src: `package p
+func Foo() {
+	//otelc:ignore
+	Bar()
+}
+`,
+			expected: true,
+		},
+		{
+			name: "no directive",
+			src: `package p
+func Foo() {
+	Bar()
+}
+`,
+			expected: false,
+		},
+		{
+			name: "directive above a function, not a call",
+			src: `package p
+//otelc:ignore
+func Foo() {
+	Bar()
+}
+`,
+			expected: false,
+		},
+		{
+			name: "directive above the package clause, not a call",
+			src: `//otelc:ignore
+
+package p
+func Foo() {
+	Bar()
+}
+`,
+			expected: false,
+		},
+		{
+			name: "directive above a call nested inside an if",
+			src: `package p
+func Foo() {
+	if true {
+		//otelc:ignore
+		Bar()
+	}
+}
+`,
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeGoTempFile(t, tt.src)
+			tree, err := ParseFileFast(path)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, FileHasIgnoredCall(tree, "otelc:ignore"))
+		})
+	}
+}
+
+func TestUnknownDirectiveNames(t *testing.T) {
+	knownIgnore := map[string]bool{"otelc:ignore": true}
+
+	tests := []struct {
+		name     string
+		src      string
+		known    map[string]bool
+		expected []string
+	}{
+		{
+			name: "known directive is not reported",
+			src: `package p
+//otelc:ignore
+func Foo() {}
+`,
+			known:    knownIgnore,
+			expected: []string{},
+		},
+		{
+			name: "typo of a known directive is reported",
+			src: `package p
+//otelc:ignoer
+func Foo() {}
+`,
+			known:    knownIgnore,
+			expected: []string{"otelc:ignoer"},
+		},
+		{
+			name: "non-otelc comment is not reported",
+			src: `package p
+// a plain doc comment
+func Foo() {}
+`,
+			known:    knownIgnore,
+			expected: []string{},
+		},
+		{
+			name: "space after slashes is not directive syntax",
+			src: `package p
+// otelc:ignore
+func Foo() {}
+`,
+			known:    knownIgnore,
+			expected: []string{},
+		},
+		{
+			name: "file-level directive is reported",
+			src: `//otelc:custom
+
+package p
+func Foo() {}
+`,
+			known:    knownIgnore,
+			expected: []string{"otelc:custom"},
+		},
+		{
+			name: "duplicate unknown directives collapse to one entry",
+			src: `package p
+//otelc:custom
+func Foo() {}
+
+//otelc:custom
+func Bar() {}
+`,
+			known:    knownIgnore,
+			expected: []string{"otelc:custom"},
+		},
+		{
+			name: "distinct unknown directives are sorted",
+			src: `package p
+//otelc:zzz
+func Foo() {}
+
+//otelc:aaa
+func Bar() {}
+`,
+			known:    knownIgnore,
+			expected: []string{"otelc:aaa", "otelc:zzz"},
+		},
+		{
+			name: "unknown directive name stops at trailing whitespace",
+			src: `package p
+//otelc:custom key:val
+func Foo() {}
+`,
+			known:    knownIgnore,
+			expected: []string{"otelc:custom"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeGoTempFile(t, tt.src)
+			tree, err := ParseFileFast(path)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, UnknownDirectiveNames(tree, tt.known))
+		})
+	}
+}
+
+func TestFileContainsDirectiveText(t *testing.T) {
+	t.Run("directive text present", func(t *testing.T) {
+		path := writeGoTempFile(t, "package p\n//otelc:ignore\nfunc Foo() {}\n")
+		found, err := FileContainsDirectiveText(path, "otelc:ignore")
+		require.NoError(t, err)
+		assert.True(t, found)
+	})
+
+	t.Run("directive text absent", func(t *testing.T) {
+		path := writeGoTempFile(t, "package p\nfunc Foo() {}\n")
+		found, err := FileContainsDirectiveText(path, "otelc:ignore")
+		require.NoError(t, err)
+		assert.False(t, found)
+	})
+
+	t.Run("read error on a missing file", func(t *testing.T) {
+		_, err := FileContainsDirectiveText(filepath.Join(t.TempDir(), "missing.go"), "otelc:ignore")
+		require.Error(t, err)
+	})
 }

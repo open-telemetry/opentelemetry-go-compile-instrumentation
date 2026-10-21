@@ -1,3 +1,5 @@
+version: "v1.0.0"
+
 init_sdk:
   target: main
   do:

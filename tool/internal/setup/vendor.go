@@ -33,7 +33,7 @@ func vendoringActive(ctx context.Context, workDir string) bool {
 	if root == "" {
 		return false
 	}
-	return util.PathExists(filepath.Join(root, "vendor", "modules.txt"))
+	return util.PathExists(filepath.Join(root, vendorDirName, "modules.txt"))
 }
 
 // modMod forces module mode, so the build ignores the vendor directory.
@@ -43,7 +43,7 @@ const modMod = "-mod=mod"
 // treats the double-dash form the same as the single-dash one. The value, if
 // any, is the next argument.
 func isModFlag(tok string) bool {
-	return tok == "-mod" || tok == "--mod"
+	return tok == flagMod || tok == "--mod"
 }
 
 // isModVendorToken reports whether tok is a joined -mod=vendor/--mod=vendor
@@ -67,14 +67,20 @@ func isModToken(tok string) bool {
 // vendoring, so we respect the user's intent). -mod=mod is appended only when
 // no -mod/--mod token is present at all.
 func forceModMod(goflags string) string {
-	fields := strings.Fields(goflags)
+	// SplitGoflags keeps quoted tokens (such as -tags='foo bar') intact, unlike
+	// strings.Fields which would split them on the inner space.
+	fields := util.SplitGoflags(goflags)
 	hasMod := false
 	for i, f := range fields {
-		switch {
-		case isModVendorToken(f):
+		// The go command strips one layer of surrounding quotes from a GOFLAGS
+		// token before interpreting it, so a quoted flag such as '-mod=readonly'
+		// is a -mod flag. Match on the unquoted form, but keep the original
+		// token in the output so an existing -mod choice is preserved verbatim.
+		switch tok := util.UnquoteGoflagsToken(f); {
+		case isModVendorToken(tok):
 			fields[i] = modMod
 			hasMod = true
-		case isModToken(f):
+		case isModToken(tok):
 			hasMod = true
 		}
 	}
@@ -89,16 +95,23 @@ func forceModMod(goflags string) string {
 // rewritten to module mode, leaving -mod=readonly and -mod=mod untouched. A
 // CLI flag beats GOFLAGS, so this neutralizes a vendor selection that setting
 // GOFLAGS alone cannot override.
-func rewriteModVendor(args []string) []string {
+// Only actual Go build flags are rewritten; test-binary arguments and test flag
+// values are preserved untouched.
+func rewriteModVendor(subcommand string, args []string) []string {
+	if subcommand == "" {
+		subcommand = subcmdBuild
+	}
+	classified := classifyArgs(subcommand, args)
 	out := make([]string, len(args))
 	copy(out, args)
-	for i := 0; i < len(out); i++ {
-		switch {
-		case isModVendorToken(out[i]):
-			out[i] = modMod
-		case isModFlag(out[i]) && i+1 < len(out) && out[i+1] == "vendor":
-			out[i+1] = "mod"
-			i++
+
+	for i, a := range classified {
+		if a.Kind == ArgBuildFlag && a.FlagName == flagMod {
+			if a.HasValue && isModVendorToken(a.Raw) {
+				out[a.Index] = modMod
+			} else if !a.HasValue && i+1 < len(classified) && classified[i+1].Kind == ArgBuildFlagValue && classified[i+1].Raw == vendorDirName {
+				out[classified[i+1].Index] = "mod"
+			}
 		}
 	}
 	return out

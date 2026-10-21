@@ -34,7 +34,6 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
-	"gopkg.in/yaml.v3"
 	"gotest.tools/v3/golden"
 )
 
@@ -54,6 +53,7 @@ const (
 	mainGoFileName     = "main.go"
 	mainTestFileName   = "main_test.go"
 	otherGoFileName    = "other.go"
+	runtimeStubName    = "runtime_stub.go"
 	mainPackage        = "main"
 	buildID            = "foo/bar"
 	compiledOutput     = "_pkg_.a"
@@ -114,6 +114,9 @@ func runTest(t *testing.T, testName string) {
 
 	testcaseDir := filepath.Join(testdataDir, goldenDir, testName)
 	helpers := buildTestcaseHelpers(ctx, t, testcaseDir)
+	if stub := buildRuntimeStub(ctx, t, testcaseDir, tempDir); stub != nil {
+		helpers = append(helpers, *stub)
+	}
 
 	args := compileArgs(tempDir, helpers, importPath, packageFiles...)
 	err := Toolexec(ctx, args, false)
@@ -153,14 +156,16 @@ func loadRulesYAML(t *testing.T, p loadRulesParams) *rule.InstRuleSet {
 	data, err := os.ReadFile(filepath.Join(testdataDir, goldenDir, p.testName, rulesFileName))
 	require.NoError(t, err)
 
-	var rawRules map[string]map[string]any
-	yaml.Unmarshal(data, &rawRules)
+	doc, parseErr := rule.ParseFile(data)
+	require.NoError(t, parseErr)
+	rules, rulesErr := doc.Rules()
+	require.NoError(t, rulesErr)
 
 	// Parse the source AST once and reuse it for every rule's where.file gating
 	// below. The gating is per-rule, but the tree is shared, so N rules do not
 	// trigger N reparses of the same file.
-	sourceTree, parseErr := ast.ParseFileFast(p.sourceFile)
-	require.NoError(t, parseErr)
+	sourceTree, sourceParseErr := ast.ParseFileFast(p.sourceFile)
+	require.NoError(t, sourceParseErr)
 
 	ruleSet := &rule.InstRuleSet{
 		// PackageName is the Go package identifier (from the source clause);
@@ -179,94 +184,58 @@ func loadRulesYAML(t *testing.T, p loadRulesParams) *rule.InstRuleSet {
 		FileRules:      make([]*rule.InstFileRule, 0),
 	}
 
-	// Sort rule names to ensure deterministic order in tests
-	ruleNames := make([]string, 0, len(rawRules))
-	for name := range rawRules {
-		ruleNames = append(ruleNames, name)
-	}
-	slices.Sort(ruleNames)
+	for _, instRule := range rules {
+		// The golden harness has no setup phase, so the where.file filter
+		// that setup.preciseMatching would evaluate is applied inline here.
+		// A rule whose file predicate does not match the source is skipped,
+		// exactly as it would be gated out during matching.
+		if !whereFileMatchesRule(t, instRule, p.isTest, sourceTree) {
+			continue
+		}
 
-	for _, name := range ruleNames {
-		propsList, normErr := rule.Normalize(rawRules[name])
-		require.NoError(t, normErr)
-		for _, props := range propsList {
-			props["name"] = name
-			ruleData, _ := yaml.Marshal(props)
+		// Mirror the setup-phase package gate: a rule applies only when its
+		// target selects this fixture's import path. This lets golden fixtures
+		// prove match vs no-match against realistic deep import paths, not
+		// just "main".
+		if !instRule.GetTarget().Matches(p.importPath, nil) {
+			continue
+		}
 
-			// The golden harness has no setup phase, so the where.file filter
-			// that setup.preciseMatching would evaluate is applied inline here.
-			// A rule whose file predicate does not match the source is skipped,
-			// exactly as it would be gated out during matching.
-			if !whereFileMatches(t, ruleData, p.isTest, sourceTree) {
-				continue
+		switch r := instRule.(type) {
+		case *rule.InstStructRule:
+			ruleSet.StructRules[p.sourceFile] = append(ruleSet.StructRules[p.sourceFile], r)
+		case *rule.InstFileRule:
+			ruleSet.FileRules = append(ruleSet.FileRules, r)
+		case *rule.InstDirectiveRule:
+			ruleSet.DirectiveRules[p.sourceFile] = append(ruleSet.DirectiveRules[p.sourceFile], r)
+		case *rule.InstRawRule:
+			ruleSet.RawRules[p.sourceFile] = append(ruleSet.RawRules[p.sourceFile], r)
+		case *rule.InstFuncRule:
+			ruleSet.FuncRules[p.sourceFile] = append(ruleSet.FuncRules[p.sourceFile], r)
+		case *rule.InstCallRule:
+			for _, file := range p.packageFiles {
+				ruleSet.CallRules[file] = append(ruleSet.CallRules[file], r)
 			}
-
-			// Mirror the setup-phase package gate: a rule applies only when its
-			// target selects this fixture's import path (exact equality or glob
-			// match). This lets golden fixtures prove glob match vs no-match
-			// against realistic deep import paths, not just "main".
-			if !targetMatches(props, p.importPath) {
-				continue
+		case *rule.InstLitRule:
+			for _, file := range p.packageFiles {
+				ruleSet.LitRules[file] = append(ruleSet.LitRules[file], r)
 			}
-
-			switch {
-			case props["struct"] != nil:
-				r, _ := rule.NewInstStructRule(ruleData, name)
-				ruleSet.StructRules[p.sourceFile] = append(ruleSet.StructRules[p.sourceFile], r)
-			case props["file"] != nil:
-				r, _ := rule.NewInstFileRule(ruleData, name)
-				ruleSet.FileRules = append(ruleSet.FileRules, r)
-			case props["directive"] != nil:
-				r, _ := rule.NewInstDirectiveRule(ruleData, name)
-				ruleSet.DirectiveRules[p.sourceFile] = append(ruleSet.DirectiveRules[p.sourceFile], r)
-			case props["raw"] != nil:
-				r, _ := rule.NewInstRawRule(ruleData, name)
-				ruleSet.RawRules[p.sourceFile] = append(ruleSet.RawRules[p.sourceFile], r)
-			case props["func"] != nil:
-				r, _ := rule.NewInstFuncRule(ruleData, name)
-				ruleSet.FuncRules[p.sourceFile] = append(ruleSet.FuncRules[p.sourceFile], r)
-			case props["function_call"] != nil:
-				r, _ := rule.NewInstCallRule(ruleData, name)
-				for _, file := range p.packageFiles {
-					ruleSet.CallRules[file] = append(ruleSet.CallRules[file], r)
-				}
-			case props["struct_literal"] != nil:
-				r, _ := rule.NewInstLitRule(ruleData, name)
-				for _, file := range p.packageFiles {
-					ruleSet.LitRules[file] = append(ruleSet.LitRules[file], r)
-				}
-			case props["identifier"] != nil:
-				r, _ := rule.NewInstDeclRule(ruleData, name)
-				ruleSet.DeclRules[p.sourceFile] = append(ruleSet.DeclRules[p.sourceFile], r)
-			}
+		case *rule.InstDeclRule:
+			ruleSet.DeclRules[p.sourceFile] = append(ruleSet.DeclRules[p.sourceFile], r)
 		}
 	}
 
 	return ruleSet
 }
 
-// whereFileMatches evaluates the rule's where.file predicate against the
-// already-parsed source tree, mirroring the gating that setup.preciseMatching
-// performs. It returns true when there is no file predicate. The golden harness
-// builds the matched rule set by hand (no setup phase), so this keeps fixtures
-// honest: a rule whose file filter does not match is gated out and produces no
-// instrumentation. The caller parses the tree once and shares it across rules.
-//
-// isTest reports whether the fixture is a test build (its source is a
-// source_test.go file), mirroring setup.isTestBuild; the is_test predicate is
-// evaluated against it.
-func whereFileMatches(t *testing.T, ruleData []byte, isTest bool, tree *dst.File) bool {
+func whereFileMatchesRule(t *testing.T, instRule rule.InstRule, isTest bool, tree *dst.File) bool {
 	t.Helper()
 
-	var probe struct {
-		Where *rule.WhereDef `yaml:"where"`
-	}
-	require.NoError(t, yaml.Unmarshal(ruleData, &probe))
-	if probe.Where == nil || probe.Where.File == nil {
+	where := instRule.GetWhere()
+	if where == nil || where.File == nil {
 		return true
 	}
-
-	return fileFilterMatches(t, probe.Where.File, isTest, tree)
+	return fileFilterMatches(t, where.File, isTest, tree)
 }
 
 // fileFilterMatches reports whether a where.file predicate matches the parsed
@@ -333,7 +302,7 @@ func fileFilterMatches(t *testing.T, def *rule.FilterDef, isTest bool, tree *dst
 	}
 	switch {
 	case def.HasFunc != "":
-		_, ok, _ := ast.FindFuncDecl(tree, def)
+		_, ok, _ := ast.FindFuncDecl(tree, def, nil)
 		return ok
 	case def.HasStruct != "":
 		return ast.FindStructType(tree, def.HasStruct) != nil
@@ -350,22 +319,6 @@ func fileFilterMatches(t *testing.T, def *rule.FilterDef, isTest bool, tree *dst
 			"evaluate (%+v); extend fileFilterMatches to mirror setup.buildFile", def)
 		return false
 	}
-}
-
-// targetMatches reports whether a rule's target selects importPath, mirroring
-// setup-phase package selection: a glob target matches via MatchGlobTarget, an
-// exact target matches only on equality. A missing, non-string, or empty target
-// never matches, so an invalid fixture fails the golden test instead of silently
-// being applied.
-func targetMatches(props map[string]any, importPath string) bool {
-	target, ok := props["target"].(string)
-	if !ok || strings.TrimSpace(target) == "" {
-		return false
-	}
-	if rule.IsGlobTarget(target) {
-		return rule.MatchGlobTarget(target, importPath)
-	}
-	return target == importPath
 }
 
 func writeMatchedJSON(ruleSet *rule.InstRuleSet) {
@@ -492,6 +445,34 @@ func buildTestcaseHelpers(ctx context.Context, t *testing.T, testcaseDir string)
 		out = append(out, helperPkg{importPath: info.ImportPath, archive: info.Export})
 	}
 	return out
+}
+
+// buildRuntimeStub compiles testcaseDir's runtime_stub.go, if present, as a
+// stand-in for the real "runtime" package, whose SuppressHooks and
+// UnsuppressHooks otelc's real build adds at compile time.
+func buildRuntimeStub(ctx context.Context, t *testing.T, testcaseDir, tempDir string) *helperPkg {
+	t.Helper()
+	stubFile := filepath.Join(testcaseDir, runtimeStubName)
+	if !util.PathExists(stubFile) {
+		return nil
+	}
+
+	gotooldir, err := exec.Command("go", "env", "GOTOOLDIR").Output()
+	require.NoError(t, err)
+
+	stubArchive := filepath.Join(tempDir, "runtime_stub.a")
+	cmd := exec.CommandContext(
+		ctx,
+		filepath.Join(strings.TrimSpace(string(gotooldir)), "compile"),
+		"-p", suppressHooksPackage,
+		"-o", stubArchive,
+		stubFile,
+	)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	require.NoError(t, cmd.Run(), "compiling %s: %s", stubFile, stderr.String())
+
+	return &helperPkg{importPath: suppressHooksPackage, archive: stubArchive}
 }
 
 func verifyGoldenFiles(t *testing.T, tempDir, testName string) {
@@ -753,4 +734,122 @@ func TestGroupRules(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRsetHasMethodCallRule(t *testing.T) {
+	t.Run("no call rules", func(t *testing.T) {
+		rset := rule.NewInstRuleSet("example.com/p")
+		assert.False(t, rsetHasMethodCallRule(rset))
+	})
+
+	t.Run("function_call rule only", func(t *testing.T) {
+		rset := rule.NewInstRuleSet("example.com/p")
+		rset.AddCallRule("/f.go", &rule.InstCallRule{FunctionCall: "net/http.Get"})
+		assert.False(t, rsetHasMethodCallRule(rset))
+	})
+
+	t.Run("method_call rule present", func(t *testing.T) {
+		rset := rule.NewInstRuleSet("example.com/p")
+		rset.AddCallRule("/f.go", &rule.InstCallRule{FunctionCall: "net/http.Get"})
+		rset.AddCallRule("/g.go", &rule.InstCallRule{MethodCall: "example.com/p.*Buffer.Write"})
+		assert.True(t, rsetHasMethodCallRule(rset))
+	})
+}
+
+// TestInstrumentSkipsFilesNoRuleChanged checks that a file a call rule is
+// attached to, but that has no matching call, stays in the compile command as
+// it is. Setup attaches call rules to every file of a target package, so with
+// a glob target that is most files of the build.
+func TestInstrumentSkipsFilesNoRuleChanged(t *testing.T) {
+	src := t.TempDir()
+	matched := filepath.Join(src, "matched.go")
+	unmatched := filepath.Join(src, "unmatched.go")
+	require.NoError(t, os.WriteFile(matched, []byte(`package p
+
+import "net/http"
+
+func F() { _, _ = http.Get("http://example.com") }
+`), 0o600))
+	require.NoError(t, os.WriteFile(unmatched, []byte(`package p
+
+func G() int { return 1 }
+`), 0o600))
+
+	r := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_get"},
+		FunctionCall: "net/http.Get",
+		ImportPath:   "net/http",
+		FuncName:     "Get",
+		Replace:      "({{ . }})",
+	}
+	rset := rule.NewInstRuleSet("example.com/p")
+	rset.PackageName = "p"
+	rset.AddCallRule(matched, r)
+	rset.AddCallRule(unmatched, r)
+
+	ip := newTestPhase()
+	ip.workDir = t.TempDir()
+	ip.compileArgs = []string{"compile", "-p", "example.com/p", matched, unmatched}
+	require.NoError(t, ip.instrument(context.Background(), rset))
+
+	assert.Equal(t, filepath.Join(ip.workDir, "matched.go"), ip.compileArgs[3],
+		"the file with a matching call must be replaced by its instrumented copy")
+	assert.Equal(t, unmatched, ip.compileArgs[4],
+		"a file no rule changed must stay in the compile command as it is")
+	assert.NoFileExists(t, filepath.Join(ip.workDir, "unmatched.go"))
+}
+
+func TestInstrumentMethodCallMatchesRegardlessOfFileOrder(t *testing.T) {
+	src := t.TempDir()
+	setup := filepath.Join(src, "a_setup.go")
+	call := filepath.Join(src, "b_call.go")
+	require.NoError(t, os.WriteFile(setup, []byte(`package p
+
+import "net/http"
+
+type Buffer struct{}
+
+func (b *Buffer) Write(p []byte) (int, error) { return len(p), nil }
+
+func F() { _, _ = http.Get("http://example.com") }
+`), 0o600))
+	require.NoError(t, os.WriteFile(call, []byte(`package p
+
+func G(b *Buffer) { _, _ = b.Write(nil) }
+`), 0o600))
+
+	unrelatedRule := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_get"},
+		FunctionCall: "net/http.Get",
+		ImportPath:   "net/http",
+		FuncName:     "Get",
+		Replace:      "({{ . }})",
+	}
+	methodRule := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_write"},
+		MethodCall:   "example.com/p.*Buffer.Write",
+		ImportPath:   "example.com/p",
+		RecvType:     "*Buffer",
+		FuncName:     "Write",
+		Replace:      "({{ . }})",
+	}
+	rset := rule.NewInstRuleSet("example.com/p")
+	rset.PackageName = "p"
+	rset.AddCallRule(setup, unrelatedRule)
+	rset.AddCallRule(call, methodRule)
+
+	ip := newTestPhase()
+	ip.workDir = t.TempDir()
+	ip.compileArgs = []string{"compile", "-p", "example.com/p", setup, call}
+	require.NoError(t, ip.instrument(context.Background(), rset))
+
+	assert.True(t, ip.methodCallInfoLoaded)
+	assert.Equal(t, filepath.Join(ip.workDir, "a_setup.go"), ip.compileArgs[3],
+		"a_setup.go's own rule must still rewrite it")
+	assert.Equal(t, filepath.Join(ip.workDir, "b_call.go"), ip.compileArgs[4],
+		"the method_call rule must still match b_call.go even though a_setup.go was rewritten first")
+
+	written, err := os.ReadFile(filepath.Join(ip.workDir, "b_call.go"))
+	require.NoError(t, err)
+	assert.Contains(t, string(written), "(b.Write(nil))")
 }

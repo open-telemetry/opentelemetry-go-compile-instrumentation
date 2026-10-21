@@ -4,7 +4,6 @@
 package instrument
 
 import (
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -111,7 +110,7 @@ func Helper() string {
 	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "helper.go"), []byte(content), 0o644))
 
 	ip := &instrumentPhase{
-		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		logger:  slog.New(slog.DiscardHandler),
 		workDir: workDir,
 	}
 
@@ -150,7 +149,7 @@ func OrigHelper() {}
 	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "helper.go"), []byte(origContent), 0o644))
 
 	ip := &instrumentPhase{
-		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		logger:  slog.New(slog.DiscardHandler),
 		workDir: workDir,
 	}
 
@@ -178,7 +177,7 @@ func TestApplyFileRule_FileNotFound(t *testing.T) {
 	workDir := t.TempDir()
 
 	ip := &instrumentPhase{
-		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		logger:  slog.New(slog.DiscardHandler),
 		workDir: workDir,
 	}
 
@@ -207,7 +206,7 @@ func SubHelper() {}
 	require.NoError(t, os.WriteFile(filepath.Join(subDir, "helper.go"), []byte(content), 0o644))
 
 	ip := &instrumentPhase{
-		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		logger:  slog.New(slog.DiscardHandler),
 		workDir: workDir,
 	}
 

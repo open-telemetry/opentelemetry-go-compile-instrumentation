@@ -1,3 +1,5 @@
+version: "v1.0.0"
+
 client_hook:
   target: net/http
   where:

@@ -21,6 +21,7 @@ const (
 	selectorStruct            selector = "struct"
 	selectorStructLiteral     selector = "struct_literal"
 	selectorFunctionCall      selector = "function_call"
+	selectorMethodCall        selector = "method_call"
 	selectorDirective         selector = "directive"
 	selectorKind              selector = "kind"
 	selectorIdentifier        selector = "identifier"
@@ -55,14 +56,15 @@ const (
 const (
 	selTarget            = string(selectorTarget)
 	selVersion           = string(selectorVersion)
-	SelFunc              = string(selectorFunc)
+	selFunc              = string(selectorFunc)
 	selRecv              = string(selectorRecv)
-	SelStruct            = string(selectorStruct)
-	SelStructLiteral     = string(selectorStructLiteral)
-	SelFunctionCall      = string(selectorFunctionCall)
-	SelDirective         = string(selectorDirective)
+	selStruct            = string(selectorStruct)
+	selStructLiteral     = string(selectorStructLiteral)
+	selFunctionCall      = string(selectorFunctionCall)
+	selMethodCall        = string(selectorMethodCall)
+	selDirective         = string(selectorDirective)
 	selKind              = string(selectorKind)
-	SelIdentifier        = string(selectorIdentifier)
+	selIdentifier        = string(selectorIdentifier)
 	selSignature         = string(selectorSignature)
 	selSignatureContains = string(selectorSignatureContains)
 	selResult            = string(selectorResult)
@@ -71,14 +73,13 @@ const (
 	selPattern           = string(selectorPattern)
 	selPlacement         = string(selectorPlacement)
 
-	WhereFile = string(selectorFile)
+	whereFile = string(selectorFile)
 	combAllOf = string(selectorAllOf)
 	combOneOf = string(selectorOneOf)
 	combNot   = string(selectorNot)
 
-	// RawField is the modifier-output key produced by normalize for raw rules
-	// (inject_code payload). It is not a where selector; tool/internal/setup/match.go shares it.
-	RawField = "raw"
+	// rawField is the modifier-output key produced by normalize for raw rules.
+	rawField = "raw"
 )
 
 // Structured top-level keys.
@@ -133,6 +134,7 @@ func allSelectors() []selector {
 		selectorStruct,
 		selectorStructLiteral,
 		selectorFunctionCall,
+		selectorMethodCall,
 		selectorDirective,
 		selectorKind,
 		selectorIdentifier,

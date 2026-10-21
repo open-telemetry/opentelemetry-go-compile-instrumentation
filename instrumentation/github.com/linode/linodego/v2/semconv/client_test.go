@@ -136,7 +136,7 @@ func TestMetricsRecord(t *testing.T) {
 
 	m := NewMetrics(mp.Meter("test"))
 	ctx := context.Background()
-	m.RecordOperationDuration(ctx, 0.12, "GetInstance", 200, "")
+	m.RecordOperationDuration(ctx, 0.12, "GetInstance", 200, "", "")
 
 	var rm metricdata.ResourceMetrics
 	require.NoError(t, reader.Collect(ctx, &rm))
@@ -153,10 +153,11 @@ func TestMetricsRecord(t *testing.T) {
 }
 
 func TestMetricAttributes_ModerateCardinality(t *testing.T) {
-	m := attrsToMap(MetricAttributes("GetInstance", 404, ""))
+	m := attrsToMap(MetricAttributes("GetInstance", 404, "404", ""))
 	assert.Equal(t, DefaultServerAddress, m["server.address"])
 	assert.Equal(t, "GetInstance", m["code.function.name"])
 	assert.Equal(t, int64(404), m["http.response.status_code"])
+	assert.Equal(t, "404", m["error.type"])
 
 	// Unbounded path-style labels must not appear on metrics.
 	_, hasPath := m["url.path"]
@@ -165,21 +166,28 @@ func TestMetricAttributes_ModerateCardinality(t *testing.T) {
 	assert.False(t, hasMethod)
 
 	// Success path without a status code omits the status attribute.
-	m = attrsToMap(MetricAttributes("ListRegions", 0, ""))
+	m = attrsToMap(MetricAttributes("ListRegions", 0, "", ""))
 	assert.Equal(t, "ListRegions", m["code.function.name"])
 	_, hasStatus := m["http.response.status_code"]
 	assert.False(t, hasStatus)
+	assert.NotContains(t, m, "error.type")
+}
+
+func TestMetricAttributes_NonHTTPFailureSetsErrorType(t *testing.T) {
+	m := attrsToMap(MetricAttributes("ListRegions", 0, "*errors.errorString", ""))
+	assert.Equal(t, "*errors.errorString", m["error.type"])
+	assert.NotContains(t, m, "http.response.status_code")
 }
 
 func TestMetricAttributes_CustomServerAddress(t *testing.T) {
-	m := attrsToMap(MetricAttributes("GetInstance", 200, "api.test.linode.com"))
+	m := attrsToMap(MetricAttributes("GetInstance", 200, "", "api.test.linode.com"))
 	assert.Equal(t, "api.test.linode.com", m["server.address"])
 }
 
 func TestNewMetricsNilMeter(t *testing.T) {
 	m := NewMetrics(nil)
 	// Should not panic.
-	m.RecordOperationDuration(context.Background(), 1, "GetInstance", 0, "")
+	m.RecordOperationDuration(context.Background(), 1, "GetInstance", 0, "", "")
 }
 
 func attrsToMap(attrs []attribute.KeyValue) map[string]interface{} {
