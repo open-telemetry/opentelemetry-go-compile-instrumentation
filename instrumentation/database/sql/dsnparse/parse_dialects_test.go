@@ -4,9 +4,11 @@
 package dsnparse
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestParseDSN_ClickHouse exercises the ClickHouse parser, which was previously
@@ -157,6 +159,39 @@ func TestParseDSN_Oracle(t *testing.T) {
 			wantPort: "1521",
 			wantDB:   "",
 		},
+		// ---- Quoted credentials (GHSA-vpvg-8754-jjm3). Oracle requires an
+		// '@' inside a password to be double-quoted, so the credentials
+		// separator is the first '@' outside quoted sections; splitting at
+		// the first '@' used to land inside the password and record the tail
+		// of it as server.address. ----
+		{
+			name:     "quoted password with at sign",
+			dsn:      `user/"s3cr3t@word"@db.example.com:1521/ORCL`,
+			wantHost: "db.example.com",
+			wantPort: "1521",
+			wantDB:   "ORCL",
+		},
+		{
+			name:     "quoted password with several at signs",
+			dsn:      `user/"a@b@c"@//db.example.com:1521/ORCL`,
+			wantHost: "db.example.com",
+			wantPort: "1521",
+			wantDB:   "ORCL",
+		},
+		{
+			name:     "quoted user with at sign",
+			dsn:      `"us@er"/pass@dbhost:1521/ORCL`,
+			wantHost: "dbhost",
+			wantPort: "1521",
+			wantDB:   "ORCL",
+		},
+		{
+			name:     "quoted password with doubled quotes and at sign",
+			dsn:      `user/"pa""s@s"@dbhost/ORCL`,
+			wantHost: "dbhost",
+			wantPort: "1521",
+			wantDB:   "ORCL",
+		},
 	}
 
 	for _, tt := range tests {
@@ -177,6 +212,84 @@ func TestParseDSN_OracleNoAt(t *testing.T) {
 	got := ParseDSN("oracle", "justaservicename")
 	assert.Equal(t, DSNInfo{}, got)
 	assert.Equal(t, "", got.Addr())
+}
+
+// TestParseDSN_OracleQuotedPasswordNotInAddress is the regression test for
+// GHSA-vpvg-8754-jjm3. parseOracleDSN used to split the Easy Connect DSN at
+// the first '@', but an '@' inside a double-quoted password is part of the
+// credentials, so the split landed inside the password and its tail was
+// recorded on every span as server.address. No output field may contain any
+// part of the password.
+func TestParseDSN_OracleQuotedPasswordNotInAddress(t *testing.T) {
+	tests := []struct {
+		name     string
+		dsn      string
+		password string
+		wantHost string
+		wantPort string
+		wantDB   string
+	}{
+		{
+			name:     "quoted password with at sign",
+			dsn:      `user/"s3cr3t@word"@db.example.com:1521/ORCL`,
+			password: "s3cr3t@word",
+			wantHost: "db.example.com",
+			wantPort: "1521",
+			wantDB:   "ORCL",
+		},
+		{
+			name:     "quoted password with at sign and double slash prefix",
+			dsn:      `user/"a@b@c"@//db.example.com:1521/ORCL`,
+			password: "a@b@c",
+			wantHost: "db.example.com",
+			wantPort: "1521",
+			wantDB:   "ORCL",
+		},
+		{
+			name:     "quoted password with at sign and default port",
+			dsn:      `user/"p@ss"@dbhost/ORCL`,
+			password: "p@ss",
+			wantHost: "dbhost",
+			wantPort: "1521",
+			wantDB:   "ORCL",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseDSN("godror", tt.dsn)
+			assert.Equal(t, tt.wantHost, got.Host, "Host")
+			assert.Equal(t, tt.wantPort, got.Port, "Port")
+			assert.Equal(t, tt.wantDB, got.DBName, "DBName")
+
+			endpoint := got.Addr()
+			addr, err := LegacyParseDSN("godror", tt.dsn)
+			require.NoError(t, err)
+			assert.Equal(t, endpoint, addr, "LegacyParseDSN endpoint")
+
+			// The fragment that used to leak is the part of the password
+			// after its first '@'; assert on it for every exported field.
+			leak := tt.password[strings.IndexByte(tt.password, '@'):]
+			for name, field := range map[string]string{
+				"Host": got.Host, "Port": got.Port, "DBName": got.DBName,
+				"Addr": got.Addr(), "LegacyParseDSN endpoint": addr,
+			} {
+				assert.NotContainsf(t, field, leak,
+					"%s contains a fragment of the password", name)
+			}
+		})
+	}
+}
+
+// TestParseDSN_OracleUnterminatedQuoteYieldsNoAddress pins the safe fallback
+// for a DSN whose quoted password is never closed: there is no trustworthy
+// credentials separator, so the parser must yield no address at all rather
+// than guessing and risking a password fragment in server.address.
+func TestParseDSN_OracleUnterminatedQuoteYieldsNoAddress(t *testing.T) {
+	got := ParseDSN("oracle", `user/"unterminated@word`)
+	assert.Equal(t, DSNInfo{}, got)
+	addr, err := LegacyParseDSN("oracle", `user/"unterminated@word`)
+	require.NoError(t, err)
+	assert.Equal(t, "oracle", addr)
 }
 
 // TestParseDSN_MySQLIPv6 covers IPv6 bracketed addresses in the non-parenthesised

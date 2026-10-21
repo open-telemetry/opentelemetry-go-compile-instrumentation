@@ -36,6 +36,15 @@ func fuzzSeeds() []string {
 		"sqlserver://user:pass@host:1433?database=mydb",
 		"clickhouse://host:9000/mydb",
 		"user/pass@//host:1521/service",
+		// Passwords containing DSN delimiters, which used to cut the DSN
+		// inside the credentials and leak the tail into server.address
+		// (GHSA-vpvg-8754-jjm3 / GHSA-xqgc-3rfx-7j5x).
+		"user:pa(ss@tcp(db.example.com:3306)/app",
+		"user:p(a@ss@tcp(db.example.com:3306)/app",
+		"user:p/a(ss@tcp(db.example.com:3306)/app",
+		`user/"s3cr3t@word"@db.example.com:1521/ORCL`,
+		`user/"a@b@c"@//db.example.com:1521/ORCL`,
+		`user/"unterminated@word`,
 		// IPv6 forms, which must survive the Addr round trip.
 		"user:pass@tcp([::1]:3306)/mydb",
 		"postgres://user:pass@[2001:db8::1]:5432/mydb",

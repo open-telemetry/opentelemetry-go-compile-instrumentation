@@ -4,9 +4,11 @@
 package dsnparse
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestParseDSN_Postgres(t *testing.T) {
@@ -260,6 +262,45 @@ func TestParseDSN_MySQL(t *testing.T) {
 			wantHost: "host",
 			wantPort: "3306",
 			wantDB:   "",
+		},
+		// ---- Passwords containing DSN delimiters (GHSA-xqgc-3rfx-7j5x).
+		// go-sql-driver/mysql allows '@', '(' and '/' inside a password, so
+		// none of them may cut the DSN inside the credentials: the fragment
+		// after the cut used to be recorded as server.address. ----
+		{
+			name:     "password with paren",
+			dsn:      "user:pa(ss@tcp(db.example.com:3306)/app",
+			wantHost: "db.example.com",
+			wantPort: "3306",
+			wantDB:   "app",
+		},
+		{
+			name:     "password with paren and at sign",
+			dsn:      "user:p(a@ss@tcp(10.0.0.9:3307)/prod",
+			wantHost: "10.0.0.9",
+			wantPort: "3307",
+			wantDB:   "prod",
+		},
+		{
+			name:     "password with parens and at sign before parenthesised address",
+			dsn:      "user:p(a)ss@tcp(db.internal:3306)/db",
+			wantHost: "db.internal",
+			wantPort: "3306",
+			wantDB:   "db",
+		},
+		{
+			name:     "password with slash",
+			dsn:      "user:p/a@ss@tcp(host:3306)/mydb",
+			wantHost: "host",
+			wantPort: "3306",
+			wantDB:   "mydb",
+		},
+		{
+			name:     "password with paren in unix address form",
+			dsn:      "user:pa(ss@unix(/tmp/mysql.sock)/mydb",
+			wantHost: "/tmp/mysql.sock",
+			wantPort: "",
+			wantDB:   "mydb",
 		},
 	}
 
@@ -597,4 +638,58 @@ func TestParseDSN_MySQLNoParensUnixSocketWithQueryParam(t *testing.T) {
 	got := ParseDSN("mysql", "unix:/tmp/mysql.sock/db?tls=a/b")
 	assert.Equal(t, "/tmp/mysql.sock", got.Host)
 	assert.Equal(t, "db", got.DBName)
+}
+
+// TestParseDSN_MySQLPasswordNotInAddress is the regression test for
+// GHSA-xqgc-3rfx-7j5x. parseMySQLDSN used to stop scanning for the
+// credentials separator at the first '(', and go-sql-driver/mysql allows '('
+// in a password, so the parenthesised address was taken from the password
+// onward and the text of the password after its '(' was recorded on every
+// span as server.address. No output field may contain any part of the
+// password.
+func TestParseDSN_MySQLPasswordNotInAddress(t *testing.T) {
+	tests := []struct {
+		name     string
+		dsn      string
+		password string
+	}{
+		{
+			name:     "paren in password",
+			dsn:      "user:pa(ss@tcp(db.example.com:3306)/app",
+			password: "pa(ss",
+		},
+		{
+			name:     "paren and at sign in password",
+			dsn:      "user:p(a@ss@tcp(db.example.com:3306)/app",
+			password: "p(a@ss",
+		},
+		{
+			name:     "slash in password",
+			dsn:      "user:p/a(ss@tcp(db.example.com:3306)/app",
+			password: "p/a(ss",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseDSN("mysql", tt.dsn)
+			assert.Equal(t, "db.example.com", got.Host, "Host")
+			assert.Equal(t, "3306", got.Port, "Port")
+			assert.Equal(t, "app", got.DBName, "DBName")
+
+			addr, err := LegacyParseDSN("mysql", tt.dsn)
+			require.NoError(t, err)
+			assert.Equal(t, "db.example.com:3306", addr, "LegacyParseDSN endpoint")
+
+			// The fragment of the password that used to leak is everything
+			// after its first '('; assert on it for every exported field.
+			leak := tt.password[strings.IndexByte(tt.password, '('):]
+			for name, field := range map[string]string{
+				"Host": got.Host, "Port": got.Port, "DBName": got.DBName,
+				"Addr": got.Addr(), "LegacyParseDSN endpoint": addr,
+			} {
+				assert.NotContainsf(t, field, leak,
+					"%s contains a fragment of the password", name)
+			}
+		})
+	}
 }

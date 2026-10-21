@@ -283,66 +283,44 @@ func parseLibpqKV(dsn string) DSNInfo {
 //
 // It also handles the non-standard form where the address is not wrapped in
 // parentheses (e.g. user:pass@tcp:3306/dbname or user:pass@host:3306/dbname).
+//
+// The separators are located the way go-sql-driver/mysql itself locates them:
+// the database name starts after the last '/' and the credentials section ends
+// at the last '@' before that '/'. A password may legitimately contain '@',
+// '(' or '/', so searching from the left — or stopping the scan at the first
+// '(' — would cut the DSN inside the password and leak the remainder of it
+// into the address recorded on server.address.
 func parseMySQLDSN(dsn string) DSNInfo {
-	// Find the last @ that precedes the first '(' so we skip '@' inside passwords.
-	atIdx := -1
-	for i := 0; i < len(dsn); i++ {
-		if dsn[i] == '@' {
-			atIdx = i
-		}
-		if dsn[i] == '(' {
-			break
-		}
+	// The '/' search stops at the first '?' so a slash inside a query-string
+	// value cannot shadow the database separator.
+	search := dsn
+	if q := strings.IndexByte(dsn, '?'); q >= 0 {
+		search = dsn[:q]
 	}
-	rest := dsn
-	if atIdx >= 0 {
-		rest = dsn[atIdx+1:]
+	dbSep := strings.LastIndexByte(search, '/')
+	if dbSep < 0 {
+		return DSNInfo{}
+	}
+	addr := dsn[:dbSep]
+	if at := strings.LastIndexByte(addr, '@'); at >= 0 {
+		addr = addr[at+1:]
 	}
 
-	var addrStr, dbPart string
-
-	if lp := strings.IndexByte(rest, '('); lp >= 0 {
-		// Standard parenthesised address: proto(host:port)/dbname
-		if rp := strings.IndexByte(rest[lp:], ')'); rp >= 0 {
-			addrStr = rest[lp+1 : lp+rp]
-			dbPart = rest[lp+rp+1:]
+	var addrStr string
+	if lp := strings.IndexByte(addr, '('); lp >= 0 {
+		// Standard parenthesised address: proto(host:port)
+		addr = addr[lp+1:]
+		if rp := strings.LastIndexByte(addr, ')'); rp >= 0 {
+			addrStr = addr[:rp]
 		}
 	} else {
-		// Non-standard: no parentheses around the address.
-		// Locate the '/' that separates the address from the database name.
-		// A unix-socket address is itself an absolute filesystem path and so
-		// contains '/' before the database name does, meaning the first '/'
-		// belongs to the address, not the separator. Every other form here
-		// (tcp, bare host, bare port) has no '/' in the address at all, so
-		// using the last '/' there gives the same split as the first.
-		sep := strings.IndexByte
-		searchIn := rest
-		if isMySQLUnixAddr(rest) {
-			sep = strings.LastIndexByte
-			if q := strings.IndexByte(rest, '?'); q >= 0 {
-				searchIn = rest[:q]
-			}
-		}
-		if sl := sep(searchIn, '/'); sl >= 0 {
-			addrStr = rest[:sl]
-			dbPart = rest[sl:]
-		} else {
-			addrStr = rest
-		}
-		addrStr = mysqlStripProtocol(addrStr)
+		// Non-standard form without parentheses around the address.
+		addrStr = mysqlStripProtocol(addr)
 	}
 
 	host, port := mysqlSplitAddr(addrStr)
-	dbName := mysqlDBName(dbPart)
+	dbName := mysqlDBName(dsn[dbSep:])
 	return DSNInfo{Host: host, Port: port, DBName: dbName}
-}
-
-// isMySQLUnixAddr reports whether a non-parenthesized MySQL address begins
-// with the "unix:" protocol keyword, meaning what follows the colon is a
-// filesystem path rather than a host[:port].
-func isMySQLUnixAddr(addr string) bool {
-	colon := strings.IndexByte(addr, ':')
-	return colon >= 0 && addr[:colon] == "unix"
 }
 
 // mysqlKnownProtocols lists the transport keywords used by go-sql-driver/mysql.
@@ -562,7 +540,7 @@ func parseOracleDSN(dsn string) DSNInfo {
 			return DSNInfo{Host: host, Port: port, DBName: dbName}
 		}
 	}
-	atIdx := strings.IndexByte(dsn, '@')
+	atIdx := oracleCredentialsEnd(dsn)
 	if atIdx < 0 {
 		return DSNInfo{}
 	}
@@ -576,6 +554,28 @@ func parseOracleDSN(dsn string) DSNInfo {
 	}
 	host, port := oracleSplitHostPort(hostPort)
 	return DSNInfo{Host: host, Port: port, DBName: dbName}
+}
+
+// oracleCredentialsEnd returns the index of the '@' that separates the
+// [user][/password] section from the address in a traditional Oracle DSN.
+// Oracle requires special characters in a user name or password to be enclosed
+// in double quotes, so quoted sections are skipped: a password such as
+// "s3cr3t@word" then no longer splits the DSN inside the credentials, which
+// would leak the tail of the password into the address recorded on
+// server.address. It returns -1 when the DSN has no unquoted '@'.
+func oracleCredentialsEnd(dsn string) int {
+	inQuote := false
+	for i := 0; i < len(dsn); i++ {
+		switch dsn[i] {
+		case '"':
+			inQuote = !inQuote
+		case '@':
+			if !inQuote {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 func oracleSplitHostPort(hp string) (host, port string) {
