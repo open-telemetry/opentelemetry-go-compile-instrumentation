@@ -34,9 +34,6 @@ const (
 const (
 	// MCPMethodName is the JSON-RPC request or notification method.
 	MCPMethodName = attribute.Key("mcp.method.name")
-	// MCPSessionID is the MCP session identifier negotiated at initialize
-	// time (ClientSession.ID()).
-	MCPSessionID = attribute.Key("mcp.session.id")
 )
 
 // GenAI operation name values.
@@ -54,9 +51,6 @@ const (
 type ToolCallRequest struct {
 	// ToolName is the name of the tool being invoked (CallToolParams.Name).
 	ToolName string
-	// SessionID is the MCP session identifier (ClientSession.ID()). It is
-	// omitted when empty, i.e. before the initialize handshake completes.
-	SessionID string
 }
 
 // ToolCallTraceAttrs returns the trace attributes for a client-side tools/call
@@ -74,9 +68,6 @@ func ToolCallTraceAttrs(req ToolCallRequest) []attribute.KeyValue {
 	}
 	if req.ToolName != "" {
 		attrs = append(attrs, GenAIToolName.String(req.ToolName))
-	}
-	if req.SessionID != "" {
-		attrs = append(attrs, MCPSessionID.String(req.SessionID))
 	}
 	return attrs
 }
