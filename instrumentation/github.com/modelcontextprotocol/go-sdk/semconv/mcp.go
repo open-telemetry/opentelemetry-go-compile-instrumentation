@@ -34,6 +34,20 @@ const (
 const (
 	// MCPMethodName is the JSON-RPC request or notification method.
 	MCPMethodName = attribute.Key("mcp.method.name")
+	// MCPSessionID is the MCP session identifier negotiated at initialize
+	// time (ClientSession.ID()).
+	MCPSessionID = attribute.Key("mcp.session.id")
+)
+
+// JSON-RPC attribute keys from the jsonrpc convention
+// (https://opentelemetry.io/docs/specs/semconv/rpc/json-rpc/). The Go SDK
+// routes every mcp call through internal/jsonrpc2.(*Connection).Call, so the
+// request id is observable there.
+const (
+	// JSONRPCRequestID is the JSON-RPC request identifier, rendered the way
+	// it travels on the wire ("42" for an integer id, quoted as a string for
+	// a string id).
+	JSONRPCRequestID = attribute.Key("jsonrpc.request.id")
 )
 
 // GenAI operation name values.
@@ -51,6 +65,9 @@ const (
 type ToolCallRequest struct {
 	// ToolName is the name of the tool being invoked (CallToolParams.Name).
 	ToolName string
+	// SessionID is the MCP session identifier (ClientSession.ID()). It is
+	// omitted when empty, i.e. before the initialize handshake completes.
+	SessionID string
 }
 
 // ToolCallTraceAttrs returns the trace attributes for a client-side tools/call
@@ -68,6 +85,9 @@ func ToolCallTraceAttrs(req ToolCallRequest) []attribute.KeyValue {
 	}
 	if req.ToolName != "" {
 		attrs = append(attrs, GenAIToolName.String(req.ToolName))
+	}
+	if req.SessionID != "" {
+		attrs = append(attrs, MCPSessionID.String(req.SessionID))
 	}
 	return attrs
 }

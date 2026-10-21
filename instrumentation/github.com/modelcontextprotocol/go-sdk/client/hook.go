@@ -5,12 +5,16 @@ package client
 
 import (
 	"context"
+	"errors"
+	"strconv"
 	"sync"
 
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
 	mcpsemconv "go.opentelemetry.io/otelc/instrumentation/github.com/modelcontextprotocol/go-sdk/semconv"
@@ -34,8 +38,9 @@ func (mcpEnablerImpl) Enable() bool {
 var mcpEnabler = mcpEnablerImpl{}
 
 var (
-	tracer   trace.Tracer
-	initOnce sync.Once
+	tracer     trace.Tracer
+	propagator propagation.TextMapPropagator
+	initOnce   sync.Once
 )
 
 func initInstrumentation() {
@@ -44,6 +49,7 @@ func initInstrumentation() {
 			instrumentationName,
 			trace.WithInstrumentationVersion(runtime.ModuleVersion()),
 		)
+		propagator = otel.GetTextMapPropagator()
 	})
 }
 
@@ -57,8 +63,10 @@ func spanName(toolName string) string {
 // invocation. The span is named "tools/call <name>" and carries the GenAI/MCP
 // attributes required by the semantic conventions.
 //
-// Signature: func (cs *mcp.ClientSession) CallTool(ctx, *mcp.CallToolParams) (*mcp.CallToolResult, error)
-// so ctx is param 0 and params is param 1.
+// Signature: func (cs *mcp.ClientSession) CallTool(ctx, *mcp.CallToolParams)
+// (*mcp.CallToolResult, error), so the parameter list seen by the hook framework
+// is: receiver cs = param 0, ctx = param 1, params = param 2. SetParam targets
+// those framework-level indices, not the hook function's own argument list.
 func BeforeCallTool(
 	ictx hook.HookContext,
 	cs *mcp.ClientSession,
@@ -78,21 +86,116 @@ func BeforeCallTool(
 		spanName(params.Name),
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(mcpsemconv.ToolCallTraceAttrs(mcpsemconv.ToolCallRequest{
-			ToolName: params.Name,
+			ToolName:  params.Name,
+			SessionID: sessionID(cs),
 		})...),
 	)
 	// Make downstream calls (and the real CallTool body) use the span context.
-	ictx.SetParam(0, spanCtx)
+	ictx.SetParam(1, spanCtx)
+
+	// Propagate the trace context through the JSON-RPC _meta field so a
+	// server-side handler can continue this trace. Copy params and the Meta
+	// map before mutating them: the caller's objects must stay untouched.
+	injected := *params
+	meta := make(mcp.Meta, len(params.Meta)+2)
+	for k, v := range params.Meta {
+		meta[k] = v
+	}
+	propagator.Inject(spanCtx, metaCarrier(meta))
+	injected.Meta = meta
+	ictx.SetParam(2, &injected)
+
 	ictx.SetData(span)
+}
+
+// sessionID returns the MCP session identifier for the client session, or ""
+// when the connection has no session id yet (e.g. before the initialize
+// handshake completes).
+func sessionID(cs *mcp.ClientSession) string {
+	if cs == nil {
+		return ""
+	}
+	return cs.ID()
+}
+
+// metaCarrier adapts mcp.Meta (a map[string]any) to the TextMapCarrier
+// interface so the W3C trace context can be injected into the request _meta.
+type metaCarrier mcp.Meta
+
+func (c metaCarrier) Get(key string) string {
+	if v, ok := c[key]; ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+func (c metaCarrier) Set(key, value string) {
+	c[key] = value
+}
+
+func (c metaCarrier) Keys() []string {
+	keys := make([]string, 0, len(c))
+	for k := range c {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// rpcCallID is the minimal surface the internal jsonrpc2.AsyncCall result of
+// (*Connection).Call exposes for request-id capture. The result is an
+// unexported concrete type, so the after hook asserts to this interface
+// instead of importing the internal package.
+type rpcCallID interface {
+	ID() jsonrpc.ID
+}
+
+// requestIDString renders a JSON-RPC id the way it is sent on the wire:
+// jsonrpc2 ids carry either an int64 or a string, and the attribute follows
+// the jsonrpc convention's string representation.
+func requestIDString(id jsonrpc.ID) string {
+	switch v := id.Raw().(type) {
+	case int64:
+		return strconv.FormatInt(v, 10)
+	case string:
+		return v
+	default:
+		return ""
+	}
+}
+
+// AfterConnectionCall captures jsonrpc.request.id for every JSON-RPC call the
+// MCP client makes (tools/call, initialize, resources/*, ...). The MCP layer
+// calls internal/jsonrpc2.(*Connection).Call, whose first parameter is the
+// request context; BeforeCallTool replaces it with the span-bearing context
+// for tools/call, so the span is recovered from that parameter via the hook
+// context. The return value is the unexported *jsonrpc2.AsyncCall, matched
+// through the rpcCallID interface rather than importing the internal package.
+func AfterConnectionCall(ictx hook.HookContext, result any) {
+	call, ok := result.(rpcCallID)
+	if !ok {
+		return
+	}
+	ctx, _ := ictx.GetParam(0).(context.Context)
+	span := trace.SpanFromContext(ctx)
+	if !span.SpanContext().IsValid() {
+		return
+	}
+	if id := requestIDString(call.ID()); id != "" {
+		span.SetAttributes(mcpsemconv.JSONRPCRequestID.String(id))
+	}
 }
 
 // AfterCallTool finalizes the span started by BeforeCallTool.
 //
 // MCP distinguishes two failure shapes: a transport/JSON-RPC error (the err
 // return) and a successful response that reports a logical tool failure via
-// CallToolResult.IsError. Both mark the span as ERROR; the latter uses the
-// well-known error.type "tool_error" mandated by the GenAI semantic
-// conventions.
+// CallToolResult.IsError. Both mark the span as ERROR and both set error.type:
+// the IsError case uses the well-known value "tool_error" mandated by the
+// GenAI semantic conventions; a JSON-RPC error uses its bare wire code string
+// (e.g. "-32601") for error.type and rpc.response.status_code, and any other
+// (transport) error uses the stable low-cardinality value "transport_error".
 func AfterCallTool(
 	ictx hook.HookContext,
 	result *mcp.CallToolResult,
@@ -107,7 +210,20 @@ func AfterCallTool(
 	switch {
 	case err != nil:
 		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
+		var rpcErr *jsonrpc.Error
+		if errors.As(err, &rpcErr) {
+			// JSON-RPC semconv: error.type carries the bare wire code string,
+			// and rpc.response.status_code records the error.code as a string.
+			code := strconv.FormatInt(rpcErr.Code, 10)
+			span.SetAttributes(
+				attribute.String("error.type", code),
+				attribute.String("rpc.response.status_code", code),
+			)
+			span.SetStatus(codes.Error, rpcErr.Message)
+		} else {
+			span.SetAttributes(attribute.String("error.type", "transport_error"))
+			span.SetStatus(codes.Error, err.Error())
+		}
 	case result != nil && result.IsError:
 		span.SetAttributes(attribute.String("error.type", mcpsemconv.ToolError))
 		span.SetStatus(codes.Error, mcpsemconv.ToolError)
