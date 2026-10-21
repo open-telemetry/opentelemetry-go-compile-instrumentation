@@ -263,7 +263,7 @@ func TestNewHookContextImpl(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			targetFunc := parseFunc(t, tt.funcSrc)
+			file, targetFunc := parseFileFunc(t, tt.funcSrc)
 			tjump := &tJump{
 				target: targetFunc,
 				rule: &rule.InstFuncRule{
@@ -271,7 +271,7 @@ func TestNewHookContextImpl(t *testing.T) {
 				},
 			}
 
-			expr := newHookContextImpl(tjump)
+			expr := newHookContextImpl(file, tjump)
 			assert.NotNil(t, expr)
 			if tt.validate != nil {
 				tt.validate(t, expr)
