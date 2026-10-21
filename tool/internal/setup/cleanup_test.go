@@ -12,6 +12,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/urfave/cli/v3"
+
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -329,7 +331,9 @@ func TestCleanup_KeepsSnapshotsWhenRevertFails(t *testing.T) {
 	// Sabotage one snapshot so Revert fails partially.
 	require.NoError(t, os.Remove(filepath.Join(util.GetBuildTemp(stateDir), stateSnapshotPath(otherFile))))
 
-	require.NoError(t, Cleanup(t.Context(), true))
+	err := Cleanup(t.Context(), true)
+	require.Error(t, err, "a failed restore must be reported")
+	assert.Contains(t, err.Error(), "otelc cleanup", "the error tells how to try again")
 
 	// Even with cleanAll, a failed revert must not delete the remaining
 	// snapshots as they are the only path left to recovery.
@@ -337,6 +341,43 @@ func TestCleanup_KeepsSnapshotsWhenRevertFails(t *testing.T) {
 		"manifest must survive a failed revert even with cleanAll")
 	assert.True(t, util.PathExists(filepath.Join(util.GetBuildTemp(stateDir), stateSnapshotPath(goMod))),
 		"snapshots must survive a failed revert even with cleanAll")
+}
+
+func TestRecoverLeftoverState(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+
+	require.NoError(t, recoverLeftoverState(t.Context()), "no manifest: nothing to do")
+
+	goMod := filepath.Join(tmp, "go.mod")
+	mustWriteFile(t, goMod, "module example.com/app\n")
+	dying := newStateManager()
+	require.NoError(t, dying.Track(goMod))
+	mustWriteFile(t, goMod, "module example.com/app\n\nreplace x => ./.otelc-build/x\n")
+
+	require.NoError(t, recoverLeftoverState(t.Context()))
+	content, err := os.ReadFile(goMod)
+	require.NoError(t, err)
+	assert.Equal(t, "module example.com/app\n", string(content))
+	assert.False(t, util.PathExists(util.GetBuildTemp(stateFileName)), "consumed manifest must be discarded")
+}
+
+func TestRecoverLeftoverStateFailureKeepsManifest(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+
+	goMod := filepath.Join(tmp, "go.mod")
+	mustWriteFile(t, goMod, "module example.com/app\n")
+	dying := newStateManager()
+	require.NoError(t, dying.Track(goMod))
+	require.NoError(t, os.Remove(filepath.Join(util.GetBuildTemp(stateDir), stateSnapshotPath(goMod))))
+
+	err := recoverLeftoverState(t.Context())
+	require.Error(t, err, "a build must not start when the old changes cannot be restored")
+	assert.Contains(t, err.Error(), "previous otelc build")
+	assert.True(t, util.PathExists(util.GetBuildTemp(stateFileName)), "the manifest must stay for recovery")
 }
 
 // mustWriteFile creates a file with the given content, creating parent dirs as needed.
@@ -348,4 +389,66 @@ func mustWriteFile(t *testing.T, path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("failed to write file %s: %v", path, err)
 	}
+}
+
+// TestBuildAndSetupFailOnBadManifest: a manifest that otelc cannot trust
+// stops otelc go build and a standalone otelc setup before they change
+// anything.
+func TestBuildAndSetupFailOnBadManifest(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+	t.Setenv("GOWORK", "off")
+	outside := filepath.Join(t.TempDir(), "x")
+	manifest, err := json.Marshal([]string{"-" + outside})
+	require.NoError(t, err)
+	mustWriteFile(t, util.GetBuildTemp(stateFileName), string(manifest))
+
+	err = GoBuild(t.Context(), newParsedCommand(t, "go", "build", "."))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "outside the otelc work directory")
+
+	err = Setup(t.Context(), newParsedCommand(t, "setup"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "outside the otelc work directory")
+}
+
+// newParsedCommand returns the command name after it parsed args (args[0]
+// is the name).
+func newParsedCommand(t *testing.T, args ...string) *cli.Command {
+	t.Helper()
+	var parsed *cli.Command
+	cmd := &cli.Command{
+		Name:            args[0],
+		SkipFlagParsing: true,
+		Action: func(_ context.Context, c *cli.Command) error {
+			parsed = c
+			return nil
+		},
+	}
+	require.NoError(t, cmd.Run(t.Context(), args))
+	return parsed
+}
+
+// TestCleanupFromPackageDir: otelc cleanup in a package directory below the
+// module root restores go.mod at the module root from the manifest.
+func TestCleanupFromPackageDir(t *testing.T) {
+	modRoot := t.TempDir()
+	workDir := filepath.Join(modRoot, "cmd", "app")
+	require.NoError(t, os.MkdirAll(workDir, 0o755))
+	t.Chdir(workDir)
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	t.Setenv("GOWORK", "off")
+
+	goMod := filepath.Join(modRoot, "go.mod")
+	mustWriteFile(t, goMod, "module example.com/mod\n")
+	s := newStateManager()
+	require.NoError(t, s.Track(goMod))
+	mustWriteFile(t, goMod, "module example.com/mod\n\nreplace x => ./x\n")
+
+	require.NoError(t, Cleanup(t.Context(), true))
+	data, err := os.ReadFile(goMod)
+	require.NoError(t, err)
+	assert.Equal(t, "module example.com/mod\n", string(data))
+	assert.NoDirExists(t, util.GetBuildTempDir())
 }

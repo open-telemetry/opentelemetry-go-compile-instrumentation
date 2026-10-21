@@ -270,5 +270,6 @@ func findDeps(ctx context.Context, subcommand string, cmdArgs []string) ([]*Depe
 			logger.DebugContext(ctx, "Found CGO objdir mapping", "objDir", objDir, "sourceDir", currentDir)
 		}
 	}
+	fillVendoredVersions(ctx, deps)
 	return deps, nil
 }

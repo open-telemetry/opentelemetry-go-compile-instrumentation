@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -195,4 +196,47 @@ func TestRunInjectionPassesConverges(t *testing.T) {
 	extra, err := runInjectionPasses(t.Context(), nil, map[string]bool{}, pass)
 	require.NoError(t, err)
 	assert.Len(t, extra, 1)
+}
+
+// TestRunInjectionPassesPreparesEachPass: prepare runs before each load, with
+// the rule sets that the last pass found. Thus the hook packages of a rule
+// that matched in one pass are ready (for example in vendor/) when the next
+// pass loads them.
+func TestRunInjectionPassesPreparesEachPass(t *testing.T) {
+	first := rule.NewInstRuleSet("example.com/app")
+	first.AddFuncRule(fakeSrcFile("a.go"), funcRuleWithPath("fn", "example.com/hooka"))
+	second := rule.NewInstRuleSet("example.com/hooka")
+	second.AddFuncRule(fakeSrcFile("b.go"), funcRuleWithPath("fn", "example.com/hookb"))
+
+	var events []string
+	loads := 0
+	pass := injectionPass{
+		prepare: func(_ context.Context, matched []*rule.InstRuleSet) error {
+			events = append(events, "prepare "+strings.Join(hookPackagePaths(matched), ","))
+			return nil
+		},
+		load: func(_ context.Context, hookPaths []string, _ map[string]bool) ([]*Dependency, error) {
+			events = append(events, "load "+strings.Join(hookPaths, ","))
+			loads++
+			if loads > 1 {
+				return nil, nil
+			}
+			return []*Dependency{{ImportPath: "example.com/hooka"}}, nil
+		},
+		match: func(_ context.Context, _ []*Dependency) ([]*rule.InstRuleSet, error) {
+			return []*rule.InstRuleSet{second}, nil
+		},
+	}
+
+	extra, err := runInjectionPasses(t.Context(), []*rule.InstRuleSet{first}, map[string]bool{}, pass)
+	require.NoError(t, err)
+	assert.Equal(t, []*rule.InstRuleSet{second}, extra)
+	assert.Equal(t, []string{
+		"prepare example.com/hooka", "load example.com/hooka",
+		"prepare example.com/hookb", "load example.com/hookb",
+	}, events)
+
+	pass.prepare = func(context.Context, []*rule.InstRuleSet) error { return assert.AnError }
+	_, err = runInjectionPasses(t.Context(), []*rule.InstRuleSet{first}, map[string]bool{}, pass)
+	require.ErrorIs(t, err, assert.AnError, "an error of prepare stops the passes")
 }

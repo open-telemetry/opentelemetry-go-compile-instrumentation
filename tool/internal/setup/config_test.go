@@ -17,6 +17,9 @@ import (
 	"github.com/dave/dst"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/tools/go/packages"
+
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 func TestFindToolFile(t *testing.T) {
@@ -878,4 +881,73 @@ func TestWalkInstrumentationParseError(t *testing.T) {
 		func(v *instrumentationVisit) (bool, error) { return false, nil },
 	)
 	require.Error(t, err)
+}
+
+// TestVendoredInstrumentationDirs: in vendor mode the go command gives no
+// module directory. For an otelc package, otelc uses the directories of the
+// extracted bundle; for a different package, the directories in vendor/.
+func TestVendoredInstrumentationDirs(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	instMod := filepath.Join(workDir, util.BuildTempDir, unzippedInstDir, "example")
+	mustWriteFile(t, filepath.Join(instMod, goModFileName), "module "+util.OtelcInstRoot+"/example\n")
+	mustWriteFile(t, filepath.Join(instMod, "server", "otelc.yaml"), "")
+
+	modDir, pkgDir, ok := vendoredInstrumentationDirs(&packages.Package{
+		PkgPath: util.OtelcInstRoot + "/example/server",
+		Module:  &packages.Module{Path: util.OtelcInstRoot + "/example"},
+	})
+	require.True(t, ok)
+	assert.Equal(t, instMod, modDir, "the module directory of the bundle has the go.mod file")
+	assert.Equal(t, filepath.Join(instMod, "server"), pkgDir)
+
+	vendorPkg := filepath.Join(workDir, "vendor", "example.com", "m", "sub")
+	modDir, pkgDir, ok = vendoredInstrumentationDirs(&packages.Package{
+		PkgPath: "example.com/m/sub",
+		Module:  &packages.Module{Path: "example.com/m"},
+		GoFiles: []string{filepath.Join(vendorPkg, "a.go")},
+	})
+	require.True(t, ok)
+	assert.Equal(t, filepath.Join(workDir, "vendor", "example.com", "m"), modDir)
+	assert.Equal(t, vendorPkg, pkgDir)
+
+	modDir, _, ok = vendoredInstrumentationDirs(&packages.Package{
+		PkgPath: "example.com/m",
+		Module:  &packages.Module{Path: "example.com/m"},
+		GoFiles: []string{filepath.Join(workDir, "vendor", "example.com", "m", "a.go")},
+	})
+	require.True(t, ok)
+	assert.Equal(t, filepath.Join(workDir, "vendor", "example.com", "m"), modDir, "the module root is the package")
+
+	_, _, ok = vendoredInstrumentationDirs(&packages.Package{
+		PkgPath: "example.com/m",
+		Module:  &packages.Module{Path: "example.com/m"},
+		GoFiles: []string{filepath.Join(workDir, "src", "a.go")},
+	})
+	assert.False(t, ok, "a package that is not in vendor/")
+	_, _, ok = vendoredInstrumentationDirs(&packages.Package{PkgPath: "example.com/m", Module: &packages.Module{}})
+	assert.False(t, ok, "a package without files")
+
+	_, found := enclosingModuleDir(filepath.Join(t.TempDir(), "no", "module"))
+	assert.False(t, found)
+}
+
+// TestFillInstrumentationConfigNotInstrumentation: a package without rule
+// files and tool file is not an instrumentation package. The error has the
+// load errors of the package.
+func TestFillInstrumentationConfigNotInstrumentation(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, goModFileName), "module example.com/m\n")
+	cfg := &instrumentationConfig{ImportPath: "example.com/m"}
+	fillInstrumentationConfig(cfg, &packages.Package{
+		Errors: []packages.Error{{Msg: "load failed"}},
+	}, dir, dir)
+	require.ErrorIs(t, cfg.Error, errNotInstrumentation)
+	assert.Contains(t, cfg.Error.Error(), "load failed")
+
+	mustWriteFile(t, filepath.Join(dir, "otelc.yaml"), "")
+	cfg = &instrumentationConfig{ImportPath: "example.com/m"}
+	fillInstrumentationConfig(cfg, &packages.Package{}, dir, dir)
+	require.NoError(t, cfg.Error)
+	assert.Equal(t, []string{filepath.Join(dir, "otelc.yaml")}, cfg.RuleFiles)
 }

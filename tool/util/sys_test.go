@@ -528,3 +528,89 @@ func TestNormalizePath(t *testing.T) {
 	assert.Equal(t, "a/c", NormalizePath("a/b/../c"))
 	assert.Equal(t, ".", NormalizePath(""))
 }
+
+// windowsRename is os.Rename with a rule of Windows: it cannot replace a
+// read-only file.
+func windowsRename(oldPath, newPath string) error {
+	if info, err := os.Lstat(newPath); err == nil && info.Mode().Perm()&0o200 == 0 {
+		return &os.LinkError{Op: "rename", Old: oldPath, New: newPath, Err: os.ErrPermission}
+	}
+	return os.Rename(oldPath, newPath)
+}
+
+// TestRenameReplaceReadOnly: on Windows, a rename cannot replace a read-only
+// file. renameReplace makes the file writable and does the rename again.
+// The new file keeps its own permissions. When the second rename fails too,
+// the old file keeps its permissions.
+func TestRenameReplaceReadOnly(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores the permissions")
+	}
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "go.mod")
+	require.NoError(t, os.WriteFile(dst, []byte("old"), 0o444))
+	src := filepath.Join(dir, "go.mod.tmp")
+	require.NoError(t, os.WriteFile(src, []byte("new"), 0o444))
+
+	require.Error(t, renameReplace(src, dst, windowsRename, false, hasOneLink),
+		"not Windows: no second rename")
+	require.NoError(t, renameReplace(src, dst, windowsRename, true, hasOneLink))
+	data, err := os.ReadFile(dst)
+	require.NoError(t, err)
+	assert.Equal(t, "new", string(data))
+	info, err := os.Stat(dst)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o444), info.Mode().Perm(), "the new file keeps its permissions")
+	assert.NoFileExists(t, src)
+
+	alwaysFails := func(string, string) error { return os.ErrPermission }
+	require.NoError(t, os.WriteFile(src, []byte("next"), 0o644))
+	require.ErrorIs(t, renameReplace(src, dst, alwaysFails, true, hasOneLink), os.ErrPermission)
+	info, err = os.Stat(dst)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o444), info.Mode().Perm(), "the permissions are set back")
+	data, err = os.ReadFile(dst)
+	require.NoError(t, err)
+	assert.Equal(t, "new", string(data))
+}
+
+// TestRenameReplaceReadOnlyHardLink: on Windows, when the read-only file is
+// a hard link to a different file (for example a file outside the project),
+// renameReplace must not make it writable: the permissions belong to the
+// file, so the other link would stay writable. The rename fails instead.
+func TestRenameReplaceReadOnlyHardLink(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores the permissions")
+	}
+	dir := t.TempDir()
+	other := filepath.Join(t.TempDir(), "outside.txt")
+	require.NoError(t, os.WriteFile(other, []byte("outside"), 0o444))
+	dst := filepath.Join(dir, "go.mod")
+	if err := os.Link(other, dst); err != nil {
+		t.Skipf("no hard links: %v", err)
+	}
+	src := filepath.Join(dir, "go.mod.tmp")
+	require.NoError(t, os.WriteFile(src, []byte("new"), 0o644))
+	assert.False(t, hasOneLink(dst), "dst has two links")
+
+	require.ErrorIs(t, renameReplace(src, dst, windowsRename, true, hasOneLink), os.ErrPermission)
+	info, err := os.Stat(other)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o444), info.Mode().Perm(), "the other link stays read-only")
+	data, err := os.ReadFile(other)
+	require.NoError(t, err)
+	assert.Equal(t, "outside", string(data))
+}
+
+// TestHasOneLink: hasOneLink counts the hard links of a file.
+func TestHasOneLink(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a")
+	require.NoError(t, os.WriteFile(path, []byte("a"), 0o644))
+	assert.True(t, hasOneLink(path))
+	assert.False(t, hasOneLink(filepath.Join(dir, "absent")), "a file that does not exist")
+	if err := os.Link(path, filepath.Join(dir, "b")); err != nil {
+		t.Skipf("no hard links: %v", err)
+	}
+	assert.False(t, hasOneLink(path))
+}

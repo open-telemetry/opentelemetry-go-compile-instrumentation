@@ -95,6 +95,7 @@ func injectedDeps(
 	if loadErr != nil {
 		return nil, loadErr
 	}
+	fillVendoredVersions(ctx, deps)
 	return deps, nil
 }
 
@@ -102,8 +103,12 @@ func injectedDeps(
 // by the caller so the loop can be exercised without loading or matching real
 // packages.
 type injectionPass struct {
-	load  func(ctx context.Context, hookPaths []string, known map[string]bool) ([]*Dependency, error)
-	match func(ctx context.Context, deps []*Dependency) ([]*rule.InstRuleSet, error)
+	// prepare, when it is not nil, runs before each load with the rule sets
+	// whose hook packages the load uses. For example, it adds these hook
+	// packages to vendor/, so that load can find them.
+	prepare func(ctx context.Context, matched []*rule.InstRuleSet) error
+	load    func(ctx context.Context, hookPaths []string, known map[string]bool) ([]*Dependency, error)
+	match   func(ctx context.Context, deps []*Dependency) ([]*rule.InstRuleSet, error)
 }
 
 // runInjectionPasses repeats load-then-match until a pass turns up nothing new.
@@ -115,6 +120,11 @@ func runInjectionPasses(
 ) ([]*rule.InstRuleSet, error) {
 	extra := make([]*rule.InstRuleSet, 0)
 	for {
+		if pass.prepare != nil {
+			if err := pass.prepare(ctx, matched); err != nil {
+				return nil, err
+			}
+		}
 		injected, err := pass.load(ctx, hookPackagePaths(matched), known)
 		if err != nil {
 			return nil, err
@@ -147,6 +157,9 @@ func runInjectionPasses(
 // packages were never in the plan, so a rule targeting one of them has nothing
 // to match against.
 //
+// Before each load, matchInjectedDeps adds the hook packages to vendor/ when
+// this is necessary (see syncHooksBeforeLoad).
+//
 // Nothing reports this. The build succeeds, matched.json is a valid non-empty
 // list, and the rule is simply absent from it.
 //
@@ -167,6 +180,7 @@ func (sp *setupPhase) matchInjectedDeps(
 	}
 
 	pass := injectionPass{
+		prepare: sp.syncHooksBeforeLoad(ctx, moduleDirs),
 		load: func(ctx context.Context, hookPaths []string, known map[string]bool) ([]*Dependency, error) {
 			injected, err := injectedDeps(ctx, hookPaths, known, buildFlags)
 			if err != nil {
