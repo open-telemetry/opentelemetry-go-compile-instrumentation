@@ -10,20 +10,19 @@ import (
 	"net/http"
 )
 
-// Compile-time interface assertions.
+// Compile-time assertions that writerWrapper satisfies the optional interfaces
+// an http.ResponseWriter may implement.
 var (
 	_ http.ResponseWriter                       = (*writerWrapper)(nil)
-	_ http.Flusher                              = (*writerWrapper)(nil)
 	_ http.Hijacker                             = (*writerWrapper)(nil)
+	_ http.Flusher                              = (*writerWrapper)(nil)
 	_ http.Pusher                               = (*writerWrapper)(nil)
 	_ io.ReaderFrom                             = (*writerWrapper)(nil)
 	_ io.StringWriter                           = (*writerWrapper)(nil)
 	_ interface{ Unwrap() http.ResponseWriter } = (*writerWrapper)(nil)
 )
 
-// writerWrapper wraps http.ResponseWriter to capture the status code.
-// Optional interfaces (Flusher, Hijacker, Pusher) are forwarded to the
-// underlying writer; each returns http.ErrNotSupported when unavailable.
+// writerWrapper wraps http.ResponseWriter to capture the status code
 type writerWrapper struct {
 	http.ResponseWriter
 	statusCode  int
@@ -48,14 +47,14 @@ func (w *writerWrapper) WriteHeader(statusCode int) {
 	w.ResponseWriter.WriteHeader(statusCode)
 }
 
+// Write implements http.ResponseWriter.Write and ensures WriteHeader is called
 func (w *writerWrapper) Write(b []byte) (int, error) {
+	// If WriteHeader wasn't called yet, call it with 200 OK (default HTTP behavior)
 	if !w.wroteHeader {
 		w.WriteHeader(http.StatusOK)
 	}
 	return w.ResponseWriter.Write(b)
 }
-
-func (w *writerWrapper) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // writeOnly hides every method of the wrapped value except Write, so that
 // io.Copy cannot re-enter a ReadFrom fast path through it.
@@ -126,11 +125,22 @@ func (w *writerWrapper) FlushError() error {
 	return http.ErrNotSupported
 }
 
-func (w *writerWrapper) Flush() { _ = w.FlushError() }
+// Flush implements the http.Flusher interface
+func (w *writerWrapper) Flush() {
+	_ = w.FlushError()
+}
 
+// Push implements the http.Pusher interface, forwarding to the underlying
+// ResponseWriter when it supports HTTP/2 server push and returning
+// http.ErrNotSupported otherwise.
 func (w *writerWrapper) Push(target string, opts *http.PushOptions) error {
 	if pusher, ok := w.ResponseWriter.(http.Pusher); ok {
 		return pusher.Push(target, opts)
 	}
 	return http.ErrNotSupported
+}
+
+// Unwrap exposes the underlying writer to http.ResponseController.
+func (w *writerWrapper) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }
