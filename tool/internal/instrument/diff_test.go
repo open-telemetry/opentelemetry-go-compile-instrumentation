@@ -725,6 +725,82 @@ func TestWriteAddedSourceDiff_MissingFile(t *testing.T) {
 	assert.NoFileExists(t, dest, "expected stale diff to be removed if added source cannot be read")
 }
 
+func TestUnifiedDiff_PreservesSourceLines(t *testing.T) {
+	tests := []struct {
+		name   string
+		before string
+		after  string
+		want   string
+	}{
+		{name: "empty files produce no diff"},
+		{
+			name:  "added file has no blank context",
+			after: "package main\n",
+			want:  "@@ -0,0 +1 @@\n+package main\n",
+		},
+		{
+			name:  "added file preserves blank lines",
+			after: "package main\n\n",
+			want:  "@@ -0,0 +1,2 @@\n+package main\n+\n",
+		},
+		{
+			name:   "deleted file has no blank context",
+			before: "package main\n",
+			want:   "@@ -1 +0,0 @@\n-package main\n",
+		},
+		{
+			name:  "added file marks missing final newline",
+			after: "package main",
+			want:  "@@ -0,0 +1 @@\n+package main\n\\ No newline at end of file\n",
+		},
+		{
+			name:   "deleted file marks missing final newline",
+			before: "package main",
+			want:   "@@ -1 +0,0 @@\n-package main\n\\ No newline at end of file\n",
+		},
+		{
+			name:   "modified file has no phantom trailing line",
+			before: "var X = 1\n",
+			after:  "var X = 2\n",
+			want:   "@@ -1 +1 @@\n-var X = 1\n+var X = 2\n",
+		},
+		{
+			name:   "adding final newline is a change",
+			before: "package main",
+			after:  "package main\n",
+			want:   "@@ -1 +1 @@\n-package main\n\\ No newline at end of file\n+package main\n",
+		},
+		{
+			name:   "removing final newline is a change",
+			before: "package main\n",
+			after:  "package main",
+			want:   "@@ -1 +1 @@\n-package main\n+package main\n\\ No newline at end of file\n",
+		},
+		{
+			name:   "unchanged unterminated files produce no diff",
+			before: "package main",
+			after:  "package main",
+		},
+		{
+			name:   "unterminated context line keeps its marker",
+			before: "var X = 1\n// end",
+			after:  "var X = 2\n// end",
+			want:   "@@ -1,2 +1,2 @@\n-var X = 1\n+var X = 2\n // end\n\\ No newline at end of file\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := unifiedDiff([]byte(test.before), []byte(test.after), "before.go", "after.go")
+			require.NoError(t, err)
+			want := test.want
+			if want != "" {
+				want = "--- before.go\n+++ after.go\n" + want
+			}
+			assert.Equal(t, want, got)
+		})
+	}
+}
+
 func TestWriteAddedSourceDiff_HeaderWithoutNewline(t *testing.T) {
 	workDir := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, workDir)
@@ -739,5 +815,5 @@ func TestWriteAddedSourceDiff_HeaderWithoutNewline(t *testing.T) {
 	require.FileExists(t, dest)
 	content, err := os.ReadFile(dest)
 	require.NoError(t, err)
-	assert.True(t, strings.HasPrefix(string(content), "# header line\n--- /dev/null"))
+	assert.Equal(t, "# header line\n--- /dev/null\n+++ "+srcFile+"\n@@ -0,0 +1 @@\n+package test\n", string(content))
 }

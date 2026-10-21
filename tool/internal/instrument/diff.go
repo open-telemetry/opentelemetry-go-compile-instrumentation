@@ -295,10 +295,23 @@ func (ip *instrumentPhase) writeGlobalsDiffForDebug(path string, contributors []
 
 func unifiedDiff(a, b []byte, fromFile, toFile string) (string, error) {
 	return difflib.GetUnifiedDiffString(difflib.UnifiedDiff{
-		A:        difflib.SplitLines(string(a)),
-		B:        difflib.SplitLines(string(b)),
+		A:        diffLines(a),
+		B:        diffLines(b),
 		FromFile: fromFile,
 		ToFile:   toFile,
 		Context:  diffContextLines,
 	})
+}
+
+func diffLines(content []byte) []string {
+	var lines []string
+	for line := range strings.Lines(string(content)) {
+		if !strings.HasSuffix(line, "\n") {
+			// difflib writes each entry verbatim, so keep the marker with
+			// its source line to avoid counting it in the hunk range.
+			line += "\n\\ No newline at end of file\n"
+		}
+		lines = append(lines, line)
+	}
+	return lines
 }
