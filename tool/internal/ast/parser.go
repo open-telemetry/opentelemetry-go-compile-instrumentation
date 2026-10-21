@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/dave/dst"
 	"github.com/dave/dst/decorator"
@@ -59,13 +60,13 @@ func (ap *AstParser) Parse(filePath string, mode parser.Mode) (*dst.File, error)
 
 // ParseSnippet parses the AST from incomplete source code snippet.
 func (ap *AstParser) ParseSnippet(source string) ([]dst.Stmt, error) {
-	if source == "" {
+	if strings.TrimSpace(source) == "" {
 		return nil, ex.New("empty source")
 	}
-	snippet := "package main; func _() {" + source + "}"
+	snippet := "package main; func _() {" + source + "\n}"
 	file, err := decorator.ParseFile(ap.fset, "", snippet, 0)
 	if err != nil {
-		return nil, ex.Wrap(err)
+		return nil, ex.Wrapf(err, "can not parse snippet %s", source)
 	}
 	funcDecl := util.AssertType[*dst.FuncDecl](file.Decls[0])
 	return funcDecl.Body.List, nil
@@ -93,9 +94,30 @@ func (ap *AstParser) FindPosition(node dst.Node) token.Position {
 	return ap.fset.Position(astNode.Pos())
 }
 
-type writeCloser interface {
-	io.Writer
-	io.Closer
+// PropagatePositions copies source positions from orig onto the matching
+// nodes in cloned. It reports whether the two subtrees have the same
+// shape, so positions could be propagated.
+//
+// orig and cloned must have the same shape.
+func (ap *AstParser) PropagatePositions(orig, cloned dst.Node) bool {
+	var origNodes, clonedNodes []dst.Node
+	dst.Inspect(orig, func(n dst.Node) bool {
+		origNodes = append(origNodes, n)
+		return true
+	})
+	dst.Inspect(cloned, func(n dst.Node) bool {
+		clonedNodes = append(clonedNodes, n)
+		return true
+	})
+	if len(origNodes) != len(clonedNodes) {
+		return false
+	}
+	for i, on := range origNodes {
+		if astNode, ok := ap.dec.Ast.Nodes[on]; ok {
+			ap.dec.Ast.Nodes[clonedNodes[i]] = astNode
+		}
+	}
+	return true
 }
 
 // WriteFile writes the AST to a file.
@@ -107,28 +129,42 @@ func WriteFile(filePath string, root *dst.File) error {
 	return writeFile(file, filePath, root)
 }
 
-func writeFile(w writeCloser, filePath string, root *dst.File) error {
+func writeFile(w io.WriteCloser, filePath string, root *dst.File) (retErr error) {
+	// The deferred close runs on every return path, including a panic during the write.
+	// The deferred close reports an error only when the write succeeds, so the write error takes priority.
+	defer func() {
+		if closeErr := w.Close(); closeErr != nil && retErr == nil {
+			retErr = ex.Wrapf(closeErr, "failed to close file %s", filePath)
+		}
+	}()
+
 	r := decorator.NewRestorer()
 	if err := r.Fprint(w, root); err != nil {
-		_ = w.Close()
 		return ex.Wrapf(err, "failed to write to file %s", filePath)
-	}
-	if err := w.Close(); err != nil {
-		return ex.Wrapf(err, "failed to close file %s", filePath)
 	}
 	return nil
 }
 
-// WriteFileAtomic writes the AST to a file atomically.
-func WriteFileAtomic(filePath string, root *dst.File) error {
+// PrintFile renders the AST to source bytes without writing it anywhere.
+func PrintFile(root *dst.File) ([]byte, error) {
 	var buf bytes.Buffer
 
 	r := decorator.NewRestorer()
 	if err := r.Fprint(&buf, root); err != nil {
-		return ex.Wrapf(err, "failed to restore AST for file %s", filePath)
+		return nil, ex.Wrapf(err, "failed to restore AST")
 	}
 
-	return util.WriteFileAtomic(filePath, buf.Bytes())
+	return buf.Bytes(), nil
+}
+
+// WriteFileAtomic writes the AST to a file atomically.
+func WriteFileAtomic(filePath string, root *dst.File) error {
+	data, err := PrintFile(root)
+	if err != nil {
+		return ex.Wrapf(err, "for file %s", filePath)
+	}
+
+	return util.WriteFileAtomic(filePath, data)
 }
 
 // ParsePackageName parses only the package name from a file, skipping

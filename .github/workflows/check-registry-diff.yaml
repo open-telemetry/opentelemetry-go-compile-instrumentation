@@ -25,6 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+        with:
+          persist-credentials: false
 
       - name: Read semconv version
         id: read-version
@@ -47,7 +49,7 @@ jobs:
           # the version declared in .semconv-version. `make lint-schema` also
           # enforces this, but check it explicitly so the failure is obvious.
           MANIFEST_VERSION=$(grep -oE 'upstream-v[0-9]+\.[0-9]+\.[0-9]+' schemas/otelc/registry_manifest.yaml | head -1 | sed -E 's/upstream-v//')
-          EXPECTED_VERSION=$(echo "${{ steps.read-version.outputs.current_version }}" | sed 's/^v//')
+          EXPECTED_VERSION="${STEPS_READ_VERSION_OUTPUTS_CURRENT_VERSION#v}"
 
           if [ -z "$MANIFEST_VERSION" ]; then
             echo "::error::Could not read the upstream version from schemas/otelc/registry_manifest.yaml"
@@ -64,6 +66,8 @@ jobs:
           fi
 
           echo "✅ Registry manifest version consistency check passed"
+        env:
+          STEPS_READ_VERSION_OUTPUTS_CURRENT_VERSION: ${{ steps.read-version.outputs.current_version }}
 
       - name: Validate code uses correct semconv version
         run: |
@@ -74,7 +78,7 @@ jobs:
             head -1 | \
             sed 's/semconv\///')
 
-          EXPECTED_VERSION="${{ steps.read-version.outputs.current_version }}"
+          EXPECTED_VERSION="${STEPS_READ_VERSION_OUTPUTS_CURRENT_VERSION}"
 
           if [ -z "$DETECTED_VERSION" ]; then
             echo "::error::No semconv version detected in Go imports in instrumentation/**/semconv/"
@@ -91,6 +95,8 @@ jobs:
           fi
 
           echo "✅ Version consistency check passed"
+        env:
+          STEPS_READ_VERSION_OUTPUTS_CURRENT_VERSION: ${{ steps.read-version.outputs.current_version }}
 
       - name: Check registry for violations
         run: |

@@ -75,6 +75,20 @@ func findCommands(buildPlanLog *os.File) ([]string, error) {
 	return commands, nil
 }
 
+// disableJSONOutput keeps the build plan on stderr as shell commands.
+// Retain the flag position: removing a flag after go test's package list
+// could turn a test-binary argument into another package target.
+func disableJSONOutput(subcommand string, args []string) []string {
+	out := make([]string, len(args))
+	copy(out, args)
+	for _, arg := range classifyArgs(subcommand, args) {
+		if arg.Kind == ArgBuildFlag && arg.FlagName == flagJSON {
+			out[arg.Index] = "-json=false"
+		}
+	}
+	return out
+}
+
 // listBuildPlan lists the build plan by running `go build -a -x -n`
 // and then filtering the commands (cd, cgo, compile) from the build plan log.
 func listBuildPlan(ctx context.Context, subcommand string, cmdArgs []string) ([]string, error) {
@@ -96,11 +110,12 @@ func listBuildPlan(ctx context.Context, subcommand string, cmdArgs []string) ([]
 	if subcommand == subcmdTest {
 		planVerb = subcmdTest
 	}
-	// The full command is: "go build/test -a -x -n {...}"
-	prefix := []string{planVerb, "-a", "-x", "-n"}
-	args := make([]string, 0, len(prefix)+len(cmdArgs))
-	args = append(args, prefix...)
-	args = append(args, cmdArgs...) // args from original build/install or setup command
+	// The full command is: "go build/test [-C dir] -a -x -n {...}"
+	planArgs := disableJSONOutput(subcommand, cmdArgs)
+	planFlags := []string{"-a", "-x", "-n"}
+	args := make([]string, 0, len(planArgs)+len(planFlags)+1)
+	args = append(args, planVerb)
+	args = append(args, addBuildFlags(planArgs, planFlags...)...)
 	logger.InfoContext(ctx, "go build command", "args", args)
 
 	cmd := execCommandContext(ctx, "go", args...)
@@ -223,6 +238,10 @@ func findDeps(ctx context.Context, subcommand string, cmdArgs []string) ([]*Depe
 		deps       []*Dependency
 		cgoObjDirs = make(map[string]string)
 		currentDir string
+		// A package can be compiled more than once with the same sources,
+		// e.g. once with and once without a PGO profile when only some of the
+		// main packages have a default.pgo. Keep one of them.
+		seen = make(map[string]bool)
 	)
 
 	for _, cmd := range buildPlan {
@@ -237,6 +256,11 @@ func findDeps(ctx context.Context, subcommand string, cmdArgs []string) ([]*Depe
 			if err1 != nil {
 				return nil, err1
 			}
+			key := dep.ImportPath + "\x00" + strings.Join(dep.Sources, "\x00")
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
 			deps = append(deps, dep)
 			logger.InfoContext(ctx, "Found dependency", "dep", dep)
 		} else if util.IsCgoCommand(cmd) && currentDir != "" {

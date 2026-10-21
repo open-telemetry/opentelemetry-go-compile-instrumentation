@@ -44,16 +44,17 @@ func TestOpenAIClient(t *testing.T) {
 			testutil.RequireGenAIClientSemconv(
 				t,
 				span,
-				"openai",            // system
-				"chat",              // operationName
-				tc.model,            // requestModel
-				"local",             // providerName (localhost maps to "local")
-				"chatcmpl-test-123", // responseID
-				tc.model,            // responseModel
-				[]string{"stop"},    // finishReasons
-				10,                  // inputTokens
-				20,                  // outputTokens
-				30,                  // totalTokens
+				"openai",                        // system
+				"chat",                          // operationName
+				tc.model,                        // requestModel
+				"local",                         // providerName (localhost maps to "local")
+				server.Listener.Addr().String(), // serverEndpoint
+				"chatcmpl-test-123",             // responseID
+				tc.model,                        // responseModel
+				[]string{"stop"},                // finishReasons
+				10,                              // inputTokens
+				20,                              // outputTokens
+				30,                              // totalTokens
 			)
 		})
 	}
@@ -83,16 +84,17 @@ func TestOpenAIClientV2(t *testing.T) {
 	testutil.RequireGenAIClientSemconv(
 		t,
 		span,
-		"openai",            // system
-		"chat",              // operationName
-		"gpt-4",             // requestModel
-		"local",             // providerName (localhost maps to "local")
-		"chatcmpl-test-123", // responseID
-		"gpt-4",             // responseModel
-		[]string{"stop"},    // finishReasons
-		10,                  // inputTokens
-		20,                  // outputTokens
-		30,                  // totalTokens
+		"openai",                        // system
+		"chat",                          // operationName
+		"gpt-4",                         // requestModel
+		"local",                         // providerName (localhost maps to "local")
+		server.Listener.Addr().String(), // serverEndpoint
+		"chatcmpl-test-123",             // responseID
+		"gpt-4",                         // responseModel
+		[]string{"stop"},                // finishReasons
+		10,                              // inputTokens
+		20,                              // outputTokens
+		30,                              // totalTokens
 	)
 }
 

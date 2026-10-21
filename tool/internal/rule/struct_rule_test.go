@@ -30,7 +30,7 @@ new_field:
 `,
 			check: func(t *testing.T, r *InstStructRule) {
 				assert.Equal(t, "struct1", r.Name)
-				assert.Equal(t, "main", r.Target)
+				assert.Equal(t, "main", r.Target.String())
 				assert.Equal(t, "MyStruct", r.Struct)
 				require.Len(t, r.NewField, 1)
 				assert.Equal(t, "NewField", r.NewField[0].Name)

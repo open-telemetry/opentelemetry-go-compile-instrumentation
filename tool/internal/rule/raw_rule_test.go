@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 func TestNewInstRawRule(t *testing.T) {
@@ -29,7 +29,7 @@ raw: println("hi")
 `,
 			check: func(t *testing.T, r *InstRawRule) {
 				assert.Equal(t, "raw1", r.Name)
-				assert.Equal(t, "main", r.Target)
+				assert.Equal(t, "main", r.Target.String())
 				assert.Equal(t, "Bar", r.Func)
 				assert.Equal(t, `println("hi")`, r.Raw)
 			},

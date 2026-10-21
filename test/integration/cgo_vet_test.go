@@ -8,7 +8,6 @@ package test
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -110,20 +109,4 @@ func Before(ctx hook.HookContext) {
 	env := os.Environ()
 	runOtelcCommand(t, moduleDir, env, otelcPath, "setup", ".")
 	runOtelcCommand(t, moduleDir, env, otelcPath, "go", "test", "-count=1", "./...")
-}
-
-func writeTestFile(t *testing.T, root, name, content string) {
-	t.Helper()
-	path := filepath.Join(root, name)
-	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
-	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
-}
-
-func runOtelcCommand(t *testing.T, dir string, env []string, otelcPath string, args ...string) {
-	t.Helper()
-	cmd := exec.CommandContext(t.Context(), otelcPath, args...)
-	cmd.Dir = dir
-	cmd.Env = env
-	output, err := cmd.CombinedOutput()
-	require.NoError(t, err, "%s failed:\n%s", cmd.String(), output)
 }

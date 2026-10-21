@@ -8,7 +8,7 @@ repo for information on this and other SIGs.
 See the [public meeting
 notes](https://docs.google.com/document/d/1XkVahJfhf482d3WVHsvUUDaGzHc8TO3sqQlSS80mpGY/edit)
 for a summary description of past meetings. You can also get in touch on slack channel
-[#otel-go-compt-instr-sig](https://cloud-native.slack.com/archives/C088D8GSSSF)
+[#otel-go-compile-instrumentation](https://cloud-native.slack.com/archives/C088D8GSSSF)
 
 ## Development
 
@@ -16,9 +16,12 @@ for a summary description of past meetings. You can also get in touch on slack c
 
 This project uses several tools for development. Most tools will be automatically installed when you first run the corresponding `make` target. However, you need to have:
 
-- [Go](https://golang.org/dl/) 1.25 or later
+- [Go](https://golang.org/dl/) 1.26 or later
 - [Git](https://git-scm.com/)
-- Make (usually pre-installed on macOS and Linux)
+- [GNU Make](https://www.gnu.org/software/make/) 3.82 or later. macOS has GNU Make
+  3.81, which is too old: install a newer version with `brew install make`, then use
+  `gmake` (or add `$(brew --prefix make)/libexec/gnubin` to your `PATH` to use it as
+  `make`)
 
 ### Getting Started
 
@@ -121,7 +124,7 @@ Test results are saved to `gotest-unit.log` and `gotest-integration.log` for rev
 
 - `make weaver-install` - Install OTel Weaver if not present
 - `make lint/semantic-conventions` - Validate semantic convention registry
-- `make registry-diff` - Generate diff between two versions of semantic convention registry
+- `make semantic-conventions/diff` - Generate diff between two versions of semantic convention registry
 - `make semantic-conventions/resolve` - Resolve semantic convention registry schema
 
 For detailed information on managing semantic conventions, see [docs/semantic-conventions.md](docs/semantic-conventions.md).

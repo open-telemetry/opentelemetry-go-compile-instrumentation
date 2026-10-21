@@ -394,7 +394,7 @@ func (ip *instrumentPhase) optimizeTJumps() error {
 		// This further simplifies the trampoline-jump-if and gives more chances
 		// for optimization passes to kick in.
 		if rule.Before != "" {
-			hookFunc, err := getHookFunc(tjump.rule, true)
+			hookFunc, err := ip.getHookFunc(tjump.rule, true)
 			if err != nil {
 				return err
 			}

@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -11,7 +12,6 @@ import (
 	"go/token"
 	"io/fs"
 	"log/slog"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -22,7 +22,6 @@ import (
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
-	"gopkg.in/yaml.v3"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
@@ -168,11 +167,15 @@ func generateOtelInstrumentationGo(imports map[string]bool, opts PinOptions) *ds
 }
 
 type yamlRule struct {
-	Target       string `yaml:"target"`
-	VersionRange string `yaml:"version"`
+	Target       rule.Target `yaml:"target"`
+	VersionRange string      `yaml:"version"`
 }
 
-func loadModuleRules(moduleDir, module string, loaded map[string][]yamlRule) error {
+func loadModuleRules(
+	ctx context.Context,
+	moduleDir, module, currentVersion string,
+	loaded map[string][]yamlRule,
+) error {
 	return filepath.WalkDir(moduleDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return ex.Wrap(err)
@@ -180,7 +183,7 @@ func loadModuleRules(moduleDir, module string, loaded map[string][]yamlRule) err
 
 		if d.IsDir() {
 			// Skip any submodules
-			if path != moduleDir && util.PathExists(filepath.Join(path, "go.mod")) {
+			if path != moduleDir && util.PathExists(filepath.Join(path, goModFileName)) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -195,22 +198,36 @@ func loadModuleRules(moduleDir, module string, loaded map[string][]yamlRule) err
 			return ex.Wrapf(readErr, "reading rule file %s", path)
 		}
 
-		var rules map[string]yamlRule
-		if unmarshalErr := yaml.Unmarshal(data, &rules); unmarshalErr != nil {
-			return ex.Wrapf(unmarshalErr, "parsing rule file %s", path)
+		doc, parseErr := rule.ParseFile(data)
+		if parseErr != nil {
+			return ex.Wrapf(parseErr, "parsing rule file %s", path)
+		}
+		if versionErr := checkRuleFileVersion(ctx, path, doc, currentVersion); versionErr != nil {
+			return versionErr
 		}
 
-		for _, r := range rules {
-			if r.Target != "" {
-				loaded[module] = append(loaded[module], r)
+		for _, entry := range doc.Entries {
+			var r yamlRule
+			if decodeErr := entry.Node.Decode(&r); decodeErr != nil {
+				return ex.Wrapf(decodeErr, "parsing rule %q in %s", entry.Name, path)
 			}
+			if r.Target.IsZero() {
+				continue
+			}
+			if validateErr := r.Target.Validate(); validateErr != nil {
+				return ex.Wrapf(validateErr, "validating target for rule %q in %s", entry.Name, path)
+			}
+			loaded[module] = append(loaded[module], r)
 		}
 
 		return nil
 	})
 }
 
-func loadMinimalRules(rulesRoot string) (map[string][]yamlRule, error) {
+func loadMinimalRules(
+	ctx context.Context,
+	rulesRoot, currentVersion string,
+) (map[string][]yamlRule, error) {
 	loaded := make(map[string][]yamlRule)
 
 	err := filepath.WalkDir(rulesRoot, func(path string, d fs.DirEntry, err error) error {
@@ -220,7 +237,7 @@ func loadMinimalRules(rulesRoot string) (map[string][]yamlRule, error) {
 		// rulesRoot is instrumentation/
 		// We want to load rules for submodules within instrumentation/
 		// Look for go.mod nested within instrumentation/
-		if d.IsDir() || d.Name() != "go.mod" || filepath.Dir(path) == rulesRoot {
+		if d.IsDir() || d.Name() != goModFileName || filepath.Dir(path) == rulesRoot {
 			return nil
 		}
 
@@ -229,7 +246,7 @@ func loadMinimalRules(rulesRoot string) (map[string][]yamlRule, error) {
 			return ex.Wrapf(err, "loading %s", path)
 		}
 
-		return loadModuleRules(filepath.Dir(path), modFile.Module.Mod.Path, loaded)
+		return loadModuleRules(ctx, filepath.Dir(path), modFile.Module.Mod.Path, currentVersion, loaded)
 	})
 	if err != nil {
 		return nil, err
@@ -262,7 +279,7 @@ func ensureOtelcRequireVersion(f *modfile.File, version string) (bool, error) {
 }
 
 func ensureOtelcRequire(moduleDir, version string) (bool, error) {
-	goModPath := filepath.Join(moduleDir, "go.mod")
+	goModPath := filepath.Join(moduleDir, goModFileName)
 	data, err := os.ReadFile(goModPath)
 	if err != nil {
 		return false, ex.Wrap(err)
@@ -283,6 +300,14 @@ func ensureOtelcRequire(moduleDir, version string) (bool, error) {
 		}
 	}
 
+	hasRequire := false
+	for _, req := range f.Require {
+		if req.Mod.Path == util.OtelcRoot {
+			hasRequire = true
+			break
+		}
+	}
+
 	if !hasTool {
 		if addErr := f.AddTool(util.OtelcToolCmdRoot); addErr != nil {
 			return false, ex.Wrap(addErr)
@@ -296,8 +321,10 @@ func ensureOtelcRequire(moduleDir, version string) (bool, error) {
 	}
 	modified = modified || added
 
+	// Dev builds can't pin their own version, so a missing require stays
+	// missing. Report it anyway so the caller tidies and go resolves one.
 	if !modified {
-		return false, nil
+		return !hasRequire, nil
 	}
 
 	if writeErr := writeGoMod(goModPath, f); writeErr != nil {
@@ -358,16 +385,15 @@ type instrumentationTargetMatch struct {
 }
 
 // instrumentationRuleMatchesDep reports whether r's target matches dep.
-// Root targets always pin the instrumentation module.
+// Targets that include $root always pin the instrumentation module; setup
+// matches them precisely later. Other targets are matched without the root
+// module paths, so an excluded $root excludes nothing here, which can only
+// pin a module that setup then leaves unused.
 func instrumentationRuleMatchesDep(dep *Dependency, r yamlRule) instrumentationTargetMatch {
-	switch {
-	case rule.IsRootTarget(r.Target):
+	if r.Target.IncludesRoot() {
 		return instrumentationTargetMatch{matched: true, isRoot: true}
-	case rule.IsGlobTarget(r.Target):
-		return instrumentationTargetMatch{matched: rule.MatchGlobTarget(r.Target, dep.ImportPath)}
-	default:
-		return instrumentationTargetMatch{matched: r.Target == dep.ImportPath}
 	}
+	return instrumentationTargetMatch{matched: r.Target.Matches(dep.ImportPath, nil)}
 }
 
 func recordUnresolvedSkip(
@@ -406,7 +432,16 @@ func emitUnresolvedSkipWarnings(
 	}
 }
 
+// skipTidyMessage is logged when updateToolFile skips go mod tidy. Tests match
+// on it, since a skipped tidy leaves nothing else behind.
+const skipTidyMessage = "tool file and go.mod unchanged, skipping go mod tidy"
+
 func updateToolFile(ctx context.Context, toolFile string, prunedImports map[string]bool, opts PinOptions) error {
+	original, readErr := os.ReadFile(toolFile)
+	if readErr != nil {
+		return ex.Wrap(readErr)
+	}
+
 	p := ast.NewAstParser()
 
 	f, parseErr := p.Parse(toolFile, parser.ParseComments)
@@ -422,16 +457,53 @@ func updateToolFile(ctx context.Context, toolFile string, prunedImports map[stri
 
 	updateGenerateDirective(f, opts)
 
-	if writeErr := ast.WriteFileAtomic(toolFile, f); writeErr != nil {
-		return writeErr
+	updated, printErr := ast.PrintFile(f)
+	if printErr != nil {
+		return printErr
 	}
 
-	_, ensureErr := ensureOtelcRequire(filepath.Dir(toolFile), util.Version)
+	toolFileChanged := !bytes.Equal(updated, original)
+	if toolFileChanged {
+		if writeErr := util.WriteFileAtomic(toolFile, updated); writeErr != nil {
+			return writeErr
+		}
+	}
+
+	goModChanged, ensureErr := ensureOtelcRequire(filepath.Dir(toolFile), util.Version)
 	if ensureErr != nil {
 		return ensureErr
 	}
 
+	// go mod tidy loads the whole module graph, so only run it when otelc
+	// changed the tool file or go.mod, or go.sum is missing. Manual go.mod
+	// edits are left for the user to tidy.
+	goSumPath := filepath.Join(filepath.Dir(toolFile), "go.sum")
+	if !toolFileChanged && !goModChanged && util.PathExists(goSumPath) {
+		util.LoggerFromContext(ctx).DebugContext(ctx, skipTidyMessage, "toolFile", toolFile)
+		return nil
+	}
+
 	return runModTidy(ctx, filepath.Dir(toolFile))
+}
+
+func validateRuleFiles(ctx context.Context, ruleFiles []string) error {
+	for _, ruleFile := range ruleFiles {
+		content, err := os.ReadFile(ruleFile)
+		if err != nil {
+			return ex.Wrapf(err, "reading %s", ruleFile)
+		}
+		doc, err := rule.ParseFile(content)
+		if err != nil {
+			return ex.Wrapf(err, "parsing rule file %s", ruleFile)
+		}
+		if err = checkRuleFileVersion(ctx, ruleFile, doc, util.Version); err != nil {
+			return err
+		}
+		if _, err = doc.Rules(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func updatePinnedProjects(
@@ -478,16 +550,9 @@ func updatePinnedProjects(
 
 			// Also validate that all rule files in the import are valid.
 			if opts.Validate {
-				for _, ruleFile := range v.Config.RuleFiles {
-					content, readErr := os.ReadFile(ruleFile)
-					if readErr != nil {
-						return false, ex.Wrapf(readErr, "reading %s", ruleFile)
-					}
-
-					if _, parseErr := parseRuleFromYaml(content); parseErr != nil {
-						pruneImport(parseErr)
-						return false, nil
-					}
+				if validateErr := validateRuleFiles(ctx, v.Config.RuleFiles); validateErr != nil {
+					pruneImport(validateErr)
+					return false, nil
 				}
 			}
 
@@ -508,7 +573,7 @@ func updatePinnedProjects(
 	return &PinResult{}, nil
 }
 
-func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opts PinOptions) (*PinResult, error) {
+func generatePinnedProjects(ctx context.Context, moduleDirs []string, opts PinOptions) (*PinResult, error) {
 	logger := util.LoggerFromContext(ctx)
 	subcommand := opts.Subcommand
 	if subcommand == "" {
@@ -526,7 +591,11 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 		return nil, extractErr
 	}
 
-	ruleset, err := loadMinimalRules(filepath.Join(util.GetBuildTempDir(), unzippedInstDir))
+	ruleset, err := loadMinimalRules(
+		ctx,
+		filepath.Join(util.GetBuildTempDir(), unzippedInstDir),
+		util.Version,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -552,8 +621,7 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 
 	// Generate otel.instrumentation.go file with imports for all matched rules.
 	f := generateOtelInstrumentationGo(imports, opts)
-	dirs := slices.Sorted(maps.Keys(moduleDirs))
-	for _, moduleDir := range dirs {
+	for _, moduleDir := range normalizeModuleDirs(moduleDirs) {
 		path := filepath.Join(moduleDir, toolFileCanonical)
 		if writeErr := ast.WriteFileAtomic(path, f); writeErr != nil {
 			return nil, ex.Wrapf(writeErr, "writing %s", path)
@@ -576,7 +644,12 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 	return &PinResult{}, nil
 }
 
-func prepareVendoredBuild(ctx context.Context, logger *slog.Logger, args []string) ([]string, error) {
+func prepareVendoredBuild(
+	ctx context.Context,
+	logger *slog.Logger,
+	subcommand string,
+	args []string,
+) ([]string, error) {
 	if !vendoringActive(ctx, util.GetOtelcWorkDir()) {
 		return args, nil
 	}
@@ -587,7 +660,7 @@ func prepareVendoredBuild(ctx context.Context, logger *slog.Logger, args []strin
 		return nil, ex.Wrapf(err, "forcing module mode for vendored build")
 	}
 
-	return rewriteModVendor(args), nil
+	return rewriteModVendor(subcommand, args), nil
 }
 
 type PinOptions struct {
@@ -601,9 +674,10 @@ type PinOptions struct {
 	Args []string
 	// Subcommand passed to go in findDeps (defaults to "build")
 	Subcommand string
-	// ModuleDirs is the set of module directories to search for tool files
-	// If empty, module directories will be found using opts.Args
-	ModuleDirs map[string]bool
+	// ModuleDirs lists the module directories to search for tool files.
+	// The list may hold duplicates and entries in any order; Pin normalizes it.
+	// If the list is empty, Pin finds the module directories with opts.Args.
+	ModuleDirs []string
 }
 
 type PinResult struct {
@@ -628,25 +702,29 @@ func Pin(ctx context.Context, opts PinOptions) (*PinResult, error) {
 }
 
 func pinLocked(ctx context.Context, opts PinOptions) (*PinResult, error) {
-	moduleDirs := opts.ModuleDirs
+	moduleDirs := normalizeModuleDirs(opts.ModuleDirs)
 	// moduleDirs being empty means Pin was invoked as a standalone command
 	// (not as part of a setup run), so use opts.Args to find module directories.
 	if len(moduleDirs) == 0 {
+		subcommand := opts.Subcommand
+		if subcommand == "" {
+			subcommand = subcmdBuild
+		}
 		// For same reason as Setup, we have to check vendoring state before
 		// forcing module mode and rewriting vendor/ paths to module mode.
-		args, err := prepareVendoredBuild(ctx, util.LoggerFromContext(ctx), opts.Args)
+		args, err := prepareVendoredBuild(ctx, util.LoggerFromContext(ctx), subcommand, opts.Args)
 		if err != nil {
 			return nil, err
 		}
 		opts.Args = args
 
 		// Use opts.Args to find module directories
-		pkgs, getErr := getBuildPackages(ctx, opts.Args)
+		buildPkgs, _, getErr := getBuildPackages(ctx, subcommand, opts.Args)
 		if getErr != nil {
 			return nil, getErr
 		}
 
-		moduleDirs, err = pkgload.FindModuleDirs(ctx, pkgs)
+		moduleDirs, err = pkgload.FindModuleDirs(ctx, buildPkgs)
 		if err != nil {
 			return nil, err
 		}
@@ -670,7 +748,7 @@ func pinLocked(ctx context.Context, opts PinOptions) (*PinResult, error) {
 
 // autoPin is a convenience function that automatically tracks generated/modified files before calling Pin
 // in order to restore them after the build completes.
-func autoPin(ctx context.Context, moduleDirs map[string]bool, subcommand string, args []string) (*PinResult, error) {
+func autoPin(ctx context.Context, moduleDirs []string, subcommand string, args []string) (*PinResult, error) {
 	stateManager, found := stateManagerFromContext(ctx)
 	if !found {
 		return nil, ex.New("state manager not found in context")

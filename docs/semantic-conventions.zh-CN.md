@@ -24,7 +24,7 @@ v1.30.0
 
 1. 更新 `.semconv-version` 中的版本
 2. 更新 `instrumentation/**/semconv/` 中的 Go 导入以匹配
-3. 运行 `make registry-check` 验证
+3. 运行 `make lint-schema` 验证
 4. 更新代码以处理任何破坏性更改
 
 ## 前置条件
@@ -44,7 +44,7 @@ make weaver-install
 验证项目的语义约定是否符合指定版本的注册表：
 
 ```bash
-make registry-check
+make lint-schema
 ```
 
 此命令会：
@@ -62,7 +62,7 @@ make registry-check
 将当前版本与最新版本进行比较，查看可用的更新：
 
 ```bash
-make registry-diff
+make semantic-conventions/diff
 ```
 
 此命令会自动：
@@ -186,7 +186,7 @@ make lint/semantic-conventions
 生成差异报告以记录你的更改：
 
 ```bash
-make registry-diff
+make semantic-conventions/diff
 ```
 
 检查差异以确保只存在预期的更改。
@@ -246,7 +246,7 @@ instrumentation/
 
 1. **读取版本**：从 `.semconv-version` 文件读取版本
 2. **验证一致性**：检查 `instrumentation/**/semconv/` 中的 Go 导入是否与 `.semconv-version` 中的版本匹配
-3. **注册表验证**：运行 `make registry-check` 验证注册表
+3. **注册表验证**：运行 `make lint-schema` 验证注册表
    - **这是阻塞性检查** - 违规将导致 PR 失败
 
 **此检查的内容**：
@@ -259,7 +259,7 @@ instrumentation/
 
 此任务显示最新语义约定中的新内容：
 
-1. **生成差异**：运行 `make registry-diff` 比较当前版本与最新版本
+1. **生成差异**：运行 `make semantic-conventions/diff` 比较当前版本与最新版本
 2. **上传报告**：上传差异报告作为构件
 3. **PR 评论**：发布信息性评论，显示：
    - 可用的新语义约定
@@ -284,8 +284,8 @@ instrumentation/
 CI 使用 Makefile 中定义的 Make 目标：
 
 - `make weaver-install`：安装 OTel Weaver
-- `make registry-check`：验证注册表（阻塞性检查）
-- `make registry-diff`：生成差异报告（非阻塞性检查）
+- `make lint-schema`：验证注册表（阻塞性检查）
+- `make semantic-conventions/diff`：生成差异报告（非阻塞性检查）
 
 这种方法：
 
@@ -307,7 +307,7 @@ CI 使用 Makefile 中定义的 Make 目标：
 2. 更新 `instrumentation/**/semconv/` 中的 Go 导入：`semconv/v1.30.0` → `semconv/v1.31.0`
 3. 更新 `.semconv-version` 文件中的版本号
 4. 更新代码以处理任何破坏性更改
-5. 运行 `make registry-check` 验证新版本
+5. 运行 `make lint-schema` 验证新版本
 6. 运行测试：`make test`
 
 ## 最佳实践

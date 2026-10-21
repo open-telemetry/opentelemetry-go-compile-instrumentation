@@ -178,6 +178,27 @@ func TestCallTemplateData_Receiver(t *testing.T) {
 	})
 }
 
+func TestCallTemplateData_FuncReturnOfType(t *testing.T) {
+	t.Run("no enclosing function errors", func(t *testing.T) {
+		d := &callTemplateData{}
+
+		_, err := d.FuncReturnOfType("error")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no enclosing function is available")
+	})
+
+	t.Run("delegates to enclosing function", func(t *testing.T) {
+		enclosing := parseFunc(t, "package main\nfunc Handler() (err error) { return nil }")
+		d := &callTemplateData{enclosing: newFuncTemplateData(enclosing, nil, nil, "")}
+
+		ret, err := d.FuncReturnOfType("error")
+
+		require.NoError(t, err)
+		assert.Equal(t, "err", ret)
+	})
+}
+
 func TestCompileExpression_ReceiverWithEnclosingMethod(t *testing.T) {
 	tmpl, err := newCallTemplate("traced({{ .Receiver }}, {{ . }})")
 	require.NoError(t, err)
@@ -185,7 +206,7 @@ func TestCompileExpression_ReceiverWithEnclosingMethod(t *testing.T) {
 	enclosing := parseFunc(t, "package main\ntype T struct{}\nfunc (t T) Handler() {}")
 	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
 
-	result, err := tmpl.compileExpression(originalCall, enclosing)
+	result, err := tmpl.compileExpression(originalCall, enclosing, nil, nil)
 
 	require.NoError(t, err)
 	resultCall, ok := result.(*dst.CallExpr)
@@ -235,7 +256,7 @@ func TestCompileExpression_FuncArgumentWithEnclosingFunc(t *testing.T) {
 	enclosing := parseFunc(t, "package main\nfunc Handler(name string) {}")
 	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
 
-	result, err := tmpl.compileExpression(originalCall, enclosing)
+	result, err := tmpl.compileExpression(originalCall, enclosing, nil, nil)
 
 	require.NoError(t, err)
 	resultCall, ok := result.(*dst.CallExpr)
@@ -246,13 +267,45 @@ func TestCompileExpression_FuncArgumentWithEnclosingFunc(t *testing.T) {
 	assert.Equal(t, "name", nameArg.Name)
 }
 
+func TestCompileExpression_FuncReturnWithEnclosingFunc(t *testing.T) {
+	tmpl, err := newCallTemplate("wrap({{ .FuncReturn 0 }}, {{ . }})")
+	require.NoError(t, err)
+
+	enclosing := parseFunc(t, "package main\nfunc Handler() (result string) { return result }")
+	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
+
+	result, err := tmpl.compileExpression(originalCall, enclosing, nil, nil)
+
+	require.NoError(t, err)
+	resultCall, ok := result.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", result)
+	require.Len(t, resultCall.Args, 2)
+	retArg, ok := resultCall.Args[0].(*dst.Ident)
+	require.True(t, ok, "expected *dst.Ident, got %T", resultCall.Args[0])
+	assert.Equal(t, "result", retArg.Name,
+		"the marker added at render time must be stripped, leaving the result's real name")
+}
+
+func TestCompileExpression_FuncReturnOutOfRange(t *testing.T) {
+	tmpl, err := newCallTemplate("wrap({{ .FuncReturn 5 }})")
+	require.NoError(t, err)
+
+	enclosing := parseFunc(t, "package main\nfunc Handler() (result string) { return result }")
+	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
+
+	_, err = tmpl.compileExpression(originalCall, enclosing, nil, nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "FuncReturn index 5 out of range [0, 1)")
+}
+
 func TestCompileExpression_FuncTagWithoutEnclosingFuncErrors(t *testing.T) {
 	tmpl, err := newCallTemplate("traced({{ .FuncName }})")
 	require.NoError(t, err)
 
 	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
 
-	_, err = tmpl.compileExpression(originalCall, nil)
+	_, err = tmpl.compileExpression(originalCall, nil, nil, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no enclosing function is available")
@@ -265,7 +318,7 @@ func TestCompileExpression_FuncArgumentOfType_Found(t *testing.T) {
 	enclosing := parseFunc(t, "package main\nfunc Handler(ctx context.Context, name string) {}")
 	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
 
-	result, err := tmpl.compileExpression(originalCall, enclosing)
+	result, err := tmpl.compileExpression(originalCall, enclosing, nil, nil)
 
 	require.NoError(t, err)
 	resultCall, ok := result.(*dst.CallExpr)
@@ -283,7 +336,7 @@ func TestCompileExpression_FuncArgumentOfType_NotFound(t *testing.T) {
 	enclosing := parseFunc(t, "package main\nfunc Handler(ctx context.Context, name string) {}")
 	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
 
-	result, err := tmpl.compileExpression(originalCall, enclosing)
+	result, err := tmpl.compileExpression(originalCall, enclosing, nil, nil)
 
 	require.NoError(t, err)
 	resultCall, ok := result.(*dst.CallExpr)
@@ -303,7 +356,7 @@ func TestCompileExpression_FuncArgumentOfType_SkipsUnsupportedParamTypes(t *test
 	enclosing := parseFunc(t, "package main\nfunc Handler(data []byte, ctx context.Context) {}")
 	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
 
-	result, err := tmpl.compileExpression(originalCall, enclosing)
+	result, err := tmpl.compileExpression(originalCall, enclosing, nil, nil)
 
 	require.NoError(t, err)
 	resultCall, ok := result.(*dst.CallExpr)
@@ -320,7 +373,37 @@ func TestCompileExpression_FuncArgumentOfType_NoEnclosingFuncErrors(t *testing.T
 
 	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
 
-	_, err = tmpl.compileExpression(originalCall, nil)
+	_, err = tmpl.compileExpression(originalCall, nil, nil, nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no enclosing function is available")
+}
+
+func TestCompileExpression_FuncReturnOfType_Found(t *testing.T) {
+	tmpl, err := newCallTemplate(`traced({{ .FuncReturnOfType "error" }}, {{ . }})`)
+	require.NoError(t, err)
+
+	enclosing := parseFunc(t, "package main\nfunc Handler() (err error) { return nil }")
+	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
+
+	result, err := tmpl.compileExpression(originalCall, enclosing, nil, nil)
+
+	require.NoError(t, err)
+	resultCall, ok := result.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", result)
+	require.Len(t, resultCall.Args, 2)
+	argIdent, ok := resultCall.Args[0].(*dst.Ident)
+	require.True(t, ok, "expected *dst.Ident, got %T", resultCall.Args[0])
+	assert.Equal(t, "err", argIdent.Name)
+}
+
+func TestCompileExpression_FuncReturnOfType_NoEnclosingFuncErrors(t *testing.T) {
+	tmpl, err := newCallTemplate(`traced({{ .FuncReturnOfType "error" }})`)
+	require.NoError(t, err)
+
+	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
+
+	_, err = tmpl.compileExpression(originalCall, nil, nil, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no enclosing function is available")
@@ -336,7 +419,7 @@ func TestCompileExpression_CallArgumentIsWrappedCallNotEnclosingFunc(t *testing.
 		Args: []dst.Expr{&dst.Ident{Name: "innerArg"}},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, enclosing)
+	result, err := tmpl.compileExpression(originalCall, enclosing, nil, nil)
 
 	require.NoError(t, err)
 	resultCall, ok := result.(*dst.CallExpr)
@@ -361,7 +444,7 @@ func TestCompileExpression_WithoutDotExpression(t *testing.T) {
 		Args: []dst.Expr{&dst.Ident{Name: "a"}, &dst.Ident{Name: "b"}},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, nil)
+	result, err := tmpl.compileExpression(originalCall, nil, nil, nil)
 
 	require.NoError(t, err)
 	resultCall, ok := result.(*dst.CallExpr)
@@ -389,7 +472,7 @@ func TestCompileExpression_PerBranchDotUsage(t *testing.T) {
 			Args: []dst.Expr{&dst.Ident{Name: "a"}},
 		}
 
-		result, resErr := tmpl.compileExpression(originalCall, nil)
+		result, resErr := tmpl.compileExpression(originalCall, nil, nil, nil)
 		require.NoError(t, resErr)
 
 		resultCall, ok := result.(*dst.CallExpr)
@@ -404,7 +487,7 @@ func TestCompileExpression_PerBranchDotUsage(t *testing.T) {
 			Fun: &dst.Ident{Name: "getValue"},
 		}
 
-		result, resErr := tmpl.compileExpression(originalCall, nil)
+		result, resErr := tmpl.compileExpression(originalCall, nil, nil, nil)
 		require.NoError(t, resErr)
 
 		resultCall, ok := result.(*dst.CallExpr)
@@ -427,7 +510,7 @@ func TestCompileExpression_CallArgumentCount(t *testing.T) {
 		Args: []dst.Expr{&dst.Ident{Name: "a"}, &dst.Ident{Name: "b"}},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, nil)
+	result, err := tmpl.compileExpression(originalCall, nil, nil, nil)
 
 	require.NoError(t, err)
 	resultCall, ok := result.(*dst.CallExpr)
@@ -447,7 +530,7 @@ func TestCompileExpression_CallArgumentOutOfRange(t *testing.T) {
 		Args: []dst.Expr{&dst.Ident{Name: "a"}},
 	}
 
-	_, err = tmpl.compileExpression(originalCall, nil)
+	_, err = tmpl.compileExpression(originalCall, nil, nil, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "out of range")
@@ -463,7 +546,7 @@ func TestCompileExpression_CallArgumentUnwrapsParens(t *testing.T) {
 	}
 	parenthesized := &dst.ParenExpr{X: call}
 
-	result, err := tmpl.compileExpression(parenthesized, nil)
+	result, err := tmpl.compileExpression(parenthesized, nil, nil, nil)
 
 	require.NoError(t, err)
 	resultCall, ok := result.(*dst.CallExpr)
@@ -483,7 +566,7 @@ func TestCompileExpression_CallArgumentRequiresCallExpr(t *testing.T) {
 
 	nonCall := &dst.BasicLit{Kind: token.INT, Value: "5"}
 
-	_, err = tmpl.compileExpression(nonCall, nil)
+	_, err = tmpl.compileExpression(nonCall, nil, nil, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "function call")
@@ -500,7 +583,7 @@ func TestCompileExpression_CallArgumentComplexExpression(t *testing.T) {
 		},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, nil)
+	result, err := tmpl.compileExpression(originalCall, nil, nil, nil)
 
 	require.NoError(t, err)
 	resultCall, ok := result.(*dst.CallExpr)
@@ -513,6 +596,103 @@ func TestCompileExpression_CallArgumentComplexExpression(t *testing.T) {
 	assert.Equal(t, "a", xIdent.Name)
 }
 
+func TestCompileExpression_CallArgumentNotRewrittenByAliasOverride(t *testing.T) {
+	// Regression test: the wrapped call's argument must be spliced in as its
+	// original AST after the alias rewrite, so a qualifier in the argument
+	// that merely shares the rule alias's name stays untouched.
+	tmpl, err := newCallTemplate("traced.Sprint({{ .CallArgument 0 }})")
+	require.NoError(t, err)
+
+	originalCall := &dst.CallExpr{
+		Fun: &dst.SelectorExpr{X: &dst.Ident{Name: "http"}, Sel: &dst.Ident{Name: "Get"}},
+		Args: []dst.Expr{
+			&dst.CallExpr{
+				Fun: &dst.SelectorExpr{X: &dst.Ident{Name: "traced"}, Sel: &dst.Ident{Name: "URL"}},
+			},
+		},
+	}
+
+	result, err := tmpl.compileExpression(originalCall, nil, nil, map[string]string{"traced": "f"})
+
+	require.NoError(t, err)
+	outer, ok := result.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", result)
+	outerSel, ok := outer.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", outer.Fun)
+	assert.Equal(t, "f", outerSel.X.(*dst.Ident).Name,
+		"the rule's own qualifier must move to the file's alias")
+	require.Len(t, outer.Args, 1)
+	argCall, ok := outer.Args[0].(*dst.CallExpr)
+	require.True(t, ok, "expected the argument to stay a *dst.CallExpr, got %T", outer.Args[0])
+	argSel, ok := argCall.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", argCall.Fun)
+	assert.Equal(t, "traced", argSel.X.(*dst.Ident).Name,
+		"the wrapped call's argument code must not be rewritten just because it shares the rule's alias name")
+}
+
+func TestCompileExpression_CallArgumentSameIndexTwice(t *testing.T) {
+	tmpl, err := newCallTemplate("combine({{ .CallArgument 0 }}, {{ .CallArgument 0 }})")
+	require.NoError(t, err)
+
+	originalArg := &dst.CallExpr{Fun: &dst.Ident{Name: "innerArg"}}
+	originalCall := &dst.CallExpr{
+		Fun:  &dst.Ident{Name: "f"},
+		Args: []dst.Expr{originalArg},
+	}
+
+	result, err := tmpl.compileExpression(originalCall, nil, nil, nil)
+
+	require.NoError(t, err)
+	resultCall, ok := result.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", result)
+	require.Len(t, resultCall.Args, 2)
+
+	for i, arg := range resultCall.Args {
+		call, callOk := arg.(*dst.CallExpr)
+		require.True(t, callOk, "expected *dst.CallExpr for arg %d, got %T", i, arg)
+		fun, funOk := call.Fun.(*dst.Ident)
+		require.True(t, funOk, "expected *dst.Ident, got %T", call.Fun)
+		assert.Equal(t, "innerArg", fun.Name)
+		assert.NotSame(t, originalArg, call,
+			"each occurrence must receive its own AST copy")
+	}
+	assert.NotSame(t, resultCall.Args[0], resultCall.Args[1],
+		"repeated occurrences of the same index must not share one AST")
+}
+
+func TestCompileExpression_CallArgumentOutOfRangeMessageUnchanged(t *testing.T) {
+	tmpl, err := newCallTemplate("wrap({{ .CallArgument 1 }})")
+	require.NoError(t, err)
+
+	originalCall := &dst.CallExpr{
+		Fun:  &dst.Ident{Name: "f"},
+		Args: []dst.Expr{&dst.Ident{Name: "a"}},
+	}
+
+	_, err = tmpl.compileExpression(originalCall, nil, nil, nil)
+
+	require.Error(t, err)
+	// The delegate validation keeps the original error text verbatim inside
+	// text/template's own error wrapping.
+	assert.Contains(t, err.Error(), "error calling CallArgument: CallArgument index 1 out of range [0, 1)")
+}
+
+func TestCompileExpression_CallArgumentPlaceholderNotReplaced(t *testing.T) {
+	tmpl, err := newCallTemplate(`wrapper("{{ .CallArgument 0 }}")`)
+	require.NoError(t, err)
+
+	originalCall := &dst.CallExpr{
+		Fun:  &dst.Ident{Name: "f"},
+		Args: []dst.Expr{&dst.Ident{Name: "a"}},
+	}
+
+	result, err := tmpl.compileExpression(originalCall, nil, nil, nil)
+
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "did not contain expected placeholder expression for {{ .CallArgument 0 }}")
+}
+
 func TestCompileExpression_SimpleWrapping(t *testing.T) {
 	tmpl, err := newCallTemplate("wrapper({{ . }})")
 	require.NoError(t, err)
@@ -522,7 +702,7 @@ func TestCompileExpression_SimpleWrapping(t *testing.T) {
 		Fun: &dst.Ident{Name: "funcCall"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, nil)
+	result, err := tmpl.compileExpression(originalCall, nil, nil, nil)
 
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -553,7 +733,7 @@ func TestCompileExpression_IIFE(t *testing.T) {
 		Fun: &dst.Ident{Name: "getValue"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, nil)
+	result, err := tmpl.compileExpression(originalCall, nil, nil, nil)
 
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -572,7 +752,7 @@ func TestCompileExpression_MultiplePlaceholders(t *testing.T) {
 		Fun: &dst.Ident{Name: "getValue"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, nil)
+	result, err := tmpl.compileExpression(originalCall, nil, nil, nil)
 
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -594,11 +774,11 @@ func TestCompileExpression_InvalidGoSyntax(t *testing.T) {
 		Fun: &dst.Ident{Name: "test"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, nil)
+	result, err := tmpl.compileExpression(originalCall, nil, nil, nil)
 
 	require.Error(t, err)
 	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "failed to parse generated code")
+	assert.Contains(t, err.Error(), "can not parse snippet")
 }
 
 func TestCompileExpression_ComplexNestedExpression(t *testing.T) {
@@ -609,7 +789,7 @@ func TestCompileExpression_ComplexNestedExpression(t *testing.T) {
 		Fun: &dst.Ident{Name: "inner"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, nil)
+	result, err := tmpl.compileExpression(originalCall, nil, nil, nil)
 
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -638,7 +818,7 @@ func TestCompileExpression_WithBinaryExpression(t *testing.T) {
 		Fun: &dst.Ident{Name: "getValue"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, nil)
+	result, err := tmpl.compileExpression(originalCall, nil, nil, nil)
 
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -661,7 +841,7 @@ func TestCompileExpression_SelectorExpression(t *testing.T) {
 		Fun: &dst.Ident{Name: "getStruct"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, nil)
+	result, err := tmpl.compileExpression(originalCall, nil, nil, nil)
 
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -686,12 +866,29 @@ func TestCompileExpression_EmptyResult(t *testing.T) {
 		Fun: &dst.Ident{Name: "test"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, nil)
+	result, err := tmpl.compileExpression(originalCall, nil, nil, nil)
 
 	// Should error because the function body is empty
 	require.Error(t, err)
 	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "function body is empty")
+	assert.Contains(t, err.Error(), "empty source")
+}
+
+func TestCompileExpression_WhitespaceOnlyResult(t *testing.T) {
+	// A template producing only whitespace must be treated the same as an
+	// empty result, not surfaced as an opaque parse error.
+	tmpl, err := newCallTemplate("   \n\t  ")
+	require.NoError(t, err)
+
+	originalCall := &dst.CallExpr{
+		Fun: &dst.Ident{Name: "test"},
+	}
+
+	result, err := tmpl.compileExpression(originalCall, nil, nil, nil)
+
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "empty source")
 }
 
 func TestCompileExpression_PlaceholderNotReplaced(t *testing.T) {
@@ -702,7 +899,7 @@ func TestCompileExpression_PlaceholderNotReplaced(t *testing.T) {
 		Fun: &dst.Ident{Name: "test"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, nil)
+	result, err := tmpl.compileExpression(originalCall, nil, nil, nil)
 
 	require.Error(t, err)
 	assert.Nil(t, result)
@@ -717,7 +914,7 @@ func TestCompileExpression_MultipleStatements(t *testing.T) {
 		Fun: &dst.Ident{Name: "test"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, nil)
+	result, err := tmpl.compileExpression(originalCall, nil, nil, nil)
 
 	require.Error(t, err)
 	assert.Nil(t, result)
@@ -734,7 +931,7 @@ func TestCompileExpression_NonExpressionStatement(t *testing.T) {
 		Fun: &dst.Ident{Name: "test"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, nil)
+	result, err := tmpl.compileExpression(originalCall, nil, nil, nil)
 
 	// Should error because it's not an expression statement
 	require.Error(t, err)
@@ -1019,4 +1216,42 @@ func TestParseGoTypeExpression_NoType(t *testing.T) {
 	_, err := parseGoTypeExpression("= 1")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unexpected spec shape")
+}
+
+func TestParseGoExpression_Success(t *testing.T) {
+	expr, err := parseGoExpression("grpc.WithInsecure()")
+	require.NoError(t, err)
+
+	call, ok := expr.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", expr)
+	sel, ok := call.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
+	assert.Equal(t, "WithInsecure", sel.Sel.Name)
+}
+
+func TestParseGoExpression_MultipleStatementsRejected(t *testing.T) {
+	// Regression test: parseSnippetFuncDecl used to only look at the first
+	// statement of the parsed body, silently discarding any statements after
+	// it (e.g. "a(); b()" would parse as just "a()"). The shared
+	// AstParser.ParseSnippet-backed implementation must reject this instead.
+	_, err := parseGoExpression("a(); b()")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "did not parse as a single statement")
+}
+
+func TestParseGoTypeExpression_Success(t *testing.T) {
+	typeExpr, err := parseGoTypeExpression("grpc.DialOption")
+	require.NoError(t, err)
+
+	sel, ok := typeExpr.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", typeExpr)
+	assert.Equal(t, "DialOption", sel.Sel.Name)
+}
+
+func TestParseGoTypeExpression_MultipleStatementsRejected(t *testing.T) {
+	// Regression test: mirrors TestParseGoExpression_MultipleStatementsRejected
+	// for the type-string parsing path.
+	_, err := parseGoTypeExpression("int\nvar y int")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "did not parse as a single statement")
 }

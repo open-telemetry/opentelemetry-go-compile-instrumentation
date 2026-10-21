@@ -11,10 +11,11 @@ import (
 	"github.com/valyala/fasttemplate"
 
 	"go.opentelemetry.io/otelc/tool/ex"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
-// InstCallRule represents a rule that wraps function calls at call sites.
+// InstCallRule represents a rule that wraps function or method calls at call
+// sites. Exactly one of FunctionCall or MethodCall must be set.
 //
 // The function_call field must use the qualified format: "package/path.FunctionName"
 // This matches calls to functions from a specific import path.
@@ -35,37 +36,14 @@ import (
 type InstCallRule struct {
 	InstBaseRule `yaml:",inline"`
 
-	// FunctionCall is the qualified function name from YAML (e.g., "net/http.Get")
-	// This field is parsed into ImportPath and FuncName during rule creation.
-	FunctionCall string `json:"function_call" yaml:"function_call"`
-
-	// ImportPath is the parsed package import path (e.g., "net/http")
-	// This field is populated during rule creation from FunctionCall.
-	ImportPath string `json:"import-path" yaml:"-"`
-
-	// FuncName is the parsed function name (e.g., "Get")
-	// This field is populated during rule creation from FunctionCall.
-	FuncName string `json:"func-name" yaml:"-"`
-
-	// Replace is the wrapper code with {{ . }} as placeholder for the original call.
-	// The replacement must be a valid Go expression. The output may be any
-	// expression type; it is not required to be a call expression.
-	//
-	// Examples:
-	//   - "wrapper({{ . }})" wraps the call with wrapper()
-	//   - "(func() { return {{ . }} })()" uses an IIFE
-	//   - "otelhttp.NewTransport({{ . }})" replaces a transport value
-	Replace string `json:"replace" yaml:"replace"`
-
-	// AppendArgs is a list of Go expression strings appended as additional
-	// arguments to the matched call. See docs/rules.md for full semantics.
-	AppendArgs []string `json:"append_args" yaml:"append_args"`
-
-	// VariadicType is the element type of the variadic parameter (e.g. "grpc.DialOption").
-	// Required only when the matched call uses an ellipsis spread (f(a, opts...)).
-	// When set and the call is ellipsis, an IIFE wrapper is generated.
-	// When unset and the call is ellipsis, the call is skipped with a warning.
-	VariadicType string `json:"variadic_type" yaml:"variadic_type"`
+	FunctionCall string   `json:"function_call" yaml:"function_call"`
+	MethodCall   string   `json:"method_call"   yaml:"method_call"`
+	ImportPath   string   `json:"import-path"   yaml:"-"` // package import path, parsed from FunctionCall or MethodCall
+	FuncName     string   `json:"func-name"     yaml:"-"` // function or method name, parsed from FunctionCall or MethodCall
+	RecvType     string   `json:"recv-type"     yaml:"-"` // "Logger" or "*DB", parsed from MethodCall
+	Replace      string   `json:"replace"       yaml:"replace"`
+	AppendArgs   []string `json:"append_args"   yaml:"append_args"`
+	VariadicType string   `json:"variadic_type" yaml:"variadic_type"`
 }
 
 // funcNamePattern matches qualified function names like "net/http.Get".
@@ -86,6 +64,9 @@ type InstCallRule struct {
 //   - "" (empty string)
 var funcNamePattern = regexp.MustCompile(`^(.+)\.([^\d\W]\w*)$`)
 
+// identPattern matches a single Go identifier
+var identPattern = regexp.MustCompile(`^[^\d\W]\w*$`)
+
 // replacePlaceholderPattern matches replacement template placeholder variants:
 // {{ . }}, {{.}}, {{- . -}}, {{ .  }}, etc.
 var replacePlaceholderPattern = regexp.MustCompile(`\{\{-?\s*\.\s*-?\}\}`)
@@ -100,15 +81,9 @@ func NewInstCallRule(data []byte, name string) (*InstCallRule, error) {
 		r.Name = name
 	}
 
-	// Parse the qualified function name once at creation
-	matches := funcNamePattern.FindStringSubmatch(r.FunctionCall)
-	if matches == nil {
-		return nil, ex.Newf("invalid function_call format: %q (expected 'package/path.FunctionName')", r.FunctionCall)
+	if err := r.parseSelector(); err != nil {
+		return nil, err
 	}
-
-	// Store parsed components
-	r.ImportPath = matches[1]
-	r.FuncName = matches[2]
 
 	// Validate other fields
 	if err := r.validate(); err != nil {
@@ -125,12 +100,63 @@ func NewInstCallRule(data []byte, name string) (*InstCallRule, error) {
 	return &r, nil
 }
 
-func (r *InstCallRule) validate() error {
-	// FunctionCall format already validated in NewInstCallRule
-	if strings.TrimSpace(r.FunctionCall) == "" {
-		return ex.Newf("function_call cannot be empty")
+// parseSelector parses whichever of FunctionCall or MethodCall is set.
+func (r *InstCallRule) parseSelector() error {
+	switch {
+	case r.FunctionCall != "" && r.MethodCall != "":
+		return ex.Newf("function_call and method_call are mutually exclusive")
+	case r.FunctionCall != "":
+		matches := funcNamePattern.FindStringSubmatch(r.FunctionCall)
+		if matches == nil {
+			return ex.Newf("invalid function_call format: %q (expected 'package/path.FunctionName')", r.FunctionCall)
+		}
+		r.ImportPath, r.FuncName = matches[1], matches[2]
+		return nil
+	case r.MethodCall != "":
+		importPath, recvType, funcName, err := parseMethodCall(r.MethodCall)
+		if err != nil {
+			return err
+		}
+		r.ImportPath, r.RecvType, r.FuncName = importPath, recvType, funcName
+		return nil
+	default:
+		return ex.Newf("one of function_call or method_call must be set")
+	}
+}
+
+// parseMethodCall splits a method_call selector into import path, receiver
+// type, and method name, in that order.
+//
+//nolint:revive // confusing-results conflicts with nonamedreturns
+func parseMethodCall(methodCall string) (string, string, string, error) {
+	invalid := func() error {
+		return ex.Newf("invalid method_call format: %q (expected 'package/path.Type.Method')", methodCall)
 	}
 
+	matches := funcNamePattern.FindStringSubmatch(methodCall)
+	if matches == nil {
+		return "", "", "", invalid()
+	}
+	recvQualified, funcName := matches[1], matches[2]
+
+	// A plain split, not funcNamePattern again: "*" fails its identifier group.
+	dot := strings.LastIndex(recvQualified, ".")
+	if dot < 0 {
+		return "", "", "", invalid()
+	}
+	importPath := recvQualified[:dot]
+	typeSeg := recvQualified[dot+1:]
+
+	bareType := strings.TrimPrefix(typeSeg, "*")
+	if importPath == "" || !identPattern.MatchString(bareType) {
+		return "", "", "", invalid()
+	}
+
+	return importPath, typeSeg, funcName, nil
+}
+
+func (r *InstCallRule) validate() error {
+	// parseSelector already validated the FunctionCall and MethodCall format.
 	if strings.TrimSpace(r.Replace) == "" && len(r.AppendArgs) == 0 {
 		return ex.Newf("at least one of replace or append_args must be set")
 	}
@@ -162,12 +188,9 @@ func (r *InstCallRule) UnmarshalJSON(data []byte) error {
 
 	// Parse ImportPath and FuncName if not already set
 	if r.ImportPath == "" || r.FuncName == "" {
-		matches := funcNamePattern.FindStringSubmatch(r.FunctionCall)
-		if matches == nil {
-			return ex.Newf("invalid function_call format: %q", r.FunctionCall)
+		if err := r.parseSelector(); err != nil {
+			return err
 		}
-		r.ImportPath = matches[1]
-		r.FuncName = matches[2]
 	}
 
 	return nil

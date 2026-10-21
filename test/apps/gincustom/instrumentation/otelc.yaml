@@ -1,3 +1,5 @@
+version: "v1.0.0"
+
 gin_custom:
   target: github.com/gin-gonic/gin
   where:
