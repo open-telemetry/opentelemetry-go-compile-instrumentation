@@ -902,7 +902,7 @@ func (ip *instrumentPhase) implementHookContext(t *rule.InstFuncRule) {
 				return true
 			}
 			ident.Name += suffix
-			if typeParams != nil && hookContextTypePosition(cursor) {
+			if typeParams != nil && hookContextTypePosition(cursor.Parent()) {
 				cursor.Replace(implTypeRef(ident, typeParams))
 			}
 			return false
@@ -910,12 +910,12 @@ func (ip *instrumentPhase) implementHookContext(t *rule.InstFuncRule) {
 	}
 }
 
-// hookContextTypePosition reports whether the cursor's node sits in a type
-// position, which is where the trampoline template references the
-// HookContextImpl type. It is never true for the HookContextImpl value itself,
-// which is always used as an expression.
-func hookContextTypePosition(cursor *dstutil.Cursor) bool {
-	switch cursor.Parent().(type) {
+// hookContextTypePosition reports whether the node sits in a type position,
+// which is where the trampoline template references the HookContextImpl type.
+// It is never true for the HookContextImpl value itself, which is always used
+// as an expression.
+func hookContextTypePosition(parent dst.Node) bool {
+	switch parent.(type) {
 	case *dst.StarExpr, *dst.TypeAssertExpr, *dst.CompositeLit:
 		return true
 	default:

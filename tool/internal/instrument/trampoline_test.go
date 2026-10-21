@@ -1383,3 +1383,39 @@ func main() {
 	require.NoErrorf(t, err, "the generated implementation does not run:\n%s\n%s", out, program)
 	assert.Equal(t, "value\n7\nupdated\nupdated\n\"\"\n", string(out))
 }
+
+// TestHookContextTypePosition checks that the type positions of the trampoline
+// template are told apart from the positions where the HookContextImpl value
+// is used, as only the former are instantiated with the type parameters.
+func TestHookContextTypePosition(t *testing.T) {
+	assert.True(t, hookContextTypePosition(&dst.StarExpr{}), "a pointer type is a type position")
+	assert.True(t, hookContextTypePosition(&dst.TypeAssertExpr{}), "a type assertion is a type position")
+	assert.True(t, hookContextTypePosition(&dst.CompositeLit{}), "a composite literal type is a type position")
+	assert.False(t, hookContextTypePosition(&dst.ValueSpec{}), "a value declaration is not a type position")
+}
+
+// TestImplTypeRef checks that the reference to the generated type is
+// instantiated with the type parameters of the target.
+func TestImplTypeRef(t *testing.T) {
+	_, single := parseFileFunc(t, `package main
+	func testFunc[T any](param1 T) {}`)
+	singleRef := implTypeRef(ast.Ident("HookContextImpl"), single.Type.TypeParams)
+	indexExpr, ok := singleRef.(*dst.IndexExpr)
+	require.True(t, ok, "a single type parameter must be instantiated with an index expression")
+	indexIdent, ok := indexExpr.Index.(*dst.Ident)
+	require.True(t, ok, "the type argument should be an Ident")
+	assert.Equal(t, "T", indexIdent.Name)
+
+	_, multi := parseFileFunc(t, `package main
+	func testFunc[K comparable, V any](key K, value V) {}`)
+	multiRef := implTypeRef(ast.Ident("HookContextImpl"), multi.Type.TypeParams)
+	indexList, ok := multiRef.(*dst.IndexListExpr)
+	require.True(t, ok, "multiple type parameters must be instantiated with an index list expression")
+	require.Len(t, indexList.Indices, 2, "all type parameters must be used")
+	first, ok := indexList.Indices[0].(*dst.Ident)
+	require.True(t, ok, "the type argument should be an Ident")
+	assert.Equal(t, "K", first.Name)
+	second, ok := indexList.Indices[1].(*dst.Ident)
+	require.True(t, ok, "the type argument should be an Ident")
+	assert.Equal(t, "V", second.Name)
+}
