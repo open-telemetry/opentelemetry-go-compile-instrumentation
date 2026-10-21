@@ -5,6 +5,7 @@ package server
 
 import (
 	"bufio"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -564,6 +565,43 @@ func TestWriterWrapper_MultipleStatusCodes(t *testing.T) {
 	}
 }
 
+func TestWriterWrapper_FlushError_Supported(t *testing.T) {
+	expectedErr := errors.New("flush failed")
+	mock := &mockFlushErrorWriter{
+		ResponseWriter: httptest.NewRecorder(),
+		err:            expectedErr,
+	}
+	wrapper := &writerWrapper{
+		ResponseWriter: mock,
+		statusCode:     http.StatusOK,
+	}
+
+	err := wrapper.FlushError()
+	require.ErrorIs(t, err, expectedErr)
+	assert.True(t, mock.flushErrorCalled)
+}
+
+func TestWriterWrapper_FlushError_FlusherFallback(t *testing.T) {
+	mock := &mockFlusher{ResponseWriter: httptest.NewRecorder()}
+	wrapper := &writerWrapper{
+		ResponseWriter: mock,
+		statusCode:     http.StatusOK,
+	}
+
+	err := wrapper.FlushError()
+	require.NoError(t, err)
+	assert.True(t, mock.flushCalled)
+}
+
+func TestWriterWrapper_ResponseController_Flush(t *testing.T) {
+	mock := &mockFlushErrorWriter{ResponseWriter: httptest.NewRecorder()}
+	wrapper := &writerWrapper{ResponseWriter: mock}
+
+	rc := http.NewResponseController(wrapper)
+	require.NoError(t, rc.Flush())
+	assert.True(t, mock.flushErrorCalled)
+}
+
 func TestWriterWrapper_FlushError_NotSupported(t *testing.T) {
 	wrapper := &writerWrapper{
 		// A bare ResponseWriter with no Flush support.
@@ -572,6 +610,18 @@ func TestWriterWrapper_FlushError_NotSupported(t *testing.T) {
 	}
 
 	require.ErrorIs(t, wrapper.FlushError(), http.ErrNotSupported)
+}
+
+// mockFlushErrorWriter is a mock ResponseWriter that implements FlushError() error.
+type mockFlushErrorWriter struct {
+	http.ResponseWriter
+	flushErrorCalled bool
+	err              error
+}
+
+func (m *mockFlushErrorWriter) FlushError() error {
+	m.flushErrorCalled = true
+	return m.err
 }
 
 // nonFlusher hides the recorder's Flush method.
