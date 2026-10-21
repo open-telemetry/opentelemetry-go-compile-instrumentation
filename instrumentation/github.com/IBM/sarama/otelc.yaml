@@ -1,9 +1,10 @@
 version: "v1.0.0"
 
-# NewClient is the single construction path shared by NewSyncProducer,
-# NewAsyncProducer, NewConsumer and NewConsumerGroup, so appending the OTel
-# interceptors to the shared *Config here covers every producer and consumer
-# built from it.
+# NewClient is the construction path shared by NewSyncProducer,
+# NewAsyncProducer and NewConsumer, so appending the OTel interceptors to the
+# *Config here covers every producer and consumer built from it. Consumer
+# groups have their own hooks below so each group gets an isolated
+# interceptor tagged with its group id.
 sarama_newclient:
   target: github.com/IBM/sarama
   where:
@@ -13,12 +14,26 @@ sarama_newclient:
         before: BeforeNewClient
         path: "go.opentelemetry.io/otelc/instrumentation/github.com/IBM/sarama"
 
-# Producer spans are started in the interceptor (first dispatch only; retries
-# reuse the span already attached to the message) but must finish on the actual
-# send result. returnSuccesses/returnErrors are the common terminal paths for
-# every partition/broker producer, covering both sync and async producers and
-# partial batch failures. They are unexported methods on the unexported
-# *asyncProducer, but otelc supports hooking those directly.
+# first_dispatch.go is compiled into github.com/IBM/sarama itself. It reads
+# the unexported ProducerMessage.retries/flags fields to tell a message's
+# first dispatch apart from retries and the dispatcher's internal fin control
+# messages, and registers that predicate with the instrumentation package via
+# linkname (no import edge from sarama).
+sarama_first_dispatch:
+  target: github.com/IBM/sarama
+  do:
+    - add_file:
+        file: first_dispatch.go
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/IBM/sarama"
+
+# Producer spans are started at the first dispatch but must finish on the
+# actual send result. returnSuccesses/returnErrors/returnError are the
+# terminal paths for every partition/broker producer, covering both sync and
+# async producers, direct single-message errors and partial batch failures.
+# They are unexported methods on the unexported *asyncProducer, but otelc
+# supports hooking those directly. The instrumentation ends a span at most
+# once because the three methods call each other in directions that differ
+# across sarama releases.
 sarama_return_successes:
   target: github.com/IBM/sarama
   where:
@@ -39,10 +54,21 @@ sarama_return_errors:
         before: BeforeReturnErrors
         path: "go.opentelemetry.io/otelc/instrumentation/github.com/IBM/sarama"
 
+sarama_return_error:
+  target: github.com/IBM/sarama
+  where:
+    func: returnError
+    recv: "*asyncProducer"
+  do:
+    - inject_hooks:
+        before: BeforeReturnError
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/IBM/sarama"
+
 # NewConsumerGroup calls NewClient internally; this outer hook runs first and
-# attaches the group id to the consumer interceptor before the inner NewClient
-# hook. NewConsumerGroupFromClient reuses an existing client and has no
-# NewClient call, so it needs its own hook to set the group name.
+# hands it a private, group-tagged copy of the config, so groups sharing one
+# caller config cannot overwrite each other's group name.
+# NewConsumerGroupFromClient reuses an existing client and has no NewClient
+# call, so it wraps the client to expose a private group-tagged config.
 sarama_new_consumer_group:
   target: github.com/IBM/sarama
   where:

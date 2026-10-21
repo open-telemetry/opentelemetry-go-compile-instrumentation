@@ -6,32 +6,39 @@
 //
 // NewClient is the single construction path shared by NewSyncProducer,
 // NewAsyncProducer, NewConsumer and NewConsumerGroup, so hooking it once
-// appends the OTel interceptors to the shared *sarama.Config and every
-// producer and consumer built from that config is traced automatically.
+// appends the OTel interceptors to the *Config every producer and consumer is
+// built from. NewConsumerGroup and NewConsumerGroupFromClient get their own
+// hooks so each group can carry its own messaging.consumer.group.name, even
+// when several groups share one Config or one Client.
 //
 // # Span semantics
 //
 // The interceptor callbacks used here (KIP-42) do not observe acknowledgments:
-// OnSend fires when a message is first handed to the
-// producer dispatcher, and OnConsume fires when a fetched message is delivered
-// to the Messages channel. Neither callback can observe the broker
-// acknowledgment, so:
+// OnConsume fires when a fetched message is delivered to the Messages channel,
+// so a consumer span is created and ended inside OnConsume and reflects
+// message delivery, not the application handler's processing time.
 //
-//   - Producer spans are created and ended inside OnSend. They reflect local
-//     hand-off to the client library, not confirmed broker delivery; the
-//     messaging.kafka.async attribute marks this so the span duration is not
-//     read as a broker round-trip. A producer span is a root span unless the
-//     application puts a context.Context in ProducerMessage.Metadata, which
-//     is then used as its parent.
-//   - Consumer spans are created and ended inside OnConsume. They reflect
-//     message delivery to the consumer, not the application handler's
-//     processing time. The W3C trace context is extracted from the message
-//     headers when present, so a producer instrumented with OpenTelemetry
-//     (this package or any other) is linked to its consumer.
+// Producer spans are not ended in OnSend. A span is opened on the first
+// dispatch of a message and kept open until the broker result is delivered to
+// (*asyncProducer).returnSuccesses, returnErrors or returnError, where it is
+// ended (with the error recorded on a failure). Those are the terminal paths
+// for every partition/broker producer, for both sync and async producers, so
+// the span duration covers the real broker round trip: SendMessage/SendMessages
+// errors and partial batch failures are observable, and no
+// messaging.kafka.async attribute is needed.
 //
-// The trace context is injected into the message headers on the producer side
-// (before the message is handed to the client), so the consumer side of the
-// same topic, instrumented or not, can continue the trace.
+// The dispatcher re-runs the producer interceptors on every retry level and
+// also routes its internal fin control messages through the same interceptor
+// loop. Whether a dispatch is a message's first one (msg.retries == 0 &&
+// msg.flags == 0) is answered by an add_file compiled into sarama itself, so
+// unexported fields can be read without an import edge from this package;
+// retries and internal control messages start no span and inject nothing.
+//
+// A producer span is a root span unless the application puts a
+// context.Context in ProducerMessage.Metadata, which is then used as its
+// parent. The W3C trace context is injected into the message headers on the
+// first dispatch, so the consumer side of the same topic, instrumented or not,
+// can continue the trace.
 package sarama
 
 import (
@@ -53,6 +60,12 @@ const (
 	instrumentationName = "go.opentelemetry.io/otelc/" +
 		"instrumentation/github.com/IBM/sarama"
 	instrumentationKey = "SARAMA"
+
+	// Positional arguments that the hooks replace via SetParam. NewClient's
+	// signature is NewClient(addrs, conf) and NewConsumerGroup's is
+	// NewConsumerGroup(addrs, groupID, conf).
+	configParamNewClient        = 1
+	configParamNewConsumerGroup = 2
 )
 
 // saramaEnabler controls whether the instrumentation is active, honoring the
@@ -85,14 +98,13 @@ func initInstrumentation() {
 }
 
 // BeforeNewClient appends the OpenTelemetry interceptors to conf, the *Config
-// shared by every sarama client constructor (NewSyncProducer, NewAsyncProducer,
-// NewConsumer and NewConsumerGroup all build on NewClient). It runs before the
-// client is created so the appended interceptors are picked up by every
-// producer and consumer dispatcher started from this config.
+// passed to NewClient (which NewSyncProducer, NewAsyncProducer and NewConsumer
+// build on). It runs before the client is created so the appended
+// interceptors are picked up by every producer and consumer started from this
+// config.
 //
 // Appending is idempotent: calling BeforeNewClient again with the same conf
-// (e.g. when one config is shared by several clients) does not add a second
-// copy of the interceptors.
+// does not add a second copy of the interceptors.
 //
 // On failure the original call still fails normally; the only observable side
 // effect is that the passed conf carries the interceptors, which is harmless
@@ -101,7 +113,7 @@ func BeforeNewClient(ictx hook.HookContext, addrs []string, conf *sarama.Config)
 	if conf == nil {
 		if enabler.Enable() {
 			conf = sarama.NewConfig()
-			ictx.SetParam(1, conf)
+			ictx.SetParam(configParamNewClient, conf)
 		} else {
 			logger.Debug("Kafka (IBM/sarama) instrumentation disabled")
 			return
@@ -112,25 +124,43 @@ func BeforeNewClient(ictx hook.HookContext, addrs []string, conf *sarama.Config)
 		return
 	}
 	initInstrumentation()
-	installInterceptors(conf, brokerEndpoint(addrs), "")
+	installInterceptors(conf, brokerEndpoint(addrs))
 }
 
-// BeforeNewConsumerGroup runs before NewConsumerGroup. It is the outermost
-// constructor (it calls NewClient internally), so attaching the group name
-// here before the inner NewClient hook fires lets the consumer interceptor
-// record messaging.consumer.group.name for group consumers.
-func BeforeNewConsumerGroup(_ hook.HookContext, addrs []string, groupID string, conf *sarama.Config) {
-	if !enabler.Enable() || conf == nil {
+// BeforeNewConsumerGroup runs before NewConsumerGroup. NewConsumerGroup calls
+// NewClient(addrs, conf) internally, so passing the caller's conf here would
+// let the inner NewClient hook attach one consumerInterceptor to a config the
+// caller may share with another group (or with a plain client): the second
+// group would then overwrite the first group's name on that shared
+// interceptor.
+//
+// Instead this hook hands NewClient a private copy of conf carrying its own
+// consumerInterceptor tagged with groupID. The caller's conf is never
+// mutated, so any number of groups can share it without racing. A nil conf is
+// created here (rather than relying on the inner hook) for the same reason.
+func BeforeNewConsumerGroup(ictx hook.HookContext, addrs []string, groupID string, conf *sarama.Config) {
+	if !enabler.Enable() {
+		logger.Debug("Kafka (IBM/sarama) instrumentation disabled")
 		return
 	}
 	initInstrumentation()
-	installInterceptors(conf, brokerEndpoint(addrs), groupID)
+	if conf == nil {
+		conf = sarama.NewConfig()
+	}
+	groupConf := configForGroup(conf, brokerEndpoint(addrs), groupID)
+	// Replacing the third argument also runs the inner NewClient hook on this
+	// private copy: configForGroup has already attached every interceptor, so
+	// that hook's idempotent append is a no-op.
+	ictx.SetParam(configParamNewConsumerGroup, groupConf)
 }
 
 // BeforeNewConsumerGroupFromClient handles groups built on an already-existing
-// client (no NewClient call). The live config is mutated directly; the group
-// name is filled into the interceptor that NewClient already attached.
-func BeforeNewConsumerGroupFromClient(_ hook.HookContext, groupID string, client sarama.Client) {
+// client (no NewClient call). The client may be shared by several groups, and
+// sarama reads client.Config() when it builds the group session, so mutating
+// the live config in place would again let one group overwrite another. The
+// client is wrapped so Config() returns a private, group-tagged copy while
+// every other Client method passes through to the real client.
+func BeforeNewConsumerGroupFromClient(ictx hook.HookContext, groupID string, client sarama.Client) {
 	if !enabler.Enable() || client == nil {
 		return
 	}
@@ -139,33 +169,85 @@ func BeforeNewConsumerGroupFromClient(_ hook.HookContext, groupID string, client
 	if brokers := client.Brokers(); len(brokers) > 0 && brokers[0] != nil {
 		endpoint = brokers[0].Addr()
 	}
-	installInterceptors(client.Config(), endpoint, groupID)
+	conf := client.Config()
+	if conf == nil {
+		conf = sarama.NewConfig()
+	}
+	ictx.SetParam(configParamNewClient, &groupClient{
+		Client: client,
+		conf:   configForGroup(conf, endpoint, groupID),
+	})
+}
+
+// groupClient wraps a sarama.Client for NewConsumerGroupFromClient, serving a
+// private, group-tagged *Config while delegating every other method.
+type groupClient struct {
+	sarama.Client
+	conf *sarama.Config
+}
+
+func (c *groupClient) Config() *sarama.Config { return c.conf }
+
+// configForGroup returns a private copy of conf whose consumer interceptors
+// are isolated for one group: any application interceptors are kept, a
+// previously attached OTel consumer interceptor (present when conf was itself
+// used to build a client) is dropped, and one consumerInterceptor tagged with
+// groupID is appended. The producer interceptor is carried over untouched;
+// producers do not depend on the group. Config holds no lock or atomic value,
+// so a value copy is safe.
+func configForGroup(conf *sarama.Config, endpoint, groupID string) *sarama.Config {
+	clone := *conf
+
+	producers := make([]sarama.ProducerInterceptor, 0, len(conf.Producer.Interceptors)+1)
+	producers = append(producers, conf.Producer.Interceptors...)
+	if !hasProducerInterceptor(producers) {
+		producers = append(producers, newProducerInterceptor(endpoint, conf.Version))
+	}
+	clone.Producer.Interceptors = producers
+
+	consumers := make([]sarama.ConsumerInterceptor, 0, len(conf.Consumer.Interceptors)+1)
+	for _, in := range conf.Consumer.Interceptors {
+		if _, ok := in.(*consumerInterceptor); ok {
+			continue
+		}
+		consumers = append(consumers, in)
+	}
+	consumers = append(consumers, &consumerInterceptor{endpoint: endpoint, group: groupID})
+	clone.Consumer.Interceptors = consumers
+	return &clone
 }
 
 // installInterceptors appends the OpenTelemetry interceptors to conf exactly
-// once. A non-empty consumerGroup fills (or updates) the group name on an
-// already-attached consumer interceptor; an empty group never clears a group
-// that an outer consumer-group constructor set earlier.
-func installInterceptors(conf *sarama.Config, endpoint, consumerGroup string) {
+// once. It is used for the plain NewClient path; groups get isolated
+// interceptors through configForGroup instead.
+func installInterceptors(conf *sarama.Config, endpoint string) {
 	if conf == nil {
 		return
 	}
-	if !hasProducerInterceptor(conf) {
+	if !hasProducerInterceptor(conf.Producer.Interceptors) {
 		conf.Producer.Interceptors = append(conf.Producer.Interceptors,
-			&producerInterceptor{
-				endpoint:         endpoint,
-				headersSupported: conf.Version.IsAtLeast(sarama.V0_11_0_0),
-				async:            !conf.Producer.Return.Successes,
-			})
+			newProducerInterceptor(endpoint, conf.Version))
 	}
-	if ci := findConsumerInterceptor(conf); ci != nil {
-		if consumerGroup != "" {
-			ci.group = consumerGroup
+	if findConsumerInterceptor(conf) == nil {
+		conf.Consumer.Interceptors = append(conf.Consumer.Interceptors,
+			&consumerInterceptor{endpoint: endpoint})
+	}
+}
+
+func hasProducerInterceptor(ins []sarama.ProducerInterceptor) bool {
+	for _, in := range ins {
+		if _, ok := in.(*producerInterceptor); ok {
+			return true
 		}
-		return
 	}
-	conf.Consumer.Interceptors = append(conf.Consumer.Interceptors,
-		&consumerInterceptor{endpoint: endpoint, group: consumerGroup})
+	return false
+}
+
+func newProducerInterceptor(endpoint string, version sarama.KafkaVersion) *producerInterceptor {
+	return &producerInterceptor{
+		endpoint:         endpoint,
+		headersSupported: version.IsAtLeast(sarama.V0_11_0_0),
+	}
 }
 
 // brokerEndpoint returns the first configured broker address, if any, in
@@ -178,15 +260,6 @@ func brokerEndpoint(brokers []string) string {
 	return brokers[0]
 }
 
-func hasProducerInterceptor(conf *sarama.Config) bool {
-	for _, in := range conf.Producer.Interceptors {
-		if _, ok := in.(*producerInterceptor); ok {
-			return true
-		}
-	}
-	return false
-}
-
 func findConsumerInterceptor(conf *sarama.Config) *consumerInterceptor {
 	for _, in := range conf.Consumer.Interceptors {
 		if ci, ok := in.(*consumerInterceptor); ok {
@@ -196,13 +269,10 @@ func findConsumerInterceptor(conf *sarama.Config) *consumerInterceptor {
 	return nil
 }
 
-// producerInterceptor implements sarama.ProducerInterceptor. It creates a
-// producer span when a message is first handed to the dispatcher and injects
-// the trace context into the message headers so consumers can link to it.
-//
-// The span cannot cover broker acknowledgment through this callback, so it
-// is ended inside OnSend and marked with messaging.kafka.async. See the
-// package-level documentation for the span semantics.
+// producerInterceptor implements sarama.ProducerInterceptor. It opens a
+// producer span when a message is first dispatched and injects the trace
+// context into the message headers so consumers can link to it. The span is
+// ended by the returnSuccesses/returnError(s) hooks, not here.
 type producerInterceptor struct {
 	endpoint string
 	// headersSupported records whether the configured Kafka protocol version
@@ -211,9 +281,20 @@ type producerInterceptor struct {
 	// then rejects every message with
 	// ConfigurationError("Producing headers requires Kafka at least v0.11").
 	headersSupported bool
-	// async marks spans for producers that do not synchronously wait for a
-	// broker ack (NewAsyncProducer). Sync producers omit messaging.kafka.async.
-	async bool
+}
+
+// firstDispatchFunc reports whether msg is leaving the dispatcher for the
+// first time (msg.retries == 0 && msg.flags == 0). It is registered by an
+// add_file compiled into sarama (first_dispatch.go), which can read those
+// unexported fields without an import edge back to this package. nil means
+// the injected file is absent, e.g. when the uninstrumented package is built
+// in this repo's unit tests.
+var firstDispatchFunc func(*sarama.ProducerMessage) bool
+
+// registerFirstDispatchFunc is the linkname target used by the injected
+// sarama-side add_file.
+func registerFirstDispatchFunc(f func(*sarama.ProducerMessage) bool) {
+	firstDispatchFunc = f
 }
 
 // producerSpanState holds the open producer span for one message. It is kept
@@ -244,10 +325,6 @@ func storeSpanState(msg *sarama.ProducerMessage, state *producerSpanState) {
 	producerSpans.Store(msg, state)
 }
 
-func deleteSpanState(msg *sarama.ProducerMessage) {
-	producerSpans.Delete(msg)
-}
-
 // parentContext extracts the caller context an application may carry in
 // ProducerMessage.Metadata; sarama passes that field through untouched.
 func parentContext(msg *sarama.ProducerMessage) context.Context {
@@ -256,18 +333,25 @@ func parentContext(msg *sarama.ProducerMessage) context.Context {
 	}
 	return context.Background()
 }
+
 func (p *producerInterceptor) OnSend(msg *sarama.ProducerMessage) {
 	if msg == nil {
 		return
 	}
 	initInstrumentation()
 
-	// sarama re-runs the producer interceptors for every dispatch, including
-	// retries of the same *ProducerMessage (the interceptor loop sits outside
-	// the retries==0 bookkeeping). A message that already carries a producer
-	// span state has been seen on a previous dispatch: do not start a second
-	// span or overwrite the injected trace context.
-	if state, ok := spanStateFor(msg); ok && state != nil {
+	// sarama re-runs the producer interceptors for every retry level of the
+	// same *ProducerMessage, and its internal fin control messages pass
+	// through the same interceptor loop. Only the first dispatch
+	// (msg.retries == 0 && msg.flags == 0, as reported by the sarama-side
+	// add_file) may start a span and inject headers.
+	if firstDispatchFunc != nil {
+		if !firstDispatchFunc(msg) {
+			return
+		}
+	} else if state, ok := spanStateFor(msg); ok && state != nil {
+		// Fallback for builds without the injected add_file (uninstrumented
+		// unit-test builds): pointer-keyed dedupe still suppresses retries.
 		return
 	}
 
@@ -279,7 +363,6 @@ func (p *producerInterceptor) OnSend(msg *sarama.ProducerMessage) {
 		Operation:       semconv.KafkaOperationSend,
 		MessageKey:      semconv.KafkaMessageKey(encodeKey(msg.Key)),
 		MessageBodySize: encodeSize(msg.Value),
-		Async:           p.async,
 	}
 	spanCtx, span := tracer.Start(parent, spanName(msg.Topic, semconv.KafkaOperationSend),
 		trace.WithSpanKind(trace.SpanKindProducer),
@@ -301,35 +384,57 @@ func (p *producerInterceptor) OnSend(msg *sarama.ProducerMessage) {
 	}
 }
 
-// AfterReturnSuccesses finishes the producer span after the broker
+// endProducerSpan ends and removes the open span for msg. LoadAndDelete makes
+// completion idempotent: sarama versions disagree about the call direction
+// between returnError and returnErrors (one calls the other in a loop,
+// reversed across releases), so whichever terminal path runs first ends the
+// span and the second run is a no-op.
+func endProducerSpan(msg *sarama.ProducerMessage, err error) {
+	if msg == nil {
+		return
+	}
+	s, loaded := producerSpans.LoadAndDelete(msg)
+	if !loaded {
+		return
+	}
+	state, ok := s.(*producerSpanState)
+	if !ok || state == nil || state.span == nil {
+		return
+	}
+	if err != nil {
+		state.span.RecordError(err)
+		state.span.SetStatus(codes.Error, err.Error())
+		state.span.SetAttributes(semconv.MessagingErrorType(err))
+	}
+	state.span.End()
+}
+
+// BeforeReturnSuccesses finishes the producer spans after the broker
 // acknowledges every message in the batch. returnSuccesses runs for both sync
 // and async producers that request Return.Successes.
 func BeforeReturnSuccesses(_ hook.HookContext, _ any, batch []*sarama.ProducerMessage) {
 	for _, msg := range batch {
-		if state, ok := spanStateFor(msg); ok && state.span != nil {
-			state.span.End()
-			deleteSpanState(msg)
-		}
+		endProducerSpan(msg, nil)
 	}
 }
 
-// AfterReturnErrors finishes producer spans for a failed batch. A single error
-// (including a Sarama ProducerError / ProducerErrors) applies to the whole
+// BeforeReturnErrors finishes producer spans for a failed batch. A single
+// error (including a sarama ProducerError/ProducerErrors) applies to the whole
 // batch, which mirrors how sarama fans the same err back to every message.
 func BeforeReturnErrors(_ hook.HookContext, _ any, batch []*sarama.ProducerMessage, err error) {
 	for _, msg := range batch {
-		state, ok := spanStateFor(msg)
-		if !ok || state.span == nil {
-			continue
-		}
-		if err != nil {
-			state.span.RecordError(err)
-			state.span.SetStatus(codes.Error, err.Error())
-			state.span.SetAttributes(semconv.MessagingErrorType(err))
-		}
-		state.span.End()
-		deleteSpanState(msg)
+		endProducerSpan(msg, err)
 	}
+}
+
+// BeforeReturnError finishes the span for a single failed message.
+// returnError is called directly from many failure sites (transaction not
+// ready, headers on Kafka < 0.11, MaxMessageBytes exceeded, partition/broker
+// producer errors, exhausted retries) and also in one direction of the
+// returnError/returnErrors recursion; endProducerSpan's idempotent deletion
+// guarantees the span ends exactly once.
+func BeforeReturnError(_ hook.HookContext, _ any, msg *sarama.ProducerMessage, err error) {
+	endProducerSpan(msg, err)
 }
 
 // encodeKey returns the message key bytes, or nil when the key encoder is nil

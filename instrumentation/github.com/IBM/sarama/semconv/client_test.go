@@ -65,40 +65,14 @@ func TestKafkaRequestTraceAttrs_Producer(t *testing.T) {
 	assert.False(t, hasOffset)
 }
 
-func TestKafkaRequestTraceAttrs_ProducerAsync(t *testing.T) {
+func TestKafkaRequestTraceAttrs_ProducerOmitsAsync(t *testing.T) {
+	// Producer spans end on the broker result, so messaging.kafka.async must
+	// never be emitted regardless of any Async field value.
 	attrs := KafkaRequestTraceAttrs(KafkaRequest{
 		Destination: "orders",
 		Operation:   KafkaOperationSend,
-		Async:       true,
 	})
-	m := attrMap(attrs)
-
-	assert.True(t, m["messaging.kafka.async"].AsBool())
-}
-
-func TestKafkaRequestTraceAttrs_ProducerSyncOmitsAsync(t *testing.T) {
-	attrs := KafkaRequestTraceAttrs(KafkaRequest{
-		Destination: "orders",
-		Operation:   KafkaOperationSend,
-		Async:       false,
-	})
-	m := attrMap(attrs)
-
-	_, hasAsync := m["messaging.kafka.async"]
-	assert.False(t, hasAsync)
-}
-
-func TestKafkaRequestTraceAttrs_ConsumerIgnoresAsync(t *testing.T) {
-	// Async only has meaning for the producer (send) side; it must never be
-	// emitted for a receive operation even if the field is mistakenly set.
-	attrs := KafkaRequestTraceAttrs(KafkaRequest{
-		Destination: "orders",
-		Operation:   KafkaOperationReceive,
-		Async:       true,
-	})
-	m := attrMap(attrs)
-
-	_, hasAsync := m["messaging.kafka.async"]
+	_, hasAsync := attrMap(attrs)["messaging.kafka.async"]
 	assert.False(t, hasAsync)
 }
 

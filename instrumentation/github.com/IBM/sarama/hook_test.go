@@ -42,6 +42,8 @@ func setupTest(t *testing.T) *tracetest.SpanRecorder {
 		initOnce = sync.Once{}
 		tracer = nil
 		propagator = nil
+		firstDispatchFunc = nil
+		producerSpans = sync.Map{}
 	})
 	return sr
 }
@@ -108,6 +110,7 @@ func TestBeforeNewClient_NilConfig(t *testing.T) {
 
 func TestProducerInterceptor_OnSend(t *testing.T) {
 	sr := setupTest(t)
+	registerFirstDispatchFunc(func(*sarama.ProducerMessage) bool { return true })
 
 	msg := &sarama.ProducerMessage{
 		Topic: "orders",
@@ -115,7 +118,7 @@ func TestProducerInterceptor_OnSend(t *testing.T) {
 		Value: sarama.StringEncoder("hello"),
 	}
 
-	(&producerInterceptor{endpoint: "broker:9092", headersSupported: true, async: true}).OnSend(msg)
+	(&producerInterceptor{endpoint: "broker:9092", headersSupported: true}).OnSend(msg)
 
 	spans := startedSpans(sr)
 	require.Len(t, spans, 1)
@@ -128,7 +131,8 @@ func TestProducerInterceptor_OnSend(t *testing.T) {
 	assert.Equal(t, "kafka", attrs["messaging.system"])
 	assert.Equal(t, "send", attrs["messaging.operation.name"])
 	assert.Equal(t, "orders", attrs["messaging.destination.name"])
-	assert.Equal(t, true, attrs["messaging.kafka.async"])
+	_, hasAsync := attrs["messaging.kafka.async"]
+	assert.False(t, hasAsync, "spans end on the broker result; async must never be set")
 	assert.Equal(t, "order-1", attrs["messaging.kafka.message.key"])
 	assert.Equal(t, int64(5), attrs["messaging.message.body.size"])
 	assert.Equal(t, "broker", attrs["server.address"])
@@ -143,6 +147,7 @@ func TestProducerInterceptor_OnSend(t *testing.T) {
 
 func TestProducerInterceptor_OnSend_NilMessage(t *testing.T) {
 	sr := setupTest(t)
+	registerFirstDispatchFunc(func(*sarama.ProducerMessage) bool { return true })
 
 	(&producerInterceptor{endpoint: "broker:9092"}).OnSend(nil)
 
@@ -151,6 +156,7 @@ func TestProducerInterceptor_OnSend_NilMessage(t *testing.T) {
 
 func TestProducerInterceptor_OnSend_MetadataContext(t *testing.T) {
 	sr := setupTest(t)
+	registerFirstDispatchFunc(func(*sarama.ProducerMessage) bool { return true })
 
 	_, parentSpan := tracer.Start(context.Background(), "caller",
 		trace.WithSpanKind(trace.SpanKindInternal))
@@ -163,7 +169,7 @@ func TestProducerInterceptor_OnSend_MetadataContext(t *testing.T) {
 		Metadata: ctx,
 	}
 
-	(&producerInterceptor{endpoint: "broker:9092", headersSupported: true, async: true}).OnSend(msg)
+	(&producerInterceptor{endpoint: "broker:9092", headersSupported: true}).OnSend(msg)
 
 	spans := startedSpans(sr)
 	require.Len(t, spans, 2) // caller + producer
@@ -178,9 +184,10 @@ func TestProducerInterceptor_OnSend_MetadataContext(t *testing.T) {
 
 func TestProducerInterceptor_OnSend_EmptyTopic(t *testing.T) {
 	sr := setupTest(t)
+	registerFirstDispatchFunc(func(*sarama.ProducerMessage) bool { return true })
 
 	msg := &sarama.ProducerMessage{Value: sarama.StringEncoder("hello")}
-	(&producerInterceptor{endpoint: "broker:9092", headersSupported: true, async: true}).OnSend(msg)
+	(&producerInterceptor{endpoint: "broker:9092", headersSupported: true}).OnSend(msg)
 
 	spans := startedSpans(sr)
 	require.Len(t, spans, 1)
@@ -189,6 +196,7 @@ func TestProducerInterceptor_OnSend_EmptyTopic(t *testing.T) {
 
 func TestProducerInterceptor_OnSend_OldProtocolSkipsInjection(t *testing.T) {
 	sr := setupTest(t)
+	registerFirstDispatchFunc(func(*sarama.ProducerMessage) bool { return true })
 
 	msg := &sarama.ProducerMessage{
 		Topic: "orders",
@@ -206,32 +214,61 @@ func TestProducerInterceptor_OnSend_OldProtocolSkipsInjection(t *testing.T) {
 	assert.Empty(t, msg.Headers, "no headers may be injected when the protocol cannot carry them")
 }
 
-func TestProducerInterceptor_OnSend_IdempotentRetry(t *testing.T) {
+// TestProducerInterceptor_OnlyFirstDispatchStartsSpan is the regression for
+// the traceparent heuristic: retries (retries>0) and the dispatcher's
+// internal fin messages (flags!=0) pass through the same interceptor loop but
+// must neither start a span nor touch the injected headers. The real
+// distinction is made by the sarama-side add_file; here its predicate is
+// modeled with a map keyed by dispatch sequence.
+func TestProducerInterceptor_OnlyFirstDispatchStartsSpan(t *testing.T) {
 	sr := setupTest(t)
 
-	msg := &sarama.ProducerMessage{
-		Topic: "orders",
-		Value: sarama.StringEncoder("hello"),
+	type dispatch struct {
+		retries int
+		flags   int
 	}
+	registerFirstDispatchFunc(func(msg *sarama.ProducerMessage) bool {
+		// The predicate reads retries/flags in the injected file; this fake
+		// reproduces that via the matching dispatch descriptor.
+		d := msg.Metadata.(*dispatch)
+		return d.retries == 0 && d.flags == 0
+	})
+
 	p := &producerInterceptor{endpoint: "broker:9092", headersSupported: true}
+	msg := &sarama.ProducerMessage{
+		Topic:    "orders",
+		Value:    sarama.StringEncoder("hello"),
+		Metadata: &dispatch{retries: 0, flags: 0},
+	}
 
-	// The dispatcher re-runs interceptors for retries of the same message.
 	p.OnSend(msg)
-	first := headerValue(t, msg.Headers, "traceparent")
-	require.NotEmpty(t, first)
+	tp := headerValue(t, msg.Headers, "traceparent")
+	require.NotEmpty(t, tp)
+	require.Len(t, startedSpans(sr), 1)
 
+	// Retry dispatch: same *ProducerMessage, retries>0.
+	msg.Metadata = &dispatch{retries: 1, flags: 0}
 	p.OnSend(msg)
-
-	// Exactly one span for both dispatches, and the injected trace context is
-	// left untouched by the retry pass.
-	spans := startedSpans(sr)
-	require.Len(t, spans, 1)
-	assert.Equal(t, first, headerValue(t, msg.Headers, "traceparent"),
+	require.Len(t, startedSpans(sr), 1, "a retry must not start a second span")
+	assert.Equal(t, tp, headerValue(t, msg.Headers, "traceparent"),
 		"the retry dispatch must not overwrite the injected trace context")
+
+	// Internal fin control message: flags != 0, never a user message.
+	fin := &sarama.ProducerMessage{
+		Topic:    "orders",
+		Metadata: &dispatch{retries: 0, flags: 1},
+	}
+	p.OnSend(fin)
+	require.Len(t, startedSpans(sr), 1, "a fin control message must not start a span")
+	assert.Empty(t, fin.Headers, "a fin control message must not be injected")
+	if _, ok := spanStateFor(fin); ok {
+		t.Fatal("a fin control message must not register span state")
+	}
 }
 
 func TestConsumerInterceptor_OnConsume(t *testing.T) {
 	sr := setupTest(t)
+	registerFirstDispatchFunc(func(*sarama.ProducerMessage) bool { return true })
 
 	// Produce a message through the producer interceptor, then consume it
 	// with the consumer interceptor: the consumer span must be a child of the
@@ -325,8 +362,9 @@ func headerValue(t *testing.T, headers []sarama.RecordHeader, key string) string
 
 func TestProducerInterceptor_SpanStaysOpenUntilSuccess(t *testing.T) {
 	sr := setupTest(t)
+	registerFirstDispatchFunc(func(*sarama.ProducerMessage) bool { return true })
 
-	p := &producerInterceptor{endpoint: "broker:9092", headersSupported: true, async: false}
+	p := &producerInterceptor{endpoint: "broker:9092", headersSupported: true}
 	msg := &sarama.ProducerMessage{Topic: "orders", Value: sarama.StringEncoder("hello")}
 	p.OnSend(msg)
 
@@ -340,7 +378,6 @@ func TestProducerInterceptor_SpanStaysOpenUntilSuccess(t *testing.T) {
 	ended := sr.Ended()
 	require.Len(t, ended, 1)
 	assert.Equal(t, "orders send", ended[0].Name())
-	// Sync producer: messaging.kafka.async must be absent.
 	_, hasAsync := spanAttrs(ended[0])["messaging.kafka.async"]
 	assert.False(t, hasAsync)
 	if _, ok := spanStateFor(msg); ok {
@@ -348,23 +385,93 @@ func TestProducerInterceptor_SpanStaysOpenUntilSuccess(t *testing.T) {
 	}
 }
 
-func TestProducerInterceptor_AsyncSpanCarriesAsync(t *testing.T) {
-	sr := setupTest(t)
+// TestProducerSpan_OmitsAsyncAttribute covers both Return.Successes settings:
+// async producers (Return.Successes=false) get no messaging.kafka.async either,
+// because every span ends on the broker result.
+func TestProducerSpan_OmitsAsyncAttribute(t *testing.T) {
+	for _, returnSuccesses := range []bool{false, true} {
+		t.Run("", func(t *testing.T) {
+			sr := setupTest(t)
+			registerFirstDispatchFunc(func(*sarama.ProducerMessage) bool { return true })
 
-	p := &producerInterceptor{endpoint: "broker:9092", headersSupported: true, async: true}
-	msg := &sarama.ProducerMessage{Topic: "orders", Value: sarama.StringEncoder("hello")}
-	p.OnSend(msg)
-	BeforeReturnSuccesses(hooktest.NewMockHookContext(), nil, []*sarama.ProducerMessage{msg})
+			conf := sarama.NewConfig()
+			conf.Producer.Return.Successes = returnSuccesses
+			BeforeNewClient(hooktest.NewMockHookContext(conf), []string{"broker:9092"}, conf)
 
-	ended := sr.Ended()
-	require.Len(t, ended, 1)
-	assert.Equal(t, true, spanAttrs(ended[0])["messaging.kafka.async"])
+			p := conf.Producer.Interceptors[0].(*producerInterceptor)
+			msg := &sarama.ProducerMessage{Topic: "orders", Value: sarama.StringEncoder("hello")}
+			p.OnSend(msg)
+			BeforeReturnSuccesses(hooktest.NewMockHookContext(), nil, []*sarama.ProducerMessage{msg})
+
+			ended := sr.Ended()
+			require.Len(t, ended, 1)
+			_, hasAsync := spanAttrs(ended[0])["messaging.kafka.async"]
+			assert.False(t, hasAsync)
+		})
+	}
+}
+
+// TestProducerSpan_EndsOnceOnReturnError covers the three completion orderings
+// sarama releases exhibit between returnError and returnErrors: only
+// returnError, returnError then returnErrors, and returnErrors then
+// returnError. Whichever runs first ends the span; the other call is a no-op.
+func TestProducerSpan_EndsOnceOnReturnError(t *testing.T) {
+	err := sarama.ErrMessageSizeTooLarge
+
+	tests := []struct {
+		name string
+		end  func(msg *sarama.ProducerMessage)
+	}{
+		{
+			name: "returnError only",
+			end: func(msg *sarama.ProducerMessage) {
+				BeforeReturnError(hooktest.NewMockHookContext(), nil, msg, err)
+			},
+		},
+		{
+			name: "returnError then returnErrors",
+			end: func(msg *sarama.ProducerMessage) {
+				BeforeReturnError(hooktest.NewMockHookContext(), nil, msg, err)
+				BeforeReturnErrors(hooktest.NewMockHookContext(), nil, []*sarama.ProducerMessage{msg}, err)
+			},
+		},
+		{
+			name: "returnErrors then returnError",
+			end: func(msg *sarama.ProducerMessage) {
+				BeforeReturnErrors(hooktest.NewMockHookContext(), nil, []*sarama.ProducerMessage{msg}, err)
+				BeforeReturnError(hooktest.NewMockHookContext(), nil, msg, err)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sr := setupTest(t)
+			registerFirstDispatchFunc(func(*sarama.ProducerMessage) bool { return true })
+
+			p := &producerInterceptor{endpoint: "broker:9092", headersSupported: true}
+			msg := &sarama.ProducerMessage{Topic: "orders", Value: sarama.StringEncoder("hello")}
+			p.OnSend(msg)
+			tt.end(msg)
+
+			ended := sr.Ended()
+			require.Len(t, ended, 1, "the span must end exactly once")
+			assert.Equal(t, codes.Error, ended[0].Status().Code)
+			assert.Equal(t, err.Error(), ended[0].Status().Description)
+			assert.Equal(t, "KError", spanAttrs(ended[0])["error.type"])
+			require.Len(t, ended[0].Events(), 1, "the send error must be recorded as an exception event")
+			if _, ok := spanStateFor(msg); ok {
+				t.Fatal("span state must be removed after completion")
+			}
+		})
+	}
 }
 
 func TestProducerInterceptor_SendErrorRecorded(t *testing.T) {
 	sr := setupTest(t)
+	registerFirstDispatchFunc(func(*sarama.ProducerMessage) bool { return true })
 
-	p := &producerInterceptor{endpoint: "broker:9092", headersSupported: true, async: false}
+	p := &producerInterceptor{endpoint: "broker:9092", headersSupported: true}
 	msg := &sarama.ProducerMessage{Topic: "orders", Value: sarama.StringEncoder("hello")}
 	p.OnSend(msg)
 
@@ -393,24 +500,116 @@ func TestConsumerInterceptor_GroupName(t *testing.T) {
 	assert.Equal(t, "checkout-svc", spanAttrs(span)["messaging.consumer.group.name"])
 }
 
-func TestInstallInterceptors_SyncVsAsync(t *testing.T) {
-	syncConf := sarama.NewConfig()
-	syncConf.Producer.Return.Successes = true
-	installInterceptors(syncConf, "broker:9092", "")
-	assert.False(t, syncConf.Producer.Interceptors[0].(*producerInterceptor).async)
+// newConsumerGroupConfig runs the NewConsumerGroup hook the way otelc injects
+// it and returns the private config handed to the inner NewClient, then runs
+// the inner NewClient hook on it (as sarama's NewConsumerGroup would).
+func newConsumerGroupConfig(t *testing.T, addrs []string, groupID string, conf *sarama.Config) *sarama.Config {
+	t.Helper()
+	ictx := hooktest.NewMockHookContext(addrs, groupID, conf)
+	BeforeNewConsumerGroup(ictx, addrs, groupID, conf)
+	got := ictx.GetParam(2)
+	groupConf, ok := got.(*sarama.Config)
+	require.True(t, ok, "the hook must replace the config argument with a *sarama.Config")
+	require.NotNil(t, groupConf)
+	BeforeNewClient(hooktest.NewMockHookContext(addrs, groupConf), addrs, groupConf)
+	return groupConf
+}
 
-	asyncConf := sarama.NewConfig()
-	asyncConf.Producer.Return.Successes = false
-	installInterceptors(asyncConf, "broker:9092", "g1")
-	pi := asyncConf.Producer.Interceptors[0].(*producerInterceptor)
-	assert.True(t, pi.async)
-	ci := asyncConf.Consumer.Interceptors[0].(*consumerInterceptor)
-	assert.Equal(t, "g1", ci.group)
+func consumeOnce(t *testing.T, conf *sarama.Config, groupNames *[]string) {
+	t.Helper()
+	msg := &sarama.ConsumerMessage{Topic: "orders", Partition: 0, Offset: 0, Value: []byte("x")}
+	for _, in := range conf.Consumer.Interceptors {
+		ci, ok := in.(*consumerInterceptor)
+		require.True(t, ok)
+		ci.OnConsume(msg)
+		*groupNames = append(*groupNames, ci.group)
+	}
+}
 
-	// Calling again for the same config does not duplicate interceptors, and
-	// setting a group updates the existing consumer interceptor in place.
-	installInterceptors(asyncConf, "broker:9092", "g2")
-	assert.Len(t, asyncConf.Producer.Interceptors, 1)
-	assert.Len(t, asyncConf.Consumer.Interceptors, 1)
-	assert.Equal(t, "g2", asyncConf.Consumer.Interceptors[0].(*consumerInterceptor).group)
+func TestBeforeNewConsumerGroup_NilConfigKeepsGroup(t *testing.T) {
+	setupTest(t)
+
+	// Copilot (a): NewConsumerGroup(addrs, groupID, nil) must not lose the
+	// group id: the hook creates the default config itself.
+	groupConf := newConsumerGroupConfig(t, []string{"broker:9092"}, "g1", nil)
+
+	var names []string
+	consumeOnce(t, groupConf, &names)
+	require.Equal(t, []string{"g1"}, names)
+}
+
+// TestBeforeNewConsumerGroup_SharedConfigKeepsEachGroupName is the regression
+// for Copilot (c): two groups built from one caller-owned config must each get
+// their own consumer interceptor; the second group must not overwrite the
+// first, and the caller's config stays usable as a plain (group-less) client.
+func TestBeforeNewConsumerGroup_SharedConfigKeepsEachGroupName(t *testing.T) {
+	setupTest(t)
+
+	shared := sarama.NewConfig()
+	// The config may already have been through NewClient (e.g. reused).
+	BeforeNewClient(hooktest.NewMockHookContext(shared), []string{"broker:9092"}, shared)
+
+	g1 := newConsumerGroupConfig(t, []string{"broker:9092"}, "g1", shared)
+	g2 := newConsumerGroupConfig(t, []string{"broker:9092"}, "g2", shared)
+
+	var names []string
+	consumeOnce(t, g1, &names)
+	consumeOnce(t, g2, &names)
+	// The original shared config's own interceptor must be group-less and
+	// untouched by either group hook.
+	consumeOnce(t, shared, &names)
+	assert.Equal(t, []string{"g1", "g2", ""}, names)
+
+	// Isolation also means separate interceptor instances and slices.
+	assert.NotSame(t,
+		g1.Consumer.Interceptors[len(g1.Consumer.Interceptors)-1],
+		g2.Consumer.Interceptors[len(g2.Consumer.Interceptors)-1])
+}
+
+// stubClient is a minimal sarama.Client for the FromClient path: it only has
+// to serve Config() and Brokers(), which the hook reads.
+type stubClient struct {
+	sarama.Client
+	conf *sarama.Config
+}
+
+func (c *stubClient) Config() *sarama.Config { return c.conf }
+func (c *stubClient) Brokers() []*sarama.Broker {
+	return []*sarama.Broker{sarama.NewBroker("broker:9092")}
+}
+
+func newConsumerGroupFromClient(t *testing.T, groupID string, client sarama.Client) sarama.Client {
+	t.Helper()
+	ictx := hooktest.NewMockHookContext(groupID, client)
+	BeforeNewConsumerGroupFromClient(ictx, groupID, client)
+	got := ictx.GetParam(1)
+	wrapped, ok := got.(sarama.Client)
+	require.True(t, ok, "the hook must wrap the client in a sarama.Client")
+	require.NotNil(t, wrapped)
+	return wrapped
+}
+
+// TestBeforeNewConsumerGroupFromClient_SharedClientKeepsEachGroupName is the
+// FromClient counterpart: two groups on one shared client get isolated
+// configs via the returned wrapper, and the shared client's own config stays
+// group-less.
+func TestBeforeNewConsumerGroupFromClient_SharedClientKeepsEachGroupName(t *testing.T) {
+	setupTest(t)
+
+	shared := sarama.NewConfig()
+	BeforeNewClient(hooktest.NewMockHookContext(shared), []string{"broker:9092"}, shared)
+	client := &stubClient{conf: shared}
+
+	c1 := newConsumerGroupFromClient(t, "g1", client)
+	c2 := newConsumerGroupFromClient(t, "g2", client)
+
+	var names []string
+	consumeOnce(t, c1.Config(), &names)
+	consumeOnce(t, c2.Config(), &names)
+	consumeOnce(t, shared, &names)
+	assert.Equal(t, []string{"g1", "g2", ""}, names)
+
+	// The endpoint is still resolved through the wrapped client.
+	last := c1.Config().Consumer.Interceptors[len(c1.Config().Consumer.Interceptors)-1].(*consumerInterceptor)
+	assert.Equal(t, "broker:9092", last.endpoint)
 }

@@ -222,34 +222,19 @@ func RequireAWSClientSemconv(
 }
 
 // RequireSaramaProducerSemconv verifies that an IBM/sarama producer span
-// follows the messaging semantic conventions.
+// follows the messaging semantic conventions. Producer spans end on the broker
+// result for both sync and async producers, so messaging.kafka.async must be
+// absent.
 // Reference: https://opentelemetry.io/docs/specs/semconv/messaging/kafka/
 func RequireSaramaProducerSemconv(
 	t *testing.T,
 	span ptrace.Span,
 	topic, endpoint string,
 ) {
-	RequireSaramaProducerSemconvAsync(t, span, topic, endpoint, false)
-}
-
-// RequireSaramaProducerSemconvAsync is the same as RequireSaramaProducerSemconv
-// but lets a test assert whether the send was asynchronous. Sync sends must
-// pass async=false and have no messaging.kafka.async attribute; async sends
-// pass true.
-func RequireSaramaProducerSemconvAsync(
-	t *testing.T,
-	span ptrace.Span,
-	topic, endpoint string,
-	async bool,
-) {
 	RequireAttribute(t, span, string(semconv.MessagingSystemKey), "kafka")
 	RequireAttribute(t, span, string(semconv.MessagingOperationNameKey), "send")
 	RequireAttribute(t, span, string(semconv.MessagingDestinationNameKey), topic)
-	if async {
-		RequireAttribute(t, span, "messaging.kafka.async", true)
-	} else {
-		RequireAttributeAbsent(t, span, "messaging.kafka.async")
-	}
+	RequireAttributeAbsent(t, span, "messaging.kafka.async")
 	if host, portText, err := net.SplitHostPort(endpoint); err == nil {
 		RequireAttribute(t, span, string(semconv.ServerAddressKey), host)
 		if port, convErr := strconv.Atoi(portText); convErr == nil && port > 0 {
