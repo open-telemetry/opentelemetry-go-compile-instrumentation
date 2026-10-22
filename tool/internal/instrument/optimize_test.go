@@ -259,11 +259,34 @@ func TestNewHookContextImpl(t *testing.T) {
 				assert.Len(t, returnsLit.Elts, 1, "should have 1 return value address")
 			},
 		},
+		{
+			name: "instantiates the context type for a generic function",
+			funcSrc: `package main
+			func testFunc[T any](param1 T) (result1 T) { return param1 }`,
+			wantErr: false,
+			validate: func(t *testing.T, expr dst.Expr) {
+				unaryExpr, ok := expr.(*dst.UnaryExpr)
+				require.True(t, ok, "expression should be unary expression")
+				compositeLit, ok := unaryExpr.X.(*dst.CompositeLit)
+				require.True(t, ok, "expression should contain composite literal")
+
+				// The context is created inside the generic target, so the type
+				// must be instantiated with the type parameters of the target.
+				indexExpr, ok := compositeLit.Type.(*dst.IndexExpr)
+				require.True(t, ok, "the context type should be instantiated")
+				typeIdent, ok := indexExpr.X.(*dst.Ident)
+				require.True(t, ok, "the instantiated type should be an Ident")
+				assert.Contains(t, typeIdent.Name, "HookContextImpl", "struct name should contain HookContextImpl")
+				indexIdent, ok := indexExpr.Index.(*dst.Ident)
+				require.True(t, ok, "the type argument should be an Ident")
+				assert.Equal(t, "T", indexIdent.Name, "the type argument should be the target type parameter")
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			targetFunc := parseFunc(t, tt.funcSrc)
+			file, targetFunc := parseFileFunc(t, tt.funcSrc)
 			tjump := &tJump{
 				target: targetFunc,
 				rule: &rule.InstFuncRule{
@@ -271,7 +294,7 @@ func TestNewHookContextImpl(t *testing.T) {
 				},
 			}
 
-			expr := newHookContextImpl(tjump)
+			expr := newHookContextImpl(file, tjump)
 			assert.NotNil(t, expr)
 			if tt.validate != nil {
 				tt.validate(t, expr)

@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/dave/dst"
+	"github.com/dave/dst/dstutil"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
@@ -871,29 +872,68 @@ func (ip *instrumentPhase) populateHookContext(before bool) bool {
 
 // implementHookContext effectively "implements" the HookContext interface by
 // renaming occurrences of HookContextImpl to HookContextImpl{suffix} in the
-// trampoline template
+// trampoline template.
+//
+// When the target is generic the HookContextImpl type is declared with the
+// target's own type parameters, so the generated accessors can type-assert
+// instantiated parameter and result types such as T or []T. Every reference to
+// the type inside the trampoline functions is then instantiated with the same
+// type arguments.
 func (ip *instrumentPhase) implementHookContext(t *rule.InstFuncRule) {
 	suffix := t.Identity()
 	structType := util.AssertType[*dst.TypeSpec](ip.hookCtxDecl.Specs[0])
 	util.Assert(structType.Name.Name == trampolineHookContextImplType,
 		"sanity check")
-	structType.Name.Name += suffix             // type declaration
+	structType.Name.Name += suffix // type declaration
+	typeParams := findTargetGenericType(ip.target, ip.targetFunc)
+	structType.TypeParams = typeParams
 	for _, method := range ip.hookCtxMethods { // method declaration
 		t1 := util.AssertType[*dst.StarExpr](method.Recv.List[0].Type)
 		t2 := util.AssertType[*dst.Ident](t1.X)
 		t2.Name += suffix
+		if typeParams != nil {
+			t1.X = implTypeRef(t2, typeParams)
+		}
 	}
 	for _, node := range []dst.Node{ip.beforeTrampFunc, ip.afterTrampFunc} {
-		dst.Inspect(node, func(node dst.Node) bool {
-			if ident, ok1 := node.(*dst.Ident); ok1 {
-				if ident.Name == trampolineHookContextImplType {
-					ident.Name += suffix
-					return false
-				}
+		dstutil.Apply(node, func(cursor *dstutil.Cursor) bool {
+			ident, ok := cursor.Node().(*dst.Ident)
+			if !ok || ident.Name != trampolineHookContextImplType {
+				return true
 			}
-			return true
-		})
+			ident.Name += suffix
+			if typeParams != nil && hookContextTypePosition(cursor.Parent()) {
+				cursor.Replace(implTypeRef(ident, typeParams))
+			}
+			return false
+		}, nil)
 	}
+}
+
+// hookContextTypePosition reports whether the node sits in a type position,
+// which is where the trampoline template references the HookContextImpl type.
+// It is never true for the HookContextImpl value itself, which is always used
+// as an expression.
+func hookContextTypePosition(parent dst.Node) bool {
+	switch parent.(type) {
+	case *dst.StarExpr, *dst.TypeAssertExpr, *dst.CompositeLit:
+		return true
+	default:
+		return false
+	}
+}
+
+// implTypeRef instantiates name with the names of typeParams, which is the
+// same list the trampolines declare as their own type parameter list.
+func implTypeRef(name dst.Expr, typeParams *dst.FieldList) dst.Expr {
+	if len(typeParams.List) == 1 {
+		return ast.IndexExpr(name, ast.Ident(typeParams.List[0].Names[0].Name))
+	}
+	indices := make([]dst.Expr, 0, len(typeParams.List))
+	for _, field := range typeParams.List {
+		indices = append(indices, ast.Ident(field.Names[0].Name))
+	}
+	return ast.IndexListExpr(name, indices)
 }
 
 func setValue(field string, idx int, t dst.Expr) *dst.CaseClause {
@@ -1217,14 +1257,9 @@ func (ip *instrumentPhase) rewriteHookContextMethods() {
 		}
 	}
 
-	// For generic functions, we need to panic the methods that are not supported
-	if findTargetGenericType(ip.target, ip.targetFunc) != nil {
-		makeMethodPanic(methodGetParam, "GetParam is unsupported for generic functions")
-		makeMethodPanic(methodGetRetVal, "GetReturnVal is unsupported for generic functions")
-		makeMethodPanic(methodSetParam, "SetParam is unsupported for generic functions")
-		makeMethodPanic(methodSetRetVal, "SetReturnVal is unsupported for generic functions")
-		return
-	}
+	// For generic targets the HookContextImpl type carries the target's own type
+	// parameters (see implementHookContext), so the same switch-based accessors
+	// work for instantiated types such as T or []T.
 
 	// nil handling now lives inside each case, so the type switch is always the
 	// first statement of every Get/Set method.
@@ -1244,19 +1279,6 @@ func (ip *instrumentPhase) rewriteHookContextMethods() {
 		methodGetRetValBody := findSwitchBlock(methodGetRetVal)
 		rewriteReturnValMethods(ip.targetFunc, methodSetRetValBody, methodGetRetValBody)
 	}
-}
-
-// makeMethodPanic replaces a method's body with a panic statement
-func makeMethodPanic(method *dst.FuncDecl, message string) {
-	panicStmt := ast.ExprStmt(
-		ast.CallTo("panic", nil, []dst.Expr{
-			&dst.BasicLit{
-				Kind:  token.STRING,
-				Value: strconv.Quote(message),
-			},
-		}),
-	)
-	method.Body.List = []dst.Stmt{panicStmt}
 }
 
 // containsTypeParameterInExprs checks if any expression in exprs contains a type parameter

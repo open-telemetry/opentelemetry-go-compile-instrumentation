@@ -4,6 +4,8 @@
 package instrument
 
 import (
+	"go/token"
+
 	"github.com/dave/dst"
 
 	"go.opentelemetry.io/otelc/tool/ex"
@@ -119,9 +121,10 @@ func removeAfterTrampolineCall(tjump *tJump) error {
 // newHookContextImpl constructs a new HookContextImpl structure literal and
 // populates its Params && ReturnValues field with addresses of all arguments.
 // The HookContextImpl structure is used to pass arguments to the exit trampoline
-func newHookContextImpl(tjump *tJump) dst.Expr {
+func newHookContextImpl(targetFile *dst.File, tjump *tJump) dst.Expr {
 	targetFunc := tjump.target
 	structName := trampolineHookContextImplType + tjump.rule.Identity()
+	typeParams := findTargetGenericType(targetFile, targetFunc)
 
 	// Build params slice: []interface{}{&param1, &param2, ...}
 	// Use createHookArgs to handle underscore parameters correctly
@@ -143,17 +146,28 @@ func newHookContextImpl(tjump *tJump) dst.Expr {
 		returnExprs,
 	)
 
-	// Build the struct literal: &HookContextImpl{params:..., returnVals:...}
-	return ast.StructLit(
-		structName,
-		ast.KeyValueExpr(trampolineParamsIdentifier, paramsSlice),
-		ast.KeyValueExpr(trampolineReturnValsIdentifier, returnValsSlice),
-	)
+	// Build the struct literal: &HookContextImpl{params:..., returnVals:...}.
+	// The literal is emitted inside the target function, so a generic target
+	// already has its type parameters in scope and must instantiate the type.
+	var structType dst.Expr = ast.Ident(structName)
+	if typeParams != nil {
+		structType = implTypeRef(structType, typeParams)
+	}
+	return &dst.UnaryExpr{
+		Op: token.AND,
+		X: &dst.CompositeLit{
+			Type: structType,
+			Elts: []dst.Expr{
+				ast.KeyValueExpr(trampolineParamsIdentifier, paramsSlice),
+				ast.KeyValueExpr(trampolineReturnValsIdentifier, returnValsSlice),
+			},
+		},
+	}
 }
 
 func removeBeforeTrampolineCall(targetFile *dst.File, tjump *tJump) error {
 	// Construct HookContext on the fly and pass to After trampoline defer call
-	hookContextExpr := newHookContextImpl(tjump)
+	hookContextExpr := newHookContextImpl(targetFile, tjump)
 	// Find defer call to After and replace its call context with new one
 	found := false
 	block := util.AssertType[*dst.BlockStmt](tjump.ifStmt.Else)
