@@ -772,6 +772,32 @@ func TestRuleFileKey(t *testing.T) {
 		}
 		assert.Equal(t, want, ruleFileKey(filepath.Join(link, "a.otelc.yml")))
 	})
+
+	t.Run("dot-dot through a symbolic link does not collide with the link's sibling", func(t *testing.T) {
+		// base/link -> other/sub. base/link/../r.yml resolves, through the
+		// link, to other/r.yml on disk. filepath.Abs alone would instead
+		// clean ".." lexically against "link" and land on base/r.yml, a
+		// different file. The path must be built by plain concatenation,
+		// not filepath.Join: Join calls Clean internally and would collapse
+		// the ".." itself before ruleFileKey ever saw it, same as the raw
+		// string a shell command line would pass in.
+		base := t.TempDir()
+		other := t.TempDir()
+		sub := filepath.Join(other, "sub")
+		require.NoError(t, os.Mkdir(sub, 0o755))
+		link := filepath.Join(base, "link")
+		if err := os.Symlink(sub, link); err != nil {
+			t.Skipf("cannot create symbolic link: %v", err)
+		}
+		otherFile := filepath.Join(other, "r.yml")
+		baseFile := filepath.Join(base, "r.yml")
+		require.NoError(t, os.WriteFile(otherFile, []byte(""), 0o644))
+		require.NoError(t, os.WriteFile(baseFile, []byte(""), 0o644))
+
+		viaLink := ruleFileKey(link + string(filepath.Separator) + ".." + string(filepath.Separator) + "r.yml")
+		assert.Equal(t, ruleFileKey(otherFile), viaLink)
+		assert.NotEqual(t, ruleFileKey(baseFile), viaLink)
+	})
 }
 
 func ruleNames(rules []rule.InstRule) []string {
@@ -1334,6 +1360,24 @@ func TestCheckRuleFileVersion(t *testing.T) {
 		assert.Contains(t, output.String(), "no minimum otelc version")
 		assert.Contains(t, output.String(), "otelc.yaml")
 		assert.Contains(t, output.String(), "v1.0.0")
+	})
+}
+
+func TestParseRuleFile(t *testing.T) {
+	t.Run("parse error", func(t *testing.T) {
+		_, err := parseRuleFile(t.Context(), "bad.yaml", []byte("not: valid: yaml:"), util.Version)
+		require.ErrorContains(t, err, "bad.yaml")
+	})
+
+	t.Run("valid file returns its rules", func(t *testing.T) {
+		content := []byte(`my_rule:
+  target: main
+  func: Example
+  raw: "_ = 1"`)
+		rules, err := parseRuleFile(t.Context(), "rules.yaml", content, util.Version)
+		require.NoError(t, err)
+		require.Len(t, rules, 1)
+		assert.Equal(t, "my_rule", rules[0].GetName())
 	})
 }
 
