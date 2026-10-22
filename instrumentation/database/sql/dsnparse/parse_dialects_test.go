@@ -185,6 +185,13 @@ func TestParseDSN_Oracle(t *testing.T) {
 			wantPort: "1521",
 			wantDB:   "ORCL",
 		},
+		{
+			name:     "easy connect with bracketed ipv6 and parameters",
+			dsn:      "user/pass@[::1]:1521/ORCL?x=1",
+			wantHost: "::1",
+			wantPort: "1521",
+			wantDB:   "ORCL",
+		},
 	}
 
 	for _, tt := range tests {
