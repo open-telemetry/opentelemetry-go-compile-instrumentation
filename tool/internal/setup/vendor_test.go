@@ -410,3 +410,96 @@ func TestEnvWithModFlag(t *testing.T) {
 	t.Setenv("GOFLAGS", "")
 	assert.Equal(t, []string{"A=1", "GOFLAGS=-mod=readonly"}, envWithModFlag(env, "readonly"))
 }
+
+// TestVendorModeErrors: a directory that does not exist is not vendored. A
+// go.mod that otelc cannot read, and a -mod=vendor build of a go.mod that is
+// too old, are errors.
+func TestVendorModeErrors(t *testing.T) {
+	t.Setenv("GOWORK", "off")
+	t.Setenv("GOFLAGS", "")
+
+	assert.Empty(t, vendoredModuleRoot(t.Context(), filepath.Join(t.TempDir(), "absent")),
+		"the go command cannot run in a directory that does not exist")
+
+	_, err := vendorGoVersionSupported(t.TempDir())
+	require.Error(t, err, "no go.mod")
+
+	root := t.TempDir()
+	writeVendoredGoMod(t, root, "1.13")
+	_, err = contextWithBuildMode(t.Context(), subcmdBuild, []string{"-C", root, "-mod=vendor"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "otelc needs go 1.14 or higher")
+}
+
+// TestBuildWorkDirDefaultSubcommand: without a subcommand, the arguments are
+// the ones of go build. Without -C, the directory is the otelc work
+// directory.
+func TestBuildWorkDirDefaultSubcommand(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	dir, err := buildWorkDir("", nil)
+	require.NoError(t, err)
+	assert.Equal(t, util.GetOtelcWorkDir(), dir)
+
+	other := t.TempDir()
+	dir, err = buildWorkDir("", []string{"-C", other, "."})
+	require.NoError(t, err)
+	assert.Equal(t, other, dir)
+}
+
+// TestVendorSyncRuleSetsErrors: each failure stops vendorSyncRuleSets with
+// an error.
+func TestVendorSyncRuleSetsErrors(t *testing.T) {
+	newModule := func(t *testing.T) string {
+		t.Helper()
+		dir := t.TempDir()
+		t.Chdir(dir)
+		t.Setenv(util.EnvOtelcWorkDir, dir)
+		mustWriteFile(t, filepath.Join(dir, goModFileName), "module example.com/app\n\ngo 1.25.0\n")
+		return dir
+	}
+	rs := rule.NewInstRuleSet("example.com/app")
+	rs.AddFuncRule(filepath.Join(t.TempDir(), "main.go"), &rule.InstFuncRule{Path: "example.com/hook"})
+	matched := []*rule.InstRuleSet{rs}
+
+	t.Run("vendorSync fails", func(t *testing.T) {
+		dir := newModule(t)
+		orig := vendorSyncHook
+		t.Cleanup(func() { vendorSyncHook = orig })
+		vendorSyncHook = func(context.Context, map[string]bool, string) error {
+			return os.ErrPermission
+		}
+		ctx := contextWithStateManager(t.Context(), newStateManager())
+		require.ErrorIs(t, vendorSyncRuleSets(ctx, matched, []string{dir}), os.ErrPermission)
+	})
+
+	t.Run("the go command is not found", func(t *testing.T) {
+		dir := newModule(t)
+		t.Setenv("PATH", "")
+		ctx := contextWithStateManager(t.Context(), newStateManager())
+		err := vendorSyncRuleSets(ctx, matched, []string{dir})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "GOWORK")
+	})
+
+	t.Run("the state cannot be saved", func(t *testing.T) {
+		skipWithoutPermissions(t)
+		dir := newModule(t)
+		require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+		makeReadOnly(t, util.GetBuildTempDir())
+		called := false
+		orig := vendorSyncHook
+		t.Cleanup(func() { vendorSyncHook = orig })
+		vendorSyncHook = func(context.Context, map[string]bool, string) error {
+			called = true
+			return nil
+		}
+		ctx := contextWithStateManager(t.Context(), newStateManager())
+		err := vendorSyncRuleSets(ctx, matched, []string{dir})
+		require.ErrorIs(t, err, os.ErrPermission)
+		// The error comes from the snapshot in the state directory, not
+		// from an earlier step (for example the go env call).
+		assert.Contains(t, err.Error(), util.GetBuildTemp(stateDir))
+		assert.False(t, called, "vendorSync does not run when the state is not saved")
+	})
+}

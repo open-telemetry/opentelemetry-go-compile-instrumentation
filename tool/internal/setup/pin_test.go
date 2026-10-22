@@ -1772,3 +1772,31 @@ func TestUpdateToolFile_RemoveImportsError(t *testing.T) {
 	err := updateToolFile(t.Context(), toolFile, map[string]bool{"foo": true}, PinOptions{})
 	require.Error(t, err)
 }
+
+// TestPinVendorGoVersionTooOld: a -mod=vendor pin of a module with a go
+// version below 1.14 fails before it changes the module.
+func TestPinVendorGoVersionTooOld(t *testing.T) {
+	t.Setenv("GOWORK", "off")
+	t.Setenv("GOFLAGS", "")
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+	writeVendoredGoMod(t, tmp, "1.13")
+
+	_, err := Pin(t.Context(), PinOptions{Args: []string{"-mod=vendor"}, ModuleDirs: []string{tmp}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "otelc needs go 1.14 or higher")
+	assert.NoFileExists(t, filepath.Join(tmp, toolFileCanonical))
+}
+
+// TestUpdatePinnedProjectsVendorSyncFails: in vendor mode, a tool file that
+// is not valid Go stops the pin before the walk.
+func TestUpdatePinnedProjectsVendorSyncFails(t *testing.T) {
+	toolFile := filepath.Join(t.TempDir(), toolFileCanonical)
+	mustWriteFile(t, toolFile, "not Go")
+	ctx := contextWithVendorMode(t.Context(), true)
+	result, err := updatePinnedProjects(ctx, []string{toolFile}, PinOptions{})
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), toolFileCanonical)
+}

@@ -614,3 +614,37 @@ func TestHasOneLink(t *testing.T) {
 	}
 	assert.False(t, hasOneLink(path))
 }
+
+// TestRenameReplaceOtherErrors: on Windows, renameReplace tries again only
+// for a read-only file that it can make writable. Else it returns the error
+// of the rename.
+func TestRenameReplaceOtherErrors(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "go.mod.tmp")
+	require.NoError(t, os.WriteFile(src, []byte("new"), 0o644))
+	calls := 0
+	failingRename := func(string, string) error {
+		calls++
+		return os.ErrPermission
+	}
+
+	require.ErrorIs(t, renameReplace(src, filepath.Join(dir, "absent"), failingRename, true, hasOneLink),
+		os.ErrPermission, "the destination does not exist")
+	assert.Equal(t, 1, calls, "no second rename")
+
+	// The destination is removed after the link count check, so it cannot
+	// be made writable.
+	dst := filepath.Join(dir, "go.mod")
+	require.NoError(t, os.WriteFile(dst, []byte("old"), 0o444))
+	removed := func(path string) bool {
+		_ = os.Chmod(path, 0o644)
+		_ = os.Remove(path)
+		return true
+	}
+	calls = 0
+	require.ErrorIs(t, renameReplace(src, dst, failingRename, true, removed), os.ErrPermission)
+	assert.Equal(t, 1, calls, "no second rename")
+	data, err := os.ReadFile(src)
+	require.NoError(t, err)
+	assert.Equal(t, "new", string(data), "the source does not change")
+}

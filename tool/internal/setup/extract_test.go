@@ -456,3 +456,53 @@ func TestExtractGZipReplacesHardLink(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "keep", string(data), "the hard link is replaced, not truncated")
 }
+
+// regularFileReader returns a tar reader at a regular file with content.
+func regularFileReader(t *testing.T, content string) (*tar.Reader, *tar.Header) {
+	t.Helper()
+	var tarBuf bytes.Buffer
+	tw := tar.NewWriter(&tarBuf)
+	require.NoError(t, tw.WriteHeader(&tar.Header{
+		Name:     "rules.yaml",
+		Mode:     0o644,
+		Size:     int64(len(content)),
+		Typeflag: tar.TypeReg,
+	}))
+	_, err := tw.Write([]byte(content))
+	require.NoError(t, err)
+	require.NoError(t, tw.Close())
+	tr := tar.NewReader(bytes.NewReader(tarBuf.Bytes()))
+	header, err := tr.Next()
+	require.NoError(t, err)
+	return tr, header
+}
+
+// TestExtract_ParentIsFile: the directory of a file cannot be made below a
+// regular file.
+func TestExtract_ParentIsFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	parent := filepath.Join(tmpDir, "file")
+	require.NoError(t, os.WriteFile(parent, []byte("a file"), 0o644))
+
+	tr, header := regularFileReader(t, "content")
+	require.Error(t, extract(tr, header, filepath.Join(parent, "rules.yaml")))
+	data, err := os.ReadFile(parent)
+	require.NoError(t, err)
+	require.Equal(t, "a file", string(data))
+}
+
+// TestExtract_TargetIsDirectory: a file does not replace a directory that
+// has files. The temporary file is removed.
+func TestExtract_TargetIsDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	target := filepath.Join(tmpDir, "rules.yaml")
+	require.NoError(t, os.MkdirAll(target, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(target, "keep"), []byte("keep"), 0o644))
+
+	tr, header := regularFileReader(t, "content")
+	require.Error(t, extract(tr, header, target))
+	require.FileExists(t, filepath.Join(target, "keep"))
+	entries, err := os.ReadDir(tmpDir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "the temporary file is removed")
+}

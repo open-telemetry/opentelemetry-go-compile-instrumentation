@@ -1190,3 +1190,96 @@ func TestRevertDoesNotRemoveThroughRestoredLink(t *testing.T) {
 		}
 	}
 }
+
+// TestReplaceWithCopyErrors: replaceWithCopy copies only a regular file
+// that it can read. When it fails, dst does not change.
+func TestReplaceWithCopyErrors(t *testing.T) {
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "dst")
+	mustWriteFile(t, dst, "old")
+
+	absent := filepath.Join(dir, "absent")
+	err := replaceWithCopy(absent, dst)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reading "+absent)
+
+	err = replaceWithCopy(dir, dst)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), dir+" is not a regular file")
+
+	if runtime.GOOS != "windows" && os.Geteuid() != 0 {
+		src := filepath.Join(dir, "unreadable")
+		mustWriteFile(t, src, "new")
+		require.NoError(t, os.Chmod(src, 0o000))
+		t.Cleanup(func() { _ = os.Chmod(src, 0o644) })
+		err = replaceWithCopy(src, dst)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "reading "+src)
+	}
+	assert.Equal(t, "old", readAppFile(t, dir, "dst"))
+}
+
+// TestReplaceWithSymlinkErrors: when replaceWithSymlink cannot make the
+// link, path does not change, and no temporary link stays.
+func TestReplaceWithSymlinkErrors(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "absent", "link")
+	err := replaceWithSymlink("target", path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "creating a temporary file for "+path)
+
+	skipWithoutSymlinks(t)
+	dir := t.TempDir()
+	path = filepath.Join(dir, "full")
+	mustWriteFile(t, filepath.Join(path, "keep"), "keep")
+	err = replaceWithSymlink("target", path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "replacing "+path+" with a symbolic link")
+	entries, readErr := os.ReadDir(dir)
+	require.NoError(t, readErr)
+	require.Len(t, entries, 1, "the temporary link is removed")
+	assert.Equal(t, "full", entries[0].Name())
+	assert.FileExists(t, filepath.Join(path, "keep"))
+}
+
+// TestRestoreSnapshotErrors: restoreSnapshot fails when it cannot make the
+// directory of path, or when the snapshot is not a file.
+func TestRestoreSnapshotErrors(t *testing.T) {
+	dir := t.TempDir()
+	snapshot := filepath.Join(dir, "snapshot")
+	mustWriteFile(t, snapshot, "content")
+	mustWriteFile(t, filepath.Join(dir, "file"), "a file")
+
+	path := filepath.Join(dir, "file", "below", "go.mod")
+	err := restoreSnapshot(snapshot, path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "creating the directory of "+path)
+
+	path = filepath.Join(dir, "go.mod")
+	err = restoreSnapshot(t.TempDir(), path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "restoring "+path)
+	assert.NoFileExists(t, path)
+}
+
+// TestSnapshotPathAbsent: a path that does not exist has no snapshot.
+func TestSnapshotPathAbsent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "absent")
+	dst := filepath.Join(dir, "snapshots", "absent")
+	err := snapshotPath(path, dst)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reading "+path)
+	assert.NoFileExists(t, dst)
+}
+
+// TestRemoveCreatedBelowFile: a path below a regular file is not "not
+// found": removeCreated returns the error.
+func TestRemoveCreatedBelowFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("on Windows, a path below a file is not found")
+	}
+	file := filepath.Join(t.TempDir(), "file")
+	mustWriteFile(t, file, "a file")
+	require.Error(t, removeCreated(filepath.Join(file, "below")))
+	assert.FileExists(t, file)
+}

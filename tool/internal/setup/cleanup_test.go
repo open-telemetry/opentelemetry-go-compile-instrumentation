@@ -452,3 +452,24 @@ func TestCleanupFromPackageDir(t *testing.T) {
 	assert.Equal(t, "module example.com/mod\n", string(data))
 	assert.NoDirExists(t, util.GetBuildTempDir())
 }
+
+// TestRevertStateDiscardFails: the files are restored, but the state cannot
+// be removed. The error names the state directory, and the manifest stays.
+func TestRevertStateDiscardFails(t *testing.T) {
+	skipWithoutPermissions(t)
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+	goMod := filepath.Join(tmp, goModFileName)
+	mustWriteFile(t, goMod, "module example.com/app\n")
+	s := newStateManager()
+	require.NoError(t, s.Track(goMod))
+	mustWriteFile(t, goMod, "module example.com/changed\n")
+	makeReadOnly(t, util.GetBuildTempDir())
+
+	err := revertState(s)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "removing the restored state in "+util.GetBuildTemp(stateDir))
+	assert.Equal(t, "module example.com/app\n", readAppFile(t, tmp, goModFileName), "go.mod is restored")
+	assert.FileExists(t, util.GetBuildTemp(stateFileName))
+}

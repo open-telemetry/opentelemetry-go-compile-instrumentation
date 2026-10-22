@@ -1914,3 +1914,467 @@ func TestPackageImportsBuildConstraints(t *testing.T) {
 		"example.com/plusnotignore",
 	}, imports)
 }
+
+// newMergeTestModule makes a module with one vendored module example.com/a,
+// and a scratch module. It returns the module directory, the scratch
+// module, and the input of mergeScratchModules.
+func newMergeTestModule(t *testing.T) (string, *vendorScratch, vendorSyncInput) {
+	t.Helper()
+	const modulesTxt = "# example.com/a v1.0.0\n## explicit\nexample.com/a\n"
+	moduleDir := t.TempDir()
+	mustWriteFile(t, filepath.Join(moduleDir, vendorDirName, modulesTxtFileName), modulesTxt)
+	mustWriteFile(t, filepath.Join(moduleDir, vendorDirName, "example.com", "a", "a.go"), "package a")
+	mustWriteFile(t, filepath.Join(moduleDir, goModFileName), "module example.com/app\n\ngo 1.21\n")
+	scratch := &vendorScratch{
+		dir:      t.TempDir(),
+		userMods: map[string]bool{},
+		updated:  map[string]bool{},
+	}
+	return moduleDir, scratch, vendorSyncInput{
+		moduleDir:   moduleDir,
+		user:        mustParseModulesTxt(t, modulesTxt),
+		stale:       map[string]bool{},
+		fingerprint: "fingerprint",
+	}
+}
+
+func parseTestGoMod(t *testing.T, content string) *modfile.File {
+	t.Helper()
+	mf, err := modfile.Parse(goModFileName, []byte(content), nil)
+	require.NoError(t, err)
+	return mf
+}
+
+// TestMergeScratchModulesErrors: each failure of the merge stops it with an
+// error, and the module of the user does not change.
+func TestMergeScratchModulesErrors(t *testing.T) {
+	scratchModulesTxt := func(t *testing.T, s *vendorScratch, content string) {
+		t.Helper()
+		mustWriteFile(t, filepath.Join(s.dir, vendorDirName, modulesTxtFileName), content)
+	}
+
+	t.Run("the scratch module has no modules.txt", func(t *testing.T) {
+		moduleDir, scratch, in := newMergeTestModule(t)
+		before := appTree(t, moduleDir)
+		changed, err := mergeScratchModules(t.Context(), in, scratch, parseTestGoMod(t, "module example.com/app\n"))
+		require.Error(t, err)
+		assert.False(t, changed)
+		assert.Contains(t, err.Error(), modulesTxtFileName)
+		assert.Equal(t, before, appTree(t, moduleDir))
+	})
+
+	t.Run("nothing to add", func(t *testing.T) {
+		moduleDir, scratch, in := newMergeTestModule(t)
+		scratchModulesTxt(t, scratch, "# example.com/a v1.0.0\n## explicit\nexample.com/a\n")
+		before := appTree(t, moduleDir)
+		changed, err := mergeScratchModules(t.Context(), in, scratch, parseTestGoMod(t, "module example.com/app\n"))
+		require.NoError(t, err)
+		assert.False(t, changed, "the scratch module has the same modules")
+		assert.Equal(t, before, appTree(t, moduleDir))
+	})
+
+	t.Run("a higher version is a conflict", func(t *testing.T) {
+		moduleDir, scratch, in := newMergeTestModule(t)
+		scratchModulesTxt(t, scratch, "# example.com/a v1.2.0\n## explicit\nexample.com/a\n")
+		before := appTree(t, moduleDir)
+		_, err := mergeScratchModules(t.Context(), in, scratch, parseTestGoMod(t, "module example.com/app\n"))
+		var conflict *vendorConflictError
+		require.ErrorAs(t, err, &conflict)
+		assert.Equal(t, "example.com/a", conflict.Module)
+		assert.Equal(t, "v1.0.0", conflict.VendoredVersion)
+		assert.Equal(t, "v1.2.0", conflict.RequiredVersion)
+		assert.Equal(t, before, appTree(t, moduleDir))
+	})
+
+	t.Run("the files of a stale module cannot be read", func(t *testing.T) {
+		skipWithoutSymlinks(t)
+		moduleDir, scratch, in := newMergeTestModule(t)
+		scratchModulesTxt(t, scratch, "# example.com/a v1.0.0\n## explicit\nexample.com/a\n")
+		require.NoError(t, os.Symlink(filepath.Join(t.TempDir(), "outside.go"),
+			filepath.Join(moduleDir, vendorDirName, "example.com", "a", "link.go")))
+		in.stale = map[string]bool{"example.com/a": true}
+		before := appTree(t, moduleDir)
+		_, err := mergeScratchModules(t.Context(), in, scratch, parseTestGoMod(t, "module example.com/app\n"))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "symbolic link")
+		assert.Equal(t, before, appTree(t, moduleDir))
+	})
+
+	t.Run("go.sum is a directory", func(t *testing.T) {
+		moduleDir, scratch, in := newMergeTestModule(t)
+		scratchModulesTxt(t, scratch, "# example.com/a v1.0.0\n## explicit\nexample.com/a\n"+
+			"# example.com/b v1.0.0\n## explicit\nexample.com/b\n")
+		require.NoError(t, os.MkdirAll(filepath.Join(moduleDir, goSumFileName), 0o755))
+		before := appTree(t, moduleDir)
+		_, err := mergeScratchModules(contextWithVendorUpdate(t.Context()), in, scratch,
+			parseTestGoMod(t, "module example.com/app\n"))
+		require.Error(t, err, "otelc vendor reads go.sum")
+		assert.Contains(t, err.Error(), goSumFileName)
+		assert.Equal(t, before, appTree(t, moduleDir))
+	})
+}
+
+// TestDropStaleReplacesUnknownModule: a stale module that modules.txt does
+// not have has no replace to remove. The other replaces stay.
+func TestDropStaleReplacesUnknownModule(t *testing.T) {
+	mf := parseTestGoMod(t, "module example.com/app\n\nreplace example.com/a v1.0.0 => ./a\n")
+	user := mustParseModulesTxt(t, "# example.com/a v1.0.0 => ./a\n## explicit\nexample.com/a\n")
+	dropStaleReplaces(mf, user, map[string]bool{"example.com/absent": true})
+	require.Len(t, mf.Replace, 1)
+	assert.Equal(t, "example.com/a", mf.Replace[0].Old.Path)
+
+	dropStaleReplaces(mf, user, map[string]bool{"example.com/a": true})
+	assert.Empty(t, mf.Replace, "the replace of the stale module is removed")
+}
+
+// TestVendoredModuleFilesErrors: vendoredModuleFiles fails when it cannot
+// read a vendored directory, and returns each file one time.
+func TestVendoredModuleFilesErrors(t *testing.T) {
+	t.Run("a package in two modules", func(t *testing.T) {
+		moduleDir := t.TempDir()
+		file := filepath.Join(moduleDir, vendorDirName, "example.com", "a", "b", "b.go")
+		mustWriteFile(t, file, "package b")
+		user := mustParseModulesTxt(t, "# example.com/a v1.0.0\n## explicit\nexample.com/a/b\n"+
+			"# example.com/a/b v1.0.0\n## explicit\nexample.com/a/b\n")
+		files, err := vendoredModuleFiles(user,
+			map[string]bool{"example.com/a": true, "example.com/a/b": true}, moduleDir)
+		require.NoError(t, err)
+		assert.Equal(t, []string{file}, files)
+	})
+
+	t.Run("a link in a package", func(t *testing.T) {
+		skipWithoutSymlinks(t)
+		moduleDir := t.TempDir()
+		dir := filepath.Join(moduleDir, vendorDirName, "example.com", "a")
+		mustWriteFile(t, filepath.Join(dir, "a.go"), "package a")
+		require.NoError(t, os.Symlink(filepath.Join(t.TempDir(), "outside.go"), filepath.Join(dir, "link.go")))
+		user := mustParseModulesTxt(t, "# example.com/a v1.0.0\n## explicit\nexample.com/a\n")
+		_, err := vendoredModuleFiles(user, map[string]bool{"example.com/a": true}, moduleDir)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "symbolic link")
+	})
+
+	t.Run("a parent directory cannot be read", func(t *testing.T) {
+		skipWithoutPermissions(t)
+		moduleDir := t.TempDir()
+		root := filepath.Join(moduleDir, vendorDirName, "example.com", "a")
+		mustWriteFile(t, filepath.Join(root, "LICENSE"), "license")
+		mustWriteFile(t, filepath.Join(root, "sub", "sub.go"), "package sub")
+		// The directory can be crossed, but not listed.
+		require.NoError(t, os.Chmod(root, 0o300))
+		t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
+		user := mustParseModulesTxt(t, "# example.com/a v1.0.0\n## explicit\nexample.com/a/sub\n")
+		_, err := vendoredModuleFiles(user, map[string]bool{"example.com/a": true}, moduleDir)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "reading "+root)
+	})
+}
+
+// TestMergedGoSumReadErrors: a go.sum that otelc cannot read is an error.
+func TestMergedGoSumReadErrors(t *testing.T) {
+	moduleDir := t.TempDir()
+	scratchDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(moduleDir, goSumFileName), 0o755))
+	sum, err := mergedGoSum(moduleDir, scratchDir)
+	require.Error(t, err, "the go.sum of the user is a directory")
+	assert.Nil(t, sum)
+
+	require.NoError(t, os.Remove(filepath.Join(moduleDir, goSumFileName)))
+	require.NoError(t, os.MkdirAll(filepath.Join(scratchDir, goSumFileName), 0o755))
+	sum, err = mergedGoSum(moduleDir, scratchDir)
+	require.Error(t, err, "the go.sum of the scratch module is a directory")
+	assert.Nil(t, sum)
+}
+
+// TestWriteScratchGoSumScratchIsDirectory: when the go.sum of the scratch
+// module cannot be read, the go.sum of the user does not go into it.
+func TestWriteScratchGoSumScratchIsDirectory(t *testing.T) {
+	moduleDir := t.TempDir()
+	scratchDir := t.TempDir()
+	mustWriteFile(t, filepath.Join(moduleDir, goSumFileName), "example.com/dep v1.0.0 h1:user=\n")
+	require.NoError(t, os.MkdirAll(filepath.Join(scratchDir, goSumFileName), 0o755))
+	require.Error(t, writeScratchGoSum(moduleDir, scratchDir))
+	info, err := os.Stat(filepath.Join(scratchDir, goSumFileName))
+	require.NoError(t, err)
+	assert.True(t, info.IsDir(), "the directory stays")
+}
+
+// TestApplyVendorMergeCopyErrors: a merge that cannot plan or make the
+// copies fails before it writes modules.txt and go.mod.
+func TestApplyVendorMergeCopyErrors(t *testing.T) {
+	const modulesTxt = "# example.com/a v1.0.0\n## explicit\nexample.com/a\n"
+	newModule := func(t *testing.T) (string, string) {
+		t.Helper()
+		moduleDir := t.TempDir()
+		mustWriteFile(t, filepath.Join(moduleDir, vendorDirName, modulesTxtFileName), modulesTxt)
+		mustWriteFile(t, filepath.Join(moduleDir, goModFileName), "module example.com/app\n")
+		scratchVendor := t.TempDir()
+		mustWriteFile(t, filepath.Join(scratchVendor, "example.com", "b", "b.go"), "package b")
+		return moduleDir, scratchVendor
+	}
+	merged := modulesTxt + "# example.com/b v1.0.0\n## explicit\nexample.com/b\n"
+
+	t.Run("a link in the scratch module", func(t *testing.T) {
+		skipWithoutSymlinks(t)
+		moduleDir, scratchVendor := newModule(t)
+		require.NoError(t, os.Symlink(filepath.Join(t.TempDir(), "outside.go"),
+			filepath.Join(scratchVendor, "example.com", "b", "link.go")))
+		before := appTree(t, moduleDir)
+		err := applyVendorMerge(t.Context(), moduleDir, scratchVendor, vendorMergeResult{
+			goMod:  parseTestGoMod(t, "module example.com/app\n"),
+			merged: mustParseModulesTxt(t, merged),
+			added:  []string{"example.com/b"},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "symbolic link")
+		assert.Equal(t, before, appTree(t, moduleDir))
+	})
+
+	t.Run("a directory cannot be made", func(t *testing.T) {
+		skipWithoutPermissions(t)
+		moduleDir, scratchVendor := newModule(t)
+		makeReadOnly(t, filepath.Join(moduleDir, vendorDirName))
+		err := applyVendorMerge(t.Context(), moduleDir, scratchVendor, vendorMergeResult{
+			goMod:  parseTestGoMod(t, "module example.com/app\n"),
+			merged: mustParseModulesTxt(t, merged),
+			added:  []string{"example.com/b"},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "creating "+filepath.Join(moduleDir, vendorDirName, "example.com"))
+		assert.Equal(t, modulesTxt, readAppFile(t, moduleDir, filepath.Join(vendorDirName, modulesTxtFileName)))
+	})
+
+	t.Run("go.sum cannot be written", func(t *testing.T) {
+		moduleDir, scratchVendor := newModule(t)
+		goSum := filepath.Join(moduleDir, goSumFileName)
+		mustWriteFile(t, filepath.Join(goSum, "keep"), "a file in a directory")
+		err := applyVendorMerge(t.Context(), moduleDir, scratchVendor, vendorMergeResult{
+			goMod:  parseTestGoMod(t, "module example.com/app\n"),
+			goSum:  []byte("example.com/b v1.0.0 h1:b=\n"),
+			merged: mustParseModulesTxt(t, merged),
+			added:  []string{"example.com/b"},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "writing "+goSum)
+		assert.FileExists(t, filepath.Join(goSum, "keep"))
+	})
+}
+
+// TestVendorScratchImportsErrors: a package of the hook code that otelc
+// cannot read stops vendorScratchImports with an error.
+func TestVendorScratchImportsErrors(t *testing.T) {
+	newSources := func(t *testing.T) *hookSources {
+		t.Helper()
+		moduleDir := t.TempDir()
+		mustWriteFile(t, filepath.Join(moduleDir, "instr", "instr.go"),
+			"package instr\n\nimport _ \"example.com/lib\"\n")
+		return &hookSources{moduleDir: moduleDir, mainPath: "example.com/app", user: &modulesTxt{}}
+	}
+	imports := map[string]bool{"example.com/app/instr": true}
+
+	t.Run("the tool file imports a package again", func(t *testing.T) {
+		h := newSources(t)
+		mustWriteFile(t, filepath.Join(h.moduleDir, toolFileCanonical),
+			"//go:build tools\n\npackage tools\n\nimport _ \"example.com/app/instr\"\n")
+		got, err := vendorScratchImports(imports, h)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"example.com/lib"}, got.packages, "each package is read one time")
+		assert.Equal(t, map[string]bool{"example.com/app/instr": true}, got.toolImports)
+	})
+
+	t.Run("a directory of the package cannot be read", func(t *testing.T) {
+		skipWithoutPermissions(t)
+		h := newSources(t)
+		locked := filepath.Join(h.moduleDir, "instr", "locked")
+		require.NoError(t, os.MkdirAll(locked, 0o755))
+		require.NoError(t, os.Chmod(locked, 0o000))
+		t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+		_, err := vendorScratchImports(imports, h)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to walk directory")
+	})
+
+	t.Run("two tool files", func(t *testing.T) {
+		h := newSources(t)
+		mustWriteFile(t, filepath.Join(h.moduleDir, toolFileCanonical), "package tools\n")
+		mustWriteFile(t, filepath.Join(h.moduleDir, toolFileAlias), "package tools\n")
+		_, err := vendorScratchImports(imports, h)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "only one instrumentation config file is allowed")
+	})
+
+	t.Run("the tool file is not Go", func(t *testing.T) {
+		h := newSources(t)
+		mustWriteFile(t, filepath.Join(h.moduleDir, toolFileCanonical), "not Go")
+		_, err := vendorScratchImports(imports, h)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), toolFileCanonical)
+	})
+
+	t.Run("a file of a main package is not Go", func(t *testing.T) {
+		h := newSources(t)
+		bad := filepath.Join(h.moduleDir, "instr", "bad.go")
+		mustWriteFile(t, bad, "not Go")
+		_, err := vendorScratchImports(imports, h)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "parsing the imports of "+bad)
+	})
+}
+
+// TestCollectRulePackagesBadAddedFile: the file that a file rule adds must
+// be a Go file.
+func TestCollectRulePackagesBadAddedFile(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	bad := filepath.Join(workDir, util.BuildTempDir, unzippedInstDir, "init", "init.go")
+	mustWriteFile(t, bad, "not Go")
+	ruleFile := filepath.Join(workDir, "rules.yaml")
+	mustWriteFile(t, ruleFile, `version: "v1.0.0"
+file_rule:
+  target: main
+  do:
+    - add_file:
+        file: init.go
+        path: "`+util.OtelcInstRoot+`/init"
+`)
+	set := map[string]bool{}
+	err := collectRulePackages(ruleFile, set, &hookSources{user: &modulesTxt{}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parsing the imports of "+bad)
+}
+
+// TestExpandMainPackagesSharedImport: two main packages import the same main
+// package. Its imports are read one time.
+func TestExpandMainPackagesSharedImport(t *testing.T) {
+	moduleDir := t.TempDir()
+	mustWriteFile(t, filepath.Join(moduleDir, "a", "a.go"), "package a\n\nimport _ \"example.com/app/shared\"\n")
+	mustWriteFile(t, filepath.Join(moduleDir, "b", "b.go"), "package b\n\nimport _ \"example.com/app/shared\"\n")
+	mustWriteFile(t, filepath.Join(moduleDir, "shared", "shared.go"),
+		"package shared\n\nimport _ \"example.com/lib\"\n")
+	h := &hookSources{moduleDir: moduleDir, mainPath: "example.com/app", user: &modulesTxt{}}
+
+	set := map[string]bool{"example.com/app/a": true, "example.com/app/b": true}
+	require.NoError(t, h.expandMainPackages(set))
+	assert.Equal(t, map[string]bool{"example.com/lib": true}, set)
+}
+
+// TestPackageImportsMoreCases: a comment after the package clause is not a
+// build constraint, a bad //go:build line does not exclude the file, and a
+// file is not a package directory.
+func TestPackageImportsMoreCases(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "after.go"),
+		"package p\n\n// +build ignore\n\nimport _ \"example.com/after\"\n")
+	mustWriteFile(t, filepath.Join(dir, "badtag.go"), "//go:build (\n\npackage p\n\nimport _ \"example.com/badtag\"\n")
+
+	imports, err := packageImports(dir)
+	require.NoError(t, err)
+	slices.Sort(imports)
+	assert.Equal(t, []string{"example.com/after", "example.com/badtag"}, imports)
+
+	if runtime.GOOS != "windows" {
+		// On Windows, reading a file as a directory gives a "not found" error.
+		file := filepath.Join(dir, "after.go")
+		_, err = packageImports(file)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "reading "+file)
+	}
+}
+
+// TestBuildVendorScratchOldScratchStays: when otelc cannot remove the old
+// scratch module, it stops with an error.
+func TestBuildVendorScratchOldScratchStays(t *testing.T) {
+	skipWithoutPermissions(t)
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	dir := util.GetBuildTemp(vendorScratchDir)
+	mustWriteFile(t, filepath.Join(dir, "sub", "old.go"), "package old")
+	makeReadOnly(t, filepath.Join(dir, "sub"))
+
+	_, err := buildVendorScratch(t.Context(), vendorScratchInput{user: &modulesTxt{}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "removing the old scratch module "+dir)
+	assert.FileExists(t, filepath.Join(dir, "sub", "old.go"))
+}
+
+// TestCopyVendoredModulesWithoutOriginal: without the full modules.txt
+// (original), the copies use the modules.txt of the user.
+func TestCopyVendoredModulesWithoutOriginal(t *testing.T) {
+	moduleDir := t.TempDir()
+	mustWriteFile(t, filepath.Join(moduleDir, vendorDirName, "example.com", "a", "a.go"), "package a")
+	scratchDir := t.TempDir()
+	userMods, copies, err := copyVendoredModules(scratchDir, vendorScratchInput{
+		user:          mustParseModulesTxt(t, "# example.com/a v1.0.0\n## explicit\nexample.com/a\n"),
+		userVendorDir: filepath.Join(moduleDir, vendorDirName),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]bool{"example.com/a": true}, userMods)
+	require.Contains(t, copies, "example.com/a")
+	assert.FileExists(t, filepath.Join(scratchDir, filepath.FromSlash(copies["example.com/a"]), "a.go"))
+}
+
+// TestRunScratchRoundWriteErrors: a scratch module that otelc cannot write
+// stops the round before the go commands run.
+func TestRunScratchRoundWriteErrors(t *testing.T) {
+	newScratch := func(t *testing.T) *vendorScratch {
+		t.Helper()
+		return &vendorScratch{
+			dir:      t.TempDir(),
+			userMods: map[string]bool{},
+			versions: map[string]string{},
+			copies:   map[string]string{},
+			pinned:   map[string]bool{},
+			updated:  map[string]bool{},
+			extra:    map[string]bool{},
+		}
+	}
+	newInput := func(t *testing.T) vendorScratchInput {
+		t.Helper()
+		return vendorScratchInput{
+			user:          &modulesTxt{},
+			userVendorDir: filepath.Join(t.TempDir(), vendorDirName),
+			imports:       []string{"example.com/hook"},
+		}
+	}
+
+	t.Run("the source file", func(t *testing.T) {
+		s := newScratch(t)
+		s.dir = filepath.Join(s.dir, "absent")
+		done, err := runScratchRound(t.Context(), s, newInput(t))
+		require.Error(t, err)
+		assert.False(t, done)
+		assert.NoDirExists(t, s.dir)
+	})
+
+	t.Run("a bad go version", func(t *testing.T) {
+		s := newScratch(t)
+		in := newInput(t)
+		in.goVersion = "not a version"
+		done, err := runScratchRound(t.Context(), s, in)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not a version")
+		assert.False(t, done)
+		assert.NoFileExists(t, filepath.Join(s.dir, goModFileName))
+	})
+
+	t.Run("the go.sum of the user is a directory", func(t *testing.T) {
+		s := newScratch(t)
+		in := newInput(t)
+		require.NoError(t, os.MkdirAll(filepath.Join(filepath.Dir(in.userVendorDir), goSumFileName), 0o755))
+		done, err := runScratchRound(t.Context(), s, in)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "reading "+filepath.Join(filepath.Dir(in.userVendorDir), goSumFileName))
+		assert.False(t, done)
+		assert.NoFileExists(t, filepath.Join(s.dir, goSumFileName))
+	})
+}
+
+// TestRaisedModulesGoFails: when the go command fails, raisedModules
+// returns its error.
+func TestRaisedModulesGoFails(t *testing.T) {
+	s := &vendorScratch{dir: filepath.Join(t.TempDir(), "absent"), userMods: map[string]bool{}}
+	raised, err := raisedModules(t.Context(), s)
+	require.Error(t, err)
+	assert.Empty(t, raised)
+	assert.Contains(t, err.Error(), "go list")
+}

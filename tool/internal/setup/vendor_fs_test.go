@@ -338,6 +338,9 @@ func TestVendorFSPermissionErrors(t *testing.T) {
 	require.Error(t, copyNewFile(root, src, root, filepath.Join(locked, "x.go")),
 		"the file cannot be made")
 	require.Error(t, removeVendoredFile(root, file), "the file cannot be removed")
+	err := linkNewFile(root, src, root, filepath.Join(locked, "sub", "x.go"))
+	require.Error(t, err, "the directory of the link cannot be made")
+	assert.Contains(t, err.Error(), "creating the directory of "+filepath.Join(locked, "sub", "x.go"))
 }
 
 // relFiles returns the paths of files relative to root, slash-separated.

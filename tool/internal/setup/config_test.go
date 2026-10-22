@@ -951,3 +951,21 @@ func TestFillInstrumentationConfigNotInstrumentation(t *testing.T) {
 	require.NoError(t, cfg.Error)
 	assert.Equal(t, []string{filepath.Join(dir, "otelc.yaml")}, cfg.RuleFiles)
 }
+
+// TestFillInstrumentationConfigWalkError: a directory of the package that
+// otelc cannot read is an error of the config.
+func TestFillInstrumentationConfigWalkError(t *testing.T) {
+	skipWithoutPermissions(t)
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, goModFileName), "module example.com/m\n")
+	locked := filepath.Join(dir, "locked")
+	require.NoError(t, os.MkdirAll(locked, 0o755))
+	require.NoError(t, os.Chmod(locked, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	cfg := &instrumentationConfig{ImportPath: "example.com/m"}
+	fillInstrumentationConfig(cfg, &packages.Package{}, dir, dir)
+	require.Error(t, cfg.Error)
+	assert.Contains(t, cfg.Error.Error(), "walking instrumentation package example.com/m")
+	assert.Empty(t, cfg.RuleFiles)
+}

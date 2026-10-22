@@ -1786,3 +1786,54 @@ func TestKeepForDebugDoesNotWriteThroughLinks(t *testing.T) {
 	assert.NoFileExists(t, filepath.Join(outside, "main", goModFileName),
 		"keepForDebug must not write through a linked directory")
 }
+
+// TestWriteDebugCopyErrors: a debug copy needs a source that otelc can read,
+// and a directory that it can make.
+func TestWriteDebugCopyErrors(t *testing.T) {
+	work := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, work)
+	dst := filepath.Join(util.GetBuildTemp("debug"), goModFileName)
+
+	absent := filepath.Join(work, "absent")
+	err := writeDebugCopy(absent, dst)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reading "+absent)
+	assert.NoFileExists(t, dst)
+
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		return
+	}
+	src := filepath.Join(work, goModFileName)
+	mustWriteFile(t, src, "module example.com/app\n")
+	require.NoError(t, os.Chmod(src, 0o000))
+	err = writeDebugCopy(src, dst)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reading "+src)
+	require.NoError(t, os.Chmod(src, 0o644))
+
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	makeReadOnly(t, util.GetBuildTempDir())
+	err = writeDebugCopy(src, dst)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "creating the directory of "+dst)
+	assert.NoFileExists(t, dst)
+}
+
+// TestSetupVendorGoVersionTooOld: otelc setup of a vendored module with -C
+// and -mod=vendor fails when the go version of the module is below 1.14.
+func TestSetupVendorGoVersionTooOld(t *testing.T) {
+	t.Setenv("GOWORK", "off")
+	t.Setenv("GOFLAGS", "")
+	setupTestModule(t, []string{"cmd"})
+	root := t.TempDir()
+	writeVendoredGoMod(t, root, "1.13")
+
+	cmd := &cli.Command{
+		Name:            "setup",
+		Action:          Setup,
+		SkipFlagParsing: true,
+	}
+	err := cmd.Run(t.Context(), []string{"setup", "-C", root, "-mod=vendor", "."})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "otelc needs go 1.14 or higher")
+}

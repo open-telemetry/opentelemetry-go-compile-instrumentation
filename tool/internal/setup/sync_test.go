@@ -683,3 +683,10 @@ go 999.0.0
 	err := syncDeps(t.Context(), map[string]bool{util.OtelcInstRoot + "/net/http/client": true}, tempDir)
 	require.Error(t, err)
 }
+
+// TestSyncDepsWithoutGoMod: syncDeps needs the go.mod file of the module.
+func TestSyncDepsWithoutGoMod(t *testing.T) {
+	err := syncDeps(t.Context(), map[string]bool{util.OtelcInstRoot + "/net/http/client": true}, t.TempDir())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to read go.mod file")
+}
