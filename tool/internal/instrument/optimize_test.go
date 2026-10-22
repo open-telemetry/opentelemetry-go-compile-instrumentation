@@ -416,7 +416,7 @@ func TestRemoveAfterTrampolineDecl(t *testing.T) {
 	assert.Nil(t, ast.FindFuncDeclWithoutRecv(targetFile, afterFuncName))
 }
 
-func TestRemoveUnusedHookContextMethods(t *testing.T) {
+func TestEmptyUnusedHookContextMethods(t *testing.T) {
 	funcSrc := `package main
 	func testFunc(param1 string) {}`
 	targetFunc := parseFunc(t, funcSrc)
@@ -444,19 +444,23 @@ func TestRemoveUnusedHookContextMethods(t *testing.T) {
 	targetFile, err := ast.NewAstParser().ParseSource(fileSrc)
 	require.NoError(t, err)
 
-	err = removeUnusedHookContextMethods(targetFile, tjump)
+	err = emptyUnusedHookContextMethods(targetFile, tjump)
 	require.NoError(t, err)
 
 	// The three return-value methods keep satisfying HookContext but no
 	// longer reference returnVals, since it's never populated without an
-	// After hook: a Before hook reaching them still gets the pre-existing
-	// no-return-values behavior instead of a panic.
+	// After hook. For a target with return values, an in-range idx into the
+	// unoptimized GetReturnVal/SetReturnVal indexes into the nil returnVals
+	// slice and panics with "index out of range"; this empties the bodies to
+	// nil/no-op/0 instead, fixing that crash rather than preserving any
+	// pre-existing behavior.
 	getReturnVal := findMethodDecl(t, targetFile, structName, "GetReturnVal")
 	retStmt, ok := getReturnVal.Body.List[0].(*dst.ReturnStmt)
 	require.True(t, ok, "GetReturnVal body should be a single return statement")
 	require.Len(t, retStmt.Results, 1)
-	_, isNil := retStmt.Results[0].(*dst.Ident)
+	ident, isNil := retStmt.Results[0].(*dst.Ident)
 	assert.True(t, isNil, "GetReturnVal should return nil")
+	assert.Equal(t, ast.IdentNil, ident.Name)
 
 	setReturnVal := findMethodDecl(t, targetFile, structName, "SetReturnVal")
 	assert.Empty(t, setReturnVal.Body.List, "SetReturnVal should be a no-op")
@@ -482,7 +486,7 @@ func findMethodDecl(t *testing.T, root *dst.File, structName, methodName string)
 	t.Helper()
 	for _, decl := range root.Decls {
 		funcDecl, ok := decl.(*dst.FuncDecl)
-		if !ok || funcDecl.Recv == nil || len(funcDecl.Recv.List) == 0 {
+		if !ok || !ast.HasReceiver(funcDecl) {
 			continue
 		}
 		starExpr, ok := funcDecl.Recv.List[0].Type.(*dst.StarExpr)
@@ -499,7 +503,7 @@ func findMethodDecl(t *testing.T, root *dst.File, structName, methodName string)
 	return nil
 }
 
-func TestRemoveUnusedHookContextMethods_MissingMethod(t *testing.T) {
+func TestEmptyUnusedHookContextMethods_MissingMethod(t *testing.T) {
 	funcSrc := `package main
 	func testFunc(param1 string) {}`
 	targetFunc := parseFunc(t, funcSrc)
@@ -519,11 +523,13 @@ func TestRemoveUnusedHookContextMethods_MissingMethod(t *testing.T) {
 	targetFile, err := ast.NewAstParser().ParseSource(fileSrc)
 	require.NoError(t, err)
 
-	err = removeUnusedHookContextMethods(targetFile, tjump)
-	assert.Error(t, err)
+	err = emptyUnusedHookContextMethods(targetFile, tjump)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), structName)
+	assert.Contains(t, err.Error(), "found 2, expected 3")
 }
 
-func TestRemoveUnusedHookContextMethods_SkipsGenericTarget(t *testing.T) {
+func TestEmptyUnusedHookContextMethods_SkipsGenericTarget(t *testing.T) {
 	funcSrc := `package main
 	func testFunc[T any](param1 T) {}`
 	targetFunc := parseFunc(t, funcSrc)
@@ -535,18 +541,21 @@ func TestRemoveUnusedHookContextMethods_SkipsGenericTarget(t *testing.T) {
 		},
 	}
 	structName := trampolineHookContextImplType + tjump.rule.Identity()
-	// The panic bodies rewriteHookContextMethods leaves for generics; no
-	// GetReturnValCount is present, which would normally fail the "found
-	// != len(emptyBodies)" check below if this target weren't skipped.
+	// Real generic output keeps all three methods: GetReturnVal and
+	// SetReturnVal panic, GetReturnValCount keeps its template body. Without
+	// GetReturnValCount present here, this fixture couldn't tell the "left
+	// untouched" assertion below apart from the panic bodies being emptied,
+	// since the "found != len(emptyBodies)" check would fail either way.
 	fileSrc := fmt.Sprintf(`package main
 	func testFunc[T any](param1 T) {}
 	type %[1]s struct{}
 	func (c *%[1]s) GetReturnVal(idx int) interface{} { panic("GetReturnVal is unsupported for generic functions") }
-	func (c *%[1]s) SetReturnVal(idx int, val interface{}) { panic("SetReturnVal is unsupported for generic functions") }`, structName)
+	func (c *%[1]s) SetReturnVal(idx int, val interface{}) { panic("SetReturnVal is unsupported for generic functions") }
+	func (c *%[1]s) GetReturnValCount() int { return len(c.returnVals) }`, structName)
 	targetFile, err := ast.NewAstParser().ParseSource(fileSrc)
 	require.NoError(t, err)
 
-	err = removeUnusedHookContextMethods(targetFile, tjump)
+	err = emptyUnusedHookContextMethods(targetFile, tjump)
 	require.NoError(t, err)
 
 	// Left untouched: still panicking, not emptied.
@@ -555,6 +564,14 @@ func TestRemoveUnusedHookContextMethods_SkipsGenericTarget(t *testing.T) {
 	require.True(t, ok, "GetReturnVal body should be unchanged")
 	_, isCall := exprStmt.X.(*dst.CallExpr)
 	assert.True(t, isCall, "GetReturnVal should still be the panic call")
+
+	// GetReturnValCount keeps its real template body too, not emptied.
+	getReturnValCount := findMethodDecl(t, targetFile, structName, "GetReturnValCount")
+	countRetStmt, ok := getReturnValCount.Body.List[0].(*dst.ReturnStmt)
+	require.True(t, ok, "GetReturnValCount body should be unchanged")
+	require.Len(t, countRetStmt.Results, 1)
+	_, isCallExpr := countRetStmt.Results[0].(*dst.CallExpr)
+	assert.True(t, isCallExpr, "GetReturnValCount should still call len(c.returnVals)")
 }
 
 func TestFlattenTJump(t *testing.T) {

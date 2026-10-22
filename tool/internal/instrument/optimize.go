@@ -198,17 +198,32 @@ func removeAfterTrampolineDecl(targetFile *dst.File, tjump *tJump) error {
 	return ex.Newf("can not remove After trampoline function")
 }
 
-// removeUnusedHookContextMethods empties the bodies of the return-value
-// methods on tjump's HookContextImpl when there is no After hook to populate
-// returnVals. These methods stay reachable through the HookContext interface
-// from a Before hook, so their bodies preserve the existing no-return-values
-// behavior (nil, no-op, 0) rather than panicking.
+// emptyUnusedHookContextMethods empties the bodies (not the declarations) of
+// the return-value methods on tjump's HookContextImpl when there is no After
+// hook to populate returnVals. These methods stay reachable through the
+// HookContext interface from a Before hook. Without this, a target function
+// with at least one return value crashes there today: GetReturnVal/
+// SetReturnVal's generated case clauses index into the nil returnVals slice
+// for any in-range idx, panicking with "index out of range" rather than
+// returning a sane value, since the After trampoline that would populate
+// returnVals never runs. This replaces those bodies with nil/no-op/0
+// (matching what an out-of-range idx already returned), fixing the crash
+// instead of papering over it, since a panic here would abort the Before
+// hook partway through under the trampoline's recover, or crash the app
+// outright if the context escaped it.
+//
+// Done in the optimize pass alongside the other no-After removals, so the
+// decision stays with the rule.After == "" branch: generation always
+// produces the full real method bodies first, since it has no per-rule
+// knowledge of After yet, and only this pass (which does, via tjump.rule)
+// empties the three that go unused.
 //
 // Generic targets are left untouched: rewriteHookContextMethods already made
-// their return-value methods panic unconditionally, regardless of After,
+// GetReturnVal and SetReturnVal panic unconditionally, regardless of After,
 // since they're unsupported for generics altogether (see #1252/#1173).
-// Replacing that panic here would silently undo that guard.
-func removeUnusedHookContextMethods(targetFile *dst.File, tjump *tJump) error {
+// GetReturnValCount keeps its template body there, so skip all three
+// wholesale. Emptying any of them would undo that guard.
+func emptyUnusedHookContextMethods(targetFile *dst.File, tjump *tJump) error {
 	if findTargetGenericType(targetFile, tjump.target) != nil {
 		return nil
 	}
@@ -221,7 +236,7 @@ func removeUnusedHookContextMethods(targetFile *dst.File, tjump *tJump) error {
 	found := 0
 	for _, decl := range targetFile.Decls {
 		funcDecl, ok := decl.(*dst.FuncDecl)
-		if !ok || funcDecl.Recv == nil || len(funcDecl.Recv.List) == 0 {
+		if !ok || !ast.HasReceiver(funcDecl) {
 			continue
 		}
 		starExpr, ok := funcDecl.Recv.List[0].Type.(*dst.StarExpr)
@@ -240,7 +255,8 @@ func removeUnusedHookContextMethods(targetFile *dst.File, tjump *tJump) error {
 		found++
 	}
 	if found != len(emptyBodies) {
-		return ex.Newf("can not find unused HookContext methods")
+		return ex.Newf("can not find unused HookContext methods for %s (found %d, expected %d)",
+			structName, found, len(emptyBodies))
 	}
 	return nil
 }
@@ -422,7 +438,7 @@ func (ip *instrumentPhase) optimizeTJumps() error {
 			if err != nil {
 				return err
 			}
-			err = removeUnusedHookContextMethods(ip.target, tjump)
+			err = emptyUnusedHookContextMethods(ip.target, tjump)
 			if err != nil {
 				return err
 			}
