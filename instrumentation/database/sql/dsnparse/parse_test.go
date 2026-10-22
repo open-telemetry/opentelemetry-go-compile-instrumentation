@@ -410,6 +410,27 @@ func TestParseDSN_SQLServer(t *testing.T) {
 			wantDB:   "mydb",
 		},
 		{
+			name:     "ado.net server with tcp protocol prefix",
+			dsn:      "Server=tcp:db.example.com,1434;Database=mydb;User Id=sa;Password=p",
+			wantHost: "db.example.com",
+			wantPort: "1434",
+			wantDB:   "mydb",
+		},
+		{
+			name:     "ado.net tcp protocol prefix is case insensitive",
+			dsn:      "server=TCP:db.example.com;initial catalog=sales;user id=sa",
+			wantHost: "db.example.com",
+			wantPort: "1433",
+			wantDB:   "sales",
+		},
+		{
+			name:     "ado.net tcp protocol prefix with bracketed ipv6",
+			dsn:      "Server=tcp:[2001:db8::1],1433;database=mydb",
+			wantHost: "2001:db8::1",
+			wantPort: "1433",
+			wantDB:   "mydb",
+		},
+		{
 			name:     "ado.net initial catalog key",
 			dsn:      "server=host;initial catalog=mydb;user id=sa",
 			wantHost: "host",
