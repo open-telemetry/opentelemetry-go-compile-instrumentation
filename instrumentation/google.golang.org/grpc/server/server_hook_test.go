@@ -533,3 +533,67 @@ func TestServerStatsHandler_NilGRPCContext_IsSafeNoOp(t *testing.T) {
 		})
 	}, "HandleRPC must return before dereferencing a nil gRPCContext")
 }
+
+type nonRecordingSpan struct {
+	trace.Span
+	ended bool
+}
+
+func (s *nonRecordingSpan) IsRecording() bool {
+	return false
+}
+
+func (s *nonRecordingSpan) End(_ ...trace.SpanEndOption) {
+	s.ended = true
+}
+
+func TestServerStatsHandler_HandleRPC_NonRecordingSpan(t *testing.T) {
+	handler := newServerStatsHandler()
+
+	mockSpan := &nonRecordingSpan{Span: trace.SpanFromContext(t.Context())}
+	ctx := trace.ContextWithSpan(t.Context(), mockSpan)
+	ctx = context.WithValue(ctx, gRPCContextKey{}, &gRPCContext{})
+
+	handler.HandleRPC(ctx, &stats.End{
+		BeginTime: time.Now().Add(-10 * time.Millisecond),
+		EndTime:   time.Now(),
+	})
+
+	assert.True(t, mockSpan.ended, "span.End() must be called for non-recording spans")
+}
+
+func TestServerStatsHandler_UnsampledSpanEnded(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "grpc")
+	initInstrumentation()
+
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSyncer(exporter),
+		sdktrace.WithSampler(sdktrace.NeverSample()),
+	)
+	oldTP := otel.GetTracerProvider()
+	otel.SetTracerProvider(tp)
+	t.Cleanup(func() {
+		_ = tp.Shutdown(context.Background())
+		otel.SetTracerProvider(oldTP)
+	})
+	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(runtime.ModuleVersion()))
+
+	handler := newServerStatsHandler()
+	ctx := handler.TagRPC(t.Context(), &stats.RPCTagInfo{
+		FullMethodName: "/test.Service/Method",
+	})
+	span := trace.SpanFromContext(ctx)
+	require.False(t, span.IsRecording(), "sampler should have marked the span non-recording")
+
+	handler.HandleRPC(ctx, &stats.End{
+		BeginTime: time.Now().Add(-50 * time.Millisecond),
+		EndTime:   time.Now(),
+	})
+
+	require.Empty(
+		t,
+		exporter.GetSpans(),
+		"NeverSample spans are not exported, but End() must still run without panicking",
+	)
+}

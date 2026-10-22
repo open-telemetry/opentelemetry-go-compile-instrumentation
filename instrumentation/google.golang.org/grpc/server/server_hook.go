@@ -227,8 +227,8 @@ func (h *serverStatsHandler) HandleRPC(ctx context.Context, rs stats.RPCStats) {
 				span.RecordError(rs.Error)
 			}
 			span.SetAttributes(statusAttr)
-			span.End()
 		}
+		span.End()
 
 		// Record metrics
 		metricAttrs := make([]attribute.KeyValue, 0, len(gctx.metricAttrs)+1)
