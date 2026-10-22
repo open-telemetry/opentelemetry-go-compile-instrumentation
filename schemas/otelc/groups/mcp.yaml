@@ -11,13 +11,11 @@ groups:
   # request instrumented today, `gen_ai.operation.name` = `execute_tool`). It
   # records no metrics.
   #
-  # The GenAI semantic conventions' MCP section
-  # (open-telemetry/semantic-conventions-genai, docs/gen-ai/mcp.md) is still
-  # Development stability, so `gen_ai.*` and `mcp.*` attribute keys are
-  # declared locally with `id:` rather than referenced from a released semconv
-  # module. `jsonrpc.request.id` follows the upstream JSON-RPC convention
-  # (https://opentelemetry.io/docs/specs/semconv/rpc/json-rpc/) but is not
-  # exposed by the pinned upstream registry yet, so it is declared locally too.
+  # Upstream OpenTelemetry GenAI attributes (`gen_ai.operation.name`,
+  # `gen_ai.tool.name`, `error.type`) are referenced with `ref:`. The MCP and
+  # JSON-RPC attributes below are not covered by the pinned upstream semconv
+  # v1.37.0 (`mcp.*` and `jsonrpc.request.id`; #1542 plans to generate them
+  # later), so they are declared locally with `id:`.
   #
   # Notes on conditional attributes:
   #   - `mcp.session.id` is recorded only once the initialize handshake has
@@ -34,19 +32,9 @@ groups:
     type: attribute_group
     display_name: otelc MCP client attributes
     brief: >
-      Attributes emitted by the modelcontextprotocol/go-sdk instrumentation that are not covered by the
-      released OpenTelemetry semantic conventions.
+      Attributes emitted by the modelcontextprotocol/go-sdk instrumentation that are not covered by the released OpenTelemetry
+      semantic conventions.
     attributes:
-      - id: gen_ai.operation.name
-        type: string
-        stability: development
-        brief: The GenAI operation being performed. MCP tool calls use `execute_tool`.
-        examples: ["execute_tool"]
-      - id: gen_ai.tool.name
-        type: string
-        stability: development
-        brief: The name of the MCP tool being invoked (CallToolParams.Name).
-        examples: ["get-weather"]
       - id: mcp.method.name
         type: string
         stability: development
@@ -61,6 +49,19 @@ groups:
         type: string
         stability: development
         brief: >
-          The JSON-RPC request identifier, rendered the way it travels on the wire (an integer id
-          is rendered as its decimal string, a string id passes through).
+          The JSON-RPC request identifier, rendered the way it travels on the wire (an integer id is rendered as its decimal
+          string, a string id passes through).
         examples: ["42", "req-7"]
+
+  - id: span.otelc.gen_ai.mcp.client
+    type: span
+    span_kind: client
+    stability: development
+    brief: MCP client span, one per tools/call issued through an instrumented ClientSession.
+    attributes:
+      - ref: gen_ai.operation.name
+      - ref: gen_ai.tool.name
+      - ref: mcp.method.name
+      - ref: mcp.session.id
+      - ref: jsonrpc.request.id
+      - ref: error.type
