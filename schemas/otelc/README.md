@@ -56,7 +56,7 @@ signals an undeclared instrumentation.
 | `k8s.io/client-go`                                  | `k8s.yaml`          | Informer spans                                                         |
 | `github.com/openai/openai-go` (v1/v2/v3)            | `openai.yaml`       | GenAI client spans                                                     |
 | `github.com/anthropics/anthropic-sdk-go`            | `anthropic.yaml`    | GenAI client spans                                                     |
-| `github.com/modelcontextprotocol/go-sdk`            | `mcp.yaml`          | GenAI/MCP client spans (trace-only)                                    |
+| `github.com/modelcontextprotocol/go-sdk`            | `mcp.yaml`         | GenAI MCP client spans                                                 |
 | `go.mongodb.org/mongo-driver/mongo`                 | `mongo.yaml`        | DB client spans                                                        |
 | `go.mongodb.org/mongo-driver/v2/mongo`              | `mongo.yaml`        | DB client spans                                                        |
 | `github.com/olivere/elastic/v7`                     | `elasticsearch.yaml` | DB client spans                                                        |

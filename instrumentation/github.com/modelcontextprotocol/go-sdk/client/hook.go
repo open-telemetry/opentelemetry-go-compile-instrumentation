@@ -6,11 +6,12 @@ package client
 import (
 	"context"
 	"errors"
+	"maps"
 	"strconv"
 	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
-	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -53,6 +54,27 @@ func initInstrumentation() {
 	})
 }
 
+// callToolSpanKey marks the context that BeforeCallTool hands to the SDK for
+// a tools/call request. The value is the client span the before hook started.
+// Only AfterConnectionCall reads it, so the JSON-RPC request id is attached to
+// the span this instrumentation started for the CallTool itself rather than
+// whatever span happens to be current (e.g. the connect handshake or an
+// application span surrounding the call).
+type callToolSpanKey struct{}
+
+// Positional parameters the CallTool hooks read and replace through the hook
+// context for (cs *ClientSession) CallTool(ctx, params): receiver=0, ctx=1,
+// params=2.
+const (
+	callToolParamContext = 1
+	callToolParamParams  = 2
+
+	// injectedMetaHeadroom reserves room in the copied _meta map for the
+	// W3C trace-context entries the propagator injects (traceparent and,
+	// when sampled, tracestate).
+	injectedMetaHeadroom = 2
+)
+
 // spanName renders the MCP client span name. The GenAI semantic conventions
 // specify "{mcp.method.name} {tool}" for tool calls (e.g. "tools/call get-weather").
 func spanName(toolName string) string {
@@ -90,20 +112,21 @@ func BeforeCallTool(
 			SessionID: sessionID(cs),
 		})...),
 	)
-	// Make downstream calls (and the real CallTool body) use the span context.
-	ictx.SetParam(1, spanCtx)
+	// Make downstream calls (and the real CallTool body) use the span context,
+	// and mark it so AfterConnectionCall can tell this span apart from the
+	// caller's own ambient span.
+	spanCtx = context.WithValue(spanCtx, callToolSpanKey{}, span)
+	ictx.SetParam(callToolParamContext, spanCtx)
 
 	// Propagate the trace context through the JSON-RPC _meta field so a
 	// server-side handler can continue this trace. Copy params and the Meta
 	// map before mutating them: the caller's objects must stay untouched.
 	injected := *params
-	meta := make(mcp.Meta, len(params.Meta)+2)
-	for k, v := range params.Meta {
-		meta[k] = v
-	}
+	meta := make(mcp.Meta, len(params.Meta)+injectedMetaHeadroom)
+	maps.Copy(meta, params.Meta)
 	propagator.Inject(spanCtx, metaCarrier(meta))
 	injected.Meta = meta
-	ictx.SetParam(2, &injected)
+	ictx.SetParam(callToolParamParams, &injected)
 
 	ictx.SetData(span)
 }
@@ -123,12 +146,15 @@ func sessionID(cs *mcp.ClientSession) string {
 type metaCarrier mcp.Meta
 
 func (c metaCarrier) Get(key string) string {
-	if v, ok := c[key]; ok {
-		if s, ok := v.(string); ok {
-			return s
-		}
+	v, found := c[key]
+	if !found {
+		return ""
 	}
-	return ""
+	s, isString := v.(string)
+	if !isString {
+		return ""
+	}
+	return s
 }
 
 func (c metaCarrier) Set(key, value string) {
@@ -165,22 +191,39 @@ func requestIDString(id jsonrpc.ID) string {
 	}
 }
 
-// AfterConnectionCall captures jsonrpc.request.id for every JSON-RPC call the
-// MCP client makes (tools/call, initialize, resources/*, ...). The MCP layer
-// calls internal/jsonrpc2.(*Connection).Call, whose framework-level parameter
-// list is receiver = param 0, request context = param 1; BeforeCallTool
-// replaces the context slot with the span-bearing context for tools/call, so
-// the span is recovered from param 1 via the hook context. The return value is
-// the unexported *jsonrpc2.AsyncCall, matched through the rpcCallID interface
-// rather than importing the internal package.
+// Positional parameters the (*jsonrpc2.Connection).Call hook sees: the
+// receiver *Connection is parameter 0, ctx is 1 and method is 2.
+const (
+	connectionCallParamContext = 1
+	connectionCallParamMethod  = 2
+)
+
+// AfterConnectionCall records jsonrpc.request.id on the client span that
+// BeforeCallTool started for the enclosing ClientSession.CallTool.
+//
+// Every mcp request goes through internal/jsonrpc2.(*Connection).Call, but only
+// the tools/call request must carry this attribute: initialize and the other
+// JSON-RPC calls create no instrumentation span. The span is read through the
+// private callToolSpanKey mark rather than trace.SpanFromContext, so an
+// application span surrounding the call or another request reusing the span
+// context is never annotated. For a method the receiver is parameter 0 and ctx
+// is parameter 1, the same indices BeforeCallTool writes with. The return
+// value is the unexported *jsonrpc2.AsyncCall, matched through the rpcCallID
+// interface rather than importing the internal package.
 func AfterConnectionCall(ictx hook.HookContext, result any) {
 	call, ok := result.(rpcCallID)
 	if !ok {
 		return
 	}
-	ctx, _ := ictx.GetParam(1).(context.Context)
-	span := trace.SpanFromContext(ctx)
-	if !span.SpanContext().IsValid() {
+	if method, _ := ictx.GetParam(connectionCallParamMethod).(string); method != mcpsemconv.MethodCallTool {
+		return
+	}
+	ctx, _ := ictx.GetParam(connectionCallParamContext).(context.Context)
+	if ctx == nil {
+		return
+	}
+	span, _ := ctx.Value(callToolSpanKey{}).(trace.Span)
+	if span == nil || !span.SpanContext().IsValid() {
 		return
 	}
 	if id := requestIDString(call.ID()); id != "" {

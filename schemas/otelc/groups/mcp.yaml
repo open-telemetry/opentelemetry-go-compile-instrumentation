@@ -52,6 +52,13 @@ groups:
           The JSON-RPC request identifier, rendered the way it travels on the wire (an integer id is rendered as its decimal
           string, a string id passes through).
         examples: ["42", "req-7"]
+      - id: rpc.response.status_code
+        type: string
+        stability: development
+        brief: >
+          The JSON-RPC error code of a failed tools/call, rendered as its decimal wire code string. Absent on success and
+          on logical tool failures (IsError), which carry no JSON-RPC error.
+        examples: ["-32601", "-32602"]
 
   - id: span.otelc.gen_ai.mcp.client
     type: span
@@ -64,4 +71,5 @@ groups:
       - ref: mcp.method.name
       - ref: mcp.session.id
       - ref: jsonrpc.request.id
+      - ref: rpc.response.status_code
       - ref: error.type

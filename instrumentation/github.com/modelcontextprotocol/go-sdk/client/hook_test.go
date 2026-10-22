@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
-	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/codes"
@@ -130,52 +130,103 @@ type fakeAsyncCall struct {
 
 func (c *fakeAsyncCall) ID() jsonrpc.ID { return c.id }
 
+// fakeConnection stands in for the unexported *jsonrpc2.Connection receiver.
+type fakeConnection struct{}
+
+// connectionCall mirrors the hook context the trampoline builds for
+// (*jsonrpc2.Connection).Call(ctx, method, params): the receiver is parameter
+// 0, followed by ctx, method and params.
+func connectionCall(ctx context.Context, method string) *hooktest.MockHookContext {
+	return hooktest.NewMockHookContext(&fakeConnection{}, ctx, method, nil)
+}
+
+// startCallTool runs the CallTool before hook and returns its hook context
+// together with the context it hands to the SDK, which the SDK passes on to
+// (*jsonrpc2.Connection).Call for the tools/call request.
+func startCallTool(t *testing.T, tool string) (*hooktest.MockHookContext, context.Context) {
+	t.Helper()
+	params := &mcp.CallToolParams{Name: tool}
+	ictx := hooktest.NewMockHookContext(&mcp.ClientSession{}, context.Background(), params)
+	BeforeCallTool(ictx, &mcp.ClientSession{}, context.Background(), params)
+	ctx, ok := ictx.GetParam(1).(context.Context)
+	require.True(t, ok)
+	return ictx, ctx
+}
+
 func TestAfterConnectionCall_RecordsRequestID(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		id   any
+		want string
+	}{
+		{name: "integer id is rendered as its wire string", id: float64(42), want: "42"},
+		{name: "string id is passed through", id: "req-7", want: "req-7"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sr := setupTest(t)
+			before, callCtx := startCallTool(t, "x")
+
+			AfterConnectionCall(connectionCall(callCtx, "tools/call"), &fakeAsyncCall{id: mustID(t, tc.id)})
+			AfterCallTool(before, &mcp.CallToolResult{}, nil)
+
+			spans := sr.Ended()
+			require.Len(t, spans, 1)
+			assert.Equal(t, tc.want, spanAttrs(spans[0])["jsonrpc.request.id"])
+		})
+	}
+}
+
+func TestAfterConnectionCall_AnnotatesOnlyItsOwnToolCall(t *testing.T) {
 	sr := setupTest(t)
+	appCtx, appSpan := tracer.Start(context.Background(), "agent-run")
+	before, callCtx := startCallTool(t, "x")
 
-	// Simulate the CallTool path: the before hook replaces the context slot
-	// (param 1) with the span-bearing context, which internal Connection.Call
-	// receives as its second framework parameter (receiver = param 0).
-	params := &mcp.CallToolParams{Name: "x"}
-	before := hooktest.NewMockHookContext(&mcp.ClientSession{}, context.Background(), params)
-	BeforeCallTool(before, &mcp.ClientSession{}, context.Background(), params)
-	callCtx := before.GetParam(1).(context.Context)
-	require.True(t, trace.SpanFromContext(callCtx).SpanContext().IsValid())
+	// A request sent under a span the instrumentation did not start: the
+	// connect handshake, or a tools/call the before hook skipped.
+	AfterConnectionCall(connectionCall(appCtx, "tools/call"), &fakeAsyncCall{id: mustID(t, float64(1))})
+	// Another request sent with the tools/call context, e.g. by a sending
+	// middleware.
+	AfterConnectionCall(connectionCall(callCtx, "tools/list"), &fakeAsyncCall{id: mustID(t, float64(2))})
 
-	t.Run("integer id is rendered as its wire string", func(t *testing.T) {
-		// Mirror the real trampoline for (*Connection).Call: receiver at
-		// index 0, request context at index 1.
-		after := hooktest.NewMockHookContext(&mcp.ClientSession{}, callCtx)
-		AfterConnectionCall(after, &fakeAsyncCall{id: mustID(t, float64(42))})
+	AfterCallTool(before, &mcp.CallToolResult{}, nil)
+	appSpan.End()
 
-		spans := sr.Started()
-		require.NotEmpty(t, spans)
-		assert.Equal(t, "42", spanAttrs(spans[len(spans)-1])["jsonrpc.request.id"])
-	})
-
-	t.Run("string id is passed through", func(t *testing.T) {
-		after := hooktest.NewMockHookContext(&mcp.ClientSession{}, callCtx)
-		AfterConnectionCall(after, &fakeAsyncCall{id: mustID(t, "req-7")})
-
-		spans := sr.Started()
-		assert.Equal(t, "req-7", spanAttrs(spans[len(spans)-1])["jsonrpc.request.id"])
-	})
+	spans := sr.Ended()
+	require.Len(t, spans, 2)
+	for _, span := range spans {
+		assert.NotContains(t, spanAttrs(span), "jsonrpc.request.id", "span %q", span.Name())
+	}
 }
 
-func TestAfterConnectionCall_NoSpanInContext(t *testing.T) {
-	setupTest(t)
+func TestAfterConnectionCall_IgnoresUnusableInputs(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		ctx    func(callCtx context.Context) context.Context
+		result any
+	}{
+		{
+			name:   "result is not an AsyncCall",
+			ctx:    func(callCtx context.Context) context.Context { return callCtx },
+			result: "not an async call",
+		},
+		{
+			name:   "nil context",
+			ctx:    func(context.Context) context.Context { return nil },
+			result: &fakeAsyncCall{id: mustID(t, float64(3))},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sr := setupTest(t)
+			before, callCtx := startCallTool(t, "x")
 
-	// A JSON-RPC call made outside any span (e.g. an initialize request with
-	// no ambient trace) must not produce an attribute or panic.
-	ictx := hooktest.NewMockHookContext(&mcp.ClientSession{}, context.Background())
-	AfterConnectionCall(ictx, &fakeAsyncCall{id: mustID(t, float64(1))})
-}
+			AfterConnectionCall(connectionCall(tc.ctx(callCtx), "tools/call"), tc.result)
+			AfterCallTool(before, &mcp.CallToolResult{}, nil)
 
-func TestAfterConnectionCall_IgnoresOtherResults(t *testing.T) {
-	setupTest(t)
-
-	ictx := hooktest.NewMockHookContext(&mcp.ClientSession{}, context.Background())
-	AfterConnectionCall(ictx, "not an async call")
+			spans := sr.Ended()
+			require.Len(t, spans, 1)
+			assert.NotContains(t, spanAttrs(spans[0]), "jsonrpc.request.id")
+		})
+	}
 }
 
 func TestCallTool_TransportError(t *testing.T) {
