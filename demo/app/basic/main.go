@@ -65,6 +65,12 @@ func Example() {
 	// [MyHook] hello world is instrumented!
 }
 
+// ReturnsValue is the target function for the hook_before_only_retvals rule.
+// It has a return value and only a before hook, so GetReturnVal/SetReturnVal/
+// GetReturnValCount run against a HookContextImpl whose returnVals the After
+// trampoline never populates.
+func ReturnsValue(p1 string, p2 int) string { return p1 }
+
 func Underscore(_ int, _ float32) {}
 
 func Ellipsis(p1 ...string) {}
@@ -121,6 +127,8 @@ func main() {
 	Ellipsis("a", "b")
 
 	Underscore(1, 2)
+
+	_ = ReturnsValue("x", 1)
 
 	FunctionA(context.Background())
 
