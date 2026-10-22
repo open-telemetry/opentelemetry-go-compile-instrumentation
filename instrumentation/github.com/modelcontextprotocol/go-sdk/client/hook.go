@@ -167,17 +167,18 @@ func requestIDString(id jsonrpc.ID) string {
 
 // AfterConnectionCall captures jsonrpc.request.id for every JSON-RPC call the
 // MCP client makes (tools/call, initialize, resources/*, ...). The MCP layer
-// calls internal/jsonrpc2.(*Connection).Call, whose first parameter is the
-// request context; BeforeCallTool replaces it with the span-bearing context
-// for tools/call, so the span is recovered from that parameter via the hook
-// context. The return value is the unexported *jsonrpc2.AsyncCall, matched
-// through the rpcCallID interface rather than importing the internal package.
+// calls internal/jsonrpc2.(*Connection).Call, whose framework-level parameter
+// list is receiver = param 0, request context = param 1; BeforeCallTool
+// replaces the context slot with the span-bearing context for tools/call, so
+// the span is recovered from param 1 via the hook context. The return value is
+// the unexported *jsonrpc2.AsyncCall, matched through the rpcCallID interface
+// rather than importing the internal package.
 func AfterConnectionCall(ictx hook.HookContext, result any) {
 	call, ok := result.(rpcCallID)
 	if !ok {
 		return
 	}
-	ctx, _ := ictx.GetParam(0).(context.Context)
+	ctx, _ := ictx.GetParam(1).(context.Context)
 	span := trace.SpanFromContext(ctx)
 	if !span.SpanContext().IsValid() {
 		return

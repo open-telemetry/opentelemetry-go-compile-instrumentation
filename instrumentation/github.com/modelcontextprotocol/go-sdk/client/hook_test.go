@@ -133,9 +133,9 @@ func (c *fakeAsyncCall) ID() jsonrpc.ID { return c.id }
 func TestAfterConnectionCall_RecordsRequestID(t *testing.T) {
 	sr := setupTest(t)
 
-	// Simulate the CallTool path: the before hook replaces ctx with the
-	// span-bearing context, which internal Connection.Call receives as its
-	// first parameter (hook param 0).
+	// Simulate the CallTool path: the before hook replaces the context slot
+	// (param 1) with the span-bearing context, which internal Connection.Call
+	// receives as its second framework parameter (receiver = param 0).
 	params := &mcp.CallToolParams{Name: "x"}
 	before := hooktest.NewMockHookContext(&mcp.ClientSession{}, context.Background(), params)
 	BeforeCallTool(before, &mcp.ClientSession{}, context.Background(), params)
@@ -143,7 +143,9 @@ func TestAfterConnectionCall_RecordsRequestID(t *testing.T) {
 	require.True(t, trace.SpanFromContext(callCtx).SpanContext().IsValid())
 
 	t.Run("integer id is rendered as its wire string", func(t *testing.T) {
-		after := hooktest.NewMockHookContext(callCtx)
+		// Mirror the real trampoline for (*Connection).Call: receiver at
+		// index 0, request context at index 1.
+		after := hooktest.NewMockHookContext(&mcp.ClientSession{}, callCtx)
 		AfterConnectionCall(after, &fakeAsyncCall{id: mustID(t, float64(42))})
 
 		spans := sr.Started()
@@ -152,7 +154,7 @@ func TestAfterConnectionCall_RecordsRequestID(t *testing.T) {
 	})
 
 	t.Run("string id is passed through", func(t *testing.T) {
-		after := hooktest.NewMockHookContext(callCtx)
+		after := hooktest.NewMockHookContext(&mcp.ClientSession{}, callCtx)
 		AfterConnectionCall(after, &fakeAsyncCall{id: mustID(t, "req-7")})
 
 		spans := sr.Started()
@@ -165,14 +167,14 @@ func TestAfterConnectionCall_NoSpanInContext(t *testing.T) {
 
 	// A JSON-RPC call made outside any span (e.g. an initialize request with
 	// no ambient trace) must not produce an attribute or panic.
-	ictx := hooktest.NewMockHookContext(context.Background())
+	ictx := hooktest.NewMockHookContext(&mcp.ClientSession{}, context.Background())
 	AfterConnectionCall(ictx, &fakeAsyncCall{id: mustID(t, float64(1))})
 }
 
 func TestAfterConnectionCall_IgnoresOtherResults(t *testing.T) {
 	setupTest(t)
 
-	ictx := hooktest.NewMockHookContext(context.Background())
+	ictx := hooktest.NewMockHookContext(&mcp.ClientSession{}, context.Background())
 	AfterConnectionCall(ictx, "not an async call")
 }
 

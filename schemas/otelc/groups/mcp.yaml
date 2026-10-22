@@ -1,0 +1,66 @@
+groups:
+  # ---------------------------------------------------------------------------
+  # modelcontextprotocol/go-sdk instrumentation emission contract.
+  #
+  # Source of truth for this file:
+  #   instrumentation/github.com/modelcontextprotocol/go-sdk/client/hook.go  (span + attrs)
+  #   instrumentation/github.com/modelcontextprotocol/go-sdk/semconv/mcp.go  (attribute keys)
+  #
+  # The go-sdk instrumentation is trace-only: it creates one client span per
+  # MCP request issued through an mcp.ClientSession (`tools/call` is the only
+  # request instrumented today, `gen_ai.operation.name` = `execute_tool`). It
+  # records no metrics.
+  #
+  # The GenAI semantic conventions' MCP section
+  # (open-telemetry/semantic-conventions-genai, docs/gen-ai/mcp.md) is still
+  # Development stability, so `gen_ai.*` and `mcp.*` attribute keys are
+  # declared locally with `id:` rather than referenced from a released semconv
+  # module. `jsonrpc.request.id` follows the upstream JSON-RPC convention
+  # (https://opentelemetry.io/docs/specs/semconv/rpc/json-rpc/) but is not
+  # exposed by the pinned upstream registry yet, so it is declared locally too.
+  #
+  # Notes on conditional attributes:
+  #   - `mcp.session.id` is recorded only once the initialize handshake has
+  #     completed (ClientSession.ID() is empty before that).
+  #   - `jsonrpc.request.id` is recorded only when the span context survives
+  #     into internal/jsonrpc2.(*Connection).Call, i.e. for requests started
+  #     from an instrumented session call (tools/call, ...).
+  #   - Call arguments and results are intentionally not emitted: the GenAI
+  #     convention marks `gen_ai.tool.call.arguments` /
+  #     `gen_ai.tool.call.result` as Opt-In to avoid leaking user data.
+  # ---------------------------------------------------------------------------
+
+  - id: registry.otelc.gen_ai.mcp
+    type: attribute_group
+    display_name: otelc MCP client attributes
+    brief: >
+      Attributes emitted by the modelcontextprotocol/go-sdk instrumentation that are not covered by the
+      released OpenTelemetry semantic conventions.
+    attributes:
+      - id: gen_ai.operation.name
+        type: string
+        stability: development
+        brief: The GenAI operation being performed. MCP tool calls use `execute_tool`.
+        examples: ["execute_tool"]
+      - id: gen_ai.tool.name
+        type: string
+        stability: development
+        brief: The name of the MCP tool being invoked (CallToolParams.Name).
+        examples: ["get-weather"]
+      - id: mcp.method.name
+        type: string
+        stability: development
+        brief: The JSON-RPC request method of the MCP call.
+        examples: ["tools/call"]
+      - id: mcp.session.id
+        type: string
+        stability: development
+        brief: The MCP session identifier negotiated at initialize time (ClientSession.ID()).
+        examples: ["session-42"]
+      - id: jsonrpc.request.id
+        type: string
+        stability: development
+        brief: >
+          The JSON-RPC request identifier, rendered the way it travels on the wire (an integer id
+          is rendered as its decimal string, a string id passes through).
+        examples: ["42", "req-7"]
