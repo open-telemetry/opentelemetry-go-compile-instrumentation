@@ -1,0 +1,58 @@
+groups:
+  # ---------------------------------------------------------------------------
+  # github.com/IBM/sarama instrumentation emission contract.
+  #
+  # Source of truth for this file:
+  #   instrumentation/github.com/IBM/sarama/hook.go
+  #   instrumentation/github.com/IBM/sarama/semconv/client.go
+  #
+  # The sarama instrumentation is trace-only: it creates one producer span per
+  # sent message and one consumer span per delivered message, and records no
+  # metrics. `messaging.system` is always `kafka`. Producer spans are opened on
+  # first dispatch and ended on the broker result path
+  # (returnSuccesses/returnErrors/returnError), so their duration covers the
+  # broker round trip; consumer spans are created and ended inside OnConsume and
+  # reflect message delivery, not application processing time. Almost every
+  # attribute is standard upstream OpenTelemetry messaging telemetry,
+  # referenced with `ref:`; no library-specific attribute is declared, so there
+  # is no local attribute_group in this file.
+  # ---------------------------------------------------------------------------
+
+  - id: span.otelc.messaging.sarama.producer
+    type: span
+    span_kind: producer
+    stability: development
+    brief: >
+      Kafka producer span, one per sent message. Opened on first dispatch of the
+      message and kept open until the broker result is delivered to the producer
+      loop (returnSuccesses/returnErrors/returnError), so the span reflects the
+      broker round trip rather than local hand-off; the error is recorded and
+      the status set on failure.
+    attributes:
+      - ref: messaging.system
+      - ref: messaging.operation.name
+      - ref: messaging.operation.type
+      - ref: messaging.destination.name
+      - ref: server.address
+      - ref: server.port
+      - ref: messaging.kafka.message.key
+      - ref: messaging.message.body.size
+      - ref: error.type
+
+  - id: span.otelc.messaging.sarama.consumer
+    type: span
+    span_kind: consumer
+    stability: development
+    brief: Kafka consumer span, one per message delivered to the Messages channel.
+    attributes:
+      - ref: messaging.system
+      - ref: messaging.operation.name
+      - ref: messaging.operation.type
+      - ref: messaging.destination.name
+      - ref: server.address
+      - ref: server.port
+      - ref: messaging.consumer.group.name
+      - ref: messaging.kafka.message.key
+      - ref: messaging.message.body.size
+      - ref: messaging.destination.partition.id
+      - ref: messaging.kafka.offset
