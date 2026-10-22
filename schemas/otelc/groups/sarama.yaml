@@ -23,11 +23,9 @@ groups:
     span_kind: producer
     stability: development
     brief: >
-      Kafka producer span, one per sent message. Opened on first dispatch of the
-      message and kept open until the broker result is delivered to the producer
-      loop (returnSuccesses/returnErrors/returnError), so the span reflects the
-      broker round trip rather than local hand-off; the error is recorded and
-      the status set on failure.
+      Kafka producer span, one per sent message. Opened on first dispatch of the message and kept open until the broker result
+      is delivered to the producer loop (returnSuccesses/returnErrors/returnError), so the span reflects the broker round
+      trip rather than local hand-off; the error is recorded and the status set on failure.
     attributes:
       - ref: messaging.system
       - ref: messaging.operation.name
