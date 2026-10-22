@@ -1055,3 +1055,9 @@ func TestUserBuildTags(t *testing.T) {
 		})
 	}
 }
+
+func TestToolexecEmptyArgs(t *testing.T) {
+	err := Toolexec(t.Context(), []string{}, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no tool command specified")
+}

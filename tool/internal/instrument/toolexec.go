@@ -660,6 +660,10 @@ func interceptToolVersion(ctx context.Context, args []string) error {
 // a rule added. Those invocations instrument compiles and run every other
 // command unchanged.
 func Toolexec(ctx context.Context, args []string, nested bool) error {
+	if len(args) == 0 {
+		return ex.New("no tool command specified")
+	}
+
 	// Use slice-based detection to correctly handle tool paths with spaces
 	// (common on Windows, e.g., "C:\Program Files\Go\pkg\tool\...")
 
@@ -668,7 +672,7 @@ func Toolexec(ctx context.Context, args []string, nested bool) error {
 	// appended so instrumented artifacts never share cache entries with plain
 	// builds; instrumentation changes compile output without changing any
 	// input go hashes.
-	if len(args) == 2 && args[1] == "-V=full" {
+	if len(args) == 2 && args[1] == "-V=full" { //nolint:gosec // false positive: args[1] is guarded by len(args) == 2
 		return interceptToolVersion(ctx, args)
 	}
 
