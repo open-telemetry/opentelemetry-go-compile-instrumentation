@@ -1,28 +1,101 @@
 name: Release
+
 on:
-  push:
-    tags:
-      - 'v*.*.*'
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+      - 'release/v*.*.x'  # for hotfix releases
+
 jobs:
   release:
     name: Build and Release
     runs-on: ubuntu-latest
+    if: >
+      github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/v')
     permissions:
       contents: write
     steps:
-      - name: Checkout code
+      - name: Extract version
+        id: version
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          VERSION="${HEAD_REF#release/}"
+          if [[ ! "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "Branch '${HEAD_REF}' is not a valid release version (must match ^v<semver>). Skipping release."
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Determine if pre-release
+        id: prerelease
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if [[ "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+- ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout merge commit
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
+          persist-credentials: true
           fetch-depth: 0
+
       - name: Set up Go
-        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: 'go.mod'
-      - name: Build binary
-        run: make build-all
-      - name: Create Release
-        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b
-        with:
-          files: |
-            dist/otelc-*
-          generate_release_notes: true
+          cache: false
+
+      - name: Build binaries
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: make build-all VERSION="${VERSION}"
+
+      - name: Generate SHA256 checksums
+        run: |
+          cd dist
+          sha256sum otelc-* > checksums.txt
+
+      - name: Create and push tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          HEAD_COMMIT=$(git rev-parse HEAD)
+          REMOTE_COMMIT=$(git ls-remote --tags origin "refs/tags/${VERSION}^{}" | awk '{print $1}')
+          if [ -z "${REMOTE_COMMIT}" ]; then
+            REMOTE_COMMIT=$(git ls-remote --tags origin "refs/tags/${VERSION}" | awk '{print $1}')
+          fi
+
+          if [ -n "${REMOTE_COMMIT}" ]; then
+            if [ "${REMOTE_COMMIT}" = "${HEAD_COMMIT}" ]; then
+              echo "Tag '${VERSION}' already exists on origin pointing to current commit (${HEAD_COMMIT}). Skipping tag creation."
+            else
+              echo "Tag '${VERSION}' already exists on remote pointing to a different commit!" >&2
+              exit 1
+            fi
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "${VERSION}" -m "Release ${VERSION}"
+            git push origin "${VERSION}"
+          fi
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          IS_PRERELEASE: ${{ steps.prerelease.outputs.prerelease }}
+        run: |
+          RELEASE_FLAGS=()
+          if [ "${IS_PRERELEASE}" = "true" ]; then
+            RELEASE_FLAGS+=(--prerelease)
+          fi
+          gh release create "${VERSION}" dist/otelc-* dist/checksums.txt \
+            --title "${VERSION}" \
+            --notes-file .github/release-notes.md \
+            "${RELEASE_FLAGS[@]}"

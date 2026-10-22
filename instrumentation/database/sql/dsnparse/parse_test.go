@@ -589,3 +589,12 @@ func TestParseDSN_MySQLNoParensPreviouslyFailing(t *testing.T) {
 	assert.Equal(t, "3306", got.Port)
 	assert.Equal(t, "mydb", got.DBName)
 }
+
+func TestParseDSN_MySQLNoParensUnixSocketWithQueryParam(t *testing.T) {
+	// Regression test: a '/' inside a query param value used to confuse the
+	// separator search, since it ran over the whole DSN instead of stopping
+	// at the '?'.
+	got := ParseDSN("mysql", "unix:/tmp/mysql.sock/db?tls=a/b")
+	assert.Equal(t, "/tmp/mysql.sock", got.Host)
+	assert.Equal(t, "db", got.DBName)
+}

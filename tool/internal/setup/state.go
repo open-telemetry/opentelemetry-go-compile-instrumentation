@@ -8,11 +8,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 
@@ -97,13 +95,13 @@ func stateManagerFromContext(ctx context.Context) (*stateManager, bool) {
 	return s, true
 }
 
-func getBackupFiles(ctx context.Context, moduleDirs map[string]bool) ([]string, error) {
+func getBackupFiles(ctx context.Context, moduleDirs []string) ([]string, error) {
 	var files []string
 
-	dirs := slices.Sorted(maps.Keys(moduleDirs))
+	dirs := normalizeModuleDirs(moduleDirs)
 	// Find all go.mod, go.sum, and tool files
 	for _, moduleDir := range dirs {
-		goModFile := filepath.Join(moduleDir, "go.mod")
+		goModFile := filepath.Join(moduleDir, goModFileName)
 		goSumFile := filepath.Join(moduleDir, "go.sum")
 		canonical := filepath.Join(moduleDir, toolFileCanonical)
 		alias := filepath.Join(moduleDir, toolFileAlias)
@@ -184,7 +182,7 @@ func (s *stateManager) Track(path string) error {
 	// If the file exists, snapshot it
 	dst := filepath.Join(util.GetBuildTemp(stateDir), stateSnapshotPath(abs))
 	if err = util.CopyFile(abs, dst); err != nil {
-		return ex.Wrapf(err, "failed to snapshot %s", abs)
+		return err
 	}
 
 	s.files[abs] = true
@@ -225,11 +223,7 @@ func (s *stateManager) Commit() error {
 		return ex.Wrapf(err, "failed to create build temp directory")
 	}
 
-	if err = util.WriteFileAtomic(f, bs); err != nil {
-		return ex.Wrapf(err, "failed to write state file %s", f)
-	}
-
-	return nil
+	return util.WriteFileAtomic(f, bs)
 }
 
 // Discard removes the persisted manifest and snapshots. Call it only after a

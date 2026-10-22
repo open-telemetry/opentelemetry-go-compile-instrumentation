@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 func TestNewInstDirectiveRule(t *testing.T) {
@@ -83,6 +83,26 @@ directive: "//otelc:span"
 target: main
 `,
 			ruleName:    "prefix-directive",
+			expectError: true,
+		},
+		{
+			name: "builtin ignore directive is reserved",
+			yamlContent: `
+directive: "otelc:ignore"
+target: main
+template: "_ = 0"
+`,
+			ruleName:    "shadow-ignore",
+			expectError: true,
+		},
+		{
+			name: "builtin instrument directive is reserved",
+			yamlContent: `
+directive: "otelc:instrument"
+target: main
+template: "_ = 0"
+`,
+			ruleName:    "shadow-instrument",
 			expectError: true,
 		},
 	}

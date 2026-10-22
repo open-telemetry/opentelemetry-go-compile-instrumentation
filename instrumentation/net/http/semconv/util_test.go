@@ -4,9 +4,11 @@
 package semconv
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 func TestSplitHostPort(t *testing.T) {
@@ -88,10 +90,11 @@ func TestStandardizeHTTPMethod(t *testing.T) {
 		{"GET", "GET"},
 		{"get", "GET"},
 		{"Post", "POST"},
-		{"QUERY", "QUERY"},
-		{"query", "QUERY"},
-		{"CUSTOM", "_OTHER"},
-		{"", "_OTHER"},
+		{"QUERY", HTTPMethodOther},
+		{"query", HTTPMethodOther},
+		{"CUSTOM", HTTPMethodOther},
+		{"", HTTPMethodOther},
+		{HTTPMethodOther, HTTPMethodOther},
 	}
 
 	for _, tt := range tests {
@@ -100,6 +103,112 @@ func TestStandardizeHTTPMethod(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestParseKnownMethods(t *testing.T) {
+	got := parseKnownMethods("GET, PROPFIND,POST")
+	assert.Equal(t, "GET", got["GET"].Value.AsString())
+	assert.Equal(t, "PROPFIND", got["PROPFIND"].Value.AsString())
+	assert.Equal(t, "POST", got["POST"].Value.AsString())
+	_, hasPut := got["PUT"]
+	assert.False(t, hasPut, "override must fully replace defaults")
+
+	empty := parseKnownMethods(" , , ")
+	assert.Empty(t, empty)
+}
+
+func resetKnownMethodsForTest(t *testing.T) {
+	t.Helper()
+	knownMethodsOnce = sync.Once{}
+	knownMethodsMap = nil
+}
+
+func TestKnownMethods(t *testing.T) {
+	t.Cleanup(func() {
+		t.Setenv(HTTPKnownMethodsEnv, "")
+		resetKnownMethodsForTest(t)
+	})
+
+	t.Run("defaults", func(t *testing.T) {
+		t.Setenv(HTTPKnownMethodsEnv, "")
+		resetKnownMethodsForTest(t)
+
+		got := knownMethods()
+		assert.Equal(t, MethodLookup, got)
+		_, hasQuery := got["QUERY"]
+		assert.False(t, hasQuery, "QUERY is not a default known method")
+	})
+
+	t.Run("env override", func(t *testing.T) {
+		t.Setenv(HTTPKnownMethodsEnv, "GET,QUERY,PROPFIND")
+		resetKnownMethodsForTest(t)
+
+		got := knownMethods()
+		assert.Equal(t, "GET", got["GET"].Value.AsString())
+		assert.Equal(t, "QUERY", got["QUERY"].Value.AsString())
+		assert.Equal(t, "PROPFIND", got["PROPFIND"].Value.AsString())
+		_, hasPost := got["POST"]
+		assert.False(t, hasPost, "override must fully replace defaults")
+
+		assert.Equal(t, "QUERY", StandardizeHTTPMethod("QUERY"))
+		assert.Equal(t, "QUERY", SpanMethod("QUERY"))
+	})
+}
+
+func TestRequestMethodAttrs(t *testing.T) {
+	tests := []struct {
+		name           string
+		method         string
+		wantMethod     string
+		wantOriginal   string
+		wantNoOriginal bool
+	}{
+		{name: "known", method: "GET", wantMethod: "GET", wantNoOriginal: true},
+		{name: "case variant", method: "get", wantMethod: "GET", wantOriginal: "get"},
+		{name: "unknown", method: "CUSTOM", wantMethod: HTTPMethodOther, wantOriginal: "CUSTOM"},
+		{name: "QUERY not default", method: "QUERY", wantMethod: HTTPMethodOther, wantOriginal: "QUERY"},
+		{name: "empty", method: "", wantMethod: HTTPMethodOther, wantNoOriginal: true},
+		{name: "literal _OTHER", method: HTTPMethodOther, wantMethod: HTTPMethodOther, wantNoOriginal: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			method, original := requestMethodAttrs(tt.method)
+			assert.Equal(t, "http.request.method", string(method.Key))
+			assert.Equal(t, tt.wantMethod, method.Value.AsString())
+			if tt.wantNoOriginal {
+				assert.Equal(t, attribute.KeyValue{}, original)
+				return
+			}
+			assert.Equal(t, "http.request.method_original", string(original.Key))
+			assert.Equal(t, tt.wantOriginal, original.Value.AsString())
+		})
+	}
+}
+
+func TestSpanMethod(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"GET", "GET"},
+		{"get", "GET"},
+		{"QUERY", "HTTP"},
+		{"CUSTOM", "HTTP"},
+		{"", "HTTP"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			assert.Equal(t, tt.expected, SpanMethod(tt.input))
+		})
+	}
+}
+
+func TestHTTPClientSpanName(t *testing.T) {
+	assert.Equal(t, "POST", HTTPClientSpanName("POST"))
+	assert.Equal(t, "HTTP", HTTPClientSpanName("CUSTOM"))
+	assert.Equal(t, "HTTP", HTTPClientSpanName(""))
 }
 
 func TestMethodLookup(t *testing.T) {
@@ -116,7 +225,7 @@ func TestMethodLookup(t *testing.T) {
 		{"OPTIONS", true},
 		{"CONNECT", true},
 		{"TRACE", true},
-		{"QUERY", true},
+		{"QUERY", false},
 		{"CUSTOM", false},
 	}
 
@@ -162,6 +271,56 @@ func TestServerClientIP(t *testing.T) {
 		t.Run(tt.input, func(t *testing.T) {
 			result := ServerClientIP(tt.input)
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestRedactQuery(t *testing.T) {
+	tests := []struct {
+		name     string
+		rawQuery string
+		want     string
+	}{
+		{"empty", "", ""},
+		{"no sensitive keys unchanged", "color=blue&size=large", "color=blue&size=large"},
+		{"sig redacted, key preserved", "color=blue&sig=abc123", "color=blue&sig=REDACTED"},
+		{"aws signature redacted", "X-Amz-Signature=deadbeef", "X-Amz-Signature=REDACTED"},
+		{"aws credential redacted", "X-Amz-Credential=AKIA/secret", "X-Amz-Credential=REDACTED"},
+		{"aws security token redacted", "X-Amz-Security-Token=tok", "X-Amz-Security-Token=REDACTED"},
+		{"google signature redacted", "X-Goog-Signature=sigval", "X-Goog-Signature=REDACTED"},
+		// Restored to the spec's default list in semantic-conventions#3989:
+		// AWSAccessKeyId is SigV2 query auth, Signature covers both SigV2 and
+		// CloudFront signed URLs.
+		{"aws access key id redacted", "AWSAccessKeyId=AKIAEXAMPLE", "AWSAccessKeyId=REDACTED"},
+		{"bare signature redacted", "Signature=abc123", "Signature=REDACTED"},
+		{
+			"cloudfront signed url",
+			"Expires=1&Signature=sig&Key-Pair-Id=K1",
+			"Expires=1&Signature=REDACTED&Key-Pair-Id=K1",
+		},
+		{
+			"order and non-sensitive preserved",
+			"a=1&sig=secret&b=2&X-Amz-Signature=k&c=3",
+			"a=1&sig=REDACTED&b=2&X-Amz-Signature=REDACTED&c=3",
+		},
+		{"matching is case-sensitive", "SIG=secret&Sig=secret2", "SIG=secret&Sig=secret2"},
+		{"wrong-case aws key not redacted", "x-amz-signature=secret", "x-amz-signature=secret"},
+		{"bare key without value unchanged", "sig&color=blue", "sig&color=blue"},
+		{"empty sensitive value still redacted", "sig=", "sig=REDACTED"},
+		{"repeated sensitive key both redacted", "sig=a&sig=b", "sig=REDACTED&sig=REDACTED"},
+		// A server decodes the key before using it, so a percent encoded key names
+		// the same parameter. Matching the raw spelling would let an encoded key
+		// carry its secret through untouched.
+		{"percent-encoded sig redacted", "s%69g=secret", "s%69g=REDACTED"},
+		{"percent-encoded aws key redacted", "X-Amz-Sign%61ture=deadbeef", "X-Amz-Sign%61ture=REDACTED"},
+		{"fully encoded sig redacted", "%73%69%67=secret", "%73%69%67=REDACTED"},
+		{"encoding that changes case does not match", "S%49G=secret", "S%49G=secret"},
+		{"undecodable key compared as written", "%zz=secret&sig=x", "%zz=secret&sig=REDACTED"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, redactQuery(tt.rawQuery))
 		})
 	}
 }

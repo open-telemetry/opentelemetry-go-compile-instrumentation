@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -210,7 +209,7 @@ func (n HTTPServer) RequestTraceAttrs(
 	}
 
 	if req.URL != nil && req.URL.RawQuery != "" {
-		attrs = append(attrs, semconv.URLQuery(req.URL.RawQuery))
+		attrs = append(attrs, semconv.URLQuery(redactQuery(req.URL.RawQuery)))
 	}
 
 	if protoName != "" && protoName != "http" {
@@ -362,18 +361,7 @@ func (n HTTPServer) MetricAttributes(
 
 // method returns the HTTP method attribute and optional original method attribute.
 func (HTTPServer) method(method string) (attribute.KeyValue, attribute.KeyValue) {
-	if method == "" {
-		return semconv.HTTPRequestMethodGet, attribute.KeyValue{}
-	}
-	if attr, ok := MethodLookup[method]; ok {
-		return attr, attribute.KeyValue{}
-	}
-
-	orig := semconv.HTTPRequestMethodOriginal(method)
-	if attr, ok := MethodLookup[strings.ToUpper(method)]; ok {
-		return attr, orig
-	}
-	return semconv.HTTPRequestMethodGet, orig
+	return requestMethodAttrs(method)
 }
 
 // scheme returns the URL scheme attribute.
@@ -445,7 +433,9 @@ func HTTPServerRoute(route string) attribute.KeyValue {
 }
 
 // HTTPServerSpanName returns the span name for an HTTP server request.
+// Unknown methods use "HTTP" so names stay low-cardinality and match semconv.
 func HTTPServerSpanName(method, route string) string {
+	method = SpanMethod(method)
 	if route != "" {
 		return method + " " + route
 	}

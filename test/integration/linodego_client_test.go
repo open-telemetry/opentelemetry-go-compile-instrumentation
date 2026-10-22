@@ -98,7 +98,27 @@ func TestLinodegoClient(t *testing.T) {
 		)
 		reqAttrs := testutil.Attrs(reqSpan)
 		require.Equal(t, int64(404), reqAttrs["http.response.status_code"])
+		require.Equal(t, "404", reqAttrs["error.type"])
 		require.Equal(t, ptrace.StatusCodeError, reqSpan.Status().Code())
+	})
+
+	t.Run("transport_failure_marks_both_spans", func(t *testing.T) {
+		f := testutil.NewTestFixture(t)
+		server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			// Close the connection before sending an HTTP response.
+			panic(http.ErrAbortHandler)
+		}))
+		t.Cleanup(server.Close)
+
+		output := f.Run("linodegoclient", "-addr="+server.URL, "-mode=not_found", "-id=123")
+		require.Contains(t, output, "GetInstance error:")
+		for _, name := range []string{"linodego.GetInstance", "GET linode/instances/123"} {
+			span := testutil.RequireSpan(t, f.Traces(), testutil.IsClient, testutil.HasName(name))
+			require.Equal(t, ptrace.StatusCodeError, span.Status().Code())
+			attrs := testutil.Attrs(span)
+			require.Equal(t, "*fmt.wrapError", attrs["error.type"])
+			require.NotContains(t, attrs, "http.response.status_code")
+		}
 	})
 }
 

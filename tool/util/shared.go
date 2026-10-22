@@ -27,14 +27,33 @@ const (
 	// EnvOtelcNestedToolexec marks toolexec invocations spawned by a go
 	// command otelc itself ran (e.g. `go list -export`).
 	EnvOtelcNestedToolexec = "OTELC_NESTED_TOOLEXEC"
-	BuildTempDir           = ".otelc-build"
-	BuildLockFile          = BuildTempDir + ".lock"
-	OtelcRoot              = "go.opentelemetry.io/otelc"
-	OtelcPkgRoot           = OtelcRoot + "/pkg"
-	OtelcInstRoot          = OtelcRoot + "/instrumentation"
-	OtelcToolCmdRoot       = OtelcRoot + "/tool/cmd/otelc"
-	OtelcToolExe           = "otelc"
+	// EnvOtelcNestedResolving lists, outermost first, the compiles waiting on
+	// a nested build to resolve an import a rule added, as comma-separated
+	// "package>added import" entries. Import paths cannot contain "," or ">",
+	// so the entries need no escaping.
+	EnvOtelcNestedResolving = "OTELC_NESTED_RESOLVING"
+	BuildTempDir            = ".otelc-build"
+	BuildLockFile           = BuildTempDir + ".lock"
+	OtelcRoot               = "go.opentelemetry.io/otelc"
+	OtelcPkgRoot            = OtelcRoot + "/pkg"
+	OtelcInstRoot           = OtelcRoot + "/instrumentation"
+	OtelcToolCmdRoot        = OtelcRoot + "/tool/cmd/otelc"
+	OtelcToolExe            = "otelc"
 )
+
+// DirectiveIgnore and DirectiveInstrument live in util, not ast or rule. ast
+// already imports rule, so rule importing ast back would cycle. Both
+// packages import util instead.
+const (
+	DirectiveIgnore     = "otelc:ignore"
+	DirectiveInstrument = "otelc:instrument"
+)
+
+// BuiltinDirectives lists directive names reserved for otelc. A directive
+// rule using one of these names fails validation.
+//
+//nolint:gochecknoglobals // read-only lookup table
+var BuiltinDirectives = []string{DirectiveIgnore, DirectiveInstrument}
 
 // IsRuleFile reports whether name identifies an otelc rule file.
 func IsRuleFile(name string) bool {
@@ -47,6 +66,12 @@ func IsRuleFile(name string) bool {
 func GetMatchedRuleFile() string {
 	const matchedRuleFile = "matched.json"
 	return GetBuildTemp(matchedRuleFile)
+}
+
+// GetImportNamesFile returns the path to the import name table file.
+func GetImportNamesFile() string {
+	const importNamesFile = "import_names.json"
+	return GetBuildTemp(importNamesFile)
 }
 
 // GetAddedImportsFileForProcess returns the per-process import tracking file.
@@ -102,7 +127,8 @@ func DiscoverWorkDir(dir string) string {
 	}
 }
 
-// GetBuildTemp returns the path to the build temp directory $BUILD_TEMP/name
+// GetBuildTempDir returns the path to the build temp directory,
+// $OTELC_WORK_DIR/.otelc-build.
 func GetBuildTempDir() string {
 	return filepath.Join(GetOtelcWorkDir(), BuildTempDir)
 }

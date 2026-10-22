@@ -364,7 +364,6 @@ func (ip *instrumentPhase) optimizeTJumps() error {
 		// because there might be more than one trampoline-jump-if in the same
 		// function, they are nested in the else block. See findJumpPoint for
 		// more details.
-		// TODO: Remove corresponding HookContextImpl methods
 		removedOnExit := false
 		rule := tjump.rule
 		if rule.After == "" {
@@ -395,7 +394,7 @@ func (ip *instrumentPhase) optimizeTJumps() error {
 		// This further simplifies the trampoline-jump-if and gives more chances
 		// for optimization passes to kick in.
 		if rule.Before != "" {
-			hookFunc, err := getHookFunc(tjump.rule, true)
+			hookFunc, err := ip.getHookFunc(tjump.rule, true)
 			if err != nil {
 				return err
 			}

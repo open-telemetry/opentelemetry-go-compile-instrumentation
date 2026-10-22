@@ -5,6 +5,7 @@ package imports
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"strings"
 
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // ImportConfig represents the parsed contents of an importcfg (or importcfg.link) file,
@@ -29,7 +31,7 @@ type ImportConfig struct {
 func ParseImportCfg(filename string) (ImportConfig, error) {
 	file, err := os.Open(filename)
 	if err != nil {
-		return ImportConfig{}, err
+		return ImportConfig{}, ex.Wrapf(err, "opening importcfg file %s", filename)
 	}
 	defer file.Close()
 
@@ -102,28 +104,27 @@ func parse(r io.Reader) (ImportConfig, error) {
 	return reg, nil
 }
 
-type writeCloser interface {
-	io.Writer
-	io.Closer
-}
-
 // WriteFile writes the content of the ImportConfig to the provided file,
 // in the format expected by the Go toolchain commands.
 func (r *ImportConfig) WriteFile(filename string) error {
-	file, err := os.Create(filename)
-	if err != nil {
-		return ex.Wrapf(err, "failed to create file %s", filename)
+	var buf bytes.Buffer
+	if err := r.write(&buf); err != nil {
+		return ex.Wrapf(err, "failed to render importcfg for %s", filename)
 	}
-	return r.writeFile(file, filename)
+	return util.WriteFileAtomic(filename, buf.Bytes())
 }
 
-func (r *ImportConfig) writeFile(w writeCloser, filename string) error {
+func (r *ImportConfig) writeFile(w io.WriteCloser, filename string) (retErr error) {
+	// The deferred close runs on every return path, including a panic during the write.
+	// The deferred close reports an error only when the write succeeds, so the write error takes priority.
+	defer func() {
+		if closeErr := w.Close(); closeErr != nil && retErr == nil {
+			retErr = ex.Wrapf(closeErr, "failed to close file %s", filename)
+		}
+	}()
+
 	if err := r.write(w); err != nil {
-		_ = w.Close()
 		return ex.Wrapf(err, "failed to write to file %s", filename)
-	}
-	if err := w.Close(); err != nil {
-		return ex.Wrapf(err, "failed to close file %s", filename)
 	}
 	return nil
 }
