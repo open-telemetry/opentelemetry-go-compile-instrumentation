@@ -5,6 +5,8 @@ module go.opentelemetry.io/otelc
 
 go 1.26.0
 
+toolchain go1.26.10
+
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/dave/dst v0.28.0

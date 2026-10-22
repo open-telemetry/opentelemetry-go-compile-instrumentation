@@ -446,7 +446,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	// application below, which compiles their dependencies too. The build plan
 	// never saw those, so match them now.
 	injected, err := sp.matchInjectedDeps(
-		ctx, matched, deps, moduleDirs, extractBuildFlags(subcommand, args),
+		ctx, matched, deps, moduleDirs, sp.buildFlags,
 	)
 	if err != nil {
 		return err
