@@ -444,6 +444,13 @@ func TestParseDSN_SQLServer(t *testing.T) {
 			wantPort: "14330",
 			wantDB:   "sales",
 		},
+		{
+			name:     "ado.net server with bracketed ipv6 and port",
+			dsn:      "Server=[::1],1433;Database=mydb",
+			wantHost: "::1",
+			wantPort: "1433",
+			wantDB:   "mydb",
+		},
 	}
 
 	for _, tt := range tests {
