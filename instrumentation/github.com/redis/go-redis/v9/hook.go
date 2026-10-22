@@ -31,6 +31,8 @@ var (
 const (
 	redisAuthCmd         = "auth"
 	redisHelloCmd        = "hello"
+	redisEvalCmd         = "eval"
+	redisEvalROCmd       = "eval_ro"
 	redisSetNameOption   = "setname"
 	redisHelloAuthArgN   = 2
 	redisQueryTextRedact = "?"
@@ -176,25 +178,9 @@ func getRedisV9Statement(cmd redis.Cmder) string {
 	return string(b)
 }
 
-// redisV9RedactRange returns a half-open index range of args that must not
-// appear in db.query.text.
-//
-// AUTH and HELLO get a narrow, credential-shaped rule: AUTH's arguments are
-// credentials outright, and HELLO's AUTH username/password sub-arguments are
-// too (SETNAME and the protocol version are not).
-//
-// Every other command redacts everything after args[1]. Unlike SQL, a Redis
-// command's arguments are not a query template plus bindable parameters:
-// SET's value, HSET's field/value pairs, LPUSH's elements, and so on are the
-// application data being written, indistinguishable from the command shape
-// without a per-command grammar. args[0] is always the command name and
-// args[1] is conventionally the key, so this keeps "what command touched
-// what key" visible while never emitting a value. It also over-redacts
-// arguments that happen not to be sensitive (e.g. EXPIRE's TTL) and, for
-// multi-key commands like MSET, redacts keys past the first as if they were
-// values - both accepted trade-offs for never leaking one by default. See
-// https://opentelemetry.io/docs/specs/semconv/db/redis/, which calls for
-// query text to be sanitized or opt-in rather than captured by default.
+// redisV9RedactRange returns the half-open index range of arguments to redact in db.query.text.
+// Credentials in AUTH/HELLO and scripts/arguments in EVAL/EVAL_RO are redacted entirely.
+// For all other commands, arguments after the key (args[1]) are redacted to avoid leaking values.
 func redisV9RedactRange(name string, args []interface{}) (start, end int) {
 	switch name {
 	case redisAuthCmd:
@@ -204,6 +190,10 @@ func redisV9RedactRange(name string, args []interface{}) (start, end int) {
 	case redisHelloCmd:
 		if i := redisV9HelloAuthIndex(args); i >= 0 {
 			return i + 1, min(i+1+redisHelloAuthArgN, len(args))
+		}
+	case redisEvalCmd, redisEvalROCmd:
+		if len(args) > 1 {
+			return 1, len(args)
 		}
 	default:
 		if len(args) > redisValueArgsStart {

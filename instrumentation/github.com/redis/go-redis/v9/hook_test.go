@@ -227,6 +227,21 @@ func TestGetRedisV9Statement_RedactsCommandValues(t *testing.T) {
 			cmd:      redis.NewCmd(context.Background(), "ping"),
 			expected: "ping",
 		},
+		{
+			name:     "EVAL redacts script and all arguments",
+			cmd:      redis.NewCmd(context.Background(), "eval", "return redis.call('get', KEYS[1])", 1, "key1"),
+			expected: "eval ? ? ?",
+		},
+		{
+			name:     "EVAL_RO redacts script and all arguments",
+			cmd:      redis.NewCmd(context.Background(), "eval_ro", "return redis.call('get', KEYS[1])", 1, "key1"),
+			expected: "eval_ro ? ? ?",
+		},
+		{
+			name:     "EVAL with script containing secret",
+			cmd:      redis.NewCmd(context.Background(), "eval", "local token = 's3cret-token'; return token", 0),
+			expected: "eval ? ?",
+		},
 	}
 
 	for _, tt := range tests {

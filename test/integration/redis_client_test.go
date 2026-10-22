@@ -119,27 +119,6 @@ func assertRedisClientSpans(t *testing.T, appsDir string) {
 		"del testkey",
 	)
 }
-				"get",
-				server.Addr(),
-				"get testkey",
-			)
-		}
-	}
-	require.Equal(t, 2, getCount, "client GET and Conn GET should each produce one span")
-	require.True(t, clientGet, "NewClient GET span is missing")
-
-	delSpan := testutil.RequireSpan(t, f.Traces(),
-		testutil.IsClient,
-		testutil.HasAttribute("db.operation.name", "del"),
-	)
-	testutil.RequireRedisClientSemconv(
-		t,
-		delSpan,
-		"del",
-		server.Addr(),
-		"del testkey",
-	)
-}
 
 // pinnedRedisClient copies redisclient and pins go-redis so otelc matches the
 // Conn rule against that module version, not the committed go.mod.
