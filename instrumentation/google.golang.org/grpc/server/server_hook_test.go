@@ -591,5 +591,9 @@ func TestServerStatsHandler_UnsampledSpanEnded(t *testing.T) {
 		EndTime:   time.Now(),
 	})
 
-	require.Empty(t, exporter.GetSpans(), "NeverSample spans are not exported, but End() must still run without panicking")
+	require.Empty(
+		t,
+		exporter.GetSpans(),
+		"NeverSample spans are not exported, but End() must still run without panicking",
+	)
 }
