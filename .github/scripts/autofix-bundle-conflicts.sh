@@ -27,6 +27,7 @@ set -EeufCo pipefail
 # head and re-report the required status checks automatically.
 #
 # Required environment variables:
+#   APP_SLUG  - slug reported by actions/create-github-app-token
 #   GH_TOKEN  - GitHub App installation token with contents:write and
 #               pull-requests:write permissions
 #   REPO      - owner/name of the repository to operate on
@@ -35,6 +36,7 @@ set -EeufCo pipefail
 #   DRY_RUN   - set to "true" to log the planned actions without pushing or
 #               commenting; useful for testing
 
+: "${APP_SLUG:?APP_SLUG must be set}"
 : "${GH_TOKEN:?GH_TOKEN must be set}"
 : "${REPO:?REPO must be set}"
 : "${DRY_RUN:=false}"
@@ -42,12 +44,12 @@ set -EeufCo pipefail
 BUNDLE="tool/data/otelc-bundle.tgz"
 MARKER="<!-- otelc-bundle-conflict-help -->"
 
-# Attribute the merge commits to the App's bot user (which EasyCLA knows about)
-# instead of a hardcoded account.
-bot_info="$(gh api user --jq '[.login, (.id | tostring)] | join(" ")')"
-read -r bot_login bot_id <<<"${bot_info}"
-[[ -n "${bot_login}" && -n "${bot_id}" ]] || {
-  echo "cannot resolve the bot identity from the App token" >&2
+# Installation tokens cannot call /user, so resolve the App's public bot user
+# from the slug emitted alongside the token.
+bot_login="${APP_SLUG}[bot]"
+bot_id="$(gh api "users/${bot_login}" --jq '.id')"
+[[ "${bot_id}" =~ ^[0-9]+$ ]] || {
+  echo "cannot resolve the bot identity for ${bot_login}" >&2
   exit 1
 }
 git config user.name "${bot_login}"
@@ -107,19 +109,17 @@ while IFS= read -r num; do
       echo "posting help comment"
       body="$(cat <<'EOF'
 <!-- otelc-bundle-conflict-help -->
-This pull request has merge conflicts with `main`, and the bot cannot fix fork
-pull requests (its token is only valid on this repository), so please merge
-`main` locally and resolve any source conflicts yourself. If the merge stops on
-`tool/data/otelc-bundle.tgz` — a binary archive that is regenerated from the
-sources — you can keep the local copy to let the merge proceed and regenerate
-it afterwards:
+This fork pull request conflicts with `main`. The bot cannot push to forks, but
+a maintainer can comment `/regenerate-bundle` to build an up-to-date archive in
+a credential-free job and attach it to the workflow run. After downloading the
+artifact, merge `main`, replace the bundle, and push the result:
 
 ```sh
 git fetch origin main
 git merge origin/main   # run `make setup-git` once so the bundle does not block this
-make package            # regenerate tool/data/otelc-bundle.tgz from the merged sources
+# Replace tool/data/otelc-bundle.tgz with the downloaded artifact.
 git add tool/data/otelc-bundle.tgz && git commit
-git push
+git push <YOUR_FORK> HEAD
 ```
 
 See [Keeping the bundle in sync](https://github.com/__REPO__/blob/main/CONTRIBUTING.md#keeping-the-bundle-in-sync).

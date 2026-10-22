@@ -196,13 +196,16 @@ automatically. It runs on every push to `main`, hourly, and on demand:
   `chore: merge main and regenerate otelc-bundle.tgz` commit. No action is
   needed from the author.
 - For **fork** pull requests it cannot push at all (the bot's GitHub App is not
-  installed on forks), so it posts a one-time comment with the manual steps
-  above.
-- The `/regenerate-bundle` comment command merges `main` first as well, so it
-  clears the conflict and refreshes the bundle in one step.
-- To observe the workflow without side effects, trigger it manually from the
-  Actions tab with the `dry_run` option enabled: it logs the merges, pushes,
-  and comments it would perform but changes nothing.
+  installed on forks), so it posts a one-time comment explaining how to request
+  and apply a generated bundle.
+- The `/regenerate-bundle` comment command builds the archive in a
+  credential-free job after merging `main`. For same-repository pull requests,
+  a separate privileged job pushes the merge and generated archive without
+  executing pull request code. For fork pull requests, the command links a
+  one-day artifact that the author can download, commit, and push.
+- To observe the automatic workflow without side effects, trigger it manually
+  from the Actions tab with the `dry_run` option enabled: it logs the merges,
+  pushes, and comments it would perform but changes nothing.
 
 Notes:
 
@@ -216,7 +219,8 @@ Notes:
   re-report themselves.
 - The `verify-bundle` CI guarantees the committed bundle matches the sources, so
   a forgotten `make package` fails CI rather than shipping a stale bundle.
-  Maintainers can also comment `/regenerate-bundle` on a PR to auto-fix it.
+  Maintainers can comment `/regenerate-bundle` to push the fix on repository
+  branches or generate the archive for fork branches.
 
 ### Tools
 
