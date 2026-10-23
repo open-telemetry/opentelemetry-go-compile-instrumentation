@@ -315,6 +315,34 @@ func TestDbClientRequestTraceAttrs_ContainsExpectedKeys(t *testing.T) {
 	}
 }
 
+func TestDbClientRequestTraceAttrs_DoesNotGrowWhenPortPresent(t *testing.T) {
+	attrs := DbClientRequestTraceAttrs(DatabaseSqlRequest{
+		OpType:     "SELECT",
+		Sql:        "SELECT * FROM users WHERE id=?",
+		Endpoint:   "127.0.0.1:3306",
+		DriverName: "mysql",
+		DbName:     "testdb",
+	})
+
+	require.Len(t, attrs, 7)
+	assert.Equal(t, 7, cap(attrs),
+		"a 5-element literal that then appends server.port and db.system.name grows the slice")
+}
+
+func TestDbClientRequestTraceAttrs_DoesNotGrowWithoutPort(t *testing.T) {
+	attrs := DbClientRequestTraceAttrs(DatabaseSqlRequest{
+		OpType:     "SELECT",
+		Sql:        "SELECT * FROM users WHERE id=?",
+		Endpoint:   "127.0.0.1",
+		DriverName: "postgres",
+		DbName:     "testdb",
+	})
+
+	require.Len(t, attrs, 6)
+	assert.Equal(t, 7, cap(attrs),
+		"a 5-element literal that then appends db.system.name grows the slice")
+}
+
 func BenchmarkOperationName(b *testing.B) {
 	// A statement long enough that splitting it into every token shows up.
 	query := "SELECT u.id, u.name, u.email, o.total FROM users u " +
@@ -328,16 +356,38 @@ func BenchmarkOperationName(b *testing.B) {
 }
 
 func BenchmarkDbClientRequestTraceAttrs(b *testing.B) {
-	req := DatabaseSqlRequest{
-		OpType:     "SELECT",
-		Sql:        "SELECT id, name FROM users WHERE name = ?",
-		Endpoint:   "127.0.0.1:3306",
-		DriverName: "mysql",
-		DbName:     "testdb",
+	tests := []struct {
+		name string
+		req  DatabaseSqlRequest
+	}{
+		{
+			name: "with_port",
+			req: DatabaseSqlRequest{
+				OpType:     "SELECT",
+				Sql:        "SELECT id, name FROM users WHERE name = ?",
+				Endpoint:   "127.0.0.1:3306",
+				DriverName: "mysql",
+				DbName:     "testdb",
+			},
+		},
+		{
+			name: "without_port",
+			req: DatabaseSqlRequest{
+				OpType:     "SELECT",
+				Sql:        "SELECT id, name FROM users WHERE name = ?",
+				Endpoint:   "127.0.0.1",
+				DriverName: "postgres",
+				DbName:     "testdb",
+			},
+		},
 	}
 
-	b.ReportAllocs()
-	for b.Loop() {
-		_ = DbClientRequestTraceAttrs(req)
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = DbClientRequestTraceAttrs(tt.req)
+			}
+		})
 	}
 }
