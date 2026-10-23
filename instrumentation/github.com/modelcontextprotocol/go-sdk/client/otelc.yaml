@@ -1,0 +1,30 @@
+version: "v1.0.0"
+
+mcp_clientsession_calltool:
+  target: github.com/modelcontextprotocol/go-sdk/mcp
+  where:
+    func: CallTool
+    recv: "*ClientSession"
+  do:
+    - inject_hooks:
+        before: BeforeCallTool
+        after: AfterCallTool
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/modelcontextprotocol/go-sdk/client"
+
+# Every mcp request goes through internal/jsonrpc2.(*Connection).Call, which
+# returns *AsyncCall. The after hook reads the JSON-RPC id from the result and
+# sets jsonrpc.request.id only on the tools/call request: it checks the method
+# parameter and recovers the span through a private context mark that
+# BeforeCallTool adds, so the connect handshake and other requests never
+# annotate an unrelated span. The receiver and result types are internal to the
+# SDK, so the hook matches them through interfaces and the generated trampoline
+# rewrites the types.
+mcp_jsonrpc2_connection_call:
+  target: github.com/modelcontextprotocol/go-sdk/internal/jsonrpc2
+  where:
+    func: Call
+    recv: "*Connection"
+  do:
+    - inject_hooks:
+        after: AfterConnectionCall
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/modelcontextprotocol/go-sdk/client"

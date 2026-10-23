@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 )
@@ -241,4 +242,17 @@ func RequireOpenSearchClientSemconv(
 	RequireAttribute(t, span, string(semconv.HTTPRequestMethodKey), method)
 	RequireAttribute(t, span, string(semconv.URLPathKey), urlPath)
 	RequireAttribute(t, span, string(semconv.DBResponseStatusCodeKey), strconv.FormatInt(statusCode, 10))
+}
+
+// RequireMCPClientSemconv verifies that an MCP ClientSession.CallTool client
+// span follows the GenAI MCP semantic conventions. mcp.* and jsonrpc.* are
+// declared in schemas/otelc/groups/mcp.yaml (they are not in the pinned
+// upstream semconv v1.37.0), so the keys are passed as literal strings.
+// Reference: https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/mcp.md
+func RequireMCPClientSemconv(t *testing.T, span ptrace.Span, toolName string) {
+	RequireAttribute(t, span, "gen_ai.operation.name", "execute_tool")
+	RequireAttribute(t, span, "mcp.method.name", "tools/call")
+	RequireAttribute(t, span, "gen_ai.tool.name", toolName)
+	RequireAttributeExists(t, span, "jsonrpc.request.id")
+	require.NotEmpty(t, Attrs(span)["jsonrpc.request.id"], "jsonrpc.request.id must be a non-empty wire id")
 }
