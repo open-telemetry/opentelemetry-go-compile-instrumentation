@@ -28,7 +28,10 @@ jobs:
     name: Auto-fix bundle conflicts
     runs-on: ubuntu-latest
     # Only act on the upstream repository, never on forks of it.
-    if: github.repository == 'open-telemetry/opentelemetry-go-compile-instrumentation'
+    # Skip instead of failing until the otelbot App credentials are configured.
+    if: >-
+      github.repository == 'open-telemetry/opentelemetry-go-compile-instrumentation' && vars.OTELBOT_COMPILE_INSTRUMENTATION_CLIENT_ID
+      != ''
     # Security: `make package` is executed only on same-repository PR branches.
     # A same-repository branch can only be created by someone with push access
     # to this repository, which matches the trust level of the existing

@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     if: >-
       github.event.issue.pull_request && contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
-      && github.event.comment.body == '/regenerate-bundle'
+      && github.event.comment.body == '/regenerate-bundle' && vars.OTELBOT_COMPILE_INSTRUMENTATION_CLIENT_ID != ''
     permissions:
       contents: read
     outputs:
