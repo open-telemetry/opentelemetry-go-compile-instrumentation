@@ -24,6 +24,7 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/imports"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -166,6 +167,43 @@ func stripCompleteFlag(args []string) []string {
 	return args
 }
 
+// resolvePackageName reads the package clause from the compile command's own
+// sources. Setup's build-plan dry run lists no readable source for the
+// go-test-generated main, so setup leaves the rule set unnamed and this method
+// recovers it (see #1348). Returns an empty name if the command lists no
+// readable Go file.
+func (ip *instrumentPhase) resolvePackageName() (string, error) {
+	for _, arg := range ip.compileArgs {
+		if !util.IsGoFile(arg) || !util.PathExists(arg) {
+			continue
+		}
+		name, err := ast.ParsePackageName(arg)
+		if err != nil {
+			return "", ex.Wrapf(err, "parsing package clause from %s", arg)
+		}
+		return name, nil
+	}
+	return "", nil
+}
+
+// ensurePackageName fills in a rule set that setup left unnamed. It must run
+// before instrument(), because file rules need the name and compileArgs still
+// holds only the original sources at that point.
+func (ip *instrumentPhase) ensurePackageName(matched *rule.InstRuleSet) error {
+	if matched.PackageName != "" {
+		return nil
+	}
+	name, err := ip.resolvePackageName()
+	if err != nil {
+		return err
+	}
+	if name != "" {
+		matched.SetPackageName(name)
+		ip.Debug("Resolved package name from compile command", "package", name)
+	}
+	return nil
+}
+
 func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 	// Read compilation output directory
 	target := util.FindFlagValue(args, "-o")
@@ -207,6 +245,10 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 	// Check if the current compile command matches the rules.
 	matched := ip.match(allSet, args)
 	if !matched.IsEmpty() {
+		if err = ip.ensurePackageName(matched); err != nil {
+			return nil, err
+		}
+
 		ip.Info("Instrument package", "rules", matched, "args", args)
 		// Okay, this package should be instrumented.
 		err = ip.instrument(ctx, matched)
