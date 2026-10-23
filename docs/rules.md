@@ -1245,6 +1245,8 @@ This rule adds a new Go source file to the target package.
 
 **Selectors:** none. File rules apply to the target package as a whole and have no point selector.
 
+A rule targeting `main` also applies to the `main` package that `go test` generates, so the added file — including any `func init()` in it — is compiled into test binaries built by `otelc go test` as well as into the application binary.
+
 **Modifier (`do: - add_file:`):**
 
 - `file` (string, required): The name of the new file to be added (e.g., `newfile.go`).
