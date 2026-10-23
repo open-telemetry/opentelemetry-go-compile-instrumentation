@@ -133,6 +133,12 @@ func RequireAttributeExists(t *testing.T, s ptrace.Span, key string) {
 	require.True(t, ok, "Attribute %q not found in span %q", key, s.Name())
 }
 
+// RequireAttributeAbsent asserts a span does not have an attribute.
+func RequireAttributeAbsent(t *testing.T, s ptrace.Span, key string) {
+	_, ok := Attrs(s)[key]
+	require.False(t, ok, "Attribute %q should not be present in span %q", key, s.Name())
+}
+
 // TraceStats holds trace statistics.
 type TraceStats struct {
 	TraceCount    int
@@ -168,3 +174,6 @@ func (ts TraceStats) String() string {
 
 // IsProducer matches producer spans.
 func IsProducer(s ptrace.Span) bool { return s.Kind() == ptrace.SpanKindProducer }
+
+// IsConsumer matches consumer spans.
+func IsConsumer(s ptrace.Span) bool { return s.Kind() == ptrace.SpanKindConsumer }
