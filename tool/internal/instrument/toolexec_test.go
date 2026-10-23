@@ -257,8 +257,8 @@ func TestTrackAddedImports(t *testing.T) {
 		require.NoError(t, err)
 
 		// No file should be created
-		pattern := util.GetAddedImportsPattern()
-		files, _ := filepath.Glob(pattern)
+		files, err := addedImportFiles()
+		require.NoError(t, err)
 		assert.Empty(t, files)
 	})
 
@@ -303,6 +303,16 @@ func TestLoadAddedImports(t *testing.T) {
 		// Create build temp directory (empty)
 		err := os.MkdirAll(util.GetBuildTempDir(), 0o755)
 		require.NoError(t, err)
+
+		result, err := loadAddedImports(t.Context())
+		require.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Empty(t, result)
+	})
+
+	t.Run("missing build directory returns empty map", func(t *testing.T) {
+		// No .otelc-build directory was ever created.
+		t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
 
 		result, err := loadAddedImports(t.Context())
 		require.NoError(t, err)
@@ -378,7 +388,7 @@ func TestLoadAddedImports(t *testing.T) {
 		require.NoError(t, err)
 
 		// Two files with same package but different archives
-		// Note: filepath.Glob returns files in lexical order
+		// Note: os.ReadDir returns entries in lexical order
 		file1 := filepath.Join(buildDir, "added_imports.1111.json")
 		file2 := filepath.Join(buildDir, "added_imports.2222.json")
 
@@ -393,6 +403,25 @@ func TestLoadAddedImports(t *testing.T) {
 
 		// The second file (lexically) should win
 		assert.Equal(t, "/new/path/fmt.a", result["fmt"])
+	})
+
+	t.Run("ignores entries that do not match the tracking pattern", func(t *testing.T) {
+		tempDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, tempDir)
+
+		buildDir := util.GetBuildTempDir()
+		require.NoError(t, os.MkdirAll(buildDir, 0o755))
+
+		validData, _ := json.Marshal(map[string]string{"fmt": "/path/to/fmt.a"})
+		require.NoError(t, os.WriteFile(filepath.Join(buildDir, "added_imports.1.json"), validData, 0o644))
+
+		// None of these should be picked up: wrong suffix or wrong prefix.
+		require.NoError(t, os.WriteFile(filepath.Join(buildDir, "added_imports.1.txt"), validData, 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(buildDir, "other_added_imports.1.json"), validData, 0o644))
+
+		result, err := loadAddedImports(t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"fmt": "/path/to/fmt.a"}, result)
 	})
 }
 
@@ -440,6 +469,43 @@ func TestCleanupImportTrackingFiles(t *testing.T) {
 		// Should not panic
 		CleanupImportTrackingFiles()
 	})
+
+	t.Run("handles missing directory gracefully", func(t *testing.T) {
+		// The very first build has no .otelc-build directory yet.
+		t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+
+		// Should not panic
+		CleanupImportTrackingFiles()
+	})
+}
+
+func TestLoadAddedImportsWithGlobMetaCharactersInPath(t *testing.T) {
+	// A workspace path containing glob meta-characters (here a character
+	// class) must not stop the tracking files from being discovered.
+	workDir := filepath.Join(t.TempDir(), "project-[dev]")
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	writeAddedImports(t, map[string]string{"fmt": "/path/to/fmt.a"})
+
+	result, err := loadAddedImports(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"fmt": "/path/to/fmt.a"}, result)
+}
+
+func TestCleanupImportTrackingFilesWithGlobMetaCharactersInPath(t *testing.T) {
+	workDir := filepath.Join(t.TempDir(), "project-[dev]")
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	buildDir := util.GetBuildTempDir()
+	require.NoError(t, os.MkdirAll(buildDir, 0o755))
+	trackingFile := filepath.Join(buildDir, "added_imports.1.json")
+	require.NoError(t, os.WriteFile(trackingFile, []byte("{}"), 0o644))
+
+	CleanupImportTrackingFiles()
+
+	_, err := os.Stat(trackingFile)
+	assert.True(t, os.IsNotExist(err), "tracking file should be removed")
 }
 
 // goCompileToolPath returns the path to the toolchain's compile binary, which
@@ -587,29 +653,32 @@ func TestTrackAddedImportsWriteError(t *testing.T) {
 	assert.Contains(t, err.Error(), "writing imports file")
 }
 
-func TestCleanupImportTrackingFilesGlobError(t *testing.T) {
-	workDir := t.TempDir()
-	// '[' makes the glob pattern malformed, so filepath.Glob errors and the
-	// cleanup bails out.
-	t.Setenv(util.EnvOtelcWorkDir, filepath.Join(workDir, "bad[glob"))
-	CleanupImportTrackingFiles()
-}
-
-func TestLoadAddedImportsGlobError(t *testing.T) {
+func TestLoadAddedImportsScanError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// On Windows a regular file used as a directory reports a missing
+		// path, which loadAddedImports treats like an absent directory.
+		t.Skip("directory-scan error cannot be triggered on Windows")
+	}
 	ctx := util.ContextWithLogger(t.Context(), slog.Default())
-	t.Setenv(util.EnvOtelcWorkDir, filepath.Join(t.TempDir(), "bad[glob"))
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	// A regular file where the build temp directory is expected makes the
+	// directory scan fail with a non-not-exist error.
+	require.NoError(t, os.WriteFile(util.GetBuildTempDir(), []byte("not a directory"), 0o644))
+
 	_, err := loadAddedImports(ctx)
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reading build temp directory")
 }
 
-func TestLoadAddedImportsReadError(t *testing.T) {
+func TestLoadAddedImportsIgnoresDirectoryEntry(t *testing.T) {
 	ctx := util.ContextWithLogger(t.Context(), slog.Default())
 	workDir := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, workDir)
 
 	buildDir := util.GetBuildTempDir()
 	require.NoError(t, os.MkdirAll(buildDir, 0o755))
-	// A directory matching the tracking-file pattern cannot be read.
+	// A directory whose name matches the tracking-file pattern is ignored.
 	require.NoError(t, os.Mkdir(filepath.Join(buildDir, "added_imports.1.json"), 0o755))
 
 	result, err := loadAddedImports(ctx)
@@ -635,10 +704,17 @@ func TestInterceptLinkNoImportCfg(t *testing.T) {
 }
 
 func TestInterceptLinkLoadError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// On Windows a regular file used as a directory reports a missing
+		// path, which loadAddedImports treats like an absent directory.
+		t.Skip("directory-scan error cannot be triggered on Windows")
+	}
 	ctx := util.ContextWithLogger(t.Context(), slog.Default())
-	// A malformed glob pattern makes loadAddedImports fail; the link command
-	// is then passed through unchanged.
-	t.Setenv(util.EnvOtelcWorkDir, filepath.Join(t.TempDir(), "bad[glob"))
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	// A regular file where the build temp directory is expected makes
+	// loadAddedImports fail; the link command is then passed through unchanged.
+	require.NoError(t, os.WriteFile(util.GetBuildTempDir(), []byte("not a directory"), 0o644))
 
 	args := []string{"link", "-o", "exe", "-buildid", "id", "-importcfg", "importcfg.link"}
 	result, err := interceptLink(ctx, args)
