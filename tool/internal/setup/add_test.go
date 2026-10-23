@@ -247,3 +247,44 @@ func TestRemoveRuntimeFile_RemoveError(t *testing.T) {
 	err := sp.removeRuntimeFile(t.Context(), tmpDir)
 	assert.Error(t, err)
 }
+
+// TestAddDepsRuntimeFileIsStable renders otelc.runtime.go repeatedly from one
+// rule set and requires identical bytes. Several hook packages, each matched in
+// a different source file, is the shape that exposes the order addDeps gets
+// from AllFuncRules; the existing cases above share a single file key.
+func TestAddDepsRuntimeFileIsStable(t *testing.T) {
+	sourceDir := t.TempDir()
+	hookPathByFile := map[string]string{
+		"d.go": "example.com/hooks/delta",
+		"b.go": "example.com/hooks/bravo",
+		"a.go": "example.com/hooks/alpha",
+		"c.go": "example.com/hooks/charlie",
+	}
+
+	render := func(t *testing.T) string {
+		t.Helper()
+		ruleSet := rule.NewInstRuleSet("example.com/app")
+		for file, hookPath := range hookPathByFile {
+			ruleSet.AddFuncRule(filepath.Join(sourceDir, file), newTestFuncRule(hookPath, "main"))
+		}
+
+		outDir := t.TempDir()
+		err := newTestSetupPhase().addDeps(
+			t.Context(),
+			[]*rule.InstRuleSet{ruleSet},
+			runtimePackage{dir: outDir, name: "main"},
+		)
+		require.NoError(t, err)
+
+		content, err := os.ReadFile(filepath.Join(outDir, otelcRuntimeFile))
+		require.NoError(t, err)
+		return strings.ReplaceAll(string(content), "\r\n", "\n")
+	}
+
+	want := render(t)
+	const iterations = 50
+	for range iterations {
+		require.Equal(t, want, render(t),
+			"otelc.runtime.go must not change between setups of identical input")
+	}
+}
