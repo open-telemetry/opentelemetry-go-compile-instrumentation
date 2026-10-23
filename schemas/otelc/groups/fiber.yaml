@@ -1,0 +1,39 @@
+groups:
+  # ---------------------------------------------------------------------------
+  # gofiber/fiber (v2) instrumentation emission contract.
+  #
+  # Source of truth for this file:
+  #   instrumentation/github.com/gofiber/fiber/v2/router_hook.go (BeforeNext / AfterNext)
+  #
+  # Unlike gin, fiber runs on fasthttp rather than `net/http`, so no server span
+  # exists when fiber's router runs. This instrumentation creates one SERVER
+  # span per request in `(*App).next` and records no metrics:
+  #
+  #   - the span opens named `<METHOD>` and is renamed to
+  #     `<METHOD> <route pattern>` once the router has matched a route
+  #   - `http.route` is set only when a route matched
+  #   - `http.response.status_code` is set only when the status is knowable
+  #     from inside the hook (from a `*fiber.Error`, or 500 for other errors)
+  #   - `server.address`, `user_agent.original`, `client.address` and
+  #     `url.query` are set only when the request carries them
+  #   - a 5xx, or a handler error with no knowable status, sets the span
+  #     status to Error and records the error as a span exception
+  #
+  # Every attribute is standard upstream HTTP telemetry, referenced with `ref:`.
+  # ---------------------------------------------------------------------------
+
+  - id: span.otelc.fiber.server
+    type: span
+    span_kind: server
+    stability: development
+    brief: gofiber/fiber server span, one per request.
+    attributes:
+      - ref: http.request.method
+      - ref: url.path
+      - ref: url.scheme
+      - ref: http.route
+      - ref: http.response.status_code
+      - ref: server.address
+      - ref: user_agent.original
+      - ref: client.address
+      - ref: url.query
