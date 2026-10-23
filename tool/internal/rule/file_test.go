@@ -135,6 +135,11 @@ func TestFileRules(t *testing.T) {
 			wantType: &InstCallRule{},
 		},
 		{
+			name:     "method call",
+			content:  "rule:\n  target: example.com/pkg\n  method_call: go.uber.org/zap.Logger.Info\n  replace: tracedInfo({{ . }})\n",
+			wantType: &InstCallRule{},
+		},
+		{
 			name:     "struct literal",
 			content:  "rule:\n  target: example.com/pkg\n  struct_literal: example.com/pkg.Client\n  field:\n    - name: Transport\n      value: tracedTransport\n",
 			wantType: &InstLitRule{},
@@ -167,6 +172,37 @@ func TestFileRules(t *testing.T) {
 		{
 			name:    "invalid glob",
 			content: "rule:\n  target: example.com/[pkg\n  func: Run\n  raw: _ = 0\n",
+			wantErr: "not a valid glob pattern",
+		},
+		{
+			name:     "struct with target list",
+			content:  "rule:\n  target:\n    - example.com/pkg\n    - not: example.com/pkg/internal\n  struct: Server\n",
+			wantType: &InstStructRule{},
+		},
+		{
+			name:     "function call with target list",
+			content:  "rule:\n  target: [$root, main]\n  function_call: net/http.Get\n  replace: tracedGet({{ . }})\n",
+			wantType: &InstCallRule{},
+		},
+		{
+			name: "structured rule with target list",
+			content: "rule:\n  target:\n    - example.com/pkg/**\n    - not: example.com/pkg/mock\n" +
+				"  where:\n    func: Run\n  do:\n    - inject_code:\n        raw: _ = 0\n",
+			wantType: &InstRawRule{},
+		},
+		{
+			name:    "target list with only not entries",
+			content: "rule:\n  target:\n    - not: example.com/pkg\n  func: Run\n  raw: _ = 0\n",
+			wantErr: "selects no package",
+		},
+		{
+			name:    "target list with an invalid entry",
+			content: "rule:\n  target:\n    - skip: example.com/pkg\n  func: Run\n  raw: _ = 0\n",
+			wantErr: "must be a pattern or {not: pattern}",
+		},
+		{
+			name:    "target list with an invalid glob",
+			content: "rule:\n  target:\n    - example.com/pkg\n    - not: example.com/[pkg\n  func: Run\n  raw: _ = 0\n",
 			wantErr: "not a valid glob pattern",
 		},
 		{

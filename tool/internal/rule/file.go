@@ -5,7 +5,6 @@ package rule
 
 import (
 	"sort"
-	"strings"
 
 	"go.yaml.in/yaml/v3"
 	"golang.org/x/mod/module"
@@ -100,10 +99,10 @@ func (f File) Rules() ([]InstRule, error) {
 			if ruleErr != nil {
 				return nil, ruleErr
 			}
-			if strings.TrimSpace(r.GetTarget()) == "" {
+			if r.GetTarget().IsZero() {
 				return nil, ex.Newf("rule %q has an empty target; target is required", entry.Name)
 			}
-			if validateErr := ValidateTarget(r.GetTarget()); validateErr != nil {
+			if validateErr := r.GetTarget().Validate(); validateErr != nil {
 				return nil, ex.Wrapf(validateErr, "rule %q", entry.Name)
 			}
 			if validateErr := util.ValidateVersionRange(r.GetVersion()); validateErr != nil {
@@ -127,7 +126,7 @@ func newRule(raw []byte, name string, fields map[string]any) (InstRule, error) {
 		return NewInstRawRule(raw, name)
 	case fields[selFunc] != nil:
 		return NewInstFuncRule(raw, name)
-	case fields[selFunctionCall] != nil:
+	case fields[selFunctionCall] != nil, fields[selMethodCall] != nil:
 		return NewInstCallRule(raw, name)
 	case fields[selStructLiteral] != nil:
 		return NewInstLitRule(raw, name)

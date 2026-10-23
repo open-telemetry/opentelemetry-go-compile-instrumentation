@@ -337,15 +337,22 @@ type writerWrapper struct {
 }
 
 func (w *writerWrapper) WriteHeader(statusCode int) {
-    if !w.wroteHeader {
-        w.statusCode = statusCode
-        w.wroteHeader = true
-        w.ResponseWriter.WriteHeader(statusCode)
+    if w.wroteHeader {
+        return
     }
+    if statusCode >= 100 && statusCode <= 199 && statusCode != http.StatusSwitchingProtocols {
+        w.ResponseWriter.WriteHeader(statusCode)
+        return
+    }
+    w.statusCode = statusCode
+    w.wroteHeader = true
+    w.ResponseWriter.WriteHeader(statusCode)
 }
 ```
 
-This wrapper implements common interfaces: `http.Hijacker`, `http.Flusher`, `http.Pusher`.
+Informational responses are forwarded without replacing the final status. The wrapper also implements
+common interfaces including `http.Hijacker`, `http.Flusher`, `http.Pusher`, `io.ReaderFrom`, and
+`io.StringWriter`.
 
 ## Testing
 

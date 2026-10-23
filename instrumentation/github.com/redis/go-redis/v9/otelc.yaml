@@ -29,6 +29,7 @@ redis_hook_newsentinelclient:
 
 redis_client_hook:
   target: github.com/redis/go-redis/v9
+  version: v9.0.0,v9.9.0
   where:
     func: Conn
     recv: "*Client"

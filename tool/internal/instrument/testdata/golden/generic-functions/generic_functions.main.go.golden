@@ -21,9 +21,9 @@ type GenStruct[T any] struct {
 
 func (g *GenStruct[T]) GenericMethod(p1 T, p2 string) (_unnamedRetVal_1139503255_0 T, _unnamedRetVal_1139503255_1 error) {
 	//line <generated>:1
-	if hookContext1139503255, _ := OtelBeforeTrampoline_GenericMethod1139503255(&g, &p1, &p2); false {
+	if hookContext1139503255, _ := OtelBeforeTrampoline_GenericMethod1139503255[T](&g, &p1, &p2); false {
 	} else {
-		defer OtelAfterTrampoline_GenericMethod1139503255(hookContext1139503255, &_unnamedRetVal_1139503255_0, &_unnamedRetVal_1139503255_1)
+		defer OtelAfterTrampoline_GenericMethod1139503255[T](hookContext1139503255, &_unnamedRetVal_1139503255_0, &_unnamedRetVal_1139503255_1)
 	}
 	//line main.go:15:2
 	return p1, nil

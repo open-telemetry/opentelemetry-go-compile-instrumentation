@@ -21,7 +21,7 @@ import (
 type InstRule interface {
 	String() string      // The string representation of the rule
 	GetName() string     // The unique name of the rule
-	GetTarget() string   // The target module path where the rule is applied
+	GetTarget() *Target  // The packages the rule applies to
 	GetVersion() string  // The version range of target module if available, e.g "v1.0.0,v2.0.0"
 	GetWhere() *WhereDef // Optional non-package selectors that remain after normalization
 }
@@ -60,6 +60,7 @@ type WhereDef struct {
 	Struct        string     `json:"struct,omitempty"         yaml:"struct,omitempty"`
 	StructLiteral string     `json:"struct_literal,omitempty" yaml:"struct_literal,omitempty"`
 	FunctionCall  string     `json:"function_call,omitempty"  yaml:"function_call,omitempty"`
+	MethodCall    string     `json:"method_call,omitempty"    yaml:"method_call,omitempty"`
 	Directive     string     `json:"directive,omitempty"      yaml:"directive,omitempty"`
 	Kind          string     `json:"kind,omitempty"           yaml:"kind,omitempty"`
 	Identifier    string     `json:"identifier,omitempty"     yaml:"identifier,omitempty"`
@@ -68,7 +69,7 @@ type WhereDef struct {
 // InstBaseRule is the base rule for all instrumentation rules.
 type InstBaseRule struct {
 	Name    string            `json:"name,omitempty"    yaml:"name,omitempty"`
-	Target  string            `json:"target"            yaml:"target"`
+	Target  Target            `json:"target"            yaml:"target"`
 	Version string            `json:"version,omitempty" yaml:"version,omitempty"`
 	Imports map[string]string `json:"imports,omitempty" yaml:"imports,omitempty"`
 	Where   *WhereDef         `json:"where,omitempty"   yaml:"where,omitempty"`
@@ -76,7 +77,7 @@ type InstBaseRule struct {
 
 func (ibr *InstBaseRule) String() string      { return ibr.Name }
 func (ibr *InstBaseRule) GetName() string     { return ibr.Name }
-func (ibr *InstBaseRule) GetTarget() string   { return ibr.Target }
+func (ibr *InstBaseRule) GetTarget() *Target  { return &ibr.Target }
 func (ibr *InstBaseRule) GetVersion() string  { return ibr.Version }
 func (ibr *InstBaseRule) GetWhere() *WhereDef { return ibr.Where }
 
@@ -97,6 +98,9 @@ type InstRuleSet struct {
 	DirectiveRules map[string][]*InstDirectiveRule `json:"directive_rules"`
 	DeclRules      map[string][]*InstDeclRule      `json:"decl_rules"`
 	FileRules      []*InstFileRule                 `json:"file_rules"`
+	// IgnoredCallFiles lists source files that hold a //otelc:ignore comment
+	// above a call.
+	IgnoredCallFiles []string `json:"ignored_call_files,omitempty"`
 }
 
 func NewInstRuleSet(importPath string) *InstRuleSet {
@@ -138,7 +142,8 @@ func (irs *InstRuleSet) IsEmpty() bool {
 			len(irs.LitRules) == 0 &&
 			len(irs.DirectiveRules) == 0 &&
 			len(irs.DeclRules) == 0 &&
-			len(irs.FileRules) == 0)
+			len(irs.FileRules) == 0 &&
+			len(irs.IgnoredCallFiles) == 0)
 }
 
 // AddRule is a generic method that adds any type of rule to the appropriate map.
@@ -174,6 +179,13 @@ func (irs *InstRuleSet) AddDirectiveRule(file string, rule *InstDirectiveRule) {
 
 func (irs *InstRuleSet) AddDeclRule(file string, rule *InstDeclRule) {
 	addRule(file, rule, irs.DeclRules)
+}
+
+// AddIgnoredCallFile records that file holds a //otelc:ignore comment above
+// a call.
+func (irs *InstRuleSet) AddIgnoredCallFile(file string) {
+	util.Assert(filepath.IsAbs(file), "file must be an absolute path")
+	irs.IgnoredCallFiles = append(irs.IgnoredCallFiles, file)
 }
 
 func (irs *InstRuleSet) AddFileRule(rule *InstFileRule) {

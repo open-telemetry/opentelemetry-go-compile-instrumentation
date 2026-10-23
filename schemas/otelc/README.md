@@ -15,6 +15,7 @@ schemas/otelc/
 │   ├── database-sql.yaml    # database/sql client spans
 │   ├── redis.yaml           # redis/go-redis (v9) client spans
 │   ├── kafka.yaml           # segmentio/kafka-go producer & consumer spans
+│   ├── rabbitmq.yaml        # rabbitmq/amqp091-go producer & consumer spans
 │   ├── k8s.yaml             # k8s.io/client-go informer spans
 │   ├── openai.yaml          # openai/openai-go GenAI client spans
 │   ├── anthropic.yaml       # anthropics/anthropic-sdk-go GenAI client spans
@@ -22,6 +23,7 @@ schemas/otelc/
 │   ├── elasticsearch.yaml   # olivere/elastic (v7) client spans
 │   ├── gin.yaml             # gin-gonic/gin server-span enrichment
 │   ├── linodego.yaml        # linode/linodego (v2) client spans + operation-duration metric
+│   ├── stripe.yaml          # stripe/stripe-go (v81/v82) client spans + request metric
 │   ├── otel-sdk.yaml        # go.opentelemetry.io/otel* — Go runtime metrics
 │   ├── logs.yaml            # log, log/slog, logrus, zap — no telemetry (correlation only)
 │   └── runtime.yaml         # runtime — no telemetry (GLS context propagation)
@@ -49,6 +51,7 @@ signals an undeclared instrumentation.
 | `database/sql`                                      | `database-sql.yaml` | DB client spans                                                        |
 | `github.com/redis/go-redis/v9`                      | `redis.yaml`        | DB client spans                                                        |
 | `github.com/segmentio/kafka-go/{producer,consumer}` | `kafka.yaml`        | Messaging producer + consumer spans                                    |
+| `github.com/rabbitmq/amqp091-go`                    | `rabbitmq.yaml`     | Messaging producer + consumer spans                                    |
 | `k8s.io/client-go`                                  | `k8s.yaml`          | Informer spans                                                         |
 | `github.com/openai/openai-go` (v1/v2/v3)            | `openai.yaml`       | GenAI client spans                                                     |
 | `github.com/anthropics/anthropic-sdk-go`            | `anthropic.yaml`    | GenAI client spans                                                     |
@@ -57,6 +60,7 @@ signals an undeclared instrumentation.
 | `github.com/olivere/elastic/v7`                     | `elasticsearch.yaml` | DB client spans                                                        |
 | `github.com/gin-gonic/gin`                          | `gin.yaml`          | `http.route` on the enclosing `net/http` server span                   |
 | `github.com/linode/linodego/v2`                     | `linodego.yaml`     | HTTP client spans + operation-duration metric                          |
+| `github.com/stripe/stripe-go` (v81/v82)             | `stripe.yaml`       | Stripe API client spans + request-duration metric                      |
 | `go.opentelemetry.io/otel/init`                     | `otel-sdk.yaml`     | Go runtime metrics (`go.*`)                                            |
 | `go.opentelemetry.io/otel`                          | `otel-sdk.yaml`     | nothing — guards the global tracer provider                            |
 | `go.opentelemetry.io/otel/sdk/trace`                | `otel-sdk.yaml`     | nothing — maintains the GLS span chain                                 |

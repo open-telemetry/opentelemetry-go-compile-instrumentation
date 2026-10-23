@@ -4,6 +4,14 @@
 # Use bash for all shell commands (required for pipefail and other bash features)
 SHELL := /bin/bash
 
+# Many recipes use .ONESHELL, so that "set -euo pipefail" applies to all the
+# lines of the recipe. GNU Make 3.81 (the default on macOS) does not support
+# .ONESHELL: it runs each line in a different shell, and failures can be
+# hidden. Thus GNU Make 3.82 or later is required.
+ifeq ($(filter oneshell,$(.FEATURES)),)
+$(error GNU Make 3.82 or later is required (found $(MAKE_VERSION)). On macOS, run "brew install make", then use "gmake")
+endif
+
 .PHONY: all test test-unit test-integration test-e2e format lint build build-all build/pkg install package manifest verify-manifest clean setup-git \
         build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
         lint/action lint/makefile lint/license-header lint/license-header/fix lint/dockerfile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
@@ -26,7 +34,7 @@ INST_BUNDLE_INST_TMP = instrumentation_temp
 API_SYNC_SOURCE = pkg/hook/context.go
 API_SYNC_TARGET = tool/internal/instrument/api.tmpl
 TOOLS_DIR = .tools
-GO_VERSION = 1.25
+GO_VERSION = 1.26
 INTEGRATION_TEST_RUN ?= .
 TOOL_COVERAGE_THRESHOLD ?= 68
 PKG_COVERAGE_THRESHOLD ?= 70
@@ -86,7 +94,11 @@ RATCHET = $(TOOLS)/ratchet
 $(RATCHET): PACKAGE=github.com/sethvargo/ratchet
 
 BUNDLE = $(TOOLS)/bundle
-$(BUNDLE): | $(TOOLS)
+# The sources are real prerequisites, not order-only: with only `| $(TOOLS)`
+# make never rebuilds an existing .bin/bundle, so editing the bundle tool (or
+# switching to a branch that changed it) silently keeps using the stale binary
+# and `make package` then writes an archive that fails Verify Bundle in CI.
+$(BUNDLE): $(wildcard $(TOOLS_DIR)/bundle/*.go) $(TOOLS_DIR)/bundle/go.mod | $(TOOLS)
 	cd $(TOOLS_DIR)/bundle && GOWORK=off go build -o $@
 
 EMBEDMD = $(TOOLS)/embedmd
@@ -295,7 +307,8 @@ lint/dockerfile: hadolint
 	elif [ -f /opt/homebrew/bin/hadolint ]; then \
 		HADOLINT_CMD="/opt/homebrew/bin/hadolint"; \
 	fi; \
-	$$HADOLINT_CMD -c .tools/hadolint.yaml demo/app/grpc/client/Dockerfile demo/app/grpc/server/Dockerfile demo/app/http/client/Dockerfile demo/app/http/server/Dockerfile
+	DOCKERFILES=$$(find demo/app -name "Dockerfile" | sort); \
+	$$HADOLINT_CMD --failure-threshold warning -c .tools/hadolint.yaml $$DOCKERFILES
 
 lint/makefile: ## Lint Makefile
 lint/makefile: $(CHECKMAKE)

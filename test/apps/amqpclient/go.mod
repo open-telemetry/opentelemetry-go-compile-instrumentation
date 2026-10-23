@@ -1,0 +1,5 @@
+module go.opentelemetry.io/otelc/test/apps/amqpclient
+
+go 1.26.0
+
+require github.com/rabbitmq/amqp091-go v1.14.0

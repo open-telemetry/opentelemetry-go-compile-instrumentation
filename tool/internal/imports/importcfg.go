@@ -5,6 +5,7 @@ package imports
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"strings"
 
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // ImportConfig represents the parsed contents of an importcfg (or importcfg.link) file,
@@ -105,11 +107,11 @@ func parse(r io.Reader) (ImportConfig, error) {
 // WriteFile writes the content of the ImportConfig to the provided file,
 // in the format expected by the Go toolchain commands.
 func (r *ImportConfig) WriteFile(filename string) error {
-	file, err := os.Create(filename)
-	if err != nil {
-		return ex.Wrapf(err, "failed to create file %s", filename)
+	var buf bytes.Buffer
+	if err := r.write(&buf); err != nil {
+		return ex.Wrapf(err, "failed to render importcfg for %s", filename)
 	}
-	return r.writeFile(file, filename)
+	return util.WriteFileAtomic(filename, buf.Bytes())
 }
 
 func (r *ImportConfig) writeFile(w io.WriteCloser, filename string) (retErr error) {

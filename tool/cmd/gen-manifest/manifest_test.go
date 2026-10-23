@@ -203,6 +203,40 @@ func TestGenerateValidatesTargets(t *testing.T) {
 		}
 	})
 
+	t.Run("lists each included pattern of a target list", func(t *testing.T) {
+		root := t.TempDir()
+		writeModule(t, root, "module", "example.com/test")
+		writeRuleFile(t, root, "module/otelc.yaml", `
+list:
+  target:
+    - $root
+    - main
+    - not: example.com/test/internal/**
+  version: v1.0.0
+`)
+
+		got, err := Generate(root)
+		require.NoError(t, err)
+		require.Equal(t, Manifest{
+			{ModulePath: "example.com/test", Target: "$root", VersionRange: "v1.0.0"},
+			{ModulePath: "example.com/test", Target: "main", VersionRange: "v1.0.0"},
+		}, got)
+	})
+
+	t.Run("rejects a target list with only not entries", func(t *testing.T) {
+		root := t.TempDir()
+		writeModule(t, root, "module", "example.com/test")
+		writeRuleFile(t, root, "module/otelc.yaml", `
+invalid:
+  target:
+    - not: main
+  version: v1.0.0
+`)
+
+		_, err := Generate(root)
+		require.ErrorContains(t, err, "selects no package")
+	})
+
 	t.Run("omits empty target", func(t *testing.T) {
 		root := t.TempDir()
 		writeModule(t, root, "module", "example.com/test")
