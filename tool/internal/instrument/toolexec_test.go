@@ -698,6 +698,15 @@ func TestResolvePackageName(t *testing.T) {
 		assert.Equal(t, "main", name)
 	})
 
+	t.Run("prefers the package clause over the -p import path", func(t *testing.T) {
+		ip := &instrumentPhase{compileArgs: []string{
+			"compile", "-o", "_pkg_.a", "-p", "example.com/foo", "-pack", testMain,
+		}}
+		name, err := ip.resolvePackageName()
+		require.NoError(t, err)
+		assert.Equal(t, "main", name)
+	})
+
 	t.Run("skips flag values that are not readable Go files", func(t *testing.T) {
 		ip := &instrumentPhase{compileArgs: []string{
 			"compile", "-o", filepath.Join(dir, "absent.go"), "-pack", testMain,
@@ -744,7 +753,8 @@ func TestInterceptCompileFileRuleWithoutPackageName(t *testing.T) {
 		require.NoError(t, os.WriteFile(matched, data, 0o644))
 
 		buildDir := t.TempDir()
-		args := []string{"compile", "-o", filepath.Join(buildDir, "_pkg_.a"), "-p", "main", "-buildid", "x"}
+		args := make([]string, 0, 7+len(sources))
+		args = append(args, "compile", "-o", filepath.Join(buildDir, "_pkg_.a"), "-p", "main", "-buildid", "x")
 		for _, name := range sources {
 			path := filepath.Join(buildDir, name)
 			require.NoError(t, os.WriteFile(path, []byte("package main\n"), 0o644))
@@ -774,6 +784,18 @@ func TestInterceptCompileFileRuleWithoutPackageName(t *testing.T) {
 		_, err := interceptCompile(ctx, args)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "cannot resolve the package name")
+		assert.NoFileExists(t, filepath.Join(buildDir, "otelc.added.go"))
+	})
+
+	t.Run("propagates a parse failure", func(t *testing.T) {
+		buildDir, args := setup(t, "_testmain.go")
+		broken := filepath.Join(buildDir, "_testmain.go")
+		require.NoError(t, os.WriteFile(broken, []byte("not a go file"), 0o644))
+		ctx := util.ContextWithLogger(t.Context(), slog.New(slog.DiscardHandler))
+
+		_, err := interceptCompile(ctx, args)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "parsing package clause")
 		assert.NoFileExists(t, filepath.Join(buildDir, "otelc.added.go"))
 	})
 }
