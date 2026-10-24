@@ -193,6 +193,27 @@ func TestAddDeps(t *testing.T) {
 			goldenFile:        "",
 			wantErr:           true,
 		},
+		{
+			name: "hook_file_rule_imports_its_own_target",
+			matched: []*rule.InstRuleSet{
+				newTestRuleSet(
+					"example.com/app/internal/log",
+					nil,
+					[]*rule.InstFileRule{
+						newTestFileRule(
+							"example.com/app/hooks",
+							"example.com/app/internal/log",
+						),
+					},
+				),
+			},
+			packageImportPath: "example.com/app/internal/log",
+			packageName:       "log",
+			importedByHooks: map[string]bool{
+				"example.com/app/hooks": true,
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -543,4 +564,93 @@ func TestAddDeps_RuntimeDiffCollision(t *testing.T) {
 	internalRetainedPath := filepath.Join(setupDebugDir(internalPkgPath), otelcRuntimeFile)
 	assert.FileExists(t, cmdRetainedPath)
 	assert.FileExists(t, internalRetainedPath)
+}
+
+func TestAddRuntimeTestDeps(t *testing.T) {
+	hookPaths := []string{"example.com/app/hooks"}
+
+	tests := []struct {
+		name      string
+		hookPaths []string
+		pkg       runtimePackage
+		seedFile  bool
+		wantErr   string
+		wantFile  bool
+	}{
+		{
+			name:     "no hooks removes stale file",
+			pkg:      runtimePackage{name: "log"},
+			seedFile: true,
+		},
+		{
+			name:      "named files are rejected",
+			hookPaths: hookPaths,
+			pkg: runtimePackage{
+				name:       "log",
+				testMode:   true,
+				fileTarget: true,
+			},
+			seedFile: true,
+			wantErr:  "use a package pattern instead",
+		},
+		{
+			name:      "non-test mode is rejected",
+			hookPaths: hookPaths,
+			pkg: runtimePackage{
+				name:       "log",
+				importPath: "example.com/app/internal/log",
+			},
+			seedFile: true,
+			wantErr:  "this workaround requires go test",
+		},
+		{
+			name:      "test mode generates external test package",
+			hookPaths: hookPaths,
+			pkg: runtimePackage{
+				name:     "log",
+				testMode: true,
+			},
+			wantFile: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			pkg := tt.pkg
+			pkg.dir = dir
+
+			filePath := filepath.Join(dir, otelcRuntimeTestFile)
+			if tt.seedFile {
+				require.NoError(t, os.WriteFile(
+					filePath, []byte("stale"), 0o600,
+				))
+			}
+
+			stateManager := newStateManager()
+			ctx := contextWithStateManager(t.Context(), stateManager)
+
+			err := newTestSetupPhase().addRuntimeTestDeps(
+				ctx, pkg, tt.hookPaths,
+			)
+
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
+
+			if tt.wantFile {
+				require.FileExists(t, filePath)
+
+				content, readErr := os.ReadFile(filePath)
+				require.NoError(t, readErr)
+				assert.Contains(t, string(content), "package log_test")
+				assert.Contains(t, string(content), "example.com/app/hooks")
+				assert.Contains(t, stateManager.files, filePath)
+			} else {
+				assert.NoFileExists(t, filePath)
+			}
+		})
+	}
 }
