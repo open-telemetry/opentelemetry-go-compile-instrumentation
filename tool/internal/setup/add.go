@@ -156,7 +156,8 @@ func (sp *setupPhase) addRuntimeTestDeps(
 		}
 		return ex.Newf(
 			"cannot safely link hook packages %v for package %s: they depend on it, which would create an import cycle; this workaround requires go test",
-			hookPaths, pkg.importPath,
+			hookPaths,
+			pkg.importPath,
 		)
 	}
 
@@ -219,6 +220,64 @@ func (sp *setupPhase) removeGeneratedRuntimeFile(
 	return nil
 }
 
+func recordSkippedHook(
+	skippedHooks map[string]bool,
+	hookPath string,
+	pkg runtimePackage,
+) {
+	if hookPath != pkg.importPath && pkg.importedByHooks[hookPath] {
+		skippedHooks[hookPath] = true
+	}
+}
+
+func collectFunctionRules(
+	matched []*rule.InstRuleSet,
+	pkg runtimePackage,
+) ([]*rule.InstFuncRule, map[string]bool, error) {
+	funcRules := []*rule.InstFuncRule{}
+	skippedHooks := make(map[string]bool)
+
+	for _, m := range matched {
+		for _, funcRule := range m.AllFuncRules() {
+			skip, err := skipHook(m, funcRule.Path, pkg)
+			if err != nil {
+				return nil, nil, err
+			}
+			if skip {
+				recordSkippedHook(skippedHooks, funcRule.Path, pkg)
+				continue
+			}
+			funcRules = append(funcRules, funcRule)
+		}
+	}
+
+	return funcRules, skippedHooks, nil
+}
+
+func collectFileRules(
+	matched []*rule.InstRuleSet,
+	pkg runtimePackage,
+	skippedHooks map[string]bool,
+) ([]*rule.InstFileRule, error) {
+	fileRules := []*rule.InstFileRule{}
+
+	for _, m := range matched {
+		for _, fileRule := range m.FileRules {
+			skip, err := skipHook(m, fileRule.Path, pkg)
+			if err != nil {
+				return nil, err
+			}
+			if skip {
+				recordSkippedHook(skippedHooks, fileRule.Path, pkg)
+				continue
+			}
+			fileRules = append(fileRules, fileRule)
+		}
+	}
+
+	return fileRules, nil
+}
+
 // addDeps generates and writes otelc.runtime.go with required imports and variable
 // declarations for OpenTelemetry instrumentation based on matched rules.
 //
@@ -226,48 +285,25 @@ func (sp *setupPhase) removeGeneratedRuntimeFile(
 // file cannot import the package it belongs to. `otelc go test ./...` selects
 // such a package when the hooks live in the application module.
 
-func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, pkg runtimePackage) error {
-	funcRules := []*rule.InstFuncRule{}
-	fileRules := []*rule.InstFileRule{}
-	skippedHooks := make(map[string]bool)
+func (sp *setupPhase) addDeps(
+	ctx context.Context,
+	matched []*rule.InstRuleSet,
+	pkg runtimePackage,
+) error {
+	funcRules, skippedHooks, err := collectFunctionRules(matched, pkg)
+	if err != nil {
+		return err
+	}
 
-	for _, m := range matched {
-		for _, funcRule := range m.AllFuncRules() {
-			skip, err := skipHook(m, funcRule.Path, pkg)
-			if err != nil {
-				return err
-			}
-			if skip {
-				// Keep a skipped hook linked into test binaries when the
-				// hook imports this package and therefore cannot be imported
-				// by its generated runtime file.
-				if funcRule.Path != pkg.importPath && pkg.importedByHooks[funcRule.Path] {
-					skippedHooks[funcRule.Path] = true
-				}
-				continue
-			}
-			funcRules = append(funcRules, funcRule)
-		}
-
-		for _, fileRule := range m.FileRules {
-			skip, err := skipHook(m, fileRule.Path, pkg)
-			if err != nil {
-				return err
-			}
-			if skip {
-				if fileRule.Path != pkg.importPath && pkg.importedByHooks[fileRule.Path] {
-					skippedHooks[fileRule.Path] = true
-				}
-				continue
-			}
-			fileRules = append(fileRules, fileRule)
-		}
+	fileRules, err := collectFileRules(matched, pkg, skippedHooks)
+	if err != nil {
+		return err
 	}
 
 	// Keep hooks that cannot be imported by the runtime file linked into
 	// test binaries through a generated external test package.
 	hookPaths := slices.Sorted(maps.Keys(skippedHooks))
-	if err := sp.addRuntimeTestDeps(ctx, pkg, hookPaths); err != nil {
+	if err = sp.addRuntimeTestDeps(ctx, pkg, hookPaths); err != nil {
 		return err
 	}
 
@@ -286,12 +322,12 @@ func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, 
 
 	// Track the file in the state manager.
 	if stateManager, found := stateManagerFromContext(ctx); found {
-		if err := stateManager.Track(otelcRuntimeFilePath); err != nil {
+		if err = stateManager.Track(otelcRuntimeFilePath); err != nil {
 			return err
 		}
 	}
 
-	if err := ast.WriteFileAtomic(otelcRuntimeFilePath, root); err != nil {
+	if err = ast.WriteFileAtomic(otelcRuntimeFilePath, root); err != nil {
 		return ex.Wrapf(err, "writing otelc runtime file %s", otelcRuntimeFilePath)
 	}
 
