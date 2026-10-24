@@ -47,6 +47,7 @@ func (sp *setupPhase) getBuildContext() *gobuild.Context {
 		slices.Clone(gobuild.Default.BuildTags),
 		util.UserBuildTags(util.SplitGoflags(os.Getenv("GOFLAGS")), sp.buildFlags)...)
 	return &bctx
+	testMode      bool
 }
 
 func (sp *setupPhase) Info(msg string, args ...any)  { sp.logger.Info(msg, args...) }
@@ -373,6 +374,8 @@ func (sp *setupPhase) generateRuntimePerPackage(
 			debugPath:       pkg.PkgPath,
 			name:            pkg.Name,
 			importedByHooks: importedByHooks,
+			testMode:        sp.testMode,
+			fileTarget:      pkg.PkgPath == pkgload.CommandLineArgumentsPackage,
 		}); err != nil {
 			return ex.Wrapf(err, "adding deps for package at %s", pkgDir)
 		}
@@ -507,6 +510,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		ruleConfig: cmd.String("rules"),
 		buildFlags: extractBuildFlags(subcommand, args),
 		pgo:        pgoValue(subcommand, args),
+		testMode:   subcommand == subcmdTest,
 	}
 
 	// Introduce additional hook code by generating otelc.runtime.go
