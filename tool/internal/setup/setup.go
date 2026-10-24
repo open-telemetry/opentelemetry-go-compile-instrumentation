@@ -33,6 +33,7 @@ type setupPhase struct {
 	// resolvedNames maps an import path to a package name, built from
 	// buildPackages' dependency graph.
 	resolvedNames map[string]string
+	testMode      bool
 }
 
 func (sp *setupPhase) Info(msg string, args ...any)  { sp.logger.Info(msg, args...) }
@@ -331,6 +332,8 @@ func (sp *setupPhase) generateRuntimePerPackage(
 			debugPath:       pkg.PkgPath,
 			name:            pkg.Name,
 			importedByHooks: importedByHooks,
+			testMode:        sp.testMode,
+			fileTarget:      pkg.PkgPath == pkgload.CommandLineArgumentsPackage,
 		}); err != nil {
 			return ex.Wrapf(err, "adding deps for package at %s", pkgDir)
 		}
@@ -442,6 +445,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		logger:     logger,
 		ruleConfig: cmd.String("rules"),
 		buildFlags: extractBuildFlags(subcommand, args),
+		testMode:   subcommand == subcmdTest,
 	}
 
 	// Introduce additional hook code by generating otelc.runtime.go
