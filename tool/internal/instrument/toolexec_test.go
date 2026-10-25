@@ -824,6 +824,19 @@ func TestEnableNestedToolexec(t *testing.T) {
 		assert.Equal(t, "1", os.Getenv(util.EnvOtelcNestedToolexec))
 	})
 
+	t.Run("strips only unpatterned gcflags from GOFLAGS", func(t *testing.T) {
+		t.Setenv("GOFLAGS", "-mod=mod -gcflags=-l '-gcflags=all=-N -l'")
+		t.Setenv(util.EnvOtelcNestedToolexec, "")
+
+		require.NoError(t, EnableNestedToolexec())
+
+		tokens := util.SplitGoflags(os.Getenv("GOFLAGS"))
+		assert.Contains(t, tokens, "-mod=mod")
+		assert.Contains(t, tokens, "'-gcflags=all=-N -l'")
+		assert.NotContains(t, tokens, "-gcflags=-l")
+		assert.Contains(t, tokens, wantToken)
+	})
+
 	t.Run("handles empty GOFLAGS without leading whitespace", func(t *testing.T) {
 		t.Setenv("GOFLAGS", "")
 		t.Setenv(util.EnvOtelcNestedToolexec, "")

@@ -1161,6 +1161,52 @@ func TestExtractBuildFlags(t *testing.T) {
 			args:     []string{"build", "-cover=false", "-tags=foo", "-cover", "./..."},
 			expected: []string{"-tags=foo", "-cover"}, // value flags first, then bool
 		},
+		{
+			name:     "joined patterned gcflags",
+			args:     []string{"-gcflags=all=-N -l", "./..."},
+			expected: []string{"-gcflags=all=-N -l"},
+		},
+		{
+			name:     "separated patterned gcflags",
+			args:     []string{"-gcflags", "all=-N -l", "./..."},
+			expected: []string{"-gcflags", "all=-N -l"},
+		},
+		{
+			name:     "joined unpatterned gcflags",
+			args:     []string{"-gcflags=-N -l", "./..."},
+			expected: nil,
+		},
+		{
+			name:     "separated unpatterned gcflags",
+			args:     []string{"-gcflags", "-N -l", "./..."},
+			expected: nil,
+		},
+		{
+			name:     "empty gcflags",
+			args:     []string{"-gcflags=", "./..."},
+			expected: nil,
+		},
+		{
+			name:     "double dash patterned gcflags",
+			args:     []string{"--gcflags=all=-l", "./..."},
+			expected: []string{"--gcflags=all=-l"},
+		},
+		{
+			name:     "repeated gcflags keep patterned values in order",
+			args:     []string{"-gcflags=all=-N -l", "-gcflags=-l", "-gcflags", "std=-l", "./..."},
+			expected: []string{"-gcflags=all=-N -l", "-gcflags", "std=-l"},
+		},
+		{
+			name:     "gcflags mixed with tags keep order",
+			args:     []string{"-tags=foo", "-gcflags", "all=-N -l", "-tags", "bar", "-gcflags=std=-l", "./..."},
+			expected: []string{"-tags=foo", "-gcflags", "all=-N -l", "-tags", "bar", "-gcflags=std=-l"},
+		},
+		{
+			name:       "patterned gcflags in go test",
+			subcommand: subcmdTest,
+			args:       []string{"-gcflags=all=-N -l", "./pkg"},
+			expected:   []string{"-gcflags=all=-N -l"},
+		},
 		// go test tail preservation tests
 		{
 			name:       "test delimiter dash-dash ignores tags in tail",
