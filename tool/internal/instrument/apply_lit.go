@@ -10,6 +10,7 @@ import (
 	"github.com/dave/dst"
 
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -17,9 +18,9 @@ import (
 // applyLitRule sets fields on every composite literal of the rule's type found
 // in the target file. It reports whether it changed root.
 func (ip *instrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule, root *dst.File) (bool, error) {
-	importAliases, aliasOverrides := ip.resolveImportOverrides(root, r.Imports)
+	importAliases := ast.ImportAliasMap(root, ip.importNames)
 
-	setters, err := newLitFieldSetters(r, aliasOverrides)
+	setters, err := newLitFieldSetters(r)
 	if err != nil {
 		return false, err
 	}
@@ -38,19 +39,16 @@ func (ip *instrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule
 	// and an enclosing literal always wraps a finished subtree.
 	for _, m := range slices.Backward(matched) {
 		lit, enclosing := m.lit, m.enclosing
+
 		// Go rejects a literal that mixes keyed and positional elements, so a
 		// positional literal cannot take the keyed elements this rule produces.
-		// The skip also precedes the shadowing check: a literal the rule never
-		// injects code into cannot resolve a rewritten alias to a local.
 		if hasPositionalElements(lit) {
 			ip.Warn("Skipping positional composite literal; set_fields requires keyed elements",
 				"rule", r.Name, "type", r.StructLiteral)
 			continue
 		}
-		if shadowErr := checkAliasOverrideShadowing(aliasOverrides, enclosing); shadowErr != nil {
-			return false, shadowErr
-		}
-		litModified, setErr := ip.setLitFields(lit, enclosing, setters, r, aliasOverrides)
+
+		litModified, setErr := ip.setLitFields(lit, enclosing, setters, r)
 		if setErr != nil {
 			return false, setErr
 		}
@@ -61,7 +59,7 @@ func (ip *instrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule
 		return false, nil
 	}
 
-	if err = ip.addRuleImports(ctx, root, usedRuleImports(root, r.Imports, aliasOverrides), r.Name); err != nil {
+	if err = ip.addRuleImports(ctx, root, usedRuleImports(root, r.Imports, nil), r.Name); err != nil {
 		return false, err
 	}
 	ip.Info("Apply literal rule", "rule", r)
@@ -114,7 +112,7 @@ type litFieldSetter struct {
 	wrap *callTemplate
 }
 
-func newLitFieldSetters(r *rule.InstLitRule, aliasOverrides map[string]string) ([]*litFieldSetter, error) {
+func newLitFieldSetters(r *rule.InstLitRule) ([]*litFieldSetter, error) {
 	setters := make([]*litFieldSetter, 0, len(r.Field))
 	for _, f := range r.Field {
 		setter := &litFieldSetter{name: f.Name}
@@ -123,7 +121,6 @@ func newLitFieldSetters(r *rule.InstLitRule, aliasOverrides map[string]string) (
 			if err != nil {
 				return nil, ex.Wrapf(err, "failed to parse value %q for field %q", f.Value, f.Name)
 			}
-			replaceQualifierAliases(value, aliasOverrides)
 			setter.value = value
 		}
 		if f.Wrap != "" {
@@ -188,7 +185,6 @@ func (ip *instrumentPhase) setLitFields(
 	enclosing *dst.FuncDecl,
 	setters []*litFieldSetter,
 	r *rule.InstLitRule,
-	aliasOverrides map[string]string,
 ) (bool, error) {
 	changed := false
 	var prepend []dst.Expr
@@ -204,7 +200,7 @@ func (ip *instrumentPhase) setLitFields(
 			// enclosing, when the literal sits inside a function, makes the shared
 			// function template variables ({{ .FuncArgument N }} etc.) available
 			// in the wrap template alongside {{ . }}.
-			wrapped, err := setter.wrap.compileExpression(existing.Value, enclosing, nil, aliasOverrides)
+			wrapped, err := setter.wrap.compileExpression(existing.Value, enclosing, nil, nil)
 			if err != nil {
 				return false, ex.Wrapf(err, "failed to wrap field %q of %s", setter.name, r.StructLiteral)
 			}
