@@ -617,26 +617,25 @@ func (sp *setupPhase) loadRules(ctx context.Context, moduleDirs []string) ([]rul
 	return nil, nil
 }
 
-func (sp *setupPhase) matchDeps(
-	ctx context.Context,
-	deps []*Dependency,
-	moduleDirs []string,
-) ([]*rule.InstRuleSet, error) {
-	// Construct the set of default allRules by parsing embedded data
+type ruleIndex struct {
+	exactRules map[string][]rule.InstRule
+	globRules  []targetRule
+}
+
+func (idx *ruleIndex) isEmpty() bool {
+	return idx == nil || (len(idx.exactRules) == 0 && len(idx.globRules) == 0)
+}
+
+func (sp *setupPhase) loadRuleIndex(ctx context.Context, moduleDirs []string) (*ruleIndex, error) {
 	allRules, err := sp.loadRules(ctx, moduleDirs)
 	if err != nil {
 		return nil, err
 	}
 	sp.Info("Found available rules", "rules", allRules)
 	if len(allRules) == 0 {
-		return nil, nil
+		return &ruleIndex{}, nil
 	}
 
-	// Split rules into two matching tiers. Rules whose target is a single exact
-	// import path are pre-indexed so each dependency resolves them with one map
-	// lookup (unchanged fast path). Every other target (a glob, $root, or a
-	// list) cannot be keyed, so those rules are kept in a flat slice and
-	// evaluated against every dependency's import path.
 	exactRules := make(map[string][]rule.InstRule)
 	globRules := make([]targetRule, 0)
 	for _, r := range allRules {
@@ -659,6 +658,20 @@ func (sp *setupPhase) matchDeps(
 		}
 		globRules = append(globRules, targetRule{target: target, rule: r})
 	}
+	return &ruleIndex{exactRules: exactRules, globRules: globRules}, nil
+}
+
+func (sp *setupPhase) matchDeps(
+	ctx context.Context,
+	deps []*Dependency,
+	idx *ruleIndex,
+) ([]*rule.InstRuleSet, error) {
+	if idx.isEmpty() {
+		return nil, nil
+	}
+
+	exactRules := idx.exactRules
+	globRules := idx.globRules
 
 	// Match the default rules with the found dependencies
 	matched := make([]*rule.InstRuleSet, 0)
@@ -681,7 +694,7 @@ func (sp *setupPhase) matchDeps(
 		})
 	}
 
-	if err = g.Wait(); err != nil {
+	if err := g.Wait(); err != nil {
 		return nil, err
 	}
 	return matched, nil
