@@ -42,7 +42,8 @@ var (
 func init() {
 	// Initialize logger early so hook packages can use it with the correct log level
 	// This is called at package load time, before any hooks execute
-	logger = slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+	// Stderr, not stdout: stdout belongs to the instrumented program and may carry data.
+	logger = slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
 		Level: logLevel(),
 	}))
 }
