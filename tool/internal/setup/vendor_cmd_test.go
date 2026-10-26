@@ -133,10 +133,10 @@ func TestVendorRejectsOldGoVersion(t *testing.T) {
 func TestVendorDirFlag(t *testing.T) {
 	for _, flags := range [][]string{{"-C", "./app"}, {"--C=./app"}} {
 		t.Run(strings.Join(flags, " "), func(t *testing.T) {
-			app := newVendorSyncApp(t)
 			parent := t.TempDir()
-			appDir := filepath.Join(parent, "app")
-			require.NoError(t, os.Rename(app, appDir))
+			// The app is written in place: on Windows, a directory that
+			// t.Chdir opened cannot be renamed.
+			appDir := newVendorSyncAppAt(t, filepath.Join(parent, "app"))
 			mustWriteFile(t, filepath.Join(parent, goModFileName), "module example.com/parent\n\ngo 1.25.0\n")
 			t.Chdir(parent)
 			t.Setenv(util.EnvOtelcWorkDir, parent)

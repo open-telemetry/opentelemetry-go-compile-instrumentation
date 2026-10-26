@@ -824,7 +824,14 @@ const patchedDep = "package dep\n\nconst V = \"patched\"\n"
 // v1.0.0 and corp.example/private v1.0.0 (only in vendor/).
 func newVendorSyncApp(t *testing.T) string {
 	t.Helper()
-	appDir := t.TempDir()
+	return newVendorSyncAppAt(t, t.TempDir())
+}
+
+// newVendorSyncAppAt writes the app of newVendorSyncApp in appDir, and
+// creates appDir if necessary. It returns appDir.
+func newVendorSyncAppAt(t *testing.T, appDir string) string {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(appDir, 0o755))
 	t.Chdir(appDir)
 	t.Setenv(util.EnvOtelcWorkDir, appDir)
 	t.Setenv("GOPROXY", newTestProxy(t, testProxyModules()...))
