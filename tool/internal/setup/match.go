@@ -636,6 +636,11 @@ func (sp *setupPhase) loadRuleIndex(ctx context.Context, moduleDirs []string) (*
 		return &ruleIndex{}, nil
 	}
 
+	// Split rules into two matching tiers. Rules whose target is a single exact
+	// import path are pre-indexed so each dependency resolves them with one map
+	// lookup (unchanged fast path). Every other target (a glob, $root, or a
+	// list) cannot be keyed, so those rules are kept in a flat slice and
+	// evaluated against every dependency's import path.
 	exactRules := make(map[string][]rule.InstRule)
 	globRules := make([]targetRule, 0)
 	for _, r := range allRules {

@@ -437,7 +437,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	// Prepare rules once for both the initial and injected dependencies.
 	idx, err := sp.loadRuleIndex(ctx, moduleDirs)
 	if err != nil {
-		return ex.Wrapf(err, "matching dependencies to hook rules")
+		return ex.Wrapf(err, "loading hook rules")
 	}
 	matched, err := sp.matchDeps(ctx, deps, idx)
 	if err != nil {
