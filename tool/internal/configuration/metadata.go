@@ -53,27 +53,29 @@ type Property struct {
 // flat-only options are intentionally omitted from the returned metadata.
 type Entry struct {
 	// Name is the existing flat instrumentation option name when present.
-	Name string
+	Name string `yaml:"name,omitempty"`
 	// DeclarativeName is the complete OpenTelemetry configuration path.
-	DeclarativeName string
+	DeclarativeName string `yaml:"declarative_name,omitempty"`
 	// Ref is the upstream shared-definition identifier, before resolution.
-	Ref string
+	Ref string `yaml:"ref,omitempty"`
 	// Description explains the option's behavior.
-	Description string
+	Description string `yaml:"description,omitempty"`
 	// Type preserves the existing flat/Go option type.
-	Type string
+	Type string `yaml:"type,omitempty"`
 	// Default is the top-level string default; nil means absent, not empty.
-	Default *string
+	Default *string `yaml:"default,omitempty"`
 	// Examples contains optional flat examples from the metadata entry.
-	Examples []string
+	Examples []string `yaml:"examples,omitempty"`
 	// DeclarativeType is the Java-compatible declarative type when specified.
-	DeclarativeType string
+	DeclarativeType string `yaml:"declarative_type,omitempty"`
 	// DeclarativeSchema describes the structured-list object shape.
-	DeclarativeSchema *Schema
+	DeclarativeSchema *Schema `yaml:"declarative_schema,omitempty"`
+	// DefaultBehavior is the prose default behavior from the declarative schema.
+	DefaultBehavior string `yaml:"default_behavior,omitempty"`
 	// Source identifies the metadata.yaml entry that produced this definition.
-	Source string
+	Source string `yaml:"-"`
 	// DefinitionSource identifies the pinned shared definition used by a ref.
-	DefinitionSource string
+	DefinitionSource string `yaml:"-"`
 }
 
 // Metadata is the declarative configuration portion of one module's
@@ -120,7 +122,7 @@ func ParseMetadata(data []byte, source string) (Metadata, error) {
 	metadata := Metadata{Source: source}
 	for i, node := range configurationsNode.Content {
 		entrySource := fmt.Sprintf("%s:configurations[%d]", source, i)
-		entry, isDeclarative, parseErr := parseEntry(node, entrySource, false)
+		entry, isDeclarative, parseErr := parseEntry(node, entrySource)
 		if parseErr != nil {
 			return Metadata{}, parseErr
 		}
@@ -136,10 +138,10 @@ func ParseMetadata(data []byte, source string) (Metadata, error) {
 	return metadata, nil
 }
 
-// parseEntry parses a configurations sequence item. Shared-definition defaults
-// may use the YAML scalar representation from Java; metadata.yaml defaults must
-// already be strings as required by the otelc metadata contract.
-func parseEntry(node *yaml.Node, source string, sharedDefault bool) (Entry, bool, error) {
+// parseEntry parses a configurations sequence item. Top-level defaults are
+// represented as strings in the metadata model; YAML boolean and numeric
+// scalars are normalized to their source spelling to match the Go watcher.
+func parseEntry(node *yaml.Node, source string) (Entry, bool, error) {
 	fields, err := mappingFields(node, source, fieldSet(
 		"name",
 		"declarative_name",
@@ -150,6 +152,7 @@ func parseEntry(node *yaml.Node, source string, sharedDefault bool) (Entry, bool
 		"examples",
 		"declarative_type",
 		"declarative_schema",
+		"default_behavior",
 	))
 	if err != nil {
 		return Entry{}, false, err
@@ -173,6 +176,7 @@ func parseEntry(node *yaml.Node, source string, sharedDefault bool) (Entry, bool
 		{name: "description", destination: &entry.Description},
 		{name: "type", destination: &entry.Type},
 		{name: "declarative_type", destination: &entry.DeclarativeType},
+		{name: "default_behavior", destination: &entry.DefaultBehavior},
 	} {
 		value, present, fieldErr := stringField(fields, field.name, source)
 		if fieldErr != nil {
@@ -184,7 +188,7 @@ func parseEntry(node *yaml.Node, source string, sharedDefault bool) (Entry, bool
 	}
 
 	if defaultNode, ok := fields["default"]; ok {
-		value, defaultErr := defaultString(defaultNode, sharedDefault, source+".default")
+		value, defaultErr := defaultString(defaultNode, source+".default")
 		if defaultErr != nil {
 			return Entry{}, false, defaultErr
 		}
@@ -246,7 +250,7 @@ func validateSelectors(fields map[string]*yaml.Node, source string) (selectors, 
 }
 
 func hasInlineFieldKeys(fields map[string]*yaml.Node) bool {
-	for _, field := range []string{"name", "description", "type", "default", "examples", "declarative_type", "declarative_schema"} {
+	for _, field := range []string{"name", "description", "type", "default", "examples", "declarative_type", "declarative_schema", "default_behavior"} {
 		if _, ok := fields[field]; ok {
 			return true
 		}
@@ -528,18 +532,15 @@ func scalarString(node *yaml.Node, source string) (string, error) {
 	return node.Value, nil
 }
 
-func defaultString(node *yaml.Node, shared bool, source string) (string, error) {
+func defaultString(node *yaml.Node, source string) (string, error) {
 	if node.Kind != yaml.ScalarNode {
-		return "", ex.Newf("%s: default must be a scalar string", source)
-	}
-	if !shared && node.Tag != yamlStringTag {
-		return "", ex.Newf("%s: default must be a string; quote scalar values", source)
+		return "", ex.Newf("%s: default must be a string, boolean, integer, or float scalar", source)
 	}
 	switch node.Tag {
 	case yamlStringTag, "!!bool", "!!int", "!!float":
 		return node.Value, nil
 	default:
-		return "", ex.Newf("%s: unsupported default scalar type %s", source, node.Tag)
+		return "", ex.Newf("%s: default must be a string, boolean, integer, or float scalar", source)
 	}
 }
 

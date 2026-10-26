@@ -1,0 +1,190 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# general.* definitions are derived from the pinned OpenTelemetry Configuration
+# schema below. Keep this file in sync with that release. The Go watcher reads
+# this file from the otelc checkout it is scanning, so refs can be enriched
+# without a network lookup. Additional otelc-owned go.* definitions belong in
+# this same catalog.
+catalog_version: 1
+source:
+  repository: open-telemetry/opentelemetry-configuration
+  release: v1.2.0
+  commit: 3b04ae78576ec407854d734eb4da4f78a67f902c
+  file: schema/instrumentation.yaml
+definitions:
+  general.stability_opt_in_list/development:
+    declarative_name: general.stability_opt_in_list/development
+    description: >-
+      Configure semantic convention stability opt-in as a comma-separated list. This property follows the format and semantics
+      of the OTEL_SEMCONV_STABILITY_OPT_IN environment variable. It controls emission of stable versus experimental semantic
+      conventions and is intended for migration between versions.
+    declarative_type: string
+    default_behavior: No opt-in is configured and instrumentations continue emitting their default semantic convention version.
+
+  general.http.semconv.version/development:
+    declarative_name: general.http.semconv.version/development
+    description: The target semantic convention version for this domain (e.g., 1).
+    declarative_type: int
+    default_behavior: The latest stable version is used, or if no stable version is available and .experimental is true then
+      the latest experimental version is used.
+  general.http.semconv.experimental/development:
+    declarative_name: general.http.semconv.experimental/development
+    description: Use latest experimental semantic conventions (before stable is available or to enable experimental features
+      on top of stable conventions).
+    declarative_type: boolean
+    default_behavior: false is used
+  general.http.semconv.dual_emit/development:
+    declarative_name: general.http.semconv.dual_emit/development
+    description: >-
+      When true, also emit the previous major version alongside the target version. For version 1, the previous version refers
+      to the pre-stable conventions emitted before the first stable convention was defined. For version 2 and above, the previous
+      version is the prior stable major version. This enables phased migration.
+    declarative_type: boolean
+    default_behavior: false is used
+
+  general.http.client.request_captured_headers/development:
+    declarative_name: general.http.client.request_captured_headers/development
+    description: Configure headers to capture for outbound http requests.
+    declarative_type: list
+    default_behavior: No outbound request headers are captured.
+  general.http.client.response_captured_headers/development:
+    declarative_name: general.http.client.response_captured_headers/development
+    description: Configure headers to capture for inbound http responses.
+    declarative_type: list
+    default_behavior: No inbound response headers are captured.
+  general.http.client.known_methods/development:
+    declarative_name: general.http.client.known_methods/development
+    description: >-
+      Override the default list of known HTTP methods. Known methods are case-sensitive. This is a full override of the defaults,
+      not a list of methods added to the defaults.
+    declarative_type: list
+    default_behavior: HTTP methods GET, HEAD, POST, PUT, DELETE, CONNECT, OPTIONS, TRACE, PATCH are known
+
+  general.http.server.request_captured_headers/development:
+    declarative_name: general.http.server.request_captured_headers/development
+    description: Configure headers to capture for inbound http requests.
+    declarative_type: list
+    default_behavior: No request headers are captured.
+  general.http.server.response_captured_headers/development:
+    declarative_name: general.http.server.response_captured_headers/development
+    description: Configure headers to capture for outbound http responses.
+    declarative_type: list
+    default_behavior: No response headers are captured.
+  general.http.server.known_methods/development:
+    declarative_name: general.http.server.known_methods/development
+    description: >-
+      Override the default list of known HTTP methods. Known methods are case-sensitive. This is a full override of the defaults,
+      not a list of methods added to the defaults.
+    declarative_type: list
+    default_behavior: HTTP methods GET, HEAD, POST, PUT, DELETE, CONNECT, OPTIONS, TRACE, PATCH are known
+
+  general.code.semconv.version/development:
+    declarative_name: general.code.semconv.version/development
+    description: The target semantic convention version for this domain (e.g., 1).
+    declarative_type: int
+    default_behavior: The latest stable version is used, or if no stable version is available and .experimental is true then
+      the latest experimental version is used.
+  general.code.semconv.experimental/development:
+    declarative_name: general.code.semconv.experimental/development
+    description: Use latest experimental semantic conventions (before stable is available or to enable experimental features
+      on top of stable conventions).
+    declarative_type: boolean
+    default_behavior: false is used
+  general.code.semconv.dual_emit/development:
+    declarative_name: general.code.semconv.dual_emit/development
+    description: >-
+      When true, also emit the previous major version alongside the target version. For version 1, the previous version refers
+      to the pre-stable conventions emitted before the first stable convention was defined. For version 2 and above, the previous
+      version is the prior stable major version. This enables phased migration.
+    declarative_type: boolean
+    default_behavior: false is used
+
+  general.db.semconv.version/development:
+    declarative_name: general.db.semconv.version/development
+    description: The target semantic convention version for this domain (e.g., 1).
+    declarative_type: int
+    default_behavior: The latest stable version is used, or if no stable version is available and .experimental is true then
+      the latest experimental version is used.
+  general.db.semconv.experimental/development:
+    declarative_name: general.db.semconv.experimental/development
+    description: Use latest experimental semantic conventions (before stable is available or to enable experimental features
+      on top of stable conventions).
+    declarative_type: boolean
+    default_behavior: false is used
+  general.db.semconv.dual_emit/development:
+    declarative_name: general.db.semconv.dual_emit/development
+    description: >-
+      When true, also emit the previous major version alongside the target version. For version 1, the previous version refers
+      to the pre-stable conventions emitted before the first stable convention was defined. For version 2 and above, the previous
+      version is the prior stable major version. This enables phased migration.
+    declarative_type: boolean
+    default_behavior: false is used
+
+  general.gen_ai.semconv.version/development:
+    declarative_name: general.gen_ai.semconv.version/development
+    description: The target semantic convention version for this domain (e.g., 1).
+    declarative_type: int
+    default_behavior: The latest stable version is used, or if no stable version is available and .experimental is true then
+      the latest experimental version is used.
+  general.gen_ai.semconv.experimental/development:
+    declarative_name: general.gen_ai.semconv.experimental/development
+    description: Use latest experimental semantic conventions (before stable is available or to enable experimental features
+      on top of stable conventions).
+    declarative_type: boolean
+    default_behavior: false is used
+  general.gen_ai.semconv.dual_emit/development:
+    declarative_name: general.gen_ai.semconv.dual_emit/development
+    description: >-
+      When true, also emit the previous major version alongside the target version. For version 1, the previous version refers
+      to the pre-stable conventions emitted before the first stable convention was defined. For version 2 and above, the previous
+      version is the prior stable major version. This enables phased migration.
+    declarative_type: boolean
+    default_behavior: false is used
+
+  general.messaging.semconv.version/development:
+    declarative_name: general.messaging.semconv.version/development
+    description: The target semantic convention version for this domain (e.g., 1).
+    declarative_type: int
+    default_behavior: The latest stable version is used, or if no stable version is available and .experimental is true then
+      the latest experimental version is used.
+  general.messaging.semconv.experimental/development:
+    declarative_name: general.messaging.semconv.experimental/development
+    description: Use latest experimental semantic conventions (before stable is available or to enable experimental features
+      on top of stable conventions).
+    declarative_type: boolean
+    default_behavior: false is used
+  general.messaging.semconv.dual_emit/development:
+    declarative_name: general.messaging.semconv.dual_emit/development
+    description: >-
+      When true, also emit the previous major version alongside the target version. For version 1, the previous version refers
+      to the pre-stable conventions emitted before the first stable convention was defined. For version 2 and above, the previous
+      version is the prior stable major version. This enables phased migration.
+    declarative_type: boolean
+    default_behavior: false is used
+
+  general.rpc.semconv.version/development:
+    declarative_name: general.rpc.semconv.version/development
+    description: The target semantic convention version for this domain (e.g., 1).
+    declarative_type: int
+    default_behavior: The latest stable version is used, or if none is available and experimental is true the latest experimental
+      version is used.
+  general.rpc.semconv.experimental/development:
+    declarative_name: general.rpc.semconv.experimental/development
+    description: Use latest experimental semantic conventions before stable is available or to enable experimental features
+      on top of stable conventions.
+    declarative_type: boolean
+    default_behavior: false is used
+  general.rpc.semconv.dual_emit/development:
+    declarative_name: general.rpc.semconv.dual_emit/development
+    description: Emit the previous major version alongside the target version for phased migration.
+    declarative_type: boolean
+    default_behavior: false is used
+
+  general.sanitization.url.sensitive_query_parameters/development:
+    declarative_name: general.sanitization.url.sensitive_query_parameters/development
+    description: >-
+      List of query parameter names whose values should be redacted from URLs. Query parameter names are case-sensitive. This
+      is a full override of the default keys; set an empty array to disable redaction.
+    declarative_type: list
+    default_behavior: The default sensitive query parameter list from the URL semantic conventions is used.

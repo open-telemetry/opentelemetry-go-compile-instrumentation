@@ -26,7 +26,7 @@ func ResolveMetadata(metadataFiles []Metadata, definitions map[string]Entry) ([]
 			if entry.Ref != "" {
 				definition, ok := definitions[entry.Ref]
 				if !ok {
-					return nil, ex.Newf("%s: unknown shared configuration ref %q", entry.Source, entry.Ref)
+					return nil, ex.Newf("%s: unknown configuration ref %q", entry.Source, entry.Ref)
 				}
 				resolved = cloneEntry(definition)
 				resolved.Ref = entry.Ref
@@ -134,5 +134,6 @@ func equivalent(left, right Entry) bool {
 		reflect.DeepEqual(left.Default, right.Default) &&
 		reflect.DeepEqual(left.Examples, right.Examples) &&
 		left.DeclarativeType == right.DeclarativeType &&
+		left.DefaultBehavior == right.DefaultBehavior &&
 		reflect.DeepEqual(left.DeclarativeSchema, right.DeclarativeSchema)
 }

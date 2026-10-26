@@ -4,76 +4,119 @@
 package configuration
 
 import (
+	"bytes"
 	_ "embed"
+	"errors"
 	"fmt"
+	"io"
 	"slices"
+	"strings"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.yaml.in/yaml/v3"
 )
 
 const (
-	// SharedDefinitionsCommit identifies the exact upstream Java source snapshot
-	// embedded in otelc. Update it only when intentionally refreshing the copy.
-	SharedDefinitionsCommit = "7e2db50673c71761c609275552958a3d5c79ca78"
-	sharedDefinitionsPath   = "instrumentation-docs/src/main/resources/shared-config-definitions.yaml"
-	// SharedDefinitionsURL links to the source file at the pinned commit.
-	SharedDefinitionsURL = "https://github.com/open-telemetry/opentelemetry-java-instrumentation/blob/" + SharedDefinitionsCommit + "/" + sharedDefinitionsPath
+	// OpenTelemetryConfigurationRelease and OpenTelemetryConfigurationCommit pin
+	// the schema snapshot from which the catalog's general.* definitions were
+	// derived. Keep the catalog offline and reproducible; update these together
+	// only when intentionally refreshing the checked-in catalog.
+	OpenTelemetryConfigurationRelease = "v1.2.0"
+	OpenTelemetryConfigurationCommit  = "3b04ae78576ec407854d734eb4da4f78a67f902c"
+	OpenTelemetryConfigurationFile    = "schema/instrumentation.yaml"
+	OpenTelemetryConfigurationURL     = "https://github.com/open-telemetry/opentelemetry-configuration/blob/" + OpenTelemetryConfigurationCommit + "/" + OpenTelemetryConfigurationFile
+
+	// CatalogPath is the path relative to the otelc repository root. The Go
+	// watcher reads this same file from the otelc checkout it is scanning.
+	CatalogPath = "tool/internal/configuration/catalog.yaml"
 )
 
-//go:embed shared-config-definitions.yaml
-var embeddedSharedDefinitions []byte
+//go:embed catalog.yaml
+var embeddedCatalog []byte
 
-// SharedDefinitions loads the checked-in Java definitions without network
-// access. Only instrumentation-level configurations are referenceable by
-// module metadata; global_configurations are intentionally excluded.
-func SharedDefinitions() (map[string]Entry, error) {
-	return ParseSharedDefinitions(embeddedSharedDefinitions)
+type catalogSource struct {
+	Repository string `yaml:"repository"`
+	Release    string `yaml:"release"`
+	Commit     string `yaml:"commit"`
+	File       string `yaml:"file"`
 }
 
-// ParseSharedDefinitions parses the instrumentation-level definitions from a
-// copy of Java's shared-config-definitions.yaml.
-func ParseSharedDefinitions(data []byte) (map[string]Entry, error) {
-	var document yaml.Node
-	if err := yaml.Unmarshal(data, &document); err != nil {
-		return nil, ex.Wrapf(err, "parse shared definitions from %s", SharedDefinitionsURL)
+type catalogDocument struct {
+	CatalogVersion int              `yaml:"catalog_version"`
+	Source         catalogSource    `yaml:"source"`
+	Definitions    map[string]Entry `yaml:"definitions"`
+}
+
+// CatalogDefinitions loads the checked-in catalog without network access.
+// general.* entries are derived from the pinned OpenTelemetry Configuration
+// release; otelc-owned go.* entries can be added to this catalog as they are
+// introduced.
+func CatalogDefinitions() (map[string]Entry, error) {
+	return ParseCatalog(embeddedCatalog)
+}
+
+// ParseCatalog parses a checked-in catalog of definitions keyed by ref. Refs
+// are the canonical declarative paths, so both the watcher and otelc use the
+// same identifier without a Java-specific alias layer.
+func ParseCatalog(data []byte) (map[string]Entry, error) {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	var document catalogDocument
+	if err := decoder.Decode(&document); err != nil {
+		return nil, ex.Wrapf(err, "parse configuration catalog")
 	}
-	if len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
-		return nil, ex.Newf("shared definitions from %s must be a mapping", SharedDefinitionsURL)
-	}
-	root, err := mappingFields(document.Content[0], "shared definitions", nil)
-	if err != nil {
-		return nil, err
-	}
-	configurationsNode, ok := root["configurations"]
-	if !ok {
-		return nil, ex.Newf("shared definitions from %s have no configurations mapping", SharedDefinitionsURL)
-	}
-	definitions, err := mappingFields(configurationsNode, "shared definitions.configurations", nil)
-	if err != nil {
-		return nil, err
-	}
-	result := make(map[string]Entry, len(definitions))
-	ids := make([]string, 0, len(definitions))
-	for id := range definitions {
-		ids = append(ids, id)
-	}
-	slices.Sort(ids)
-	for _, id := range ids {
-		node := definitions[id]
-		source := fmt.Sprintf("shared definition %q", id)
-		entry, declarative, parseErr := parseEntry(node, source, true)
-		if parseErr != nil {
-			return nil, parseErr
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return nil, ex.New("configuration catalog must contain a single YAML document")
 		}
-		if !declarative || entry.Ref != "" || entry.DeclarativeName == "" {
-			return nil, ex.Newf("%s: shared definition must contain declarative_name and inline fields", source)
-		}
-		if validateErr := validateEntry(entry, source); validateErr != nil {
-			return nil, validateErr
-		}
-		entry.Source = source
-		result[id] = entry
+		return nil, ex.Wrapf(err, "parse trailing configuration catalog document")
 	}
-	return result, nil
+
+	if document.CatalogVersion != 1 {
+		return nil, ex.Newf("unsupported configuration catalog version %d", document.CatalogVersion)
+	}
+	if document.Source.Repository != "open-telemetry/opentelemetry-configuration" ||
+		document.Source.Release != OpenTelemetryConfigurationRelease ||
+		document.Source.Commit != OpenTelemetryConfigurationCommit ||
+		document.Source.File != OpenTelemetryConfigurationFile {
+		return nil, ex.Newf(
+			"configuration catalog source must pin %s at %s",
+			OpenTelemetryConfigurationRelease,
+			OpenTelemetryConfigurationCommit,
+		)
+	}
+	if len(document.Definitions) == 0 {
+		return nil, ex.New("configuration catalog has no definitions")
+	}
+
+	refs := make([]string, 0, len(document.Definitions))
+	for ref := range document.Definitions {
+		refs = append(refs, ref)
+	}
+	slices.Sort(refs)
+	definitions := make(map[string]Entry, len(refs))
+	for _, ref := range refs {
+		entry := document.Definitions[ref]
+		source := fmt.Sprintf("configuration catalog ref %q", ref)
+		if ref == "" || entry.DeclarativeName == "" {
+			return nil, ex.Newf("%s: ref and declarative_name must be non-empty", source)
+		}
+		if ref != entry.DeclarativeName {
+			return nil, ex.Newf("%s: catalog key must equal declarative_name %q", source, entry.DeclarativeName)
+		}
+		if !strings.HasPrefix(ref, "general.") && !strings.HasPrefix(ref, "go.") {
+			return nil, ex.Newf("%s: catalog refs must use the general. or go. namespace", source)
+		}
+		if err := validateEntry(entry, source); err != nil {
+			return nil, err
+		}
+		if strings.HasPrefix(ref, "general.") {
+			entry.Source = source + " from " + OpenTelemetryConfigurationURL
+		} else {
+			entry.Source = source + " (otelc-owned go.* definition)"
+		}
+		definitions[ref] = entry
+	}
+	return definitions, nil
 }

@@ -16,7 +16,7 @@ import (
 
 func TestValidateSelectedConfigurationMetadata(t *testing.T) {
 	module := makeConfigurationModule(t, "example.com/instrumentation", `configurations:
-  - ref: http.client.capture-request-headers
+  - ref: general.http.client.request_captured_headers/development
 `)
 	matched := []*rule.InstRuleSet{{
 		FuncRules: map[string][]*rule.InstFuncRule{
@@ -42,7 +42,7 @@ func TestValidateSelectedConfigurationMetadataUnknownReference(t *testing.T) {
 	}}
 
 	err := newTestSetupPhase().validateSelectedConfigurationMetadata(t.Context(), matched, []string{module.dir})
-	require.ErrorContains(t, err, `unknown shared configuration ref "missing.definition"`)
+	require.ErrorContains(t, err, `unknown configuration ref "missing.definition"`)
 	require.ErrorContains(t, err, filepath.Join(module.dir, "metadata.yaml"))
 }
 

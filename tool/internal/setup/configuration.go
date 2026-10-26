@@ -62,9 +62,9 @@ func (sp *setupPhase) validateSelectedConfigurationMetadata(
 		return nil
 	}
 
-	definitions, err := configuration.SharedDefinitions()
+	definitions, err := configuration.CatalogDefinitions()
 	if err != nil {
-		return ex.Wrapf(err, "load pinned shared configuration definitions")
+		return ex.Wrapf(err, "load pinned configuration catalog")
 	}
 	resolved, err := configuration.ResolveMetadata(metadataFiles, definitions)
 	if err != nil {

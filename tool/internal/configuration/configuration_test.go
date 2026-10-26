@@ -19,13 +19,13 @@ configurations:
     declarative_name: go.net_http.enabled
     type: bool
     default: "true"
-  - ref: http.client.capture-request-headers
+  - ref: general.http.client.request_captured_headers/development
   - name: legacy.go.option
     type: time.Duration
     default: 10s
   - name: legacy.boolean.option
     type: bool
-    default: true
+    default: "true"
 `)
 
 	metadata, err := ParseMetadata(data, "/module/metadata.yaml")
@@ -36,7 +36,7 @@ configurations:
 	assert.Equal(t, "bool", metadata.Entries[0].Type)
 	require.NotNil(t, metadata.Entries[0].Default)
 	assert.Equal(t, "true", *metadata.Entries[0].Default)
-	assert.Equal(t, "http.client.capture-request-headers", metadata.Entries[1].Ref)
+	assert.Equal(t, "general.http.client.request_captured_headers/development", metadata.Entries[1].Ref)
 }
 
 func TestParseMetadataDistinguishesAbsentAndEmptyDefaults(t *testing.T) {
@@ -63,7 +63,7 @@ func TestParseMetadataRejectsMalformedDeclarations(t *testing.T) {
 		{
 			name: "both selectors",
 			body: `- declarative_name: go.net_http.enabled
-  ref: http.client.capture-request-headers`,
+  ref: general.http.client.request_captured_headers/development`,
 			want: "exactly one of declarative_name or ref",
 		},
 		{
@@ -83,18 +83,18 @@ func TestParseMetadataRejectsMalformedDeclarations(t *testing.T) {
 		},
 		{
 			name: "surrounding ref whitespace",
-			body: `- ref: " http.client.capture-request-headers "`,
+			body: `- ref: " general.http.client.request_captured_headers/development "`,
 			want: "ref must not have leading or trailing whitespace",
 		},
 		{
 			name: "ref repeats inline data",
-			body: `- ref: http.client.capture-request-headers
+			body: `- ref: general.http.client.request_captured_headers/development
   description: duplicate`,
 			want: "a ref entry must not include inline configuration fields",
 		},
 		{
 			name: "ref repeats an empty inline field",
-			body: `- ref: http.client.capture-request-headers
+			body: `- ref: general.http.client.request_captured_headers/development
   description: ""`,
 			want: "a ref entry must not include inline configuration fields",
 		},
@@ -110,10 +110,10 @@ func TestParseMetadataRejectsMalformedDeclarations(t *testing.T) {
 			want: "declarative_type or declarative_schema requires declarative_name or ref",
 		},
 		{
-			name: "non-string top-level default",
+			name: "non-scalar top-level default",
 			body: `- declarative_name: go.net_http.enabled
-  default: true`,
-			want: "default must be a string",
+  default: [true]`,
+			want: "default must be a string, boolean, integer, or float scalar",
 		},
 		{
 			name: "invalid boolean default",
@@ -180,6 +180,23 @@ func TestParseMetadataRejectsMalformedDeclarations(t *testing.T) {
 	}
 }
 
+func TestParseMetadataNormalizesTopLevelScalarDefaultsToStrings(t *testing.T) {
+	metadata, err := ParseMetadata([]byte(`configurations:
+  - declarative_name: go.feature.enabled
+    declarative_type: boolean
+    default: true
+  - declarative_name: go.feature.limit
+    declarative_type: int
+    default: 17
+`), "metadata.yaml")
+	require.NoError(t, err)
+	require.Len(t, metadata.Entries, 2)
+	require.NotNil(t, metadata.Entries[0].Default)
+	assert.Equal(t, "true", *metadata.Entries[0].Default)
+	require.NotNil(t, metadata.Entries[1].Default)
+	assert.Equal(t, "17", *metadata.Entries[1].Default)
+}
+
 func TestParseMetadataPropertyValuesRetainYAMLTypes(t *testing.T) {
 	metadata, err := ParseMetadata([]byte(`configurations:
   - declarative_name: go.http.rules
@@ -204,37 +221,66 @@ func TestParseMetadataPropertyValuesRetainYAMLTypes(t *testing.T) {
 	assert.Equal(t, "/users/{id}", properties["pattern"].Example)
 }
 
-func TestSharedDefinitionsAndResolver(t *testing.T) {
-	definitions, err := SharedDefinitions()
+func TestConfigurationCatalogAndResolver(t *testing.T) {
+	definitions, err := CatalogDefinitions()
 	require.NoError(t, err)
-	assert.Equal(t, "7e2db50673c71761c609275552958a3d5c79ca78", SharedDefinitionsCommit)
-	require.Contains(t, definitions, "http.client.capture-request-headers")
+	assert.Equal(t, "v1.2.0", OpenTelemetryConfigurationRelease)
+	assert.Equal(t, "3b04ae78576ec407854d734eb4da4f78a67f902c", OpenTelemetryConfigurationCommit)
+	require.GreaterOrEqual(t, len(definitions), 26, "catalog contains the general.* leaves from the pinned schema")
+	require.Contains(t, definitions, "general.http.client.request_captured_headers/development")
 	assert.Equal(
 		t,
-		"general.http.client.request_captured_headers",
-		definitions["http.client.capture-request-headers"].DeclarativeName,
+		"general.http.client.request_captured_headers/development",
+		definitions["general.http.client.request_captured_headers/development"].DeclarativeName,
 	)
-	require.NotNil(t, definitions["http.server.emit-experimental-telemetry"].Default)
-	assert.Equal(t, "false", *definitions["http.server.emit-experimental-telemetry"].Default)
+	assert.Equal(
+		t,
+		"No outbound request headers are captured.",
+		definitions["general.http.client.request_captured_headers/development"].DefaultBehavior,
+	)
+	assert.Equal(t, "int", definitions["general.http.semconv.version/development"].DeclarativeType)
+	assert.Equal(t, "boolean", definitions["general.http.semconv.experimental/development"].DeclarativeType)
 
 	first, err := ParseMetadata([]byte(`configurations:
-  - ref: http.client.capture-request-headers
+  - ref: general.http.client.request_captured_headers/development
 `), "/a/metadata.yaml")
 	require.NoError(t, err)
 	second, err := ParseMetadata([]byte(`configurations:
-  - ref: http.client.capture-request-headers
+  - ref: general.http.client.request_captured_headers/development
 `), "/b/metadata.yaml")
 	require.NoError(t, err)
 
 	resolved, err := ResolveMetadata([]Metadata{first, second}, definitions)
 	require.NoError(t, err)
 	require.Len(t, resolved, 1, "identical references resolve once")
-	assert.Equal(t, "http.client.capture-request-headers", resolved[0].Ref)
-	assert.Equal(t, "general.http.client.request_captured_headers", resolved[0].DeclarativeName)
+	assert.Equal(t, "general.http.client.request_captured_headers/development", resolved[0].Ref)
+	assert.Equal(t, "general.http.client.request_captured_headers/development", resolved[0].DeclarativeName)
+}
+
+func TestParseCatalogAcceptsOtelcOwnedGoDefinitions(t *testing.T) {
+	definitions, err := ParseCatalog([]byte(`catalog_version: 1
+source:
+  repository: open-telemetry/opentelemetry-configuration
+  release: v1.2.0
+  commit: 3b04ae78576ec407854d734eb4da4f78a67f902c
+  file: schema/instrumentation.yaml
+definitions:
+  go.example.enabled:
+    declarative_name: go.example.enabled
+    description: Enables the example instrumentation.
+    declarative_type: boolean
+    default: "false"
+`))
+	require.NoError(t, err)
+	require.Contains(t, definitions, "go.example.enabled")
+	assert.Equal(t, "go.example.enabled", definitions["go.example.enabled"].DeclarativeName)
+	assert.Equal(t, "boolean", definitions["go.example.enabled"].DeclarativeType)
+	require.NotNil(t, definitions["go.example.enabled"].Default)
+	assert.Equal(t, "false", *definitions["go.example.enabled"].Default)
 }
 
 func TestResolveMetadataReportsUnknownRefsAndConflictingPaths(t *testing.T) {
-	definitions, err := SharedDefinitions()
+	definitions, err := CatalogDefinitions()
 	require.NoError(t, err)
 
 	unknown, err := ParseMetadata([]byte(`configurations:
@@ -242,7 +288,7 @@ func TestResolveMetadataReportsUnknownRefsAndConflictingPaths(t *testing.T) {
 `), "/module/metadata.yaml")
 	require.NoError(t, err)
 	_, err = ResolveMetadata([]Metadata{unknown}, definitions)
-	require.ErrorContains(t, err, `unknown shared configuration ref "missing.definition"`)
+	require.ErrorContains(t, err, `unknown configuration ref "missing.definition"`)
 
 	left, err := ParseMetadata([]byte(`configurations:
   - declarative_name: go.net_http.enabled
@@ -258,7 +304,7 @@ func TestResolveMetadataReportsUnknownRefsAndConflictingPaths(t *testing.T) {
 	require.ErrorContains(t, err, `conflicting configuration definitions for declarative_name "go.net_http.enabled"`)
 }
 
-func TestResolveMetadataReportsConflictingSharedDefinitions(t *testing.T) {
+func TestResolveMetadataReportsConflictingCatalogDefinitions(t *testing.T) {
 	first, err := ParseMetadata([]byte(`configurations:
   - ref: first.definition
   - ref: second.definition
@@ -308,6 +354,10 @@ func TestEnvironmentVariableName(t *testing.T) {
 		{
 			name: "go.net_http.enabled",
 			want: "OTEL_INSTRUMENTATION_GO_NET_HTTP_ENABLED",
+		},
+		{
+			name: "general.http.client.request_captured_headers/development",
+			want: "OTEL_INSTRUMENTATION_HTTP_CLIENT_REQUEST_CAPTURED_HEADERS",
 		},
 		{
 			name: "java.common.http.client.emit_experimental_telemetry/development",
