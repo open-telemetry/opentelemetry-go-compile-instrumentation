@@ -317,6 +317,14 @@ func TestExtractGZip_SkipsZipSlip(t *testing.T) {
 	}
 }
 
+// TestExtractGZipSkipsAbsoluteEntry: an archive entry with an absolute path
+// is skipped. It is not written below the target directory either.
+func TestExtractGZipSkipsAbsoluteEntry(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, extractGZip(bundleWithFile(t, "/abs.yaml", []byte("evil")), dir))
+	require.NoFileExists(t, filepath.Join(dir, "abs.yaml"))
+}
+
 func TestExtractGZip_InvalidGzip(t *testing.T) {
 	t.Parallel()
 

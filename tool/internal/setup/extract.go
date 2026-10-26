@@ -146,10 +146,13 @@ func extractGZip(bundleReader io.Reader, targetDir string) (retErr error) {
 		// follow a symbolic link below the target directory: a link (for
 		// example one that a forged state file restored) can point outside
 		// it. A part of the path that does not exist yet is not a link.
-		targetPath := filepath.Join(targetDir, filepath.FromSlash(cleanName))
-		if checkInside(targetDir, targetPath) != nil {
+		// filepath.IsLocal is checked here, not in a helper function, so that
+		// CodeQL sees that the path is sanitized.
+		name := filepath.FromSlash(cleanName)
+		if !filepath.IsLocal(name) {
 			continue // Skip files that would be extracted outside target dir
 		}
+		targetPath := filepath.Join(targetDir, name)
 		if err = checkNoSymlink(targetDir, targetPath); err != nil {
 			return ex.Wrapf(err, "extracting %s", header.Name)
 		}
