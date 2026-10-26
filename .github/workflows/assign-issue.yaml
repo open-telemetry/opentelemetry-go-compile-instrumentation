@@ -17,6 +17,13 @@ jobs:
     if: >-
       !github.event.issue.pull_request && (github.event.comment.body == '/assign' || github.event.comment.body == '/unassign')
     steps:
+      # GITHUB_TOKEN rather than the otelbot App token the bundle workflows
+      # use: otelbot is there so pushed commits still trigger pull_request
+      # workflows, and this job pushes nothing. Taking it on would also mean
+      # taking its "skip when the App is not configured" guard, which would
+      # make /assign silently do nothing -- the failure this command exists to
+      # remove.
+      #
       # The comment body and author reach the script through the environment,
       # never through ${{ }} interpolation, so a crafted comment cannot inject
       # shell.
