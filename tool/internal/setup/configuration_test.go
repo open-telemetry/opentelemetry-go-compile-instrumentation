@@ -16,7 +16,7 @@ import (
 
 func TestValidateSelectedConfigurationMetadata(t *testing.T) {
 	module := makeConfigurationModule(t, "example.com/instrumentation", `configurations:
-  - ref: general.http.client.request_captured_headers/development
+  - ref: general.http.client.request_captured_headers
 `)
 	matched := []*rule.InstRuleSet{{
 		FuncRules: map[string][]*rule.InstFuncRule{

@@ -7,6 +7,7 @@ package configuration
 
 import (
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"strconv"
@@ -21,6 +22,9 @@ const (
 	yamlStringTag       = "!!str"
 	booleanType         = "boolean"
 	integerType         = "int"
+	stringType          = "string"
+	listType            = "list"
+	mapType             = "map"
 	structuredListType  = "structured_list"
 )
 
@@ -49,27 +53,23 @@ type Property struct {
 	hasExample bool
 }
 
-// Entry is one declarative configuration definition after parsing. Legacy
-// flat-only options are intentionally omitted from the returned metadata.
+// Entry describes one Go instrumentation configuration option. In source
+// metadata it has either a Name (an inline declarative path) or a Ref.
 type Entry struct {
-	// Name is the existing flat instrumentation option name when present.
+	// Name is the OpenTelemetry configuration path relative to instrumentation/development.
 	Name string `yaml:"name,omitempty"`
-	// DeclarativeName is the complete OpenTelemetry configuration path.
-	DeclarativeName string `yaml:"declarative_name,omitempty"`
-	// Ref is the upstream shared-definition identifier, before resolution.
+	// Ref identifies a catalog definition; resolved entries retain its provenance.
 	Ref string `yaml:"ref,omitempty"`
 	// Description explains the option's behavior.
 	Description string `yaml:"description,omitempty"`
-	// Type preserves the existing flat/Go option type.
+	// Type is boolean, string, int, map, list, or structured_list.
 	Type string `yaml:"type,omitempty"`
 	// Default is the top-level string default; nil means absent, not empty.
 	Default *string `yaml:"default,omitempty"`
-	// Examples contains optional flat examples from the metadata entry.
+	// Examples contains optional string representations of example values.
 	Examples []string `yaml:"examples,omitempty"`
-	// DeclarativeType is the Java-compatible declarative type when specified.
-	DeclarativeType string `yaml:"declarative_type,omitempty"`
-	// DeclarativeSchema describes the structured-list object shape.
-	DeclarativeSchema *Schema `yaml:"declarative_schema,omitempty"`
+	// Schema describes the item object shape for a structured_list.
+	Schema *Schema `yaml:"schema,omitempty"`
 	// DefaultBehavior is the prose default behavior from the declarative schema.
 	DefaultBehavior string `yaml:"default_behavior,omitempty"`
 	// Source identifies the metadata.yaml entry that produced this definition.
@@ -83,7 +83,7 @@ type Entry struct {
 type Metadata struct {
 	// Source is the metadata.yaml file path.
 	Source string
-	// Entries contains declarative entries; legacy flat-only entries are omitted.
+	// Entries contains inline definitions and catalog references.
 	Entries []Entry
 }
 
@@ -97,7 +97,7 @@ func fieldSet(names ...string) map[string]struct{} {
 
 // ParseMetadata reads only the configurations field from metadata.yaml. Other
 // top-level metadata fields belong to the watcher/catalog model and are ignored
-// here. Entries without declarative_name/ref remain valid legacy options.
+// here. Every configuration must have exactly one of name or ref.
 func ParseMetadata(data []byte, source string) (Metadata, error) {
 	var document yaml.Node
 	if err := yaml.Unmarshal(data, &document); err != nil {
@@ -122,12 +122,9 @@ func ParseMetadata(data []byte, source string) (Metadata, error) {
 	metadata := Metadata{Source: source}
 	for i, node := range configurationsNode.Content {
 		entrySource := fmt.Sprintf("%s:configurations[%d]", source, i)
-		entry, isDeclarative, parseErr := parseEntry(node, entrySource)
+		entry, parseErr := parseEntry(node, entrySource)
 		if parseErr != nil {
 			return Metadata{}, parseErr
-		}
-		if !isDeclarative {
-			continue
 		}
 		if validateErr := validateEntry(entry, entrySource); validateErr != nil {
 			return Metadata{}, validateErr
@@ -141,28 +138,27 @@ func ParseMetadata(data []byte, source string) (Metadata, error) {
 // parseEntry parses a configurations sequence item. Top-level defaults are
 // represented as strings in the metadata model; YAML boolean and numeric
 // scalars are normalized to their source spelling to match the Go watcher.
-func parseEntry(node *yaml.Node, source string) (Entry, bool, error) {
+func parseEntry(node *yaml.Node, source string) (Entry, error) {
 	fields, err := mappingFields(node, source, fieldSet(
 		"name",
-		"declarative_name",
 		"ref",
 		"description",
 		"type",
 		"default",
 		"examples",
-		"declarative_type",
-		"declarative_schema",
+		"schema",
 		"default_behavior",
 	))
 	if err != nil {
-		return Entry{}, false, err
+		return Entry{}, err
 	}
-	selectors, selectorErr := validateSelectors(fields, source)
-	if selectorErr != nil {
-		return Entry{}, false, selectorErr
+	_, hasName := fields["name"]
+	_, hasRef := fields["ref"]
+	if hasName == hasRef {
+		return Entry{}, ex.Newf("%s: exactly one of name or ref must be set", source)
 	}
-	if !selectors.hasDeclarativeName && !selectors.hasRef {
-		return Entry{}, false, nil
+	if hasRef && len(fields) != 1 {
+		return Entry{}, ex.Newf("%s: a ref entry must not include inline configuration fields", source)
 	}
 
 	entry := Entry{}
@@ -171,16 +167,14 @@ func parseEntry(node *yaml.Node, source string) (Entry, bool, error) {
 		destination *string
 	}{
 		{name: "name", destination: &entry.Name},
-		{name: "declarative_name", destination: &entry.DeclarativeName},
 		{name: "ref", destination: &entry.Ref},
 		{name: "description", destination: &entry.Description},
 		{name: "type", destination: &entry.Type},
-		{name: "declarative_type", destination: &entry.DeclarativeType},
 		{name: "default_behavior", destination: &entry.DefaultBehavior},
 	} {
 		value, present, fieldErr := stringField(fields, field.name, source)
 		if fieldErr != nil {
-			return Entry{}, false, fieldErr
+			return Entry{}, fieldErr
 		}
 		if present {
 			*field.destination = value
@@ -190,7 +184,7 @@ func parseEntry(node *yaml.Node, source string) (Entry, bool, error) {
 	if defaultNode, ok := fields["default"]; ok {
 		value, defaultErr := defaultString(defaultNode, source+".default")
 		if defaultErr != nil {
-			return Entry{}, false, defaultErr
+			return Entry{}, defaultErr
 		}
 		entry.Default = &value
 	}
@@ -198,89 +192,52 @@ func parseEntry(node *yaml.Node, source string) (Entry, bool, error) {
 	if examplesNode, ok := fields["examples"]; ok {
 		entry.Examples, err = stringSequence(examplesNode, source+".examples")
 		if err != nil {
-			return Entry{}, false, err
+			return Entry{}, err
 		}
 	}
 
-	if schemaNode, ok := fields["declarative_schema"]; ok {
-		entry.DeclarativeSchema, err = parseSchema(schemaNode, source+".declarative_schema")
+	if schemaNode, ok := fields["schema"]; ok {
+		entry.Schema, err = parseSchema(schemaNode, source+".schema")
 		if err != nil {
-			return Entry{}, false, err
+			return Entry{}, err
 		}
 	}
-
-	if selectors.hasDeclarativeName && entry.DeclarativeName == "" {
-		return Entry{}, false, ex.Newf("%s: declarative_name must not be empty", source)
+	selector, value := "name", entry.Name
+	if hasRef {
+		selector, value = "ref", entry.Ref
 	}
-	if selectors.hasRef && entry.Ref == "" {
-		return Entry{}, false, ex.Newf("%s: ref must not be empty", source)
+	if strings.TrimSpace(value) == "" {
+		return Entry{}, ex.Newf("%s: %s must not be empty", source, selector)
 	}
-	if selectors.hasDeclarativeName && strings.TrimSpace(entry.DeclarativeName) != entry.DeclarativeName {
-		return Entry{}, false, ex.Newf("%s: declarative_name must not have leading or trailing whitespace", source)
+	if strings.TrimSpace(value) != value {
+		return Entry{}, ex.Newf("%s: %s must not have leading or trailing whitespace", source, selector)
 	}
-	if selectors.hasRef && strings.TrimSpace(entry.Ref) != entry.Ref {
-		return Entry{}, false, ex.Newf("%s: ref must not have leading or trailing whitespace", source)
-	}
-	if selectors.hasRef && hasInlineFieldKeys(fields) {
-		return Entry{}, false, ex.Newf("%s: a ref entry must not include inline configuration fields", source)
-	}
-	return entry, true, nil
-}
-
-type selectors struct {
-	hasDeclarativeName bool
-	hasRef             bool
-}
-
-func validateSelectors(fields map[string]*yaml.Node, source string) (selectors, error) {
-	_, hasName := fields["declarative_name"]
-	_, hasRef := fields["ref"]
-	_, hasDeclarativeType := fields["declarative_type"]
-	_, hasDeclarativeSchema := fields["declarative_schema"]
-	if hasName && hasRef {
-		return selectors{}, ex.Newf("%s: exactly one of declarative_name or ref must be set", source)
-	}
-	if !hasName && !hasRef && (hasDeclarativeType || hasDeclarativeSchema) {
-		return selectors{}, ex.Newf(
-			"%s: declarative_type or declarative_schema requires declarative_name or ref",
-			source,
-		)
-	}
-	return selectors{hasDeclarativeName: hasName, hasRef: hasRef}, nil
-}
-
-func hasInlineFieldKeys(fields map[string]*yaml.Node) bool {
-	for _, field := range []string{"name", "description", "type", "default", "examples", "declarative_type", "declarative_schema", "default_behavior"} {
-		if _, ok := fields[field]; ok {
-			return true
-		}
-	}
-	return false
+	return entry, nil
 }
 
 func validateEntry(entry Entry, source string) error {
-	if entry.DeclarativeName != "" && strings.TrimSpace(entry.DeclarativeName) != entry.DeclarativeName {
-		return ex.Newf("%s: declarative_name must not have leading or trailing whitespace", source)
+	if entry.Name == "" && entry.Ref != "" {
+		return nil
 	}
-	if entry.Ref != "" && strings.TrimSpace(entry.Ref) != entry.Ref {
-		return ex.Newf("%s: ref must not have leading or trailing whitespace", source)
+	if _, err := EnvironmentVariableName(entry.Name); err != nil {
+		return ex.Wrapf(err, "%s", source)
 	}
-	if entry.DeclarativeType != "" && !supportedType(entry.DeclarativeType) {
-		return ex.Newf("%s: unsupported declarative_type %q", source, entry.DeclarativeType)
+	if !supportedType(entry.Type) {
+		return ex.Newf("%s: unsupported or missing type %q", source, entry.Type)
 	}
-	if entry.DeclarativeSchema != nil && entry.DeclarativeType != structuredListType {
-		return ex.Newf("%s: declarative_schema requires declarative_type structured_list", source)
+	if entry.Schema != nil && entry.Type != structuredListType {
+		return ex.Newf("%s: schema requires type structured_list", source)
 	}
-	if entry.DeclarativeType == structuredListType && entry.DeclarativeSchema == nil {
-		return ex.Newf("%s: structured_list requires declarative_schema", source)
+	if entry.Type == structuredListType && entry.Schema == nil {
+		return ex.Newf("%s: structured_list requires schema", source)
 	}
-	if entry.DeclarativeSchema != nil {
-		if err := validateSchema(entry.DeclarativeSchema, source+".declarative_schema"); err != nil {
+	if entry.Schema != nil {
+		if err := validateSchema(entry.Schema, source+".schema"); err != nil {
 			return err
 		}
 	}
 	if entry.Default != nil {
-		if err := validateDefault(*entry.Default, entry.DeclarativeType, entry.Type, source+".default"); err != nil {
+		if err := validateDefault(*entry.Default, entry.Type, entry.Schema, source+".default"); err != nil {
 			return err
 		}
 	}
@@ -289,26 +246,68 @@ func validateEntry(entry Entry, source string) error {
 
 func supportedType(value string) bool {
 	switch value {
-	case booleanType, "string", integerType, "map", "list", structuredListType:
+	case booleanType, stringType, integerType, mapType, listType, structuredListType:
 		return true
 	default:
 		return false
 	}
 }
 
-func validateDefault(value, declarativeType, flatType, source string) error {
-	typeName := declarativeType
-	if typeName == "" {
-		typeName = flatType
-	}
+func validateDefault(value, typeName string, schema *Schema, source string) error {
 	switch typeName {
-	case booleanType, "bool":
+	case booleanType:
 		if _, err := strconv.ParseBool(value); err != nil {
 			return ex.Newf("%s: default %q is not a valid boolean", source, value)
 		}
-	case integerType, "integer":
+	case integerType:
 		if _, err := strconv.ParseInt(value, 10, 64); err != nil {
 			return ex.Newf("%s: default %q is not a valid integer", source, value)
+		}
+	case mapType, listType, structuredListType:
+		var decoded any
+		if err := yaml.Unmarshal([]byte(value), &decoded); err != nil {
+			return ex.Wrapf(err, "%s: parse collection default", source)
+		}
+		if !valueMatchesType(decoded, typeName) {
+			return ex.Newf("%s: default must encode a YAML value of type %q", source, typeName)
+		}
+		if typeName == structuredListType {
+			return validateStructuredDefaults(decoded, schema, source)
+		}
+	}
+	return nil
+}
+
+func validateStructuredDefaults(value any, schema *Schema, source string) error {
+	items, ok := value.([]any)
+	if !ok {
+		return ex.Newf("%s: structured_list default must be a sequence", source)
+	}
+	for i, item := range items {
+		object, isObject := item.(map[string]any)
+		if !isObject {
+			return ex.Newf("%s[%d]: structured_list item must be a string-keyed mapping", source, i)
+		}
+		if err := validateStructuredDefault(object, schema, fmt.Sprintf("%s[%d]", source, i)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateStructuredDefault(item map[string]any, schema *Schema, source string) error {
+	for _, key := range schema.Required {
+		if _, exists := item[key]; !exists {
+			return ex.Newf("%s: required schema property %q is missing", source, key)
+		}
+	}
+	for _, key := range slices.Sorted(maps.Keys(item)) {
+		property, exists := schema.Properties[key]
+		if !exists {
+			return ex.Newf("%s: unknown schema property %q", source, key)
+		}
+		if !valueMatchesType(item[key], property.Type) {
+			return ex.Newf("%s.%s: value does not match type %q", source, key, property.Type)
 		}
 	}
 	return nil
@@ -357,7 +356,7 @@ func valueMatchesType(value any, typeName string) bool {
 	case booleanType:
 		_, ok := value.(bool)
 		return ok
-	case "string":
+	case stringType:
 		_, ok := value.(string)
 		return ok
 	case integerType:
@@ -367,9 +366,9 @@ func valueMatchesType(value any, typeName string) bool {
 		default:
 			return false
 		}
-	case "map":
+	case mapType:
 		return isMappingValue(value)
-	case "list":
+	case listType:
 		return isSequenceValue(value)
 	case structuredListType:
 		items, ok := value.([]any)

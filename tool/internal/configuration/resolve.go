@@ -34,18 +34,18 @@ func ResolveMetadata(metadataFiles []Metadata, definitions map[string]Entry) ([]
 				resolved.DefinitionSource = definition.Source
 			}
 
-			if previous, ok := byPath[resolved.DeclarativeName]; ok {
+			if previous, ok := byPath[resolved.Name]; ok {
 				if !equivalent(previous, resolved) {
 					return nil, ex.Newf(
-						"conflicting configuration definitions for declarative_name %q: %s and %s",
-						resolved.DeclarativeName,
+						"conflicting configuration definitions for name %q: %s and %s",
+						resolved.Name,
 						entryOrigin(previous),
 						entryOrigin(resolved),
 					)
 				}
 				continue
 			}
-			byPath[resolved.DeclarativeName] = resolved
+			byPath[resolved.Name] = resolved
 		}
 	}
 
@@ -62,11 +62,11 @@ func ResolveMetadata(metadataFiles []Metadata, definitions map[string]Entry) ([]
 		if err != nil {
 			return nil, ex.Wrapf(err, "%s", entry.Source)
 		}
-		if previous, ok := variables[variable]; ok && previous.DeclarativeName != path {
+		if previous, ok := variables[variable]; ok && previous.Name != path {
 			return nil, ex.Newf(
 				"environment variable %s collides between declarative paths %q (%s) and %q (%s)",
 				variable,
-				previous.DeclarativeName,
+				previous.Name,
 				entryOrigin(previous),
 				path,
 				entryOrigin(entry),
@@ -86,16 +86,16 @@ func entryOrigin(entry Entry) string {
 }
 
 // EnvironmentVariableName returns the canonical environment variable for a
-// fully resolved declarative path. Java development stability is encoded in
-// the terminal /development suffix and is omitted from the variable name.
-func EnvironmentVariableName(declarativeName string) (string, error) {
-	if declarativeName == "" || strings.TrimSpace(declarativeName) != declarativeName {
-		return "", ex.New("declarative_name must be non-empty and have no surrounding whitespace")
+// fully resolved declarative path relative to instrumentation/development.
+// A development suffix on a property is omitted from the variable name.
+func EnvironmentVariableName(path string) (string, error) {
+	if path == "" || strings.TrimSpace(path) != path {
+		return "", ex.New("name must be non-empty and have no surrounding whitespace")
 	}
-	name := strings.TrimPrefix(declarativeName, "general.")
+	name := strings.TrimPrefix(path, "general.")
 	name = strings.TrimSuffix(name, "/development")
 	if name == "" {
-		return "", ex.Newf("declarative_name %q has no environment-variable path", declarativeName)
+		return "", ex.Newf("name %q has no environment-variable path", path)
 	}
 	name = strings.NewReplacer(".", "_", "-", "_", "/", "_").Replace(name)
 	name = strings.ToUpper(name)
@@ -103,7 +103,7 @@ func EnvironmentVariableName(declarativeName string) (string, error) {
 		switch {
 		case r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_':
 		default:
-			return "", ex.Newf("declarative_name %q contains unsupported character %q", declarativeName, r)
+			return "", ex.Newf("name %q contains unsupported character %q", path, r)
 		}
 	}
 	return envPrefix + name, nil
@@ -116,24 +116,22 @@ func cloneEntry(entry Entry) Entry {
 		clone.Default = &value
 	}
 	clone.Examples = slices.Clone(entry.Examples)
-	if entry.DeclarativeSchema != nil {
-		schema := *entry.DeclarativeSchema
-		schema.Required = slices.Clone(entry.DeclarativeSchema.Required)
-		schema.Properties = make(map[string]Property, len(entry.DeclarativeSchema.Properties))
-		maps.Copy(schema.Properties, entry.DeclarativeSchema.Properties)
-		clone.DeclarativeSchema = &schema
+	if entry.Schema != nil {
+		schema := *entry.Schema
+		schema.Required = slices.Clone(entry.Schema.Required)
+		schema.Properties = make(map[string]Property, len(entry.Schema.Properties))
+		maps.Copy(schema.Properties, entry.Schema.Properties)
+		clone.Schema = &schema
 	}
 	return clone
 }
 
 func equivalent(left, right Entry) bool {
 	return left.Name == right.Name &&
-		left.DeclarativeName == right.DeclarativeName &&
 		left.Description == right.Description &&
 		left.Type == right.Type &&
 		reflect.DeepEqual(left.Default, right.Default) &&
 		reflect.DeepEqual(left.Examples, right.Examples) &&
-		left.DeclarativeType == right.DeclarativeType &&
 		left.DefaultBehavior == right.DefaultBehavior &&
-		reflect.DeepEqual(left.DeclarativeSchema, right.DeclarativeSchema)
+		reflect.DeepEqual(left.Schema, right.Schema)
 }
