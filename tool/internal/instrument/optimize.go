@@ -198,6 +198,69 @@ func removeAfterTrampolineDecl(targetFile *dst.File, tjump *tJump) error {
 	return ex.Newf("can not remove After trampoline function")
 }
 
+// emptyUnusedHookContextMethods empties the bodies (not the declarations) of
+// the return-value methods on tjump's HookContextImpl when there is no After
+// hook to populate returnVals. These methods stay reachable through the
+// HookContext interface from a Before hook. Without this, a target function
+// with at least one return value crashes there today: GetReturnVal/
+// SetReturnVal's generated case clauses index into the nil returnVals slice
+// for any in-range idx, panicking with "index out of range" rather than
+// returning a sane value, since the After trampoline that would populate
+// returnVals never runs. This replaces those bodies with nil/no-op/0
+// (matching what an out-of-range idx already returned), fixing the crash
+// instead of papering over it, since a panic here would abort the Before
+// hook partway through under the trampoline's recover, or crash the app
+// outright if the context escaped it.
+//
+// Done in the optimize pass alongside the other no-After removals, so the
+// decision stays with the rule.After == "" branch: generation always
+// produces the full real method bodies first, since it has no per-rule
+// knowledge of After yet, and only this pass (which does, via tjump.rule)
+// empties the three that go unused.
+//
+// Generic targets are left untouched: rewriteHookContextMethods already made
+// GetReturnVal and SetReturnVal panic unconditionally, regardless of After,
+// since they're unsupported for generics altogether (see #1252/#1173).
+// GetReturnValCount keeps its template body there, so skip all three
+// wholesale. Emptying any of them would undo that guard.
+func emptyUnusedHookContextMethods(targetFile *dst.File, tjump *tJump) error {
+	if findTargetGenericType(targetFile, tjump.target) != nil {
+		return nil
+	}
+	structName := trampolineHookContextImplType + tjump.rule.Identity()
+	emptyBodies := map[string]*dst.BlockStmt{
+		trampolineGetReturnValName:      ast.Block(ast.ReturnStmt(ast.Exprs(ast.Nil()))),
+		trampolineSetReturnValName:      ast.BlockStmts(),
+		trampolineGetReturnValCountName: ast.Block(ast.ReturnStmt(ast.Exprs(ast.IntLit(0)))),
+	}
+	found := 0
+	for _, decl := range targetFile.Decls {
+		funcDecl, ok := decl.(*dst.FuncDecl)
+		if !ok || !ast.HasReceiver(funcDecl) {
+			continue
+		}
+		starExpr, ok := funcDecl.Recv.List[0].Type.(*dst.StarExpr)
+		if !ok {
+			continue
+		}
+		recvIdent, ok := starExpr.X.(*dst.Ident)
+		if !ok || recvIdent.Name != structName {
+			continue
+		}
+		body, isReturnValMethod := emptyBodies[funcDecl.Name.Name]
+		if !isReturnValMethod {
+			continue
+		}
+		funcDecl.Body = body
+		found++
+	}
+	if found != len(emptyBodies) {
+		return ex.Newf("can not find unused HookContext methods for %s (found %d, expected %d)",
+			structName, found, len(emptyBodies))
+	}
+	return nil
+}
+
 // canFlattenTJump checks if the tjump can be safely flattened based on
 // the hook function's usage of HookContext. Returns true if:
 // 1. SetSkipCall is never called (so skip is always false)
@@ -372,6 +435,10 @@ func (ip *instrumentPhase) optimizeTJumps() error {
 				return err
 			}
 			err = removeAfterTrampolineDecl(ip.target, tjump)
+			if err != nil {
+				return err
+			}
+			err = emptyUnusedHookContextMethods(ip.target, tjump)
 			if err != nil {
 				return err
 			}
