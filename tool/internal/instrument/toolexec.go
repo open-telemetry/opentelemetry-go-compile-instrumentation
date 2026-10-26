@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dave/dst"
@@ -235,6 +236,10 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 		ip.importConfig.PackageFile = make(map[string]string)
 	}
 
+	loadBuildFlags := sync.OnceValues(func() ([]string, error) {
+		flags, err := ip.pgoBuildFlags()
+		return append(util.GetBuildFlags(), flags...), err
+	})
 	var updated bool
 	for _, importPath := range newImports {
 		if importPath == "unsafe" || importPath == "C" {
@@ -247,12 +252,15 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 			continue
 		}
 
+		buildFlags, err := loadBuildFlags()
+		if err != nil {
+			return err
+		}
 		restore, err := ip.enterNestedResolution(importPath)
 		if err != nil {
 			return err
 		}
 		// Resolve package archive location, passing build flags to match the current build context
-		buildFlags := util.GetBuildFlags()
 		archives, err := pkgload.ResolveExportFiles(ctx, importPath, buildFlags...)
 		restore()
 		if err != nil {
@@ -285,6 +293,29 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 	}
 
 	return nil
+}
+
+// pgoBuildFlags returns the -pgo flag that makes a nested go list compile the
+// added imports with the profile setup recorded, when this compile uses one.
+// Without it the nested build compiles them unprofiled, and the link rejects
+// the mix of export data with a fingerprint mismatch.
+func (ip *instrumentPhase) pgoBuildFlags() ([]string, error) {
+	if util.FindFlagValue(ip.compileArgs, "-pgoprofile") == "" {
+		return nil, nil
+	}
+	f := util.GetPGOProfileFile()
+	profile, err := os.ReadFile(f)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, ex.Wrapf(err, "failed to read PGO profile from file %s", f)
+	}
+	if len(profile) == 0 {
+		return nil, nil
+	}
+	// go/packages passes -pgo=off; a later -pgo flag overrides it.
+	return []string{"-pgo=" + string(profile)}, nil
 }
 
 // resolution is a compile waiting on a nested build to resolve an import a rule

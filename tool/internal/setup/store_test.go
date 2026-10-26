@@ -47,6 +47,30 @@ func TestSetupPhaseStoreCreateError(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestSetupPhaseStorePGOProfile(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	sp := newTestSetupPhase()
+	for _, tt := range []struct{ pgo, want string }{
+		{pgo: "profile.pgo", want: "profile.pgo"},
+		// A later setup without a profile clears the one recorded before.
+		{pgo: "off", want: ""},
+	} {
+		sp.pgo = tt.pgo
+		require.NoError(t, sp.store(t.Context(), []*rule.InstRuleSet{}, nil))
+		data, err := os.ReadFile(util.GetPGOProfileFile())
+		require.NoError(t, err)
+		assert.Equal(t, tt.want, string(data))
+	}
+}
+
+func TestSetupPhaseStorePGOProfileWriteError(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	require.NoError(t, os.MkdirAll(util.GetPGOProfileFile(), 0o755))
+	err := newTestSetupPhase().store(t.Context(), []*rule.InstRuleSet{}, nil)
+	require.ErrorContains(t, err, "failed to write PGO profile")
+}
+
 func TestStoreResolvedNames_WriteError(t *testing.T) {
 	workDir := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, workDir)
