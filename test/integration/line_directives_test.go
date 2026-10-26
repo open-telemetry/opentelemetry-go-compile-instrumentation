@@ -227,7 +227,9 @@ replace go.opentelemetry.io/otelc/pkg => %s
 			raws := filterLines(lines, "RAW")
 			require.Len(t, raws, 1, "output:\n%s", output)
 			assertSameFile(t, wantGenerated, raws[0].file, "raw code")
-			assert.Positive(t, raws[0].line)
+			// The raw code is the first statement of the run, so it is at
+			// line 1 of the "<generated>" file.
+			assert.Equal(t, 1, raws[0].line)
 
 			// Original code, also above the first injected code, keeps its
 			// original file and line. The compiler reads a copy of each

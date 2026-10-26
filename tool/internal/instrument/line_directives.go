@@ -15,6 +15,7 @@ import (
 	"github.com/dave/dst"
 
 	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // -----------------------------------------------------------------------------
@@ -24,6 +25,9 @@ import (
 // help, a stack trace or a debugger shows this code as lines of the user file,
 // and every line after it is off. This pass fixes both problems with line
 // directives.
+//
+// The pass runs on instrumented files only. Files that otelc writes
+// wholesale (otelc.globals.go, otelc.<name>.go) keep their own path.
 //
 // A "//line" comment is only valid at column 1, but the printer indents
 // comments in a function body. A "/*line*/" comment is valid at any column, and
@@ -226,7 +230,9 @@ type lineDirectivePass struct {
 // versions. The name has the volume of absFile, because on Windows a name
 // without a volume is not absolute. On Unix the volume is empty, so the name
 // is "/<generated>". If the name is not safe in a comment, the function
-// returns "<generated>".
+// returns "<generated>". This name is relative, so Go 1.27 and Go 1.26 give
+// different files to the generated code. This is a known limit (see
+// docs/rules.md).
 func generatedFile(absFile string) string {
 	return generatedFileOnVolume(filepath.VolumeName(absFile))
 }
@@ -244,7 +250,14 @@ func generatedFileOnVolume(volume string) string {
 
 // markLineDirectives adds the line directives to root. parser must be the
 // parser that read the original file at path file, and file must be absolute.
-func markLineDirectives(parser *ast.AstParser, root *dst.File, file string) {
+// It returns the state after the last declaration. When this state is
+// lineStale, the end of the file can have wrong positions (for example, a
+// restore was skipped).
+func markLineDirectives(parser *ast.AstParser, root *dst.File, file string) lineState {
+	// With another parser, no node is original, so all the code of the user
+	// would be in the "<generated>" file.
+	util.Assert(filepath.IsAbs(file), "file must be absolute: "+file)
+	util.Assert(parser.Parsed(root), "parser did not read "+file)
 	p := &lineDirectivePass{
 		parser:           parser,
 		dir:              filepath.Dir(file),
@@ -295,6 +308,13 @@ func markLineDirectives(parser *ast.AstParser, root *dst.File, file string) {
 		// stale, and the next declaration is restored.
 		p.children(decl, &state)
 	}
+	return state
+}
+
+// runStart returns the target of the directive on the first node of a run
+// of generated code: line 1 of the "<generated>" file.
+func (p *lineDirectivePass) runStart() string {
+	return p.generated + ":1"
 }
 
 // step looks at one node of a list. state describes the last token that was
@@ -307,7 +327,7 @@ func (p *lineDirectivePass) step(node, prev dst.Node, state *lineState) bool {
 		// In a function body, the printer indents a "//line" comment, so
 		// only a "/*line*/" comment can give the node its own position.
 		p.stepGenerated(node, hasEffectiveDirective(node.Decorations().Start, false), state, func() {
-			prependDirective(node, prev, "/*line "+p.generated+":1*/")
+			prependDirective(node, prev, "/*line "+p.runStart()+"*/")
 		})
 		return false
 	}
@@ -428,16 +448,14 @@ func (p *lineDirectivePass) stepDecl(decl dst.Decl, state *lineState) bool {
 	switch {
 	case !original:
 		p.stepGenerated(decl, ownDirective, state, func() {
-			prependDeclDirective(decl, "//line "+p.generated+":1")
+			prependDeclDirective(decl, "//line "+p.runStart())
 		})
 	case *state != lineKnown:
 		target, ok := directive(p.absolute(pos.Filename), pos.Line)
 		if ok {
 			prependDeclDirective(decl, "//line "+target)
-			*state = lineKnown
-		} else {
-			*state = lineStale
 		}
+		p.updateState(ok, state)
 	}
 	return original
 }
@@ -473,18 +491,21 @@ func (p *lineDirectivePass) stepGenerated(n dst.Node, ownDirective bool, state *
 // decorations of n are not read, because they hold the directive that the pass
 // writes.
 func (p *lineDirectivePass) mayHaveDirectiveInside(n dst.Node) bool {
+	return p.hasDecorationInside(n, mayHoldDirective)
+}
+
+// hasDecorationInside reports whether pred is true for a list of decorations
+// of n, or of a node inside n. The Start decorations of n are not read.
+func (p *lineDirectivePass) hasDecorationInside(n dst.Node, pred func(dst.Decorations) bool) bool {
 	found := false
 	dst.Inspect(n, func(c dst.Node) bool {
 		if c == nil || found {
 			return false
 		}
-		lists := p.innerDecorations(c)
-		lists = append(lists, c.Decorations().End)
-		if c != n {
-			lists = append(lists, c.Decorations().Start)
-		}
-		for _, list := range lists {
-			found = found || mayHoldDirective(list)
+		decs := c.Decorations()
+		found = pred(decs.End) || c != n && pred(decs.Start)
+		for _, list := range p.innerDecorations(c) {
+			found = found || pred(list)
 		}
 		return !found
 	})
@@ -507,7 +528,7 @@ func mayHoldDirective(decorations dst.Decorations) bool {
 // of decl. Go reads a "//line" comment only at column 1. If the last
 // decoration is a "/*...*/" comment, the printer puts the next decoration on
 // the same line, so the function adds a newline before the directive.
-func prependDeclDirective(decl dst.Decl, directive string) {
+func prependDeclDirective(decl dst.Decl, text string) {
 	decs := decl.Decorations()
 	if decs.Before == dst.None {
 		decs.Before = dst.NewLine
@@ -515,7 +536,7 @@ func prependDeclDirective(decl dst.Decl, directive string) {
 	if n := len(decs.Start); n > 0 && decs.Start[n-1] != "\n" && !strings.HasPrefix(decs.Start[n-1], "//") {
 		decs.Start.Append("\n")
 	}
-	decs.Start.Append(directive)
+	decs.Start.Append(text)
 }
 
 // children processes the code that is inside the original node n, in source
@@ -575,7 +596,12 @@ func (p *lineDirectivePass) children(n dst.Node, state *lineState) {
 			*state = lineStale
 			return false
 		}
-		directives := p.userDirectivesInside(c, c != n && c != labeled, c != n)
+		// Step and list read the Start and End decorations of n, and
+		// stepLabeled reads the Start decorations of the statement of a
+		// label.
+		readStart := c != n && c != labeled
+		readEnd := c != n
+		directives := p.userDirectivesInside(c, readStart, readEnd)
 		found = found || directives.ignored
 		effective = effective || directives.effective
 		p.noteUserDirectives(directives, state)
@@ -722,7 +748,7 @@ func (p *lineDirectivePass) block(block *dst.BlockStmt, state *lineState) {
 	}
 	// The closing brace is original, but the last token is not. Put the
 	// directive before the newline that precedes the brace.
-	target, ok := directive(p.absolute(rbrace.Filename), rbrace.Line-1)
+	target, ok := p.braceTarget(rbrace)
 	if !ok {
 		// The closing brace is original code, and the decorations of the
 		// block can hold a directive that Go reads. So the state does not
@@ -753,14 +779,19 @@ func (p *lineDirectivePass) emptyBlock(block *dst.BlockStmt, rbrace token.Positi
 	if *state == lineKnown && !userDirective {
 		return
 	}
-	// The pass puts a newline after the directive, so the directive gives the
-	// line before the brace.
-	if target, ok := directive(p.absolute(rbrace.Filename), rbrace.Line-1); ok {
+	if target, ok := p.braceTarget(rbrace); ok {
 		block.Decs.Lbrace.Append("/*line "+target+"*/", "\n")
 		*state = lineKnown
 	} else {
 		*state = lineStale
 	}
+}
+
+// braceTarget returns the target of the directive that restores the closing
+// brace at rbrace, and reports whether Go can read it (see directive). A
+// newline follows the directive, so the target is the line before the brace.
+func (p *lineDirectivePass) braceTarget(rbrace token.Position) (string, bool) {
+	return directive(p.absolute(rbrace.Filename), rbrace.Line-1)
 }
 
 // list processes the statements of a block, or the clauses of a switch or
@@ -830,21 +861,7 @@ func (p *lineDirectivePass) markAfterComment(decorations dst.Decorations, stmts 
 // line of its own (see hasCommentOnOwnLine), other than in the Start
 // decorations of n.
 func (p *lineDirectivePass) hasOwnLineComment(n dst.Node) bool {
-	found := false
-	dst.Inspect(n, func(c dst.Node) bool {
-		if c == nil || found {
-			return false
-		}
-		lists := append(p.innerDecorations(c), c.Decorations().End)
-		if c != n {
-			lists = append(lists, c.Decorations().Start)
-		}
-		for _, list := range lists {
-			found = found || hasCommentOnOwnLine(list)
-		}
-		return !found
-	})
-	return found
+	return p.hasDecorationInside(n, hasCommentOnOwnLine)
 }
 
 // hasCommentOnOwnLine reports whether decorations hold a comment that starts
@@ -938,13 +955,13 @@ func (p *lineDirectivePass) absolute(file string) string {
 	return filepath.Join(p.dir, file)
 }
 
-// prependDirective puts directive immediately before the first token of node.
+// prependDirective puts text immediately before the first token of node.
 // prev is the node before it in the same list, or nil.
 //
 // The printer puts a /*...*/ comment on a line of its own when a blank line is
 // before it. Then the comment applies to the newline and not to the token. To
 // prevent this, the function removes the blank line before the node.
-func prependDirective(node, prev dst.Node, directive string) {
+func prependDirective(node, prev dst.Node, text string) {
 	decs := node.Decorations()
 	decs.Before = dst.NewLine
 	if prev != nil {
@@ -952,7 +969,7 @@ func prependDirective(node, prev dst.Node, directive string) {
 			prevDecs.After = dst.NewLine
 		}
 	}
-	decs.Start.Append(directive)
+	decs.Start.Append(text)
 }
 
 // hasEffectiveDirective reports whether decorations hold a line directive that

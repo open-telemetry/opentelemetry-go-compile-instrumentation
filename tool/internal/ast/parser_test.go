@@ -161,6 +161,26 @@ func findCallExpr(t *testing.T, root dst.Node, funcName string) *dst.CallExpr {
 	return found
 }
 
+func TestParsed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "orig.go")
+	require.NoError(t, os.WriteFile(path, []byte("package main\n"), 0o600))
+	p := NewAstParser()
+	file, err := p.Parse(path, parser.ParseComments)
+	require.NoError(t, err)
+	assert.True(t, p.Parsed(file))
+
+	// The same file, read by another parser.
+	assert.False(t, NewAstParser().Parsed(file))
+	// A file that ParseSource parsed.
+	source, err := p.ParseSource("package main\n")
+	require.NoError(t, err)
+	assert.False(t, p.Parsed(source))
+	// A file that has only the package clause.
+	clause, err := p.Parse(path, parser.PackageClauseOnly)
+	require.NoError(t, err)
+	assert.False(t, p.Parsed(clause))
+}
+
 func TestPropagatePositions(t *testing.T) {
 	p := NewAstParser()
 	file, err := p.ParseSource("package main\n\nfunc Foo() {\n\tbar(1)\n}\n")

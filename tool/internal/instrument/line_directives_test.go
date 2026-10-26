@@ -8,10 +8,12 @@ package instrument
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	goast "go/ast"
 	"go/parser"
 	"go/token"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,6 +27,7 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // fileMarker stands for the absolute path of the original file in the expected
@@ -950,6 +953,77 @@ func h() {}
 	})
 	assert.Equal(t, 1, strings.Count(got, "INJECTED"), got)
 	assert.Contains(t, got, "//line DIR/safe.go:90\nfunc h() {}")
+}
+
+func TestMarkLineDirectives_ReturnsStateAtEndOfFile(t *testing.T) {
+	// The function ends in generated code. In the second source, the restore
+	// of its closing brace is skipped, because the file name is unsafe. Then
+	// the end of the file keeps a wrong position.
+	for _, tc := range []struct {
+		name, src string
+		want      lineState
+	}{
+		{"restored", "package main\n\nfunc f() {\n\ta()\n}\n", lineKnown},
+		{"restore skipped", "package main\n\nfunc f() {\n\ta()\n//line /tmp/x/*/.go:5\n}\n", lineStale},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file := filepath.Join(t.TempDir(), "orig.go")
+			require.NoError(t, os.WriteFile(file, []byte(tc.src), 0o600))
+			p := ast.NewAstParser()
+			root, err := p.Parse(file, parser.ParseComments)
+			require.NoError(t, err)
+			f := findFunc(t, root, "f").Body
+			f.List = append(f.List, snippet(t, "gen()")...)
+			assert.Equal(t, tc.want, markLineDirectives(p, root, file))
+		})
+	}
+}
+
+func TestInstrumentFile_LogsWrongPositionsAtEndOfFile(t *testing.T) {
+	// A raw rule changes Target. In the second source, a user "//line"
+	// comment has an unsafe file name, so the restores of the statement and of
+	// the closing brace are skipped. Then the end of the file can have wrong
+	// positions, and instrumentFile writes a debug log.
+	for _, tc := range []struct {
+		name, src string
+		wantLog   bool
+	}{
+		{"restored", "package main\n\nfunc Target() {\n\ta()\n}\n", false},
+		{"restore skipped", "package main\n\nfunc Target() {\n//line /tmp/x/*/.go:5\n\ta()\n}\n", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "source.go")
+			require.NoError(t, os.WriteFile(path, []byte(tc.src), 0o600))
+			var logs bytes.Buffer
+			logger := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+			ip := &instrumentPhase{logger: logger, workDir: t.TempDir(), compileArgs: []string{path}}
+			raw := &rule.InstRawRule{
+				InstBaseRule: rule.InstBaseRule{Name: "raw"},
+				Func:         "Target",
+				Raw:          "_ = 1",
+			}
+			ctx := util.ContextWithLogger(t.Context(), logger)
+			_, err := ip.instrumentFile(ctx, path, []rule.InstRule{raw})
+			require.NoError(t, err)
+			const msg = "Line directives: the end of the file can have wrong positions"
+			var files []string
+			for line := range strings.SplitSeq(strings.TrimSpace(logs.String()), "\n") {
+				var record struct {
+					Msg  string `json:"msg"`
+					File string `json:"file"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(line), &record), line)
+				if record.Msg == msg {
+					files = append(files, record.File)
+				}
+			}
+			if tc.wantLog {
+				assert.Equal(t, []string{path}, files)
+			} else {
+				assert.Empty(t, files)
+			}
+		})
+	}
 }
 
 func TestMarkLineDirectives_ClonedNodeIsGenerated(t *testing.T) {
@@ -3815,4 +3889,60 @@ func TestMarkLineDirectives_CompilerCommentOnOwnLineAfterWrappedStatement(t *tes
 			assertSamePositions(t, src, func(root *dst.File) { wrap(t, root) }, "A")
 		})
 	}
+}
+
+func TestMarkLineDirectives_CompilerUserBlockDirectiveAfterGeneratedRun(t *testing.T) {
+	// The clause ends in generated code, and a user "/*line*/" comment follows
+	// it, in the End decorations of the clause. Go reads the comment, so the
+	// code after it is not in the "<generated>" file. The generated clause
+	// after it must get its own "<generated>" directive, and the next original
+	// statement is restored.
+	const src = preludeProgram + `func main() {
+	switch len(fmt.Sprint()) {
+	case 1:
+		fmt.Println("A", where())
+		/*line mapped.go:40*/
+	}
+	fmt.Println("after", where())
+}
+`
+	got := assertSamePositions(t, src, func(root *dst.File) {
+		body := findFunc(t, root, "main").Body
+		sw := body.List[0].(*dst.SwitchStmt)
+		clause := sw.Body.List[0].(*dst.CaseClause)
+		require.Contains(t, clause.Decs.End, "/*line mapped.go:40*/")
+		clause.Body = append(clause.Body, snippet(t, printWhere("gen"))...)
+		extra := snippet(t, "switch {\ndefault:\n"+printWhere("gen-clause")+"\n}")[0].(*dst.SwitchStmt)
+		sw.Body.List = append(sw.Body.List, extra.Body.List[0])
+	}, "after")
+	assert.Regexp(t, generatedPosition, got["gen-clause"])
+}
+
+func TestMarkLineDirectives_CompilerTwoStatementsOnOneLine(t *testing.T) {
+	// Known limit: the printer puts two statements of one line on two lines.
+	// After a restore, the first statement keeps its line. The second
+	// statement, and the code after it, report one line late, until the next
+	// directive.
+	const src = preludeProgram + `func main() {
+	fmt.Println("A", where())
+	fmt.Println("B", where()); fmt.Println("C", where())
+	fmt.Println("D", where())
+	fmt.Println("E", where())
+}
+`
+	run := runInjected(t, src, func(root *dst.File) {
+		body := findFunc(t, root, "main").Body
+		// Original statements: 0 A, 1 B, 2 C, 3 D, 4 E.
+		body.List = insertStmts(t, body.List, 4, printWhere("gen-before-E"))
+		body.List = insertStmts(t, body.List, 1, printWhere("gen-before-B"))
+	})
+	got := positions(run.output)
+	at := func(id string, shift int) string {
+		return fmt.Sprintf("%s:%d", run.origFile, lineOfMarker(t, src, `"`+id+`"`)+shift)
+	}
+	assert.Equal(t, at("B", 0), got["B"])
+	assert.Equal(t, at("C", 1), got["C"])
+	assert.Equal(t, at("D", 1), got["D"])
+	// The restore after the generated statement before E ends the shift.
+	assert.Equal(t, at("E", 0), got["E"])
 }

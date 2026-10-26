@@ -128,6 +128,18 @@ func (ap *AstParser) Rbrace(block *dst.BlockStmt) (token.Position, bool) {
 	return ap.originalPosition(astBlock.Rbrace)
 }
 
+// Parsed reports whether root is a file that Parse read with this parser. It
+// is false for a file that ParseSource parsed, for a file that another parser
+// read, and for a file that Parse read with the mode parser.PackageClauseOnly.
+func (ap *AstParser) Parsed(root *dst.File) bool {
+	astFile, ok := ap.dec.Ast.Nodes[root].(*goast.File)
+	if !ok {
+		return false
+	}
+	_, ok = ap.parsed[ap.fset.File(astFile.Package)]
+	return ok
+}
+
 func (ap *AstParser) originalPosition(pos token.Pos) (token.Position, bool) {
 	if !pos.IsValid() {
 		return token.Position{}, false
