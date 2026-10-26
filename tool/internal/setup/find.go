@@ -238,6 +238,10 @@ func findDeps(ctx context.Context, subcommand string, cmdArgs []string) ([]*Depe
 		deps       []*Dependency
 		cgoObjDirs = make(map[string]string)
 		currentDir string
+		// A package can be compiled more than once with the same sources,
+		// e.g. once with and once without a PGO profile when only some of the
+		// main packages have a default.pgo. Keep one of them.
+		seen = make(map[string]bool)
 	)
 
 	for _, cmd := range buildPlan {
@@ -252,6 +256,11 @@ func findDeps(ctx context.Context, subcommand string, cmdArgs []string) ([]*Depe
 			if err1 != nil {
 				return nil, err1
 			}
+			key := dep.ImportPath + "\x00" + strings.Join(dep.Sources, "\x00")
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
 			deps = append(deps, dep)
 			logger.InfoContext(ctx, "Found dependency", "dep", dep)
 		} else if util.IsCgoCommand(cmd) && currentDir != "" {

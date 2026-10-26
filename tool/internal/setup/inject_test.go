@@ -149,6 +149,57 @@ func TestMatchInjectedDepsDegradesWhenLoadFails(t *testing.T) {
 // Build-flag extraction itself is covered by the existing TestExtractBuildFlags
 // in setup_test.go; matchInjectedDeps now reuses that function directly.
 
+// TestMatchInjectedDepsRespectsBuildFlags covers the buildFlags parameter
+// setupLocked now passes straight through as sp.buildFlags instead of
+// recomputing it. A hook package that only imports a second package under a
+// build tag must bring that second package into the matched closure when the
+// tag is active, and must not when it is absent — proving the flags given to
+// matchInjectedDeps actually reach the packages it loads, not just that the
+// call compiles.
+func TestMatchInjectedDepsRespectsBuildFlags(t *testing.T) {
+	t.Setenv("OTELC_RULES", "")
+
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "go.mod"), "module example.com/injecttest2\n\ngo 1.25.0\n")
+	mustWriteFile(t, filepath.Join(dir, "hooks", "hooks.go"), "package hooks\n")
+	mustWriteFile(t, filepath.Join(dir, "hooks", "extra.go"),
+		"//go:build extra\n\npackage hooks\n\nimport _ \"example.com/injecttest2/extradep\"\n")
+	mustWriteFile(t, filepath.Join(dir, "extradep", "extradep.go"),
+		"package extradep\n\nfunc ExtraFn() {}\n")
+
+	ruleFile := filepath.Join(dir, "rules.yaml")
+	mustWriteFile(t, ruleFile, `extraRule:
+  target: example.com/injecttest2/extradep
+  func: ExtraFn
+  raw: "_ = 1"
+`)
+
+	newSetupPhase := func() *setupPhase {
+		return &setupPhase{logger: slog.New(slog.DiscardHandler), ruleConfig: ruleFile}
+	}
+	set := rule.NewInstRuleSet("example.com/svc")
+	set.AddFuncRule(fakeSrcFile("a.go"), funcRuleWithPath("fn", "example.com/injecttest2/hooks"))
+
+	t.Run("tag absent, extradep is never imported and must not match", func(t *testing.T) {
+		sp := newSetupPhase()
+		extra, err := sp.matchInjectedDeps(
+			t.Context(), []*rule.InstRuleSet{set}, nil, nil, []string{"-C", dir},
+		)
+		require.NoError(t, err)
+		assert.Empty(t, extra)
+	})
+
+	t.Run("tag active, extradep enters the closure and its rule matches", func(t *testing.T) {
+		sp := newSetupPhase()
+		extra, err := sp.matchInjectedDeps(
+			t.Context(), []*rule.InstRuleSet{set}, nil, nil, []string{"-C", dir, "-tags", "extra"},
+		)
+		require.NoError(t, err)
+		require.Len(t, extra, 1)
+		assert.Equal(t, "example.com/injecttest2/extradep", extra[0].ModulePath)
+	})
+}
+
 func TestRunInjectionPassesFollowsLongChain(t *testing.T) {
 	const chainLength = 6
 	n := 0

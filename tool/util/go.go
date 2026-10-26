@@ -54,11 +54,6 @@ func IsCompileCommandWithArgs(args []string) bool {
 		}
 	}
 
-	// PGO compile command is different, skip it
-	if hasFlag(args, "-pgoprofile") {
-		return false
-	}
-
 	return true
 }
 
