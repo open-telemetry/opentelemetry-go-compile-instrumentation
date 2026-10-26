@@ -110,6 +110,16 @@ func classifyOperation(path string) operationType {
 	return opUnknown
 }
 
+// requestTruncatedWarnOnce and responseTruncatedWarnOnce log the
+// size-cap-exceeded warning once per operationType rather than once per
+// request. The message only ever varies by operation name and a constant
+// cap, so there are a handful of distinct messages total; a workload that
+// regularly exceeds the cap would otherwise log on every single request.
+var (
+	requestTruncatedWarnOnce  [opUnknown + 1]sync.Once
+	responseTruncatedWarnOnce [opUnknown + 1]sync.Once
+)
+
 func operationName(op operationType) string {
 	switch op {
 	case opChat:
@@ -121,6 +131,27 @@ func operationName(op operationType) string {
 	default:
 		return ""
 	}
+}
+
+// readBounded reads up to limit bytes from body for attribute parsing while
+// preserving the full stream for downstream consumers (the SDK or the HTTP
+// caller). truncated reports whether body held more than limit bytes; in that
+// case bodyBytes is nil so no caller can parse a cut-off prefix as JSON.
+func readBounded(body io.ReadCloser, limit int64) (bodyBytes []byte, truncated bool, reassembled io.ReadCloser, err error) {
+	var buf bytes.Buffer
+	tee := io.TeeReader(body, &buf)
+	// Read one byte past the limit so a full body can be told apart from one
+	// that was cut short. That extra byte is still captured by the tee, so
+	// reassembled below reproduces the stream in full either way.
+	read, err := io.ReadAll(io.LimitReader(tee, limit+1))
+	reassembled = struct {
+		io.Reader
+		io.Closer
+	}{io.MultiReader(&buf, body), body}
+	if int64(len(read)) > limit {
+		return nil, true, reassembled, err
+	}
+	return read, false, reassembled, err
 }
 
 // OtelMiddleware returns an HTTP middleware that creates spans for OpenAI API
@@ -147,14 +178,8 @@ func otelMiddleware(
 		opName := operationName(op)
 
 		// Read a bounded copy for attribute parsing, but preserve the full body for the SDK.
-		var buf bytes.Buffer
-		tee := io.TeeReader(req.Body, &buf)
-		bodyBytes, err := io.ReadAll(io.LimitReader(tee, maxRequestBodySize))
-		// Reassemble: buffered bytes + remaining unread body.
-		req.Body = struct {
-			io.Reader
-			io.Closer
-		}{io.MultiReader(&buf, req.Body), req.Body}
+		bodyBytes, truncated, reassembledBody, err := readBounded(req.Body, maxRequestBodySize)
+		req.Body = reassembledBody
 		if err != nil {
 			return next(req)
 		}
@@ -164,25 +189,35 @@ func otelMiddleware(
 		captureContent := isContentCaptureEnabled()
 		var prompts []string
 
-		switch op {
-		case opChat:
-			model, spanAttrs, prompts = parseChatRequest(bodyBytes, captureContent)
-		case opCompletion:
-			model, spanAttrs, prompts = parseCompletionRequest(bodyBytes, captureContent)
-		case opEmbedding:
-			model, spanAttrs = parseEmbeddingRequest(bodyBytes)
+		if truncated {
+			requestTruncatedWarnOnce[op].Do(func() {
+				logger.Warn("openai request body exceeded size cap, skipping request attributes",
+					"operation", opName, "cap_bytes", maxRequestBodySize)
+			})
+		} else {
+			switch op {
+			case opChat:
+				model, spanAttrs, prompts = parseChatRequest(bodyBytes, captureContent)
+			case opCompletion:
+				model, spanAttrs, prompts = parseCompletionRequest(bodyBytes, captureContent)
+			case opEmbedding:
+				model, spanAttrs = parseEmbeddingRequest(bodyBytes)
+			}
+
+			if model == "" {
+				return next(req)
+			}
 		}
 
-		if model == "" {
-			return next(req)
-		}
-
-		spanName := opName + " " + model
+		spanName := opName
 		baseAttrs := []attribute.KeyValue{
 			semconv.GenAISystem("openai"),
 			semconv.GenAIOperationName(opName),
-			semconv.GenAIRequestModel(model),
 			semconv.GenAIProviderName(provider),
+		}
+		if model != "" {
+			spanName = opName + " " + model
+			baseAttrs = append(baseAttrs, semconv.GenAIRequestModel(model))
 		}
 		serverAddress, serverPort := netutil.HTTPServerEndpoint(req.URL)
 		if serverAddress != "" && serverPort > 0 {
@@ -273,15 +308,16 @@ func handleNonStreamingResponse(
 	defer span.End()
 
 	// Read a bounded preview for parsing, but reassemble the full body for callers.
-	var buf bytes.Buffer
-	tee := io.TeeReader(resp.Body, &buf)
-	bodyBytes, err := io.ReadAll(io.LimitReader(tee, maxResponseBodySize))
-	// Reassemble: preview bytes + remaining unread body.
-	resp.Body = struct {
-		io.Reader
-		io.Closer
-	}{io.MultiReader(&buf, resp.Body), resp.Body}
+	bodyBytes, truncated, reassembledBody, err := readBounded(resp.Body, maxResponseBodySize)
+	resp.Body = reassembledBody
 	if err != nil {
+		return
+	}
+	if truncated {
+		responseTruncatedWarnOnce[op].Do(func() {
+			logger.Warn("openai response body exceeded size cap, skipping response attributes",
+				"operation", operationName(op), "cap_bytes", maxResponseBodySize)
+		})
 		return
 	}
 
