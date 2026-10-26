@@ -587,17 +587,17 @@ func addBuildFlags(args []string, flags ...string) []string {
 }
 
 // toolexecBuildArgs assembles the argv for the instrumented build: the
-// original go subcommand, -work, the -toolexec flag pointing at execPath, and
+// original go subcommand, optional goFlags, the -toolexec flag pointing at execPath, and
 // the caller's remaining arguments. Kept free of side effects so it can be
 // tested directly; buildWithToolexec cannot be, since it would spawn a go
 // build whose -toolexec target is the test binary itself.
-func toolexecBuildArgs(args []string, execPath string, vendored bool) ([]string, error) {
+func toolexecBuildArgs(args []string, execPath string, vendored bool, goFlags ...string) ([]string, error) {
 	insert, err := toolexecInsertArg(execPath)
 	if err != nil {
 		return nil, err
 	}
-	const additionalCount = 3
-	newArgs := make([]string, 0, len(args)+additionalCount) // Avoid in-place modification
+	const additionalCount = 2
+	newArgs := make([]string, 0, len(args)+additionalCount+len(goFlags)) // Avoid in-place modification
 	// Add "go build"
 	newArgs = append(newArgs, "go")
 	newArgs = append(newArgs, args[:1]...)
@@ -618,9 +618,9 @@ func toolexecBuildArgs(args []string, execPath string, vendored bool) ([]string,
 			restArgs = slices.Insert(restArgs, insertAt, otelcRuntimePath)
 		}
 	}
-	// Add -work and -toolexec after a leading -C/--C. The go command rejects -C
+	// Add goFlags and -toolexec after a leading -C/--C. The go command rejects -C
 	// when any other flag comes before it.
-	restArgs = addBuildFlags(restArgs, "-work", insert)
+	restArgs = addBuildFlags(restArgs, slices.Concat(goFlags, []string{insert})...)
 	return append(newArgs, restArgs...), nil
 }
 
@@ -651,7 +651,12 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 	if err != nil {
 		return ex.Wrapf(err, "failed to get executable path")
 	}
-	newArgs, err := toolexecBuildArgs(args, execPath, vendored)
+	var goFlags []string
+	if cmd.Bool("debug") {
+		// Keep Go's temporary work directory only for debugging.
+		goFlags = append(goFlags, "-work")
+	}
+	newArgs, err := toolexecBuildArgs(args, execPath, vendored, goFlags...)
 	if err != nil {
 		return err
 	}

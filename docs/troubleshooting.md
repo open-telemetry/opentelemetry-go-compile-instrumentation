@@ -122,12 +122,14 @@ Run `otelc cleanup` to remove them.
 | `matched.json` | Rules that matched dependencies; empty array when nothing matched. |
 | `debug/main/otelc.runtime.go` | Generated helper file for runtime hooks and file injections. |
 | `debug/main/go.mod` | Copy of `go.mod` after `otelc` adds its `replace` directives. |
+| `debug/<package>/` | Instrumented source files as compiled, one directory per package; `/` and `.` in the import path become `_`. |
 | `gocache/` | Persistent Go build cache used across `otelc` builds. |
 | `added_imports.<pid>.json` | Per-process import tracking used during the link phase. |
 
-`go build -work` is passed internally, so Go's own temporary work directory is also preserved
-after the build. The path is printed at the start of the build output as `WORK=...`. Inspect
-the sources there to see the exact code that entered the compiler for each package.
+With `--debug`, `go build -work` is also passed, so Go's own temporary work directory is
+preserved after the build. The path is printed at the start of the build output as `WORK=...`.
+Inspect the sources there to see the exact code that entered the compiler for each package.
+Without `--debug`, Go removes the directory as usual.
 
 ## Common Errors
 
