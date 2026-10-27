@@ -3,6 +3,7 @@
 
 package main
 
+//line /golden/work/main.go:6
 type T struct {
 	Field1 string
 	Field2 int

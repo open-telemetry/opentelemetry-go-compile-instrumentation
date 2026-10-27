@@ -3,21 +3,20 @@
 
 package users
 
+//line /<generated>:1
 import _ "unsafe"
 
+//line /golden/work/main.go:6
 func Handler(p1 string, p2 int) (_unnamedRetVal_4272340228_0 float32, _unnamedRetVal_4272340228_1 error) {
-	//line <generated>:1
-	if hookContext4272340228, _ := OtelBeforeTrampoline_Handler4272340228(&p1, &p2); false {
+	/*line /<generated>:1*/ if hookContext4272340228, _ := OtelBeforeTrampoline_Handler4272340228(&p1, &p2); false {
 	} else {
 		defer OtelAfterTrampoline_Handler4272340228(hookContext4272340228, &_unnamedRetVal_4272340228_0, &_unnamedRetVal_4272340228_1)
 	}
-	//line main.go:7:2
-	println("Hello, World!")
-	//line main.go:8:2
+	/*line /golden/work/main.go:7*/ println("Hello, World!")
 	return 0.0, nil
 }
 
-//line <generated>:1
+//line /<generated>:1
 type HookContextImpl4272340228 struct {
 	params      []interface{}
 	returnVals  []interface{}

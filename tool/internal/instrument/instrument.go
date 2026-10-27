@@ -191,6 +191,12 @@ func (ip *instrumentPhase) instrumentFile(ctx context.Context, file string, rule
 	if err = ip.optimizeTJumps(); err != nil {
 		return false, ex.Wrapf(err, "optimizing trampoline jumps for %s", file)
 	}
+	// Mark the injected code, so stack traces and debuggers do not show it
+	// as lines of the original file, and restore the original positions
+	// after it.
+	if markLineDirectives(ip.parser, root, file) == lineStale {
+		ip.Debug("Line directives: the end of the file can have wrong positions", "file", file)
+	}
 	// Once all func rules targeting this file are applied, write instrumented
 	// AST to new file and replace the original file in the compile command
 	if err = ip.writeInstrumented(root, file, changes); err != nil {
