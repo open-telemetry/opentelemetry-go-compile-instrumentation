@@ -168,7 +168,10 @@ func responseStatus(c *fiber.Ctx, app *fiber.App, nextErr error) (int, bool) {
 	// would write. A configured Config.ErrorHandler may map any error, including
 	// a *fiber.Error, to any status, and it runs after (*App).next returns, so
 	// there is nothing this hook can observe. Report no code rather than a wrong
-	// one.
+	// one. That includes the ErrorHandler of a mounted sub-app: fiber's
+	// (*App).ErrorHandler dispatches by request path to a sub-app that was
+	// created with its own Config.ErrorHandler, and usesDefaultErrorHandler
+	// cannot see that - see its comment.
 	if !usesDefaultErrorHandler(app) {
 		return 0, false
 	}
@@ -182,6 +185,18 @@ func responseStatus(c *fiber.Ctx, app *fiber.App, nextErr error) (int, bool) {
 // usesDefaultErrorHandler reports whether app still maps errors to statuses the
 // way responseStatus assumes. Function values are not comparable, so the check
 // is on the code pointer.
+//
+// Mounted sub-apps are the blind spot. A sub-app mounted with (*App).Mount
+// never runs its own router for those requests: fiber clones the sub-app's
+// routes into the parent's stack, so the hook only ever receives the parent,
+// whose ErrorHandler may well be the default. fiber's (*App).ErrorHandler then
+// dispatches by request path to the sub-app's Config.ErrorHandler when the
+// sub-app was created with one, so the status written can differ from what
+// DefaultErrorHandler would produce. Neither the mounted apps nor their mount
+// prefixes are exposed by fiber's public API (mountFields and Route.group are
+// unexported), so this cannot be detected from the hook; the recorded
+// http.response.status_code follows DefaultErrorHandler semantics for those
+// requests.
 func usesDefaultErrorHandler(app *fiber.App) bool {
 	if app == nil {
 		return false

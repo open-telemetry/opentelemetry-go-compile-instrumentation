@@ -13,7 +13,11 @@ groups:
   #     `<METHOD> <route pattern>` once the router has matched a route
   #   - `http.route` is set only when a route matched
   #   - `http.response.status_code` is set only when the status is knowable
-  #     from inside the hook (from a `*fiber.Error`, or 500 for other errors)
+  #     from inside the hook (from a `*fiber.Error`, or 500 for other errors);
+  #     an app with a custom `Config.ErrorHandler` remaps statuses after the
+  #     router returns, so no code is recorded for it - except that a mounted
+  #     sub-app's custom handler is not detectable and the default-derived
+  #     code may disagree with the response actually written
   #   - `server.address`, `user_agent.original`, `client.address` and
   #     `url.query` are set only when the request carries them
   #   - a 5xx, or a handler error with no knowable status, sets the span
