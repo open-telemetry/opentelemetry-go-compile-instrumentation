@@ -4,8 +4,10 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -373,6 +375,76 @@ func TestAfterRoundTrip(t *testing.T) {
 	}
 }
 
+func TestAfterRoundTrip_NilRequestAndURL_DebugEnabled(t *testing.T) {
+	oldLogger := logger
+	defer func() { logger = oldLogger }()
+
+	t.Run("nil request does not panic and logs empty method and url with debug logging", func(t *testing.T) {
+		var buf bytes.Buffer
+		logger = slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+		sr, tp := setupTestTracer(t)
+		testTracer := tp.Tracer(instrumentationName)
+		_, span := testTracer.Start(t.Context(), "GET", trace.WithSpanKind(trace.SpanKindClient))
+
+		mockCtx := hooktest.NewMockHookContext()
+		mockCtx.SetData(&hookData{span: span})
+
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Request:    nil,
+		}
+
+		assert.NotPanics(t, func() {
+			AfterRoundTrip(mockCtx, resp, nil)
+		})
+
+		spans := sr.Ended()
+		require.Len(t, spans, 1)
+		assert.Equal(t, codes.Unset, spans[0].Status().Code)
+
+		logOutput := buf.String()
+		assert.Contains(t, logOutput, `"msg":"AfterRoundTrip called"`)
+		assert.Contains(t, logOutput, `"method":""`)
+		assert.Contains(t, logOutput, `"url":""`)
+		assert.Contains(t, logOutput, `"status_code":200`)
+	})
+
+	t.Run("request with nil URL does not panic and logs method and empty url with debug logging", func(t *testing.T) {
+		var buf bytes.Buffer
+		logger = slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+		sr, tp := setupTestTracer(t)
+		testTracer := tp.Tracer(instrumentationName)
+		_, span := testTracer.Start(t.Context(), "GET", trace.WithSpanKind(trace.SpanKindClient))
+
+		mockCtx := hooktest.NewMockHookContext()
+		mockCtx.SetData(&hookData{span: span})
+
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Request: &http.Request{
+				Method: http.MethodGet,
+				URL:    nil,
+			},
+		}
+
+		assert.NotPanics(t, func() {
+			AfterRoundTrip(mockCtx, resp, nil)
+		})
+
+		spans := sr.Ended()
+		require.Len(t, spans, 1)
+		assert.Equal(t, codes.Unset, spans[0].Status().Code)
+
+		logOutput := buf.String()
+		assert.Contains(t, logOutput, `"msg":"AfterRoundTrip called"`)
+		assert.Contains(t, logOutput, `"method":"GET"`)
+		assert.Contains(t, logOutput, `"url":""`)
+		assert.Contains(t, logOutput, `"status_code":200`)
+	})
+}
+
 func TestClientEnabler(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -468,4 +540,72 @@ func BenchmarkRoundTripHooks(b *testing.B) {
 		BeforeRoundTrip(mockCtx, transport, req)
 		AfterRoundTrip(mockCtx, res, nil)
 	}
+}
+
+// RoundTripper.RoundTrip must not modify the caller's request. The trace
+// context therefore has to go onto the request the hook hands to the real
+// RoundTrip, not onto the caller's own Header map.
+func TestBeforeRoundTrip_DoesNotMutateCallerRequest(t *testing.T) {
+	initOnce = *new(sync.Once)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+	setupTestTracer(t)
+
+	req, err := http.NewRequest(http.MethodGet, "http://example.com/path", nil)
+	require.NoError(t, err)
+	req.Header.Set("X-Custom", "keep")
+
+	mockCtx := hooktest.NewMockHookContext()
+	BeforeRoundTrip(mockCtx, &http.Transport{}, req)
+
+	newReq, ok := mockCtx.GetParam(1).(*http.Request)
+	require.True(t, ok, "param 1 should be the request handed to RoundTrip")
+	assert.NotEmpty(t, newReq.Header.Get("traceparent"), "outgoing request should carry the trace context")
+	assert.Equal(t, "keep", newReq.Header.Get("X-Custom"), "existing headers must still be sent")
+
+	assert.Empty(t, req.Header.Get("traceparent"), "caller's request must not be modified")
+	assert.Equal(t, http.Header{"X-Custom": {"keep"}}, req.Header)
+}
+
+func TestBeforeRoundTrip_NilHeaderCallerRequestStaysNil(t *testing.T) {
+	initOnce = *new(sync.Once)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+	setupTestTracer(t)
+
+	u, _ := url.Parse("http://example.com/path")
+	req := &http.Request{Method: http.MethodGet, URL: u}
+
+	mockCtx := hooktest.NewMockHookContext()
+	BeforeRoundTrip(mockCtx, &http.Transport{}, req)
+
+	newReq, ok := mockCtx.GetParam(1).(*http.Request)
+	require.True(t, ok)
+	assert.NotEmpty(t, newReq.Header.Get("traceparent"))
+	assert.Nil(t, req.Header, "caller's request must not be modified")
+}
+
+// Sharing one Header map across requests is common (a base set of headers
+// assigned to every request). Injecting into that shared map from concurrent
+// RoundTrips is a data race and can crash with "concurrent map writes".
+func TestBeforeRoundTrip_SharedHeaderMapIsNotWritten(t *testing.T) {
+	initOnce = *new(sync.Once)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+	setupTestTracer(t)
+
+	shared := http.Header{"X-Shared": {"1"}}
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req, err := http.NewRequest(http.MethodGet, "http://example.com/path", nil)
+			if err != nil {
+				return
+			}
+			req.Header = shared
+			BeforeRoundTrip(hooktest.NewMockHookContext(), &http.Transport{}, req)
+		}()
+	}
+	wg.Wait()
+
+	assert.Equal(t, http.Header{"X-Shared": {"1"}}, shared)
 }

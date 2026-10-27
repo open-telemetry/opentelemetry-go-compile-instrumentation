@@ -5,6 +5,7 @@
 - [Schema Reference](#schema-reference)
   - [Rule shape](#rule-shape)
   - [Top-level fields](#top-level-fields)
+  - [Added-import cycles](#added-import-cycles)
   - [Quick demo](#quick-demo)
   - [`where` semantics](#where-semantics)
   - [`where.file` semantics](#wherefile-semantics)
@@ -94,6 +95,16 @@ Field notes:
     _: "unsafe"      # Blank import: import _ "unsafe"
   ```
 
+#### Added-import cycles
+
+otelc resolves a rule-added import with a nested build. That build sees each package's original imports only, so Go cannot detect a cycle that the added imports form: when the rule for `p` adds an import of `q` and the rule for `q` adds an import of `p`, each nested build starts another one and the build never ends. otelc stops this and fails the build:
+
+```
+rules add an import cycle: p adds q; q adds p
+```
+
+The added imports must not require each other in a cycle. This applies to the `imports` field and to function hook rules alike, whose imports are resolved the same way.
+
 ### Quick demo
 
 A single rule that instruments `(*sql.DB).Exec` — but only in files that also define an `init` function:
@@ -122,8 +133,8 @@ instrument_sql_exec:
 - Composition sub-groups `all-of`, `one-of`, `not` may appear at any position
   to compose nested selector groups.
 - Point selector keys recognized at the top of `where`:
-  `func`, `recv`, `struct`, `struct_literal`, `function_call`, `directive`,
-  `kind`, `identifier`.
+  `func`, `recv`, `struct`, `struct_literal`, `function_call`, `method_call`,
+  `directive`, `kind`, `identifier`.
 - File-level predicates live under `where.file`.
 - `target` and `version` **must not** appear inside `where`. They are
   package-scope selectors and stay top-level.
@@ -576,6 +587,10 @@ hook_fallible:
         path: example.com/hooks/db
 ```
 
+**Stack frames and line markers:**
+
+The trampoline call that the tool adds to the target function gets the same line markers as the code of the Raw Code Injection Rule. In stack traces, it shows the file `/<generated>` (on Windows, `<generated>` at the root of the volume). The original statements of the function keep their original file path and line number. See "Stack frames and line markers" in the [Raw Code Injection Rule](#3-raw-code-injection-rule) section.
+
 ### 2. Struct Field Injection Rule
 
 This rule adds one or more new fields to a specified struct type.
@@ -769,6 +784,18 @@ Note the pattern starts with `^`. During AST traversal, outer statements (such a
 
 Anchoring the pattern with `^` (and usually `$`) ensures that only the exact statement is matched, preventing insertion at the wrong level (e.g., before an entire block instead of the intended inner statement).
 
+**Stack frames and line markers:**
+
+The tool puts a `/*line /<generated>:1*/` directive on the first statement of each run of injected statements. The next injected lines get the next line numbers in `/<generated>`: 2, 3, and so on. These numbers count printed lines, not statements. An injected statement that uses several lines takes several numbers. In stack traces, injected code shows the file `/<generated>`. On Windows, the file is at the root of the volume of the instrumented file, for example `C:\<generated>`, or `\\server\share\<generated>` for a UNC path. For an extended UNC path (`\\?\UNC\server\share\...`), the file is `\\?\UNC\server\share\<generated>` with Go 1.27 and later, and `\\?\UNC\<generated>` with Go 1.26, because the volume that Go finds for this path is different. The name is absolute, so Go does not join it with the directory of the file, and it does not depend on the work directory of the compiler. A stack filter can match it exactly, or by the suffix `<generated>`. For an extended UNC path, use the suffix if the filter must work with Go 1.26 and Go 1.27. The first original statement after a run gets a directive that restores its original absolute file path and line number. The next original statements keep their original lines. The first original declaration of an instrumented file also gets a restore directive, also when no rule changed it. The reason is that the compiler reads a copy of the file in a work directory, so without this directive the code above the first run shows the path of the copy. Exception: the tool cannot restore an original file name (from a `//line` directive in the source) that has characters that cannot be in a comment, or that ends in `:` and digits (for example `foo:7`), because Go would read these digits as a line number. Then the code after the injected code can show `/<generated>` until the next valid position. Exception: injected code that starts with its own line directive that Go reads (a `/*line*/` comment, or a `//line` comment at the top level) keeps that position, and gets no `/<generated>` directive. Exception: when the printer changes the layout of the user code, the lines after it are off until the next directive. For example, the printer puts two statements of one line on two lines, so the second statement and the code after it are one line late. Exception: if the volume name of the instrumented file has characters that cannot be in a comment, the file of the injected code is `<generated>`, without a volume. This name is relative, so Go 1.27 joins it with the directory of the instrumented file, and Go 1.26 does not.
+
+The same applies to the trampoline code of the [Function Hook Rule](#1-function-hook-rule).
+
+A `//line` comment of the user inside a function body (for example, in code that goyacc writes) stays in the file. The printer indents it, so Go would ignore it. The tool adds a restore directive after it, so the code keeps the line that the comment gives. This is done in every function of an instrumented file, also in a function that no rule changed. The same exceptions apply as above. Also, the tool cannot restore a statement directly after a comment that gives line 1 (for example `//line foo.go:1`), because its directive must give line 0, which Go does not accept. The tool then restores the next statement. Directives have a line and no column. A `/*line*/` comment of the user is not changed.
+
+A rule can also put generated code inside a statement that the user wrote (for example, a call rule that replaces a call with a wrapper of several lines, or a struct rule that adds a field to a type declaration). The tool does not put a directive on this code: it keeps the line of the statement. Known limit: a stack frame in this code shows the user file, and not `/<generated>`. The extra printed lines move the lines after it, so the tool restores the next original statement (or the closing brace of the block, or the next top-level declaration). The same is true for a `//line` comment of the user inside an expression (for example, in the arguments of a call or in a composite literal): the printer indents it, so the tool restores the code after it.
+
+With `go build -trimpath`, the Go compiler rewrites the original file path in the same way as for normal Go files. Injected code stays in `/<generated>` (on Windows, `<generated>` at the root of the volume), because the compiler does not rewrite this name. For a UNC path, the name includes the server and the share (for an extended UNC path, only with Go 1.27 and later).
+
 ### 4. Call Wrapping Rule
 
 This rule wraps function calls at call sites with instrumentation code. Unlike the Function Hook Rule which instruments function definitions, this rule instruments where functions are called.
@@ -782,9 +809,10 @@ This rule wraps function calls at call sites with instrumentation code. Unlike t
 
 **Selectors (under `where`):**
 
-| Field           | Type   | Required | Notes                                                |
-| --------------- | ------ | -------- | ---------------------------------------------------- |
-| `function_call` | string | Yes      | Qualified function name: `package/path.FunctionName` |
+| Field           | Type   | Required                             | Notes                                                                            |
+| --------------- | ------ | ------------------------------------ | -------------------------------------------------------------------------------- |
+| `function_call` | string | One of `function_call`/`method_call` | Qualified function name: `package/path.FunctionName`                             |
+| `method_call`   | string | One of `function_call`/`method_call` | Qualified method name: `package/path.Type.Method` or `package/path.*Type.Method` |
 
 **Modifier (`do: - wrap_call:`):**
 
@@ -972,6 +1000,36 @@ Examples:
 - Unqualified calls like `Get()` without a package prefix
 - Calls from different packages (e.g., `other.Get()` when rule specifies `net/http.Get`)
 
+**Understanding method_call Matching:**
+
+`method_call` matches a call by its receiver type. Use the format `package/path.Type.Method` for a value receiver, or `package/path.*Type.Method` for a pointer receiver. As with the `recv` field on function hook rules, a rule with `*` matches only a pointer receiver, and a rule without `*` matches only a value receiver.
+
+The `*` and the type name name the method's declared receiver, not the type of the call-site variable. Go takes the address of an addressable value automatically, so a value-typed variable still satisfies a pointer-receiver rule. For example, method `Info` has the declared receiver `*Logger`. The rule `go.uber.org/zap.*Logger.Info` matches the call `l.Info()`, even where `l` has the type `zap.Logger`, not `*zap.Logger`.
+
+The same applies to methods promoted from an embedded type: the rule names the type that *declares* the method, not the struct the call is made on. For example, `Embedder` embeds `Logger`, and `Logger` declares `Info`; the rule `…/Logger.Info` matches `e.Info()`, and a rule for `…/Embedder.Info` does not match.
+
+Examples:
+
+- `go.uber.org/zap.*Logger.Info` matches `logger.Info(...)` where `logger` has a pointer-receiver `*zap.Logger`
+- `database/sql.*DB.QueryContext` matches `db.QueryContext(...)` where `db` has a pointer-receiver `*sql.DB`
+
+**What does NOT match:**
+
+- A same-named method on a different type
+- A pointer-receiver method when the rule omits `*` (or vice versa)
+- A call through an interface-typed receiver (see below)
+
+**Calls through interfaces never match:**
+
+`method_call` matches only a call whose receiver type is concrete. When a call goes through an interface-typed variable, the type checker sees only the interface, not the concrete type that the variable holds at runtime. For this reason, a `method_call` rule never matches a call made through an interface-typed receiver, even when the concrete type would otherwise match.
+
+For example, suppose variable `w` has the static type `io.Writer` and holds a `*bytes.Buffer`:
+
+- The rule `io.Writer.Write` does not match the call `w.Write(p)`. A match here would match every concrete type that implements `io.Writer`, not only calls on an `io.Writer` value.
+- The rule `bytes.*Buffer.Write` also does not match the call `w.Write(p)`. The type checker cannot see the concrete type behind an interface value.
+
+To instrument a method, write the rule against the concrete type, and call that method through a variable of the concrete type, not through an interface.
+
 **Examples:**
 
 #### Example 1: Wrapping Standard Library Calls
@@ -1132,16 +1190,41 @@ grpc.Dial(addr, func(v ...grpc.DialOption) []grpc.DialOption {
 
 ---
 
+#### Example 6: Wrapping a Method Call by Receiver Type
+
+```yaml
+wrap_query_context:
+  target: myapp
+  where:
+    method_call: database/sql.*DB.QueryContext
+  do:
+    - wrap_call:
+        replace: "tracedQuery({{ . }})"
+```
+
+Gives:
+
+```go
+func fetch(db *sql.DB, ctx context.Context) {
+    rows, err := db.QueryContext(ctx, "SELECT 1")
+    // becomes:
+    rows, err := tracedQuery(db.QueryContext(ctx, "SELECT 1"))
+}
+```
+
+---
+
 **Important Notes:**
 
-- The `{{ . }}` placeholder in the `replace` string represents the original function call.
+- The `{{ . }}` placeholder in the `replace` string represents the original function or method call.
 - The `replace` string must be a valid Go expression that includes the placeholder and produces a call expression (current limitation).
 - The `replace` string can only reference packages and functions that are already imported or defined in the target file.
-- Call rules only affect call sites in the target package, not the function definition itself.
-- Multiple calls to the same function will all be wrapped independently.
-- Use the qualified format `package/path.FunctionName` for functions.
+- Call rules only affect call sites in the target package, not the function or method definition itself.
+- Multiple calls to the same function or method will all be wrapped independently.
+- Use the qualified format `package/path.FunctionName` for functions, or `package/path.Type.Method` (`package/path.*Type.Method` for a pointer receiver) for methods.
 - All packages referenced in `append_args` must be in the target module's `go.mod`.
 - Ellipsis calls without `variadic_type` are skipped with a logged warning.
+- A rule must set exactly one of `function_call` or `method_call`.
 
 ### 5. Directive Rule
 
@@ -1274,6 +1357,8 @@ This rule adds a new Go source file to the target package.
 - Introducing new functionalities or APIs to an existing package.
 
 **Selectors:** none. File rules apply to the target package as a whole and have no point selector.
+
+A rule targeting `main` also applies to the `main` package that `go test` generates, so the added file — including any `func init()` in it — is compiled into test binaries built by `otelc go test` as well as into the application binary.
 
 **Modifier (`do: - add_file:`):**
 

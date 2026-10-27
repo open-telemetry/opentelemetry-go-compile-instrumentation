@@ -24,6 +24,7 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 func TestApplyFuncRuleSignatureFilterMismatchIsLookupMiss(t *testing.T) {
@@ -42,9 +43,100 @@ func Target(value string) error { return nil }
 		Signature:    &sig,
 	}
 
-	err = newTestPhase().applyFuncRule(context.Background(), funcRule, root)
+	funcDecl, found, err := ast.FindFuncDecl(root, funcRule, map[string]string{})
+	require.NoError(t, err)
+	require.False(t, found)
+
+	_, err = newTestPhase().applyFuncRule(context.Background(), funcRule, root, funcDecl, found)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "can not find function Target")
+}
+
+func TestApplyFuncRule_ImportAliasMismatchDoesNotError(t *testing.T) {
+	root := parseFile(t, `package main
+
+import (
+	f "fmt"
+)
+
+func Target(value string) error { return nil }
+`)
+	r := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "mismatch",
+			Imports: map[string]string{"traced": "fmt"},
+		},
+		Func:   "Target",
+		Before: "BeforeTarget",
+		Path:   "example.com/hook",
+	}
+
+	ip := newTestPhase()
+	ip.appliedFuncIdentities = map[string]struct{}{r.Identity(): {}}
+
+	funcDecl, found, err := ast.FindFuncDecl(root, r, ip.importNames)
+	require.NoError(t, err)
+
+	_, err = ip.applyFuncRule(context.Background(), r, root, funcDecl, found)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, countImportSpecs(root),
+		"must not add a redundant import for an alias never referenced by generated code")
+}
+
+func TestApplyFuncRule_BlankImportKept(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Target(value string) error { return nil }
+`)
+	r := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "side-effect-driver",
+			Imports: map[string]string{"_": "net/http/pprof"},
+		},
+		Func:   "Target",
+		Before: "BeforeTarget",
+		Path:   "example.com/hook",
+	}
+
+	ip := newTestPhase()
+	ip.appliedFuncIdentities = map[string]struct{}{r.Identity(): {}}
+
+	funcDecl, found, err := ast.FindFuncDecl(root, r, ip.importNames)
+	require.NoError(t, err)
+
+	_, err = ip.applyFuncRule(context.Background(), r, root, funcDecl, found)
+
+	require.NoError(t, err)
+	assert.True(t, fileImportsPath(root, "net/http/pprof"),
+		"blank import must still be added for a de-duplicated rule")
+}
+
+func TestApplyFuncRule_DotImportConflictStillErrors(t *testing.T) {
+	root := parseFile(t, `package main
+
+import rt "runtime"
+
+func Target(value string) error { return nil }
+`)
+	r := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "dot-conflict",
+			Imports: map[string]string{".": "runtime"},
+		},
+		Func:   "Target",
+		Before: "BeforeTarget",
+		Path:   "example.com/hook",
+	}
+
+	ip := newTestPhase()
+	funcDecl, found, err := ast.FindFuncDecl(root, r, ip.importNames)
+	require.NoError(t, err)
+
+	_, err = ip.applyFuncRule(context.Background(), r, root, funcDecl, found)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dot-import conflict")
 }
 
 // testHash stands in for InstFuncRule.Identity() in these unit tests, since
@@ -530,4 +622,114 @@ func (g *GenStruct[K, V]) Clear() error { return nil }
 	require.Len(t, afterIndexList.Indices, 2)
 	assert.Equal(t, "K", afterIndexList.Indices[0].(*dst.Ident).Name)
 	assert.Equal(t, "V", afterIndexList.Indices[1].(*dst.Ident).Name)
+}
+
+func TestApplyFuncRule_RuntimeImportFollowsBuildWideIgnoreUsage(t *testing.T) {
+	hookDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(hookDir, "hook.go"),
+		[]byte("package hook\n\nfunc HBefore(ctx HookContext, p1 string) {}\n"),
+		0o600,
+	))
+
+	newTargetRoot := func(t *testing.T) (*dst.File, *dst.FuncDecl) {
+		t.Helper()
+		root := parseFile(t, `package main
+
+func HookedFunc(p1 string) {}
+`)
+		return root, findFuncDeclInFile(t, root, "HookedFunc")
+	}
+
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "hook-rule"},
+		Func:         "HookedFunc",
+		Before:       "HBefore",
+		ResolvedPath: hookDir,
+	}
+
+	t.Run("build never uses //otelc:ignore", func(t *testing.T) {
+		root, funcDecl := newTargetRoot(t)
+		ip := newTestPhase()
+		ip.target = root
+		ip.parser = ast.NewAstParser()
+
+		_, err := ip.applyFuncRule(context.Background(), funcRule, root, funcDecl, true)
+		require.NoError(t, err)
+
+		src := renderFile(t, root)
+		assert.NotContains(
+			t,
+			src,
+			`"runtime"`,
+			"no otelc:ignore anywhere in the build means no reason to import runtime",
+		)
+		assert.NotContains(t, src, "HooksSuppressed")
+	})
+
+	t.Run("build uses //otelc:ignore somewhere", func(t *testing.T) {
+		root, funcDecl := newTargetRoot(t)
+		ip := newTestPhase()
+		ip.target = root
+		ip.parser = ast.NewAstParser()
+		ip.buildUsesIgnoreDirective = true
+
+		_, err := ip.applyFuncRule(context.Background(), funcRule, root, funcDecl, true)
+		require.NoError(t, err)
+
+		src := renderFile(t, root)
+		assert.Contains(t, src, `"runtime"`)
+		assert.Contains(t, src, "runtime.HooksSuppressed()")
+	})
+}
+
+func TestInstrumentFile_FindFuncDeclErrorIsWrapped(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "source.go")
+	require.NoError(t, os.WriteFile(path, []byte("package main\n\nfunc Target(x int) {}\n"), 0o600))
+
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "bad-filter"},
+		Func:         "Target",
+		Param:        "[]invalid",
+	}
+
+	ip := newTestPhase()
+	_, err := ip.instrumentFile(context.Background(), path, []rule.InstRule{funcRule})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "finding function Target")
+}
+
+func TestInstrumentFile_ApplyIgnoredCallSitesErrorIsWrapped(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "source.go")
+	src := "package main\n\nfunc Run() error {\n\t//otelc:ignore\n\treturn hooked()\n}\n\nfunc hooked() error { return nil }\n"
+	require.NoError(t, os.WriteFile(path, []byte(src), 0o600))
+
+	ip := newTestPhase()
+	_, err := ip.instrumentFile(context.Background(), path, nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "applying //otelc:ignore call sites")
+}
+
+func TestWriteInstrumentedDebugCopiesSourceWithDiff(t *testing.T) {
+	buildDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, buildDir)
+	t.Setenv(util.EnvOtelcDebug, "1")
+	original := filepath.Join(t.TempDir(), "source.go")
+	require.NoError(t, os.WriteFile(original, []byte("package main\n\nvar X = 1\n"), 0o644))
+	root, err := ast.NewAstParser().ParseSource("package main\n\nvar X = 2\n")
+	require.NoError(t, err)
+	ip := newTestPhase()
+	ip.workDir = t.TempDir()
+	ip.compileArgs = []string{"-p", "example.com/app", original}
+	require.NoError(t, ip.writeInstrumented(root, original, nil))
+	debugFile := util.GetBuildTemp(filepath.Join("debug", "example_com_app", "source.go"))
+	content, err := os.ReadFile(debugFile)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "var X = 2")
+	content, err = os.ReadFile(debugFile + ".diff")
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "-var X = 1")
+	assert.Contains(t, string(content), "+var X = 2")
 }

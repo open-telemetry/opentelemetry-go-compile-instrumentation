@@ -5,6 +5,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -88,6 +89,28 @@ func logLevel() slog.Level {
 	}
 }
 
+// newResource builds the process resource for auto-configured providers.
+// WithTelemetrySDK stamps telemetry.sdk.name/language/version, which
+// resource.Default() includes but resource.New() does not unless asked.
+// WithService stamps service.name (unknown_service:<executable>) and
+// service.instance.id. WithFromEnv stays last so OTEL_SERVICE_NAME and
+// OTEL_RESOURCE_ATTRIBUTES still win.
+func newResource(ctx context.Context) *resource.Resource {
+	res, err := resource.New(ctx,
+		resource.WithTelemetrySDK(),
+		resource.WithService(),
+		resource.WithProcess(),
+		resource.WithOS(),
+		resource.WithContainer(),
+		resource.WithHost(),
+		resource.WithFromEnv())
+	if err != nil {
+		logger.Warn("failed to create resource", "error", err)
+		return resource.Default()
+	}
+	return res
+}
+
 // setupOpenTelemetry initializes the OpenTelemetry SDK with OTLP exporters
 func setupOpenTelemetry(cfg Config) {
 	// Defensive: catch any panics during setup
@@ -104,18 +127,7 @@ func setupOpenTelemetry(cfg Config) {
 	}))
 
 	ctx := context.Background()
-
-	// Create resource
-	res, err := resource.New(ctx, resource.WithProcess(),
-		resource.WithOS(),
-		resource.WithContainer(),
-		resource.WithHost(),
-		resource.WithFromEnv())
-	if err != nil {
-		// Log but don't fail - continue with basic providers
-		logger.Warn("failed to create resource", "error", err)
-		res = resource.Default()
-	}
+	res := newResource(ctx)
 
 	// Setup trace provider with auto-configured exporter
 	if err := setupTraceProvider(ctx, res); err != nil {
@@ -262,30 +274,30 @@ func setupLoggerProvider(ctx context.Context, res *resource.Resource) error {
 
 // Shutdown gracefully shuts down the OpenTelemetry SDK
 func Shutdown(ctx context.Context) error {
-	var err error
+	var errs []error
 
 	if tracerProvider != nil {
 		if shutdownErr := tracerProvider.Shutdown(ctx); shutdownErr != nil {
 			Logger().Error("failed to shutdown tracer provider", "error", shutdownErr)
-			err = shutdownErr
+			errs = append(errs, shutdownErr)
 		}
 	}
 
 	if meterProvider != nil {
 		if shutdownErr := meterProvider.Shutdown(ctx); shutdownErr != nil {
 			Logger().Error("failed to shutdown meter provider", "error", shutdownErr)
-			err = shutdownErr
+			errs = append(errs, shutdownErr)
 		}
 	}
 
 	if loggerProvider != nil {
 		if shutdownErr := loggerProvider.Shutdown(ctx); shutdownErr != nil {
 			Logger().Error("failed to shutdown logger provider", "error", shutdownErr)
-			err = shutdownErr
+			errs = append(errs, shutdownErr)
 		}
 	}
 
-	return err
+	return errors.Join(errs...)
 }
 
 // StartRuntimeMetrics enables Go runtime metrics collection.

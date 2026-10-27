@@ -186,9 +186,6 @@ func beforePingContextInstrumentation(ictx hook.HookContext, db *sql.DB, ctx con
 }
 
 func afterPingContextInstrumentation(ictx hook.HookContext, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	instrumentEnd(ictx, err)
 }
 
@@ -209,9 +206,6 @@ func beforePrepareContextInstrumentation(ictx hook.HookContext, db *sql.DB, ctx 
 }
 
 func afterPrepareContextInstrumentation(ictx hook.HookContext, stmt *sql.Stmt, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	if stmt == nil {
 		return
 	}
@@ -245,9 +239,6 @@ func beforeExecContextInstrumentation(
 }
 
 func afterExecContextInstrumentation(ictx hook.HookContext, result sql.Result, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	instrumentEnd(ictx, err)
 }
 
@@ -268,9 +259,6 @@ func beforeQueryContextInstrumentation(
 }
 
 func afterQueryContextInstrumentation(ictx hook.HookContext, rows *sql.Rows, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	instrumentEnd(ictx, err)
 }
 
@@ -285,25 +273,44 @@ func beforeTxInstrumentation(ictx hook.HookContext, db *sql.DB, ctx context.Cont
 }
 
 func afterTxInstrumentation(ictx hook.HookContext, tx *sql.Tx, err error) {
-	if !clientEnabler.Enable() {
+	defer instrumentEnd(ictx, err)
+	if tx == nil {
 		return
 	}
-	defer instrumentEnd(ictx, err)
-	if tx == nil || ictx.GetData() == nil {
+	populateTxFromBeginHook(ictx, tx)
+}
+
+// populateTxFromBeginHook copies the endpoint/driver info and the context
+// instrumentStart stashed in ictx onto tx. Both BeginTx entry points
+// (DB.BeginTx and Conn.BeginTx) call instrumentStart with the same "start"
+// span before returning the *sql.Tx, so this is shared by their after-hooks:
+// afterTxInstrumentation and afterConnTxInstrumentation.
+//
+// When the caller's context already has a span, that context is stored, so
+// Commit/Rollback are siblings of the begin span. Otherwise the begin span's own
+// context is stored so they stay in the same trace. txContext reads it back.
+func populateTxFromBeginHook(ictx hook.HookContext, tx *sql.Tx) {
+	if ictx.GetData() == nil {
 		return
 	}
 	callData, ok := ictx.GetData().(map[string]interface{})
 	if !ok {
 		return
 	}
-	dbRequest, ok := callData["req"].(semconv.DatabaseSqlRequest)
-	if !ok {
-		return
+	if dbRequest, ok := callData["req"].(semconv.DatabaseSqlRequest); ok {
+		tx.Endpoint = dbRequest.Endpoint
+		tx.DriverName = dbRequest.DriverName
+		tx.DSN = dbRequest.Dsn
+		tx.DbName = dbRequest.DbName
 	}
-	tx.Endpoint = dbRequest.Endpoint
-	tx.DriverName = dbRequest.DriverName
-	tx.DSN = dbRequest.Dsn
-	tx.DbName = dbRequest.DbName
+	parent, _ := callData["parentCtx"].(context.Context)
+	if parent != nil && trace.SpanContextFromContext(parent).IsValid() {
+		tx.OtelCtx = parent
+	} else if ctx, ok := callData["ctx"].(context.Context); ok {
+		// The caller had no span, so there is no parent to be a sibling of. Use
+		// the begin span's context to keep commit and rollback in the same trace.
+		tx.OtelCtx = ctx
+	}
 }
 
 func beforeConnInstrumentation(ictx hook.HookContext, db *sql.DB, ctx context.Context) {
@@ -322,9 +329,6 @@ func beforeConnInstrumentation(ictx hook.HookContext, db *sql.DB, ctx context.Co
 }
 
 func afterConnInstrumentation(ictx hook.HookContext, conn *sql.Conn, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	if conn == nil {
 		return
 	}
@@ -361,9 +365,6 @@ func beforeConnPingContextInstrumentation(ictx hook.HookContext, conn *sql.Conn,
 }
 
 func afterConnPingContextInstrumentation(ictx hook.HookContext, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	instrumentEnd(ictx, err)
 }
 
@@ -384,9 +385,6 @@ func beforeConnPrepareContextInstrumentation(ictx hook.HookContext, conn *sql.Co
 }
 
 func afterConnPrepareContextInstrumentation(ictx hook.HookContext, stmt *sql.Stmt, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	if stmt == nil {
 		return
 	}
@@ -420,9 +418,6 @@ func beforeConnExecContextInstrumentation(
 }
 
 func afterConnExecContextInstrumentation(ictx hook.HookContext, result sql.Result, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	instrumentEnd(ictx, err)
 }
 
@@ -443,9 +438,6 @@ func beforeConnQueryContextInstrumentation(
 }
 
 func afterConnQueryContextInstrumentation(ictx hook.HookContext, rows *sql.Rows, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	instrumentEnd(ictx, err)
 }
 
@@ -460,10 +452,11 @@ func beforeConnTxInstrumentation(ictx hook.HookContext, conn *sql.Conn, ctx cont
 }
 
 func afterConnTxInstrumentation(ictx hook.HookContext, tx *sql.Tx, err error) {
-	if !clientEnabler.Enable() {
+	defer instrumentEnd(ictx, err)
+	if tx == nil {
 		return
 	}
-	instrumentEnd(ictx, err)
+	populateTxFromBeginHook(ictx, tx)
 }
 
 func beforeTxPrepareContextInstrumentation(ictx hook.HookContext, tx *sql.Tx, ctx context.Context, query string) {
@@ -483,9 +476,6 @@ func beforeTxPrepareContextInstrumentation(ictx hook.HookContext, tx *sql.Tx, ct
 }
 
 func afterTxPrepareContextInstrumentation(ictx hook.HookContext, stmt *sql.Stmt, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	if stmt == nil {
 		return
 	}
@@ -519,9 +509,6 @@ func beforeTxStmtContextInstrumentation(ictx hook.HookContext, tx *sql.Tx, ctx c
 }
 
 func afterTxStmtContextInstrumentation(ictx hook.HookContext, stmt *sql.Stmt) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	if stmt == nil {
 		return
 	}
@@ -529,23 +516,13 @@ func afterTxStmtContextInstrumentation(ictx hook.HookContext, stmt *sql.Stmt) {
 	if !ok {
 		return
 	}
-	stmt.Data = map[string]string{}
-	endpoint, ok := data["endpoint"]
-	if ok {
-		stmt.Data["endpoint"] = endpoint
+	stmt.Data = map[string]string{
+		"endpoint": data["endpoint"],
+		"driver":   data["driver"],
+		"sql":      data["sql"],
+		"dbName":   data["dbName"],
 	}
-	driverName, ok := data["driver"]
-	if ok {
-		stmt.Data["driver"] = driverName
-	}
-	dsn, ok := data["dsn"]
-	if ok {
-		stmt.Data["dsn"] = dsn
-	}
-	dbName, ok := data["dbName"]
-	if ok {
-		stmt.Data["dbName"] = dbName
-	}
+	stmt.DSN = data["dsn"]
 }
 
 func beforeTxExecContextInstrumentation(
@@ -565,9 +542,6 @@ func beforeTxExecContextInstrumentation(
 }
 
 func afterTxExecContextInstrumentation(ictx hook.HookContext, result sql.Result, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	instrumentEnd(ictx, err)
 }
 
@@ -588,9 +562,6 @@ func beforeTxQueryContextInstrumentation(
 }
 
 func afterTxQueryContextInstrumentation(ictx hook.HookContext, rows *sql.Rows, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	instrumentEnd(ictx, err)
 }
 
@@ -601,13 +572,10 @@ func beforeTxCommitInstrumentation(ictx hook.HookContext, tx *sql.Tx) {
 	if tx == nil {
 		return
 	}
-	instrumentStart(ictx, context.Background(), "commit", "COMMIT", tx.Endpoint, tx.DriverName, tx.DSN, tx.DbName)
+	instrumentStart(ictx, txContext(tx), "commit", "COMMIT", tx.Endpoint, tx.DriverName, tx.DSN, tx.DbName)
 }
 
 func afterTxCommitInstrumentation(ictx hook.HookContext, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	instrumentEnd(ictx, err)
 }
 
@@ -618,13 +586,21 @@ func beforeTxRollbackInstrumentation(ictx hook.HookContext, tx *sql.Tx) {
 	if tx == nil {
 		return
 	}
-	instrumentStart(ictx, context.Background(), "rollback", "ROLLBACK", tx.Endpoint, tx.DriverName, tx.DSN, tx.DbName)
+	instrumentStart(ictx, txContext(tx), "rollback", "ROLLBACK", tx.Endpoint, tx.DriverName, tx.DSN, tx.DbName)
+}
+
+// txContext returns the context BeginTx was originally called with, so that
+// commit and rollback spans land in the same trace as the transaction they
+// belong to. It falls back to context.Background() for a Tx that predates
+// this field, e.g. one built directly by a driver in a test.
+func txContext(tx *sql.Tx) context.Context {
+	if tx.OtelCtx != nil {
+		return tx.OtelCtx
+	}
+	return context.Background()
 }
 
 func afterTxRollbackInstrumentation(ictx hook.HookContext, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	instrumentEnd(ictx, err)
 }
 
@@ -648,9 +624,6 @@ func beforeStmtExecContextInstrumentation(
 }
 
 func afterStmtExecContextInstrumentation(ictx hook.HookContext, result sql.Result, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	instrumentEnd(ictx, err)
 }
 
@@ -674,9 +647,6 @@ func beforeStmtQueryContextInstrumentation(
 }
 
 func afterStmtQueryContextInstrumentation(ictx hook.HookContext, rows *sql.Rows, err error) {
-	if !clientEnabler.Enable() {
-		return
-	}
 	instrumentEnd(ictx, err)
 }
 
@@ -704,7 +674,7 @@ func instrumentStart(
 	attrs := semconv.DbClientRequestTraceAttrs(req)
 
 	// Start span
-	ctx, span := tracer.Start(ctx,
+	spanCtx, span := tracer.Start(ctx,
 		req.OpType,
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(attrs...),
@@ -712,18 +682,17 @@ func instrumentStart(
 
 	// Store data for after hook
 	ictx.SetData(map[string]interface{}{
-		"ctx":   ctx,
-		"span":  span,
-		"req":   req,
-		"start": time.Now(),
+		"ctx": spanCtx,
+		// parentCtx is the caller's context from before the span started. BeginTx
+		// keeps it on the Tx so commit and rollback spans are siblings of begin.
+		"parentCtx": ctx,
+		"span":      span,
+		"req":       req,
+		"start":     time.Now(),
 	})
 }
 
 func instrumentEnd(ictx hook.HookContext, err error) {
-	if !clientEnabler.Enable() {
-		logger.Debug("Db client instrumentation disabled")
-		return
-	}
 	if ictx.GetData() == nil {
 		return
 	}

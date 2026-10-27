@@ -6,6 +6,8 @@ This document explains how the `log/slog` instrumentation provided by this repos
 
 `instrumentation/log/slog` hooks `slog.NewRecord` to append `trace_id`/`span_id` attributes to the created record when an active span is available.
 
+This instrumentation adds trace/span-id attributes only. It does not export logs. Pair it with an OTLP-capable handler such as `otelslog` (`go.opentelemetry.io/contrib/bridges/otelslog`) for export.
+
 ## How trace/span ids are attached
 
 The hook calls `runtime.GetTraceAndSpanID()` (see `pkg/runtime/trace_context.go`), which returns the current goroutine's active trace/span id from goroutine-local storage (GLS), or two empty strings if none is available. If the returned trace id is empty, no attributes are added to the record.

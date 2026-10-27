@@ -3,24 +3,23 @@
 
 package main
 
+//line /<generated>:1
 import _ "unsafe"
 
+//line /golden/work/main.go:6
 func Func1(p1 string, p2 int) (_unnamedRetVal_155800511_0 float32, _unnamedRetVal_155800511_1 error) {
-	//line <generated>:1
-	if OtelBeforeTrampoline_Func1155800511(&p1, &p2); false {
+	/*line /<generated>:1*/ if OtelBeforeTrampoline_Func1155800511(&p1, &p2); false {
 	} else {
 		if false {
 		} else {
 			defer OtelAfterTrampoline_Func11412092233(&HookContextImpl1412092233{params: []interface{}{&p1, &p2}, returnVals: []interface{}{&_unnamedRetVal_155800511_0, &_unnamedRetVal_155800511_1}}, &_unnamedRetVal_155800511_0, &_unnamedRetVal_155800511_1)
 		}
 	}
-	//line main.go:7:2
-	println("Hello, World!")
-	//line main.go:8:2
+	/*line /golden/work/main.go:7*/ println("Hello, World!")
 	return 0.0, nil
 }
 
-//line <generated>:1
+//line /<generated>:1
 type HookContextImpl155800511 struct {
 	params      []interface{}
 	returnVals  []interface{}
@@ -143,7 +142,6 @@ func OtelBeforeTrampoline_Func1155800511(param0 *string, param1 *int) (hookConte
 //go:linkname H1Before testdata/golden/multiple-hooks-single-func.H1Before
 func H1Before(hookContext HookContext, param0 string, param1 int)
 
-//line <generated>:1
 type HookContextImpl1412092233 struct {
 	params      []interface{}
 	returnVals  []interface{}

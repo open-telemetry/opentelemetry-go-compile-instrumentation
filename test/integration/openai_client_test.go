@@ -44,16 +44,17 @@ func TestOpenAIClient(t *testing.T) {
 			testutil.RequireGenAIClientSemconv(
 				t,
 				span,
-				"openai",            // system
-				"chat",              // operationName
-				tc.model,            // requestModel
-				"local",             // providerName (localhost maps to "local")
-				"chatcmpl-test-123", // responseID
-				tc.model,            // responseModel
-				[]string{"stop"},    // finishReasons
-				10,                  // inputTokens
-				20,                  // outputTokens
-				30,                  // totalTokens
+				"openai",                        // system
+				"chat",                          // operationName
+				tc.model,                        // requestModel
+				"local",                         // providerName (localhost maps to "local")
+				server.Listener.Addr().String(), // serverEndpoint
+				"chatcmpl-test-123",             // responseID
+				tc.model,                        // responseModel
+				[]string{"stop"},                // finishReasons
+				10,                              // inputTokens
+				20,                              // outputTokens
+				30,                              // totalTokens
 			)
 		})
 	}
@@ -83,16 +84,51 @@ func TestOpenAIClientV2(t *testing.T) {
 	testutil.RequireGenAIClientSemconv(
 		t,
 		span,
-		"openai",            // system
-		"chat",              // operationName
-		"gpt-4",             // requestModel
-		"local",             // providerName (localhost maps to "local")
-		"chatcmpl-test-123", // responseID
-		"gpt-4",             // responseModel
-		[]string{"stop"},    // finishReasons
-		10,                  // inputTokens
-		20,                  // outputTokens
-		30,                  // totalTokens
+		"openai",                        // system
+		"chat",                          // operationName
+		"gpt-4",                         // requestModel
+		"local",                         // providerName (localhost maps to "local")
+		server.Listener.Addr().String(), // serverEndpoint
+		"chatcmpl-test-123",             // responseID
+		"gpt-4",                         // responseModel
+		[]string{"stop"},                // finishReasons
+		10,                              // inputTokens
+		20,                              // outputTokens
+		30,                              // totalTokens
+	)
+}
+
+// TestOpenAIClientV3 exercises the openai-go/v3 instrumentation package end
+// to end via otelc go build. This also makes the v3 module part of the
+// instrumented-binary govulncheck coverage derived from test/apps.
+func TestOpenAIClientV3(t *testing.T) {
+	t.Parallel()
+	testutil.Build(t, "", "openaiclientv3", "go", "build", "-a")
+
+	f := testutil.NewTestFixture(t)
+	server := startMockOpenAIServer(t)
+
+	f.Run("openaiclientv3",
+		fmt.Sprintf("-addr=%s/v1", server.URL),
+		"-api-key=test-key",
+		"-model=gpt-4",
+	)
+
+	span := f.RequireSingleSpan()
+	testutil.RequireGenAIClientSemconv(
+		t,
+		span,
+		"openai",
+		"chat",
+		"gpt-4",
+		"local",
+		server.Listener.Addr().String(),
+		"chatcmpl-test-123",
+		"gpt-4",
+		[]string{"stop"},
+		10,
+		20,
+		30,
 	)
 }
 
