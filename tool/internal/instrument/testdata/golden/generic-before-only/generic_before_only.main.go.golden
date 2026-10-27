@@ -15,7 +15,7 @@ func GenericFuncBeforeOnly[T any](p1 T, p2 int) (_unnamedRetVal_3330034316_0 T, 
 }
 
 //line <generated>:1
-type HookContextImpl3330034316 struct {
+type HookContextImpl3330034316[T any] struct {
 	params      []interface{}
 	returnVals  []interface{}
 	skipCall    bool
@@ -24,18 +24,18 @@ type HookContextImpl3330034316 struct {
 	packageName string
 }
 
-func (c *HookContextImpl3330034316) SetSkipCall(skip bool)    { c.skipCall = skip }
-func (c *HookContextImpl3330034316) IsSkipCall() bool         { return c.skipCall }
-func (c *HookContextImpl3330034316) SetData(data interface{}) { c.data = data }
-func (c *HookContextImpl3330034316) GetData() interface{}     { return c.data }
-func (c *HookContextImpl3330034316) GetKeyData(key string) interface{} {
+func (c *HookContextImpl3330034316[T]) SetSkipCall(skip bool)    { c.skipCall = skip }
+func (c *HookContextImpl3330034316[T]) IsSkipCall() bool         { return c.skipCall }
+func (c *HookContextImpl3330034316[T]) SetData(data interface{}) { c.data = data }
+func (c *HookContextImpl3330034316[T]) GetData() interface{}     { return c.data }
+func (c *HookContextImpl3330034316[T]) GetKeyData(key string) interface{} {
 	if m, ok := c.data.(map[string]interface{}); ok {
 		return m[key]
 	}
 	return nil
 }
 
-func (c *HookContextImpl3330034316) SetKeyData(key string, val interface{}) {
+func (c *HookContextImpl3330034316[T]) SetKeyData(key string, val interface{}) {
 	m, ok := c.data.(map[string]interface{})
 	if !ok || m == nil {
 		m = make(map[string]interface{})
@@ -44,7 +44,7 @@ func (c *HookContextImpl3330034316) SetKeyData(key string, val interface{}) {
 	m[key] = val
 }
 
-func (c *HookContextImpl3330034316) HasKeyData(key string) bool {
+func (c *HookContextImpl3330034316[T]) HasKeyData(key string) bool {
 	if m, ok := c.data.(map[string]interface{}); ok {
 		_, ok := m[key]
 		return ok
@@ -52,28 +52,66 @@ func (c *HookContextImpl3330034316) HasKeyData(key string) bool {
 	return false
 }
 
-func (c *HookContextImpl3330034316) GetParam(idx int) interface{} {
-	panic("GetParam is unsupported for generic functions")
+func (c *HookContextImpl3330034316[T]) GetParam(idx int) interface{} {
+	switch idx {
+	case 0:
+		return *(c.params[0].(*T))
+	case 1:
+		return *(c.params[1].(*int))
+	}
+	return nil
 }
 
-func (c *HookContextImpl3330034316) SetParam(idx int, val interface{}) {
-	panic("SetParam is unsupported for generic functions")
+func (c *HookContextImpl3330034316[T]) SetParam(idx int, val interface{}) {
+	switch idx {
+	case 0:
+		if val == nil {
+			*(c.params[0].(*T)) = *new(T)
+		} else {
+			*(c.params[0].(*T)) = val.(T)
+		}
+	case 1:
+		if val == nil {
+			*(c.params[1].(*int)) = *new(int)
+		} else {
+			*(c.params[1].(*int)) = val.(int)
+		}
+	}
 }
 
-func (c *HookContextImpl3330034316) GetReturnVal(idx int) interface{} {
-	panic("GetReturnVal is unsupported for generic functions")
+func (c *HookContextImpl3330034316[T]) GetReturnVal(idx int) interface{} {
+	switch idx {
+	case 0:
+		return *(c.returnVals[0].(*T))
+	case 1:
+		return *(c.returnVals[1].(*error))
+	}
+	return nil
 }
 
-func (c *HookContextImpl3330034316) SetReturnVal(idx int, val interface{}) {
-	panic("SetReturnVal is unsupported for generic functions")
+func (c *HookContextImpl3330034316[T]) SetReturnVal(idx int, val interface{}) {
+	switch idx {
+	case 0:
+		if val == nil {
+			*(c.returnVals[0].(*T)) = *new(T)
+		} else {
+			*(c.returnVals[0].(*T)) = val.(T)
+		}
+	case 1:
+		if val == nil {
+			*(c.returnVals[1].(*error)) = *new(error)
+		} else {
+			*(c.returnVals[1].(*error)) = val.(error)
+		}
+	}
 }
-func (c *HookContextImpl3330034316) GetParamCount() int     { return len(c.params) }
-func (c *HookContextImpl3330034316) GetReturnValCount() int { return len(c.returnVals) }
-func (c *HookContextImpl3330034316) GetFuncName() string    { return c.funcName }
-func (c *HookContextImpl3330034316) GetPackageName() string { return c.packageName }
+func (c *HookContextImpl3330034316[T]) GetParamCount() int     { return len(c.params) }
+func (c *HookContextImpl3330034316[T]) GetReturnValCount() int { return len(c.returnVals) }
+func (c *HookContextImpl3330034316[T]) GetFuncName() string    { return c.funcName }
+func (c *HookContextImpl3330034316[T]) GetPackageName() string { return c.packageName }
 
 // Trampoline Template
-func OtelBeforeTrampoline_GenericFuncBeforeOnly3330034316[T any](param0 *T, param1 *int) (hookContext *HookContextImpl3330034316, skipCall bool) {
+func OtelBeforeTrampoline_GenericFuncBeforeOnly3330034316[T any](param0 *T, param1 *int) (hookContext *HookContextImpl3330034316[T], skipCall bool) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec Before hook", "GenericFuncBeforeOnlyBefore")
@@ -86,7 +124,7 @@ func OtelBeforeTrampoline_GenericFuncBeforeOnly3330034316[T any](param0 *T, para
 			}
 		}
 	}()
-	hookContext = &HookContextImpl3330034316{}
+	hookContext = &HookContextImpl3330034316[T]{}
 	hookContext.params = []interface{}{param0, param1}
 	hookContext.funcName = "GenericFuncBeforeOnly"
 	hookContext.packageName = "main"

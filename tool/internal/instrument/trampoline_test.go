@@ -5,9 +5,16 @@ package instrument
 
 import (
 	"errors"
+	"fmt"
+	goast "go/ast"
+	"go/importer"
+	"go/parser"
 	"go/token"
+	"go/types"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dave/dst"
@@ -15,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 func TestGetHookFuncCachesParsedFile(t *testing.T) {
@@ -1216,4 +1224,198 @@ func TestTypeParamDeclNames(t *testing.T) {
 	}
 
 	assert.Equal(t, []string{"K", "V", "", "T"}, typeParamDeclNames(params))
+}
+
+// genericTargetSource is a generic function whose first parameter is a type
+// parameter, so the generated accessors have to work with an instantiated
+// type such as T.
+const genericTargetSource = `package main
+
+func GenericFunc[T any](p1 T, p2 int) (r1 T, r2 error) { return p1, nil }
+`
+
+// genericHookContext is the HookContext implementation the tool generates for
+// a target function.
+type genericHookContext struct {
+	// src holds the generated declarations, without the package clause.
+	src string
+	// typeName is the name of the generated implementation type.
+	typeName string
+}
+
+// generateGenericHookContext runs the same code the instrumenter runs to
+// produce the HookContext implementation of a target function.
+func generateGenericHookContext(t *testing.T, targetSource string) genericHookContext {
+	t.Helper()
+
+	file, targetFunc := parseFileFunc(t, targetSource)
+	ip := &instrumentPhase{target: file, targetFunc: targetFunc}
+	require.NoError(t, ip.materializeTemplate())
+
+	ip.implementHookContext(&rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Target: rule.NewTarget("main"),
+		},
+		Func:   targetFunc.Name.Name,
+		Before: "BeforeHook",
+		After:  "AfterHook",
+	})
+	ip.rewriteHookContextMethods()
+
+	structType := util.AssertType[*dst.TypeSpec](ip.hookCtxDecl.Specs[0])
+
+	decls := make([]dst.Decl, 0, 1+len(ip.hookCtxMethods))
+	decls = append(decls, ip.hookCtxDecl)
+	for _, method := range ip.hookCtxMethods {
+		decls = append(decls, method)
+	}
+	rendered := renderFile(t, &dst.File{Name: dst.NewIdent("main"), Decls: decls})
+	src, ok := strings.CutPrefix(rendered, "package main\n\n")
+	require.True(t, ok, "unexpected rendered package clause")
+	return genericHookContext{src: src, typeName: structType.Name.Name}
+}
+
+// hookContextInterface returns the source of the HookContext interface. It is
+// taken from the API template, which is kept in sync with pkg/hook, so the
+// check below runs against the very interface the hooks are called with.
+func hookContextInterface(t *testing.T) string {
+	t.Helper()
+
+	// The template is embedded as it is stored in the working tree, so its line
+	// endings depend on the platform the tests run on.
+	src := strings.ReplaceAll(templateAPI, "\r\n", "\n")
+	src, ok := strings.CutPrefix(src, "// Copyright The OpenTelemetry Authors\n"+
+		"// SPDX-License-Identifier: Apache-2.0\n\n")
+	require.True(t, ok, "unexpected api.tmpl header")
+	return strings.Replace(src, "package hook", "package main", 1)
+}
+
+// TestGenericHookContextSatisfiesHookContext checks that the implementation
+// generated for a generic target still satisfies the hook.HookContext
+// interface: the accessors are generated on a type parameterised
+// implementation, so the methods must keep the exact signatures the
+// interface declares.
+func TestGenericHookContextSatisfiesHookContext(t *testing.T) {
+	generated := generateGenericHookContext(t, genericTargetSource)
+	implSrc := generated.src
+
+	fset := token.NewFileSet()
+	hookFile, err := parser.ParseFile(fset, "hook.go", hookContextInterface(t), parser.AllErrors)
+	require.NoError(t, err, "hook context interface does not parse")
+	conf := types.Config{Importer: importer.Default()}
+	hookPkg, err := conf.Check("hook", fset, []*goast.File{hookFile}, nil)
+	require.NoError(t, err, "hook context interface does not type-check")
+
+	implFile, err := parser.ParseFile(fset, "impl.go", "package main\n\n"+implSrc, parser.AllErrors)
+	require.NoErrorf(t, err, "generated code does not parse:\n%s", implSrc)
+	implPkg, err := conf.Check("main", fset, []*goast.File{implFile}, nil)
+	require.NoErrorf(t, err, "generated code does not type-check:\n%s", implSrc)
+
+	ifaceObj := hookPkg.Scope().Lookup("HookContext")
+	require.NotNil(t, ifaceObj, "the HookContext interface must be declared")
+	iface, ok := ifaceObj.Type().Underlying().(*types.Interface)
+	require.True(t, ok, "HookContext must be an interface")
+
+	implObj := implPkg.Scope().Lookup(generated.typeName)
+	require.NotNil(t, implObj, "the generated implementation type must be declared")
+	named, ok := implObj.Type().(*types.Named)
+	require.True(t, ok, "the generated implementation type must be a named type")
+	require.NotNil(t, named.TypeParams(), "the generated implementation type must be generic")
+
+	inst, err := types.Instantiate(nil, named, []types.Type{types.Typ[types.String]}, true)
+	require.NoError(t, err, "the generated implementation type must be instantiable")
+	assert.True(t, types.Implements(types.NewPointer(inst), iface),
+		"the generated methods must satisfy hook.HookContext")
+}
+
+// TestGenericHookContextAccessorsUseTypeParams checks that the accessors of a
+// generic target are generated for the instantiated type of the parameter
+// instead of panicking.
+func TestGenericHookContextAccessorsUseTypeParams(t *testing.T) {
+	implSrc := generateGenericHookContext(t, genericTargetSource).src
+
+	assert.NotContains(t, implSrc, "unsupported for generic functions",
+		"the accessors of a generic target must not panic")
+	assert.Contains(t, implSrc, "c.params[0].(*T)",
+		"the accessor of a type parameter slot must assert the instantiated type")
+	assert.Contains(t, implSrc, "c.returnVals[0].(*T)",
+		"the accessor of a type parameter result must assert the instantiated type")
+}
+
+// TestGenericHookContextGetParamReturnsValue runs the generated implementation
+// to check that a type parameter slot is readable and writable through the
+// generic HookContext implementation.
+func TestGenericHookContextGetParamReturnsValue(t *testing.T) {
+	goTool, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("the go tool is not available")
+	}
+
+	generated := generateGenericHookContext(t, genericTargetSource)
+	program := fmt.Sprintf(`package main
+
+import "fmt"
+
+%s
+
+func main() {
+	p1 := "value"
+	p2 := 7
+	c := &%s[string]{params: []interface{}{&p1, &p2}}
+	fmt.Println(c.GetParam(0))
+	fmt.Println(c.GetParam(1))
+	c.SetParam(0, "updated")
+	fmt.Println(p1)
+	fmt.Println(c.GetParam(0))
+	c.SetParam(0, nil)
+	fmt.Printf("%%q\n", p1)
+}
+`, generated.src, generated.typeName)
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"),
+		[]byte("module genericcontext\n\ngo 1.21\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"), []byte(program), 0o600))
+
+	cmd := exec.Command(goTool, "run", ".")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	require.NoErrorf(t, err, "the generated implementation does not run:\n%s\n%s", out, program)
+	assert.Equal(t, "value\n7\nupdated\nupdated\n\"\"\n", string(out))
+}
+
+// TestHookContextTypePosition checks that the type positions of the trampoline
+// template are told apart from the positions where the HookContextImpl value
+// is used, as only the former are instantiated with the type parameters.
+func TestHookContextTypePosition(t *testing.T) {
+	assert.True(t, hookContextTypePosition(&dst.StarExpr{}), "a pointer type is a type position")
+	assert.True(t, hookContextTypePosition(&dst.TypeAssertExpr{}), "a type assertion is a type position")
+	assert.True(t, hookContextTypePosition(&dst.CompositeLit{}), "a composite literal type is a type position")
+	assert.False(t, hookContextTypePosition(&dst.ValueSpec{}), "a value declaration is not a type position")
+}
+
+// TestImplTypeRef checks that the reference to the generated type is
+// instantiated with the type parameters of the target.
+func TestImplTypeRef(t *testing.T) {
+	_, single := parseFileFunc(t, `package main
+	func testFunc[T any](param1 T) {}`)
+	singleRef := implTypeRef(ast.Ident("HookContextImpl"), single.Type.TypeParams)
+	indexExpr, ok := singleRef.(*dst.IndexExpr)
+	require.True(t, ok, "a single type parameter must be instantiated with an index expression")
+	indexIdent, ok := indexExpr.Index.(*dst.Ident)
+	require.True(t, ok, "the type argument should be an Ident")
+	assert.Equal(t, "T", indexIdent.Name)
+
+	_, multi := parseFileFunc(t, `package main
+	func testFunc[K comparable, V any](key K, value V) {}`)
+	multiRef := implTypeRef(ast.Ident("HookContextImpl"), multi.Type.TypeParams)
+	indexList, ok := multiRef.(*dst.IndexListExpr)
+	require.True(t, ok, "multiple type parameters must be instantiated with an index list expression")
+	require.Len(t, indexList.Indices, 2, "all type parameters must be used")
+	first, ok := indexList.Indices[0].(*dst.Ident)
+	require.True(t, ok, "the type argument should be an Ident")
+	assert.Equal(t, "K", first.Name)
+	second, ok := indexList.Indices[1].(*dst.Ident)
+	require.True(t, ok, "the type argument should be an Ident")
+	assert.Equal(t, "V", second.Name)
 }

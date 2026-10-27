@@ -232,9 +232,10 @@ packages are possible if declared in the instrumentation module's `go.mod`, but 
 a minimum — every extra dependency widens the transitive dependency graph for every user of
 the instrumentation. See [Adding a New Instrumentation Hook](instrument-guide.md#limitations).
 
-**Generic functions.** When the target function is generic, `HookContext` APIs that modify
-parameters or return values (`SetParam`, `SetReturnVal`) cannot be used. The type parameters
-are not available to the injected code.
+**Generic functions.** Generic targets are supported: the generated hook context is generic
+over the type parameters of the target, so `SetParam` and `SetReturnVal` work for the type
+parameter slots as well. The value handed to them must have the type the target was
+instantiated with, as the generated code asserts that type.
 
 **Goroutine-local storage scope.** Some instrumentation uses goroutine-local storage (GLS)
 to propagate trace context across boundaries that do not pass `context.Context`. GLS state
