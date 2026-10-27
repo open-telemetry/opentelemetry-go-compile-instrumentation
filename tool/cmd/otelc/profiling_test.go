@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -213,4 +214,39 @@ func TestIsSubPath(t *testing.T) {
 			assert.Equal(t, tt.expected, isSubPath(tt.target, tt.base))
 		})
 	}
+}
+
+// TestIsSubPath_ResolvesSymlinkedAncestor covers a real symbolic link
+// standing in for macOS's /var -> /private/var firmlink: os.Getwd() (which
+// feeds base through GetBuildTempDir) can return the unresolved form, while
+// an absolute --profile-path the user passes spells the same real directory
+// through the resolved form, or vice versa. filepath.Rel alone (what
+// isSubPath used before) treats these as unrelated siblings and misses the
+// containment, which is exactly the case this guard exists to catch.
+func TestIsSubPath_ResolvesSymlinkedAncestor(t *testing.T) {
+	root := t.TempDir()
+	realBuildTemp := filepath.Join(root, "real", ".otelc-build")
+	require.NoError(t, os.MkdirAll(realBuildTemp, 0o755))
+	linkedRoot := filepath.Join(root, "linked")
+	require.NoError(t, os.Symlink(filepath.Join(root, "real"), linkedRoot))
+	linkedBuildTemp := filepath.Join(linkedRoot, ".otelc-build")
+
+	t.Run("base through the link, target through the real path, target not yet created", func(t *testing.T) {
+		target := filepath.Join(realBuildTemp, "profiles")
+		assert.True(t, isSubPath(target, linkedBuildTemp))
+	})
+
+	t.Run("base through the real path, target through the link, target not yet created", func(t *testing.T) {
+		target := filepath.Join(linkedBuildTemp, "profiles")
+		assert.True(t, isSubPath(target, realBuildTemp))
+	})
+
+	t.Run("target through the link, fully existing", func(t *testing.T) {
+		assert.True(t, isSubPath(linkedBuildTemp, realBuildTemp))
+	})
+
+	t.Run("sibling reached through the same link is still rejected", func(t *testing.T) {
+		sibling := filepath.Join(root, "real", ".otelc-build-profiles", "x")
+		assert.False(t, isSubPath(sibling, linkedBuildTemp))
+	})
 }

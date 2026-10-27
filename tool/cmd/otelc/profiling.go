@@ -118,10 +118,64 @@ func stopProfiling(ctx context.Context, cmd *cli.Command) error {
 }
 
 // isSubPath reports whether target is equal to base or located inside base.
+//
+// Resolves symbolic links in each path's deepest existing ancestor before
+// comparing, so two different spellings of the same real directory agree.
+// On macOS, /var is a firmlink to /private/var: os.Getwd() (which feeds
+// base here, via GetBuildTempDir) returns the unresolved /var form, but an
+// absolute --profile-path the user passes can spell the same real directory
+// through /private/var. Comparing the raw strings (or even filepath.Rel on
+// them, as this used to do) would then miss a profile-path that genuinely
+// is inside base, letting it through only for Cleanup to silently delete
+// the profile output afterward with no error at any point.
+//
+// target usually doesn't exist on disk yet at this point (its directory is
+// created later, by profile.Start's MkdirAll), so this can't just call
+// filepath.EvalSymlinks(target) directly: EvalSymlinks requires every
+// component to exist. resolveExistingAncestor instead resolves the deepest
+// existing ancestor and rejoins the nonexistent suffix unresolved, which is
+// exactly what it would resolve to once created, since a path that doesn't
+// exist yet can't itself be a symlink.
 func isSubPath(target, base string) bool {
-	rel, err := filepath.Rel(base, target)
+	resolvedTarget, err := resolveExistingAncestor(target)
+	if err != nil {
+		return false
+	}
+	resolvedBase, err := resolveExistingAncestor(base)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(resolvedBase, resolvedTarget)
 	if err != nil {
 		return false
 	}
 	return rel == "." || !strings.HasPrefix(rel, "..")
+}
+
+// resolveExistingAncestor resolves symbolic links in path's deepest existing
+// ancestor and rejoins the remaining suffix (which may not exist) onto the
+// result. For a path that exists in full, this is equivalent to
+// filepath.EvalSymlinks(path). It walks up to the filesystem root if no
+// prefix of path exists, at which point it returns path unchanged (the root
+// itself always exists and is never a symlink).
+func resolveExistingAncestor(path string) (string, error) {
+	suffix := "."
+	for {
+		resolved, err := filepath.EvalSymlinks(path)
+		if err == nil {
+			return filepath.Join(resolved, suffix), nil
+		}
+		if !os.IsNotExist(err) {
+			return "", err
+		}
+		parent := filepath.Dir(path)
+		if parent == path {
+			// Reached the root (or ran out of components for a relative
+			// path) without finding anything that exists; nothing left to
+			// resolve.
+			return path, nil
+		}
+		suffix = filepath.Join(filepath.Base(path), suffix)
+		path = parent
+	}
 }
