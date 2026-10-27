@@ -271,7 +271,18 @@ func TestCleanupSubcommand(t *testing.T) {
 // catches such a regression even while the module still pins an older cli
 // version that tolerates the collision.
 func TestRootCommandFlagNamesUnique(t *testing.T) {
-	app := newRootCommand()
+	app := &cli.Command{
+		Name:  "otelc",
+		Flags: rootFlags(),
+		Commands: []*cli.Command{
+			&commandPin,
+			&commandSetup,
+			&commandGo,
+			&commandCleanup,
+			&commandToolexec,
+			&commandVersion,
+		},
+	}
 	err := app.Walk(func(cmd *cli.Command) error {
 		seen := make(map[string]struct{})
 		for _, f := range cmd.Flags {

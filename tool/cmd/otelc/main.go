@@ -22,57 +22,61 @@ const (
 	flagWorkDir      = "work-dir"
 )
 
-func newRootCommand() cli.Command {
-	return cli.Command{
+func rootFlags() []cli.Flag {
+	return []cli.Flag{
+		&cli.StringFlag{
+			Name:      flagWorkDir,
+			Aliases:   []string{"w"},
+			Usage:     "The path to a directory where working files will be written",
+			TakesFile: true,
+			Value:     util.GetOtelcWorkDir(),
+		},
+		&cli.BoolFlag{
+			Name:    "debug",
+			Aliases: []string{"d"},
+			Sources: cli.EnvVars(util.EnvOtelcDebug),
+			Usage:   "Enable debug mode",
+			Value:   false,
+		},
+		&cli.StringFlag{
+			Name:      "rules",
+			Usage:     "The path to the rules configuration file",
+			TakesFile: true,
+			Value:     "",
+		},
+		&cli.StringFlag{
+			Name:    "profile-path",
+			Sources: cli.EnvVars(envProfilePath),
+			Usage:   "Directory for profiling output",
+			Hidden:  true,
+		},
+		&cli.StringSliceFlag{
+			Name:    "profile",
+			Sources: cli.EnvVars(envEnabledProfiles),
+			Usage:   "Enable profiling: cpu, heap, trace (repeatable)",
+			Hidden:  true,
+		},
+		&cli.BoolFlag{
+			Name:    "profile-summary",
+			Sources: cli.EnvVars("OTELC_PROFILE_SUMMARY"),
+			Usage:   "Merge profile files into one per type after build completes",
+			Hidden:  true,
+		},
+		&cli.BoolFlag{
+			Name:    "stats",
+			Sources: cli.EnvVars(util.EnvOtelcStats),
+			Usage:   "Log per-tool wall-clock duration for toolexec commands",
+			Hidden:  true,
+		},
+	}
+}
+
+func main() {
+	app := cli.Command{
 		Name:        "otelc",
 		Usage:       "OpenTelemetry Go Compile-Time Instrumentation Tool",
 		HideVersion: true,
-		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:      flagWorkDir,
-				Aliases:   []string{"w"},
-				Usage:     "The path to a directory where working files will be written",
-				TakesFile: true,
-				Value:     util.GetOtelcWorkDir(),
-			},
-			&cli.BoolFlag{
-				Name:    "debug",
-				Aliases: []string{"d"},
-				Sources: cli.EnvVars(util.EnvOtelcDebug),
-				Usage:   "Enable debug mode",
-				Value:   false,
-			},
-			&cli.StringFlag{
-				Name:      "rules",
-				Usage:     "The path to the rules configuration file",
-				TakesFile: true,
-				Value:     "",
-			},
-			&cli.StringFlag{
-				Name:    "profile-path",
-				Sources: cli.EnvVars(envProfilePath),
-				Usage:   "Directory for profiling output",
-				Hidden:  true,
-			},
-			&cli.StringSliceFlag{
-				Name:    "profile",
-				Sources: cli.EnvVars(envEnabledProfiles),
-				Usage:   "Enable profiling: cpu, heap, trace (repeatable)",
-				Hidden:  true,
-			},
-			&cli.BoolFlag{
-				Name:    "profile-summary",
-				Sources: cli.EnvVars("OTELC_PROFILE_SUMMARY"),
-				Usage:   "Merge profile files into one per type after build completes",
-				Hidden:  true,
-			},
-			&cli.BoolFlag{
-				Name:    "stats",
-				Sources: cli.EnvVars(util.EnvOtelcStats),
-				Usage:   "Log per-tool wall-clock duration for toolexec commands",
-				Hidden:  true,
-			},
-		},
+		Flags:       rootFlags(),
 		Commands: []*cli.Command{
 			&commandPin,
 			&commandSetup,
@@ -81,34 +85,30 @@ func newRootCommand() cli.Command {
 			&commandToolexec,
 			&commandVersion,
 		},
-	}
-}
-
-func main() {
-	app := newRootCommand()
-	app.Before = func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
-		// In drop-in mode (otelc is the GOFLAGS -toolexec tool) the go
-		// children otelc spawns would inherit the flag and recurse, so
-		// strip it process-wide; commands that need toolexec re-add it.
-		if goflags := os.Getenv("GOFLAGS"); goflags != "" {
-			if stripped := util.StripToolexecFromGoflags(goflags); stripped != goflags {
-				if err := os.Setenv("GOFLAGS", stripped); err != nil {
-					return ctx, ex.Wrapf(err, "stripping -toolexec from GOFLAGS")
+		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+			// In drop-in mode (otelc is the GOFLAGS -toolexec tool) the go
+			// children otelc spawns would inherit the flag and recurse, so
+			// strip it process-wide; commands that need toolexec re-add it.
+			if goflags := os.Getenv("GOFLAGS"); goflags != "" {
+				if stripped := util.StripToolexecFromGoflags(goflags); stripped != goflags {
+					if err := os.Setenv("GOFLAGS", stripped); err != nil {
+						return ctx, ex.Wrapf(err, "stripping -toolexec from GOFLAGS")
+					}
 				}
 			}
-		}
-		ctx, err := initLogger(ctx, cmd)
-		if err != nil {
-			return ctx, err
-		}
-		ctx, err = initProfiling(ctx, cmd)
-		if err != nil {
-			return ctx, err
-		}
-		return initStats(ctx, cmd)
-	}
-	app.After = func(ctx context.Context, cmd *cli.Command) error {
-		return ex.Join(stopProfiling(ctx, cmd), closeLogger(ctx))
+			ctx, err := initLogger(ctx, cmd)
+			if err != nil {
+				return ctx, err
+			}
+			ctx, err = initProfiling(ctx, cmd)
+			if err != nil {
+				return ctx, err
+			}
+			return initStats(ctx, cmd)
+		},
+		After: func(ctx context.Context, cmd *cli.Command) error {
+			return ex.Join(stopProfiling(ctx, cmd), closeLogger(ctx))
+		},
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
