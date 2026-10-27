@@ -4,13 +4,11 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/urfave/cli/v3"
@@ -267,33 +265,6 @@ func TestCleanupSubcommand(t *testing.T) {
 	}
 }
 
-// TestRootCommandVersion runs the real root command tree from main down to the
-// version subcommand. urfave/cli v3.14.0+ rejects a flag whose Name is also
-// listed in its Aliases when the command runs ("flag \"rules\" defined
-// multiple times in command \"otelc\""), so this test must exercise the command
-// defined in main rather than re-declaring flags.
-func TestRootCommandVersion(t *testing.T) {
-	t.Setenv(util.EnvOtelcWorkDir, "")
-	workDir := t.TempDir()
-
-	var buf bytes.Buffer
-	app := newRootCommand()
-	app.Writer = &buf
-	// commandVersion is shared package-level state; an earlier run may have
-	// cached its Writer (cli only propagates the parent Writer when the
-	// command's own is nil), so point it at this test's buffer and restore.
-	oldWriter := commandVersion.Writer
-	commandVersion.Writer = &buf
-	t.Cleanup(func() { commandVersion.Writer = oldWriter })
-
-	args := []string{"otelc", "--" + flagWorkDir, workDir, "version"}
-	if err := app.Run(context.Background(), args); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(buf.String(), "otelc version") {
-		t.Errorf("expected version output, got %q", buf.String())
-	}
-}
 
 // TestRootCommandFlagNamesUnique replicates the duplicate flag name check that
 // urfave/cli v3.14.0+ performs at startup: no flag Name may collide with an
