@@ -3,20 +3,19 @@
 
 package main
 
+//line /<generated>:1
 import _ "unsafe"
 
+//line /golden/work/main.go:6
 func Func1(p1 string, p2 int) (_unnamedRetVal_4242419412_0 float32, _unnamedRetVal_4242419412_1 error) {
-	//line <generated>:1
-	if OtelBeforeTrampoline_Func14242419412(&p1, &p2); false {
+	/*line /<generated>:1*/ if OtelBeforeTrampoline_Func14242419412(&p1, &p2); false {
 	} else {
 	}
-	//line main.go:7:2
-	println("Hello, World!")
-	//line main.go:8:2
+	/*line /golden/work/main.go:7*/ println("Hello, World!")
 	return 0.0, nil
 }
 
-//line <generated>:1
+//line /<generated>:1
 type HookContextImpl4242419412 struct {
 	params      []interface{}
 	returnVals  []interface{}
