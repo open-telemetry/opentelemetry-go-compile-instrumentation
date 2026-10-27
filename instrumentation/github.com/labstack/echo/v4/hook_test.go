@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"sync"
 	"testing"
 
 	"github.com/labstack/echo/v4"
@@ -382,10 +383,21 @@ func TestBeforeDefaultHTTPErrorHandler_NestedInternal5xxRecorded(t *testing.T) {
 	require.Len(t, sr.Ended()[0].Events(), 1)
 }
 
-func TestBeforeEchoServeHTTP_WrapsCustomHTTPErrorHandler(t *testing.T) {
+// serveFlowWithSpan replicates the instrumented (*Echo).ServeHTTP request
+// flow on a caller-created echo.Context: (*Router).Find runs with the
+// injected AfterFind hook, ServeHTTP then reads c.Handler() and executes it,
+// and dispatches a returned error to e.HTTPErrorHandler.
+func serveFlowWithSpan(e *echo.Echo, c echo.Context) {
+	e.Router().Find(c.Request().Method, c.Request().URL.Path, c)
+	AfterFind(hooktest.NewMockHookContext(c))
+	if err := c.Handler()(c); err != nil {
+		e.HTTPErrorHandler(err, c)
+	}
+}
+
+func TestAfterFind_WrapsHandlerForCustomHTTPErrorHandler(t *testing.T) {
 	sr, tr := setupContextTracer(t)
 	_, span := tr.Start(context.Background(), "GET")
-	c := newEchoContextWithRoute(t, http.MethodGet, "/users/:id", "/users/42", span)
 
 	e := echo.New()
 	var customCalled bool
@@ -393,34 +405,108 @@ func TestBeforeEchoServeHTTP_WrapsCustomHTTPErrorHandler(t *testing.T) {
 		customCalled = true
 		_ = ctx.NoContent(http.StatusInternalServerError)
 	}
+	e.GET("/users/:id", func(echo.Context) error { return errors.New("handler returned error") })
 
-	BeforeEchoServeHTTP(hooktest.NewMockHookContext(), e, httptest.NewRecorder(), c.Request())
-	e.HTTPErrorHandler(errors.New("handler returned error"), c)
+	req := httptest.NewRequest(http.MethodGet, "/users/42", nil).
+		WithContext(trace.ContextWithSpan(context.Background(), span))
+	serveFlowWithSpan(e, e.NewContext(req, httptest.NewRecorder()))
 	span.End()
 
 	assert.True(t, customCalled)
 	require.Len(t, sr.Ended(), 1)
-	assert.Equal(t, codes.Error, sr.Ended()[0].Status().Code)
-	require.Len(t, sr.Ended()[0].Events(), 1)
+	ended := sr.Ended()[0]
+	assert.Equal(t, "GET /users/:id", ended.Name())
+	assert.Equal(t, codes.Error, ended.Status().Code)
+	assert.Contains(t, ended.Status().Description, "handler returned error")
+	require.Len(t, ended.Events(), 1)
+	assert.Equal(t, "exception", ended.Events()[0].Name)
 }
 
-func TestBeforeEchoServeHTTP_WrapsOnce(t *testing.T) {
+func TestAfterFind_WrapsHandlerOnceOnRepeatedFind(t *testing.T) {
+	sr, tr := setupContextTracer(t)
+	_, span := tr.Start(context.Background(), "GET")
+
 	e := echo.New()
-	e.HTTPErrorHandler = func(error, echo.Context) {}
+	e.GET("/users/:id", func(echo.Context) error { return errors.New("handler returned error") })
 
-	BeforeEchoServeHTTP(hooktest.NewMockHookContext(), e, httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
-	first := reflect.ValueOf(e.HTTPErrorHandler).Pointer()
-	BeforeEchoServeHTTP(hooktest.NewMockHookContext(), e, httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
-	assert.Equal(t, first, reflect.ValueOf(e.HTTPErrorHandler).Pointer())
+	req := httptest.NewRequest(http.MethodGet, "/users/42", nil).
+		WithContext(trace.ContextWithSpan(context.Background(), span))
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	// (*Router).Find runs once per request in ServeHTTP; repeated AfterFind
+	// calls on the same context must not nest wrappers and re-record.
+	e.Router().Find(http.MethodGet, "/users/42", c)
+	ictx := hooktest.NewMockHookContext(c)
+	AfterFind(ictx)
+	AfterFind(ictx)
+	require.Error(t, c.Handler()(c), "wrapped handler must pass the error through")
+	span.End()
+
+	require.Len(t, sr.Ended(), 1)
+	ended := sr.Ended()[0]
+	assert.Equal(t, codes.Error, ended.Status().Code)
+	assert.Len(t, ended.Events(), 1)
 }
 
-func TestBeforeEchoServeHTTP_DisabledDoesNotWrap(t *testing.T) {
+func TestAfterFind_DisabledDoesNotWrapHandler(t *testing.T) {
 	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "echo")
 
 	e := echo.New()
-	orig := reflect.ValueOf(e.HTTPErrorHandler).Pointer()
-	BeforeEchoServeHTTP(hooktest.NewMockHookContext(), e, httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
-	assert.Equal(t, orig, reflect.ValueOf(e.HTTPErrorHandler).Pointer())
+	e.GET("/users/:id", func(echo.Context) error { return nil })
+
+	req := httptest.NewRequest(http.MethodGet, "/users/42", nil)
+	c := e.NewContext(req, httptest.NewRecorder())
+	e.Router().Find(http.MethodGet, "/users/42", c)
+	orig := reflect.ValueOf(c.Handler()).Pointer()
+
+	AfterFind(hooktest.NewMockHookContext(c))
+
+	assert.Equal(t, orig, reflect.ValueOf(c.Handler()).Pointer())
+}
+
+// TestAfterFind_ConcurrentRequestsAreRaceFree drives concurrent initial requests:
+// concurrent requests on one *Echo with a custom e.HTTPErrorHandler. The
+// previous fix wrote e.HTTPErrorHandler from a before-hook on ServeHTTP,
+// racing Echo's unlocked read of that field in ServeHTTP. The handler wrap
+// only mutates the per-request echo.Context, so this must stay clean under
+// the race detector.
+func TestAfterFind_ConcurrentRequestsAreRaceFree(t *testing.T) {
+	sr, tr := setupContextTracer(t)
+
+	e := echo.New()
+	e.HTTPErrorHandler = func(err error, c echo.Context) {
+		_ = c.NoContent(http.StatusInternalServerError)
+	}
+	e.GET("/boom", func(echo.Context) error { return errors.New("handler returned error") })
+
+	const goroutines = 20
+	const requests = 25
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for range goroutines {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for range requests {
+				_, span := tr.Start(context.Background(), "GET")
+				req := httptest.NewRequest(http.MethodGet, "/boom", nil).
+					WithContext(trace.ContextWithSpan(context.Background(), span))
+				serveFlowWithSpan(e, e.NewContext(req, httptest.NewRecorder()))
+				span.End()
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	require.Len(t, sr.Ended(), goroutines*requests)
+	for _, ended := range sr.Ended() {
+		assert.Equal(t, "GET /boom", ended.Name())
+		assert.Equal(t, codes.Error, ended.Status().Code)
+		assert.Len(t, ended.Events(), 1)
+	}
 }
 
 func TestRecordRequestError_IdempotentAcrossBothHooks(t *testing.T) {

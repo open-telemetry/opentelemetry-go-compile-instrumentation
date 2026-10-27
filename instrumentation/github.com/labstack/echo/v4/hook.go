@@ -4,9 +4,7 @@
 package server
 
 import (
-	"net/http"
 	"reflect"
-	"sync"
 
 	"github.com/labstack/echo/v4"
 	"go.opentelemetry.io/otel/codes"
@@ -19,8 +17,9 @@ import (
 
 // Keys stored on echo.Context. Reserved by this package.
 const (
-	routeSetKey    = "otel.echo.route.set"
-	errRecordedKey = "otel.echo.err.recorded"
+	routeSetKey       = "otel.echo.route.set"
+	errRecordedKey    = "otel.echo.err.recorded"
+	handlerWrappedKey = "otel.echo.handler.wrapped"
 )
 
 // AfterFind runs after (*Router).Find. The router has set Context.Path()
@@ -40,7 +39,23 @@ func AfterFind(ictx hook.HookContext) {
 	}
 
 	route := c.Path()
-	if route == "" || !matchedRoute(c) {
+
+	// Capture handler identity before wrapping: Echo's default 404/405
+	// handlers must not count as a matched route.
+	matched := matchedRoute(c)
+
+	// Wrap the per-request handler so a handler `return err` is recorded on
+	// the net/http server span before ServeHTTP dispatches to
+	// e.HTTPErrorHandler, whatever error handler the application installed.
+	// ServeHTTP reads c.Handler() after (*Router).Find returns, so the wrap is
+	// picked up by the request that is being routed. Mutating the
+	// per-request echo.Context is race-free, unlike writing
+	// e.HTTPErrorHandler, which Echo's ServeHTTP reads without a lock.
+	// Wrapped before the route checks so unmatched requests (custom 404
+	// handlers) are covered too; recordRequestError still skips 4xx.
+	wrapHandler(c)
+
+	if route == "" || !matched {
 		return
 	}
 	if c.Get(routeSetKey) != nil {
@@ -59,7 +74,9 @@ func AfterFind(ictx hook.HookContext) {
 }
 
 // BeforeError runs before (*context).Error. The receiver is unexported, so
-// the hook takes any and asserts to echo.Context.
+// the hook takes any and asserts to echo.Context. This covers handlers that
+// call c.Error(err) and return nil: the wrapped handler sees a nil error, but
+// c.Error invokes e.HTTPErrorHandler directly and this hook fires first.
 func BeforeError(_ hook.HookContext, recv any, err error) {
 	if !enabler.Enable() {
 		return
@@ -68,18 +85,10 @@ func BeforeError(_ hook.HookContext, recv any, err error) {
 	recordRequestError(c, err)
 }
 
-// BeforeEchoServeHTTP wraps e.HTTPErrorHandler once so handler `return err`
-// is recorded even when the application replaced the default handler.
-func BeforeEchoServeHTTP(_ hook.HookContext, e *echo.Echo, _ http.ResponseWriter, _ *http.Request) {
-	if !enabler.Enable() || e == nil {
-		return
-	}
-	installErrorHandlerHook(e)
-}
-
 // BeforeDefaultHTTPErrorHandler runs before (*Echo).DefaultHTTPErrorHandler.
 // ServeHTTP calls this for handler `return err` when the default handler is
-// still installed.
+// still installed. It is idempotent with the wrapped handler in AfterFind
+// (recordRequestError gates on errRecordedKey).
 func BeforeDefaultHTTPErrorHandler(_ hook.HookContext, _ *echo.Echo, err error, c echo.Context) {
 	if !enabler.Enable() {
 		return
@@ -87,20 +96,28 @@ func BeforeDefaultHTTPErrorHandler(_ hook.HookContext, _ *echo.Echo, err error, 
 	recordRequestError(c, err)
 }
 
-// hookedErrorHandlers tracks Echo instances whose HTTPErrorHandler is wrapped.
-var hookedErrorHandlers sync.Map
-
-func installErrorHandlerHook(e *echo.Echo) {
-	if _, loaded := hookedErrorHandlers.LoadOrStore(e, struct{}{}); loaded {
+// wrapHandler wraps c.Handler() so the error a handler returns is recorded
+// before ServeHTTP dispatches to e.HTTPErrorHandler. This reaches custom
+// error handlers, which replace DefaultHTTPErrorHandler and therefore
+// bypass its hook. ServeHTTP applies its middleware chain around the wrapped
+// handler, so middleware that swallows or rewrites the error runs after the
+// original error has been recorded.
+func wrapHandler(c echo.Context) {
+	if c.Get(handlerWrappedKey) != nil {
 		return
 	}
-	orig := e.HTTPErrorHandler
-	e.HTTPErrorHandler = func(err error, c echo.Context) {
-		recordRequestError(c, err)
-		if orig != nil {
-			orig(err, c)
-		}
+	next := c.Handler()
+	if next == nil {
+		return
 	}
+	c.Set(handlerWrappedKey, struct{}{})
+	c.SetHandler(func(c echo.Context) error {
+		err := next(c)
+		if err != nil {
+			recordRequestError(c, err)
+		}
+		return err
+	})
 }
 
 func recordRequestError(c echo.Context, err error) {
