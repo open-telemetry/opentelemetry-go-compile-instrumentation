@@ -35,6 +35,11 @@ func TestIsRuleFile(t *testing.T) {
 	}
 }
 
+func TestEscapePackagePathKeepsPackagesWithSameBasenameSeparate(t *testing.T) {
+	assert.Equal(t, "example_com_app_cmd_client", EscapePackagePath("example.com/app/cmd/client"))
+	assert.Equal(t, "example_com_app_internal_client", EscapePackagePath("example.com/app/internal/client"))
+}
+
 func TestVersionInRange(t *testing.T) {
 	tests := []struct {
 		name           string
