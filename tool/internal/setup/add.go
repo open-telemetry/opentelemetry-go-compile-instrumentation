@@ -212,6 +212,7 @@ func (sp *setupPhase) removeRuntimeFile(ctx context.Context, pkgDir string) erro
 func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, pkg runtimePackage) error {
 	var funcRules []*rule.InstFuncRule
 	var fileRules []*rule.InstFileRule
+
 	for _, m := range matched {
 		for _, funcRule := range m.AllFuncRules() {
 			if funcRule.Path != pkg.importPath {

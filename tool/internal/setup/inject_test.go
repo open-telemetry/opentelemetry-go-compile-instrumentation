@@ -41,8 +41,10 @@ func fakeSrcFile(name string) string {
 }
 
 func TestHookPackagePaths(t *testing.T) {
+	sp := &setupPhase{logger: slog.New(slog.DiscardHandler)}
+
 	t.Run("no rules", func(t *testing.T) {
-		assert.Empty(t, hookPackagePaths(nil))
+		assert.Empty(t, sp.hookPackagePaths(nil))
 	})
 
 	t.Run("collects func and file rule paths", func(t *testing.T) {
@@ -52,7 +54,7 @@ func TestHookPackagePaths(t *testing.T) {
 
 		assert.ElementsMatch(t,
 			[]string{"example.com/hooks", "example.com/filehooks"},
-			hookPackagePaths([]*rule.InstRuleSet{set}),
+			sp.hookPackagePaths([]*rule.InstRuleSet{set}),
 		)
 	})
 
@@ -66,7 +68,7 @@ func TestHookPackagePaths(t *testing.T) {
 
 		assert.Equal(t,
 			[]string{"example.com/hooks"},
-			hookPackagePaths([]*rule.InstRuleSet{first, second}),
+			sp.hookPackagePaths([]*rule.InstRuleSet{first, second}),
 		)
 	})
 
@@ -74,7 +76,7 @@ func TestHookPackagePaths(t *testing.T) {
 		set := rule.NewInstRuleSet("example.com/svc")
 		set.AddFuncRule(fakeSrcFile("a.go"), funcRuleWithPath("fn", ""))
 
-		assert.Empty(t, hookPackagePaths([]*rule.InstRuleSet{set}))
+		assert.Empty(t, sp.hookPackagePaths([]*rule.InstRuleSet{set}))
 	})
 }
 
@@ -220,7 +222,8 @@ func TestRunInjectionPassesFollowsLongChain(t *testing.T) {
 		},
 	}
 
-	extra, err := runInjectionPasses(t.Context(), nil, map[string]bool{}, pass)
+	sp := &setupPhase{logger: slog.New(slog.DiscardHandler)}
+	extra, err := sp.runInjectionPasses(t.Context(), nil, map[string]bool{}, pass)
 	require.NoError(t, err)
 	assert.Len(t, extra, chainLength)
 	assert.Equal(t, chainLength+1, n, "the pass after the last match must detect convergence")
@@ -243,7 +246,169 @@ func TestRunInjectionPassesConverges(t *testing.T) {
 		},
 	}
 
-	extra, err := runInjectionPasses(t.Context(), nil, map[string]bool{}, pass)
+	sp := &setupPhase{logger: slog.New(slog.DiscardHandler)}
+	extra, err := sp.runInjectionPasses(t.Context(), nil, map[string]bool{}, pass)
 	require.NoError(t, err)
 	assert.Len(t, extra, 1)
+}
+
+func TestFileRuleSourceImports(t *testing.T) {
+	dir := t.TempDir()
+	sourceCode := `//go:build ignore
+
+package hooks
+
+import (
+	"context"
+	_ "unsafe"
+	_ "C"
+	extra "example.com/extra"
+	. "example.com/dot"
+	_ "example.com/blank"
+)
+`
+	sourceFile := "injected.go"
+	mustWriteFile(t, filepath.Join(dir, sourceFile), sourceCode)
+
+	sp := &setupPhase{logger: slog.New(slog.DiscardHandler)}
+	fileRule := &rule.InstFileRule{
+		InstBaseRule: rule.InstBaseRule{Name: "add-hook", Target: rule.NewTarget("main")},
+		File:         sourceFile,
+		Path:         "example.com/hooks",
+		ResolvedPath: dir,
+	}
+
+	t.Run("extracts and sorts unique imports excluding C and unsafe", func(t *testing.T) {
+		imports, err := sp.fileRuleSourceImports(fileRule)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"context", "example.com/blank", "example.com/dot", "example.com/extra"}, imports)
+	})
+
+	t.Run("returns cached results on subsequent calls", func(t *testing.T) {
+		imports, err := sp.fileRuleSourceImports(fileRule)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"context", "example.com/blank", "example.com/dot", "example.com/extra"}, imports)
+
+		// Delete the source file on disk; subsequent call must serve from cache without re-reading.
+		require.NoError(t, os.Remove(filepath.Join(dir, sourceFile)))
+		cached, err := sp.fileRuleSourceImports(fileRule)
+		require.NoError(t, err)
+		assert.Equal(t, imports, cached)
+	})
+
+	t.Run("inapplicable build constraints returns nil", func(t *testing.T) {
+		inapplicable := "inapplicable.go"
+		mustWriteFile(
+			t,
+			filepath.Join(dir, inapplicable),
+			"//go:build ignore && non_matching_xyz\n\npackage hooks\nimport \"example.com/skip\"\n",
+		)
+		r := &rule.InstFileRule{
+			InstBaseRule: rule.InstBaseRule{Name: "inapplicable", Target: rule.NewTarget("main")},
+			File:         inapplicable,
+			Path:         "example.com/hooks",
+			ResolvedPath: dir,
+		}
+		imports, err := sp.fileRuleSourceImports(r)
+		require.NoError(t, err)
+		assert.Nil(t, imports)
+	})
+
+	t.Run("missing file returns error", func(t *testing.T) {
+		r := &rule.InstFileRule{
+			InstBaseRule: rule.InstBaseRule{Name: "missing", Target: rule.NewTarget("main")},
+			File:         "does_not_exist.go",
+			Path:         "example.com/hooks",
+			ResolvedPath: dir,
+		}
+		_, err := sp.fileRuleSourceImports(r)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "reading source file")
+		assert.Contains(t, err.Error(), "does_not_exist.go")
+	})
+
+	t.Run("malformed source returns error", func(t *testing.T) {
+		malformed := "malformed.go"
+		mustWriteFile(t, filepath.Join(dir, malformed), "//go:build ignore\n\npackage hooks\nimport \"unclosed\n")
+		r := &rule.InstFileRule{
+			InstBaseRule: rule.InstBaseRule{Name: "malformed", Target: rule.NewTarget("main")},
+			File:         malformed,
+			Path:         "example.com/hooks",
+			ResolvedPath: dir,
+		}
+		_, err := sp.fileRuleSourceImports(r)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "parsing imports for rule")
+	})
+
+	t.Run("empty path or file returns nil", func(t *testing.T) {
+		imports, err := sp.fileRuleSourceImports(&rule.InstFileRule{})
+		require.NoError(t, err)
+		assert.Nil(t, imports)
+	})
+
+	t.Run("nil rule returns nil", func(t *testing.T) {
+		imports, err := sp.fileRuleSourceImports(nil)
+		require.NoError(t, err)
+		assert.Nil(t, imports)
+	})
+}
+
+func TestHookPackagePaths_FileRuleSourceImports(t *testing.T) {
+	dir := t.TempDir()
+	sourceFile := "injected.go"
+	mustWriteFile(
+		t,
+		filepath.Join(dir, sourceFile),
+		"//go:build ignore\n\npackage hooks\nimport \"example.com/extra\"\n",
+	)
+
+	fileRule := &rule.InstFileRule{
+		InstBaseRule: rule.InstBaseRule{Name: "file", Target: rule.NewTarget("example.com/svc")},
+		Path:         "example.com/filehooks",
+		File:         sourceFile,
+		ResolvedPath: dir,
+	}
+	set := rule.NewInstRuleSet("example.com/svc")
+	set.AddFileRule(fileRule)
+
+	sp := &setupPhase{logger: slog.New(slog.DiscardHandler)}
+	paths := sp.hookPackagePaths([]*rule.InstRuleSet{set})
+	assert.ElementsMatch(t, []string{"example.com/filehooks", "example.com/extra"}, paths)
+}
+
+func TestMatchInjectedDeps_AddFileSourceImports(t *testing.T) {
+	t.Setenv("OTELC_RULES", "")
+
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "go.mod"), "module example.com/injecttest3\n\ngo 1.25.0\n")
+	mustWriteFile(t, filepath.Join(dir, "hooks", "hooks.go"), "package hooks\n")
+	mustWriteFile(t, filepath.Join(dir, "hooks", "added.go"),
+		"//go:build ignore\n\npackage hooks\n\nimport _ \"example.com/injecttest3/injecteddep\"\n")
+	mustWriteFile(t, filepath.Join(dir, "injecteddep", "injecteddep.go"),
+		"package injecteddep\n\nfunc InjectedFn() {}\n")
+
+	ruleFile := filepath.Join(dir, "rules.yaml")
+	mustWriteFile(t, ruleFile, `injectedRule:
+  target: example.com/injecttest3/injecteddep
+  func: InjectedFn
+  raw: "_ = 1"
+`)
+
+	sp := &setupPhase{logger: slog.New(slog.DiscardHandler), ruleConfig: ruleFile}
+	fileRule := &rule.InstFileRule{
+		InstBaseRule: rule.InstBaseRule{Name: "add-file", Target: rule.NewTarget("example.com/svc")},
+		Path:         "example.com/injecttest3/hooks",
+		File:         "added.go",
+		ResolvedPath: filepath.Join(dir, "hooks"),
+	}
+	set := rule.NewInstRuleSet("example.com/svc")
+	set.AddFileRule(fileRule)
+
+	extra, err := sp.matchInjectedDeps(
+		t.Context(), []*rule.InstRuleSet{set}, nil, nil, []string{"-C", dir},
+	)
+	require.NoError(t, err)
+	require.Len(t, extra, 1)
+	assert.Equal(t, "example.com/injecttest3/injecteddep", extra[0].ModulePath)
 }
