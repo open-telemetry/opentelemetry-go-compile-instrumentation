@@ -137,11 +137,24 @@ func getBuildPackages(
 	subcommand string,
 	args []string,
 ) ([]*packages.Package, []*packages.Package, error) {
-	logger := util.LoggerFromContext(ctx)
-	// NeedForTest marks the test packages, so the loop below can split them
+	// NeedForTest marks the test packages, so loadBuildPackages can split them
 	// from the real build packages.
 	mode := packages.NeedName | packages.NeedFiles | packages.NeedModule |
 		packages.NeedImports | packages.NeedDeps | packages.NeedForTest
+	return loadBuildPackages(ctx, mode, subcommand, args)
+}
+
+// loadBuildPackages loads the build packages of getBuildPackages with the
+// given load mode.
+//
+//nolint:revive // needed to balance confusing-results and nonamedreturns linters
+func loadBuildPackages(
+	ctx context.Context,
+	mode packages.LoadMode,
+	subcommand string,
+	args []string,
+) ([]*packages.Package, []*packages.Package, error) {
+	logger := util.LoggerFromContext(ctx)
 	tests := subcommand == subcmdTest
 
 	pkgTargets, fileTargets, err := splitBuildTargets(subcommand, args)
