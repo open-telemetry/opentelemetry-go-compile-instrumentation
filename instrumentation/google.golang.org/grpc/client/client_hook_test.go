@@ -694,3 +694,35 @@ func TestClientStatsHandler_NilGRPCContext_IsSafeNoOp(t *testing.T) {
 		})
 	}, "HandleRPC must return before dereferencing a nil gRPCContext")
 }
+
+func TestClientStatsHandler_HandleRPC_UsesStatsEndTime(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "grpc")
+	initInstrumentation()
+
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	oldTP := otel.GetTracerProvider()
+	oldTracer := tracer
+	otel.SetTracerProvider(tp)
+	t.Cleanup(func() {
+		_ = tp.Shutdown(context.Background())
+		otel.SetTracerProvider(oldTP)
+		tracer = oldTracer
+	})
+	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(runtime.ModuleVersion()))
+
+	handler := newClientStatsHandler()
+	ctx := handler.TagRPC(t.Context(), &stats.RPCTagInfo{
+		FullMethodName: "/test.Service/Method",
+	})
+
+	endTime := time.Now().Add(5 * time.Second).Truncate(time.Microsecond)
+	handler.HandleRPC(ctx, &stats.End{
+		BeginTime: time.Now(),
+		EndTime:   endTime,
+	})
+
+	spans := exporter.GetSpans()
+	require.Len(t, spans, 1)
+	assert.True(t, spans[0].EndTime.Equal(endTime), "span EndTime should match stats.End.EndTime")
+}
