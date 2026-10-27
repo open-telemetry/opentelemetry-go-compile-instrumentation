@@ -3,11 +3,13 @@
 
 package main
 
+//line /golden/work/main.go:6
 type Calculator struct{}
 
 func (c *Calculator) Divide(a int, b int) (_unnamedRetVal0 int, _unnamedRetVal1 error) {
-	println("enter Divide recv=c arg0=a")
-	return a / b, nil
+	/*line /<generated>:1*/ println("enter Divide recv=c arg0=a")
+	/*line /golden/work/main.go:9*/ return a / b, nil
 }
 
+//line /golden/work/main.go:12
 func main() { (&Calculator{}).Divide(4, 2) }
