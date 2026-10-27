@@ -35,7 +35,7 @@ mcp_clientsession_close:
     recv: "*ClientSession"
   do:
     - inject_hooks:
-        after: AfterClose
+        before: BeforeClose
         path: "go.opentelemetry.io/otelc/instrumentation/github.com/modelcontextprotocol/go-sdk/client"
 
 # Every mcp request goes through internal/jsonrpc2.(*Connection).Call, which

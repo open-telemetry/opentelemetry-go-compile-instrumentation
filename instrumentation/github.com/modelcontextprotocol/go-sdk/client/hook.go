@@ -58,7 +58,7 @@ func initInstrumentation() {
 // connected *mcp.ClientSession. It is populated by AfterConnect when the
 // client establishes a session over a concrete Transport, and read by
 // BeforeCallTool to annotate the tool-call span. Entries are removed by
-// AfterClose when the session is closed, so the map tracks only live sessions.
+// BeforeClose when the session is closed, so the map tracks only live sessions.
 var sessionTransports sync.Map // *mcp.ClientSession -> string
 
 // detectTransport maps a concrete mcp.Transport to the network.transport enum
@@ -103,9 +103,12 @@ func AfterConnect(ictx hook.HookContext, cs *mcp.ClientSession, err error) {
 	}
 }
 
-// AfterClose runs after (*ClientSession).Close() returns. It removes the
-// session's transport entry so the map does not accumulate dead sessions.
-func AfterClose(ictx hook.HookContext, cs *mcp.ClientSession, err error) {
+// BeforeClose runs before (*ClientSession).Close() is invoked. It removes the
+// session's transport entry so the map does not accumulate dead sessions. An
+// after hook cannot be used: Close() returns only error, so an after hook only
+// receives (HookContext, error) and has no receiver, whereas a before hook
+// receives HookContext plus the receiver.
+func BeforeClose(ictx hook.HookContext, cs *mcp.ClientSession) {
 	if cs != nil {
 		sessionTransports.Delete(cs)
 	}

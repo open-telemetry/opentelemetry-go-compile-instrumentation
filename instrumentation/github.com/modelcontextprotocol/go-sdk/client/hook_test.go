@@ -337,8 +337,8 @@ func TestNetworkTransport_EmittedAfterConnect(t *testing.T) {
 	require.Len(t, spans, 1)
 	assert.Equal(t, mcpsemconv.NetworkTransportPipe, spanAttrs(spans[0])["network.transport"])
 
-	// AfterClose must remove the entry so the map does not leak.
-	AfterClose(ictx, cs, nil)
+	// BeforeClose must remove the entry so the map does not leak.
+	BeforeClose(ictx, cs)
 	_, ok := sessionTransports.Load(cs)
 	assert.False(t, ok, "session entry must be removed after Close")
 }
@@ -396,7 +396,7 @@ func TestNetworkTransport_InMemoryEndToEnd(t *testing.T) {
 	assert.Equal(t, mcpsemconv.NetworkTransportInProc, m["network.transport"])
 
 	require.NoError(t, cs.Close())
-	AfterClose(ictx, cs, nil)
+	BeforeClose(ictx, cs)
 	_, ok := sessionTransports.Load(cs)
 	assert.False(t, ok, "map entry must be removed after Close")
 }
