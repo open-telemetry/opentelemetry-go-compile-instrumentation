@@ -218,21 +218,20 @@ func removeAfterTrampolineDecl(targetFile *dst.File, tjump *tJump) error {
 // knowledge of After yet, and only this pass (which does, via tjump.rule)
 // empties the three that go unused.
 //
-// Generic targets are left untouched: rewriteHookContextMethods already made
-// GetReturnVal and SetReturnVal panic unconditionally, regardless of After,
-// since they're unsupported for generics altogether (see #1252/#1173).
-// GetReturnValCount keeps its template body there, so skip all three
-// wholesale. Emptying any of them would undo that guard.
+// Generic targets keep their per-slot guards: rewriteHookContextMethods made
+// the type-parameter slots of GetReturnVal and SetReturnVal panic,
+// regardless of After, since they are unsupported for generics altogether
+// (see #1252/#1173). Those panic clauses are kept; only the concrete-slot
+// clauses are dropped, since they would index into the nil returnVals
+// slice and panic with "index out of range" for any in-range idx. A dropped
+// idx falls through the switch to the trailing return nil / empty body.
+// GetReturnValCount is emptied to return 0 for generic and non-generic
+// targets alike, since returnVals is never populated without an After
+// hook.
 func emptyUnusedHookContextMethods(targetFile *dst.File, tjump *tJump) error {
-	if findTargetGenericType(targetFile, tjump.target) != nil {
-		return nil
-	}
 	structName := trampolineHookContextImplType + tjump.rule.Identity()
-	emptyBodies := map[string]*dst.BlockStmt{
-		trampolineGetReturnValName:      ast.Block(ast.ReturnStmt(ast.Exprs(ast.Nil()))),
-		trampolineSetReturnValName:      ast.BlockStmts(),
-		trampolineGetReturnValCountName: ast.Block(ast.ReturnStmt(ast.Exprs(ast.IntLit(0)))),
-	}
+
+	var getReturnVal, setReturnVal, getReturnValCount *dst.FuncDecl
 	found := 0
 	for _, decl := range targetFile.Decls {
 		funcDecl, ok := decl.(*dst.FuncDecl)
@@ -247,18 +246,70 @@ func emptyUnusedHookContextMethods(targetFile *dst.File, tjump *tJump) error {
 		if !ok || recvIdent.Name != structName {
 			continue
 		}
-		body, isReturnValMethod := emptyBodies[funcDecl.Name.Name]
-		if !isReturnValMethod {
+		switch funcDecl.Name.Name {
+		case trampolineGetReturnValName:
+			getReturnVal = funcDecl
+		case trampolineSetReturnValName:
+			setReturnVal = funcDecl
+		case trampolineGetReturnValCountName:
+			getReturnValCount = funcDecl
+		default:
 			continue
 		}
-		funcDecl.Body = body
 		found++
 	}
-	if found != len(emptyBodies) {
-		return ex.Newf("can not find unused HookContext methods for %s (found %d, expected %d)",
-			structName, found, len(emptyBodies))
+	if found != 3 {
+		return ex.Newf("can not find unused HookContext methods for %s (found %d, expected 3)",
+			structName, found)
 	}
+
+	// returnVals is never populated without an After hook, so the count is
+	// always 0, even for generic targets.
+	getReturnValCount.Body = ast.Block(ast.ReturnStmt(ast.Exprs(ast.IntLit(0))))
+
+	if findTargetGenericType(targetFile, tjump.target) != nil {
+		// Generic target: keep the type-parameter panic clauses, drop the
+		// concrete-slot clauses that would index into the nil returnVals.
+		dropConcreteSlotClauses(getReturnVal)
+		dropConcreteSlotClauses(setReturnVal)
+		return nil
+	}
+
+	// Non-generic target: replace both bodies wholesale.
+	getReturnVal.Body = ast.Block(ast.ReturnStmt(ast.Exprs(ast.Nil())))
+	setReturnVal.Body = ast.BlockStmts()
 	return nil
+}
+
+// dropConcreteSlotClauses removes the case clauses of the type-aware switch
+// that starts method's body which do not panic, keeping only the ones
+// rewriteReturnValMethods emits for type-parameter slots.
+func dropConcreteSlotClauses(method *dst.FuncDecl) {
+	switchStmt := util.AssertType[*dst.SwitchStmt](method.Body.List[0])
+	kept := make([]dst.Stmt, 0, len(switchStmt.Body.List))
+	for _, stmt := range switchStmt.Body.List {
+		if isPanicClause(util.AssertType[*dst.CaseClause](stmt)) {
+			kept = append(kept, stmt)
+		}
+	}
+	switchStmt.Body.List = kept
+}
+
+// isPanicClause reports whether clause's body is exactly one panic call.
+func isPanicClause(clause *dst.CaseClause) bool {
+	if len(clause.Body) != 1 {
+		return false
+	}
+	exprStmt, ok := clause.Body[0].(*dst.ExprStmt)
+	if !ok {
+		return false
+	}
+	call, ok := exprStmt.X.(*dst.CallExpr)
+	if !ok {
+		return false
+	}
+	ident, ok := call.Fun.(*dst.Ident)
+	return ok && ident.Name == "panic"
 }
 
 // canFlattenTJump checks if the tjump can be safely flattened based on
