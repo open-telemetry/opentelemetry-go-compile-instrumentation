@@ -305,6 +305,9 @@ func scopeNamesBetween(enclosing *dst.FuncDecl, target dst.Node) map[string]bool
 		}
 		return true
 	})
+	if !found {
+		panic("scopeNamesBetween: target is not within enclosing function")
+	}
 	return names
 }
 

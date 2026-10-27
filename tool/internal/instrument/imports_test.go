@@ -816,6 +816,24 @@ func Run() {
 	assert.NoError(t, checkAliasOverrideShadowingAt(map[string]string{"traced": "f"}, nil, call))
 }
 
+func TestScopeNamesBetween_TargetOutsideEnclosingPanics(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run() {}
+
+func Other() {
+	http.Get("url")
+}
+`)
+	run := findFuncDeclInFile(t, root, "Run")
+	other := findFuncDeclInFile(t, root, "Other")
+	call := findCallInFunc(t, other, "Get")
+
+	assert.Panics(t, func() {
+		scopeNamesBetween(run, call)
+	})
+}
+
 // findCallInFunc returns the first call to the named selector method in fn.
 func findCallInFunc(t *testing.T, fn *dst.FuncDecl, method string) *dst.CallExpr {
 	t.Helper()
