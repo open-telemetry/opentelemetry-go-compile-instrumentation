@@ -142,14 +142,14 @@ func requireLinodegoRequestSemconv(t *testing.T, span ptrace.Span, method, path,
 	require.Equal(t, serverAddress, attrs["server.address"])
 }
 
-// mustHost extracts the host:port from a test server URL, matching how the
-// linodego instrumentation derives server.address from the client's
+// mustHost extracts the host (without port) from a test server URL, matching
+// how the linodego instrumentation derives server.address from the client's
 // configured base URL.
 func mustHost(t *testing.T, rawURL string) string {
 	t.Helper()
 	u, err := url.Parse(rawURL)
 	require.NoError(t, err)
-	return u.Host
+	return u.Hostname()
 }
 
 // startLinodeMockAPI serves minimal Linode API JSON for the smoke-suite paths.

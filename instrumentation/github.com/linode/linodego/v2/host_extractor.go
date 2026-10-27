@@ -22,6 +22,6 @@ func init() {
 		if err != nil || parsed.Host == "" {
 			return ""
 		}
-		return parsed.Host
+		return parsed.Hostname()
 	})
 }

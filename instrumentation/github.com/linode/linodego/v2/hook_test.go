@@ -196,12 +196,42 @@ func TestBeforeAfterDoRequest_PlainError(t *testing.T) {
 func TestGetHostURL(t *testing.T) {
 	assert.Empty(t, getHostURL(nil))
 
-	c, err := linodego.NewClient(nil)
-	require.NoError(t, err)
-	assert.Equal(t, "api.linode.com", getHostURL(&c))
+	tests := []struct {
+		name string
+		url  string
+		want string
+	}{
+		{
+			name: "default host",
+			want: "api.linode.com",
+		},
+		{
+			name: "custom host",
+			url:  "https://my-mock-linode-api.example.com",
+			want: "my-mock-linode-api.example.com",
+		},
+		{
+			name: "custom host with port",
+			url:  "https://gateway.internal:8443/v4",
+			want: "gateway.internal",
+		},
+		{
+			name: "IPv6 host with port",
+			url:  "https://[::1]:8443/v4",
+			want: "::1",
+		},
+	}
 
-	c.SetBaseURL("https://my-mock-linode-api.example.com")
-	assert.Equal(t, "my-mock-linode-api.example.com", getHostURL(&c))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, err := linodego.NewClient(nil)
+			require.NoError(t, err)
+			if tt.url != "" {
+				c.SetBaseURL(tt.url)
+			}
+			assert.Equal(t, tt.want, getHostURL(&c))
+		})
+	}
 }
 
 func TestBeforeAfterDoRequest_CustomServerAddress(t *testing.T) {
