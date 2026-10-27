@@ -42,6 +42,23 @@ func checkRuleFileVersion(ctx context.Context, path string, doc rule.File, curre
 	return nil
 }
 
+// parseRuleFile parses file's already-read content into the rules it
+// declares, checking the rule-file version along the way. Shared by
+// loadCustomRuleFile and loadRulesFromToolFiles, which otherwise differ only
+// in how they find file paths and in the wording each gives for its own
+// read error. otelcVersion is the version of otelc that the rule file must
+// support.
+func parseRuleFile(ctx context.Context, file string, content []byte, otelcVersion string) ([]rule.InstRule, error) {
+	doc, parseErr := rule.ParseFile(content)
+	if parseErr != nil {
+		return nil, ex.Wrapf(parseErr, "parsing rule file %s", file)
+	}
+	if err := checkRuleFileVersion(ctx, file, doc, otelcVersion); err != nil {
+		return nil, err
+	}
+	return doc.Rules()
+}
+
 func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
 	return util.VersionInRange(dependency.Version, rule.GetVersion())
 }
@@ -444,14 +461,7 @@ func loadCustomRuleFile(
 	if err != nil {
 		return nil, ex.Wrapf(err, "failed to read %s from -rules flag", file)
 	}
-	doc, err := rule.ParseFile(content)
-	if err != nil {
-		return nil, ex.Wrapf(err, "parsing rule file %s", file)
-	}
-	if err = checkRuleFileVersion(ctx, file, doc, otelcVersion); err != nil {
-		return nil, err
-	}
-	rules, err := doc.Rules()
+	rules, err := parseRuleFile(ctx, file, content, otelcVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -531,15 +541,7 @@ func loadRulesFromToolFiles(
 			if readErr != nil {
 				return false, ex.Wrapf(readErr, "reading %s", file)
 			}
-			doc, parseErr := rule.ParseFile(content)
-			if parseErr != nil {
-				return false, ex.Wrapf(parseErr, "parsing rule file %s", file)
-			}
-			if versionErr := checkRuleFileVersion(ctx, file, doc, otelcVersion); versionErr != nil {
-				return false, versionErr
-			}
-
-			rules, parseErr := doc.Rules()
+			rules, parseErr := parseRuleFile(ctx, file, content, otelcVersion)
 			if parseErr != nil {
 				return false, parseErr
 			}
@@ -559,13 +561,28 @@ func loadRulesFromToolFiles(
 // paths to the same file (relative paths, symbolic links) give the same key.
 // If the path cannot be resolved, the key is the cleaned path.
 func ruleFileKey(path string) string {
-	// Make the path absolute first: EvalSymlinks keeps a relative path
-	// relative, and the working directory can itself contain a symbolic link.
-	if abs, err := filepath.Abs(path); err == nil {
-		path = abs
-	}
+	// Resolve symbolic links first, on the raw (possibly relative) path:
+	// filepath.Abs cleans ".." components lexically, so running it before
+	// EvalSymlinks would delete a ".." path segment's preceding component
+	// without ever resolving the symbolic link it might have named, letting
+	// two different files collide on the same key. EvalSymlinks still
+	// resolves correctly on a relative path, and filepath.Abs below anchors
+	// the result, covering a working directory that itself contains a
+	// symbolic link.
 	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		return resolved
+		path = resolved
+	}
+	if abs, absErr := filepath.Abs(path); absErr == nil {
+		// Abs joins a relative path using the working directory as Getwd
+		// reports it, which on some platforms doesn't itself resolve every
+		// symbolic link (macOS's /var -> /private/var APFS firmlink is one:
+		// Getwd keeps the firmlinked form, but an explicit EvalSymlinks call
+		// on the resulting absolute path still sees through it). Resolve
+		// again on the now-absolute result to catch that.
+		if resolved, evalErr := filepath.EvalSymlinks(abs); evalErr == nil {
+			return resolved
+		}
+		return abs
 	}
 	return filepath.Clean(path)
 }
