@@ -3,8 +3,9 @@
 
 package main
 
+//line /golden/work/main.go:6
 import "fmt"
 
 func main() {
-	fmt.Println("hello", "world")
+	fmt.Println("hello", "world") /*line /golden/work/main.go:9*/
 }

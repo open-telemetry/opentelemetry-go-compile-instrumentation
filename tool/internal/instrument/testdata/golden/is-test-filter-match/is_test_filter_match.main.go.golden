@@ -3,25 +3,24 @@
 
 package main
 
+//line /<generated>:1
 import _ "unsafe"
 
 // ProcessRequest is instrumented only in non-test builds. The is_test: false
 // predicate matches this normal build (source.go, no _test.go file); the same
 // rule is gated out of a test build. See is-test-filter-true-match for the
 // is_test: true counterpart.
+//line /golden/work/main.go:10
 func ProcessRequest(req string) (_unnamedRetVal_2401870380_0 error) {
-	//line <generated>:1
-	if hookContext2401870380, _ := OtelBeforeTrampoline_ProcessRequest2401870380(&req); false {
+	/*line /<generated>:1*/ if hookContext2401870380, _ := OtelBeforeTrampoline_ProcessRequest2401870380(&req); false {
 	} else {
 		defer OtelAfterTrampoline_ProcessRequest2401870380(hookContext2401870380, &_unnamedRetVal_2401870380_0)
 	}
-	//line main.go:11:2
-	println("processing:", req)
-	//line main.go:12:2
+	/*line /golden/work/main.go:11*/ println("processing:", req)
 	return nil
 }
 
-//line <generated>:1
+//line /<generated>:1
 type HookContextImpl2401870380 struct {
 	params      []interface{}
 	returnVals  []interface{}

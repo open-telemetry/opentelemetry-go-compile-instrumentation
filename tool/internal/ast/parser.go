@@ -5,6 +5,7 @@ package ast
 
 import (
 	"bytes"
+	goast "go/ast"
 	"go/parser"
 	"go/token"
 	"io"
@@ -22,13 +23,18 @@ import (
 type AstParser struct {
 	fset *token.FileSet
 	dec  *decorator.Decorator
+	// parsed holds the files that Parse read from disk. A node whose position
+	// is inside one of them comes from user source. Snippets that
+	// ParseSnippet parses get their own token.File, so they are not in it.
+	parsed map[*token.File]struct{}
 }
 
 func NewAstParser() *AstParser {
 	fset := token.NewFileSet()
 	return &AstParser{
-		fset: fset,
-		dec:  decorator.NewDecorator(fset),
+		fset:   fset,
+		dec:    decorator.NewDecorator(fset),
+		parsed: make(map[*token.File]struct{}),
 	}
 }
 
@@ -46,6 +52,7 @@ func (ap *AstParser) Parse(filePath string, mode parser.Mode) (*dst.File, error)
 	if err != nil {
 		return nil, ex.Wrapf(err, "failed to parse file %s", filePath)
 	}
+	ap.parsed[ap.fset.File(astFile.Package)] = struct{}{}
 	// Skip DST decoration when only the package clause is needed; decoration
 	// is expensive and unnecessary when the caller only reads astFile.Name.
 	if mode == parser.PackageClauseOnly {
@@ -92,6 +99,55 @@ func (ap *AstParser) FindPosition(node dst.Node) token.Position {
 		return token.Position{}
 	}
 	return ap.fset.Position(astNode.Pos())
+}
+
+// OriginalPosition returns the position that node has in the source file that
+// Parse read. The second result is false when node is not from that source:
+// code that was generated, cloned, or parsed from a snippet.
+//
+// The position is adjusted. It follows any "//line" directive of the source
+// file, as the Go compiler does. The file name is relative to the directory of
+// the source file when the directive gives a relative name; otherwise it is
+// the base name of the parsed file.
+func (ap *AstParser) OriginalPosition(node dst.Node) (token.Position, bool) {
+	astNode := ap.dec.Ast.Nodes[node]
+	if astNode == nil {
+		return token.Position{}, false
+	}
+	return ap.originalPosition(astNode.Pos())
+}
+
+// Rbrace returns the position of the closing brace that block has in
+// the source file that Parse read. The second result is false when block is
+// not from that source. See OriginalPosition for the position rules.
+func (ap *AstParser) Rbrace(block *dst.BlockStmt) (token.Position, bool) {
+	astBlock, ok := ap.dec.Ast.Nodes[block].(*goast.BlockStmt)
+	if !ok {
+		return token.Position{}, false
+	}
+	return ap.originalPosition(astBlock.Rbrace)
+}
+
+// Parsed reports whether root is a file that Parse read with this parser. It
+// is false for a file that ParseSource parsed, for a file that another parser
+// read, and for a file that Parse read with the mode parser.PackageClauseOnly.
+func (ap *AstParser) Parsed(root *dst.File) bool {
+	astFile, ok := ap.dec.Ast.Nodes[root].(*goast.File)
+	if !ok {
+		return false
+	}
+	_, ok = ap.parsed[ap.fset.File(astFile.Package)]
+	return ok
+}
+
+func (ap *AstParser) originalPosition(pos token.Pos) (token.Position, bool) {
+	if !pos.IsValid() {
+		return token.Position{}, false
+	}
+	if _, ok := ap.parsed[ap.fset.File(pos)]; !ok {
+		return token.Position{}, false
+	}
+	return ap.fset.Position(pos), true
 }
 
 // PropagatePositions copies source positions from orig onto the matching
