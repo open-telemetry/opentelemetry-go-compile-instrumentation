@@ -22,8 +22,13 @@ const (
 	flagWorkDir      = "work-dir"
 )
 
-func main() {
-	app := cli.Command{
+// newRootCommand builds the root otelc command, including its flags and
+// subcommand tree. Tests run it so that a malformed command definition, e.g. a
+// flag Name also listed in its Aliases, is caught before release: urfave/cli
+// v3.14.0+ fails the command at startup with
+// `flag "..." defined multiple times in command "otelc"`.
+func newRootCommand() cli.Command {
+	return cli.Command{
 		Name:        "otelc",
 		Usage:       "OpenTelemetry Go Compile-Time Instrumentation Tool",
 		HideVersion: true,
@@ -44,7 +49,6 @@ func main() {
 			},
 			&cli.StringFlag{
 				Name:      "rules",
-				Aliases:   []string{"rules"},
 				Usage:     "The path to the rules configuration file",
 				TakesFile: true,
 				Value:     "",
@@ -107,6 +111,10 @@ func main() {
 			return ex.Join(stopProfiling(ctx, cmd), closeLogger(ctx))
 		},
 	}
+}
+
+func main() {
+	app := newRootCommand()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

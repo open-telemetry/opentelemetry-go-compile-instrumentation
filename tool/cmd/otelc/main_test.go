@@ -4,10 +4,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/urfave/cli/v3"
@@ -261,5 +264,57 @@ func TestCleanupSubcommand(t *testing.T) {
 
 	if _, err := os.Stat(buildTemp); !os.IsNotExist(err) {
 		t.Errorf("expected %s to be removed, stat err: %v", buildTemp, err)
+	}
+}
+
+// TestRootCommandVersion runs the real root command tree from main down to the
+// version subcommand. urfave/cli v3.14.0+ rejects a flag whose Name is also
+// listed in its Aliases when the command runs ("flag \"rules\" defined
+// multiple times in command \"otelc\""), so this test must exercise the command
+// defined in main rather than re-declaring flags.
+func TestRootCommandVersion(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, "")
+	workDir := t.TempDir()
+
+	var buf bytes.Buffer
+	app := newRootCommand()
+	app.Writer = &buf
+	// commandVersion is shared package-level state; an earlier run may have
+	// cached its Writer (cli only propagates the parent Writer when the
+	// command's own is nil), so point it at this test's buffer and restore.
+	oldWriter := commandVersion.Writer
+	commandVersion.Writer = &buf
+	t.Cleanup(func() { commandVersion.Writer = oldWriter })
+
+	args := []string{"otelc", "--" + flagWorkDir, workDir, "version"}
+	if err := app.Run(context.Background(), args); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "otelc version") {
+		t.Errorf("expected version output, got %q", buf.String())
+	}
+}
+
+// TestRootCommandFlagNamesUnique replicates the duplicate flag name check that
+// urfave/cli v3.14.0+ performs at startup: no flag Name may collide with an
+// Alias or another flag Name within the same command. Checking it directly
+// catches such a regression even while the module still pins an older cli
+// version that tolerates the collision.
+func TestRootCommandFlagNamesUnique(t *testing.T) {
+	app := newRootCommand()
+	err := app.Walk(func(cmd *cli.Command) error {
+		seen := make(map[string]struct{})
+		for _, f := range cmd.Flags {
+			for _, name := range f.Names() {
+				if _, dup := seen[name]; dup {
+					return fmt.Errorf("flag %q defined multiple times in command %q", name, cmd.Name)
+				}
+				seen[name] = struct{}{}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
