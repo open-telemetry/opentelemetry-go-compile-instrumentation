@@ -547,6 +547,8 @@ func (s *nonRecordingSpan) End(_ ...trace.SpanEndOption) {
 	s.ended = true
 }
 
+// initInstrumentation is skipped on purpose: the span and gRPCContext are
+// injected by hand, and the metric instruments stay nil-guarded zero values.
 func TestServerStatsHandler_HandleRPC_NonRecordingSpan(t *testing.T) {
 	handler := newServerStatsHandler()
 
@@ -562,7 +564,7 @@ func TestServerStatsHandler_HandleRPC_NonRecordingSpan(t *testing.T) {
 	assert.True(t, mockSpan.ended, "span.End() must be called for non-recording spans")
 }
 
-func TestServerStatsHandler_UnsampledSpanEnded(t *testing.T) {
+func TestServerStatsHandler_UnsampledRPC_NoExport(t *testing.T) {
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "grpc")
 	initInstrumentation()
 
@@ -572,10 +574,12 @@ func TestServerStatsHandler_UnsampledSpanEnded(t *testing.T) {
 		sdktrace.WithSampler(sdktrace.NeverSample()),
 	)
 	oldTP := otel.GetTracerProvider()
+	oldTracer := tracer
 	otel.SetTracerProvider(tp)
 	t.Cleanup(func() {
 		_ = tp.Shutdown(context.Background())
 		otel.SetTracerProvider(oldTP)
+		tracer = oldTracer
 	})
 	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(runtime.ModuleVersion()))
 
@@ -591,9 +595,5 @@ func TestServerStatsHandler_UnsampledSpanEnded(t *testing.T) {
 		EndTime:   time.Now(),
 	})
 
-	require.Empty(
-		t,
-		exporter.GetSpans(),
-		"NeverSample spans are not exported, but End() must still run without panicking",
-	)
+	require.Empty(t, exporter.GetSpans(), "NeverSample spans are not exported")
 }
