@@ -3,10 +3,12 @@
 
 package main
 
+//line /<generated>:1
 import "fmt"
 
+//line /golden/work/main.go:6
 func Func1(p1 string, p2 int) (_unnamedRetVal0 float32, _unnamedRetVal1 error) {
-	fmt.Println("Instrumented with imports")
-	println("Hello, World!")
+	/*line /<generated>:1*/ fmt.Println("Instrumented with imports")
+	/*line /golden/work/main.go:7*/ println("Hello, World!")
 	return 0.0, nil
 }
