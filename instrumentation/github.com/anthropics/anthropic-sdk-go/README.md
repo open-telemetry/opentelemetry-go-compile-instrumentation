@@ -110,6 +110,19 @@ export OTEL_GO_DISABLED_INSTRUMENTATIONS=anthropic
 Instrumentation names are lowercase. If neither variable is set, all
 instrumentations run by default.
 
+### Native SDK OpenTelemetry (`v1.81.0+`)
+
+Starting in `v1.81.0`, `anthropic-sdk-go` includes built-in OpenTelemetry
+tracing that activates whenever a global `TracerProvider` is registered. When
+`otelc`'s Anthropic instrumentation is enabled (the default), it automatically
+sets `ANTHROPIC_OPEN_TELEMETRY=false` (if not already set) to prevent duplicate
+spans.
+
+To use the SDK's built-in tracing instead of `otelc`'s middleware, either:
+
+- Set `ANTHROPIC_OPEN_TELEMETRY=true` at runtime, or
+- Disable `otelc`'s Anthropic instrumentation via `OTEL_GO_DISABLED_INSTRUMENTATIONS=anthropic`.
+
 ### Privacy
 
 Message bodies are **never captured** by default. Only request parameters
