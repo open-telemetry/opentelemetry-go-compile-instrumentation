@@ -3,22 +3,22 @@
 
 package main
 
+//line /<generated>:1
 import _ "unsafe"
 
 // Blank param + blank named return, the collision case from issue #736.
+//line /golden/work/main.go:7
 func UnderscoreParamReturnFunc(_ignoredParam_1353090234_0 int) (_ignoredRetVal_1353090234_0 error) {
-	//line <generated>:1
-	if hookContext1353090234, _ := OtelBeforeTrampoline_UnderscoreParamReturnFunc1353090234(&_ignoredParam_1353090234_0); false {
+	/*line /<generated>:1*/ if hookContext1353090234, _ := OtelBeforeTrampoline_UnderscoreParamReturnFunc1353090234(&_ignoredParam_1353090234_0); false {
 	} else {
 		defer OtelAfterTrampoline_UnderscoreParamReturnFunc1353090234(hookContext1353090234, &_ignoredRetVal_1353090234_0)
 	}
-	//line main.go:8:2
-	return nil
+	/*line /golden/work/main.go:8*/ return nil
 }
 
 func main() {}
 
-//line <generated>:1
+//line /<generated>:1
 type HookContextImpl1353090234 struct {
 	params      []interface{}
 	returnVals  []interface{}
