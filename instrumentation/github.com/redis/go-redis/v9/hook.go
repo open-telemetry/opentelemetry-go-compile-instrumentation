@@ -34,6 +34,11 @@ const (
 	redisSetNameOption   = "setname"
 	redisHelloAuthArgN   = 2
 	redisQueryTextRedact = "?"
+	// redisMaxArgBytes caps each unredacted argument in db.query.text so
+	// large keys or payloads do not produce unbounded span attributes while
+	// still accommodating normal structured Redis keys and pipeline summaries.
+	redisMaxArgBytes        = 256
+	redisArgTruncatedSuffix = "..."
 )
 
 func initInstrumentation() {
@@ -222,12 +227,12 @@ func redisV9AppendArg(b []byte, v interface{}) []byte {
 		return append(b, "<nil>"...)
 	case string:
 		if utf8.ValidString(v) {
-			return append(b, v...)
+			return appendTruncatedUTF8(b, v)
 		}
 		return append(b, "<string>"...)
 	case []byte:
 		if utf8.Valid(v) {
-			return append(b, v...)
+			return appendTruncatedUTF8(b, v)
 		}
 		return append(b, "<byte>"...)
 	case int:
@@ -264,4 +269,19 @@ func redisV9AppendArg(b []byte, v interface{}) []byte {
 	default:
 		return append(b, "not_support_type"...)
 	}
+}
+
+// appendTruncatedUTF8 appends s to b, capping the appended text at
+// redisMaxArgBytes on a valid UTF-8 rune boundary and appending
+// redisArgTruncatedSuffix when truncated.
+func appendTruncatedUTF8[T ~string | ~[]byte](b []byte, s T) []byte {
+	if len(s) <= redisMaxArgBytes {
+		return append(b, s...)
+	}
+	limit := redisMaxArgBytes
+	for limit > 0 && !utf8.RuneStart(s[limit]) {
+		limit--
+	}
+	b = append(b, s[:limit]...)
+	return append(b, redisArgTruncatedSuffix...)
 }
