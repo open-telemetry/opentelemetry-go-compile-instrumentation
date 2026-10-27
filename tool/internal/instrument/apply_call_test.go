@@ -1419,6 +1419,42 @@ func b() int                { return 2 }
 	assert.Contains(t, err.Error(), "holds more than one call")
 }
 
+func TestApplyIgnoredCallSites_AllowsTypeConversionArgument(t *testing.T) {
+	root := parseFile(t, `package main
+
+import "io"
+
+func Run(w io.Writer, s string) {
+	//otelc:ignore
+	w.Write([]byte(s))
+}
+`)
+
+	_, err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+	require.NoError(t, err)
+
+	src := renderFile(t, root)
+	assert.Contains(t, src, "runtime.SuppressHooks()")
+}
+
+func TestApplyIgnoredCallSites_AllowsTypeConversionWithRealSecondCall(t *testing.T) {
+	root := parseFile(t, `package main
+
+import "io"
+
+func Run(w io.Writer, s string) {
+	//otelc:ignore
+	w.Write([]byte(id(s)))
+}
+
+func id(s string) string { return s }
+`)
+
+	_, err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "holds more than one call")
+}
+
 func TestApplyIgnoredCallSites_AllowsReturnInsideNestedClosure(t *testing.T) {
 	root := parseFile(t, `package main
 
