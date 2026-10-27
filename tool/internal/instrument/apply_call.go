@@ -5,7 +5,8 @@ package instrument
 
 import (
 	"context"
-	"go/ast"
+	"fmt"
+	goast "go/ast"
 	"go/parser"
 	"go/token"
 	"go/types"
@@ -18,6 +19,7 @@ import (
 	"golang.org/x/tools/go/gcexportdata"
 
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/imports"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
@@ -82,6 +84,9 @@ func walkCallsWithEnclosingFunc(root *dst.File, fn func(call *dst.CallExpr, encl
 // applyCallReplace applies replacement wrapping to all matching calls in root using a
 // two-pass approach to avoid re-matching wrapped nodes.
 // Returns true if any replacement was made.
+//
+// A //otelc:ignore comment above a matching call's enclosing statement opts
+// that one call site out and leaves every other matching call site wrapped.
 func (ip *instrumentPhase) applyCallReplace(
 	r *rule.InstCallRule,
 	root *dst.File,
@@ -93,12 +98,18 @@ func (ip *instrumentPhase) applyCallReplace(
 		return false, err
 	}
 
+	stmts := ast.CallEnclosingStmts(root)
+
 	// Pass 1: collect matching calls and pre-compute replacements to avoid
 	// re-matching the original call pointer inside its own wrapper.
 	replacements := make(map[*dst.CallExpr]dst.Expr)
 	var wrapError error
 	walkCallsWithEnclosingFunc(root, func(call *dst.CallExpr, enclosing *dst.FuncDecl) bool {
 		if !ip.matchesRule(call, r, importAliases) {
+			return true
+		}
+		if ast.HasLeadingDirective(stmts[call], util.DirectiveIgnore) {
+			ip.Debug("Skip call site due to //otelc:ignore", "rule", r.Name)
 			return true
 		}
 		if shadowErr := checkAliasOverrideShadowing(aliasOverrides, enclosing); shadowErr != nil {
@@ -145,6 +156,10 @@ func (ip *instrumentPhase) applyCallReplace(
 	return true, nil
 }
 
+// applyCallAppendArgs appends r's extra arguments to every call site that
+// matches r. A //otelc:ignore comment above a matching call's enclosing
+// statement opts that one call site out and leaves every other matching call
+// site appended.
 func (ip *instrumentPhase) applyCallAppendArgs(
 	r *rule.InstCallRule,
 	root *dst.File,
@@ -160,15 +175,21 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 		return false, err
 	}
 
+	stmts := ast.CallEnclosingStmts(root)
 	var matchingCalls []*dst.CallExpr
 	dst.Inspect(root, func(node dst.Node) bool {
 		call, ok := node.(*dst.CallExpr)
 		if !ok {
 			return true
 		}
-		if ip.matchesRule(call, r, importAliases) {
-			matchingCalls = append(matchingCalls, call)
+		if !ip.matchesRule(call, r, importAliases) {
+			return true
 		}
+		if ast.HasLeadingDirective(stmts[call], util.DirectiveIgnore) {
+			ip.Debug("Skip call site due to //otelc:ignore", "rule", r.Name)
+			return true
+		}
+		matchingCalls = append(matchingCalls, call)
 		return true
 	})
 	modified := false
@@ -406,7 +427,7 @@ func checkPackageForMethodCalls(
 	cfg imports.ImportConfig,
 ) (*methodCallPackageInfo, error) {
 	fset := token.NewFileSet()
-	astFiles := make([]*ast.File, 0, len(files))
+	astFiles := make([]*goast.File, 0, len(files))
 	for _, path := range files {
 		astFile, err := parseForTypeCheck(fset, path)
 		if err != nil {
@@ -416,7 +437,7 @@ func checkPackageForMethodCalls(
 	}
 
 	info := &types.Info{
-		Selections: make(map[*ast.SelectorExpr]*types.Selection),
+		Selections: make(map[*goast.SelectorExpr]*types.Selection),
 	}
 	var firstTypeError error
 	// Sizes is nil, so go/types uses SizesFor("gc", "amd64") — unsafe sizing
@@ -446,7 +467,7 @@ func checkPackageForMethodCalls(
 }
 
 // parseForTypeCheck records position filenames as filepath.Base(path)
-func parseForTypeCheck(fset *token.FileSet, path string) (*ast.File, error) {
+func parseForTypeCheck(fset *token.FileSet, path string) (*goast.File, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, ex.Wrapf(err, "opening %s for type-checking", path)
@@ -607,4 +628,187 @@ func buildEllipsisIIFE(spreadArg, varType dst.Expr, newArgs []dst.Expr) *dst.Cal
 		Args:     []dst.Expr{spreadArg},
 		Ellipsis: true,
 	}
+}
+
+// applyIgnoredCallSites brackets every call whose enclosing statement
+// carries //otelc:ignore. It reports whether it changed root.
+func (ip *instrumentPhase) applyIgnoredCallSites(ctx context.Context, root *dst.File) (bool, error) {
+	marked := markedIgnoredStmts(root)
+	if len(marked) == 0 {
+		return false, nil
+	}
+
+	stmtLists := findStmtLists(root)
+
+	selfPackage := ip.isSuppressHooksPackage()
+
+	bracketed := 0
+	nextFlag := 0
+	for _, list := range stmtLists {
+		n, err := bracketMarkedStmts(list, marked, selfPackage, &nextFlag)
+		if err != nil {
+			return false, err
+		}
+		bracketed += n
+	}
+	if bracketed == 0 {
+		return false, nil
+	}
+
+	if selfPackage {
+		return true, nil
+	}
+	suppressImport := map[string]string{suppressHooksPackage: suppressHooksPackage}
+	if err := ip.addRuleImports(ctx, root, suppressImport, "otelc:ignore"); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// markedIgnoredStmts returns statements in root carrying //otelc:ignore
+// above a call.
+func markedIgnoredStmts(root *dst.File) map[dst.Stmt]bool {
+	marked := make(map[dst.Stmt]bool)
+	for _, stmt := range ast.CallEnclosingStmts(root) {
+		if stmt == nil {
+			continue
+		}
+		if ast.HasLeadingDirective(stmt, util.DirectiveIgnore) {
+			marked[stmt] = true
+		}
+	}
+	return marked
+}
+
+// findStmtLists returns a pointer to every statement list in root: the body
+// of each block, plus the body of each switch case and select case. A
+// //otelc:ignore comment can sit above a call in any of these lists.
+func findStmtLists(root *dst.File) []*[]dst.Stmt {
+	var lists []*[]dst.Stmt
+	dst.Inspect(root, func(n dst.Node) bool {
+		switch node := n.(type) {
+		case *dst.BlockStmt:
+			lists = append(lists, &node.List)
+		case *dst.CaseClause:
+			lists = append(lists, &node.Body)
+		case *dst.CommClause:
+			lists = append(lists, &node.Body)
+		}
+		return true
+	})
+	return lists
+}
+
+// bracketMarkedStmts brackets every statement in *list that appears in
+// marked and reports how many it bracketed. selfPackage decides whether the
+// inserted calls need a "runtime" qualifier. nextFlag numbers each inserted
+// guard variable so that two bracketed statements in the same function never
+// collide; callers share one counter across every list in the file.
+func bracketMarkedStmts(
+	list *[]dst.Stmt,
+	marked map[dst.Stmt]bool,
+	selfPackage bool,
+	nextFlag *int,
+) (int, error) {
+	stmts := *list
+	bracketed := 0
+	for i := 0; i < len(stmts); i++ {
+		stmt := stmts[i]
+		if !marked[stmt] {
+			continue
+		}
+		if hasEscapingControlFlow(stmt) {
+			*list = stmts
+			return 0, ex.Newf(
+				"the statement above //otelc:ignore returns, breaks, continues, or jumps out of " +
+					"its enclosing block; the suppression placed after it would not always run. " +
+					"Assign the call's result to a variable in its own statement, then use the " +
+					"variable in the control-flow statement on its own, unannotated line")
+		}
+		if hasMultipleCalls(stmt) {
+			*list = stmts
+			return 0, ex.Newf(
+				"the statement above //otelc:ignore holds more than one call. The bracket " +
+					"suppresses hooks for the whole statement, so it would also suppress hooks " +
+					"for the other calls. Give each other call its own statement, then use " +
+					"its result here")
+		}
+		before, after := suppressHooksStmts(selfPackage, *nextFlag)
+		*nextFlag++
+		stmts = append(stmts[:i], append(before, stmts[i:]...)...)
+		i += len(before)
+		stmts = append(stmts[:i+1], append(after, stmts[i+1:]...)...)
+		i += len(after)
+		bracketed++
+	}
+	*list = stmts
+	return bracketed, nil
+}
+
+// suppressHooksStmts returns the statements to put before and after an
+// ignored call to suppress any hooks around it.
+//
+// A deferred statement also turns suppression off if the call panics.
+
+//nolint:revive // nonamedreturns conflicts with confusing-results
+func suppressHooksStmts(selfPackage bool, id int) ([]dst.Stmt, []dst.Stmt) {
+	flag := fmt.Sprintf("otelcIgnoreDone%d", id)
+
+	fallback := &dst.IfStmt{
+		Cond: &dst.UnaryExpr{Op: token.NOT, X: ast.Ident(flag)},
+		Body: ast.Block(ast.ExprStmt(suppressHooksCall(unsuppressHooksFuncName, selfPackage))),
+	}
+	deferFallback := ast.DeferStmt(&dst.CallExpr{
+		Fun: &dst.FuncLit{
+			Type: &dst.FuncType{Params: &dst.FieldList{}},
+			Body: ast.BlockStmts(fallback),
+		},
+	})
+
+	before := []dst.Stmt{
+		ast.ExprStmt(suppressHooksCall(suppressHooksFuncName, selfPackage)),
+		ast.DefineStmts([]dst.Expr{ast.Ident(flag)}, []dst.Expr{ast.BoolFalse()}),
+		deferFallback,
+	}
+	after := []dst.Stmt{
+		ast.AssignStmt(ast.Ident(flag), ast.BoolTrue()),
+		ast.ExprStmt(suppressHooksCall(unsuppressHooksFuncName, selfPackage)),
+	}
+	return before, after
+}
+
+// hasEscapingControlFlow reports whether stmt's subtree holds a return,
+// break, continue, or goto outside a nested function literal.
+func hasEscapingControlFlow(stmt dst.Stmt) bool {
+	found := false
+	dst.Inspect(stmt, func(n dst.Node) bool {
+		if found {
+			return false
+		}
+		switch n.(type) {
+		case *dst.FuncLit:
+			return false
+		case *dst.ReturnStmt, *dst.BranchStmt:
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+// hasMultipleCalls reports whether stmt's subtree holds more than one call,
+// outside a nested function literal.
+func hasMultipleCalls(stmt dst.Stmt) bool {
+	calls := 0
+	dst.Inspect(stmt, func(n dst.Node) bool {
+		switch n.(type) {
+		case *dst.FuncLit:
+			return false
+		case *dst.CallExpr:
+			calls++
+		}
+		return true
+	})
+	return calls > 1
 }

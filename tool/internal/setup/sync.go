@@ -262,7 +262,7 @@ func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) e
 	}
 
 	// Keep the file for debugging
-	keepForDebug(ctx, goModFile)
+	keepForDebug(ctx, goModFile, "")
 
 	return nil
 }
