@@ -13,6 +13,14 @@
   // equivalent of Dependabot's `cooldown`.
   minimumReleaseAge: '5 days',
   internalChecksFilter: 'strict',
+  // Renovate's default go.sum update only records the /go.mod hashes when a
+  // bump shifts transitive module versions, so the committed go.sum can miss
+  // the full module hashes that `go build` needs and CI fails with "missing
+  // go.sum entry". Run `go mod tidy` after each Go update so the committed
+  // go.mod and go.sum files stay consistent.
+  postUpdateOptions: [
+    'gomodTidy',
+  ],
   customManagers: [
     {
       customType: 'regex',
