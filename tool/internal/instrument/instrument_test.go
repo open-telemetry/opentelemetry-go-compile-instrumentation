@@ -58,6 +58,8 @@ const (
 	buildID            = "foo/bar"
 	compiledOutput     = "_pkg_.a"
 	goldenExt          = ".golden"
+	// goldenWorkDir replaces the temporary directory in golden files.
+	goldenWorkDir      = "/golden/work"
 	invalidReceiver    = "invalid-receiver"
 	invalidReceiverMsg = "can not find function"
 )
@@ -490,6 +492,10 @@ func verifyGoldenFiles(t *testing.T, tempDir, testName string) {
 		// The dave/dst stringifier occasionally introduces CRLF on Windows.
 		// We normalize the generated string to LF before comparing to the .gitattributes LF golden file.
 		actualNorm := strings.ReplaceAll(string(actualBytes), "\r\n", "\n")
+		// Line directives hold the absolute path of the original file, which
+		// is in the temporary directory. Replace it so the golden files are
+		// the same on all machines.
+		actualNorm = strings.ReplaceAll(actualNorm, tempDir, goldenWorkDir)
 		golden.Assert(t, actualNorm, goldenPath)
 	}
 }
