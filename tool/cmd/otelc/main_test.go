@@ -265,7 +265,6 @@ func TestCleanupSubcommand(t *testing.T) {
 	}
 }
 
-
 // TestRootCommandFlagNamesUnique replicates the duplicate flag name check that
 // urfave/cli v3.14.0+ performs at startup: no flag Name may collide with an
 // Alias or another flag Name within the same command. Checking it directly
