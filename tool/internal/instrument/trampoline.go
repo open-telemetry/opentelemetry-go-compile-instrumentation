@@ -1356,8 +1356,8 @@ func isTypeParameter(t dst.Expr, typeParams *dst.FieldList) bool {
 	return false
 }
 
-// referencesTypeParameter checks type expressions without matching parameter
-// or field names that happen to share a type parameter's name.
+// referencesTypeParameter checks if a type expression references a type parameter.
+// Parameter and field names that match a type-parameter name do not count as type references.
 func referencesTypeParameter(t dst.Expr, typeParams *dst.FieldList) bool {
 	return containsTypeParameter(t, typeParams)
 }
