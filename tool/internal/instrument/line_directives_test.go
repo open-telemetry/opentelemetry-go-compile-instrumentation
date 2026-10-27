@@ -55,7 +55,7 @@ func instrumentSourceAt(t *testing.T, file, src string, edit func(root *dst.File
 	require.NoError(t, err)
 	edit(root)
 	markLineDirectives(p, root, file)
-	out, err := ast.PrintFile(root)
+	out, err := ast.RenderFile(root)
 	require.NoError(t, err)
 	result := strings.ReplaceAll(string(out), file, fileMarker)
 	return strings.ReplaceAll(result, filepath.Dir(file), dirMarker)
