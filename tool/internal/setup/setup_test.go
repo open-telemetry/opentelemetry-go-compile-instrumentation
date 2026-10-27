@@ -1589,7 +1589,7 @@ func TestSetup_FindDepsErrorWithRules(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestSetup_MatchDepsError(t *testing.T) {
+func TestSetup_RuleLoadError(t *testing.T) {
 	setupTestModule(t, []string{"cmd"})
 	t.Setenv(util.EnvOtelcRules, "/nonexistent/rules.yaml")
 	_ = os.RemoveAll(util.GetBuildTempDir())
@@ -1600,7 +1600,7 @@ func TestSetup_MatchDepsError(t *testing.T) {
 		Action: Setup,
 	}
 	err := cmd.Run(t.Context(), []string{"setup", "."})
-	require.Error(t, err)
+	require.ErrorContains(t, err, "loading hook rules")
 }
 
 func TestSetupLocked_FindModuleDirsError(t *testing.T) {

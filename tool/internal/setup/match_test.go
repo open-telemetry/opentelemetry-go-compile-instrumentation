@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/dave/dst"
@@ -1719,7 +1720,9 @@ func TestMatchDeps_GlobTargetSplit(t *testing.T) {
 		{ImportPath: "example.com/other", Sources: []string{unrelatedSrc}, CgoFiles: map[string]string{}},
 	}
 
-	matched, err := sp.matchDeps(context.Background(), deps, nil)
+	idx, err := sp.loadRuleIndex(context.Background(), nil)
+	require.NoError(t, err)
+	matched, err := sp.matchDeps(context.Background(), deps, idx)
 	require.NoError(t, err)
 
 	matchedPaths := make(map[string]bool)
@@ -1763,7 +1766,9 @@ func TestMatchDeps_RootTargetExpandsToRootModuleGlob(t *testing.T) {
 		{ImportPath: "example.com/appliance", Sources: []string{prefixSrc}, CgoFiles: map[string]string{}},
 	}
 
-	matched, err := sp.matchDeps(context.Background(), deps, nil)
+	idx, err := sp.loadRuleIndex(context.Background(), nil)
+	require.NoError(t, err)
+	matched, err := sp.matchDeps(context.Background(), deps, idx)
 	require.NoError(t, err)
 
 	matchedPaths := make(map[string]bool)
@@ -1815,7 +1820,9 @@ func TestMatchDeps_TargetList(t *testing.T) {
 		{ImportPath: "example.com/other", Sources: []string{externalSrc}, CgoFiles: map[string]string{}},
 	}
 
-	matched, err := sp.matchDeps(context.Background(), deps, nil)
+	idx, err := sp.loadRuleIndex(context.Background(), nil)
+	require.NoError(t, err)
+	matched, err := sp.matchDeps(context.Background(), deps, idx)
 	require.NoError(t, err)
 
 	rulesByPath := make(map[string]int)
@@ -1827,7 +1834,7 @@ func TestMatchDeps_TargetList(t *testing.T) {
 	assert.Equal(t, map[string]int{"main": 1, "example.com/app/lib": 1}, rulesByPath)
 }
 
-func TestMatchDeps_RootTargetRequiresRootModule(t *testing.T) {
+func TestLoadRuleIndex_RootTargetRequiresRootModule(t *testing.T) {
 	dir := t.TempDir()
 	ruleFile := filepath.Join(dir, "root.yaml")
 	err := os.WriteFile(ruleFile, []byte(`root_hook:
@@ -1841,14 +1848,13 @@ func TestMatchDeps_RootTargetRequiresRootModule(t *testing.T) {
 	sp := newTestSetupPhase()
 	sp.ruleConfig = ruleFile
 
-	_, err = sp.matchDeps(context.Background(), []*Dependency{
-		{ImportPath: "example.com/app", Sources: []string{}, CgoFiles: map[string]string{}},
-	}, nil)
+	idx, err := sp.loadRuleIndex(t.Context(), nil)
 	require.Error(t, err)
+	assert.Nil(t, idx)
 	require.ErrorContains(t, err, `target "$root"`)
 }
 
-func TestMatchDeps_InvalidGlobTargetRejected(t *testing.T) {
+func TestLoadRuleIndex_InvalidGlobTargetRejected(t *testing.T) {
 	// A malformed glob target (unclosed bracket) must fail loudly at load time
 	// rather than silently matching nothing during the setup phase.
 	dir := t.TempDir()
@@ -1864,16 +1870,13 @@ func TestMatchDeps_InvalidGlobTargetRejected(t *testing.T) {
 	sp := newTestSetupPhase()
 	sp.ruleConfig = ruleFile
 
-	deps := []*Dependency{
-		{ImportPath: "example.com/svc/users", Sources: []string{}, CgoFiles: map[string]string{}},
-	}
-
-	_, err = sp.matchDeps(context.Background(), deps, nil)
+	idx, err := sp.loadRuleIndex(t.Context(), nil)
 	require.Error(t, err)
+	assert.Nil(t, idx)
 	require.ErrorContains(t, err, "not a valid glob pattern")
 }
 
-func TestMatchDeps_EmptyTargetRejected(t *testing.T) {
+func TestLoadRuleIndex_EmptyTargetRejected(t *testing.T) {
 	// target is required: an empty (or whitespace-only) target would land under
 	// exactRules[""] and silently never match, so the loader must reject it at
 	// load time rather than accepting a rule that can never fire.
@@ -1890,12 +1893,9 @@ func TestMatchDeps_EmptyTargetRejected(t *testing.T) {
 	sp := newTestSetupPhase()
 	sp.ruleConfig = ruleFile
 
-	deps := []*Dependency{
-		{ImportPath: "example.com/svc/users", Sources: []string{}, CgoFiles: map[string]string{}},
-	}
-
-	_, err = sp.matchDeps(context.Background(), deps, nil)
+	idx, err := sp.loadRuleIndex(t.Context(), nil)
 	require.Error(t, err)
+	assert.Nil(t, idx)
 	require.ErrorContains(t, err, "empty target")
 }
 
@@ -1924,7 +1924,9 @@ func TestMatchDeps_NoMatchesWarning(t *testing.T) {
 		},
 	}
 
-	matched, err := sp.matchDeps(t.Context(), deps, nil)
+	idx, err := sp.loadRuleIndex(t.Context(), nil)
+	require.NoError(t, err)
+	matched, err := sp.matchDeps(t.Context(), deps, idx)
 	require.NoError(t, err)
 	assert.Empty(t, matched)
 }
@@ -2526,9 +2528,11 @@ func TestMatchDeps_RunMatchError(t *testing.T) {
 	sp := newTestSetupPhase()
 	sp.ruleConfig = ruleFile
 
-	_, err = sp.matchDeps(context.Background(), []*Dependency{
+	idx, err := sp.loadRuleIndex(t.Context(), nil)
+	require.NoError(t, err)
+	_, err = sp.matchDeps(t.Context(), []*Dependency{
 		{ImportPath: "example.com/bad", Sources: []string{badSrc}, CgoFiles: map[string]string{}},
-	}, nil)
+	}, idx)
 	require.Error(t, err)
 }
 
@@ -2551,4 +2555,198 @@ func TestLoadRules_NoRulesAvailable(t *testing.T) {
 	rules, err := sp.loadRules(t.Context(), []string{})
 	require.NoError(t, err)
 	assert.Nil(t, rules)
+}
+
+func TestMatchDeps_ReusesRuleIndexAcrossCalls(t *testing.T) {
+	t.Setenv(util.EnvOtelcRules, "")
+
+	dir := t.TempDir()
+	ruleFile := filepath.Join(dir, "rules.yaml")
+	err := os.WriteFile(ruleFile, []byte(`version: v1.0.0
+
+rule1:
+  target: example.com/pkg1
+  func: Func1
+  raw: "_ = 1"
+
+rule2:
+  target: example.com/pkg2
+  func: Func2
+  raw: "_ = 2"
+`), 0o644)
+	require.NoError(t, err)
+
+	src1 := writeGoSource(t, "pkg1.go", "package pkg1\n\nfunc Func1() {}\n")
+	src2 := writeGoSource(t, "pkg2.go", "package pkg2\n\nfunc Func2() {}\n")
+
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	sp := &setupPhase{
+		logger:     logger,
+		ruleConfig: ruleFile,
+	}
+
+	dep1 := &Dependency{ImportPath: "example.com/pkg1", Sources: []string{src1}, CgoFiles: map[string]string{}}
+	dep2 := &Dependency{ImportPath: "example.com/pkg2", Sources: []string{src2}, CgoFiles: map[string]string{}}
+
+	idx, err := sp.loadRuleIndex(t.Context(), nil)
+	require.NoError(t, err)
+	require.NoError(t, os.Remove(ruleFile))
+
+	matched1, err := sp.matchDeps(t.Context(), []*Dependency{dep1}, idx)
+	require.NoError(t, err)
+	require.Len(t, matched1, 1)
+	require.Equal(t, "example.com/pkg1", matched1[0].ModulePath)
+
+	matched2, err := sp.matchDeps(t.Context(), []*Dependency{dep2}, idx)
+	require.NoError(t, err)
+	require.Len(t, matched2, 1)
+	require.Equal(t, "example.com/pkg2", matched2[0].ModulePath)
+
+	logOutput := logBuf.String()
+	assert.Equal(t, 1, strings.Count(logOutput, "rules source: ruleConfig"), "rules should only be loaded once")
+	assert.Equal(t, 1, strings.Count(logOutput, "Found available rules"), "index should only be built once")
+}
+
+func TestLoadRuleIndex_NoRules(t *testing.T) {
+	t.Setenv(util.EnvOtelcRules, "")
+	sp := newTestSetupPhase()
+
+	idx, err := sp.loadRuleIndex(t.Context(), nil)
+	require.NoError(t, err)
+	require.NotNil(t, idx)
+	assert.True(t, idx.isEmpty())
+
+	matched, err := sp.matchDeps(t.Context(), []*Dependency{{ImportPath: "example.com/x"}}, idx)
+	require.NoError(t, err)
+	assert.Nil(t, matched)
+}
+
+func TestLoadRuleIndex_LoadErrorCanRetry(t *testing.T) {
+	t.Setenv(util.EnvOtelcRules, "")
+	ruleFile := filepath.Join(t.TempDir(), "rules.yaml")
+	require.NoError(t, os.WriteFile(ruleFile, []byte("invalid: yaml: ["), 0o644))
+
+	sp := newTestSetupPhase()
+	sp.ruleConfig = ruleFile
+	idx, err := sp.loadRuleIndex(t.Context(), nil)
+	require.ErrorContains(t, err, "parsing rule file")
+	assert.Nil(t, idx)
+
+	require.NoError(t, os.WriteFile(ruleFile, []byte(`version: v1.0.0
+
+r1:
+  target: example.com/pkg
+  func: Run
+  raw: "_ = 1"
+`), 0o644))
+	idx, err = sp.loadRuleIndex(t.Context(), nil)
+	require.NoError(t, err)
+	src := writeGoSource(t, "pkg.go", "package pkg\n\nfunc Run() {}\n")
+	matched, err := sp.matchDeps(
+		t.Context(),
+		[]*Dependency{{ImportPath: "example.com/pkg", Sources: []string{src}}},
+		idx,
+	)
+	require.NoError(t, err)
+	require.Len(t, matched, 1)
+	require.Len(t, matched[0].RawRules[src], 1)
+	assert.Equal(t, "r1", matched[0].RawRules[src][0].GetName())
+}
+
+func TestMatchDeps_ConcurrentMatching(t *testing.T) {
+	t.Setenv(util.EnvOtelcRules, "")
+	dir := t.TempDir()
+	ruleFile := filepath.Join(dir, "rules.yaml")
+	err := os.WriteFile(ruleFile, []byte(`version: v1.0.0
+
+r1:
+  target: example.com/pkg1
+  func: Fn1
+  raw: "_ = 1"
+
+r2:
+  target: example.com/pkg2
+  func: Fn2
+  raw: "_ = 2"
+`), 0o644)
+	require.NoError(t, err)
+
+	src1 := writeGoSource(t, "pkg1.go", "package pkg1\n\nfunc Fn1() {}\n")
+	src2 := writeGoSource(t, "pkg2.go", "package pkg2\n\nfunc Fn2() {}\n")
+
+	sp := newTestSetupPhase()
+	sp.ruleConfig = ruleFile
+
+	deps := []*Dependency{
+		{ImportPath: "example.com/pkg1", Sources: []string{src1}, CgoFiles: map[string]string{}},
+		{ImportPath: "example.com/pkg2", Sources: []string{src2}, CgoFiles: map[string]string{}},
+	}
+
+	idx, err := sp.loadRuleIndex(t.Context(), nil)
+	require.NoError(t, err)
+
+	var wg sync.WaitGroup
+	var errs [5]error
+	for i := range errs {
+		wg.Go(func() {
+			var matched []*rule.InstRuleSet
+			matched, errs[i] = sp.matchDeps(t.Context(), deps, idx)
+			assert.Len(t, matched, 2)
+		})
+	}
+	wg.Wait()
+	for _, err := range errs {
+		require.NoError(t, err)
+	}
+}
+
+func BenchmarkMatchDeps_ReusedRuleIndex(b *testing.B) {
+	b.Setenv(util.EnvOtelcRules, "")
+	dir := b.TempDir()
+	ruleFile := filepath.Join(dir, "rules.yaml")
+	err := os.WriteFile(ruleFile, []byte(`version: v1.0.0
+
+r1:
+  target: example.com/pkg
+  func: Run
+  raw: "_ = 1"
+`), 0o644)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	src := filepath.Join(dir, "main.go")
+	if err = os.WriteFile(src, []byte("package pkg\n\nfunc Run() {}\n"), 0o644); err != nil {
+		b.Fatal(err)
+	}
+
+	dep := &Dependency{
+		ImportPath: "example.com/pkg",
+		Sources:    []string{src},
+		CgoFiles:   map[string]string{},
+	}
+
+	sp := &setupPhase{
+		logger:     slog.New(slog.DiscardHandler),
+		ruleConfig: ruleFile,
+	}
+
+	idx, err := sp.loadRuleIndex(b.Context(), nil)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for b.Loop() {
+		matched, mErr := sp.matchDeps(b.Context(), []*Dependency{dep}, idx)
+		if mErr != nil {
+			b.Fatal(mErr)
+		}
+		if len(matched) != 1 {
+			b.Fatalf("expected 1 match, got %d", len(matched))
+		}
+	}
 }

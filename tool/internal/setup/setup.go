@@ -384,8 +384,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	// GOFLAGS for the later buildWithToolexec, and before the findDeps dry run
 	// further down. Computed here rather than threaded in because Setup is also
 	// a standalone command action (otelc setup).
-	vendored := vendoringActive(ctx, util.GetOtelcWorkDir())
-	if vendored {
+	if vendoringActive(ctx, util.GetOtelcWorkDir()) {
 		logger.InfoContext(ctx, "vendored project detected; building with -mod=mod")
 		// Mutates GOFLAGS process-wide with no restore. Fine for the one-shot
 		// CLI; a second in-process GoBuild would inherit this -mod=mod.
@@ -406,12 +405,6 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		return nil
 	}
 
-	sp := &setupPhase{
-		logger:     logger,
-		ruleConfig: cmd.String("rules"),
-		buildFlags: extractBuildFlags(subcommand, args),
-	}
-
 	// Introduce additional hook code by generating otelc.runtime.go
 	// Use GetPackage to determine the build target directory
 	buildPkgs, allPkgs, err := getBuildPackages(ctx, subcommand, args)
@@ -420,8 +413,13 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	}
 	// Only the real packages are built. The test packages still feed the name
 	// table, because they carry imports that only _test.go files use.
-	sp.buildPackages = buildPkgs
-	sp.resolvedNames = pkgload.CollectPackageNames(allPkgs)
+	sp := &setupPhase{
+		logger:        logger,
+		ruleConfig:    cmd.String("rules"),
+		buildFlags:    extractBuildFlags(subcommand, args),
+		buildPackages: buildPkgs,
+		resolvedNames: pkgload.CollectPackageNames(allPkgs),
+	}
 
 	// Find the module directories for the build packages
 	moduleDirs, findModErr := pkgload.FindModuleDirs(ctx, buildPkgs)
@@ -454,8 +452,12 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		}
 	}
 
-	// Match the hook code with these dependencies
-	matched, err := sp.matchDeps(ctx, deps, moduleDirs)
+	// Prepare rules once for both the initial and injected dependencies.
+	idx, err := sp.loadRuleIndex(ctx, moduleDirs)
+	if err != nil {
+		return ex.Wrapf(err, "loading hook rules")
+	}
+	matched, err := sp.matchDeps(ctx, deps, idx)
 	if err != nil {
 		return ex.Wrapf(err, "matching dependencies to hook rules")
 	}
@@ -464,7 +466,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	// application below, which compiles their dependencies too. The build plan
 	// never saw those, so match them now.
 	injected, err := sp.matchInjectedDeps(
-		ctx, matched, deps, moduleDirs, sp.buildFlags,
+		ctx, matched, deps, idx, sp.buildFlags,
 	)
 	if err != nil {
 		return err
