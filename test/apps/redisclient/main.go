@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"log"
 	"log/slog"
@@ -14,12 +15,28 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-var addr = flag.String("addr", "localhost:6379", "The Redis server address")
+var (
+	addr  = flag.String("addr", "localhost:6379", "The Redis server address")
+	mode  = flag.String("mode", "client", "Which client to use: client, ring or cluster")
+	addr2 = flag.String("addr2", "", "In ring mode, a shard address to add with SetAddrs")
+)
 
 func main() {
 	flag.Parse()
 
 	ctx := context.Background()
+
+	switch *mode {
+	case "client":
+	case "ring":
+		runRing(ctx)
+		return
+	case "cluster":
+		runCluster(ctx)
+		return
+	default:
+		log.Fatalf("unknown mode %q", *mode)
+	}
 
 	rdb := redis.NewClient(&redis.Options{
 		Addr: *addr,
@@ -54,4 +71,44 @@ func main() {
 		log.Fatalf("failed to del key: %v", err)
 	}
 	slog.Info("DEL", "key", "testkey")
+}
+
+// runRing pings every shard, then adds a shard with SetAddrs and pings again.
+// Ring creates both kinds of shard with redis.NewClient.
+func runRing(ctx context.Context) {
+	ring := redis.NewRing(&redis.RingOptions{
+		Addrs: map[string]string{"shard0": *addr},
+	})
+	defer ring.Close()
+
+	pingShards(ctx, ring)
+	if *addr2 != "" {
+		ring.SetAddrs(map[string]string{"shard0": *addr, "shard1": *addr2})
+		pingShards(ctx, ring)
+	}
+	slog.Info("RING PING")
+}
+
+func pingShards(ctx context.Context, ring *redis.Ring) {
+	err := ring.ForEachShard(ctx, func(ctx context.Context, shard *redis.Client) error {
+		return shard.Ping(ctx).Err()
+	})
+	if err != nil {
+		log.Fatalf("failed to ping ring shards: %v", err)
+	}
+}
+
+// runCluster sends one GET through a cluster client. Cluster nodes are
+// created lazily with redis.NewClient.
+func runCluster(ctx context.Context) {
+	cluster := redis.NewClusterClient(&redis.ClusterOptions{
+		Addrs: []string{*addr},
+	})
+	defer cluster.Close()
+
+	err := cluster.Get(ctx, "clusterkey").Err()
+	if err != nil && !errors.Is(err, redis.Nil) {
+		log.Fatalf("failed to get key via cluster: %v", err)
+	}
+	slog.Info("CLUSTER GET", "key", "clusterkey")
 }

@@ -37,21 +37,3 @@ redis_client_hook:
     - inject_hooks:
         after: afterClientConnV9
         path: "go.opentelemetry.io/otelc/instrumentation/github.com/redis/go-redis/v9"
-
-redis_hook_newringclient:
-  target: github.com/redis/go-redis/v9
-  where:
-    func: NewRing
-  do:
-    - inject_hooks:
-        after: afterNewRingClientV9
-        path: "go.opentelemetry.io/otelc/instrumentation/github.com/redis/go-redis/v9"
-
-redis_hook_newclusterclient:
-  target: github.com/redis/go-redis/v9
-  where:
-    func: NewClusterClient
-  do:
-    - inject_hooks:
-        after: afterNewClusterClientV9
-        path: "go.opentelemetry.io/otelc/instrumentation/github.com/redis/go-redis/v9"
