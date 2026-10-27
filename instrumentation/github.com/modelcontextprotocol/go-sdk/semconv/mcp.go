@@ -50,6 +50,24 @@ const (
 	JSONRPCRequestID = attribute.Key("jsonrpc.request.id")
 )
 
+// Network transport attribute, per the OpenTelemetry network semconv
+// (https://opentelemetry.io/docs/specs/semconv/attributes-registry/network/).
+// The value is one of the well-known network.transport enum values.
+const (
+	// NetworkTransport identifies the low-level transport carrying the JSON-RPC
+	// stream. MCP clients run over stdio (a pipe), an in-memory net.Pipe, or
+	// HTTP (SSE / Streamable HTTP) on top of TCP.
+	NetworkTransport = attribute.Key("network.transport")
+
+	// NetworkTransportPipe is the value for stdio and other stream-based
+	// transports (stdin/stdout, IOTransport).
+	NetworkTransportPipe = "pipe"
+	// NetworkTransportInProc is the value for InMemoryTransport (net.Pipe in-process).
+	NetworkTransportInProc = "inproc"
+	// NetworkTransportTCP is the value for HTTP-based transports (SSE, Streamable HTTP).
+	NetworkTransportTCP = "tcp"
+)
+
 // GenAI operation name values.
 const (
 	// OperationExecuteTool is the operation name for an MCP tool call.
@@ -68,6 +86,9 @@ type ToolCallRequest struct {
 	// SessionID is the MCP session identifier (ClientSession.ID()). It is
 	// omitted when empty, i.e. before the initialize handshake completes.
 	SessionID string
+	// Transport is the network.transport value ("pipe", "inproc", "tcp").
+	// It is omitted when empty, i.e. when the transport could not be detected.
+	Transport string
 }
 
 // ToolCallTraceAttrs returns the trace attributes for a client-side tools/call
@@ -88,6 +109,9 @@ func ToolCallTraceAttrs(req ToolCallRequest) []attribute.KeyValue {
 	}
 	if req.SessionID != "" {
 		attrs = append(attrs, MCPSessionID.String(req.SessionID))
+	}
+	if req.Transport != "" {
+		attrs = append(attrs, NetworkTransport.String(req.Transport))
 	}
 	return attrs
 }

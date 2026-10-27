@@ -1,5 +1,20 @@
 version: "v1.0.0"
 
+# Capture the concrete Transport passed to (*Client).Connect so that the
+# resulting *ClientSession can be annotated with network.transport on every
+# tools/call span. The before hook type-switches the Transport; the after hook
+# associates the detected value with the returned session.
+mcp_client_connect:
+  target: github.com/modelcontextprotocol/go-sdk/mcp
+  where:
+    func: Connect
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        before: BeforeConnect
+        after: AfterConnect
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/modelcontextprotocol/go-sdk/client"
+
 mcp_clientsession_calltool:
   target: github.com/modelcontextprotocol/go-sdk/mcp
   where:

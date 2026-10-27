@@ -18,6 +18,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 
+	mcpsemconv "go.opentelemetry.io/otelc/instrumentation/github.com/modelcontextprotocol/go-sdk/semconv"
 	"go.opentelemetry.io/otelc/pkg/hook/hooktest"
 )
 
@@ -298,3 +299,57 @@ type staticError string
 func (e staticError) Error() string { return string(e) }
 
 func assertError(msg string) error { return staticError(msg) }
+
+func TestDetectTransport(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		t    mcp.Transport
+		want string
+	}{
+		{"stdio -> pipe", &mcp.StdioTransport{}, mcpsemconv.NetworkTransportPipe},
+		{"IO -> pipe", &mcp.IOTransport{}, mcpsemconv.NetworkTransportPipe},
+		{"in-memory -> inproc", &mcp.InMemoryTransport{}, mcpsemconv.NetworkTransportInProc},
+		{"SSE -> tcp", &mcp.SSEClientTransport{}, mcpsemconv.NetworkTransportTCP},
+		{"streamable -> tcp", &mcp.StreamableClientTransport{}, mcpsemconv.NetworkTransportTCP},
+		{"logging wraps stdio -> pipe", &mcp.LoggingTransport{Transport: &mcp.StdioTransport{}}, mcpsemconv.NetworkTransportPipe},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, detectTransport(tc.t))
+		})
+	}
+}
+
+func TestNetworkTransport_EmittedAfterConnect(t *testing.T) {
+	sr := setupTest(t)
+
+	// Simulate Client.Connect: BeforeConnect stashes the transport, AfterConnect
+	// associates it with the returned session.
+	cs := &mcp.ClientSession{}
+	connectCtx := hooktest.NewMockHookContext(&mcp.Client{}, context.Background(), &mcp.StdioTransport{}, (*mcp.ClientSessionOptions)(nil))
+	BeforeConnect(connectCtx, &mcp.Client{}, context.Background(), &mcp.StdioTransport{}, nil)
+	AfterConnect(connectCtx, cs, nil)
+
+	// Now a CallTool on that session should carry network.transport=pipe.
+	params := &mcp.CallToolParams{Name: "get-weather"}
+	ictx := hooktest.NewMockHookContext(cs, context.Background(), params)
+	BeforeCallTool(ictx, cs, context.Background(), params)
+	AfterCallTool(ictx, &mcp.CallToolResult{}, nil)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	assert.Equal(t, mcpsemconv.NetworkTransportPipe, spanAttrs(spans[0])["network.transport"])
+}
+
+func TestNetworkTransport_OmittedWhenNoConnectObserved(t *testing.T) {
+	sr := setupTest(t)
+
+	// A session that was never seen by AfterConnect (e.g. zero value in tests)
+	// must not get a fabricated network.transport.
+	ictx := hooktest.NewMockHookContext(&mcp.ClientSession{}, context.Background(), &mcp.CallToolParams{Name: "x"})
+	BeforeCallTool(ictx, &mcp.ClientSession{}, context.Background(), &mcp.CallToolParams{Name: "x"})
+	AfterCallTool(ictx, &mcp.CallToolResult{}, nil)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	assert.NotContains(t, spanAttrs(spans[0]), "network.transport")
+}

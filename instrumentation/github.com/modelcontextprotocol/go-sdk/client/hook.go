@@ -54,6 +54,69 @@ func initInstrumentation() {
 	})
 }
 
+// sessionTransports records the detected network.transport value for each
+// connected *mcp.ClientSession. It is populated by AfterConnect when the
+// client establishes a session over a concrete Transport, and read by
+// BeforeCallTool to annotate the tool-call span.
+var sessionTransports sync.Map // *mcp.ClientSession -> string
+
+// detectTransport maps a concrete mcp.Transport to the network.transport enum
+// value from the OTel network semconv.
+func detectTransport(t mcp.Transport) string {
+	switch tr := t.(type) {
+	case *mcp.StdioTransport:
+		return mcpsemconv.NetworkTransportPipe
+	case *mcp.IOTransport:
+		return mcpsemconv.NetworkTransportPipe
+	case *mcp.InMemoryTransport:
+		return mcpsemconv.NetworkTransportInProc
+	case *mcp.SSEClientTransport:
+		return mcpsemconv.NetworkTransportTCP
+	case *mcp.StreamableClientTransport:
+		return mcpsemconv.NetworkTransportTCP
+	case *mcp.LoggingTransport:
+		return detectTransport(tr.Transport)
+	default:
+		return "other"
+	}
+}
+
+// BeforeConnect runs before (*Client).Connect(ctx, transport, opts). It stashes
+// the detected transport type in the hook context so AfterConnect can associate
+// it with the returned *ClientSession.
+func BeforeConnect(ictx hook.HookContext, c *mcp.Client, ctx context.Context, t mcp.Transport, opts *mcp.ClientSessionOptions) {
+	if !mcpEnabler.Enable() || t == nil {
+		return
+	}
+	ictx.SetData(detectTransport(t))
+}
+
+// AfterConnect runs after (*Client).Connect returns. It associates the detected
+// transport with the new session so BeforeCallTool can read it.
+func AfterConnect(ictx hook.HookContext, cs *mcp.ClientSession, err error) {
+	if err != nil || cs == nil {
+		return
+	}
+	if tr, _ := ictx.GetData().(string); tr != "" {
+		sessionTransports.Store(cs, tr)
+	}
+}
+
+// transportFor returns the recorded network.transport for a session, or ""
+// when the session was not observed by AfterConnect (e.g. a zero-value
+// ClientSession used in unit tests).
+func transportFor(cs *mcp.ClientSession) string {
+	if cs == nil {
+		return ""
+	}
+	v, ok := sessionTransports.Load(cs)
+	if !ok {
+		return ""
+	}
+	s, _ := v.(string)
+	return s
+}
+
 // callToolSpanKey marks the context that BeforeCallTool hands to the SDK for
 // a tools/call request. The value is the client span the before hook started.
 // Only AfterConnectionCall reads it, so the JSON-RPC request id is attached to
@@ -110,6 +173,7 @@ func BeforeCallTool(
 		trace.WithAttributes(mcpsemconv.ToolCallTraceAttrs(mcpsemconv.ToolCallRequest{
 			ToolName:  params.Name,
 			SessionID: sessionID(cs),
+			Transport: transportFor(cs),
 		})...),
 	)
 	// Make downstream calls (and the real CallTool body) use the span context,
