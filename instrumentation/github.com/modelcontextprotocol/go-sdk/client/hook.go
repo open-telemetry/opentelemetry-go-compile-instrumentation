@@ -57,16 +57,17 @@ func initInstrumentation() {
 // sessionTransports records the detected network.transport value for each
 // connected *mcp.ClientSession. It is populated by AfterConnect when the
 // client establishes a session over a concrete Transport, and read by
-// BeforeCallTool to annotate the tool-call span.
+// BeforeCallTool to annotate the tool-call span. Entries are removed by
+// AfterClose when the session is closed, so the map tracks only live sessions.
 var sessionTransports sync.Map // *mcp.ClientSession -> string
 
 // detectTransport maps a concrete mcp.Transport to the network.transport enum
-// value from the OTel network semconv.
+// value from the OTel network semconv. It returns "" when the transport type
+// cannot be determined (e.g. a generic IOTransport whose underlying stream is
+// unknown), so the attribute is omitted rather than guessed.
 func detectTransport(t mcp.Transport) string {
 	switch tr := t.(type) {
 	case *mcp.StdioTransport:
-		return mcpsemconv.NetworkTransportPipe
-	case *mcp.IOTransport:
 		return mcpsemconv.NetworkTransportPipe
 	case *mcp.InMemoryTransport:
 		return mcpsemconv.NetworkTransportInProc
@@ -77,7 +78,7 @@ func detectTransport(t mcp.Transport) string {
 	case *mcp.LoggingTransport:
 		return detectTransport(tr.Transport)
 	default:
-		return "other"
+		return ""
 	}
 }
 
@@ -99,6 +100,14 @@ func AfterConnect(ictx hook.HookContext, cs *mcp.ClientSession, err error) {
 	}
 	if tr, _ := ictx.GetData().(string); tr != "" {
 		sessionTransports.Store(cs, tr)
+	}
+}
+
+// AfterClose runs after (*ClientSession).Close() returns. It removes the
+// session's transport entry so the map does not accumulate dead sessions.
+func AfterClose(ictx hook.HookContext, cs *mcp.ClientSession, err error) {
+	if cs != nil {
+		sessionTransports.Delete(cs)
 	}
 }
 

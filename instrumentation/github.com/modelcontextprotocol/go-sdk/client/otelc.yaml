@@ -26,6 +26,18 @@ mcp_clientsession_calltool:
         after: AfterCallTool
         path: "go.opentelemetry.io/otelc/instrumentation/github.com/modelcontextprotocol/go-sdk/client"
 
+# Remove the session's transport entry when the session is closed, so the
+# sessionTransports map does not accumulate dead sessions.
+mcp_clientsession_close:
+  target: github.com/modelcontextprotocol/go-sdk/mcp
+  where:
+    func: Close
+    recv: "*ClientSession"
+  do:
+    - inject_hooks:
+        after: AfterClose
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/modelcontextprotocol/go-sdk/client"
+
 # Every mcp request goes through internal/jsonrpc2.(*Connection).Call, which
 # returns *AsyncCall. The after hook reads the JSON-RPC id from the result and
 # sets jsonrpc.request.id only on the tools/call request: it checks the method

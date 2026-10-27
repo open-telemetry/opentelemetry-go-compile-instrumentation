@@ -307,11 +307,12 @@ func TestDetectTransport(t *testing.T) {
 		want string
 	}{
 		{"stdio -> pipe", &mcp.StdioTransport{}, mcpsemconv.NetworkTransportPipe},
-		{"IO -> pipe", &mcp.IOTransport{}, mcpsemconv.NetworkTransportPipe},
+		{"IOTransport -> omitted", &mcp.IOTransport{}, ""},
 		{"in-memory -> inproc", &mcp.InMemoryTransport{}, mcpsemconv.NetworkTransportInProc},
 		{"SSE -> tcp", &mcp.SSEClientTransport{}, mcpsemconv.NetworkTransportTCP},
 		{"streamable -> tcp", &mcp.StreamableClientTransport{}, mcpsemconv.NetworkTransportTCP},
 		{"logging wraps stdio -> pipe", &mcp.LoggingTransport{Transport: &mcp.StdioTransport{}}, mcpsemconv.NetworkTransportPipe},
+		{"logging wraps IOTransport -> omitted", &mcp.LoggingTransport{Transport: &mcp.IOTransport{}}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			assert.Equal(t, tc.want, detectTransport(tc.t))
@@ -322,14 +323,11 @@ func TestDetectTransport(t *testing.T) {
 func TestNetworkTransport_EmittedAfterConnect(t *testing.T) {
 	sr := setupTest(t)
 
-	// Simulate Client.Connect: BeforeConnect stashes the transport, AfterConnect
-	// associates it with the returned session.
 	cs := &mcp.ClientSession{}
 	connectCtx := hooktest.NewMockHookContext(&mcp.Client{}, context.Background(), &mcp.StdioTransport{}, (*mcp.ClientSessionOptions)(nil))
 	BeforeConnect(connectCtx, &mcp.Client{}, context.Background(), &mcp.StdioTransport{}, nil)
 	AfterConnect(connectCtx, cs, nil)
 
-	// Now a CallTool on that session should carry network.transport=pipe.
 	params := &mcp.CallToolParams{Name: "get-weather"}
 	ictx := hooktest.NewMockHookContext(cs, context.Background(), params)
 	BeforeCallTool(ictx, cs, context.Background(), params)
@@ -338,13 +336,16 @@ func TestNetworkTransport_EmittedAfterConnect(t *testing.T) {
 	spans := sr.Ended()
 	require.Len(t, spans, 1)
 	assert.Equal(t, mcpsemconv.NetworkTransportPipe, spanAttrs(spans[0])["network.transport"])
+
+	// AfterClose must remove the entry so the map does not leak.
+	AfterClose(ictx, cs, nil)
+	_, ok := sessionTransports.Load(cs)
+	assert.False(t, ok, "session entry must be removed after Close")
 }
 
 func TestNetworkTransport_OmittedWhenNoConnectObserved(t *testing.T) {
 	sr := setupTest(t)
 
-	// A session that was never seen by AfterConnect (e.g. zero value in tests)
-	// must not get a fabricated network.transport.
 	ictx := hooktest.NewMockHookContext(&mcp.ClientSession{}, context.Background(), &mcp.CallToolParams{Name: "x"})
 	BeforeCallTool(ictx, &mcp.ClientSession{}, context.Background(), &mcp.CallToolParams{Name: "x"})
 	AfterCallTool(ictx, &mcp.CallToolResult{}, nil)
@@ -352,4 +353,50 @@ func TestNetworkTransport_OmittedWhenNoConnectObserved(t *testing.T) {
 	spans := sr.Ended()
 	require.Len(t, spans, 1)
 	assert.NotContains(t, spanAttrs(spans[0]), "network.transport")
+}
+
+// TestNetworkTransport_InMemoryEndToEnd runs the hook functions against a real
+// in-memory MCP transport: Connect -> CallTool -> Close, verifying the span
+// carries network.transport=inproc and the map entry is cleaned up.
+func TestNetworkTransport_InMemoryEndToEnd(t *testing.T) {
+	sr := setupTest(t)
+
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+
+	srv := mcp.NewServer(&mcp.Implementation{Name: "test-server", Version: "1.0.0"}, nil)
+	mcp.AddTool(srv, &mcp.Tool{Name: "ping"}, func(_ context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "pong"}}}, nil, nil
+	})
+
+	ctx := context.Background()
+	serverSession, err := srv.Connect(ctx, serverTransport, nil)
+	require.NoError(t, err)
+	defer serverSession.Close()
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "1.0.0"}, nil)
+	cs, err := client.Connect(ctx, clientTransport, nil)
+	require.NoError(t, err)
+	require.NotNil(t, cs)
+
+	// Run the connect hooks as the generated trampoline would.
+	connectCtx := hooktest.NewMockHookContext(client, ctx, clientTransport, (*mcp.ClientSessionOptions)(nil))
+	BeforeConnect(connectCtx, client, ctx, clientTransport, nil)
+	AfterConnect(connectCtx, cs, nil)
+
+	callParams := &mcp.CallToolParams{Name: "ping"}
+	ictx := hooktest.NewMockHookContext(cs, ctx, callParams)
+	BeforeCallTool(ictx, cs, ctx, callParams)
+	result, callErr := cs.CallTool(ctx, callParams)
+	AfterCallTool(ictx, result, callErr)
+	require.NoError(t, callErr)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	m := spanAttrs(spans[0])
+	assert.Equal(t, mcpsemconv.NetworkTransportInProc, m["network.transport"])
+
+	require.NoError(t, cs.Close())
+	AfterClose(ictx, cs, nil)
+	_, ok := sessionTransports.Load(cs)
+	assert.False(t, ok, "map entry must be removed after Close")
 }
