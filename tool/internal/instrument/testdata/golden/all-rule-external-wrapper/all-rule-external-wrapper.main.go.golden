@@ -3,34 +3,38 @@
 
 package main
 
+//line /golden/work/main.go:6
 import (
 	"unsafe"
 
 	"go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/all-rule-external-wrapper/helpers/wrapper"
 )
 
+//line /golden/work/main.go:8
 type T struct{ ExternalTag wrapper.Tag }
 
+//line /golden/work/main.go:10
 var GlobalVar interface{} = wrapper.WrapValue("original")
 
+//line /golden/work/main.go:12
 func RawFunc() {
-	wrapper.Log("raw instrumented")
-	println("raw func body")
+	/*line /<generated>:1*/ wrapper.Log("raw instrumented")
+	/*line /golden/work/main.go:13*/ println("raw func body")
 }
 
 //otelc:external-log
 func DirectiveFunc() {
-	wrapper.Log("DirectiveFunc")
-	println("directive func body")
+	/*line /<generated>:1*/ wrapper.Log("DirectiveFunc")
+	/*line /golden/work/main.go:18*/ println("directive func body")
 }
 
 func CallSizeof() {
 	x := 42
 	size := wrapper.Wrapper(unsafe.Sizeof(x))
-	_ = size
+	/*line /golden/work/main.go:24*/ _ = size
 }
 
 func main() {
 	y := "hello"
-	_ = wrapper.Wrapper(unsafe.Sizeof(y))
+	_ = wrapper.Wrapper(unsafe.Sizeof(y)) /*line /golden/work/main.go:29*/
 }
