@@ -19,9 +19,9 @@ func init() {
 			return ""
 		}
 		parsed, err := url.Parse(c.hostURL)
-		if err != nil || parsed.Host == "" {
+		if err != nil {
 			return ""
 		}
-		return parsed.Host
+		return parsed.Hostname()
 	})
 }

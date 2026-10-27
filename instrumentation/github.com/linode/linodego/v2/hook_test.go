@@ -200,8 +200,35 @@ func TestGetHostURL(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "api.linode.com", getHostURL(&c))
 
-	c.SetBaseURL("https://my-mock-linode-api.example.com")
-	assert.Equal(t, "my-mock-linode-api.example.com", getHostURL(&c))
+	tests := []struct {
+		name    string
+		baseURL string
+		want    string
+	}{
+		{
+			name:    "custom host without port",
+			baseURL: "https://my-mock-linode-api.example.com",
+			want:    "my-mock-linode-api.example.com",
+		},
+		{
+			name:    "custom host with explicit port",
+			baseURL: "https://gateway.internal:8443/v4",
+			want:    "gateway.internal",
+		},
+		{
+			name:    "IPv6 literal with port",
+			baseURL: "https://[::1]:8443/v4",
+			want:    "::1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := c.UseURL(tt.baseURL)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, getHostURL(&c))
+		})
+	}
 }
 
 func TestBeforeAfterDoRequest_CustomServerAddress(t *testing.T) {

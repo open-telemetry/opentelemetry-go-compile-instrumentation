@@ -103,10 +103,10 @@ func defaultHostURLGetter(client *linodego.Client) (host string) {
 	}
 
 	parsed, err := url.Parse(f.String())
-	if err != nil || parsed.Host == "" {
+	if err != nil {
 		return ""
 	}
-	return parsed.Host
+	return parsed.Hostname()
 }
 
 func initInstrumentation() {
