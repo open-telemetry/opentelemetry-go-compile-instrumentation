@@ -103,7 +103,7 @@ func TestGetRedisV9Statement(t *testing.T) {
 		{
 			name:     "HELLO AUTH then SETNAME",
 			cmd:      redis.NewCmd(context.Background(), "hello", 3, "AUTH", "user", "s3cret", "SETNAME", "myclient"),
-			expected: "hello 3 AUTH ? ? SETNAME myclient",
+			expected: "hello 3 AUTH ? ? ? ?",
 		},
 		{
 			name:     "HELLO SETNAME then AUTH",
@@ -167,9 +167,14 @@ func TestGetRedisV9Statement_RedactsCredentials(t *testing.T) {
 			expected: "hello 3 auth ? ?",
 		},
 		{
-			name:     "HELLO keeps SETNAME visible",
+			name:     "HELLO AUTH then trailing options",
 			cmd:      redis.NewCmd(context.Background(), "hello", 3, "auth", "default", "s3cret", "setname", "myapp"),
-			expected: "hello 3 auth ? ? setname myapp",
+			expected: "hello 3 auth ? ? ? ?",
+		},
+		{
+			name:     "HELLO repeated AUTH blocks",
+			cmd:      redis.NewCmd(context.Background(), "hello", 3, "auth", "u1", "s3cret1", "auth", "u2", "s3cret2"),
+			expected: "hello 3 auth ? ? ? ? ?",
 		},
 		{
 			name:     "HELLO without AUTH is untouched",
@@ -242,6 +247,21 @@ func TestGetRedisV9Statement_RedactsCommandValues(t *testing.T) {
 			cmd:      redis.NewCmd(context.Background(), "eval", "local token = 's3cret-token'; return token", 0),
 			expected: "eval ? ?",
 		},
+		{
+			name:     "ECHO redacts the message",
+			cmd:      redis.NewCmd(context.Background(), "echo", "sensitive-message"),
+			expected: "echo ?",
+		},
+		{
+			name:     "SLAVEOF redacts host and port",
+			cmd:      redis.NewCmd(context.Background(), "slaveof", "10.0.0.1", 6379),
+			expected: "slaveof ? ?",
+		},
+		{
+			name:     "REPLICAOF redacts host and port",
+			cmd:      redis.NewCmd(context.Background(), "replicaof", "10.0.0.1", 6379),
+			expected: "replicaof ? ?",
+		},
 	}
 
 	for _, tt := range tests {
@@ -256,7 +276,7 @@ func TestGetRedisV9Statement_RedactsCommandValues(t *testing.T) {
 // (not just getRedisV9Statement) to confirm the span actually produced for
 // an ordinary write command carries no sensitive value in db.query.text.
 func TestProcessHook_RedactsCommandValues(t *testing.T) {
-	initOnce = *new(sync.Once)
+	initOnce = sync.Once{}
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "redis")
 
 	sr := setupTestTracer(t)
@@ -268,7 +288,7 @@ func TestProcessHook_RedactsCommandValues(t *testing.T) {
 
 	cmd := redis.NewCmd(context.Background(), "set", "session:42", "s3cret-session-token")
 	err := processHook(context.Background(), cmd)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	spans := sr.Ended()
 	require.Len(t, spans, 1)
