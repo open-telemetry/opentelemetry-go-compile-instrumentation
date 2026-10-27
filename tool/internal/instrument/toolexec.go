@@ -8,7 +8,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"go/build"
+	"io/fs"
 	"log/slog"
 	"maps"
 	"os"
@@ -401,12 +403,36 @@ func trackAddedImports(packages map[string]string) error {
 	return nil
 }
 
+// addedImportFiles returns the per-process import tracking files written during
+// compilation. It scans the build temp directory instead of globbing so that a
+// workspace whose path contains glob meta-characters (for example square
+// brackets) still resolves its files.
+func addedImportFiles() ([]string, error) {
+	dir := util.GetBuildTempDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, ex.Wrapf(err, "reading build temp directory %q", dir)
+	}
+
+	files := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasPrefix(name, "added_imports.") || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		files = append(files, filepath.Join(dir, name))
+	}
+	return files, nil
+}
+
 // CleanupImportTrackingFiles removes import tracking files from previous builds.
 // Should be called at the start of a new build to clean up stale files from prior runs.
 // This is exported for use by the setup phase.
 func CleanupImportTrackingFiles() {
-	pattern := util.GetAddedImportsPattern()
-	files, err := filepath.Glob(pattern)
+	files, err := addedImportFiles()
 	if err != nil {
 		return
 	}
@@ -427,12 +453,11 @@ func CleanupDebugArtifacts() error {
 // loadAddedImports discovers and merges all per-process import tracking files.
 func loadAddedImports(ctx context.Context) (map[string]string, error) {
 	logger := util.LoggerFromContext(ctx)
-	pattern := util.GetAddedImportsPattern()
 
 	// Find all per-process import files
-	files, err := filepath.Glob(pattern)
+	files, err := addedImportFiles()
 	if err != nil {
-		return nil, ex.Wrapf(err, "globbing import files")
+		return nil, err
 	}
 
 	if len(files) == 0 {
