@@ -258,9 +258,10 @@ func emptyUnusedHookContextMethods(targetFile *dst.File, tjump *tJump) error {
 		}
 		found++
 	}
-	if found != 3 {
-		return ex.Newf("can not find unused HookContext methods for %s (found %d, expected 3)",
-			structName, found)
+	const expectedReturnValMethods = 3
+	if found != expectedReturnValMethods {
+		return ex.Newf("can not find unused HookContext methods for %s (found %d, expected %d)",
+			structName, found, expectedReturnValMethods)
 	}
 
 	// returnVals is never populated without an After hook, so the count is
