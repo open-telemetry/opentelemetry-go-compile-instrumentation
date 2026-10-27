@@ -22,11 +22,6 @@ const (
 	flagWorkDir      = "work-dir"
 )
 
-// newRootCommand builds the root otelc command, including its flags and
-// subcommand tree. Tests run it so that a malformed command definition, e.g. a
-// flag Name also listed in its Aliases, is caught before release: urfave/cli
-// v3.14.0+ fails the command at startup with
-// `flag "..." defined multiple times in command "otelc"`.
 func newRootCommand() cli.Command {
 	return cli.Command{
 		Name:        "otelc",
@@ -86,35 +81,35 @@ func newRootCommand() cli.Command {
 			&commandToolexec,
 			&commandVersion,
 		},
-		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
-			// In drop-in mode (otelc is the GOFLAGS -toolexec tool) the go
-			// children otelc spawns would inherit the flag and recurse, so
-			// strip it process-wide; commands that need toolexec re-add it.
-			if goflags := os.Getenv("GOFLAGS"); goflags != "" {
-				if stripped := util.StripToolexecFromGoflags(goflags); stripped != goflags {
-					if err := os.Setenv("GOFLAGS", stripped); err != nil {
-						return ctx, ex.Wrapf(err, "stripping -toolexec from GOFLAGS")
-					}
-				}
-			}
-			ctx, err := initLogger(ctx, cmd)
-			if err != nil {
-				return ctx, err
-			}
-			ctx, err = initProfiling(ctx, cmd)
-			if err != nil {
-				return ctx, err
-			}
-			return initStats(ctx, cmd)
-		},
-		After: func(ctx context.Context, cmd *cli.Command) error {
-			return ex.Join(stopProfiling(ctx, cmd), closeLogger(ctx))
-		},
 	}
 }
 
 func main() {
 	app := newRootCommand()
+	app.Before = func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+		// In drop-in mode (otelc is the GOFLAGS -toolexec tool) the go
+		// children otelc spawns would inherit the flag and recurse, so
+		// strip it process-wide; commands that need toolexec re-add it.
+		if goflags := os.Getenv("GOFLAGS"); goflags != "" {
+			if stripped := util.StripToolexecFromGoflags(goflags); stripped != goflags {
+				if err := os.Setenv("GOFLAGS", stripped); err != nil {
+					return ctx, ex.Wrapf(err, "stripping -toolexec from GOFLAGS")
+				}
+			}
+		}
+		ctx, err := initLogger(ctx, cmd)
+		if err != nil {
+			return ctx, err
+		}
+		ctx, err = initProfiling(ctx, cmd)
+		if err != nil {
+			return ctx, err
+		}
+		return initStats(ctx, cmd)
+	}
+	app.After = func(ctx context.Context, cmd *cli.Command) error {
+		return ex.Join(stopProfiling(ctx, cmd), closeLogger(ctx))
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
