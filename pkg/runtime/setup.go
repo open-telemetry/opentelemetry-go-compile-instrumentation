@@ -196,13 +196,8 @@ func newSpanProcessor(traceExporter sdktrace.SpanExporter) sdktrace.SpanProcesso
 		return sdktrace.NewSimpleSpanProcessor(traceExporter)
 	}
 
-	// No WithBatchTimeout/WithMaxExportBatchSize here: NewBatchSpanProcessor
-	// already derives MaxQueueSize, MaxExportBatchSize, BatchTimeout and
-	// ExportTimeout from the standard OTEL_BSP_* env vars when no option
-	// overrides them. Passing explicit options for two of the four silently
-	// defeats OTEL_BSP_MAX_EXPORT_BATCH_SIZE and OTEL_BSP_SCHEDULE_DELAY for
-	// every otelc-instrumented service, with no way to raise the export
-	// throughput ceiling short of patching this function.
+	// No explicit options: NewBatchSpanProcessor already reads the standard
+	// OTEL_BSP_* env vars and falls back to the SDK defaults.
 	return sdktrace.NewBatchSpanProcessor(traceExporter)
 }
 
