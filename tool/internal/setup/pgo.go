@@ -42,12 +42,8 @@ func pgoProfile(value string, pkgs []*packages.Package) (string, bool) {
 		if dir == "" {
 			continue
 		}
-		path, err := filepath.Abs(filepath.Join(dir, "default.pgo"))
-		if err != nil {
-			continue
-		}
-		info, err := os.Stat(path)
-		if err != nil || info.IsDir() {
+		path := filepath.Join(dir, "default.pgo")
+		if _, err := os.Stat(path); err != nil {
 			continue
 		}
 		if profile != "" && profile != path {
