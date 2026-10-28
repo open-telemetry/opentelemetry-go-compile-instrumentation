@@ -25,7 +25,6 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
-	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -719,12 +718,7 @@ func pinLocked(ctx context.Context, opts PinOptions) (*PinResult, error) {
 		opts.Args = args
 
 		// Use opts.Args to find module directories
-		buildPkgs, _, getErr := getBuildPackages(ctx, subcommand, opts.Args)
-		if getErr != nil {
-			return nil, getErr
-		}
-
-		moduleDirs, err = pkgload.FindModuleDirs(ctx, buildPkgs)
+		moduleDirs, err = findBuildModuleDirs(ctx, subcommand, opts.Args)
 		if err != nil {
 			return nil, err
 		}

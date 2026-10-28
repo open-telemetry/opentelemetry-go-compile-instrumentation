@@ -1580,6 +1580,103 @@ func TestPinLocked_DiscoversModuleDirs(t *testing.T) {
 	require.FileExists(t, filepath.Join(dir, toolFileCanonical))
 }
 
+// newPinRoot is newBuildRoot for a standalone pin, which keeps its work files
+// in the build root.
+func newPinRoot(t *testing.T, files map[string]string) string {
+	t.Helper()
+	root := newBuildRoot(t, files)
+	t.Setenv(util.EnvOtelcWorkDir, root)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	return root
+}
+
+func TestPinLocked_StandaloneToolFile(t *testing.T) {
+	// The golden path is relative to the working directory, which the
+	// subtests change, so make it absolute first.
+	goldenFile, absErr := filepath.Abs(filepath.Join("testdata", "standalone.otel.instrumentation.go.golden"))
+	require.NoError(t, absErr)
+
+	tests := []struct {
+		name  string
+		files map[string]string
+		args  []string
+		want  []string // dirs with a tool file, relative to the build root
+	}{
+		{
+			name:  "-C flag",
+			files: changeDirFiles(),
+			args:  []string{"-C", "app", "."},
+			want:  []string{"app"},
+		},
+		{
+			name:  "go.work with two modules",
+			files: workspaceFiles(),
+			args:  []string{"./a", "./b"},
+			want:  []string{"a", "b"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := newPinRoot(t, tt.files)
+
+			_, err := pinLocked(t.Context(), PinOptions{Prune: true, Args: tt.args})
+			require.NoError(t, err)
+
+			for _, dir := range tt.want {
+				actual, readErr := os.ReadFile(filepath.Join(root, dir, toolFileCanonical))
+				require.NoError(t, readErr)
+
+				actualNorm := strings.ReplaceAll(string(actual), "\r\n", "\n")
+				golden.Assert(t, actualNorm, goldenFile)
+			}
+		})
+	}
+}
+
+func TestPinLocked_ImportCycleRoot(t *testing.T) {
+	// Finding the module dirs does not resolve imports, so a root package in
+	// an import cycle is not skipped there. A fresh pin fails later, with the
+	// error of the go command; an already pinned module is updated as usual.
+	tests := []struct {
+		name        string
+		pinnedFirst bool
+		wantErr     string
+	}{
+		{name: "fresh pin", wantErr: "import cycle not allowed"},
+		{name: "already pinned", pinnedFirst: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := newPinRoot(t, plainModuleFiles())
+			toolFile := filepath.Join(root, toolFileCanonical)
+
+			var pinned []byte
+			if tt.pinnedFirst {
+				_, err := pinLocked(t.Context(), PinOptions{Prune: true})
+				require.NoError(t, err)
+				pinned, err = os.ReadFile(toolFile)
+				require.NoError(t, err)
+			}
+
+			mustWriteFile(t, filepath.Join(root, "a", "a.go"), "package a\n\nimport _ \"example.com/app/b\"\n")
+			mustWriteFile(t, filepath.Join(root, "b", "b.go"), "package b\n\nimport _ \"example.com/app/a\"\n")
+
+			_, err := pinLocked(t.Context(), PinOptions{Prune: true, Args: []string{"./a"}})
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				assert.NoFileExists(t, toolFile)
+				return
+			}
+			require.NoError(t, err)
+			actual, err := os.ReadFile(toolFile)
+			require.NoError(t, err)
+			assert.Equal(t, string(pinned), string(actual), "tool file must not change")
+		})
+	}
+}
+
 func TestPin_UpdatesExistingToolFile(t *testing.T) {
 	// Pin wraps pinLocked under the build lock. Point the work dir at the
 	// module so the lock is taken in the sandbox rather than an ambient path.
