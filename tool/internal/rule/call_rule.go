@@ -71,6 +71,11 @@ var identPattern = regexp.MustCompile(`^[^\d\W]\w*$`)
 // {{ . }}, {{.}}, {{- . -}}, {{ .  }}, etc.
 var replacePlaceholderPattern = regexp.MustCompile(`\{\{-?\s*\.\s*-?\}\}`)
 
+// callArgPlaceholderPattern matches call argument placeholder variants:
+// {{ .CallArgument 0 }}, {{.CallArgument 0}}, {{- .CallArgument 1 -}},
+// {{ $.CallArgument $i }}, etc.
+var callArgPlaceholderPattern = regexp.MustCompile(`\{\{-?\s*\$?\.CallArgument\s+[^\s}][^}]*\}\}`)
+
 // NewInstCallRule loads and validates an InstCallRule from YAML data.
 func NewInstCallRule(data []byte, name string) (*InstCallRule, error) {
 	var r InstCallRule
@@ -160,8 +165,11 @@ func (r *InstCallRule) validate() error {
 	if strings.TrimSpace(r.Replace) == "" && len(r.AppendArgs) == 0 {
 		return ex.Newf("at least one of replace or append_args must be set")
 	}
-	if strings.TrimSpace(r.Replace) != "" && !replacePlaceholderPattern.MatchString(r.Replace) {
-		return ex.Newf("replace must contain {{ . }} placeholder (also accepts {{.}}, {{- . -}}, etc.)")
+	if strings.TrimSpace(r.Replace) != "" &&
+		!replacePlaceholderPattern.MatchString(r.Replace) &&
+		!callArgPlaceholderPattern.MatchString(r.Replace) {
+		return ex.Newf("replace must contain {{ . }} or {{ .CallArgument N }} placeholder " +
+			"(also accepts {{.}}, {{- . -}}, {{.CallArgument 0}}, etc.)")
 	}
 	for i, arg := range r.AppendArgs {
 		if strings.TrimSpace(arg) == "" {
