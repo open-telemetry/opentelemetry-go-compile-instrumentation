@@ -712,17 +712,37 @@ func TestClientStatsHandler_HandleRPC_UsesStatsEndTime(t *testing.T) {
 	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(runtime.ModuleVersion()))
 
 	handler := newClientStatsHandler()
-	ctx := handler.TagRPC(t.Context(), &stats.RPCTagInfo{
-		FullMethodName: "/test.Service/Method",
+
+	t.Run("explicit EndTime", func(t *testing.T) {
+		exporter.Reset()
+		ctx := handler.TagRPC(t.Context(), &stats.RPCTagInfo{
+			FullMethodName: "/test.Service/Method",
+		})
+
+		endTime := time.Now().Add(5 * time.Second).Truncate(time.Microsecond)
+		handler.HandleRPC(ctx, &stats.End{
+			BeginTime: time.Now(),
+			EndTime:   endTime,
+		})
+
+		spans := exporter.GetSpans()
+		require.Len(t, spans, 1)
+		assert.True(t, spans[0].EndTime.Equal(endTime), "span EndTime should match stats.End.EndTime")
 	})
 
-	endTime := time.Now().Add(5 * time.Second).Truncate(time.Microsecond)
-	handler.HandleRPC(ctx, &stats.End{
-		BeginTime: time.Now(),
-		EndTime:   endTime,
-	})
+	t.Run("zero EndTime", func(t *testing.T) {
+		exporter.Reset()
+		before := time.Now().Truncate(time.Microsecond)
+		ctx := handler.TagRPC(t.Context(), &stats.RPCTagInfo{
+			FullMethodName: "/test.Service/Method",
+		})
 
-	spans := exporter.GetSpans()
-	require.Len(t, spans, 1)
-	assert.True(t, spans[0].EndTime.Equal(endTime), "span EndTime should match stats.End.EndTime")
+		handler.HandleRPC(ctx, &stats.End{})
+
+		after := time.Now().Add(time.Second)
+		spans := exporter.GetSpans()
+		require.Len(t, spans, 1)
+		assert.False(t, spans[0].EndTime.IsZero(), "span EndTime should not be zero")
+		assert.True(t, !spans[0].EndTime.Before(before) && !spans[0].EndTime.After(after), "span EndTime should be set to current time")
+	})
 }
