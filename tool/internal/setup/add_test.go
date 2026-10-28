@@ -654,3 +654,98 @@ func TestAddRuntimeTestDeps(t *testing.T) {
 		})
 	}
 }
+
+func TestAddRuntimeTestDeps_WriteError(t *testing.T) {
+	root := t.TempDir()
+	pkgDir := filepath.Join(root, "not-a-directory")
+	require.NoError(t, os.WriteFile(pkgDir, []byte("x"), 0o600))
+
+	err := newTestSetupPhase().addRuntimeTestDeps(
+		t.Context(),
+		runtimePackage{
+			dir:        pkgDir,
+			name:       "log",
+			importPath: "example.com/app/internal/log",
+			testMode:   true,
+		},
+		[]string{"example.com/app/hooks"},
+	)
+
+	require.ErrorContains(t, err, "writing otelc runtime test file")
+}
+
+func TestAddRuntimeTestDeps_RemoveError(t *testing.T) {
+	tests := []struct {
+		name string
+		pkg  runtimePackage
+	}{
+		{
+			name: "named files",
+			pkg: runtimePackage{
+				testMode:   true,
+				fileTarget: true,
+			},
+		},
+		{
+			name: "non-test mode",
+			pkg:  runtimePackage{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			staleDir := filepath.Join(dir, otelcRuntimeTestFile)
+			require.NoError(t, os.Mkdir(staleDir, 0o700))
+			require.NoError(t, os.WriteFile(
+				filepath.Join(staleDir, "child"),
+				[]byte("x"),
+				0o600,
+			))
+
+			pkg := tt.pkg
+			pkg.dir = dir
+			pkg.importPath = "example.com/app/internal/log"
+
+			err := newTestSetupPhase().addRuntimeTestDeps(
+				t.Context(),
+				pkg,
+				[]string{"example.com/app/hooks"},
+			)
+
+			require.ErrorContains(t, err, "removing stale generated runtime file")
+		})
+	}
+}
+
+func TestAddDeps_RuntimeTestDepsError(t *testing.T) {
+	hookPath := "example.com/app/hooks"
+	targetPath := "example.com/lib"
+
+	matched := []*rule.InstRuleSet{
+		newTestRuleSet(
+			targetPath,
+			[]*rule.InstFuncRule{
+				newTestFuncRule(hookPath, targetPath),
+			},
+			nil,
+		),
+	}
+
+	err := newTestSetupPhase().addDeps(
+		t.Context(),
+		matched,
+		runtimePackage{
+			dir:        t.TempDir(),
+			importPath: "example.com/app/internal/log",
+			name:       "log",
+			importedByHooks: map[string]bool{
+				hookPath: true,
+			},
+			testMode:   true,
+			fileTarget: true,
+		},
+	)
+
+	require.ErrorContains(t, err, "use a package pattern instead")
+}
