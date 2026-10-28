@@ -835,6 +835,36 @@ func TestStripToolexecFromGoflags(t *testing.T) {
 			goflags:  "  -mod=mod   -toolexec=otelc  ",
 			expected: "-mod=mod",
 		},
+		{
+			name:     "bare toolexec boolean flag",
+			goflags:  "-toolexec",
+			expected: "",
+		},
+		{
+			name:     "bare double-dash toolexec flag",
+			goflags:  "--toolexec=otelc",
+			expected: "",
+		},
+		{
+			name:     "bare double-dash toolexec boolean flag",
+			goflags:  "--toolexec",
+			expected: "",
+		},
+		{
+			name:     "single-quoted double-dash toolexec flag with space",
+			goflags:  "'--toolexec=otelc toolexec'",
+			expected: "",
+		},
+		{
+			name:     "double-quoted double-dash toolexec flag with space",
+			goflags:  `"--toolexec=otelc toolexec"`,
+			expected: "",
+		},
+		{
+			name:     "double-dash toolexec flag between other flags",
+			goflags:  "-mod=mod '--toolexec=otelc toolexec' -race",
+			expected: "-mod=mod -race",
+		},
 	}
 
 	for _, tt := range tests {

@@ -135,7 +135,8 @@ func StripToolexecFromGoflags(goflags string) string {
 	kept := make([]string, 0, len(tokens))
 	for _, token := range tokens {
 		unquoted := UnquoteGoflagsToken(token)
-		if unquoted == "-toolexec" || strings.HasPrefix(unquoted, "-toolexec=") {
+		if unquoted == "-toolexec" || strings.HasPrefix(unquoted, "-toolexec=") ||
+			unquoted == "--toolexec" || strings.HasPrefix(unquoted, "--toolexec=") {
 			continue
 		}
 		kept = append(kept, token)
