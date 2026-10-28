@@ -24,8 +24,9 @@ func (g redisClientEnabler) Enable() bool {
 
 var redisEnabler = redisClientEnabler{}
 
-// Ring and ClusterClient create their nodes with NewClient, so this hook
-// instruments them too.
+// Ring and ClusterClient use redis.NewClient by default to create their node
+// clients (unless overridden via RingOptions.NewClient or ClusterOptions.NewClient),
+// so this hook instruments them too.
 func afterNewRedisClientV9(ictx hook.HookContext, client *redis.Client) {
 	client.AddHook(newOtelRedisHook(client.Options().Addr))
 }
