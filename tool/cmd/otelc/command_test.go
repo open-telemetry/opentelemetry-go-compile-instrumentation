@@ -33,3 +33,19 @@ func TestCommandVersion(t *testing.T) {
 	// --verbose appends the Go runtime version (e.g. "go1.25.0").
 	assert.Contains(t, out, "go1.")
 }
+
+// TestCommandsHaveUsage guards the COMMANDS: section of `otelc --help`.
+// urfave/cli renders Usage there and Description only on a command's own help
+// page, so a command with Description alone is listed with no text at all.
+func TestCommandsHaveUsage(t *testing.T) {
+	commands := []*cli.Command{
+		&commandPin, &commandSetup, &commandGo,
+		&commandCleanup, &commandToolexec, &commandVersion,
+	}
+	for _, cmd := range commands {
+		t.Run(cmd.Name, func(t *testing.T) {
+			assert.NotEmpty(t, cmd.Usage,
+				"Usage is what --help lists; without it the command appears blank")
+		})
+	}
+}
