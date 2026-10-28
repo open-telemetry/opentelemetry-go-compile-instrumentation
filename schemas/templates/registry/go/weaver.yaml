@@ -1,0 +1,218 @@
+# Generates pkg/otelcconv from the attributes otelc declares itself with `id:`
+# in schemas/otelc/. See docs/adr/0006-semconv-telemetry-contract-organization.md.
+#
+# attribute_group.go.j2 and helpers.j2 are vendored from go.opentelemetry.io/otel
+# v1.46.0 (semconv/templates/registry/go). The only local change is the package
+# name in attribute_group.go.j2 (semconv -> otelcconv). The text maps, comment
+# formats and acronyms below are copied from the same weaver.yaml, because the
+# helpers depend on them.
+#
+# Selection: after resolution a `ref:` attribute looks like an `id:` one, so the
+# filter uses lineage instead. Groups from the otelc registry are kept, and of
+# their attributes only those with no lineage entry, which are the ones declared
+# with `id:`. Attributes referenced from upstream (or from another otelc group)
+# carry a lineage source group and are dropped.
+templates:
+  - pattern: attribute_group.go.j2
+    filter: |
+      [.groups[]
+        | select(.lineage.provenance.registry_id == "otelc")
+        | . as $g
+        | .attributes[]?
+        | select((($g.lineage.attributes // {})[.name]) == null)
+        | select(.deprecated == null)]
+      | unique_by(.name)
+      | group_by(.name | split(".")[0])
+      | map({root_namespace: (.[0].name | split(".")[0]), attributes: .})
+    application_mode: single
+    file_name: attribute_group.go
+comment_formats:
+  go:
+    format: markdown
+    prefix: "// "
+    indent_first_level_list_items: true
+    shortcut_reference_link: true
+    trim: true
+    word_wrap:
+      line_length: 80
+  go_1tab:
+    format: markdown
+    prefix: "\t// "
+    indent_first_level_list_items: true
+    shortcut_reference_link: true
+    trim: true
+    word_wrap:
+      line_length: 80
+default_comment_format: go
+text_maps:
+  attribute_type_method:
+    string: String
+    string[]: StringSlice
+    int: Int
+    int64: Int64
+    int[]: IntSlice
+    double: Float64
+    double[]: FloatSlice
+    boolean: Bool
+    boolean[]: BoolSlice
+  attribute_type_value:
+    string: string
+    string[]: "...string"
+    int: int
+    int[]: "...int"
+    double: float64
+    double[]: "...float64"
+    boolean: bool
+    boolean[]: "...bool"
+acronyms:
+  - ACL
+  - AI
+  - AIX
+  - AKS
+  - AMD64
+  - API
+  - ARM32
+  - ARM64
+  - ARN
+  - ARNs
+  - ASCII
+  - ASPNETCore
+  - AWS
+  - ActiveMQ
+  - AppHub
+  - CICD
+  - CPP
+  - CPU
+  - CSI
+  - CSS
+  - CVM
+  - ClickHouse
+  - CloudEvents
+  - CloudFoundry
+  - CockroachDB
+  - CosmosDB
+  - CouchDB
+  - CronJob
+  - DB
+  - DB2
+  - DC
+  - DNS
+  - DaemonSet
+  - DragonflyBSD
+  - DynamoDB
+  - EC2
+  - ECS
+  - EDB
+  - EKS
+  - EOF
+  - EventGrid
+  - EventHubs
+  - FC
+  - FaaS
+  - FirebirdSQL
+  - FirstSQL
+  - FreeBSD
+  - GC
+  - GCE
+  - GCP
+  - GNU
+  - GRPC
+  - GUID
+  - GraphQL
+  - HANA
+  - HBase
+  - HPA
+  - HPUX
+  - HSQLDB
+  - HTML
+  - HTTP
+  - HTTPS
+  - HanaDB
+  - IA64
+  - IBM
+  - ICC
+  - ID
+  - IO
+  - IOS
+  - IOWait
+  - IP
+  - IPv4
+  - IPv6
+  - ISO
+  - InProc
+  - InfluxDB
+  - InstantDB
+  - JDBC
+  - JMS
+  - JSON
+  - JSONRPC
+  - JVM
+  - K8S
+  - LHS
+  - MCC
+  - MNC
+  - MSSQL
+  - MariaDB
+  - MaxDB
+  - MongoDB
+  - MySQL
+  - NetBSD
+  - OCI
+  - OKE
+  - OS
+  - OTel
+  - OpenAI
+  - OpenBSD
+  - OpenSearch
+  - OpenShift
+  - OpenTracing
+  - PHP
+  - PID
+  - PPC32
+  - PPC64
+  - PostgreSQL
+  - PubSub
+  - QPS
+  - QUIC
+  - RAM
+  - RHS
+  - RPC
+  - RabbitMQ
+  - ReplicaSet
+  - ReplicationController
+  - ResourceQuota
+  - RocketMQ
+  - SAP
+  - SCF
+  - SDK
+  - SLA
+  - SMTP
+  - SNS
+  - SPDY
+  - SQL
+  - SQLite
+  - SQS
+  - SSH
+  - ServiceBus
+  - SignalR
+  - StatefulSet
+  - TCP
+  - TLS
+  - TTL
+  - UDP
+  - UI
+  - UID
+  - URI
+  - URL
+  - UTF8
+  - UUID
+  - V8JS
+  - VCS
+  - VM
+  - WebEngine
+  - WebJS
+  - XML
+  - XMPP
+  - XSRF
+  - XSS
+  - ZOS
