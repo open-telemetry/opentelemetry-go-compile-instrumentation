@@ -22,58 +22,61 @@ const (
 	flagWorkDir      = "work-dir"
 )
 
+func rootFlags() []cli.Flag {
+	return []cli.Flag{
+		&cli.StringFlag{
+			Name:      flagWorkDir,
+			Aliases:   []string{"w"},
+			Usage:     "The path to a directory where working files will be written",
+			TakesFile: true,
+			Value:     util.GetOtelcWorkDir(),
+		},
+		&cli.BoolFlag{
+			Name:    "debug",
+			Aliases: []string{"d"},
+			Sources: cli.EnvVars(util.EnvOtelcDebug),
+			Usage:   "Enable debug mode",
+			Value:   false,
+		},
+		&cli.StringFlag{
+			Name:      "rules",
+			Usage:     "The path to the rules configuration file",
+			TakesFile: true,
+			Value:     "",
+		},
+		&cli.StringFlag{
+			Name:    "profile-path",
+			Sources: cli.EnvVars(envProfilePath),
+			Usage:   "Directory for profiling output",
+			Hidden:  true,
+		},
+		&cli.StringSliceFlag{
+			Name:    "profile",
+			Sources: cli.EnvVars(envEnabledProfiles),
+			Usage:   "Enable profiling: cpu, heap, trace (repeatable)",
+			Hidden:  true,
+		},
+		&cli.BoolFlag{
+			Name:    "profile-summary",
+			Sources: cli.EnvVars("OTELC_PROFILE_SUMMARY"),
+			Usage:   "Merge profile files into one per type after build completes",
+			Hidden:  true,
+		},
+		&cli.BoolFlag{
+			Name:    "stats",
+			Sources: cli.EnvVars(util.EnvOtelcStats),
+			Usage:   "Log per-tool wall-clock duration for toolexec commands",
+			Hidden:  true,
+		},
+	}
+}
+
 func main() {
 	app := cli.Command{
 		Name:        "otelc",
 		Usage:       "OpenTelemetry Go Compile-Time Instrumentation Tool",
 		HideVersion: true,
-		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:      flagWorkDir,
-				Aliases:   []string{"w"},
-				Usage:     "The path to a directory where working files will be written",
-				TakesFile: true,
-				Value:     util.GetOtelcWorkDir(),
-			},
-			&cli.BoolFlag{
-				Name:    "debug",
-				Aliases: []string{"d"},
-				Sources: cli.EnvVars(util.EnvOtelcDebug),
-				Usage:   "Enable debug mode",
-				Value:   false,
-			},
-			&cli.StringFlag{
-				Name:      "rules",
-				Aliases:   []string{"rules"},
-				Usage:     "The path to the rules configuration file",
-				TakesFile: true,
-				Value:     "",
-			},
-			&cli.StringFlag{
-				Name:    "profile-path",
-				Sources: cli.EnvVars(envProfilePath),
-				Usage:   "Directory for profiling output",
-				Hidden:  true,
-			},
-			&cli.StringSliceFlag{
-				Name:    "profile",
-				Sources: cli.EnvVars(envEnabledProfiles),
-				Usage:   "Enable profiling: cpu, heap, trace (repeatable)",
-				Hidden:  true,
-			},
-			&cli.BoolFlag{
-				Name:    "profile-summary",
-				Sources: cli.EnvVars("OTELC_PROFILE_SUMMARY"),
-				Usage:   "Merge profile files into one per type after build completes",
-				Hidden:  true,
-			},
-			&cli.BoolFlag{
-				Name:    "stats",
-				Sources: cli.EnvVars(util.EnvOtelcStats),
-				Usage:   "Log per-tool wall-clock duration for toolexec commands",
-				Hidden:  true,
-			},
-		},
+		Flags:       rootFlags(),
 		Commands: []*cli.Command{
 			&commandPin,
 			&commandSetup,
