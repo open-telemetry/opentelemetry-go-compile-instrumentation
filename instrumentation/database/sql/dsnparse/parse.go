@@ -562,7 +562,7 @@ func parseOracleDSN(dsn string) DSNInfo {
 			if port == "" {
 				port = "1521"
 			}
-			dbName := strings.TrimPrefix(u.Path, "/")
+			dbName := oracleServiceName(strings.TrimPrefix(u.Path, "/"))
 			return DSNInfo{Host: host, Port: port, DBName: dbName}
 		}
 	}
@@ -571,15 +571,29 @@ func parseOracleDSN(dsn string) DSNInfo {
 		return DSNInfo{}
 	}
 	connStr := strings.TrimPrefix(dsn[atIdx+1:], "//")
+	// Easy Connect parameters start at '?' and are not part of the address.
+	if q := strings.IndexByte(connStr, '?'); q >= 0 {
+		connStr = connStr[:q]
+	}
 	var hostPort, dbName string
 	if sl := strings.IndexByte(connStr, '/'); sl >= 0 {
 		hostPort = connStr[:sl]
-		dbName = connStr[sl+1:]
+		dbName = oracleServiceName(connStr[sl+1:])
 	} else {
 		hostPort = connStr
 	}
 	host, port := oracleSplitHostPort(hostPort)
 	return DSNInfo{Host: host, Port: port, DBName: dbName}
+}
+
+// oracleServiceName returns the service name from the part of an Easy Connect
+// string after the host, which may continue with ":server_type" and
+// "/instance_name".
+func oracleServiceName(s string) string {
+	if end := strings.IndexAny(s, ":/"); end >= 0 {
+		return s[:end]
+	}
+	return s
 }
 
 func oracleSplitHostPort(hp string) (host, port string) {
