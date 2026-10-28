@@ -2,7 +2,7 @@ module go.opentelemetry.io/otelc/test/apps/fiberserver
 
 go 1.25.0
 
-require github.com/gofiber/fiber/v2 v2.52.13
+require github.com/gofiber/fiber/v2 v2.52.14
 
 require (
 	github.com/andybalholm/brotli v1.2.1 // indirect
