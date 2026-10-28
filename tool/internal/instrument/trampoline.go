@@ -7,6 +7,8 @@ import (
 	_ "embed"
 	"fmt"
 	"go/token"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -226,16 +228,26 @@ func (ip *instrumentPhase) parseHookFileCached(file string) (*dst.File, error) {
 }
 
 // findHookFile locates the file in rule.ResolvedPath defining rule's hooks
-// and returns it already parsed, since the caller needs both.
+// and returns it already parsed, since the caller needs both. The hooks are
+// linked by the import path of rule.Path, so only the files the go command
+// compiles into that package are searched: a subdirectory is another package,
+// testdata is no package at all, and test files and files starting with "." or
+// "_" are never built into it.
 func (ip *instrumentPhase) findHookFile(rule *rule.InstFuncRule) (string, *dst.File, error) {
-	files, err0 := util.ListFiles(rule.ResolvedPath)
+	entries, err0 := os.ReadDir(rule.ResolvedPath)
 	if err0 != nil {
-		return "", nil, err0
+		return "", nil, ex.Wrapf(err0, "reading hook directory %s", rule.ResolvedPath)
 	}
-	for _, file := range files {
-		if !util.IsGoFile(file) {
+	files := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !util.IsGoFile(name) || strings.HasSuffix(name, "_test.go") ||
+			strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
 			continue
 		}
+		files = append(files, filepath.Join(rule.ResolvedPath, name))
+	}
+	for _, file := range files {
 		root, err := ip.parseHookFileCached(file)
 		if err != nil {
 			return "", nil, err

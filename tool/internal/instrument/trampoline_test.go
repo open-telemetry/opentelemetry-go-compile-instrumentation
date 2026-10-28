@@ -61,6 +61,68 @@ func TestGetHookFuncPropagatesParseError(t *testing.T) {
 	require.Error(t, err)
 }
 
+// writeHookFiles writes each name -> content pair under dir, creating
+// subdirectories as needed.
+func writeHookFiles(t *testing.T, dir string, files map[string]string) {
+	t.Helper()
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	}
+}
+
+func TestFindHookFileOnlyReadsPackageDir(t *testing.T) {
+	tests := []struct {
+		name  string
+		files map[string]string
+	}{
+		{
+			// A nested v2 package declares a hook of the same name with another
+			// signature, and its directory sorts before the real hook file.
+			name: "nested package",
+			files: map[string]string{
+				"zz_hook.go": "package hook\n\nfunc BeforeA(n int) {}\n",
+				"v2/hook.go": "package hook\n\nfunc BeforeA(s string) {}\n",
+				"v2/go.mod":  "module example.com/hook/v2\n",
+			},
+		},
+		{
+			// A fixture under testdata is not part of the package and does not
+			// parse.
+			name: "testdata",
+			files: map[string]string{
+				"zz_hook.go":         "package hook\n\nfunc BeforeA(n int) {}\n",
+				"testdata/broken.go": "not valid go",
+			},
+		},
+		{
+			// The go command never builds a test file or a file starting with
+			// "_" into the package.
+			name: "ignored files",
+			files: map[string]string{
+				"hook_test.go": "package hook_test\n\nfunc BeforeA(s string) {}\n",
+				"_hook.go":     "package hook\n\nfunc BeforeA(s string) {}\n",
+				"zz_hook.go":   "package hook\n\nfunc BeforeA(n int) {}\n",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeHookFiles(t, dir, tt.files)
+
+			ip := &instrumentPhase{}
+			r := &rule.InstFuncRule{Before: "BeforeA", ResolvedPath: dir}
+			file, root, err := ip.findHookFile(r)
+			require.NoError(t, err)
+			require.NotNil(t, root)
+			assert.Equal(t, filepath.Join(dir, "zz_hook.go"), file)
+		})
+	}
+}
+
 func TestMaterializeTemplateClonesIndependently(t *testing.T) {
 	ip1 := &instrumentPhase{target: &dst.File{}}
 	require.NoError(t, ip1.materializeTemplate())
