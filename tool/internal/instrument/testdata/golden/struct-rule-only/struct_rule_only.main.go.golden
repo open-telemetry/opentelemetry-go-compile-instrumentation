@@ -3,4 +3,5 @@
 
 package main
 
+//line /golden/work/main.go:6
 type T struct{ NewField string }
