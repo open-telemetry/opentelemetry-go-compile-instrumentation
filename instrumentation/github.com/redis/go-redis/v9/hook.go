@@ -34,6 +34,8 @@ const (
 	redisSetNameOption   = "setname"
 	redisHelloAuthArgN   = 2
 	redisQueryTextRedact = "?"
+	redisStatementLimit  = 1024
+	redisTruncatedSuffix = "... [truncated]"
 )
 
 func initInstrumentation() {
@@ -162,6 +164,9 @@ func getRedisV9Statement(cmd redis.Cmder) string {
 			continue
 		}
 		b = redisV9AppendArg(b, arg)
+		if len(b) > redisStatementLimit {
+			break
+		}
 	}
 
 	if err := cmd.Err(); err != nil && !errors.Is(err, redis.Nil) {
@@ -169,7 +174,22 @@ func getRedisV9Statement(cmd redis.Cmder) string {
 		b = append(b, err.Error()...)
 	}
 
-	return string(b)
+	stmt := string(b)
+	if len(stmt) > redisStatementLimit {
+		contentLimit := redisStatementLimit - len(redisTruncatedSuffix)
+		return truncateToUTF8Boundary(stmt, contentLimit) + redisTruncatedSuffix
+	}
+	return stmt
+}
+
+func truncateToUTF8Boundary(content string, limit int) string {
+	if len(content) <= limit {
+		return content
+	}
+	for limit > 0 && content[limit]&0xc0 == 0x80 {
+		limit--
+	}
+	return content[:limit]
 }
 
 // redisV9CredentialRedactRange returns a half-open index range of args that

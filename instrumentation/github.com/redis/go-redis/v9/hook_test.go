@@ -7,9 +7,11 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
@@ -181,13 +183,70 @@ func TestGetRedisV9Statement_RedactsCredentials(t *testing.T) {
 			cmd:      redis.NewCmd(context.Background(), "get", "auth", "token"),
 			expected: "get auth token",
 		},
+		{
+			name:     "oversized key is truncated to redisStatementLimit",
+			cmd:      redis.NewCmd(context.Background(), "get", strings.Repeat("x", 2000)),
+			expected: "get " + strings.Repeat("x", redisStatementLimit-len("get ")-len(redisTruncatedSuffix)) + redisTruncatedSuffix,
+		},
+		{
+			name: "multibyte utf8 string boundary is preserved when truncated",
+			// "\u4e16\u754c" is 6 bytes (3 bytes each)
+			cmd: redis.NewCmd(context.Background(), "get", strings.Repeat("\u4e16\u754c", 500)),
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := getRedisV9Statement(tt.cmd)
-			assert.Equal(t, tt.expected, result)
+			if tt.expected != "" {
+				assert.Equal(t, tt.expected, result)
+			}
+			assert.LessOrEqual(t, len(result), redisStatementLimit)
+			assert.True(t, utf8.ValidString(result), "result must always be valid UTF-8")
 			assert.NotContains(t, result, "s3cret", "the password must never reach db.query.text")
+		})
+	}
+}
+
+func TestTruncateToUTF8Boundary(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  string
+		limit    int
+		expected string
+	}{
+		{
+			name:     "no truncation needed",
+			content:  "hello",
+			limit:    10,
+			expected: "hello",
+		},
+		{
+			name:     "ascii truncation",
+			content:  "hello world",
+			limit:    5,
+			expected: "hello",
+		},
+		{
+			name:     "does not split multibyte utf-8 rune",
+			// "世界" is 6 bytes: \xe4\xb8\x96 (3 bytes) and \xe7\x95\x8c (3 bytes)
+			content:  "世界",
+			limit:    4, // inside second rune
+			expected: "世", // steps back to first rune
+		},
+		{
+			name:     "does not split first multibyte utf-8 rune",
+			content:  "世界",
+			limit:    2, // inside first rune
+			expected: "",  // steps back to start
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actual := truncateToUTF8Boundary(tt.content, tt.limit)
+			assert.Equal(t, tt.expected, actual)
+			assert.True(t, utf8.ValidString(actual))
 		})
 	}
 }
