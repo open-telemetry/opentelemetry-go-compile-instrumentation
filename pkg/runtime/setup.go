@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"math"
 	"os"
 	"os/signal"
 	"strings"
@@ -73,7 +74,11 @@ func Logger() *slog.Logger {
 	return logger
 }
 
-// logLevel returns the log level from environment variable
+// levelNone is above every slog level, so a handler set to it logs nothing.
+const levelNone = slog.Level(math.MaxInt)
+
+// logLevel returns the log level from OTEL_LOG_LEVEL. Logging is off unless the
+// variable is set to a known level.
 func logLevel() slog.Level {
 	levelStr := strings.ToLower(strings.TrimSpace(os.Getenv("OTEL_LOG_LEVEL")))
 	switch levelStr {
@@ -86,7 +91,7 @@ func logLevel() slog.Level {
 	case "error":
 		return slog.LevelError
 	default:
-		return slog.LevelInfo
+		return levelNone
 	}
 }
 
