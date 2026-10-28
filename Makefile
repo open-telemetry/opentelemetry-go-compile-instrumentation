@@ -529,7 +529,14 @@ benchmark/threshold: build ## Enforce absolute otelc overhead ceiling (fails if 
 # when Go compiles the test packages, the embed will fail.
 
 test: ## Run all tests (unit + integration + e2e)
-test: test-unit test-integration test-e2e
+test: test-bundle-workflows test-unit test-integration test-e2e
+
+.PHONY: test-bundle-workflows
+test-bundle-workflows: ## Check bundle workflow scripts and Git regression fixtures
+	@set -euo pipefail
+	@for script in .github/scripts/*bundle*.sh; do bash -n "$$script"; done
+	@shellcheck .github/scripts/*bundle*.sh
+	@bash .github/scripts/test-bundle-workflows.sh
 
 test-unit: test-unit/tool test-unit/pkg test-unit/instrumentation test-unit/demo test-unit/helper ## Run all unit tests (tool + pkg + demo + test helpers)
 

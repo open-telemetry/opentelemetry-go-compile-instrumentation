@@ -1,215 +1,126 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Copyright The OpenTelemetry Authors
 # SPDX-License-Identifier: Apache-2.0
 
-set -EeufCo pipefail
+set -o errexit
+set -o nounset
+set -o pipefail
 
-# Auto-resolve pull request merge conflicts that are limited to
-# tool/data/otelc-bundle.tgz.
-#
-# The bundle is a binary archive regenerated from pkg/ and instrumentation/ on
-# almost every change, and git cannot 3-way merge binary files, so open pull
-# requests frequently hit "This branch has conflicts that must be resolved" on
-# it. For each conflicted pull request we merge origin/main locally: the custom
-# 'otelc-bundle' merge driver (.gitattributes + .github/scripts/merge-bundle.sh)
-# auto-resolves the bundle, and any other conflict still fails the merge. On
-# success we regenerate the bundle from the merged sources (make package) and
-# push a single commit back to the branch, which clears GitHub's server-side
-# conflict indicator.
-#
-# Fork pull requests cannot be pushed to at all (the App is not installed on
-# forks); for those we post a one-time (deduplicated) comment with manual
-# instructions instead. Fork code is never checked out or executed here.
-#
-# The push is made with a GitHub App installation token rather than
-# GITHUB_TOKEN, so the normal pull_request workflows are triggered on the new
-# head and re-report the required status checks automatically.
-#
-# Required environment variables:
-#   APP_SLUG  - slug reported by actions/create-github-app-token
-#   GH_TOKEN  - GitHub App installation token with contents:write and
-#               pull-requests:write permissions
-#   REPO      - owner/name of the repository to operate on
-#
-# Optional environment variables:
-#   DRY_RUN   - set to "true" to log the planned actions without pushing or
-#               commenting; useful for testing
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
+readonly HOURLY_LIMIT=10
+WORK_DIR=''
 
-: "${APP_SLUG:?APP_SLUG must be set}"
-: "${GH_TOKEN:?GH_TOKEN must be set}"
-: "${REPO:?REPO must be set}"
-: "${DRY_RUN:=false}"
-
-BUNDLE="tool/data/otelc-bundle.tgz"
-MARKER="<!-- otelc-bundle-conflict-help -->"
-
-# Installation tokens cannot call /user, so resolve the App's public bot user
-# from the slug emitted alongside the token.
-bot_login="${APP_SLUG}[bot]"
-bot_id="$(gh api "users/${bot_login}" --jq '.id')"
-[[ "${bot_id}" =~ ^[0-9]+$ ]] || {
-  echo "cannot resolve the bot identity for ${bot_login}" >&2
-  exit 1
+cleanup() {
+  if [[ -n "${WORK_DIR}" ]]; then
+    git worktree remove --force "${WORK_DIR}/checkout" >/dev/null 2>&1 || true
+    rm -rf "${WORK_DIR}"
+  fi
 }
-git config user.name "${bot_login}"
-git config user.email "${bot_id}+${bot_login}@users.noreply.github.com"
+trap cleanup EXIT
 
-git config merge.otelc-bundle.name "Keep current otelc-bundle.tgz (regenerate with make package)"
-git config merge.otelc-bundle.driver ".github/scripts/merge-bundle.sh %A"
+recent_requests() {
+  local runs id jobs prior requests='[]'
+  # A scan starts within one hour and lasts at most ten minutes. Three hours covers the budget window.
+  runs="$(gh api --method GET "repos/${REPO}/actions/workflows/autofix-bundle-conflicts.yaml/runs" \
+    -f branch=main -f "created=>=$2" -f per_page=100 --paginate --slurp \
+    | jq -ce --argjson current "${RUN_ID}" '
+      if type == "array" and length > 0 and
+        all(.[]; (.total_count | type) == "number" and .total_count <= 1000) then
+        [.[].workflow_runs[]] as $runs |
+        if ($runs | length) != (map(.total_count) | max) then
+          error("Incomplete workflow run pages")
+        else [$runs[] | select(.id != $current) | .id] end
+      else error("Cannot verify the repair budget") end')" || return 1
+  while IFS= read -r id; do
+    [[ "${id}" =~ ^[1-9][0-9]*$ ]] || return 1
+    jobs="$(gh api "repos/${REPO}/actions/runs/${id}/attempts/1/jobs?per_page=100" --paginate --slurp)" || return 1
+    prior="$(jq -ce --arg since "$1" '
+      if type == "array" and length > 0 and
+        all(.[]; (.jobs | type) == "array" and (.total_count | type) == "number") then .
+      else error("Missing workflow job pages") end |
+      [.[].jobs[]] as $jobs |
+      if ($jobs | length) != (map(.total_count) | max) then
+        error("Incomplete workflow job pages")
+      else [$jobs[] | .name | capture("^Bundle repair #(?<pr>[1-9][0-9]*) / ").pr | tonumber] | unique as $prs |
+      if ($prs | length) == 0 then [] else
+        [$jobs[] | select(.name == "Select bundle repairs") | .completed_at] as $times |
+        if ($times | length) != 1 or ($times[0] | type) != "string" then
+          error("Incomplete repair selection history")
+        elif $times[0] >= $since then $prs else [] end
+      end end' <<<"${jobs}")" || return 1
+    requests="$(jq -cn --argjson previous "${requests}" --argjson added "${prior}" '$previous + $added')" || return 1
+  done < <(jq -r '.[]' <<<"${runs}")
+  printf '%s\n' "${requests}"
+}
 
-# Pin the merge-driver policy in $GIT_DIR/info/attributes, which takes
-# precedence over any .gitattributes checked out from the PR: only the bundle
-# may use the custom driver, everything else keeps git's default merge
-# behavior. Without this a same-repository PR could map its own source files to
-# the driver and have real conflicts silently resolved in its favor.
-git_dir="$(git rev-parse --git-dir)"
-mkdir -p "${git_dir}/info"
-printf '%s\n%s\n' '* !merge' 'tool/data/otelc-bundle.tgz merge=otelc-bundle' \
-  >"${git_dir}/info/attributes"
-
-git fetch --force origin main
-
-prs="$(gh pr list --repo "${REPO}" --state open --limit 200 \
-  --json number,isDraft,mergeable \
-  --jq '.[] | select(.isDraft == false and .mergeable == "CONFLICTING") | .number')"
-
-if [[ -z "${prs}" ]]; then
-  echo "No pull requests are conflicted on ${BUNDLE}; nothing to do."
-  exit 0
-fi
-
-while IFS= read -r num; do
-  echo "::group::PR #${num}"
-
-  meta="$(gh pr view "${num}" --repo "${REPO}" \
-    --json state,mergeable,isCrossRepository,headRefName)"
-  state="$(jq -r .state <<<"${meta}")"
-  mergeable="$(jq -r .mergeable <<<"${meta}")"
-  cross="$(jq -r .isCrossRepository <<<"${meta}")"
-  branch="$(jq -r .headRefName <<<"${meta}")"
-
-  if [[ "${state}" != "OPEN" || "${mergeable}" != "CONFLICTING" ]]; then
-    echo "state=${state} mergeable=${mergeable}; skipping"
-    echo "::endgroup::"
-    continue
+main() {
+  : "${REPO:?REPO must be set}"
+  : "${GH_TOKEN:?GH_TOKEN must be set}"
+  : "${RUN_ID:?RUN_ID must be set}"
+  : "${GITHUB_OUTPUT:?GITHUB_OUTPUT must be set}"
+  printf 'prs=[]\n' >>"${GITHUB_OUTPUT}"
+  [[ "${REPO}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ && "${RUN_ID}" =~ ^[1-9][0-9]*$ ]]
+  local since lookback run requests count remaining selected='[]'
+  since="$(jq -nr 'now - 3600 | strftime("%Y-%m-%dT%H:%M:%SZ")')"
+  lookback="$(jq -nr 'now - 10800 | strftime("%Y-%m-%dT%H:%M:%SZ")')"
+  run="$(gh api "repos/${REPO}/actions/runs/${RUN_ID}")"
+  if ! jq -e --arg since "${since}" '.created_at >= $since and .run_attempt == 1' <<<"${run}" >/dev/null; then
+    printf 'Start a new scanner run. This run is stale or is a retry.\n' >&2
+    return 1
+  fi
+  requests="$(recent_requests "${since}" "${lookback}")"
+  count="$(jq 'length' <<<"${requests}")"
+  remaining=$((HOURLY_LIMIT - count))
+  if ((remaining <= 0)); then
+    printf 'Automatic repair limit reached: %s requests in the last hour.\n' "${count}"
+    return
   fi
 
-  if [[ "${cross}" == "true" ]]; then
-    # Fork PR: never check out or execute fork code, and the App's token cannot
-    # push to the fork. Post a one-time comment with manual instructions.
-    # Capture the bodies into a variable instead of piping into grep: with
-    # pipefail, grep exiting early on a match would kill the pipeline.
-    comments="$(gh pr view "${num}" --repo "${REPO}" --json comments --jq '.comments[].body')"
-    if [[ "${comments}" == *"${MARKER}"* ]]; then
-      echo "help comment already present; not reposting"
-    elif [[ "${DRY_RUN}" == "true" ]]; then
-      echo "dry run: would post a one-time help comment"
-    else
-      echo "posting help comment"
-      body="$(cat <<'EOF'
-<!-- otelc-bundle-conflict-help -->
-This fork pull request conflicts with `main`. The bot cannot push to forks, but
-a maintainer can comment `/regenerate-bundle` to build an up-to-date archive in
-a credential-free job and attach it to the workflow run. After downloading the
-artifact, merge `main`, replace the bundle, and push the result:
-
-```sh
-git fetch origin main
-git merge origin/main   # run `make setup-git` once so the bundle does not block this
-# Replace tool/data/otelc-bundle.tgz with the downloaded artifact.
-git add tool/data/otelc-bundle.tgz && git commit
-git push <YOUR_FORK> HEAD
-```
-
-See [Keeping the bundle in sync](https://github.com/__REPO__/blob/main/CONTRIBUTING.md#keeping-the-bundle-in-sync).
-EOF
-)"
-      gh pr comment "${num}" --repo "${REPO}" --body "${body//__REPO__/${REPO}}"
+  git fetch --no-prune --no-tags origin 'refs/heads/main:refs/remotes/origin/main'
+  local base prs
+  base="$(git rev-parse refs/remotes/origin/main)"
+  prs="$(gh pr list --repo "${REPO}" --state open --limit 200 \
+    --json number,isDraft,mergeable,baseRefName \
+    --jq '.[] | select(.isDraft == false and .mergeable == "CONFLICTING" and .baseRefName == "main") | .number')"
+  WORK_DIR="$(mktemp -d)"
+  local num meta head
+  while IFS= read -r num; do
+    [[ -n "${num}" ]] || continue
+    [[ "${num}" =~ ^[1-9][0-9]*$ ]]
+    if jq -e --argjson pr "${num}" 'any(.[]; . == $pr)' <<<"${requests}" >/dev/null; then
+      printf 'PR #%s has a request in the last hour. Skipping.\n' "${num}"
+      continue
     fi
-    echo "::endgroup::"
-    continue
-  fi
+    meta="$(gh api "repos/${REPO}/pulls/${num}")"
+    if ! jq -e --arg repository "${REPO}" --arg base "${base}" \
+      '.state == "open" and .draft != true and .base.ref == "main" and .base.sha == $base
+       and .head.repo != null and (.head.repo.full_name == $repository or .maintainer_can_modify == true)' \
+      <<<"${meta}" >/dev/null; then
+      printf 'PR #%s is not eligible for automatic repair.\n' "${num}"
+      continue
+    fi
+    head="$(jq -r '.head.sha' <<<"${meta}")"
+    [[ "${head}" =~ ^[0-9a-f]{40}$ ]]
+    git fetch --no-prune --no-tags origin "refs/pull/${num}/head"
+    [[ "$(git rev-parse FETCH_HEAD)" == "${head}" ]] || continue
+    git -c core.hooksPath=/dev/null worktree add --detach "${WORK_DIR}/checkout" "${head}"
+    if bash "${SCRIPT_DIR}/merge-bundle-branch.sh" "${WORK_DIR}/checkout" "${base}"; then
+      if [[ "${DRY_RUN:-false}" == 'true' ]]; then
+        printf 'Dry run: would request bundle repair for PR #%s.\n' "${num}"
+      else
+        selected="$(jq -c --argjson pr "${num}" '. + [$pr]' <<<"${selected}")"
+        printf 'Selected bundle repair for PR #%s.\n' "${num}"
+      fi
+      remaining=$((remaining - 1))
+    else
+      printf 'PR #%s has conflicts outside the bundle. Skipping.\n' "${num}"
+    fi
+    git worktree remove --force "${WORK_DIR}/checkout"
+    ((remaining > 0)) || break
+  done <<<"${prs}"
+  printf 'prs=%s\n' "${selected}" >>"${GITHUB_OUTPUT}"
+}
 
-  # Same-repository branch. Reset the shared working tree between iterations;
-  # this checkout is a throwaway CI workspace, not a developer machine.
-  git merge --abort >/dev/null 2>&1 || true
-  git reset --hard --quiet
-  git clean -ffdxq
-
-  if ! git fetch --force origin "refs/heads/${branch}:refs/remotes/origin/${branch}"; then
-    echo "cannot fetch branch '${branch}' (deleted?); skipping"
-    echo "::endgroup::"
-    continue
-  fi
-  git checkout --detach --force "refs/remotes/origin/${branch}"
-
-  # Re-check just before acting: the listing can be stale.
-  state="$(gh pr view "${num}" --repo "${REPO}" --json state --jq .state)"
-  if [[ "${state}" != "OPEN" ]]; then
-    echo "PR is now ${state}; skipping"
-    echo "::endgroup::"
-    continue
-  fi
-
-  # The custom driver auto-resolves only the bundle; any other conflict makes
-  # the merge fail, meaning this PR has a real conflict that must stay with the
-  # author.
-  if ! git merge --no-ff --no-commit origin/main >/dev/null; then
-    echo "conflicts beyond ${BUNDLE}; skipping"
-    git merge --abort >/dev/null 2>&1 || true
-    echo "::endgroup::"
-    continue
-  fi
-
-  if ! make package; then
-    echo "'make package' failed on the merged sources (semantic conflict); skipping"
-    git merge --abort >/dev/null 2>&1 || true
-    git reset --hard --quiet
-    git clean -ffdxq
-    echo "::endgroup::"
-    continue
-  fi
-
-  git add -- "${BUNDLE}"
-  # Only skip when there is no merge in progress AND nothing is staged: with a
-  # merge in progress the index may equal HEAD (e.g. the only changes were
-  # already contained in the branch) yet the merge commit still needs to be
-  # recorded so GitHub re-evaluates the conflict.
-  if ! git rev-parse -q --verify MERGE_HEAD >/dev/null \
-    && git diff --quiet --cached; then
-    echo "nothing to merge and nothing staged; nothing to push"
-    git merge --abort >/dev/null 2>&1 || true
-    echo "::endgroup::"
-    continue
-  fi
-
-  if [[ "${DRY_RUN}" == "true" ]]; then
-    echo "dry run: would commit and push 'chore: merge main and regenerate ${BUNDLE}' to '${branch}'"
-    git merge --abort >/dev/null 2>&1 || true
-    git reset --hard --quiet
-    git clean -ffdxq
-    echo "::endgroup::"
-    continue
-  fi
-
-  git commit -m "chore: merge main and regenerate ${BUNDLE}"
-
-  # Re-check right before pushing so we never resurrect a branch whose PR was
-  # merged (and possibly auto-deleted) while we were working.
-  state="$(gh pr view "${num}" --repo "${REPO}" --json state --jq .state)"
-  if [[ "${state}" != "OPEN" ]]; then
-    echo "PR is now ${state}; not pushing"
-    echo "::endgroup::"
-    continue
-  fi
-
-  if git push origin "HEAD:refs/heads/${branch}"; then
-    # The App token triggers the normal pull_request workflows on the new
-    # head, so the required status checks re-report themselves.
-    echo "pushed merge commit to '${branch}'"
-  else
-    echo "push rejected (branch moved meanwhile); skipping"
-  fi
-  echo "::endgroup::"
-done <<<"${prs}"
+main "$@"
