@@ -5,6 +5,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -33,6 +34,12 @@ func main() {
 			return c.SendStatus(fiber.StatusBadRequest)
 		}
 		return c.SendStatus(code)
+	})
+
+	// Returns an error instead of writing a status, so the default error
+	// handler turns it into a 500 after the instrumented (*App).next returns.
+	app.Get("/fail", func(c *fiber.Ctx) error {
+		return errors.New("handler failed")
 	})
 
 	addr := fmt.Sprintf(":%s", *port)

@@ -182,6 +182,12 @@ func responseStatus(c *fiber.Ctx, app *fiber.App, nextErr error) (int, bool) {
 // usesDefaultErrorHandler reports whether app still maps errors to statuses the
 // way responseStatus assumes. Function values are not comparable, so the check
 // is on the code pointer.
+//
+// Only the root app's handler can be checked. A sub-app mounted with
+// app.Mount can set its own Config.ErrorHandler, and (*App).ErrorHandler
+// dispatches to it by path prefix, but (*App).next only sees the root App and
+// the mount table is unexported. For routes under such a sub-app, the status
+// recorded here can differ from what the sub-app's handler writes.
 func usesDefaultErrorHandler(app *fiber.App) bool {
 	if app == nil {
 		return false

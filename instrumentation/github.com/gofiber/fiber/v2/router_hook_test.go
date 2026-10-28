@@ -20,32 +20,8 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 
-	"go.opentelemetry.io/otelc/pkg/hook"
+	"go.opentelemetry.io/otelc/pkg/hook/hooktest"
 )
-
-type mockHookContext struct {
-	hook.HookContext
-	params  []any
-	keyData map[string]any
-}
-
-func newMockHookContext(params ...any) *mockHookContext {
-	return &mockHookContext{
-		params:  params,
-		keyData: make(map[string]any),
-	}
-}
-
-func (m *mockHookContext) GetParam(i int) any {
-	if i < len(m.params) {
-		return m.params[i]
-	}
-	return nil
-}
-
-func (m *mockHookContext) SetKeyData(key string, val any) { m.keyData[key] = val }
-
-func (m *mockHookContext) GetKeyData(key string) any { return m.keyData[key] }
 
 // newRecordingTracer installs a real SDK tracer so the hooks exercise the same
 // code path they do in a build, and returns the recorder holding finished spans.
@@ -98,7 +74,7 @@ func TestBeforeAfterNextCreatesServerSpan(t *testing.T) {
 	spans := runRequest(t, recorder, fiber.MethodGet, "/user/42", func(app *fiber.App) {
 		app.Get("/user/:id", func(c *fiber.Ctx) error {
 			// Stand in for the trampoline around (*App).next.
-			ictx := newMockHookContext(app, c)
+			ictx := hooktest.NewMockHookContext(app, c)
 			BeforeNext(ictx, app, c)
 			err := c.SendString("ok")
 			AfterNext(ictx, true, nil)
@@ -127,7 +103,7 @@ func TestMiddlewareProducesExactlyOneSpan(t *testing.T) {
 
 	spans := runRequest(t, recorder, fiber.MethodGet, "/user/42", func(app *fiber.App) {
 		app.Use(func(c *fiber.Ctx) error {
-			ictx := newMockHookContext(app, c)
+			ictx := hooktest.NewMockHookContext(app, c)
 			BeforeNext(ictx, app, c)
 			err := c.Next()
 			AfterNext(ictx, true, nil)
@@ -135,7 +111,7 @@ func TestMiddlewareProducesExactlyOneSpan(t *testing.T) {
 		})
 		app.Get("/user/:id", func(c *fiber.Ctx) error {
 			// The re-entrant frame (*Ctx).Next produces.
-			ictx := newMockHookContext(app, c)
+			ictx := hooktest.NewMockHookContext(app, c)
 			BeforeNext(ictx, app, c)
 			err := c.SendString("ok")
 			AfterNext(ictx, true, nil)
@@ -153,7 +129,7 @@ func TestHandlerErrorIsRecordedAsFiveHundred(t *testing.T) {
 
 	spans := runRequest(t, recorder, fiber.MethodGet, "/fail", func(app *fiber.App) {
 		app.Get("/fail", func(c *fiber.Ctx) error {
-			ictx := newMockHookContext(app, c)
+			ictx := hooktest.NewMockHookContext(app, c)
 			BeforeNext(ictx, app, c)
 			AfterNext(ictx, true, handlerErr)
 			return handlerErr
@@ -178,7 +154,7 @@ func TestFiberErrorKeepsItsOwnStatus(t *testing.T) {
 
 	spans := runRequest(t, recorder, fiber.MethodGet, "/missing", func(app *fiber.App) {
 		app.Get("/missing", func(c *fiber.Ctx) error {
-			ictx := newMockHookContext(app, c)
+			ictx := hooktest.NewMockHookContext(app, c)
 			BeforeNext(ictx, app, c)
 			AfterNext(ictx, false, notFound)
 			return notFound
@@ -200,7 +176,7 @@ func TestDisabledInstrumentationCreatesNoSpan(t *testing.T) {
 
 	spans := runRequest(t, recorder, fiber.MethodGet, "/user/42", func(app *fiber.App) {
 		app.Get("/user/:id", func(c *fiber.Ctx) error {
-			ictx := newMockHookContext(app, c)
+			ictx := hooktest.NewMockHookContext(app, c)
 			BeforeNext(ictx, app, c)
 			err := c.SendString("ok")
 			AfterNext(ictx, true, nil)
@@ -217,7 +193,7 @@ func TestSpanIsVisibleToTheHandler(t *testing.T) {
 
 	spans := runRequest(t, recorder, fiber.MethodGet, "/user/42", func(app *fiber.App) {
 		app.Get("/user/:id", func(c *fiber.Ctx) error {
-			ictx := newMockHookContext(app, c)
+			ictx := hooktest.NewMockHookContext(app, c)
 			BeforeNext(ictx, app, c)
 			// Anything the handler calls must nest under the server span.
 			seen = trace.SpanContextFromContext(c.UserContext())
@@ -243,7 +219,7 @@ func TestIncomingTraceContextIsContinued(t *testing.T) {
 
 	app := fiber.New()
 	app.Get("/user/:id", func(c *fiber.Ctx) error {
-		ictx := newMockHookContext(app, c)
+		ictx := hooktest.NewMockHookContext(app, c)
 		BeforeNext(ictx, app, c)
 		err := c.SendString("ok")
 		AfterNext(ictx, true, nil)
@@ -300,7 +276,7 @@ func TestCustomErrorHandlerLeavesStatusUnrecorded(t *testing.T) {
 		},
 	})
 	app.Get("/fail", func(c *fiber.Ctx) error {
-		ictx := newMockHookContext(app, c)
+		ictx := hooktest.NewMockHookContext(app, c)
 		BeforeNext(ictx, app, c)
 		AfterNext(ictx, true, handlerErr)
 		return handlerErr

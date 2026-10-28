@@ -19,6 +19,11 @@ groups:
   #   - a 5xx, or a handler error with no knowable status, sets the span
   #     status to Error and records the error as a span exception
   #
+  # Known limitation: the status is only knowable when the root app uses
+  # fiber's default error handler. A sub-app mounted with `app.Mount` that sets
+  # its own `ErrorHandler` cannot be detected through fiber's public API, so for
+  # routes under it the recorded status may not match the response.
+  #
   # Every attribute is standard upstream HTTP telemetry, referenced with `ref:`.
   # ---------------------------------------------------------------------------
 

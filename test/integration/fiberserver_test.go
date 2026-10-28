@@ -26,25 +26,38 @@ func TestFiberServer(t *testing.T) {
 	f.Start("fiberserver", fmt.Sprintf("-port=%d", port))
 	testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", port))
 
-	// Send request to Fiber server endpoint
-	url := fmt.Sprintf("http://127.0.0.1:%d/hello/world", port)
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
-	require.NoError(t, err)
+	get := func(t *testing.T, path string) int {
+		t.Helper()
+		url := fmt.Sprintf("http://127.0.0.1:%d%s", port, path)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+		require.NoError(t, err)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
 
-	resp, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	require.Equal(t, http.StatusOK, resp.StatusCode)
+	t.Run("ok", func(t *testing.T) {
+		require.Equal(t, http.StatusOK, get(t, "/hello/world"))
+		f.WaitForSpans(1)
 
-	// Wait for span from the Fiber server to be flushed
-	f.WaitForSpans(1)
-
-	f.RequireTraceCount(1)
-	f.RequireSpansPerTrace(1)
-
-	fiberServerSpan := testutil.RequireSpan(t, f.Traces(), testutil.IsServer, func(s ptrace.Span) bool {
-		return s.Name() == "GET /hello/:name"
+		span := testutil.RequireSpan(t, f.Traces(), testutil.IsServer, testutil.HasName("GET /hello/:name"))
+		require.False(t, span.TraceID().IsEmpty(), "Fiber server span must have a valid TraceID")
+		testutil.RequireAttribute(t, span, "http.response.status_code", int64(http.StatusOK))
+		require.NotEqual(t, ptrace.StatusCodeError, span.Status().Code())
 	})
 
-	require.False(t, fiberServerSpan.TraceID().IsEmpty(), "Fiber server span must have a valid TraceID")
+	// The handler returns an error, so the status comes from AfterNext reading
+	// the returned error, not from the response.
+	t.Run("handler error is 500", func(t *testing.T) {
+		require.Equal(t, http.StatusInternalServerError, get(t, "/fail"))
+		f.WaitForSpans(2)
+
+		span := testutil.RequireSpan(t, f.Traces(), testutil.IsServer, testutil.HasName("GET /fail"))
+		testutil.RequireAttribute(t, span, "http.response.status_code", int64(http.StatusInternalServerError))
+		require.Equal(t, ptrace.StatusCodeError, span.Status().Code())
+	})
+
+	f.RequireTraceCount(2)
+	f.RequireSpansPerTrace(1)
 }
