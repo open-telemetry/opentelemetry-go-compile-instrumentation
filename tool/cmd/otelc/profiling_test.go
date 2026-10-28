@@ -211,9 +211,23 @@ func TestIsSubPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, isSubPath(tt.target, tt.base))
+			got, err := isSubPath(tt.target, tt.base)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, got)
 		})
 	}
+}
+
+func TestIsSubPath_ResolutionErrorFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	// A regular file where a directory component is expected: EvalSymlinks on
+	// anything beneath it fails with ENOTDIR, not ErrNotExist.
+	notADir := filepath.Join(dir, "not-a-dir")
+	require.NoError(t, os.WriteFile(notADir, []byte("x"), 0o644))
+	target := filepath.Join(notADir, "profiles")
+
+	_, err := isSubPath(target, dir)
+	require.Error(t, err)
 }
 
 // TestIsSubPath_ResolvesSymlinkedAncestor covers a real symbolic link
@@ -233,20 +247,30 @@ func TestIsSubPath_ResolvesSymlinkedAncestor(t *testing.T) {
 
 	t.Run("base through the link, target through the real path, target not yet created", func(t *testing.T) {
 		target := filepath.Join(realBuildTemp, "profiles")
-		assert.True(t, isSubPath(target, linkedBuildTemp))
+		assert.True(t, mustIsSubPath(t, target, linkedBuildTemp))
 	})
 
 	t.Run("base through the real path, target through the link, target not yet created", func(t *testing.T) {
 		target := filepath.Join(linkedBuildTemp, "profiles")
-		assert.True(t, isSubPath(target, realBuildTemp))
+		assert.True(t, mustIsSubPath(t, target, realBuildTemp))
 	})
 
 	t.Run("target through the link, fully existing", func(t *testing.T) {
-		assert.True(t, isSubPath(linkedBuildTemp, realBuildTemp))
+		assert.True(t, mustIsSubPath(t, linkedBuildTemp, realBuildTemp))
 	})
 
 	t.Run("sibling reached through the same link is still rejected", func(t *testing.T) {
 		sibling := filepath.Join(root, "real", ".otelc-build-profiles", "x")
-		assert.False(t, isSubPath(sibling, linkedBuildTemp))
+		assert.False(t, mustIsSubPath(t, sibling, linkedBuildTemp))
 	})
+}
+
+// mustIsSubPath calls isSubPath and fails the test if it returns an error,
+// so callers that only care about the containment result can assert on it
+// directly.
+func mustIsSubPath(t *testing.T, target, base string) bool {
+	t.Helper()
+	got, err := isSubPath(target, base)
+	require.NoError(t, err)
+	return got
 }

@@ -45,7 +45,11 @@ func initProfiling(ctx context.Context, cmd *cli.Command) (context.Context, erro
 
 	// Guard against placing profiles inside .otelc-build/ which Cleanup removes.
 	buildTemp := util.GetBuildTempDir()
-	if isSubPath(profilePath, buildTemp) {
+	inside, err := isSubPath(profilePath, buildTemp)
+	if err != nil {
+		return ctx, ex.Wrapf(err, "verify profile-path %q is outside the build temp directory", profilePath)
+	}
+	if inside {
 		return ctx, ex.Newf(
 			"profile-path %q must not be inside the build temp directory %q",
 			profilePath, buildTemp,
@@ -136,20 +140,26 @@ func stopProfiling(ctx context.Context, cmd *cli.Command) error {
 // existing ancestor and rejoins the nonexistent suffix unresolved, which is
 // exactly what it would resolve to once created, since a path that doesn't
 // exist yet can't itself be a symlink.
-func isSubPath(target, base string) bool {
+//
+// Returns an error if either path's deepest existing ancestor can't be
+// resolved for a reason other than not existing (e.g. a permission error, or
+// a path component that isn't a directory). Reporting that error lets the
+// caller fail with a clear cause instead of this silently treating target as
+// outside base when containment couldn't actually be verified.
+func isSubPath(target, base string) (bool, error) {
 	resolvedTarget, err := resolveExistingAncestor(target)
 	if err != nil {
-		return false
+		return false, ex.Wrapf(err, "resolve %q", target)
 	}
 	resolvedBase, err := resolveExistingAncestor(base)
 	if err != nil {
-		return false
+		return false, ex.Wrapf(err, "resolve %q", base)
 	}
 	rel, err := filepath.Rel(resolvedBase, resolvedTarget)
 	if err != nil {
-		return false
+		return false, nil
 	}
-	return rel == "." || !strings.HasPrefix(rel, "..")
+	return rel == "." || !strings.HasPrefix(rel, ".."), nil
 }
 
 // resolveExistingAncestor resolves symbolic links in path's deepest existing
