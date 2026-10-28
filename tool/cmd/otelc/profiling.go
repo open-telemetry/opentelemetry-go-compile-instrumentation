@@ -143,9 +143,11 @@ func stopProfiling(ctx context.Context, cmd *cli.Command) error {
 //
 // Returns an error if either path's deepest existing ancestor can't be
 // resolved for a reason other than not existing (e.g. a permission error, or
-// a path component that isn't a directory). Reporting that error lets the
-// caller fail with a clear cause instead of this silently treating target as
-// outside base when containment couldn't actually be verified.
+// a path component that isn't a directory), or if the two resolved paths
+// can't be compared at all (e.g. one absolute, one still relative).
+// Reporting the error lets the caller fail with a clear cause instead of
+// this silently treating target as outside base when containment couldn't
+// actually be verified.
 func isSubPath(target, base string) (bool, error) {
 	resolvedTarget, err := resolveExistingAncestor(target)
 	if err != nil {
@@ -157,7 +159,7 @@ func isSubPath(target, base string) (bool, error) {
 	}
 	rel, err := filepath.Rel(resolvedBase, resolvedTarget)
 	if err != nil {
-		return false, nil
+		return false, ex.Wrapf(err, "compute relative path from %q to %q", resolvedBase, resolvedTarget)
 	}
 	return rel == "." || !strings.HasPrefix(rel, ".."), nil
 }

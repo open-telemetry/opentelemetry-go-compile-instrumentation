@@ -201,12 +201,6 @@ func TestIsSubPath(t *testing.T) {
 			base:     base,
 			expected: false,
 		},
-		{
-			name:     "incompatible relative path error path",
-			target:   "relative/path",
-			base:     base,
-			expected: false,
-		},
 	}
 
 	for _, tt := range tests {
@@ -216,6 +210,13 @@ func TestIsSubPath(t *testing.T) {
 			assert.Equal(t, tt.expected, got)
 		})
 	}
+}
+
+func TestIsSubPath_IncompatiblePathsError(t *testing.T) {
+	base := filepath.Join(string(filepath.Separator), "path", "to", ".otelc-build")
+
+	_, err := isSubPath("relative/path", base)
+	require.Error(t, err)
 }
 
 func TestIsSubPath_ResolutionErrorFailsClosed(t *testing.T) {
