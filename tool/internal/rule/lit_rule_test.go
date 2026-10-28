@@ -185,6 +185,40 @@ field:
 			errContains: `field "Internal" is set more than once`,
 		},
 		{
+			name: "null entry in field list",
+			yaml: `
+struct_literal: net/http.Transport
+field:
+  - null
+`,
+			ruleName:    "bad",
+			wantErr:     true,
+			errContains: "field[0] cannot be empty",
+		},
+		{
+			name: "empty item in field list",
+			yaml: `
+struct_literal: net/http.Transport
+field:
+  -
+`,
+			ruleName:    "bad",
+			wantErr:     true,
+			errContains: "field[0] cannot be empty",
+		},
+		{
+			name: "empty field name",
+			yaml: `
+struct_literal: net/http.Transport
+field:
+  - name: "  "
+    value: "true"
+`,
+			ruleName:    "bad",
+			wantErr:     true,
+			errContains: "field[0].name cannot be empty",
+		},
+		{
 			name:     "invalid yaml",
 			yaml:     `{bad yaml [`,
 			ruleName: "bad",

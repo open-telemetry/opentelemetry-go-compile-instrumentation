@@ -12,11 +12,12 @@ import (
 
 func TestNewInstStructRule(t *testing.T) {
 	tests := []struct {
-		name    string
-		yaml    string
-		ruleID  string
-		wantErr bool
-		check   func(*testing.T, *InstStructRule)
+		name        string
+		yaml        string
+		ruleID      string
+		wantErr     bool
+		errContains string
+		check       func(*testing.T, *InstStructRule)
 	}{
 		{
 			name:   "minimal valid rule",
@@ -85,6 +86,41 @@ new_field:
 			yaml:    "target: main\n  bad: [unterminated",
 			wantErr: true,
 		},
+		{
+			name:        "null item in new_field",
+			ruleID:      "struct6",
+			yaml:        "target: main\nstruct: MyStruct\nnew_field:\n  - null\n",
+			wantErr:     true,
+			errContains: "new_field[0] cannot be empty",
+		},
+		{
+			name:        "empty item in new_field",
+			ruleID:      "struct7",
+			yaml:        "target: main\nstruct: MyStruct\nnew_field:\n  -\n",
+			wantErr:     true,
+			errContains: "new_field[0] cannot be empty",
+		},
+		{
+			name:        "empty field name in new_field",
+			ruleID:      "struct8",
+			yaml:        "target: main\nstruct: MyStruct\nnew_field:\n  - name: \"  \"\n    type: string\n",
+			wantErr:     true,
+			errContains: "new_field[0].name cannot be empty",
+		},
+		{
+			name:        "empty field type in new_field",
+			ruleID:      "struct9",
+			yaml:        "target: main\nstruct: MyStruct\nnew_field:\n  - name: ValidName\n    type: \"   \"\n",
+			wantErr:     true,
+			errContains: "new_field[0].type cannot be empty",
+		},
+		{
+			name:        "duplicate field name in new_field",
+			ruleID:      "struct10",
+			yaml:        "target: main\nstruct: MyStruct\nnew_field:\n  - name: DupField\n    type: string\n  - name: DupField\n    type: int\n",
+			wantErr:     true,
+			errContains: `new_field "DupField" is added more than once`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -92,6 +128,9 @@ new_field:
 			r, err := NewInstStructRule([]byte(tt.yaml), tt.ruleID)
 			if tt.wantErr {
 				require.Error(t, err)
+				if tt.errContains != "" {
+					assert.Contains(t, err.Error(), tt.errContains)
+				}
 				return
 			}
 			require.NoError(t, err)

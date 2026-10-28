@@ -51,5 +51,21 @@ func (r *InstStructRule) validate() error {
 	if strings.TrimSpace(r.Struct) == "" {
 		return ex.Newf("struct cannot be empty")
 	}
+	seen := make(map[string]bool, len(r.NewField))
+	for i, f := range r.NewField {
+		if f == nil {
+			return ex.Newf("new_field[%d] cannot be empty", i)
+		}
+		if strings.TrimSpace(f.Name) == "" {
+			return ex.Newf("new_field[%d].name cannot be empty", i)
+		}
+		if strings.TrimSpace(f.Type) == "" {
+			return ex.Newf("new_field[%d].type cannot be empty", i)
+		}
+		if seen[f.Name] {
+			return ex.Newf("new_field %q is added more than once", f.Name)
+		}
+		seen[f.Name] = true
+	}
 	return nil
 }
