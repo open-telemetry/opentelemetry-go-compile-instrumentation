@@ -3,13 +3,14 @@
 
 package main
 
+//line /golden/work/main.go:6
 import "fmt"
 
 func Handler(name string) {
 	(func() (int, error) {
 		println("handler arg:", name)
 		return fmt.Println("hello")
-	})()
+	})() /*line /golden/work/main.go:9*/
 }
 
 func main() { Handler("world") }
