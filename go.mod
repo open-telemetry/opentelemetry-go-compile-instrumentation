@@ -5,20 +5,20 @@ module go.opentelemetry.io/otelc
 
 go 1.26.0
 
-toolchain go1.26.10
+toolchain go1.27.3
 
 require (
-	github.com/bmatcuk/doublestar/v4 v4.10.0
+	github.com/bmatcuk/doublestar/v4 v4.10.3
 	github.com/dave/dst v0.28.0
 	github.com/gofrs/flock v0.13.1
 	github.com/google/go-cmp v0.7.0
 	github.com/stretchr/testify v1.12.1
-	github.com/urfave/cli/v3 v3.12.0
+	github.com/urfave/cli/v3 v3.14.0
 	github.com/valyala/fasttemplate v1.2.2
-	golang.org/x/mod v0.41.0
-	golang.org/x/sync v0.23.0
-	golang.org/x/sys v0.48.0
-	golang.org/x/tools v0.50.0
+	golang.org/x/mod v0.42.0
+	golang.org/x/sync v0.24.0
+	golang.org/x/sys v0.49.0
+	golang.org/x/tools v0.52.0
 	gotest.tools/v3 v3.5.2
 )
 
