@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"sync"
 	"testing"
 
 	"github.com/labstack/echo/v4"
@@ -382,45 +383,103 @@ func TestBeforeDefaultHTTPErrorHandler_NestedInternal5xxRecorded(t *testing.T) {
 	require.Len(t, sr.Ended()[0].Events(), 1)
 }
 
-func TestBeforeEchoServeHTTP_WrapsCustomHTTPErrorHandler(t *testing.T) {
+// findRoute runs the router the way (*Echo).ServeHTTP does, then the AfterFind
+// hook, and returns the request's Context.
+func findRoute(e *echo.Echo, method, url string, span trace.Span) echo.Context {
+	req := httptest.NewRequest(method, url, nil).
+		WithContext(trace.ContextWithSpan(context.Background(), span))
+	c := e.NewContext(req, httptest.NewRecorder())
+	e.Router().Find(method, req.URL.Path, c)
+	AfterFind(hooktest.NewMockHookContext(c))
+	return c
+}
+
+func TestAfterFind_WrappedHandlerRecordsErrorWithCustomErrorHandler(t *testing.T) {
 	sr, tr := setupContextTracer(t)
 	_, span := tr.Start(context.Background(), "GET")
-	c := newEchoContextWithRoute(t, http.MethodGet, "/users/:id", "/users/42", span)
 
 	e := echo.New()
 	var customCalled bool
-	e.HTTPErrorHandler = func(err error, ctx echo.Context) {
+	e.HTTPErrorHandler = func(_ error, c echo.Context) {
 		customCalled = true
-		_ = ctx.NoContent(http.StatusInternalServerError)
+		_ = c.NoContent(http.StatusInternalServerError)
 	}
+	e.GET("/users/:id", func(echo.Context) error { return errors.New("handler returned error") })
 
-	BeforeEchoServeHTTP(hooktest.NewMockHookContext(), e, httptest.NewRecorder(), c.Request())
-	e.HTTPErrorHandler(errors.New("handler returned error"), c)
+	c := findRoute(e, http.MethodGet, "/users/42", span)
+	err := c.Handler()(c)
+	require.Error(t, err)
+	e.HTTPErrorHandler(err, c)
 	span.End()
 
 	assert.True(t, customCalled)
 	require.Len(t, sr.Ended(), 1)
-	assert.Equal(t, codes.Error, sr.Ended()[0].Status().Code)
-	require.Len(t, sr.Ended()[0].Events(), 1)
+	ended := sr.Ended()[0]
+	assert.Equal(t, "GET /users/:id", ended.Name())
+	assert.Equal(t, codes.Error, ended.Status().Code)
+	assert.Len(t, ended.Events(), 1)
 }
 
-func TestBeforeEchoServeHTTP_WrapsOnce(t *testing.T) {
+func TestAfterFind_WrappedHandlerSkips4xx(t *testing.T) {
+	sr, tr := setupContextTracer(t)
+	_, span := tr.Start(context.Background(), "GET")
+
+	e := echo.New()
+	e.GET("/users/:id", func(echo.Context) error { return echo.ErrNotFound })
+
+	c := findRoute(e, http.MethodGet, "/users/42", span)
+	require.ErrorIs(t, c.Handler()(c), echo.ErrNotFound)
+	span.End()
+
+	require.Len(t, sr.Ended(), 1)
+	assert.Equal(t, codes.Unset, sr.Ended()[0].Status().Code)
+	assert.Empty(t, sr.Ended()[0].Events())
+}
+
+func TestAfterFind_DisabledDoesNotWrapHandler(t *testing.T) {
+	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "echo")
+	sr, tr := setupContextTracer(t)
+	_, span := tr.Start(context.Background(), "GET")
+
+	e := echo.New()
+	e.GET("/users/:id", func(echo.Context) error { return errors.New("boom") })
+
+	c := findRoute(e, http.MethodGet, "/users/42", span)
+	require.Error(t, c.Handler()(c))
+	span.End()
+
+	require.Len(t, sr.Ended(), 1)
+	assert.Equal(t, codes.Unset, sr.Ended()[0].Status().Code)
+}
+
+func TestAfterFind_ConcurrentRequestsShareEcho(t *testing.T) {
+	// Run with -race: the hooks must not write to the shared *echo.Echo.
+	sr, tr := setupContextTracer(t)
+
 	e := echo.New()
 	e.HTTPErrorHandler = func(error, echo.Context) {}
+	e.GET("/users/:id", func(echo.Context) error { return errors.New("boom") })
 
-	BeforeEchoServeHTTP(hooktest.NewMockHookContext(), e, httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
-	first := reflect.ValueOf(e.HTTPErrorHandler).Pointer()
-	BeforeEchoServeHTTP(hooktest.NewMockHookContext(), e, httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
-	assert.Equal(t, first, reflect.ValueOf(e.HTTPErrorHandler).Pointer())
-}
+	const n = 32
+	var wg sync.WaitGroup
+	for range n {
+		wg.Go(func() {
+			_, span := tr.Start(context.Background(), "GET")
+			defer span.End()
+			c := findRoute(e, http.MethodGet, "/users/42", span)
+			if err := c.Handler()(c); err != nil {
+				e.HTTPErrorHandler(err, c)
+			}
+		})
+	}
+	wg.Wait()
 
-func TestBeforeEchoServeHTTP_DisabledDoesNotWrap(t *testing.T) {
-	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "echo")
-
-	e := echo.New()
-	orig := reflect.ValueOf(e.HTTPErrorHandler).Pointer()
-	BeforeEchoServeHTTP(hooktest.NewMockHookContext(), e, httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
-	assert.Equal(t, orig, reflect.ValueOf(e.HTTPErrorHandler).Pointer())
+	require.Len(t, sr.Ended(), n)
+	for _, s := range sr.Ended() {
+		assert.Equal(t, "GET /users/:id", s.Name())
+		assert.Equal(t, codes.Error, s.Status().Code)
+		assert.Len(t, s.Events(), 1)
+	}
 }
 
 func TestRecordRequestError_IdempotentAcrossBothHooks(t *testing.T) {

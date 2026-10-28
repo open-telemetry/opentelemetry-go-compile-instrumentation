@@ -23,7 +23,7 @@ func main() {
 	e.HideBanner = true
 	e.HidePort = true
 	// Custom handler, not DefaultHTTPErrorHandler. Instrumentation must
-	// still record handler `return err` (see BeforeEchoServeHTTP).
+	// still record handler `return err` (see wrapHandler).
 	e.HTTPErrorHandler = func(err error, c echo.Context) {
 		code := http.StatusInternalServerError
 		msg := err.Error()

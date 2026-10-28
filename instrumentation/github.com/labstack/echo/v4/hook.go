@@ -4,9 +4,7 @@
 package server
 
 import (
-	"net/http"
 	"reflect"
-	"sync"
 
 	"github.com/labstack/echo/v4"
 	"go.opentelemetry.io/otel/codes"
@@ -19,8 +17,9 @@ import (
 
 // Keys stored on echo.Context. Reserved by this package.
 const (
-	routeSetKey    = "otel.echo.route.set"
-	errRecordedKey = "otel.echo.err.recorded"
+	routeSetKey       = "otel.echo.route.set"
+	errRecordedKey    = "otel.echo.err.recorded"
+	handlerWrappedKey = "otel.echo.handler.wrapped"
 )
 
 // AfterFind runs after (*Router).Find. The router has set Context.Path()
@@ -39,11 +38,12 @@ func AfterFind(ictx hook.HookContext) {
 		return
 	}
 
+	// matchedRoute compares c.Handler() with Echo's 404/405 handlers, so it
+	// must run before wrapHandler replaces it.
 	route := c.Path()
-	if route == "" || !matchedRoute(c) {
-		return
-	}
-	if c.Get(routeSetKey) != nil {
+	matched := route != "" && matchedRoute(c)
+	wrapHandler(c)
+	if !matched || c.Get(routeSetKey) != nil {
 		return
 	}
 
@@ -68,18 +68,9 @@ func BeforeError(_ hook.HookContext, recv any, err error) {
 	recordRequestError(c, err)
 }
 
-// BeforeEchoServeHTTP wraps e.HTTPErrorHandler once so handler `return err`
-// is recorded even when the application replaced the default handler.
-func BeforeEchoServeHTTP(_ hook.HookContext, e *echo.Echo, _ http.ResponseWriter, _ *http.Request) {
-	if !enabler.Enable() || e == nil {
-		return
-	}
-	installErrorHandlerHook(e)
-}
-
 // BeforeDefaultHTTPErrorHandler runs before (*Echo).DefaultHTTPErrorHandler.
-// ServeHTTP calls this for handler `return err` when the default handler is
-// still installed.
+// It covers errors returned by global middleware, which run outside the
+// handler that wrapHandler wraps.
 func BeforeDefaultHTTPErrorHandler(_ hook.HookContext, _ *echo.Echo, err error, c echo.Context) {
 	if !enabler.Enable() {
 		return
@@ -87,20 +78,25 @@ func BeforeDefaultHTTPErrorHandler(_ hook.HookContext, _ *echo.Echo, err error, 
 	recordRequestError(c, err)
 }
 
-// hookedErrorHandlers tracks Echo instances whose HTTPErrorHandler is wrapped.
-var hookedErrorHandlers sync.Map
-
-func installErrorHandlerHook(e *echo.Echo) {
-	if _, loaded := hookedErrorHandlers.LoadOrStore(e, struct{}{}); loaded {
+// wrapHandler records the error returned by the request's handler, so
+// `return err` is recorded even with a custom e.HTTPErrorHandler. It changes
+// only this request's Context, never the shared *echo.Echo.
+func wrapHandler(c echo.Context) {
+	if c.Get(handlerWrappedKey) != nil {
 		return
 	}
-	orig := e.HTTPErrorHandler
-	e.HTTPErrorHandler = func(err error, c echo.Context) {
-		recordRequestError(c, err)
-		if orig != nil {
-			orig(err, c)
-		}
+	next := c.Handler()
+	if next == nil {
+		return
 	}
+	c.Set(handlerWrappedKey, struct{}{})
+	c.SetHandler(func(c echo.Context) error {
+		err := next(c)
+		if err != nil {
+			recordRequestError(c, err)
+		}
+		return err
+	})
 }
 
 func recordRequestError(c echo.Context, err error) {
