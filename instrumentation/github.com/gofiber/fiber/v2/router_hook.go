@@ -168,7 +168,8 @@ func responseStatus(c *fiber.Ctx, app *fiber.App, nextErr error) (int, bool) {
 	// would write. A configured Config.ErrorHandler may map any error, including
 	// a *fiber.Error, to any status, and it runs after (*App).next returns, so
 	// there is nothing this hook can observe. Report no code rather than a wrong
-	// one.
+	// one. A mounted sub-app's own ErrorHandler is the exception this check
+	// cannot see; see usesDefaultErrorHandler.
 	if !usesDefaultErrorHandler(app) {
 		return 0, false
 	}

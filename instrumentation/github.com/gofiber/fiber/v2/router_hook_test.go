@@ -300,3 +300,51 @@ func TestCustomErrorHandlerLeavesStatusUnrecorded(t *testing.T) {
 	assert.Equal(t, codes.Error, span.Status().Code)
 	require.Len(t, span.Events(), 1, "the error must still be recorded")
 }
+
+// A mounted sub-app created with its own Config.ErrorHandler runs that handler
+// for errors from its routes: fiber's (*App).ErrorHandler dispatches by
+// request path to the sub-app. The sub-app's routes are cloned into the
+// parent's stack, so the hooks only ever see the parent - which kept
+// DefaultErrorHandler - and fiber exposes no public API to enumerate mounted
+// apps. The status recorded for such requests therefore follows
+// DefaultErrorHandler semantics and can disagree with the response actually
+// written. This test pins that documented divergence; see
+// usesDefaultErrorHandler.
+func TestMountedSubAppErrorHandlerIsNotObservable(t *testing.T) {
+	recorder := newRecordingTracer(t)
+	handlerErr := errors.New("boom")
+
+	parent := fiber.New()
+	sub := fiber.New(fiber.Config{
+		ErrorHandler: func(c *fiber.Ctx, _ error) error {
+			return c.SendStatus(fiber.StatusBadRequest)
+		},
+	})
+	sub.Get("/fail", func(c *fiber.Ctx) error {
+		// The parent's (*App).next frame drives this cloned route, so the
+		// trampoline would pass the parent app.
+		ictx := hooktest.NewMockHookContext(parent, c)
+		BeforeNext(ictx, parent, c)
+		AfterNext(ictx, true, handlerErr)
+		return handlerErr
+	})
+	parent.Mount("/sub", sub)
+
+	req := httptest.NewRequest(fiber.MethodGet, "/sub/fail", nil)
+	resp, err := parent.Test(req)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+
+	// The sub-app's handler remapped the error to 400...
+	require.Equal(t, fiber.StatusBadRequest, resp.StatusCode,
+		"fiber must dispatch to the mounted sub-app's ErrorHandler")
+
+	// ...while the hook, seeing only the parent, recorded the 500 that
+	// DefaultErrorHandler would have written.
+	spans := recorder.Ended()
+	require.Len(t, spans, 1)
+	assert.Equal(t, int64(fiber.StatusInternalServerError),
+		attrsOf(t, spans[0])["http.response.status_code"].AsInt64())
+	assert.Equal(t, codes.Error, spans[0].Status().Code)
+	require.Len(t, spans[0].Events(), 1, "the error must still be recorded")
+}
