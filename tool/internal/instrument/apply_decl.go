@@ -125,7 +125,7 @@ func wrapDeclValue(spec *dst.ValueSpec, templateStr string, nameIdx int, aliasOv
 	}
 
 	// Package-level var/const initializers have no enclosing function.
-	wrapped, err := tmpl.compileExpression(spec.Values[nameIdx], nil, nil, aliasOverrides)
+	wrapped, err := tmpl.compileExpression(spec.Values[nameIdx], callSite{}, nil, nil, aliasOverrides)
 	if err != nil {
 		return ex.Wrapf(err, "failed to wrap expression at index %d", nameIdx)
 	}

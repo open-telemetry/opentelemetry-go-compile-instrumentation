@@ -116,7 +116,11 @@ func (ip *instrumentPhase) applyCallReplace(
 			wrapError = shadowErr
 			return false
 		}
-		wrapped, wrapErr := tmpl.compileExpression(call, enclosing, importAliases, aliasOverrides)
+		site := callSite{
+			methodCall: r.MethodCall != "",
+			deferred:   isGoOrDeferCall(stmts[call], call),
+		}
+		wrapped, wrapErr := tmpl.compileExpression(call, site, enclosing, importAliases, aliasOverrides)
 		if wrapErr != nil {
 			wrapError = wrapErr
 			return false
@@ -154,6 +158,19 @@ func (ip *instrumentPhase) applyCallReplace(
 	}, nil)
 
 	return true, nil
+}
+
+// isGoOrDeferCall reports whether call is the call of stmt, a defer or go
+// statement.
+func isGoOrDeferCall(stmt dst.Stmt, call *dst.CallExpr) bool {
+	switch s := stmt.(type) {
+	case *dst.DeferStmt:
+		return s.Call == call
+	case *dst.GoStmt:
+		return s.Call == call
+	default:
+		return false
+	}
 }
 
 // applyCallAppendArgs appends r's extra arguments to every call site that

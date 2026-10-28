@@ -204,7 +204,7 @@ func (ip *instrumentPhase) setLitFields(
 			// enclosing, when the literal sits inside a function, makes the shared
 			// function template variables ({{ .FuncArgument N }} etc.) available
 			// in the wrap template alongside {{ . }}.
-			wrapped, err := setter.wrap.compileExpression(existing.Value, enclosing, nil, aliasOverrides)
+			wrapped, err := setter.wrap.compileExpression(existing.Value, callSite{}, enclosing, nil, aliasOverrides)
 			if err != nil {
 				return false, ex.Wrapf(err, "failed to wrap field %q of %s", setter.name, r.StructLiteral)
 			}

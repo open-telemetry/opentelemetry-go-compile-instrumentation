@@ -18,7 +18,10 @@ import (
 // placeholderIdent is substituted for "{{ . }}" during template execution,
 // then replaced with the actual AST node once the rendered text has been
 // parsed. It must be a syntactically valid Go expression on its own.
-const placeholderIdent = "_.PLACEHOLDER_0"
+const placeholderIdent = toolast.IdentIgnore + "." + placeholderSel
+
+// placeholderSel is the selector part of placeholderIdent.
+const placeholderSel = "PLACEHOLDER_0"
 
 // callArgPlaceholderSel is the selector part of the placeholder substituted
 // for "{{ .CallArgument N }}" during template execution (full form:
@@ -32,6 +35,15 @@ const callArgPlaceholderSel = "CALLARG_"
 func callArgPlaceholderIdent(idx int) string {
 	return toolast.IdentIgnore + "." + callArgPlaceholderSel + strconv.Itoa(idx)
 }
+
+// callRecvPlaceholderSel is the selector part of the placeholder substituted
+// for "{{ .CallReceiver }}" during template execution. It is swapped for the
+// receiver's AST the same way as the call argument placeholders.
+const callRecvPlaceholderSel = "CALLRECV"
+
+// callRecvPlaceholderIdent is the placeholder for the wrapped call's
+// receiver. It must be a syntactically valid Go expression on its own.
+const callRecvPlaceholderIdent = toolast.IdentIgnore + "." + callRecvPlaceholderSel
 
 // callTemplate represents a code template that can be used to wrap or transform
 // Go expressions. It uses text/template for template execution and supports
@@ -68,10 +80,25 @@ func (t *callTemplate) String() string {
 type callTemplateData struct {
 	enclosing *funcTemplateData
 
-	// isCall and callArgs describe the wrapped expression when it is a
-	// function call (e.g. wrap_call's matched call site)
-	isCall   bool
-	callArgs []dst.Expr
+	// isCall, callArgs and callEllipsis describe the wrapped expression when
+	// it is a function call (e.g. wrap_call's matched call site).
+	// callEllipsis is true when the call spreads its last argument with "...".
+	isCall       bool
+	callArgs     []dst.Expr
+	callEllipsis bool
+
+	// callRecv is the receiver expression of the wrapped call when it was
+	// matched as a method call, and nil otherwise.
+	callRecv dst.Expr
+}
+
+// callSite describes where the wrapped call sits.
+type callSite struct {
+	// methodCall is true when the call was matched by method_call, so the X
+	// of its selector is the receiver expression.
+	methodCall bool
+	// deferred is true when the call is the call of a defer or go statement.
+	deferred bool
 }
 
 // String implements fmt.Stringer so "{{ . }}" renders as placeholderIdent.
@@ -164,10 +191,21 @@ func (d *callTemplateData) FuncReturnOfType(typeStr string) (string, error) {
 type renderingCallTemplateData struct {
 	*callTemplateData
 
-	// renderedCallArgs records each index rendered by {{ .CallArgument N }}
-	// so compileExpression can verify every placeholder was swapped for
-	// the argument's real AST.
-	renderedCallArgs map[int]bool
+	// rendered records which parts of the wrapped call the template
+	// rendered, so compileExpression can verify every placeholder was
+	// swapped for the real AST and check the evaluation of those parts.
+	rendered *renderedCallParts
+}
+
+// renderedCallParts records the call parts rendered by a template.
+type renderedCallParts struct {
+	// args holds each index rendered by {{ .CallArgument N }} or
+	// {{ .CallArguments }}.
+	args map[int]bool
+	// receiver is true when {{ .CallReceiver }} was rendered.
+	receiver bool
+	// argumentList is true when {{ .CallArguments }} was rendered.
+	argumentList bool
 }
 
 func (d renderingCallTemplateData) FuncName() (string, error) {
@@ -210,8 +248,34 @@ func (d renderingCallTemplateData) CallArgument(idx int) (string, error) {
 	if _, err := d.callTemplateData.CallArgument(idx); err != nil {
 		return "", err
 	}
-	d.renderedCallArgs[idx] = true
+	d.rendered.args[idx] = true
 	return callArgPlaceholderIdent(idx), nil
+}
+
+// CallArguments renders the wrapped call's arguments as placeholders, in the
+// same form as callTemplateData.CallArguments. Template usage:
+// {{.CallArguments}}
+func (d renderingCallTemplateData) CallArguments() (string, error) {
+	if !d.isCall {
+		return "", notACallErr()
+	}
+	args := make([]string, len(d.callArgs))
+	for i := range d.callArgs {
+		d.rendered.args[i] = true
+		args[i] = callArgPlaceholderIdent(i)
+	}
+	d.rendered.argumentList = true
+	return joinCallArguments(args, d.callEllipsis), nil
+}
+
+// CallReceiver renders the wrapped call's receiver as a placeholder. See
+// CallArgument for why. Template usage: {{.CallReceiver}}
+func (d renderingCallTemplateData) CallReceiver() (string, error) {
+	if _, err := d.callTemplateData.CallReceiver(); err != nil {
+		return "", err
+	}
+	d.rendered.receiver = true
+	return callRecvPlaceholderIdent, nil
 }
 
 func notACallErr() error {
@@ -244,8 +308,53 @@ func (d *callTemplateData) CallArgument(idx int) (string, error) {
 	return toolast.RenderExpr(d.callArgs[idx])
 }
 
+// CallArguments returns the source text of all arguments of the wrapped call
+// expression, separated by ", ", with a trailing "..." when the call spreads
+// its last argument. It returns "" for a call without arguments. Only
+// available when the wrapped expression is itself a function call. Template
+// usage: {{.CallArguments}}
+func (d *callTemplateData) CallArguments() (string, error) {
+	if !d.isCall {
+		return "", notACallErr()
+	}
+	args := make([]string, len(d.callArgs))
+	for i, arg := range d.callArgs {
+		text, err := toolast.RenderExpr(arg)
+		if err != nil {
+			return "", err
+		}
+		args[i] = text
+	}
+	return joinCallArguments(args, d.callEllipsis), nil
+}
+
+func joinCallArguments(args []string, ellipsis bool) string {
+	joined := strings.Join(args, ", ")
+	if ellipsis && len(args) > 0 {
+		joined += "..."
+	}
+	return joined
+}
+
+// CallReceiver returns the source text of the receiver expression of the
+// wrapped method call, e.g. "log" for log.Info(msg). Only available when the
+// call was matched by method_call. Template usage: {{.CallReceiver}}
+func (d *callTemplateData) CallReceiver() (string, error) {
+	if !d.isCall {
+		return "", notACallErr()
+	}
+	if d.callRecv == nil {
+		return "", ex.Newf("CallReceiver requires a method call matched by method_call; " +
+			"the wrapped call has no receiver")
+	}
+	return toolast.RenderExpr(d.callRecv)
+}
+
 // compileExpression executes the template with the given expression node as
 // the placeholder value, parses the result, and returns the transformed expression.
+// site describes node when it is a matched call site: it makes the receiver
+// of a method call available to {{ .CallReceiver }}, and tells whether the
+// call is the call of a defer or go statement. Pass callSite{} otherwise.
 // enclosing is the function declaration that contains node, or
 // nil if node sits outside any function body (e.g. a package-level variable
 // initializer); when non-nil, it makes the shared function template
@@ -259,13 +368,14 @@ func (d *callTemplateData) CallArgument(idx int) (string, error) {
 //
 // The process:
 //  1. Execute the template with fixed placeholder strings (_.PLACEHOLDER_0 for
-//     "{{ . }}", _.CALLARG_<N> for "{{ .CallArgument N }}")
+//     "{{ . }}", _.CALLARG_<N> for "{{ .CallArgument N }}" and
+//     "{{ .CallArguments }}", _.CALLRECV for "{{ .CallReceiver }}")
 //  2. Parse the result as a Go statement snippet
 //  3. Rewrite the rule's own qualifiers in that parsed result
 //  4. Replace the placeholders with the actual AST nodes, which keeps the
 //     target's own code untouched by the rewrite in step 3
 func (t *callTemplate) compileExpression(
-	node dst.Expr, enclosing *dst.FuncDecl, imports, aliasOverrides map[string]string,
+	node dst.Expr, site callSite, enclosing *dst.FuncDecl, imports, aliasOverrides map[string]string,
 ) (dst.Expr, error) {
 	data := &callTemplateData{}
 	if enclosing != nil {
@@ -274,11 +384,15 @@ func (t *callTemplate) compileExpression(
 	if call, ok := unwrap(node).(*dst.CallExpr); ok {
 		data.isCall = true
 		data.callArgs = call.Args
+		data.callEllipsis = call.Ellipsis
+		if sel, isSel := call.Fun.(*dst.SelectorExpr); isSel && site.methodCall {
+			data.callRecv = sel.X
+		}
 	}
 
 	renderData := renderingCallTemplateData{
 		callTemplateData: data,
-		renderedCallArgs: make(map[int]bool),
+		rendered:         &renderedCallParts{args: make(map[int]bool)},
 	}
 	var sb strings.Builder
 	if err := t.template.Execute(&sb, renderData); err != nil {
@@ -304,11 +418,17 @@ func (t *callTemplate) compileExpression(
 	replaceQualifierAliases(exprStmt.X, aliasOverrides)
 	stripDynamicIdents(exprStmt.X)
 
-	// Swap the call-argument placeholders before the {{ . }} placeholder so
-	// both run after the qualifier rewrite; the swapped-in argument ASTs then
-	// keep the target's original argument code untouched.
+	if renderData.rendered.receiver || renderData.rendered.argumentList {
+		if err = checkCallPartsEvaluation(exprStmt.X, data, site.deferred); err != nil {
+			return nil, err
+		}
+	}
+
+	// Swap the call-part placeholders before the {{ . }} placeholder so
+	// all of them run after the qualifier rewrite; the swapped-in ASTs then
+	// keep the target's original code untouched.
 	swappedArgs, swappedIdxs := replaceCallArgPlaceholders(exprStmt.X, data.callArgs)
-	for idx := range renderData.renderedCallArgs {
+	for idx := range renderData.rendered.args {
 		if !swappedIdxs[idx] {
 			return nil, ex.Newf(
 				"template output did not contain expected placeholder expression for {{ .CallArgument %d }}",
@@ -317,6 +437,16 @@ func (t *callTemplate) compileExpression(
 		}
 	}
 	exprStmt.X = swappedArgs
+
+	if renderData.rendered.receiver {
+		swappedRecv, swapped := replaceCallRecvPlaceholder(exprStmt.X, data.callRecv)
+		if !swapped {
+			return nil, ex.New(
+				"template output did not contain expected placeholder expression for {{ .CallReceiver }}",
+			)
+		}
+		exprStmt.X = swappedRecv
+	}
 
 	result, replaced := replacePlaceholder(exprStmt.X, node)
 	if placeholderRendered && !replaced {
@@ -331,6 +461,163 @@ func (t *callTemplate) compileExpression(
 	}
 
 	return resultExpr, nil
+}
+
+// callPartReceiver identifies the receiver in checkCallPartsEvaluation. An
+// index >= 0 identifies the call argument at that index.
+const callPartReceiver = -1
+
+// callPartUse is one use of the receiver or of an argument of the wrapped
+// call in the template output.
+type callPartUse struct {
+	part      int
+	inFuncLit bool
+}
+
+// checkCallPartsEvaluation checks that the template output expr evaluates the
+// receiver and the arguments of the wrapped call as the original call does.
+// It runs on the parsed output before the placeholders are swapped, for
+// templates that use {{ .CallReceiver }} or {{ .CallArguments }}. Every
+// placeholder that stands for original code is counted, including {{ . }}
+// and {{ .CallArgument N }}.
+//
+// A receiver or argument that is a name, a selector on a name, or a literal
+// has no side effects, so the output can use it any number of times. The
+// output must use any other receiver or argument, such as a call, exactly
+// once, and in the order of the original call: the receiver first, then the
+// arguments from left to right.
+//
+// When the wrapped call is the call of a defer or go statement (deferred),
+// the output must not use the receiver or an argument inside a function
+// literal. The original call evaluates them at the defer or go statement,
+// and the function literal evaluates them later.
+func checkCallPartsEvaluation(expr dst.Expr, data *callTemplateData, deferred bool) error {
+	counts := make(map[int]int)
+	lastPart := callPartReceiver - 1
+	for _, use := range collectCallPartUses(expr, data) {
+		if deferred && use.inFuncLit {
+			return ex.Newf("the template uses the %s inside a function literal, but the matched call "+
+				"is the call of a defer or go statement; the original call evaluates it at that statement",
+				data.describeCallPart(use.part))
+		}
+		if hasNoSideEffects(data.callPart(use.part)) {
+			continue
+		}
+		if use.part < lastPart {
+			return ex.Newf("the template evaluates the %s before the %s; it must keep the order of the "+
+				"original call because both can have side effects",
+				data.describeCallPart(lastPart), data.describeCallPart(use.part))
+		}
+		lastPart = use.part
+		counts[use.part]++
+	}
+
+	first := 0
+	if data.callRecv != nil {
+		first = callPartReceiver
+	}
+	for part := first; part < len(data.callArgs); part++ {
+		if n := counts[part]; n != 1 && !hasNoSideEffects(data.callPart(part)) {
+			return ex.Newf("the template evaluates the %s %d times; it must evaluate it exactly once "+
+				"because it can have side effects", data.describeCallPart(part), n)
+		}
+	}
+	return nil
+}
+
+// collectCallPartUses returns, in source order, every use in expr of the
+// receiver or of an argument of the wrapped call. A {{ . }} placeholder uses
+// the receiver and every argument.
+func collectCallPartUses(expr dst.Expr, data *callTemplateData) []callPartUse {
+	var uses []callPartUse
+	funcLitDepth := 0
+	dstutil.Apply(
+		expr,
+		func(cursor *dstutil.Cursor) bool {
+			switch node := cursor.Node().(type) {
+			case *dst.FuncLit:
+				funcLitDepth++
+			case *dst.SelectorExpr:
+				ident, ok := node.X.(*dst.Ident)
+				if !ok || ident.Name != toolast.IdentIgnore {
+					return true
+				}
+				for _, part := range data.placeholderCallParts(node.Sel.Name) {
+					uses = append(uses, callPartUse{part: part, inFuncLit: funcLitDepth > 0})
+				}
+				return false
+			}
+			return true
+		},
+		func(cursor *dstutil.Cursor) bool {
+			if _, ok := cursor.Node().(*dst.FuncLit); ok {
+				funcLitDepth--
+			}
+			return true
+		},
+	)
+	return uses
+}
+
+// placeholderCallParts returns the call parts that the placeholder with
+// selector name stands for.
+func (d *callTemplateData) placeholderCallParts(name string) []int {
+	switch {
+	case name == placeholderSel:
+		parts := make([]int, 0, 1+len(d.callArgs))
+		if d.callRecv != nil {
+			parts = append(parts, callPartReceiver)
+		}
+		for i := range d.callArgs {
+			parts = append(parts, i)
+		}
+		return parts
+	case name == callRecvPlaceholderSel:
+		return []int{callPartReceiver}
+	case strings.HasPrefix(name, callArgPlaceholderSel):
+		idx, err := strconv.Atoi(strings.TrimPrefix(name, callArgPlaceholderSel))
+		if err == nil && idx >= 0 && idx < len(d.callArgs) {
+			return []int{idx}
+		}
+	}
+	return nil
+}
+
+// callPart returns the receiver for callPartReceiver, or the argument at
+// index part.
+func (d *callTemplateData) callPart(part int) dst.Expr {
+	if part == callPartReceiver {
+		return d.callRecv
+	}
+	return d.callArgs[part]
+}
+
+// describeCallPart names a call part in error messages, e.g. "receiver log"
+// or "argument 1 (zap.String("k", v))".
+func (d *callTemplateData) describeCallPart(part int) string {
+	text, err := toolast.RenderExpr(d.callPart(part))
+	if err != nil {
+		text = "?"
+	}
+	if part == callPartReceiver {
+		return "receiver " + text
+	}
+	return "argument " + strconv.Itoa(part) + " (" + text + ")"
+}
+
+// hasNoSideEffects reports whether evaluating expr has no side effects: expr
+// is a name, a literal, or a selector or parentheses around one of these.
+func hasNoSideEffects(expr dst.Expr) bool {
+	switch e := expr.(type) {
+	case *dst.Ident, *dst.BasicLit:
+		return true
+	case *dst.SelectorExpr:
+		return hasNoSideEffects(e.X)
+	case *dst.ParenExpr:
+		return hasNoSideEffects(e.X)
+	default:
+		return false
+	}
 }
 
 // unwrap strips any enclosing parentheses from expr, e.g. (foo()) -> foo().
@@ -424,6 +711,31 @@ func replaceCallArgPlaceholders(node dst.Expr, callArgs []dst.Expr) (dst.Expr, m
 	return expr, swappedIdxs
 }
 
+// replaceCallRecvPlaceholder replaces every _.CALLRECV occurrence in node
+// with its own dst.Clone copy of recv, and reports whether it replaced any.
+func replaceCallRecvPlaceholder(node, recv dst.Expr) (dst.Expr, bool) {
+	replaced := false
+	result := dstutil.Apply(
+		node,
+		func(cursor *dstutil.Cursor) bool {
+			selectorExpr, ok := cursor.Node().(*dst.SelectorExpr)
+			if !ok {
+				return true
+			}
+			ident, ok := selectorExpr.X.(*dst.Ident)
+			if !ok || ident.Name != toolast.IdentIgnore || selectorExpr.Sel.Name != callRecvPlaceholderSel {
+				return true
+			}
+			cursor.Replace(dst.Clone(recv))
+			replaced = true
+			return false
+		},
+		nil,
+	)
+	expr, _ := result.(dst.Expr)
+	return expr, replaced
+}
+
 // replacePlaceholder replaces all occurrences of _.PLACEHOLDER_0 in the AST
 // with the given node. This is used to inject the original call expression
 // into the template-generated code.
@@ -443,7 +755,7 @@ func replacePlaceholder(node, replacement dst.Node) (dst.Node, bool) {
 				return true
 			}
 
-			if selectorExpr.Sel.Name == "PLACEHOLDER_0" {
+			if selectorExpr.Sel.Name == placeholderSel {
 				cursor.Replace(replacement)
 				replaced = true
 				return false
