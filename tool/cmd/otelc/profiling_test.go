@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -220,6 +221,9 @@ func TestIsSubPath_IncompatiblePathsError(t *testing.T) {
 }
 
 func TestIsSubPath_ResolutionErrorFailsClosed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a regular file standing in for a directory component resolves as not-exist on Windows, not ENOTDIR")
+	}
 	dir := t.TempDir()
 	// A regular file where a directory component is expected: EvalSymlinks on
 	// anything beneath it fails with ENOTDIR, not ErrNotExist.
