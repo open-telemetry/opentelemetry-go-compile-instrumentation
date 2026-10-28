@@ -3,23 +3,23 @@
 
 package main
 
+//line /<generated>:1
 import _ "unsafe"
 
 // interface{}/any params and returns take the passthrough path in the
 // generated SetParam/SetReturnVal (stored directly, no pointer, no nil check).
+//line /golden/work/main.go:8
 func InterfacePassthrough(v interface{}) (r any) {
-	//line <generated>:1
-	if hookContext3881633898, _ := OtelBeforeTrampoline_InterfacePassthrough3881633898(&v); false {
+	/*line /<generated>:1*/ if hookContext3881633898, _ := OtelBeforeTrampoline_InterfacePassthrough3881633898(&v); false {
 	} else {
 		defer OtelAfterTrampoline_InterfacePassthrough3881633898(hookContext3881633898, &r)
 	}
-	//line main.go:9:2
-	return v
+	/*line /golden/work/main.go:9*/ return v
 }
 
 func main() {}
 
-//line <generated>:1
+//line /<generated>:1
 type HookContextImpl3881633898 struct {
 	params      []interface{}
 	returnVals  []interface{}

@@ -7,21 +7,20 @@
 // negation holds and Connect IS instrumented here.
 package main
 
+//line /<generated>:1
 import _ "unsafe"
 
+//line /golden/work/main.go:10
 func Connect(dsn string) (_unnamedRetVal_297295154_0 error) {
-	//line <generated>:1
-	if hookContext297295154, _ := OtelBeforeTrampoline_Connect297295154(&dsn); false {
+	/*line /<generated>:1*/ if hookContext297295154, _ := OtelBeforeTrampoline_Connect297295154(&dsn); false {
 	} else {
 		defer OtelAfterTrampoline_Connect297295154(hookContext297295154, &_unnamedRetVal_297295154_0)
 	}
-	//line main.go:11:2
-	println("connecting " + dsn)
-	//line main.go:12:2
+	/*line /golden/work/main.go:11*/ println("connecting " + dsn)
 	return nil
 }
 
-//line <generated>:1
+//line /<generated>:1
 type HookContextImpl297295154 struct {
 	params      []interface{}
 	returnVals  []interface{}
