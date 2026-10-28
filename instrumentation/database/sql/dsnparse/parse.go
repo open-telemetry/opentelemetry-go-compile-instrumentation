@@ -497,14 +497,18 @@ func parseSQLServerKV(dsn string) DSNInfo {
 		val = strings.TrimSpace(val)
 		switch key {
 		case "server", "data source":
-			// Accept both "host,port" and "host\instance" forms.
-			if comma := strings.IndexByte(val, ','); comma >= 0 {
-				host = val[:comma]
-				port = val[comma+1:]
-			} else if bs := strings.IndexByte(val, '\\'); bs >= 0 {
-				host = val[:bs]
-			} else {
-				host = val
+			// Accept "host,port", "host\instance", and the combined
+			// "host\instance,port". The port is split off first because the
+			// instance name sits between the host and the comma, so a single
+			// either/or branch would leave the instance attached to the host
+			// whenever a port was also given.
+			host = val
+			if comma := strings.IndexByte(host, ','); comma >= 0 {
+				port = host[comma+1:]
+				host = host[:comma]
+			}
+			if bs := strings.IndexByte(host, '\\'); bs >= 0 {
+				host = host[:bs]
 			}
 			host = trimHostBrackets(host)
 		case "port":
@@ -558,7 +562,7 @@ func parseOracleDSN(dsn string) DSNInfo {
 			if port == "" {
 				port = "1521"
 			}
-			dbName := strings.TrimPrefix(u.Path, "/")
+			dbName := oracleServiceName(strings.TrimPrefix(u.Path, "/"))
 			return DSNInfo{Host: host, Port: port, DBName: dbName}
 		}
 	}
@@ -567,15 +571,29 @@ func parseOracleDSN(dsn string) DSNInfo {
 		return DSNInfo{}
 	}
 	connStr := strings.TrimPrefix(dsn[atIdx+1:], "//")
+	// Easy Connect parameters start at '?' and are not part of the address.
+	if q := strings.IndexByte(connStr, '?'); q >= 0 {
+		connStr = connStr[:q]
+	}
 	var hostPort, dbName string
 	if sl := strings.IndexByte(connStr, '/'); sl >= 0 {
 		hostPort = connStr[:sl]
-		dbName = connStr[sl+1:]
+		dbName = oracleServiceName(connStr[sl+1:])
 	} else {
 		hostPort = connStr
 	}
 	host, port := oracleSplitHostPort(hostPort)
 	return DSNInfo{Host: host, Port: port, DBName: dbName}
+}
+
+// oracleServiceName returns the service name from the part of an Easy Connect
+// string after the host, which may continue with ":server_type" and
+// "/instance_name".
+func oracleServiceName(s string) string {
+	if end := strings.IndexAny(s, ":/"); end >= 0 {
+		return s[:end]
+	}
+	return s
 }
 
 func oracleSplitHostPort(hp string) (host, port string) {

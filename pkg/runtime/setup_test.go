@@ -10,8 +10,10 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -465,6 +467,65 @@ func TestNewSpanProcessorUsesSimpleSpanProcessor(t *testing.T) {
 	span.End()
 
 	assert.Len(t, exporter.GetSpans(), 1, "simple processor should export completed spans immediately")
+}
+
+// batchRecorder records the size of every batch passed to ExportSpans.
+type batchRecorder struct {
+	mu      sync.Mutex
+	batches []int
+}
+
+func (r *batchRecorder) ExportSpans(_ context.Context, spans []sdktrace.ReadOnlySpan) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.batches = append(r.batches, len(spans))
+	return nil
+}
+
+func (*batchRecorder) Shutdown(context.Context) error { return nil }
+
+func (r *batchRecorder) exported() []int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]int(nil), r.batches...)
+}
+
+func TestNewSpanProcessorRespectsMaxExportBatchSizeEnv(t *testing.T) {
+	t.Setenv("OTEL_BSP_MAX_EXPORT_BATCH_SIZE", "2")
+	// Long schedule delay so only the batch size triggers exports before ForceFlush.
+	t.Setenv("OTEL_BSP_SCHEDULE_DELAY", "3600000")
+	exporter := &batchRecorder{}
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(newSpanProcessor(exporter)))
+	t.Cleanup(func() { require.NoError(t, provider.Shutdown(context.Background())) })
+
+	for range 5 {
+		_, span := provider.Tracer("test").Start(context.Background(), "test")
+		span.End()
+	}
+	require.NoError(t, provider.ForceFlush(context.Background()))
+
+	batches := exporter.exported()
+	total := 0
+	for _, n := range batches {
+		assert.LessOrEqual(t, n, 2, "batch exceeds OTEL_BSP_MAX_EXPORT_BATCH_SIZE")
+		total += n
+	}
+	assert.Equal(t, 5, total)
+}
+
+func TestNewSpanProcessorRespectsScheduleDelayEnv(t *testing.T) {
+	t.Setenv("OTEL_BSP_SCHEDULE_DELAY", "10")
+	exporter := tracetest.NewInMemoryExporter()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(newSpanProcessor(exporter)))
+	t.Cleanup(func() { require.NoError(t, provider.Shutdown(context.Background())) })
+
+	_, span := provider.Tracer("test").Start(context.Background(), "test")
+	span.End()
+
+	// Well under both the previous hardcoded 1s and the SDK default 5s, so this
+	// only passes if OTEL_BSP_SCHEDULE_DELAY is honored.
+	assert.Eventually(t, func() bool { return len(exporter.GetSpans()) == 1 },
+		500*time.Millisecond, 5*time.Millisecond)
 }
 
 func TestSetupMeterProviderNoneExporter(t *testing.T) {

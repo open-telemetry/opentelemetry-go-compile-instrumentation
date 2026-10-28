@@ -430,6 +430,27 @@ func TestParseDSN_SQLServer(t *testing.T) {
 			wantPort: "1433",
 			wantDB:   "mydb",
 		},
+		{
+			name:     "ado.net server with backslash instance and port",
+			dsn:      "Server=host\\SQLEXPRESS,1433;Database=mydb;User Id=sa;Password=p",
+			wantHost: "host",
+			wantPort: "1433",
+			wantDB:   "mydb",
+		},
+		{
+			name:     "ado.net data source with backslash instance and non-default port",
+			dsn:      "Data Source=db.example.com\\PROD,14330;Initial Catalog=sales",
+			wantHost: "db.example.com",
+			wantPort: "14330",
+			wantDB:   "sales",
+		},
+		{
+			name:     "ado.net server with bracketed ipv6 and port",
+			dsn:      "Server=[::1],1433;Database=mydb",
+			wantHost: "::1",
+			wantPort: "1433",
+			wantDB:   "mydb",
+		},
 	}
 
 	for _, tt := range tests {
