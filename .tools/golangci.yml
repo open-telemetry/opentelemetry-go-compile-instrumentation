@@ -572,6 +572,13 @@ linters:
         linters:
           - goimports
           - golines
+      # Every instrumentation module carries a local replace directive to
+      # go.opentelemetry.io/otelc/pkg (and sometimes pkg/runtime) by design:
+      # those packages are not published yet, see CONTRIBUTING.md.
+      - path: 'instrumentation/.*/go\.mod$'
+        text: 'local replacement are not allowed'
+        linters:
+          - gomoddirectives
 
 formatters:
   enable:
