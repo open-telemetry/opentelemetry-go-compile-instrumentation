@@ -40,8 +40,9 @@ Weaver v0.19.0, the version `otelc` pins, constrains the layout:
   `id:` attribute, so a template cannot tell a local declaration from an
   upstream one by looking at the attribute alone.
 
-[ADR-0004](0004-instrumentation-ownership-and-compatibility.md) makes
-each instrumentation responsible for its own telemetry,
+[ADR-0004](0004-instrumentation-ownership-and-compatibility.md) sets the
+three-tier ownership model and requires semantic convention alignment for
+the in-repo core tier,
 [ADR-0005](0005-import-driven-instrumentation-selection.md) treats
 instrumentations as ordinary Go modules, and
 [ADR-0007](0007-migrate-instrumentations-to-contrib.md) moves
@@ -137,7 +138,7 @@ Tests assert on the generated constants rather than string literals,
 and a `forbidigo` pattern rejects literal attribute keys in
 instrumentation code, so a registry rename fails the build instead of
 changing what an assertion means. `golangci-lint` currently runs only on
-the root module, which is `tool/`, so the instrumentation modules have
+the root module (which contains `tool/`), so the instrumentation modules have
 to be brought under lint before that pattern takes effect.
 
 Two things remain conventions rather than checks. Nothing verifies that
