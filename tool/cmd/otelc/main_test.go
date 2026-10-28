@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -261,5 +262,40 @@ func TestCleanupSubcommand(t *testing.T) {
 
 	if _, err := os.Stat(buildTemp); !os.IsNotExist(err) {
 		t.Errorf("expected %s to be removed, stat err: %v", buildTemp, err)
+	}
+}
+
+// TestRootCommandFlagNamesUnique replicates the duplicate flag name check that
+// urfave/cli v3.14.0+ performs at startup: no flag Name may collide with an
+// Alias or another flag Name within the same command. Checking it directly
+// catches such a regression even while the module still pins an older cli
+// version that tolerates the collision.
+func TestRootCommandFlagNamesUnique(t *testing.T) {
+	app := &cli.Command{
+		Name:  "otelc",
+		Flags: rootFlags(),
+		Commands: []*cli.Command{
+			&commandPin,
+			&commandSetup,
+			&commandGo,
+			&commandCleanup,
+			&commandToolexec,
+			&commandVersion,
+		},
+	}
+	err := app.Walk(func(cmd *cli.Command) error {
+		seen := make(map[string]struct{})
+		for _, f := range cmd.Flags {
+			for _, name := range f.Names() {
+				if _, dup := seen[name]; dup {
+					return fmt.Errorf("flag %q defined multiple times in command %q", name, cmd.Name)
+				}
+				seen[name] = struct{}{}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
