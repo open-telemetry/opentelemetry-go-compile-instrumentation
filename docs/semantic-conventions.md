@@ -56,6 +56,7 @@ schemas/otelc/
 │   ├── mongo.yaml           # go.mongodb.org/mongo-driver client spans
 │   ├── elasticsearch.yaml   # olivere/elastic (v7) client spans
 │   ├── gin.yaml             # gin-gonic/gin server-span enrichment
+│   ├── fiber.yaml           # gofiber/fiber (v2) server spans
 │   ├── otel-sdk.yaml        # go.opentelemetry.io/otel* — Go runtime metrics
 │   ├── logs.yaml            # log, log/slog, logrus, zap — no telemetry (correlation only)
 │   └── runtime.yaml         # runtime — no telemetry (GLS context propagation)
