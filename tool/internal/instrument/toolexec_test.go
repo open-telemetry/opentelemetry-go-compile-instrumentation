@@ -124,6 +124,22 @@ func TestInterceptVetIgnoresCgoSourceWithoutPreservedCopy(t *testing.T) {
 	assert.Equal(t, original, data)
 }
 
+func TestInterceptVetPassesThroughConfigWithoutGoFiles(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "vet.cfg")
+	original := []byte(`{"Compiler":"gc","ImportPath":"example.com/p"}`)
+	require.NoError(t, os.WriteFile(configPath, original, 0o600))
+
+	args := []string{vetToolName, configPath}
+	got, err := interceptVet(t.Context(), args)
+	require.NoError(t, err)
+	assert.Equal(t, args, got)
+
+	data, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+	assert.Equal(t, original, data)
+}
+
 func TestInterceptVetLogsUnexpectedArguments(t *testing.T) {
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))

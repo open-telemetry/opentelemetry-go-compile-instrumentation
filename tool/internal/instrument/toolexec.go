@@ -632,8 +632,12 @@ func interceptVet(ctx context.Context, args []string) ([]string, error) {
 		return nil, ex.Wrapf(err, "parsing vet config")
 	}
 
+	raw, ok := config["GoFiles"]
+	if !ok {
+		return args, nil
+	}
 	var goFiles []string
-	if err = json.Unmarshal(config["GoFiles"], &goFiles); err != nil {
+	if err = json.Unmarshal(raw, &goFiles); err != nil {
 		return nil, ex.Wrapf(err, "parsing GoFiles from vet config")
 	}
 
