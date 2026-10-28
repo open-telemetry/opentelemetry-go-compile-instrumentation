@@ -16,7 +16,6 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 
 	"go.opentelemetry.io/otelc/test/testutil"
@@ -75,14 +74,18 @@ func assertRedisRingSpans(t *testing.T, appsDir string) {
 		require.NoError(t, err)
 		wantPort, err := strconv.Atoi(port)
 		require.NoError(t, err)
-		span := testutil.RequireSpan(t, f.Traces(),
-			testutil.IsClient,
-			testutil.HasAttribute("db.operation.name", "ping"),
-			testutil.HasAttribute("server.port", int64(wantPort)),
-		)
-		testutil.RequireRedisClientSemconv(t, span, "ping", server.Addr(), "ping")
+
+		var shardPingSpans []ptrace.Span
+		for _, s := range testutil.AllSpans(f.Traces()) {
+			if testutil.IsClient(s) &&
+				testutil.HasAttribute("db.operation.name", "ping")(s) &&
+				testutil.HasAttribute("server.port", int64(wantPort))(s) {
+				shardPingSpans = append(shardPingSpans, s)
+			}
+		}
+		require.Len(t, shardPingSpans, 1, "expected exactly one ping span for shard at port %d", wantPort)
+		testutil.RequireRedisClientSemconv(t, shardPingSpans[0], "ping", server.Addr(), "ping")
 	}
-	requireNoNestedRedisSpans(t, testutil.AllSpans(f.Traces()))
 }
 
 // assertRedisClusterSpans checks that lazily created cluster nodes get exactly
@@ -95,12 +98,14 @@ func assertRedisClusterSpans(t *testing.T, appsDir string) {
 
 	f.Run("redisclient", "-mode=cluster", "-addr="+server.Addr())
 
-	span := testutil.RequireSpan(t, f.Traces(),
-		testutil.IsClient,
-		testutil.HasAttribute("db.operation.name", "get"),
-	)
-	testutil.RequireRedisClientSemconv(t, span, "get", server.Addr(), "get clusterkey")
-	requireNoNestedRedisSpans(t, testutil.AllSpans(f.Traces()))
+	var getSpans []ptrace.Span
+	for _, s := range testutil.AllSpans(f.Traces()) {
+		if testutil.IsClient(s) && testutil.HasAttribute("db.operation.name", "get")(s) {
+			getSpans = append(getSpans, s)
+		}
+	}
+	require.Len(t, getSpans, 1, "expected exactly one span for cluster command")
+	testutil.RequireRedisClientSemconv(t, getSpans[0], "get", server.Addr(), "get clusterkey")
 }
 
 func fixtureOpts(appsDir string) []testutil.TestFixtureOption {
@@ -108,33 +113,6 @@ func fixtureOpts(appsDir string) []testutil.TestFixtureOption {
 		return nil
 	}
 	return []testutil.TestFixtureOption{testutil.WithAppsDir(appsDir)}
-}
-
-// requireNoNestedRedisSpans fails if a Redis client span is the child of a
-// Redis client span with the same name, which happens when one client has two
-// otel hooks. Other nesting is expected: go-redis runs its connection setup
-// pipeline inside the first command.
-func requireNoNestedRedisSpans(t *testing.T, spans []ptrace.Span) {
-	t.Helper()
-
-	redisSpans := make(map[pcommon.SpanID]ptrace.Span)
-	for _, span := range spans {
-		if testutil.IsClient(span) && testutil.HasAttribute("db.system.name", "redis")(span) {
-			redisSpans[span.SpanID()] = span
-		}
-	}
-	require.NotEmpty(t, redisSpans)
-	for _, span := range redisSpans {
-		parent, ok := redisSpans[span.ParentSpanID()]
-		if ok && parent.Name() == span.Name() {
-			require.Failf(
-				t,
-				"duplicate redis span",
-				"redis span %q is nested in a redis span with the same name: the client has two otel hooks",
-				span.Name(),
-			)
-		}
-	}
 }
 
 func assertRedisClientSpans(t *testing.T, appsDir string) {

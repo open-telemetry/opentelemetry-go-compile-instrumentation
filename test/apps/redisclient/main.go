@@ -11,6 +11,7 @@ import (
 	"flag"
 	"log"
 	"log/slog"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -28,16 +29,17 @@ func main() {
 
 	switch *mode {
 	case "client":
+		runClient(ctx)
 	case "ring":
 		runRing(ctx)
-		return
 	case "cluster":
 		runCluster(ctx)
-		return
 	default:
 		log.Fatalf("unknown mode %q", *mode)
 	}
+}
 
+func runClient(ctx context.Context) {
 	rdb := redis.NewClient(&redis.Options{
 		Addr: *addr,
 	})
@@ -77,15 +79,15 @@ func main() {
 // Ring creates both kinds of shard with redis.NewClient.
 func runRing(ctx context.Context) {
 	ring := redis.NewRing(&redis.RingOptions{
-		Addrs: map[string]string{"shard0": *addr},
+		Addrs:              map[string]string{"shard0": *addr},
+		HeartbeatFrequency: time.Hour,
 	})
 	defer ring.Close()
 
-	pingShards(ctx, ring)
 	if *addr2 != "" {
 		ring.SetAddrs(map[string]string{"shard0": *addr, "shard1": *addr2})
-		pingShards(ctx, ring)
 	}
+	pingShards(ctx, ring)
 	slog.Info("RING PING")
 }
 
