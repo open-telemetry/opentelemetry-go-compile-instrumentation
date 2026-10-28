@@ -70,18 +70,6 @@ func TestPGOBuildFlags(t *testing.T) {
 	}
 }
 
-func TestUpdateImportConfigPGOReadIsLazy(t *testing.T) {
-	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
-	require.NoError(t, os.MkdirAll(util.GetPGOProfileFile(), 0o755))
-	ip := &instrumentPhase{
-		compileArgs:      []string{"-pgoprofile=compiled.pgo"},
-		importConfigPath: filepath.Join(t.TempDir(), "importcfg"),
-		importConfig:     imports.ImportConfig{PackageFile: map[string]string{"fmt": "fmt.a"}},
-	}
-	err := ip.updateImportConfig(t.Context(), map[string]string{"fmt": "fmt", "unsafe": "unsafe", "C": "C"})
-	require.NoError(t, err)
-}
-
 func TestUpdateImportConfigPGOReadError(t *testing.T) {
 	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
 	require.NoError(t, os.MkdirAll(util.GetPGOProfileFile(), 0o755))

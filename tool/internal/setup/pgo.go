@@ -13,10 +13,7 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-const (
-	flagPGO    = "-pgo"
-	goflagsEnv = "GOFLAGS"
-)
+const flagPGO = "-pgo"
 
 // pgoProfile returns the PGO profile a build with the -pgo value applies to
 // every package of pkgs, for the nested builds toolexec runs: an explicit -pgo
@@ -58,7 +55,7 @@ func pgoProfile(value string, pkgs []*packages.Package) (string, bool) {
 // else the last one in GOFLAGS, else auto, as in cmd/go.
 func pgoValue(subcommand string, args []string) string {
 	value := "auto"
-	for _, token := range util.SplitGoflags(os.Getenv(goflagsEnv)) {
+	for _, token := range util.SplitGoflags(os.Getenv("GOFLAGS")) {
 		name, v, ok := strings.Cut(util.UnquoteGoflagsToken(token), "=")
 		if ok && flagName(name) == flagPGO {
 			value = v

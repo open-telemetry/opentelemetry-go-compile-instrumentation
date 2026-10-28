@@ -18,7 +18,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/dave/dst"
@@ -285,10 +284,10 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 		ip.importConfig.PackageFile = make(map[string]string)
 	}
 
-	loadBuildFlags := sync.OnceValues(func() ([]string, error) {
-		flags, err := ip.pgoBuildFlags()
-		return append(util.GetBuildFlags(), flags...), err
-	})
+	pgoFlags, pgoErr := ip.pgoBuildFlags()
+	if pgoErr != nil {
+		return pgoErr
+	}
 	var updated bool
 	for _, importPath := range newImports {
 		if importPath == "unsafe" || importPath == "C" {
@@ -301,15 +300,12 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 			continue
 		}
 
-		buildFlags, err := loadBuildFlags()
-		if err != nil {
-			return err
-		}
 		restore, err := ip.enterNestedResolution(importPath)
 		if err != nil {
 			return err
 		}
 		// Resolve package archive location, passing build flags to match the current build context
+		buildFlags := append(util.GetBuildFlags(), pgoFlags...)
 		archives, err := pkgload.ResolveExportFiles(ctx, importPath, buildFlags...)
 		restore()
 		if err != nil {
