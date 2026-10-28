@@ -83,10 +83,10 @@ func BeforeNewClient(ictx hook.HookContext, opts ...option.RequestOption) {
 	if !enabler.Enable() {
 		return
 	}
-	// If the user explicitly opted into the SDK's built-in tracing via
-	// ANTHROPIC_OPEN_TELEMETRY=true, skip otelc's middleware to avoid
-	// emitting duplicate spans.
-	if strings.EqualFold(os.Getenv(sdkOpenTelemetryEnv), "true") {
+	// If the user explicitly opted into the SDK's built-in tracing,
+	// skip otelc's middleware to avoid emitting duplicate spans.
+	// In anthropic-sdk-go, any value other than "false" enables tracing.
+	if v := os.Getenv(sdkOpenTelemetryEnv); v != "" && !strings.EqualFold(v, "false") {
 		return
 	}
 	initInstrumentation()

@@ -120,8 +120,10 @@ spans.
 
 To use the SDK's built-in tracing instead of `otelc`'s middleware, either:
 
-- Set `ANTHROPIC_OPEN_TELEMETRY=true` at runtime, or
+- Set `ANTHROPIC_OPEN_TELEMETRY=true` (or any non-`false` value) at runtime, or
 - Disable `otelc`'s Anthropic instrumentation via `OTEL_GO_DISABLED_INSTRUMENTATIONS=anthropic`.
+
+> **Note:** Because `ANTHROPIC_OPEN_TELEMETRY=false` is set process-wide, built-in SDK spans are also disabled for message batches (`POST /v1/messages/batches`), which `otelc` does not currently instrument. To trace message batches, enable native SDK tracing via `ANTHROPIC_OPEN_TELEMETRY=true`.
 
 ### Privacy
 
@@ -136,7 +138,10 @@ reassembled so the SDK always receives the full payload.
 - **Streaming is not yet instrumented.** When `"stream": true` is set in the
   request, the middleware passes the request through without creating a span.
   Streaming support is planned as a follow-up.
-- Message batches (`POST /v1/messages/batches`) are passed through.
+- Message batches (`POST /v1/messages/batches`) are passed through without
+  instrumentation. Since `otelc` disables native SDK tracing process-wide by
+  default, message batches will not emit spans unless `ANTHROPIC_OPEN_TELEMETRY=true`
+  is set.
 
 ## Example
 

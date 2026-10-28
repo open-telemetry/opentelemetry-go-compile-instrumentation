@@ -38,10 +38,23 @@ func TestBeforeNewClient_Enabled(t *testing.T) {
 }
 
 func TestBeforeNewClient_SDKOpenTelemetryExplicitlyEnabled(t *testing.T) {
+	for _, envVal := range []string{"true", "1", "yes"} {
+		t.Run(envVal, func(t *testing.T) {
+			t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "ANTHROPIC")
+			t.Setenv(sdkOpenTelemetryEnv, envVal)
+			ictx := hooktest.NewMockHookContext()
+			BeforeNewClient(ictx)
+			assert.Equal(t, 0, ictx.GetParamCount())
+			assert.Equal(t, envVal, os.Getenv(sdkOpenTelemetryEnv))
+		})
+	}
+}
+
+func TestBeforeNewClient_SDKOpenTelemetryExplicitlyDisabled(t *testing.T) {
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "ANTHROPIC")
-	t.Setenv(sdkOpenTelemetryEnv, "true")
+	t.Setenv(sdkOpenTelemetryEnv, "false")
 	ictx := hooktest.NewMockHookContext()
 	BeforeNewClient(ictx)
-	assert.Equal(t, 0, ictx.GetParamCount())
-	assert.Equal(t, "true", os.Getenv(sdkOpenTelemetryEnv))
+	assert.Greater(t, ictx.GetParamCount(), 0)
+	assert.Equal(t, "false", os.Getenv(sdkOpenTelemetryEnv))
 }
