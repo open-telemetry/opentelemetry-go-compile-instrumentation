@@ -497,14 +497,18 @@ func parseSQLServerKV(dsn string) DSNInfo {
 		val = strings.TrimSpace(val)
 		switch key {
 		case "server", "data source":
-			// Accept both "host,port" and "host\instance" forms.
-			if comma := strings.IndexByte(val, ','); comma >= 0 {
-				host = val[:comma]
-				port = val[comma+1:]
-			} else if bs := strings.IndexByte(val, '\\'); bs >= 0 {
-				host = val[:bs]
-			} else {
-				host = val
+			// Accept "host,port", "host\instance", and the combined
+			// "host\instance,port". The port is split off first because the
+			// instance name sits between the host and the comma, so a single
+			// either/or branch would leave the instance attached to the host
+			// whenever a port was also given.
+			host = val
+			if comma := strings.IndexByte(host, ','); comma >= 0 {
+				port = host[comma+1:]
+				host = host[:comma]
+			}
+			if bs := strings.IndexByte(host, '\\'); bs >= 0 {
+				host = host[:bs]
 			}
 			host = trimHostBrackets(host)
 		case "port":
