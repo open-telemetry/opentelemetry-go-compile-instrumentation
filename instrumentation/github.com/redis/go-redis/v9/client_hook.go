@@ -24,24 +24,15 @@ func (g redisClientEnabler) Enable() bool {
 
 var redisEnabler = redisClientEnabler{}
 
+// Ring and ClusterClient use redis.NewClient by default to create their node
+// clients (unless overridden via RingOptions.NewClient or ClusterOptions.NewClient),
+// so this hook instruments them too.
 func afterNewRedisClientV9(ictx hook.HookContext, client *redis.Client) {
 	client.AddHook(newOtelRedisHook(client.Options().Addr))
 }
 
 func afterNewFailOverRedisClientV9(call hook.HookContext, client *redis.Client) {
 	client.AddHook(newOtelRedisHook(client.Options().Addr))
-}
-
-func afterNewRingClientV9(call hook.HookContext, client *redis.Ring) {
-	client.OnNewNode(func(rdb *redis.Client) {
-		rdb.AddHook(newOtelRedisHook(rdb.Options().Addr))
-	})
-}
-
-func afterNewClusterClientV9(call hook.HookContext, client *redis.ClusterClient) {
-	client.OnNewNode(func(rdb *redis.Client) {
-		rdb.AddHook(newOtelRedisHook(rdb.Options().Addr))
-	})
 }
 
 func afterNewSentinelClientV9(call hook.HookContext, client *redis.SentinelClient) {

@@ -35,7 +35,8 @@ var (
 		"refactor": "scope:refactor",
 		"test":     "scope:chore",
 	}
-	titleRegexp = regexp.MustCompile(fmt.Sprintf(`^(%s)(?:\(.+\))?!?: .*$`, strings.Join(slices.Collect(maps.Keys(conventionalLabels)), "|")))
+	breakingLabel = "breaking"
+	titleRegexp   = regexp.MustCompile(fmt.Sprintf(`^(%s)(?:\(.+\))?(!)?: .*$`, strings.Join(slices.Collect(maps.Keys(conventionalLabels)), "|")))
 )
 
 func main() {
@@ -107,14 +108,20 @@ func main() {
 	title := pr.GetTitle()
 	log.Printf("The title of this pull request is: %q\n", title)
 
-	prLabel, labelError := labelForTitle(title)
+	prLabel, isBreaking, labelError := labelForTitle(title)
 	if labelError != nil {
 		log.Fatalln(errors.Join(labelError, createReviewComment(ctx, client, pr, labelError)))
 	}
 	log.Printf("Conventional commit label for this pull request is: %q\n", prLabel)
 
-	if _, _, err := client.Issues.AddLabelsToIssue(ctx, prOwner, prRepo, prNumber, []string{prLabel}); err != nil {
-		log.Fatalf("Failed to add the label to the pull request: %v\n", err)
+	labelsToAdd := []string{prLabel}
+	if isBreaking {
+		labelsToAdd = append(labelsToAdd, breakingLabel)
+		log.Println("Breaking change detected, adding breaking label")
+	}
+
+	if _, _, err := client.Issues.AddLabelsToIssue(ctx, prOwner, prRepo, prNumber, labelsToAdd); err != nil {
+		log.Fatalf("Failed to add labels to the pull request: %v\n", err)
 	}
 
 	for _, label := range conventionalLabels {
@@ -129,21 +136,33 @@ func main() {
 			log.Printf("Removed outdated label from pull request: %q\n", label)
 		}
 	}
+
+	// Remove breaking label if the title no longer has the ! modifier.
+	if !isBreaking {
+		if resp, err := client.Issues.RemoveLabelForIssue(ctx, prOwner, prRepo, prNumber, breakingLabel); err != nil {
+			if resp == nil || resp.StatusCode != http.StatusNotFound {
+				log.Fatalf("Failed to remove label %q from pull request: %v\n", breakingLabel, err)
+			}
+		} else {
+			log.Printf("Removed outdated label from pull request: %q\n", breakingLabel)
+		}
+	}
 }
 
-func labelForTitle(title string) (string, ConventionalCommitError) {
+func labelForTitle(title string) (string, bool, ConventionalCommitError) {
 	matches := titleRegexp.FindStringSubmatch(title)
 	if matches == nil {
-		return "", InvalidFormatError{}
+		return "", false, InvalidFormatError{}
 	}
 	ctype := matches[1]
+	isBreaking := matches[2] == "!"
 
 	label := conventionalLabels[ctype]
 	if label == "" {
-		return "", InvalidCommitType{Type: ctype}
+		return "", false, InvalidCommitType{Type: ctype}
 	}
 
-	return label, nil
+	return label, isBreaking, nil
 }
 
 const commentMarker = "<!-- .github/cools/conventionalcommit -->\n"

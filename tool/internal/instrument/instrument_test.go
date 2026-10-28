@@ -53,10 +53,13 @@ const (
 	mainGoFileName     = "main.go"
 	mainTestFileName   = "main_test.go"
 	otherGoFileName    = "other.go"
+	runtimeStubName    = "runtime_stub.go"
 	mainPackage        = "main"
 	buildID            = "foo/bar"
 	compiledOutput     = "_pkg_.a"
 	goldenExt          = ".golden"
+	// goldenWorkDir replaces the temporary directory in golden files.
+	goldenWorkDir      = "/golden/work"
 	invalidReceiver    = "invalid-receiver"
 	invalidReceiverMsg = "can not find function"
 )
@@ -113,6 +116,9 @@ func runTest(t *testing.T, testName string) {
 
 	testcaseDir := filepath.Join(testdataDir, goldenDir, testName)
 	helpers := buildTestcaseHelpers(ctx, t, testcaseDir)
+	if stub := buildRuntimeStub(ctx, t, testcaseDir, tempDir); stub != nil {
+		helpers = append(helpers, *stub)
+	}
 
 	args := compileArgs(tempDir, helpers, importPath, packageFiles...)
 	err := Toolexec(ctx, args, false)
@@ -443,6 +449,34 @@ func buildTestcaseHelpers(ctx context.Context, t *testing.T, testcaseDir string)
 	return out
 }
 
+// buildRuntimeStub compiles testcaseDir's runtime_stub.go, if present, as a
+// stand-in for the real "runtime" package, whose SuppressHooks and
+// UnsuppressHooks otelc's real build adds at compile time.
+func buildRuntimeStub(ctx context.Context, t *testing.T, testcaseDir, tempDir string) *helperPkg {
+	t.Helper()
+	stubFile := filepath.Join(testcaseDir, runtimeStubName)
+	if !util.PathExists(stubFile) {
+		return nil
+	}
+
+	gotooldir, err := exec.Command("go", "env", "GOTOOLDIR").Output()
+	require.NoError(t, err)
+
+	stubArchive := filepath.Join(tempDir, "runtime_stub.a")
+	cmd := exec.CommandContext(
+		ctx,
+		filepath.Join(strings.TrimSpace(string(gotooldir)), "compile"),
+		"-p", suppressHooksPackage,
+		"-o", stubArchive,
+		stubFile,
+	)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	require.NoError(t, cmd.Run(), "compiling %s: %s", stubFile, stderr.String())
+
+	return &helperPkg{importPath: suppressHooksPackage, archive: stubArchive}
+}
+
 func verifyGoldenFiles(t *testing.T, tempDir, testName string) {
 	entries, _ := os.ReadDir(filepath.Join(testdataDir, goldenDir, testName))
 	for _, entry := range entries {
@@ -458,6 +492,10 @@ func verifyGoldenFiles(t *testing.T, tempDir, testName string) {
 		// The dave/dst stringifier occasionally introduces CRLF on Windows.
 		// We normalize the generated string to LF before comparing to the .gitattributes LF golden file.
 		actualNorm := strings.ReplaceAll(string(actualBytes), "\r\n", "\n")
+		// Line directives hold the absolute path of the original file, which
+		// is in the temporary directory. Replace it so the golden files are
+		// the same on all machines.
+		actualNorm = strings.ReplaceAll(actualNorm, tempDir, goldenWorkDir)
 		golden.Assert(t, actualNorm, goldenPath)
 	}
 }

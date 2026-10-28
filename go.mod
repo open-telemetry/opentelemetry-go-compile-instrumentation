@@ -5,6 +5,8 @@ module go.opentelemetry.io/otelc
 
 go 1.26.0
 
+toolchain go1.26.10
+
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/dave/dst v0.28.0
@@ -19,6 +21,8 @@ require (
 	golang.org/x/tools v0.50.0
 	gotest.tools/v3 v3.5.2
 )
+
+require github.com/pmezard/go-difflib v1.0.0
 
 require (
 	github.com/valyala/bytebufferpool v1.0.0 // indirect

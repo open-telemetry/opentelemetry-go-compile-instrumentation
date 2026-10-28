@@ -273,6 +273,10 @@ func (h *clientStatsHandler) HandleRPC(ctx context.Context, rs stats.RPCStats) {
 				span.RecordError(rs.Error)
 			}
 			span.SetAttributes(statusAttr)
+		}
+		if !rs.EndTime.IsZero() {
+			span.End(trace.WithTimestamp(rs.EndTime))
+		} else {
 			span.End()
 		}
 

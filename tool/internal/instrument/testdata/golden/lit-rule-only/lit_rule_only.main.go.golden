@@ -3,23 +3,24 @@
 
 package main
 
+//line /golden/work/main.go:6
 import "io"
 
 // Empty literal takes both fields.
 func Bare() *io.LimitedReader {
-	return &io.LimitedReader{N: 50, R: nil}
+	return &io.LimitedReader{N: 50, R: nil} /*line /golden/work/main.go:10*/
 }
 
 // Existing keys are kept and overridden in place.
 func Configured(r io.Reader) *io.LimitedReader {
-	return &io.LimitedReader{R: nil, N: 50}
+	return &io.LimitedReader{R: nil, N: 50} /*line /golden/work/main.go:15*/
 }
 
 type holder struct{ lr *io.LimitedReader }
 
 // Literal nested inside another literal, with no name bound to it.
 func Nested() *holder {
-	return &holder{lr: &io.LimitedReader{N: 50, R: nil}}
+	return &holder{lr: &io.LimitedReader{N: 50, R: nil}} /*line /golden/work/main.go:22*/
 }
 
 // A different type from the same package is left alone.
