@@ -19,7 +19,7 @@ import (
 var (
 	driverName = flag.String("driver", "testdb", "The database driver name")
 	dsn        = flag.String("dsn", "user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8", "The data source name")
-	op         = flag.String("op", "all", "The operation to perform: ping, exec, query, tx, tx-rollback, tx-fail, prepare, opendb, all")
+	op         = flag.String("op", "all", "The operation to perform: ping, exec, query, tx, tx-rollback, tx-fail, prepare, tx-stmt, opendb, all")
 )
 
 func main() {
@@ -68,6 +68,8 @@ func main() {
 		doTxFail(ctx, failDB)
 	case "prepare":
 		doPrepare(ctx, db)
+	case "tx-stmt":
+		doTxStmt(ctx, db)
 	case "all":
 		doPing(ctx, db)
 		doExec(ctx, db)
@@ -127,6 +129,39 @@ func doPrepare(ctx context.Context, db *sql.DB) {
 	}
 	defer rows.Close()
 	slog.Info("prepare and stmt query succeeded")
+}
+
+// doTxStmt exercises reusing a connection-level prepared statement inside a
+// transaction via (*Tx).StmtContext. The single max-open-conn is required so
+// the prepared statement and the transaction share one connection, which lets
+// database/sql reuse the driver statement instead of re-preparing it.
+func doTxStmt(ctx context.Context, db *sql.DB) {
+	db.SetMaxOpenConns(1)
+	stmt, err := db.PrepareContext(ctx, "SELECT id FROM users WHERE name = ?")
+	if err != nil {
+		log.Fatalf("failed to prepare: %v", err)
+	}
+	defer stmt.Close()
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		log.Fatalf("failed to begin tx: %v", err)
+	}
+
+	txStmt := tx.StmtContext(ctx, stmt)
+	defer txStmt.Close()
+
+	rows, err := txStmt.QueryContext(ctx, "alice")
+	if err != nil {
+		tx.Rollback()
+		log.Fatalf("failed to query with tx stmt: %v", err)
+	}
+	rows.Close()
+
+	if err := tx.Commit(); err != nil {
+		log.Fatalf("failed to commit: %v", err)
+	}
+	slog.Info("tx prepared statement query succeeded")
 }
 
 func doTx(ctx context.Context, db *sql.DB) {

@@ -25,10 +25,12 @@ import (
 )
 
 type setupPhase struct {
-	logger          *slog.Logger
-	ruleConfig      string
-	buildPackages   []*packages.Package
-	buildFlags      []string
+	logger        *slog.Logger
+	ruleConfig    string
+	buildPackages []*packages.Package
+	buildFlags    []string
+	// pgo is the build's effective -pgo value; see pgoValue.
+	pgo             string
 	rootModulePaths []string
 	// resolvedNames maps an import path to a package name, built from
 	// buildPackages' dependency graph.
@@ -40,25 +42,34 @@ func (sp *setupPhase) Error(msg string, args ...any) { sp.logger.Error(msg, args
 func (sp *setupPhase) Warn(msg string, args ...any)  { sp.logger.Warn(msg, args...) }
 func (sp *setupPhase) Debug(msg string, args ...any) { sp.logger.Debug(msg, args...) }
 
+func setupDebugDir(pkgPath string) string {
+	if pkgPath == "" {
+		pkgPath = "main"
+	}
+	return filepath.Join(util.GetBuildTemp("debug"), util.EscapePackagePath(pkgPath))
+}
+
+func cleanupDebugArtifacts() error {
+	if !instrument.DiffDebugEnabled() {
+		return nil
+	}
+	return instrument.CleanupDebugArtifacts()
+}
+
 // keepForDebug copies the file to the build temp directory for debugging.
 // Error is tolerated as it's not critical.
-func keepForDebug(ctx context.Context, srcPath string) {
+func keepForDebug(ctx context.Context, srcPath, pkgPath string) {
 	logger := util.LoggerFromContext(ctx)
-
-	escape := func(s string) string {
-		s = strings.ReplaceAll(s, "/", "_")
-		s = strings.ReplaceAll(s, ".", "_")
-		return s
+	var targetDir string
+	switch {
+	case pkgPath != "":
+		targetDir = setupDebugDir(pkgPath)
+	case filepath.Clean(filepath.Dir(srcPath)) == filepath.Clean(util.GetOtelcWorkDir()):
+		targetDir = setupDebugDir("main")
+	default:
+		targetDir = setupDebugDir(filepath.Base(filepath.Dir(srcPath)))
 	}
-
-	var name string
-	if filepath.Clean(filepath.Dir(srcPath)) == filepath.Clean(util.GetOtelcWorkDir()) {
-		name = "main"
-	} else {
-		name = escape(filepath.Base(filepath.Dir(srcPath)))
-	}
-
-	dstPath := filepath.Join(util.GetBuildTemp("debug"), name, filepath.Base(srcPath))
+	dstPath := filepath.Join(targetDir, filepath.Base(srcPath))
 	if err := util.CopyFile(srcPath, dstPath); err != nil {
 		logger.WarnContext(ctx, "failed to record added file", "path", srcPath, "error", err)
 	}
@@ -90,6 +101,9 @@ const (
 	delimiterDashDash = "--"
 	// flagJSON makes the go command report its output as JSON events.
 	flagJSON = "-json"
+	// flagGcflags is forwarded to `go list` only with a package pattern; see
+	// forwardedValueFlag.
+	flagGcflags = "-gcflags"
 )
 
 func lastFileTargetIndex(subcommand string, args []string) int {
@@ -128,11 +142,24 @@ func getBuildPackages(
 	subcommand string,
 	args []string,
 ) ([]*packages.Package, []*packages.Package, error) {
-	logger := util.LoggerFromContext(ctx)
-	// NeedForTest marks the test packages, so the loop below can split them
+	// NeedForTest marks the test packages, so loadBuildPackages can split them
 	// from the real build packages.
 	mode := packages.NeedName | packages.NeedFiles | packages.NeedModule |
 		packages.NeedImports | packages.NeedDeps | packages.NeedForTest
+	return loadBuildPackages(ctx, mode, subcommand, args)
+}
+
+// loadBuildPackages loads the build packages of getBuildPackages with the
+// given load mode.
+//
+//nolint:revive // needed to balance confusing-results and nonamedreturns linters
+func loadBuildPackages(
+	ctx context.Context,
+	mode packages.LoadMode,
+	subcommand string,
+	args []string,
+) ([]*packages.Package, []*packages.Package, error) {
+	logger := util.LoggerFromContext(ctx)
 	tests := subcommand == subcmdTest
 
 	pkgTargets, fileTargets, err := splitBuildTargets(subcommand, args)
@@ -288,6 +315,7 @@ func (sp *setupPhase) generateRuntimePerPackage(
 		if err := sp.addDeps(ctx, matched, runtimePackage{
 			dir:        pkgDir,
 			importPath: sp.runtimeImportPath(ctx, pkg, pkgDir),
+			debugPath:  pkg.PkgPath,
 			name:       pkg.Name,
 		}); err != nil {
 			return ex.Wrapf(err, "adding deps for package at %s", pkgDir)
@@ -353,6 +381,14 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	if cmd.Name == "go" {
 		subcommand = cmd.Args().First() // build / install / test
 		args = cmd.Args().Tail()        // trim the subcommand
+	} else {
+		// Clean up debug artifacts from previous runs for standalone `otelc setup`,
+		// as it prepares the environment for a subsequent toolexec build.
+		// For `otelc go ...`, runGoBuild already performed this cleanup at its
+		// lifecycle boundary before invoking Setup.
+		if err := cleanupDebugArtifacts(); err != nil {
+			return ex.Wrapf(err, "cleaning debug artifacts")
+		}
 	}
 
 	logger := util.LoggerFromContext(ctx)
@@ -392,6 +428,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		logger:     logger,
 		ruleConfig: cmd.String("rules"),
 		buildFlags: extractBuildFlags(subcommand, args),
+		pgo:        pgoValue(subcommand, args),
 	}
 
 	// Introduce additional hook code by generating otelc.runtime.go
@@ -446,7 +483,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	// application below, which compiles their dependencies too. The build plan
 	// never saw those, so match them now.
 	injected, err := sp.matchInjectedDeps(
-		ctx, matched, deps, moduleDirs, extractBuildFlags(subcommand, args),
+		ctx, matched, deps, moduleDirs, sp.buildFlags,
 	)
 	if err != nil {
 		return err
@@ -493,6 +530,8 @@ func setupGoCache(ctx context.Context, env []string) ([]string, error) {
 // extractBuildFlags extracts flags that affect the build context from the arguments.
 // These flags need to be forwarded to `go list` when resolving import archives.
 // Returns a slice of flag arguments preserving their original form.
+// Only patterned -gcflags values are forwarded: unpatterned values apply to the
+// outer command's targets, not the imports resolved by the nested go command.
 //
 // For boolean flags, the last occurrence wins. This correctly handles cases like:
 //   - GOFLAGS=-race with -race=false on CLI (result: -race=false)
@@ -516,11 +555,7 @@ func extractBuildFlags(subcommand string, args []string) []string {
 		}
 
 		if isBuildContextFlagWithValue(a.FlagName) {
-			if a.HasValue {
-				valueFlags = append(valueFlags, a.Raw)
-			} else if i+1 < len(classified) && classified[i+1].Kind == ArgBuildFlagValue {
-				valueFlags = append(valueFlags, a.Raw, classified[i+1].Raw)
-			}
+			valueFlags = append(valueFlags, forwardedValueFlag(classified, i)...)
 			continue
 		}
 
@@ -550,6 +585,28 @@ func extractBuildFlags(subcommand string, args []string) []string {
 	slices.Sort(enabledBoolFlags)
 
 	return append(valueFlags, enabledBoolFlags...)
+}
+
+// forwardedValueFlag returns the tokens of the value flag at classified[i] as
+// the user wrote them, in its joined or separated form, or nil when it has no
+// value or must not be forwarded. cmd/go applies a -gcflags value without a
+// package pattern only to the packages named on its own command line: the
+// targets of this build, but the added import in a nested `go list`.
+func forwardedValueFlag(classified []ClassifiedArg, i int) []string {
+	a := classified[i]
+	tokens := []string{a.Raw}
+	value := a.Value
+	if !a.HasValue {
+		if i+1 >= len(classified) || classified[i+1].Kind != ArgBuildFlagValue {
+			return nil
+		}
+		value = classified[i+1].Raw
+		tokens = append(tokens, value)
+	}
+	if a.FlagName == flagGcflags && !util.HasPackagePattern(value) {
+		return nil
+	}
+	return tokens
 }
 
 // toolexecInsertArg builds the -toolexec=... argument for execPath. Split out
@@ -587,17 +644,17 @@ func addBuildFlags(args []string, flags ...string) []string {
 }
 
 // toolexecBuildArgs assembles the argv for the instrumented build: the
-// original go subcommand, -work, the -toolexec flag pointing at execPath, and
+// original go subcommand, optional goFlags, the -toolexec flag pointing at execPath, and
 // the caller's remaining arguments. Kept free of side effects so it can be
 // tested directly; buildWithToolexec cannot be, since it would spawn a go
 // build whose -toolexec target is the test binary itself.
-func toolexecBuildArgs(args []string, execPath string, vendored bool) ([]string, error) {
+func toolexecBuildArgs(args []string, execPath string, vendored bool, goFlags ...string) ([]string, error) {
 	insert, err := toolexecInsertArg(execPath)
 	if err != nil {
 		return nil, err
 	}
-	const additionalCount = 3
-	newArgs := make([]string, 0, len(args)+additionalCount) // Avoid in-place modification
+	const additionalCount = 2
+	newArgs := make([]string, 0, len(args)+additionalCount+len(goFlags)) // Avoid in-place modification
 	// Add "go build"
 	newArgs = append(newArgs, "go")
 	newArgs = append(newArgs, args[:1]...)
@@ -618,9 +675,9 @@ func toolexecBuildArgs(args []string, execPath string, vendored bool) ([]string,
 			restArgs = slices.Insert(restArgs, insertAt, otelcRuntimePath)
 		}
 	}
-	// Add -work and -toolexec after a leading -C/--C. The go command rejects -C
+	// Add goFlags and -toolexec after a leading -C/--C. The go command rejects -C
 	// when any other flag comes before it.
-	restArgs = addBuildFlags(restArgs, "-work", insert)
+	restArgs = addBuildFlags(restArgs, slices.Concat(goFlags, []string{insert})...)
 	return append(newArgs, restArgs...), nil
 }
 
@@ -651,7 +708,12 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 	if err != nil {
 		return ex.Wrapf(err, "failed to get executable path")
 	}
-	newArgs, err := toolexecBuildArgs(args, execPath, vendored)
+	var goFlags []string
+	if cmd.Bool("debug") {
+		// Keep Go's temporary work directory only for debugging.
+		goFlags = append(goFlags, "-work")
+	}
+	newArgs, err := toolexecBuildArgs(args, execPath, vendored, goFlags...)
 	if err != nil {
 		return err
 	}
@@ -715,6 +777,9 @@ func runGoBuild(ctx context.Context, cmd *cli.Command) error {
 	// Clean up import tracking files from previous builds at the start
 	// to prevent stale data from affecting this build.
 	instrument.CleanupImportTrackingFiles()
+	if err := cleanupDebugArtifacts(); err != nil {
+		return ex.Wrapf(err, "cleaning debug artifacts")
+	}
 
 	defer func() {
 		// Restore backed-up go.mod/go.sum but keep .otelc-build/ for debugging.

@@ -6,6 +6,7 @@ package instrument
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
@@ -35,6 +36,17 @@ func (ip *instrumentPhase) load() ([]*rule.InstRuleSet, error) {
 	return rset, nil
 }
 
+// anyRuleSetHasIgnoredCallFiles reports whether any package in this build has
+// a //otelc:ignore comment above a call, found during setup.
+func anyRuleSetHasIgnoredCallFiles(allSet []*rule.InstRuleSet) bool {
+	for _, rset := range allSet {
+		if len(rset.IgnoredCallFiles) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // loadImportNames loads the import name table. A missing file is not
 // an error, since the table only improves a fallback guess.
 func loadImportNames() (map[string]string, error) {
@@ -55,15 +67,37 @@ func loadImportNames() (map[string]string, error) {
 
 // match matches the rules with the compile command.
 func (ip *instrumentPhase) match(allSet []*rule.InstRuleSet, args []string) *rule.InstRuleSet {
-	// One package can only be matched with one rule set, so it's safe to return
-	// the first matched rule set.
+	// Several packages can share an import path, such as every main package
+	// of a build, so a rule set only matches a compile that holds the files
+	// its rules were matched in.
 	importPath := util.FindFlagValue(args, "-p")
 	util.Assert(importPath != "", "sanity check")
+	compiled := make(map[string]bool, len(args))
+	for _, arg := range args {
+		if !util.IsGoFile(arg) {
+			continue
+		}
+		if abs, err := filepath.Abs(arg); err == nil {
+			compiled[abs] = true
+		}
+	}
 	for _, rset := range allSet {
-		if rset.ModulePath == importPath {
+		if rset.ModulePath == importPath && ip.compilesRuleFiles(rset, compiled) {
 			ip.Debug("Match rule set", "set", rset)
 			return rset
 		}
 	}
 	return nil
+}
+
+// compilesRuleFiles reports whether every file rset has rules for is in
+// compiled, using the same cgo file mapping as instrument.
+func (ip *instrumentPhase) compilesRuleFiles(rset *rule.InstRuleSet, compiled map[string]bool) bool {
+	_, files := groupRules(ip.workDir, rset)
+	for _, file := range files {
+		if !compiled[file] {
+			return false
+		}
+	}
+	return true
 }

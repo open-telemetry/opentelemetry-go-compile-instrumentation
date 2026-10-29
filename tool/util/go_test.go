@@ -60,9 +60,9 @@ func TestIsCompileCommand(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:     "PGO compile command should be excluded",
-			line:     "/usr/local/go/pkg/tool/linux_amd64/compile -o /tmp/output.a -p main -buildid abc123 -pgoprofile /tmp/default.pgo",
-			expected: false,
+			name:     "PGO compile command",
+			line:     "/usr/local/go/pkg/tool/linux_amd64/compile -o /tmp/output.a -p main -buildid abc123 -pgoprofile=/tmp/pgo.preprofile",
+			expected: true,
 		},
 		{
 			name:     "complete compile command with additional flags",
@@ -204,7 +204,7 @@ func TestIsCompileArgs(t *testing.T) {
 			expected: false,
 		},
 		{
-			name: "PGO compile should be excluded",
+			name: "PGO compile command",
 			args: []string{
 				"/usr/local/go/pkg/tool/linux_amd64/compile",
 				"-o",
@@ -213,10 +213,9 @@ func TestIsCompileArgs(t *testing.T) {
 				"main",
 				"-buildid",
 				"abc123",
-				"-pgoprofile",
-				"/tmp/default.pgo",
+				"-pgoprofile=/tmp/pgo.preprofile",
 			},
-			expected: false,
+			expected: true,
 		},
 		{
 			name: "link command should not match",
@@ -788,6 +787,61 @@ func TestNewFileScanner(t *testing.T) {
 	}
 	require.NoError(t, scanner.Err())
 	assert.Equal(t, []string{"line1", "line2", "line3"}, lines)
+}
+
+func TestHasPackagePattern(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    string
+		expected bool
+	}{
+		{name: "all packages", value: "all=-N -l", expected: true},
+		{name: "standard library", value: "std=-l", expected: true},
+		{name: "import path pattern", value: "example.com/...=-m", expected: true},
+		{name: "relative pattern", value: "./...=-l", expected: true},
+		{name: "multiple flags without pattern", value: "-N -l", expected: false},
+		{name: "single flag without pattern", value: "-l", expected: false},
+		{name: "empty", value: "", expected: false},
+		{name: "whitespace", value: "  ", expected: false},
+		{name: "leading space", value: " all=-l", expected: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, HasPackagePattern(tt.value))
+		})
+	}
+}
+
+func TestStripUnpatternedGcflagsFromGoflags(t *testing.T) {
+	tests := []struct {
+		name     string
+		goflags  string
+		expected string
+	}{
+		{name: "empty", goflags: "", expected: ""},
+		{name: "no gcflags", goflags: "-mod=mod -race", expected: "-mod=mod -race"},
+		{name: "unpatterned", goflags: "-gcflags=-l", expected: ""},
+		{name: "single quoted unpatterned", goflags: "'-gcflags=-N -l'", expected: ""},
+		{name: "double quoted unpatterned", goflags: `"-gcflags=-l"`, expected: ""},
+		{name: "empty value", goflags: "-gcflags=", expected: ""},
+		{name: "double dash unpatterned", goflags: "--gcflags=-l", expected: ""},
+		{name: "patterned", goflags: "-gcflags=all=-l", expected: "-gcflags=all=-l"},
+		{
+			name:     "quoted patterned preserved verbatim",
+			goflags:  `"-gcflags=all=-N -l"`,
+			expected: `"-gcflags=all=-N -l"`,
+		},
+		{
+			name:     "mixed flags keep order",
+			goflags:  "-mod=mod -gcflags=-l -tags=x '-gcflags=std=-N -l'",
+			expected: "-mod=mod -tags=x '-gcflags=std=-N -l'",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, StripUnpatternedGcflagsFromGoflags(tt.goflags))
+		})
+	}
 }
 
 func TestStripToolexecFromGoflags(t *testing.T) {

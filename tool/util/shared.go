@@ -41,6 +41,20 @@ const (
 	OtelcToolExe            = "otelc"
 )
 
+// DirectiveIgnore and DirectiveInstrument live in util, not ast or rule. ast
+// already imports rule, so rule importing ast back would cycle. Both
+// packages import util instead.
+const (
+	DirectiveIgnore     = "otelc:ignore"
+	DirectiveInstrument = "otelc:instrument"
+)
+
+// BuiltinDirectives lists directive names reserved for otelc. A directive
+// rule using one of these names fails validation.
+//
+//nolint:gochecknoglobals // read-only lookup table
+var BuiltinDirectives = []string{DirectiveIgnore, DirectiveInstrument}
+
 // IsRuleFile reports whether name identifies an otelc rule file.
 func IsRuleFile(name string) bool {
 	return name == "otelc.yml" ||
@@ -60,17 +74,18 @@ func GetImportNamesFile() string {
 	return GetBuildTemp(importNamesFile)
 }
 
+// GetPGOProfileFile returns the path to the file that records the build's PGO
+// profile for the nested builds toolexec runs.
+func GetPGOProfileFile() string {
+	const pgoProfileFile = "pgo_profile"
+	return GetBuildTemp(pgoProfileFile)
+}
+
 // GetAddedImportsFileForProcess returns the per-process import tracking file.
 // Each compile process writes to its own file to avoid inter-process race conditions.
 func GetAddedImportsFileForProcess() string {
 	pid := os.Getpid()
 	return GetBuildTemp(fmt.Sprintf("added_imports.%d.json", pid))
-}
-
-// GetAddedImportsPattern returns the glob pattern for all import tracking files.
-// Used by the link phase to discover and merge all per-process import files.
-func GetAddedImportsPattern() string {
-	return GetBuildTemp("added_imports.*.json")
 }
 
 // GetOtelcWorkDir returns the otelc working directory. It first checks the
@@ -207,4 +222,11 @@ func VersionInRange(version, versionRange string) bool {
 
 	// Minimal version only? i.e. "v0.11.0"
 	return semver.Compare(version, versionRange) >= 0
+}
+
+// EscapePackagePath turns a package or module import path into a filesystem-safe
+// directory name for debug artifacts, e.g. "a/b.c" -> "a_b_c".
+func EscapePackagePath(s string) string {
+	s = strings.ReplaceAll(s, "/", "_")
+	return strings.ReplaceAll(s, ".", "_")
 }

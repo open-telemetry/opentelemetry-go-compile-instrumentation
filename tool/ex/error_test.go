@@ -172,3 +172,15 @@ func TestFatalf(t *testing.T) {
 	assert.Contains(t, out, "Stack:",
 		"Fatalf builds a stackful error, so a stack section should be printed")
 }
+
+// TestCaptureStackKeepsOutermostFrame guards the CallersFrames contract: more
+// reports whether the next call yields a frame, not whether this one did, so
+// the loop has to record before it breaks. runtime.goexit is the outermost
+// frame of every goroutine, so its presence is what proves the last frame
+// survives; dropping it is exactly what the inverted loop did.
+func TestCaptureStackKeepsOutermostFrame(t *testing.T) {
+	frames := captureStack()
+	require.NotEmpty(t, frames)
+	assert.Contains(t, frames[len(frames)-1], "runtime.goexit",
+		"the outermost frame should be recorded, not discarded with more==false")
+}
