@@ -172,6 +172,8 @@ func TestGetPackageDir(t *testing.T) {
 	tests := []struct {
 		name    string
 		goFiles []string
+		dir     string
+		want    string
 	}{
 		{
 			name:    "package with single go file",
@@ -197,17 +199,28 @@ func TestGetPackageDir(t *testing.T) {
 			name:    "package with empty go files slice",
 			goFiles: []string{},
 		},
+		{
+			name: "package with only test files",
+			dir:  filepath.Join(tmpDir, "testonly"),
+			want: filepath.Join(tmpDir, "testonly"),
+		},
+		{
+			name:    "go files take precedence over dir",
+			goFiles: []string{filepath.Join("path_to_project", "main.go")},
+			dir:     tmpDir,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var expected string
+			expected := tt.want
 			if len(tt.goFiles) > 0 {
 				expected = filepath.Dir(tt.goFiles[0])
 			}
 
 			pkg := &packages.Package{}
 			pkg.GoFiles = tt.goFiles
+			pkg.Dir = tt.dir
 			result := PackageDir(pkg)
 			if result != expected {
 				t.Errorf("GetPackageDir() = %q, expected %q", result, expected)
@@ -492,7 +505,7 @@ func TestFindModuleDirs(t *testing.T) {
 			want: []string{},
 		},
 		{
-			name: "skips package with module but no go files",
+			name: "uses module dir of package without go files",
 			pkgs: []*packages.Package{
 				{
 					PkgPath: "example.com/a",
@@ -501,16 +514,30 @@ func TestFindModuleDirs(t *testing.T) {
 					},
 				},
 			},
-			want: []string{},
+			want: []string{
+				"/tmp/mod",
+			},
 		},
 		{
-			name: "skips command line package without go files",
+			name: "errors when command line package has no directory",
 			pkgs: []*packages.Package{
 				{
 					PkgPath: CommandLineArgumentsPackage,
 				},
 			},
-			want: []string{},
+			wantErr: true,
+		},
+		{
+			name: "resolves module dir for command line package with only test files",
+			pkgs: []*packages.Package{
+				{
+					PkgPath: CommandLineArgumentsPackage,
+					Dir:     tmp,
+				},
+			},
+			want: []string{
+				tmp,
+			},
 		},
 		{
 			name: "resolves module dir for command line package",

@@ -92,12 +92,23 @@ func realDirs(t *testing.T, dirs []string) []string {
 	return res
 }
 
+// testOnlyFiles holds a package with only in-package tests and one with only
+// external tests. Neither has GoFiles.
+func testOnlyFiles(prefix string) map[string]string {
+	return map[string]string{
+		prefix + "go.mod":          "module example.com/app\n\ngo 1.25\n",
+		prefix + "inpkg/a_test.go": "package inpkg\n",
+		prefix + "xpkg/b_test.go":  "package xpkg_test\n",
+	}
+}
+
 func TestFindBuildModuleDirs(t *testing.T) {
 	tests := []struct {
-		name  string
-		files map[string]string
-		args  []string
-		want  []string // module dirs, relative to the build root
+		name       string
+		files      map[string]string
+		subcommand string // defaults to build
+		args       []string
+		want       []string // module dirs, relative to the build root
 	}{
 		{
 			name:  "plain module",
@@ -128,16 +139,54 @@ func TestFindBuildModuleDirs(t *testing.T) {
 			args: []string{"./..."},
 			want: []string{"."},
 		},
+		{
+			name:       "package with only in-package tests",
+			files:      testOnlyFiles(""),
+			subcommand: subcmdTest,
+			args:       []string{"./inpkg"},
+			want:       []string{"."},
+		},
+		{
+			name:       "package with only external tests",
+			files:      testOnlyFiles(""),
+			subcommand: subcmdTest,
+			args:       []string{"./xpkg"},
+			want:       []string{"."},
+		},
+		{
+			name:       "module with only test-only packages",
+			files:      testOnlyFiles(""),
+			subcommand: subcmdTest,
+			args:       []string{"./..."},
+			want:       []string{"."},
+		},
+		{
+			name: "test-only package next to a package of another module",
+			files: func() map[string]string {
+				files := testOnlyFiles("b/")
+				files["go.work"] = "go 1.25\n\nuse (\n\t./a\n\t./b\n)\n"
+				files["a/go.mod"] = "module example.com/a\n\ngo 1.25\n"
+				files["a/main.go"] = testMainGo
+				return files
+			}(),
+			subcommand: subcmdTest,
+			args:       []string{"./a", "./b/inpkg"},
+			want:       []string{"a", "b"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			root := newBuildRoot(t, tt.files)
+			subcommand := tt.subcommand
+			if subcommand == "" {
+				subcommand = subcmdBuild
+			}
 
-			got, err := findBuildModuleDirs(t.Context(), subcmdBuild, tt.args)
+			got, err := findBuildModuleDirs(t.Context(), subcommand, tt.args)
 			require.NoError(t, err)
 
-			buildPkgs, _, err := getBuildPackages(t.Context(), subcmdBuild, tt.args)
+			buildPkgs, _, err := getBuildPackages(t.Context(), subcommand, tt.args)
 			require.NoError(t, err)
 			full, err := pkgload.FindModuleDirs(t.Context(), buildPkgs)
 			require.NoError(t, err)
