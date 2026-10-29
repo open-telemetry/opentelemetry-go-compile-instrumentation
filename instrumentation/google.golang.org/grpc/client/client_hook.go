@@ -274,7 +274,11 @@ func (h *clientStatsHandler) HandleRPC(ctx context.Context, rs stats.RPCStats) {
 			}
 			span.SetAttributes(statusAttr)
 		}
-		span.End()
+		if !rs.EndTime.IsZero() {
+			span.End(trace.WithTimestamp(rs.EndTime))
+		} else {
+			span.End()
+		}
 
 		// Record metrics
 		metricAttrs := make([]attribute.KeyValue, 0, len(gctx.metricAttrs)+1)

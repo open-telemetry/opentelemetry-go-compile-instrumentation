@@ -63,6 +63,9 @@ func TestKafkaRequestTraceAttrs_Producer(t *testing.T) {
 	assert.False(t, hasGroup)
 	_, hasPartition := m["messaging.destination.partition.id"]
 	assert.False(t, hasPartition)
+
+	assert.Equal(t, kafkaRequestAttrCap, cap(attrs),
+		"a 3-element literal that then appends host, port, key, and body grows twice")
 }
 
 func TestKafkaRequestTraceAttrs_ProducerAsync(t *testing.T) {
