@@ -34,6 +34,27 @@ func TestCollectPackageNames(t *testing.T) {
 	}, names)
 }
 
+func TestCollectPackageNames_TestVariant(t *testing.T) {
+	// A test load returns the plain package before its test variant. Both
+	// have the same PkgPath, but only the variant has the imports of the
+	// _test.go files.
+	plain := &packages.Package{ID: "example.com/svc", PkgPath: "example.com/svc", Name: "svc"}
+	helper := &packages.Package{ID: "example.com/helper", PkgPath: "example.com/helper", Name: "helper"}
+	variant := &packages.Package{
+		ID:      "example.com/svc [example.com/svc.test]",
+		PkgPath: "example.com/svc",
+		Name:    "svc",
+		Imports: map[string]*packages.Package{"example.com/helper": helper},
+	}
+
+	names := CollectPackageNames([]*packages.Package{plain, variant})
+
+	assert.Equal(t, map[string]string{
+		"example.com/svc":    "svc",
+		"example.com/helper": "helper",
+	}, names)
+}
+
 func TestCollectPackageNames_SkipsEmptyName(t *testing.T) {
 	pkg := &packages.Package{PkgPath: "example.com/broken", Name: ""}
 

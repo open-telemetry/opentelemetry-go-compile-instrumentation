@@ -508,22 +508,30 @@ func TestGetBuildPackages_TestSubcommandIncludesTestOnlyImports(t *testing.T) {
 		[]byte("package main\n\nfunc main() {}\n"),
 		0o644,
 	))
+	// Only main_test.go imports helper. A standard library package does not
+	// test this, because "testing" imports most of them.
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "helper"), 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "helper", "helper.go"),
+		[]byte("package helper\n\nfunc Name() string { return \"helper\" }\n"),
+		0o644,
+	))
 	require.NoError(t, os.WriteFile(
 		filepath.Join(tmpDir, "main_test.go"),
-		[]byte("package main\n\nimport (\n\t\"testing\"\n\t\"unicode\"\n)\n\n"+
-			"func TestUsesUnicode(t *testing.T) { _ = unicode.IsUpper('A') }\n"),
+		[]byte("package main\n\nimport (\n\t\"testing\"\n\n\t\"testmodule/helper\"\n)\n\n"+
+			"func TestUsesHelper(t *testing.T) { _ = helper.Name() }\n"),
 		0o644,
 	))
 	t.Chdir(tmpDir)
 
 	buildPkgs, _, err := getBuildPackages(t.Context(), subcmdBuild, nil)
 	require.NoError(t, err)
-	assert.NotContains(t, pkgload.CollectPackageNames(buildPkgs), "unicode",
+	assert.NotContains(t, pkgload.CollectPackageNames(buildPkgs), "testmodule/helper",
 		"a build must not resolve names for imports that only appear in _test.go files")
 
 	testBuildPkgs, testAllPkgs, err := getBuildPackages(t.Context(), subcmdTest, nil)
 	require.NoError(t, err)
-	assert.Contains(t, pkgload.CollectPackageNames(testAllPkgs), "unicode",
+	assert.Contains(t, pkgload.CollectPackageNames(testAllPkgs), "testmodule/helper",
 		"otelc go test must resolve real names for imports that only appear in _test.go files")
 	for _, pkg := range testBuildPkgs {
 		assert.Empty(t, pkg.ForTest,
