@@ -465,16 +465,36 @@ func outer() {
 
 	assert.Equal(t, "outer", matches[0].Func.Name.Name)
 	assert.Nil(t, matches[0].Lit)
+	assert.Nil(t, matches[0].Enclosing)
 	assert.Equal(t, []DirectiveArg{{Key: "tag", Value: "outer"}}, matches[0].Args)
 
 	require.NotNil(t, matches[1].Lit)
+	assert.Same(t, matches[0].Func, matches[1].Enclosing)
 	assert.Equal(t, []DirectiveArg{{Key: "tag", Value: "inner"}}, matches[1].Args)
 
 	// The literal is annotated twice and returned once, with the arguments of
 	// the first directive.
 	require.NotNil(t, matches[2].Lit)
+	assert.Same(t, matches[0].Func, matches[2].Enclosing)
 	assert.Equal(t, []DirectiveArg{{Key: "tag", Value: "statement"}}, matches[2].Args)
 	assert.NotSame(t, matches[1].Lit, matches[2].Lit)
+}
+
+func TestFindFuncsByDirective_PackageLevelFuncLitHasNoEnclosing(t *testing.T) {
+	src := `package p
+
+//otelc:span
+var handler = func() {}
+`
+	path := writeGoTempFile(t, src)
+	tree, err := ParseFileFast(path)
+	require.NoError(t, err)
+
+	matches, err := FindFuncsByDirective(tree, "otelc:span")
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	require.NotNil(t, matches[0].Lit)
+	assert.Nil(t, matches[0].Enclosing)
 }
 
 func TestFindFuncsByDirective_FuncLitParseArgsError(t *testing.T) {

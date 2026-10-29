@@ -236,11 +236,14 @@ func HasLeadingDirective(stmt dst.Stmt, directive string) bool {
 
 // FuncDirectiveMatch pairs a function matched by FindFuncsByDirective with
 // the key:value arguments parsed from its matching directive comment. Exactly
-// one of Func and Lit is set.
+// one of Func and Lit is set. Enclosing is the top-level function declaration
+// that contains Lit, or nil if Lit is outside any function (e.g. in a
+// package-level var).
 type FuncDirectiveMatch struct {
-	Func *dst.FuncDecl
-	Lit  *dst.FuncLit
-	Args []DirectiveArg
+	Func      *dst.FuncDecl
+	Lit       *dst.FuncLit
+	Enclosing *dst.FuncDecl
+	Args      []DirectiveArg
 }
 
 // FileHasLeadingDirective returns true if the file contains a leading run of comments
@@ -270,8 +273,9 @@ func FileHasLeadingDirective(file *dst.File, directive string) bool {
 // first directive.
 func FindFuncsByDirective(file *dst.File, directive string) ([]FuncDirectiveMatch, error) {
 	var (
-		matches []FuncDirectiveMatch
-		err     error
+		matches   []FuncDirectiveMatch
+		enclosing *dst.FuncDecl
+		err       error
 	)
 	seen := make(map[*dst.FuncLit]bool)
 	visit := func(n dst.Node) bool {
@@ -307,11 +311,12 @@ func FindFuncsByDirective(file *dst.File, directive string) ([]FuncDirectiveMatc
 			return false
 		}
 		for _, lit := range literals {
-			matches = append(matches, FuncDirectiveMatch{Lit: lit, Args: args})
+			matches = append(matches, FuncDirectiveMatch{Lit: lit, Enclosing: enclosing, Args: args})
 		}
 		return true
 	}
 	for _, decl := range file.Decls {
+		enclosing, _ = decl.(*dst.FuncDecl)
 		dst.Inspect(decl, visit)
 	}
 	if err != nil {

@@ -49,6 +49,12 @@ func (ip *instrumentPhase) applyDirectiveRule(
 		if err = checkAliasOverrideShadowing(aliasOverrides, funcDecl); err != nil {
 			return false, ex.Wrapf(err, "checking import aliases for func %s", name)
 		}
+		// A literal's body can also be shadowed by the names in scope around it.
+		if match.Lit != nil {
+			if err = checkAliasOverrideShadowingAt(aliasOverrides, match.Enclosing, match.Lit); err != nil {
+				return false, ex.Wrapf(err, "checking import aliases for func %s", name)
+			}
+		}
 		var (
 			snippet string
 			stmts   []dst.Stmt //nolint:prealloc // Slice allocated by `p.ParseSnippet`

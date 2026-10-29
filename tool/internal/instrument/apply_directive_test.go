@@ -630,6 +630,67 @@ func foo(f sink) {
 	require.Len(t, funcDecl.Body.List, 1, "must not inject code that would resolve to the wrong identifier")
 }
 
+func TestApplyDirectiveRule_FuncLitOverrideShadowedByEnclosingScopeReportsConflict(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+	}{
+		{
+			name: "enclosing func parameter",
+			src: `package main
+
+import f "fmt"
+
+func foo(f sink) {
+	//otelc:test
+	inner := func() {
+		println("hello")
+	}
+	inner()
+}
+`,
+		},
+		{
+			name: "enclosing block variable",
+			src: `package main
+
+import f "fmt"
+
+func foo() {
+	if f := 1; f > 0 {
+		//otelc:test
+		inner := func() {
+			println("hello")
+		}
+		inner()
+	}
+}
+`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root, err := ast.NewAstParser().ParseSource(tt.src)
+			require.NoError(t, err)
+
+			r := &rule.InstDirectiveRule{
+				InstBaseRule: rule.InstBaseRule{
+					Name:    "test_directive",
+					Imports: map[string]string{"traced": "fmt"},
+				},
+				Directive: "otelc:test",
+				Template:  "traced.Println()",
+			}
+
+			modified, err := newTestPhase().applyDirectiveRule(context.Background(), r, root)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "alias override conflict")
+			assert.False(t, modified)
+		})
+	}
+}
+
 const directiveOnFuncLiteralsSource = `package main
 
 import "errors"
