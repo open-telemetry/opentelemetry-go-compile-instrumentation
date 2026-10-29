@@ -567,6 +567,13 @@ func TestAddDeps_FileRuleDoesNotCreateImportCycle(t *testing.T) {
 		Path: "example.com/app/hooks",
 	}
 
+	mainFileRule.ResolvedPath = t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(mainFileRule.ResolvedPath, mainFileRule.File),
+		[]byte("package main\n\nimport _ \"example.com/app/server\"\n"),
+		0o600,
+	))
+
 	matched := []*rule.InstRuleSet{
 		newTestRuleSet("example.com/app/main", nil, []*rule.InstFileRule{mainFileRule}),
 	}
@@ -629,6 +636,13 @@ func TestAddDeps_FileRuleDoesNotViolateInternalPackageVisibility(t *testing.T) {
 		File: "hook.go",
 		Path: "example.com/lib/hook",
 	}
+
+	fileRule.ResolvedPath = t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(fileRule.ResolvedPath, fileRule.File),
+		[]byte("package lib\n\nimport _ \"example.com/lib/internal/secret\"\n"),
+		0o600,
+	))
 
 	matched := []*rule.InstRuleSet{
 		newTestRuleSet("example.com/lib", nil, []*rule.InstFileRule{fileRule}),
