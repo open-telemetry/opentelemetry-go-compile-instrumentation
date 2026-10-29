@@ -942,3 +942,48 @@ func Run() {}
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "dot-import conflict")
 }
+
+func TestApplyRawRule_SkipsDuplicateIdentity(t *testing.T) {
+	// Two rule packages can ship the same inject_code content under different
+	// names. Identity() is content-derived, so the second apply must not
+	// inject again (that redeclares otelcCalls and fails the compile).
+	root := parseFile(t, `package main
+
+func Work() {
+	println("work")
+}
+`)
+	raw := "otelcCalls := 1\nprintln(\"instrumented\", otelcCalls)"
+	ruleA := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{Name: "count_work_a"},
+		Func:         "Work",
+		Raw:          raw,
+	}
+	ruleB := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{Name: "count_work_b"},
+		Func:         "Work",
+		Raw:          raw,
+	}
+	require.Equal(t, ruleA.Identity(), ruleB.Identity())
+
+	ip := newTestPhase()
+	require.NoError(t, ip.applyRawRule(context.Background(), ruleA, root))
+	require.NoError(t, ip.applyRawRule(context.Background(), ruleB, root))
+
+	fn := findFuncDeclInFile(t, root, "Work")
+	assigns := 0
+	for _, stmt := range fn.Body.List {
+		as, ok := stmt.(*dst.AssignStmt)
+		if !ok {
+			continue
+		}
+		for _, lhs := range as.Lhs {
+			ident, isIdent := lhs.(*dst.Ident)
+			if isIdent && ident.Name == "otelcCalls" {
+				assigns++
+			}
+		}
+	}
+	assert.Equal(t, 1, assigns, "identical inject_code must be applied once")
+	assert.Len(t, fn.Body.List, 3, "two injected stmts plus the original println")
+}

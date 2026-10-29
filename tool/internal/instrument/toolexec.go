@@ -69,6 +69,10 @@ type instrumentPhase struct {
 	// whole package because HookContext declarations accumulate into one globals
 	// file across all instrumented source files.
 	appliedFuncIdentities map[string]struct{}
+	// Content identities (see InstRawRule.Identity) of raw rules already
+	// applied during this package's instrumentation. Used to de-duplicate
+	// inject_code that would otherwise redeclare the same variables.
+	appliedRawIdentities map[string]struct{}
 	// importNames maps an import path to a package name, resolved
 	// during setup instead of guessed from the import path. importNames
 	// has no entries when the table is unavailable, such as after an

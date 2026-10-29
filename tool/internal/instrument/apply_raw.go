@@ -205,6 +205,14 @@ func (ip *instrumentPhase) applyRawRule(ctx context.Context, rule *rule.InstRawR
 		return ex.Newf("can not find function %s", rule.Func)
 	}
 
+	// De-duplicate injection for rules that resolve to the same content
+	// identity: injecting again would redeclare the same variables.
+	id := rule.Identity()
+	if _, seen := ip.appliedRawIdentities[id]; seen {
+		ip.Debug("Skipping duplicate raw rule", "rule", rule.Name, "func", rule.Func)
+		return nil
+	}
+
 	importAliases, aliasOverrides := ip.resolveImportOverrides(root, rule.Imports)
 	if err = checkAliasOverrideShadowing(aliasOverrides, funcDecl); err != nil {
 		return err
@@ -219,6 +227,10 @@ func (ip *instrumentPhase) applyRawRule(ctx context.Context, rule *rule.InstRawR
 	if err = ip.addRuleImports(ctx, root, usedRuleImports(root, rule.Imports, aliasOverrides), rule.Name); err != nil {
 		return err
 	}
+	if ip.appliedRawIdentities == nil {
+		ip.appliedRawIdentities = make(map[string]struct{})
+	}
+	ip.appliedRawIdentities[id] = struct{}{}
 	ip.Info("Apply raw rule", "rule", rule)
 	return nil
 }
