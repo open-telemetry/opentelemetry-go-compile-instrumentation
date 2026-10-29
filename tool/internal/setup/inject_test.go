@@ -370,7 +370,11 @@ import (
 
 	t.Run("invalid build constraints returns error", func(t *testing.T) {
 		invalidBC := "invalid_bc.go"
-		mustWriteFile(t, filepath.Join(dir, invalidBC), "//go:build (invalid &&\n\npackage hooks\nimport \"example.com/skip\"\n")
+		mustWriteFile(
+			t,
+			filepath.Join(dir, invalidBC),
+			"//go:build (invalid &&\n\npackage hooks\nimport \"example.com/skip\"\n",
+		)
 		r := &rule.InstFileRule{
 			InstBaseRule: rule.InstBaseRule{Name: "invalid-bc", Target: rule.NewTarget("main")},
 			File:         invalidBC,
@@ -548,4 +552,3 @@ func TestMatchInjectedDeps_ResolveRulePathsError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "resolving injected rule paths")
 }
-

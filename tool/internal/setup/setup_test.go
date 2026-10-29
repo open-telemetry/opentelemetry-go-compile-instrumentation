@@ -1833,5 +1833,3 @@ func TestSetupPhase_GetBuildContext(t *testing.T) {
 		assert.NotContains(t, bctx.BuildTags, "envtag")
 	})
 }
-
-

@@ -388,14 +388,12 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	if cmd.Name == "go" {
 		subcommand = cmd.Args().First() // build / install / test
 		args = cmd.Args().Tail()        // trim the subcommand
-	} else {
+	} else if err := cleanupDebugArtifacts(); err != nil {
 		// Clean up debug artifacts from previous runs for standalone `otelc setup`,
 		// as it prepares the environment for a subsequent toolexec build.
 		// For `otelc go ...`, runGoBuild already performed this cleanup at its
 		// lifecycle boundary before invoking Setup.
-		if err := cleanupDebugArtifacts(); err != nil {
-			return ex.Wrapf(err, "cleaning debug artifacts")
-		}
+		return ex.Wrapf(err, "cleaning debug artifacts")
 	}
 
 	logger := util.LoggerFromContext(ctx)
@@ -409,8 +407,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	// GOFLAGS for the later buildWithToolexec, and before the findDeps dry run
 	// further down. Computed here rather than threaded in because Setup is also
 	// a standalone command action (otelc setup).
-	vendored := vendoringActive(ctx, util.GetOtelcWorkDir())
-	if vendored {
+	if vendoringActive(ctx, util.GetOtelcWorkDir()) {
 		logger.InfoContext(ctx, "vendored project detected; building with -mod=mod")
 		// Mutates GOFLAGS process-wide with no restore. Fine for the one-shot
 		// CLI; a second in-process GoBuild would inherit this -mod=mod.
@@ -455,8 +452,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Ensure a state manager is available in the context
-	stateManager, found := stateManagerFromContext(ctx)
-	if !found {
+	if stateManager, found := stateManagerFromContext(ctx); !found {
 		// save this state manager in the context
 		ctx = contextWithStateManager(ctx, stateManager)
 	}
