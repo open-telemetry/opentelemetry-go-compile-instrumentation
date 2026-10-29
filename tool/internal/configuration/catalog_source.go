@@ -25,6 +25,9 @@ var upstreamInstrumentation []byte
 //go:embed go-configurations.yaml
 var goConfigurations []byte
 
+//go:embed general-compatibility.yaml
+var generalCompatibility []byte
+
 type upstreamSchema struct {
 	Ref             string                     `yaml:"$ref"`
 	Type            yaml.Node                  `yaml:"type"`
@@ -35,12 +38,22 @@ type upstreamSchema struct {
 	Items           *upstreamSchema            `yaml:"items"`
 }
 
-// GenerateCatalog builds the offline catalog from the pinned general schema
-// and otelc's own go.* definitions. Names are relative to the upstream
-// instrumentation/development root; that root suffix is not added to leaves.
+// GenerateCatalog builds the offline catalog from the pinned general schema,
+// otelc's go.* definitions, and deprecated general.* compatibility entries.
+// It checks the prior catalog so upstream removals cannot silently drop paths.
+// Names are relative to instrumentation/development; that root suffix is not
+// added to leaves.
 func GenerateCatalog() ([]byte, error) {
+	return generateCatalog(upstreamInstrumentation, goConfigurations, generalCompatibility, embeddedCatalog)
+}
+
+func generateCatalog(upstream, goOptions, compatibilityOptions, previousCatalog []byte) ([]byte, error) {
+	previousDefinitions, previousErr := parsePreviousCatalogDefinitions(previousCatalog)
+	if previousErr != nil {
+		return nil, previousErr
+	}
 	var root upstreamSchema
-	if err := yaml.Unmarshal(upstreamInstrumentation, &root); err != nil {
+	if err := yaml.Unmarshal(upstream, &root); err != nil {
 		return nil, ex.Wrapf(err, "parse pinned instrumentation schema")
 	}
 	general, ok := root.Properties["general"]
@@ -57,9 +70,12 @@ func GenerateCatalog() ([]byte, error) {
 	); err != nil {
 		return nil, err
 	}
-	owned, err := ParseMetadata(goConfigurations, "go-configurations.yaml")
-	if err != nil {
+	if err := applyGeneralCompatibilityOverrides(definitions, compatibilityOptions); err != nil {
 		return nil, err
+	}
+	owned, parseErr := ParseMetadata(goOptions, "go-configurations.yaml")
+	if parseErr != nil {
+		return nil, parseErr
 	}
 	for _, entry := range owned.Entries {
 		if entry.Ref != "" || !strings.HasPrefix(entry.Name, "go.") {
@@ -70,10 +86,13 @@ func GenerateCatalog() ([]byte, error) {
 		}
 		definitions[entry.Name] = entry
 	}
+	if err := ensureCatalogDefinitionsRetained(previousDefinitions, definitions); err != nil {
+		return nil, err
+	}
 	document := catalogDocument{
 		CatalogVersion: 1,
 		Source: catalogSource{
-			Repository: "open-telemetry/opentelemetry-configuration",
+			Repository: OpenTelemetryConfigurationRepository,
 			Release:    OpenTelemetryConfigurationRelease,
 			Commit:     OpenTelemetryConfigurationCommit,
 			File:       OpenTelemetryConfigurationFile,
@@ -87,13 +106,118 @@ func GenerateCatalog() ([]byte, error) {
 	encoder := yaml.NewEncoder(&output)
 	const catalogIndent = 2
 	encoder.SetIndent(catalogIndent)
-	if err = encoder.Encode(document); err != nil {
+	if err := encoder.Encode(document); err != nil {
 		return nil, ex.Wrapf(err, "encode configuration catalog")
 	}
-	if err = encoder.Close(); err != nil {
+	if err := encoder.Close(); err != nil {
 		return nil, ex.Wrapf(err, "close configuration catalog encoder")
 	}
 	return output.Bytes(), nil
+}
+
+// parsePreviousCatalogDefinitions reads the checked-in catalog from the prior
+// generation. Its upstream pin may differ from the current pin, but it must be
+// a valid catalog so generation can detect definitions that would be dropped.
+func parsePreviousCatalogDefinitions(data []byte) (map[string]Entry, error) {
+	var previous catalogDocument
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&previous); err != nil {
+		return nil, ex.Wrapf(err, "parse previous configuration catalog")
+	}
+	if previous.CatalogVersion != 1 {
+		return nil, ex.Newf("unsupported previous configuration catalog version %d", previous.CatalogVersion)
+	}
+	if previous.Source.Repository != OpenTelemetryConfigurationRepository ||
+		previous.Source.Release == "" || previous.Source.Commit == "" ||
+		previous.Source.File != "schema/instrumentation.yaml" {
+		return nil, ex.New(
+			"previous configuration catalog must identify a pinned OpenTelemetry Configuration instrumentation schema",
+		)
+	}
+	if len(previous.Definitions) == 0 {
+		return nil, ex.New("previous configuration catalog has no definitions")
+	}
+	return previous.Definitions, nil
+}
+
+// ensureCatalogDefinitionsRetained prevents a schema refresh from silently
+// dropping an existing configuration path. Retired entries must remain in the
+// compatibility source or in otelc's go-configurations.yaml as deprecated.
+func ensureCatalogDefinitionsRetained(previous, current map[string]Entry) error {
+	names := make([]string, 0, len(previous))
+	for name := range previous {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	for _, name := range names {
+		previousEntry := previous[name]
+		currentEntry, exists := current[name]
+		if !exists {
+			return ex.Newf(
+				"catalog generation would drop %q; retain it as deprecated in the compatibility source",
+				name,
+			)
+		}
+		if previousEntry.Deprecated && !currentEntry.Deprecated {
+			return ex.Newf("catalog generation would clear deprecation for %q; retain its deprecated metadata", name)
+		}
+		if previousEntry.ReplacedBy != nil && currentEntry.ReplacedBy == nil {
+			return ex.Newf("catalog generation would clear replaced_by for %q; retain its replacement metadata", name)
+		}
+	}
+	return nil
+}
+
+// applyGeneralCompatibilityOverrides keeps otelc-owned compatibility
+// definitions in the generated catalog, including definitions removed from
+// the pinned upstream schema. Retired paths require complete definitions;
+// entries still present upstream may only contribute deprecation data.
+func applyGeneralCompatibilityOverrides(definitions map[string]Entry, data []byte) error {
+	metadata, err := ParseMetadata(data, "general-compatibility.yaml")
+	if err != nil {
+		return err
+	}
+	seen := make(map[string]struct{}, len(metadata.Entries))
+	for _, entry := range metadata.Entries {
+		if entry.Ref != "" || !strings.HasPrefix(entry.Name, "general.") {
+			return ex.Newf("%s: compatibility definitions must name a general.* path directly", entry.Source)
+		}
+		if !entry.Deprecated {
+			return ex.Newf("%s: general compatibility definitions must be deprecated", entry.Source)
+		}
+		if _, duplicate := seen[entry.Name]; duplicate {
+			return ex.Newf("%s: duplicate compatibility definition %q", entry.Source, entry.Name)
+		}
+		seen[entry.Name] = struct{}{}
+		if validationErr := validateEntry(entry, entry.Source); validationErr != nil {
+			return validationErr
+		}
+		current, exists := definitions[entry.Name]
+		if !exists {
+			definitions[entry.Name] = entry
+			continue
+		}
+		if entry.Type != current.Type {
+			return ex.Newf(
+				"%s: compatibility type %q does not match current upstream type %q",
+				entry.Source,
+				entry.Type,
+				current.Type,
+			)
+		}
+		if entry.Description != "" || entry.Default != nil || len(entry.Examples) != 0 ||
+			entry.Schema != nil || entry.DefaultBehavior != "" {
+			return ex.Newf(
+				"%s: compatibility entries for current upstream paths may only set deprecated and replaced_by",
+				entry.Source,
+			)
+		}
+		current.Deprecated = entry.Deprecated
+		current.ReplacedBy = entry.ReplacedBy
+		definitions[entry.Name] = current
+	}
+	return nil
 }
 
 func collectGeneralDefinitions(

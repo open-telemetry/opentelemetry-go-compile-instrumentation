@@ -72,6 +72,10 @@ type Entry struct {
 	Schema *Schema `yaml:"schema,omitempty"`
 	// DefaultBehavior is the prose default behavior from the declarative schema.
 	DefaultBehavior string `yaml:"default_behavior,omitempty"`
+	// Indicates whether this configuration option is deprecated.
+	Deprecated bool `yaml:"deprecated,omitempty"`
+	// ReplacedBy identifies the canonical configuration path that supersedes this option.
+	ReplacedBy *string `yaml:"replaced_by,omitempty"`
 	// Source identifies the metadata.yaml entry that produced this definition.
 	Source string `yaml:"-"`
 	// DefinitionSource identifies the pinned shared definition used by a ref.
@@ -148,6 +152,8 @@ func parseEntry(node *yaml.Node, source string) (Entry, error) {
 		"examples",
 		"schema",
 		"default_behavior",
+		"deprecated",
+		"replaced_by",
 	))
 	if err != nil {
 		return Entry{}, err
@@ -202,6 +208,19 @@ func parseEntry(node *yaml.Node, source string) (Entry, error) {
 			return Entry{}, err
 		}
 	}
+	if deprecatedNode, ok := fields["deprecated"]; ok {
+		entry.Deprecated, err = booleanValue(deprecatedNode, source+".deprecated")
+		if err != nil {
+			return Entry{}, err
+		}
+	}
+	if replacedByNode, ok := fields["replaced_by"]; ok {
+		value, stringErr := scalarString(replacedByNode, source+".replaced_by")
+		if stringErr != nil {
+			return Entry{}, stringErr
+		}
+		entry.ReplacedBy = &value
+	}
 	selector, value := "name", entry.Name
 	if hasRef {
 		selector, value = "ref", entry.Ref
@@ -219,8 +238,25 @@ func validateEntry(entry Entry, source string) error {
 	if entry.Name == "" && entry.Ref != "" {
 		return nil
 	}
+	if !isConfigurationPath(entry.Name) {
+		return ex.Newf("%s: name must be a canonical general. or go. configuration path", source)
+	}
 	if _, err := EnvironmentVariableName(entry.Name); err != nil {
 		return ex.Wrapf(err, "%s", source)
+	}
+	if entry.ReplacedBy != nil {
+		if !entry.Deprecated {
+			return ex.Newf("%s: replaced_by requires deprecated to be true", source)
+		}
+		if strings.TrimSpace(*entry.ReplacedBy) == "" {
+			return ex.Newf("%s: replaced_by must not be empty", source)
+		}
+		if strings.TrimSpace(*entry.ReplacedBy) != *entry.ReplacedBy {
+			return ex.Newf("%s: replaced_by must not have leading or trailing whitespace", source)
+		}
+		if !isConfigurationPath(*entry.ReplacedBy) {
+			return ex.Newf("%s: replaced_by must be a canonical general. or go. configuration path", source)
+		}
 	}
 	if !supportedType(entry.Type) {
 		return ex.Newf("%s: unsupported or missing type %q", source, entry.Type)
@@ -242,6 +278,13 @@ func validateEntry(entry Entry, source string) error {
 		}
 	}
 	return nil
+}
+
+func isConfigurationPath(value string) bool {
+	if strings.HasPrefix(value, "general.") {
+		return len(value) > len("general.") && !strings.HasSuffix(value, "/development")
+	}
+	return strings.HasPrefix(value, "go.") && len(value) > len("go.")
 }
 
 func supportedType(value string) bool {
@@ -529,6 +572,17 @@ func scalarString(node *yaml.Node, source string) (string, error) {
 		return "", ex.Newf("%s: expected a string", source)
 	}
 	return node.Value, nil
+}
+
+func booleanValue(node *yaml.Node, source string) (bool, error) {
+	if node.Kind != yaml.ScalarNode || node.Tag != "!!bool" {
+		return false, ex.Newf("%s: expected a boolean", source)
+	}
+	value, err := strconv.ParseBool(node.Value)
+	if err != nil {
+		return false, ex.Wrapf(err, "%s: parse boolean", source)
+	}
+	return value, nil
 }
 
 func defaultString(node *yaml.Node, source string) (string, error) {

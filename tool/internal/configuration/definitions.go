@@ -17,6 +17,7 @@ import (
 )
 
 const (
+	OpenTelemetryConfigurationRepository = "open-telemetry/opentelemetry-configuration"
 	// OpenTelemetryConfigurationRelease and OpenTelemetryConfigurationCommit pin
 	// the schema snapshot from which the catalog's general.* definitions were
 	// derived. Keep the catalog offline and reproducible; update these together
@@ -142,7 +143,7 @@ func catalogDefinitionNodes(document *yaml.Node) (map[string]*yaml.Node, error) 
 	if err = sourceNode.Decode(&source); err != nil {
 		return nil, ex.Wrapf(err, "decode configuration catalog source")
 	}
-	if source.Repository != "open-telemetry/opentelemetry-configuration" ||
+	if source.Repository != OpenTelemetryConfigurationRepository ||
 		source.Release != OpenTelemetryConfigurationRelease ||
 		source.Commit != OpenTelemetryConfigurationCommit ||
 		source.File != OpenTelemetryConfigurationFile {

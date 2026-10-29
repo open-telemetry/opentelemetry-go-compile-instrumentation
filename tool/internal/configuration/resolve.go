@@ -115,6 +115,10 @@ func cloneEntry(entry Entry) Entry {
 		value := *entry.Default
 		clone.Default = &value
 	}
+	if entry.ReplacedBy != nil {
+		value := *entry.ReplacedBy
+		clone.ReplacedBy = &value
+	}
 	clone.Examples = slices.Clone(entry.Examples)
 	if entry.Schema != nil {
 		schema := *entry.Schema
@@ -133,5 +137,7 @@ func equivalent(left, right Entry) bool {
 		reflect.DeepEqual(left.Default, right.Default) &&
 		reflect.DeepEqual(left.Examples, right.Examples) &&
 		left.DefaultBehavior == right.DefaultBehavior &&
+		left.Deprecated == right.Deprecated &&
+		reflect.DeepEqual(left.ReplacedBy, right.ReplacedBy) &&
 		reflect.DeepEqual(left.Schema, right.Schema)
 }

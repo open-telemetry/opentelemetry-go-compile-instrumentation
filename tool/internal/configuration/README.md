@@ -25,6 +25,10 @@ must never be interpreted as a machine-readable default.
 Collection defaults encode YAML inside the string, for example `default: "[]"`
 for a list or `default: "{}"` for a map. Structured-list defaults are validated
 against the item schema, including required keys and property value types.
+Inline definitions may set `deprecated: true` and optionally name a canonical
+`replaced_by` path. A replacement is valid only when the old entry is deprecated;
+deprecated entries may have no replacement. Reference entries use the complete
+catalog definition and cannot override its deprecation metadata.
 
 ## Shared catalog
 
@@ -42,7 +46,15 @@ root, so `/development` is not added to each general leaf. The snapshot also
 retains upstream constraints for subsequent application-configuration validation;
 this metadata catalog projects leaf names, types, descriptions, and default behavior.
 
-Add otelc-owned `go.*` definitions to `go-configurations.yaml`, then run:
+`general-compatibility.yaml` records deprecated `general.*` paths. For a path
+still present upstream, the entry supplies its type and deprecation metadata;
+generation preserves the upstream description and default behavior. A retired
+path must include its complete definition. The generator compares the previous
+catalog with its output and fails if a prior path would disappear without a
+compatibility entry. Add otelc-owned `go.*` definitions, including any deprecated
+ones, to `go-configurations.yaml`; all three sources are combined by `go generate`.
+
+After changing either source file, regenerate and test the catalog:
 
 ```sh
 go generate ./tool/internal/configuration
