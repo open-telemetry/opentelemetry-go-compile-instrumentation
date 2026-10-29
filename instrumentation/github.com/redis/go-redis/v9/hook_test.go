@@ -552,3 +552,69 @@ func TestDialHook_Error(t *testing.T) {
 	assert.Equal(t, expectedErr, err)
 	assert.Nil(t, conn)
 }
+
+func TestSanitizeRedisError(t *testing.T) {
+	assert.Nil(t, sanitizeRedisError(nil))
+
+	standardErr := errors.New("connection reset by peer")
+	assert.Equal(t, "connection reset by peer", sanitizeRedisError(standardErr).Error())
+
+	// Redis 7.0+ echoes unredacted command arguments on unknown commands
+	echoedErr := errors.New("ERR unknown command 'secret_cmd', with args beginning with: 'token123', 'pass456'")
+	sanitized := sanitizeRedisError(echoedErr)
+	assert.Equal(t, "ERR unknown command 'secret_cmd'", sanitized.Error())
+	assert.NotContains(t, sanitized.Error(), "token123")
+	assert.NotContains(t, sanitized.Error(), "pass456")
+
+	// Case insensitive pattern matching
+	upperEchoedErr := errors.New("ERR unknown command `foo`, WITH ARGS BEGINNING WITH: `arg1`")
+	upperSanitized := sanitizeRedisError(upperEchoedErr)
+	assert.Equal(t, "ERR unknown command `foo`", upperSanitized.Error())
+	assert.NotContains(t, upperSanitized.Error(), "arg1")
+}
+
+func TestGetRedisV9Statement_DoesNotAppendCmdErr(t *testing.T) {
+	cmd := redis.NewCmd(context.Background(), "get", "mykey")
+	cmd.SetErr(errors.New("ERR unknown command 'get', with args beginning with: 'mykey'"))
+
+	statement := getRedisV9Statement(cmd)
+	assert.Equal(t, "get mykey", statement)
+	assert.NotContains(t, statement, "ERR")
+	assert.NotContains(t, statement, "with args beginning with")
+}
+
+func TestProcessHook_SanitizesEchoedArgumentsInSpan(t *testing.T) {
+	initOnce = *new(sync.Once)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "redis")
+
+	sr := setupTestTracer(t)
+
+	hook := newOtelRedisHook("localhost:6379")
+	rawErr := errors.New("ERR unknown command 'foo', with args beginning with: 'super-secret'")
+	processHook := hook.ProcessHook(func(ctx context.Context, cmd redis.Cmder) error {
+		return rawErr
+	})
+
+	cmd := redis.NewCmd(context.Background(), "foo", "super-secret")
+	err := processHook(context.Background(), cmd)
+	// Caller receives original untouched error
+	assert.Equal(t, rawErr, err)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	span := spans[0]
+	assert.Equal(t, codes.Error, span.Status().Code)
+	assert.Equal(t, "ERR unknown command 'foo'", span.Status().Description)
+	assert.NotContains(t, span.Status().Description, "super-secret")
+
+	// Event description must also be sanitized
+	events := span.Events()
+	require.Len(t, events, 1)
+	for _, attr := range events[0].Attributes {
+		if string(attr.Key) == "exception.message" {
+			assert.Equal(t, "ERR unknown command 'foo'", attr.Value.AsString())
+			assert.NotContains(t, attr.Value.AsString(), "super-secret")
+		}
+	}
+}

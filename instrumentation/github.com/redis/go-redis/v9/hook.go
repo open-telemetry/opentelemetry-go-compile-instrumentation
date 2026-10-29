@@ -83,8 +83,9 @@ func (o *otelRedisHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 
 		err := next(ctx, cmd)
 		if err != nil && !errors.Is(err, redis.Nil) {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
+			sanitizedErr := sanitizeRedisError(err)
+			span.RecordError(sanitizedErr)
+			span.SetStatus(codes.Error, sanitizedErr.Error())
 		}
 		return err
 	}
@@ -131,8 +132,9 @@ func (o *otelRedisHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redi
 
 		err := next(ctx, cmds)
 		if err != nil && !errors.Is(err, redis.Nil) {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
+			sanitizedErr := sanitizeRedisError(err)
+			span.RecordError(sanitizedErr)
+			span.SetStatus(codes.Error, sanitizedErr.Error())
 		}
 		return err
 	}
@@ -164,12 +166,23 @@ func getRedisV9Statement(cmd redis.Cmder) string {
 		b = redisV9AppendArg(b, arg)
 	}
 
-	if err := cmd.Err(); err != nil && !errors.Is(err, redis.Nil) {
-		b = append(b, ": "...)
-		b = append(b, err.Error()...)
-	}
-
 	return string(b)
+}
+
+// sanitizeRedisError removes potentially sensitive command arguments echoed by
+// Redis server error replies (e.g. Redis 7.0+ "ERR unknown command `foo`, with args beginning with: ...")
+// before recording the error on trace spans.
+func sanitizeRedisError(err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	lower := strings.ToLower(msg)
+	const pattern = ", with args beginning with:"
+	if idx := strings.Index(lower, pattern); idx != -1 {
+		msg = msg[:idx]
+	}
+	return errors.New(msg)
 }
 
 // redisV9CredentialRedactRange returns a half-open index range of args that
