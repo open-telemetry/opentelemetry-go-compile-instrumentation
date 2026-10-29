@@ -112,7 +112,7 @@ func (ip *instrumentPhase) applyCallReplace(
 			ip.Debug("Skip call site due to //otelc:ignore", "rule", r.Name)
 			return true
 		}
-		if shadowErr := checkAliasOverrideShadowing(aliasOverrides, enclosing); shadowErr != nil {
+		if shadowErr := checkAliasOverrideShadowingAt(aliasOverrides, enclosing, call); shadowErr != nil {
 			wrapError = shadowErr
 			return false
 		}
@@ -194,11 +194,8 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 
 	stmts := ast.CallEnclosingStmts(root)
 	var matchingCalls []*dst.CallExpr
-	dst.Inspect(root, func(node dst.Node) bool {
-		call, ok := node.(*dst.CallExpr)
-		if !ok {
-			return true
-		}
+	var shadowErr error
+	walkCallsWithEnclosingFunc(root, func(call *dst.CallExpr, enclosing *dst.FuncDecl) bool {
 		if !ip.matchesRule(call, r, importAliases) {
 			return true
 		}
@@ -206,9 +203,15 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 			ip.Debug("Skip call site due to //otelc:ignore", "rule", r.Name)
 			return true
 		}
+		if shadowErr = checkAliasOverrideShadowingAt(aliasOverrides, enclosing, call); shadowErr != nil {
+			return false
+		}
 		matchingCalls = append(matchingCalls, call)
 		return true
 	})
+	if shadowErr != nil {
+		return false, shadowErr
+	}
 	modified := false
 	for _, call := range matchingCalls {
 		callArgs := make([]dst.Expr, len(newArgs))

@@ -438,7 +438,7 @@ func TestCompileExpression_CallArgumentIsWrappedCallNotEnclosingFunc(t *testing.
 }
 
 func TestCompileExpression_WithoutDotExpression(t *testing.T) {
-	tmpl, err := newCallTemplate(`replacement({{ .CallArgumentCount }})`)
+	tmpl, err := newCallTemplate(`replacement({{ .CallArgumentCount }}, {{ .CallArgument 0 }})`)
 	require.NoError(t, err)
 
 	originalCall := &dst.CallExpr{
@@ -451,11 +451,43 @@ func TestCompileExpression_WithoutDotExpression(t *testing.T) {
 	require.NoError(t, err)
 	resultCall, ok := result.(*dst.CallExpr)
 	require.True(t, ok, "expected *dst.CallExpr, got %T", result)
-	require.Len(t, resultCall.Args, 1)
+	require.Len(t, resultCall.Args, 2)
 	countLit, ok := resultCall.Args[0].(*dst.BasicLit)
 	require.True(t, ok, "expected *dst.BasicLit, got %T", resultCall.Args[0])
 	assert.Equal(t, "2", countLit.Value,
 		"CallArgumentCount must still resolve even without referencing the call itself")
+}
+
+func TestCompileExpression_NoPlaceholderRendered(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+	}{
+		{name: "CallArgument in false branch", text: `{{ if false }}{{ .CallArgument 0 }}{{ end }}replacement()`},
+		{name: "CallArgument in comment", text: `{{/* .CallArgument 0 */}}replacement()`},
+		{name: "dot in comment", text: `{{/* . */}}replacement()`},
+		{name: "only CallArgumentCount", text: `replacement({{ .CallArgumentCount }})`},
+		{name: "CallArguments in false branch", text: `{{ if false }}{{ .CallArguments }}{{ end }}replacement()`},
+		{name: "CallReceiver in false branch", text: `{{ if false }}{{ .CallReceiver }}{{ end }}replacement()`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpl, err := newCallTemplate(tt.text)
+			require.NoError(t, err)
+
+			originalCall := &dst.CallExpr{
+				Fun:  &dst.Ident{Name: "f"},
+				Args: []dst.Expr{&dst.Ident{Name: "a"}},
+			}
+
+			result, err := tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
+
+			require.Error(t, err)
+			assert.Nil(t, result)
+			assert.Contains(t, err.Error(), "template output did not use {{ . }}, {{ .CallReceiver }}, "+
+				"{{ .CallArguments }} or {{ .CallArgument N }}")
+		})
+	}
 }
 
 func TestCompileExpression_PerBranchDotUsage(t *testing.T) {
@@ -1362,6 +1394,12 @@ func TestCompileExpression_CallReceiverAndCallArguments(t *testing.T) {
 			call:    `log.Sync()`,
 			replace: "{{ .CallReceiver }}.With(trace()...).Sync({{ .CallArguments }})",
 			want:    `log.With(trace()...).Sync()`,
+		},
+		{
+			name:    "only arguments and none passed",
+			call:    `log.Sync()`,
+			replace: "flush({{ .CallArguments }})",
+			want:    `flush()`,
 		},
 		{
 			name:    "receiver only",

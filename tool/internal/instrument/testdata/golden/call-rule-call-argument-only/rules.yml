@@ -13,4 +13,6 @@ replace_println:
     function_call: fmt.Println
   do:
     - wrap_call:
-        replace: "fmt.Print({{ range $i := .CallArgumentCount }}{{ if $i }}, {{ end }}{{ $.CallArgument $i }}{{ end }})"
+        replace: "fmt.Fprintln(os.Stdout{{ range $i := .CallArgumentCount }}, {{ $.CallArgument $i }}{{ end }})"
+  imports:
+    os: "os"

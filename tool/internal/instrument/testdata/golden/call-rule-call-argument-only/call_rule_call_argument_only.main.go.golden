@@ -6,13 +6,15 @@ package main
 //line /golden/work/main.go:6
 import (
 	"fmt"
+	"os"
 	"strings"
 )
 
+//line /golden/work/main.go:11
 func Greet(name string) string {
 	return strings.ToLower(name) /*line /golden/work/main.go:12*/
 }
 
 func main() {
-	fmt.Print("hello", Greet("world")) /*line /golden/work/main.go:16*/
+	fmt.Fprintln(os.Stdout, "hello", Greet("world")) /*line /golden/work/main.go:16*/
 }

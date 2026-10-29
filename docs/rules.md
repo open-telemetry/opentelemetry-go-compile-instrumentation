@@ -1263,7 +1263,7 @@ func fetch(db *sql.DB, ctx context.Context) {
 
 **Important Notes:**
 
-- The `{{ . }}` placeholder in the `replace` string represents the original function or method call.
+- The `{{ . }}` placeholder in the `replace` string represents the original function or method call. Use `{{ .CallReceiver }}`, `{{ .CallArguments }}` or `{{ .CallArgument N }}` instead to build the new expression from the call's parts.
 - The `replace` string must be a valid Go expression that includes `{{ . }}`, `{{ .CallReceiver }}`, `{{ .CallArguments }}` or `{{ .CallArgument N }}` and produces a call expression (current limitation).
 - The `replace` string can only reference packages and functions that are already imported or defined in the target file.
 - Call rules only affect call sites in the target package, not the function or method definition itself.

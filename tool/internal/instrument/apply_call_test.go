@@ -405,6 +405,114 @@ func Run(f sink) {
 		"must not wrap the call when the override would resolve to the wrong identifier")
 }
 
+func TestApplyCallRule_OverrideShadowedByNestedLocalReportsConflict(t *testing.T) {
+	// The file aliases fmt as f and a nested block rebinds f before the call
+	// site, so the rewritten qualifier would resolve to the local instead of
+	// the import.
+	root := parseFile(t, `package main
+
+import (
+	f "fmt"
+	"net/http"
+)
+
+func Run(ok bool) {
+	if ok {
+		f := sink{}
+		_ = f
+		http.Get("url")
+	}
+}
+`)
+	r := httpGetRule("traced.Call({{ . }})")
+	r.Imports = map[string]string{"traced": "fmt"}
+
+	_, err := newTestPhase().applyCallRule(context.Background(), r, root)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "alias override conflict")
+	run := findFuncDeclInFile(t, root, "Run")
+	stmt, ok := run.Body.List[0].(*dst.IfStmt)
+	require.True(t, ok, "expected *dst.IfStmt, got %T", run.Body.List[0])
+	inner, ok := stmt.Body.List[len(stmt.Body.List)-1].(*dst.ExprStmt)
+	require.True(t, ok, "expected *dst.ExprStmt, got %T", stmt.Body.List[len(stmt.Body.List)-1])
+	assert.Equal(t, "http", inner.X.(*dst.CallExpr).Fun.(*dst.SelectorExpr).X.(*dst.Ident).Name,
+		"must not wrap the call when the override would resolve to the wrong identifier")
+}
+
+func TestApplyCallRule_OverrideShadowedOutsideCallPathAppliesRule(t *testing.T) {
+	// The shadowing local lives in a block that does not contain the call
+	// site, so it cannot affect the injected qualifier and the rule applies.
+	root := parseFile(t, `package main
+
+import (
+	f "fmt"
+	"net/http"
+)
+
+func Run() {
+	if true {
+		f := sink{}
+		_ = f
+	}
+	http.Get("url")
+}
+`)
+	r := httpGetRule("traced.Call({{ . }})")
+	r.Imports = map[string]string{"traced": "fmt"}
+
+	_, err := newTestPhase().applyCallRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	run := findFuncDeclInFile(t, root, "Run")
+	stmt, ok := run.Body.List[1].(*dst.ExprStmt)
+	require.True(t, ok, "expected *dst.ExprStmt, got %T", run.Body.List[1])
+	call, ok := stmt.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", stmt.X)
+	sel, ok := call.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
+	ident, ok := sel.X.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "f", ident.Name, "injected code must use the file's existing alias, not the rule's")
+	assert.Equal(t, "Call", sel.Sel.Name)
+}
+
+func TestApplyCallRule_AppendArgsOverrideShadowedAtCallSiteReportsConflict(t *testing.T) {
+	// append_args injects the rule's alias at the call site as well; a local
+	// binding between the function entry and the call shadows the rewritten
+	// qualifier there too.
+	root := parseFile(t, `package main
+
+import (
+	f "fmt"
+	"net/http"
+)
+
+func Run(ok bool) {
+	if ok {
+		f := sink{}
+		_ = f
+		http.Get("url")
+	}
+}
+`)
+	r := httpGetRule("")
+	r.AppendArgs = []string{"traced.Context()"}
+	r.Imports = map[string]string{"traced": "fmt"}
+
+	_, err := newTestPhase().applyCallRule(context.Background(), r, root)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "alias override conflict")
+	run := findFuncDeclInFile(t, root, "Run")
+	stmt, ok := run.Body.List[0].(*dst.IfStmt)
+	require.True(t, ok, "expected *dst.IfStmt, got %T", run.Body.List[0])
+	inner, ok := stmt.Body.List[len(stmt.Body.List)-1].(*dst.ExprStmt)
+	require.True(t, ok, "expected *dst.ExprStmt, got %T", stmt.Body.List[len(stmt.Body.List)-1])
+	call := inner.X.(*dst.CallExpr)
+	assert.Len(t, call.Args, 1, "must not append arguments when the override would resolve to the wrong identifier")
+}
+
 func TestApplyCallReplace_DoesNotRewriteOriginalCallArguments(t *testing.T) {
 	call := &dst.CallExpr{
 		Fun: &dst.SelectorExpr{X: &dst.Ident{Name: "http"}, Sel: &dst.Ident{Name: "Get"}},
