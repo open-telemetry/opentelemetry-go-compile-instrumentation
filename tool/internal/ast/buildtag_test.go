@@ -124,6 +124,17 @@ func TestMatchFileConstraints(t *testing.T) {
 			assert.Equal(t, tt.expected, matched)
 		})
 	}
+
+	t.Run("nil bctx defaults to build.Default", func(t *testing.T) {
+		matched, err := MatchFileConstraints(nil, t.TempDir(), "file.go", []byte("//go:build ignore\n\npackage main\n"))
+		require.NoError(t, err)
+		assert.True(t, matched)
+	})
+
+	t.Run("invalid build constraint returns error", func(t *testing.T) {
+		_, err := MatchFileConstraints(nil, t.TempDir(), "file.go", []byte("//go:build (&& foo\n\npackage main\n"))
+		require.Error(t, err)
+	})
 }
 
 func TestStripBuildIgnoreTag(t *testing.T) {

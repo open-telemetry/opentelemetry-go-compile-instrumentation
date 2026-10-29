@@ -1637,6 +1637,30 @@ func TestSetup_MatchDepsError(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestSetup_ResolveRulePathsError(t *testing.T) {
+	setupTestModule(t, []string{"cmd"})
+	_ = os.RemoveAll(util.GetBuildTempDir())
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	dir := t.TempDir()
+	ruleFile := filepath.Join(dir, "rules.yaml")
+	mustWriteFile(t, ruleFile, `brokenRule:
+  target: main
+  func: main
+  path: example.com/nonexistent/package
+  after: SomeHook
+`)
+
+	cmd := &cli.Command{
+		Name:   "setup",
+		Flags:  []cli.Flag{&cli.StringFlag{Name: "rules"}},
+		Action: Setup,
+	}
+	err := cmd.Run(t.Context(), []string{"setup", "--rules", ruleFile, "."})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "resolving rule paths")
+}
+
 func TestSetupLocked_FindModuleDirsError(t *testing.T) {
 	// A standalone .go file outside any Go module causes FindModuleDirs to fail in setupLocked (line 377)
 	tmp := t.TempDir()
@@ -1790,3 +1814,24 @@ func TestRuntime(t *testing.T) {
 		})
 	}
 }
+
+func TestSetupPhase_GetBuildContext(t *testing.T) {
+	t.Run("from GOFLAGS", func(t *testing.T) {
+		t.Setenv("GOFLAGS", "-tags=envtag")
+		sp := &setupPhase{}
+		bctx := sp.getBuildContext()
+		require.NotNil(t, bctx)
+		assert.Contains(t, bctx.BuildTags, "envtag")
+	})
+
+	t.Run("from buildFlags overriding GOFLAGS", func(t *testing.T) {
+		t.Setenv("GOFLAGS", "-tags=envtag")
+		sp := &setupPhase{buildFlags: []string{"-tags", "clitag"}}
+		bctx := sp.getBuildContext()
+		require.NotNil(t, bctx)
+		assert.Contains(t, bctx.BuildTags, "clitag")
+		assert.NotContains(t, bctx.BuildTags, "envtag")
+	})
+}
+
+

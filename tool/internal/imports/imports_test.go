@@ -608,6 +608,27 @@ func TestCollectImportPaths(t *testing.T) {
 				"testing":        "testing",
 			},
 		},
+		{
+			name: "non-import decls and edge-case specs",
+			root: &dst.File{
+				Decls: []dst.Decl{
+					&dst.FuncDecl{Name: dst.NewIdent("main")},
+					&dst.GenDecl{Tok: token.VAR, Specs: []dst.Spec{&dst.ValueSpec{}}},
+					&dst.GenDecl{
+						Tok: token.IMPORT,
+						Specs: []dst.Spec{
+							&dst.ValueSpec{},
+							&dst.ImportSpec{Path: nil},
+							&dst.ImportSpec{Path: &dst.BasicLit{Value: "invalid_unquoted"}},
+							&dst.ImportSpec{Path: &dst.BasicLit{Value: `""`}},
+						},
+					},
+				},
+			},
+			expected: map[string]string{
+				"invalid_unquoted": "invalid_unquoted",
+			},
+		},
 	}
 
 	for _, tt := range tests {

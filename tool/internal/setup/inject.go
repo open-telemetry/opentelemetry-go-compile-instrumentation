@@ -58,19 +58,7 @@ func (sp *setupPhase) fileRuleSourceImports(r *rule.InstFileRule) ([]string, err
 
 	paths := make([]string, 0, len(f.Imports))
 	for _, imp := range f.Imports {
-		if imp.Path == nil {
-			continue
-		}
-		unquoted, unquoteErr := strconv.Unquote(imp.Path.Value)
-		if unquoteErr != nil {
-			return nil, ex.Wrapf(
-				unquoteErr,
-				"unquoting import %s in rule %q source file %s",
-				imp.Path.Value,
-				r.Name,
-				filePath,
-			)
-		}
+		unquoted, _ := strconv.Unquote(imp.Path.Value)
 		if unquoted == "" || unquoted == "C" || unquoted == "unsafe" {
 			continue
 		}
