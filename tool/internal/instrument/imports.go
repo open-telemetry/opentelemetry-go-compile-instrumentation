@@ -35,10 +35,10 @@ func (ip *instrumentPhase) updateImportConfigForFile(ctx context.Context, root *
 
 // addRuleImports processes imports for a rule and updates the import config.
 //
-// This function validates that if a rule expects to use an import with a specific alias,
-// and the file already imports the same package with a different alias (whether explicit or
-// implicit), an error is returned. This prevents silent failures where injected code uses
-// an alias that doesn't exist in the file.
+// A file may already import a rule's path under a different alias. The rule's
+// alias is then added as a second import, so injected code keeps the alias the
+// rule wrote. Dot imports are the exception: the file must dot-import the path
+// itself, because injected unqualified identifiers cannot resolve otherwise.
 func (ip *instrumentPhase) addRuleImports(
 	ctx context.Context,
 	root *dst.File,
@@ -51,38 +51,19 @@ func (ip *instrumentPhase) addRuleImports(
 
 	resolution := imports.FindNew(ctx, root, ruleImports)
 
-	// Validate: check for alias mismatches that would break injected code
+	// Validate: a dot import only works if the file dot-imports the path itself
 	for ruleAlias, importPath := range ruleImports {
-		if ruleAlias == "." {
-			// Dot-import conflict check: the file must dot-import the path itself
-			if aliases, pathExists := resolution.ExistingAliasSets[importPath]; pathExists {
-				if !slices.Contains(aliases, ".") {
-					return ex.Newf(
-						"%s: dot-import conflict for %q - "+
-							"file imports the path with aliases %v but rule requires dot-import; "+
-							"injected unqualified identifiers will not resolve; "+
-							"either update the file to use dot-import or adjust the rule",
-						ruleName, importPath, aliases)
-				}
-			}
+		if ruleAlias != "." {
 			continue
 		}
-		if ruleAlias == "_" {
-			continue // Blank imports are permissive
-		}
-
-		// Validate alias matches for all existing imports (both explicit and implicit).
-		// When a file already imports a path, we won't add a duplicate, so injected code
-		// must use an alias that actually exists in the file. A file may import the
-		// path under several aliases; each of them is valid.
 		if aliases, pathExists := resolution.ExistingAliasSets[importPath]; pathExists {
-			if !slices.Contains(aliases, ruleAlias) {
+			if !slices.Contains(aliases, ".") {
 				return ex.Newf(
-					"%s: import alias mismatch for %q - "+
-						"file uses aliases %v but rule expects %q; "+
-						"injected code will fail to compile; "+
-						"either update the file's import or adjust the rule's import alias",
-					ruleName, importPath, aliases, ruleAlias)
+					"%s: dot-import conflict for %q - "+
+						"file imports the path with aliases %v but rule requires dot-import; "+
+						"injected unqualified identifiers will not resolve; "+
+						"either update the file to use dot-import or adjust the rule",
+					ruleName, importPath, aliases)
 			}
 		}
 	}

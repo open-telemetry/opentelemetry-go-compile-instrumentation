@@ -142,49 +142,39 @@ type S struct{}
 	require.True(t, ok, "expected *dst.SelectorExpr, got %T", field.Type)
 	ident, ok := sel.X.(*dst.Ident)
 	require.True(t, ok)
-	assert.Equal(t, "stdctx", ident.Name, "injected field type must use the file's existing alias, not the rule's")
+	assert.Equal(t, "context", ident.Name, "injected field type must use the file's existing alias, not the rule's")
 	assert.Equal(t, "Context", sel.Sel.Name)
-	assert.Equal(t, 1, countImportSpecs(root), "must not add a redundant import for an alias the rewrite eliminated")
+	assert.Equal(t, 2, countImportSpecs(root), "both import aliases should be present")
 }
 
-func TestApplyStructRule_AliasOverrideUsesResolvedName(t *testing.T) {
-	// The target file imports a divergent-name dependency unaliased, so the
-	// override must use ip.importNames' resolved real name, not a guess
-	// derived from the import path.
-	const importPath = "github.com/redis/go-redis/v9"
-	root := parseFile(t, `package main
+func TestApplyStructRule_UnaliasedImportGetsRuleAlias(t *testing.T) {
+	root := parseTestFile(t, `package main
 
-import "`+importPath+`"
+import "fmt"
 
 type S struct{}
 `)
 	r := &rule.InstStructRule{
 		InstBaseRule: rule.InstBaseRule{
 			Name:    "add_field",
-			Imports: map[string]string{"traced": importPath},
+			Imports: map[string]string{"traced": "fmt"},
 		},
 		Struct:   "S",
-		NewField: []*rule.InstStructField{{Name: "Client", Type: "*traced.Client"}},
+		NewField: []*rule.InstStructField{{Name: "Value", Type: "traced.Stringer"}},
 	}
 
-	ip := newTestPhase()
-	ip.importNames = map[string]string{importPath: "redis"}
-
-	err := ip.applyStructRule(context.Background(), r, root)
+	err := newTestPhase().applyStructRule(context.Background(), r, root)
 
 	require.NoError(t, err)
 	structType := findStructTypeInFile(t, root, "S")
 	require.Len(t, structType.Fields.List, 1)
-	field := structType.Fields.List[0]
-	star, ok := field.Type.(*dst.StarExpr)
-	require.True(t, ok, "expected *dst.StarExpr, got %T", field.Type)
-	sel, ok := star.X.(*dst.SelectorExpr)
-	require.True(t, ok, "expected *dst.SelectorExpr, got %T", star.X)
+	sel, ok := structType.Fields.List[0].Type.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", structType.Fields.List[0].Type)
 	ident, ok := sel.X.(*dst.Ident)
 	require.True(t, ok)
-	assert.Equal(t, "redis", ident.Name, "override must use the resolved real name, not the path-derived guess")
-	assert.Equal(t, "Client", sel.Sel.Name)
-	assert.Equal(t, 1, countImportSpecs(root), "must not add a redundant import for an alias the rewrite eliminated")
+	assert.Equal(t, "traced", ident.Name)
+	assert.Equal(t, "Stringer", sel.Sel.Name)
+	assert.Equal(t, 2, countImportSpecs(root), "both aliases of fmt should be imported")
 }
 
 func TestApplyStructRule_DotImportConflictSurfacesAsAnError(t *testing.T) {

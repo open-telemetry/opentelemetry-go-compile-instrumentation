@@ -511,6 +511,7 @@ func f2() *http.Transport {
 	_, err := newTestPhase().applyLitRule(context.Background(), r, root)
 
 	require.NoError(t, err)
+	assert.Equal(t, 3, countImportSpecs(root))
 	lit := litFromReturn(t, root, "f2")
 	require.Len(t, lit.Elts, 1)
 	kv := lit.Elts[0].(*dst.KeyValueExpr)
@@ -521,7 +522,7 @@ func f2() *http.Transport {
 	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
 	ident, ok := sel.X.(*dst.Ident)
 	require.True(t, ok)
-	assert.Equal(t, "f", ident.Name, "injected value must use the file's existing alias, not the rule's")
+	assert.Equal(t, "traced", ident.Name, "injected value must use the rule's alias")
 	assert.Equal(t, "Sprintf", sel.Sel.Name)
 }
 
@@ -545,6 +546,7 @@ func f2() *http.Transport {
 	_, err := newTestPhase().applyLitRule(context.Background(), r, root)
 
 	require.NoError(t, err)
+	assert.Equal(t, 3, countImportSpecs(root))
 	lit := litFromReturn(t, root, "f2")
 	require.Len(t, lit.Elts, 1)
 	kv := lit.Elts[0].(*dst.KeyValueExpr)
@@ -554,47 +556,44 @@ func f2() *http.Transport {
 	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
 	ident, ok := sel.X.(*dst.Ident)
 	require.True(t, ok)
-	assert.Equal(t, "f", ident.Name, "wrapped value must use the file's existing alias, not the rule's")
+	assert.Equal(t, "traced", ident.Name, "wrapped value must use the rule's alias")
 	assert.Equal(t, "Sprint", sel.Sel.Name)
 	require.Len(t, call.Args, 1)
 	assert.Equal(t, "myProxy", call.Args[0].(*dst.Ident).Name)
 }
 
-func TestApplyLitRule_AliasOverrideUsesResolvedName(t *testing.T) {
-	// The target file imports a divergent-name dependency unaliased, so the
-	// override must use ip.importNames' resolved real name, not a guess
-	// derived from the import path.
-	const importPath = "github.com/redis/go-redis/v9"
+func TestApplyLitRule_UnaliasedImportGetsRuleAlias(t *testing.T) {
 	root := parseFile(t, `package main
 
 import (
+	"fmt"
 	"net/http"
-	"`+importPath+`"
 )
 
 func f2() *http.Transport {
 	return &http.Transport{}
 }
 `)
-	r := transportRule(&rule.InstLitField{Name: "Internal", Value: "traced.NewClient()"})
-	r.Imports = map[string]string{"traced": importPath}
+	r := transportRule(&rule.InstLitField{
+		Name:  "Internal",
+		Value: `traced.Sprintf("x")`,
+	})
+	r.Imports = map[string]string{"traced": "fmt"}
 
-	ip := newTestPhase()
-	ip.importNames = map[string]string{importPath: "redis"}
-
-	_, err := ip.applyLitRule(context.Background(), r, root)
+	_, err := newTestPhase().applyLitRule(context.Background(), r, root)
 
 	require.NoError(t, err)
 	lit := litFromReturn(t, root, "f2")
 	kv := lit.Elts[0].(*dst.KeyValueExpr)
-	call := kv.Value.(*dst.CallExpr)
+	call, ok := kv.Value.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", kv.Value)
 	sel, ok := call.Fun.(*dst.SelectorExpr)
-	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", kv.Value)
 	ident, ok := sel.X.(*dst.Ident)
 	require.True(t, ok)
-	assert.Equal(t, "redis", ident.Name, "override must use the resolved real name, not the path-derived guess")
-	assert.Equal(t, "NewClient", sel.Sel.Name)
-	assert.Equal(t, 2, countImportSpecs(root), "must not add a redundant import for an alias the rewrite eliminated")
+	assert.Equal(t, "traced", ident.Name)
+	assert.Equal(t, "Sprintf", sel.Sel.Name)
+	assert.Equal(t, 3, countImportSpecs(root), "both aliases of fmt should be imported")
 }
 
 func TestApplyLitRule_DotImportConflictSurfacesAsAnError(t *testing.T) {
@@ -639,9 +638,13 @@ func run(f sink) *http.Transport {
 
 	_, err := newTestPhase().applyLitRule(context.Background(), r, root)
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "alias override conflict")
-	assert.Contains(t, err.Error(), "run", "the error names the offending function")
+	require.NoError(t, err)
+
+	lit := litFromReturn(t, root, "run")
+	kv := lit.Elts[0].(*dst.KeyValueExpr)
+	call := kv.Value.(*dst.CallExpr)
+	sel := call.Fun.(*dst.SelectorExpr)
+	assert.Equal(t, "traced", sel.X.(*dst.Ident).Name)
 }
 
 func TestApplyLitRule_OverrideNonShadowingSignatureAppliesRule(t *testing.T) {
@@ -674,7 +677,7 @@ func run(s sink) *http.Transport {
 	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
 	ident, ok := sel.X.(*dst.Ident)
 	require.True(t, ok)
-	assert.Equal(t, "f", ident.Name, "wrapped value must use the file's existing alias, not the rule's")
+	assert.Equal(t, "traced", ident.Name, "wrapped value must use the file's existing alias, not the rule's")
 	assert.Equal(t, "Sprint", sel.Sel.Name)
 	require.Len(t, call.Args, 1)
 	assert.Equal(t, "myProxy", call.Args[0].(*dst.Ident).Name)
