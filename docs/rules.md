@@ -105,6 +105,14 @@ rules add an import cycle: p adds q; q adds p
 
 The added imports must not require each other in a cycle. This applies to the `imports` field and to function hook rules alike, whose imports are resolved the same way.
 
+An added import must also not depend on the package it is added to. Each compile only sees its own imports, so the compiles succeed and the link fails with an error such as `inittask ... is not schedulable`. otelc checks this before it compiles and fails the build:
+
+```
+rule "wrap_new" adds import "example.com/app/helper" to "example.com/app/a", but example.com/app/helper imports example.com/app/a
+```
+
+To fix it, exclude the package from the rule's target (see [Target lists](#target-lists)). A `wrap_call` rule with `function_call` is checked only for the packages where it wraps a call. Rules that use `method_call` or `set_fields` are not checked.
+
 ### Quick demo
 
 A single rule that instruments `(*sql.DB).Exec` — but only in files that also define an `init` function:
