@@ -161,6 +161,18 @@ func TestAnswer(t *testing.T) {
 }
 `)
 
+	writeTestFile(t, moduleDir, filepath.Join("cmd", "app", "main.go"), `// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+import "example.com/otelc-transitive-link/internal/log"
+
+func main() {
+	_ = log.Answer()
+}
+`)
+
 	writeTestFile(t, moduleDir, filepath.Join("hooks", "hooks.go"), `// Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
@@ -189,6 +201,10 @@ func Before(ctx hook.HookContext) {
 `)
 
 	env := append(os.Environ(), "OTELC_RULES=rules.yml")
+	// A normal build must not require the test-only file used to keep hooks
+	// linked in test binaries.
+	runOtelcCommand(t, moduleDir, env, otelcPath, "go", "build", "./cmd/app", "./internal/log")
+
 	output := runOtelcCommand(
 		t, moduleDir, env, otelcPath,
 		"go", "test", "-count=1", "-v", "./internal/log",

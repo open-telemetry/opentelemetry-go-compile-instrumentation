@@ -594,14 +594,13 @@ func TestAddRuntimeTestDeps(t *testing.T) {
 			wantErr:  "use a package pattern instead",
 		},
 		{
-			name:      "non-test mode is rejected",
+			name:      "non-test mode removes stale file",
 			hookPaths: hookPaths,
 			pkg: runtimePackage{
 				name:       "log",
 				importPath: "example.com/app/internal/log",
 			},
 			seedFile: true,
-			wantErr:  "this workaround requires go test",
 		},
 		{
 			name:      "test mode generates external test package",

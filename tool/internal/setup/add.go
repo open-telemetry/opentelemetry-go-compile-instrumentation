@@ -194,7 +194,7 @@ func (sp *setupPhase) addRuntimeTestDeps(
 	pkg runtimePackage,
 	hookPaths []string,
 ) error {
-	if len(hookPaths) == 0 {
+	if !pkg.testMode || len(hookPaths) == 0 {
 		return sp.removeRuntimeTestFile(ctx, pkg.dir)
 	}
 
@@ -205,17 +205,6 @@ func (sp *setupPhase) addRuntimeTestDeps(
 		return ex.Newf(
 			"cannot keep hook packages %v linked when testing named Go files in %s; use a package pattern instead",
 			hookPaths, pkg.dir,
-		)
-	}
-
-	if !pkg.testMode {
-		if err := sp.removeRuntimeTestFile(ctx, pkg.dir); err != nil {
-			return err
-		}
-		return ex.Newf(
-			"cannot safely link hook packages %v for package %s: they depend on it, which would create an import cycle; this workaround requires go test",
-			hookPaths,
-			pkg.importPath,
 		)
 	}
 
