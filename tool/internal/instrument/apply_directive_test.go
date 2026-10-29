@@ -630,7 +630,7 @@ func foo(f sink) {
 	require.Len(t, funcDecl.Body.List, 1, "must not inject code that would resolve to the wrong identifier")
 }
 
-const directiveOnFuncLitsSource = `package main
+const directiveOnFuncLiteralsSource = `package main
 
 import "errors"
 
@@ -663,8 +663,8 @@ func funcLitAt(t *testing.T, root *dst.File, name string, idx int) *dst.FuncLit 
 	return lit
 }
 
-func TestApplyDirectiveRule_FuncLits(t *testing.T) {
-	root, err := ast.NewAstParser().ParseSource(directiveOnFuncLitsSource)
+func TestApplyDirectiveRule_FuncLiterals(t *testing.T) {
+	root, err := ast.NewAstParser().ParseSource(directiveOnFuncLiteralsSource)
 	require.NoError(t, err)
 
 	r := &rule.InstDirectiveRule{
@@ -695,7 +695,7 @@ func TestApplyDirectiveRule_FuncLits(t *testing.T) {
 }
 
 func TestRenderDirective_FuncLit(t *testing.T) {
-	root, err := ast.NewAstParser().ParseSource(directiveOnFuncLitsSource)
+	root, err := ast.NewAstParser().ParseSource(directiveOnFuncLiteralsSource)
 	require.NoError(t, err)
 	lit := funcLitAt(t, root, "main", 0)
 

@@ -291,14 +291,14 @@ func FindFuncsByDirective(file *dst.File, directive string) ([]FuncDirectiveMatc
 			matches = append(matches, FuncDirectiveMatch{Func: funcDecl, Args: args})
 			return true
 		}
-		var lits []*dst.FuncLit
-		for _, lit := range annotatedFuncLits(n) {
+		var literals []*dst.FuncLit
+		for _, lit := range annotatedFuncLiterals(n) {
 			if !seen[lit] {
 				seen[lit] = true
-				lits = append(lits, lit)
+				literals = append(literals, lit)
 			}
 		}
-		if len(lits) == 0 {
+		if len(literals) == 0 {
 			return true
 		}
 		args, argsErr := parseDirectiveArgs(dec, directive)
@@ -306,7 +306,7 @@ func FindFuncsByDirective(file *dst.File, directive string) ([]FuncDirectiveMatc
 			err = ex.Wrapf(argsErr, "parsing directive args for func literal")
 			return false
 		}
-		for _, lit := range lits {
+		for _, lit := range literals {
 			matches = append(matches, FuncDirectiveMatch{Lit: lit, Args: args})
 		}
 		return true
@@ -337,7 +337,7 @@ func FindStrayDirectives(file *dst.File, directive string) []dst.Node {
 		}
 		_, lead := leadingDirective(n, directive)
 		_, isDecl := n.(*dst.FuncDecl)
-		if lead && !isDecl && len(annotatedFuncLits(n)) == 0 {
+		if lead && !isDecl && len(annotatedFuncLiterals(n)) == 0 {
 			stray = append(stray, n)
 			return true
 		}
@@ -370,18 +370,18 @@ func leadingDirective(n dst.Node, directive string) (string, bool) {
 	return "", false
 }
 
-// annotatedFuncLits returns the function literals that a directive in the
+// annotatedFuncLiterals returns the function literals that a directive in the
 // leading decorations of n annotates. See FindFuncsByDirective.
-func annotatedFuncLits(n dst.Node) []*dst.FuncLit {
+func annotatedFuncLiterals(n dst.Node) []*dst.FuncLit {
 	switch node := n.(type) {
 	case *dst.GenDecl:
-		lits := make([]*dst.FuncLit, 0, len(node.Specs))
+		literals := make([]*dst.FuncLit, 0, len(node.Specs))
 		for _, spec := range node.Specs {
-			lits = append(lits, annotatedFuncLits(spec)...)
+			literals = append(literals, annotatedFuncLiterals(spec)...)
 		}
-		return lits
+		return literals
 	case *dst.DeclStmt:
-		return annotatedFuncLits(node.Decl)
+		return annotatedFuncLiterals(node.Decl)
 	case *dst.ValueSpec:
 		return funcLitValues(node.Values...)
 	case *dst.AssignStmt:
@@ -408,16 +408,16 @@ func annotatedFuncLits(n dst.Node) []*dst.FuncLit {
 // funcLitValues returns the function literals among exprs. A call of a
 // function literal counts as that literal. The arguments of a call do not.
 func funcLitValues(exprs ...dst.Expr) []*dst.FuncLit {
-	var lits []*dst.FuncLit
+	var literals []*dst.FuncLit
 	for _, expr := range exprs {
 		if call, isCall := expr.(*dst.CallExpr); isCall {
 			expr = call.Fun
 		}
 		if lit, isLit := expr.(*dst.FuncLit); isLit {
-			lits = append(lits, lit)
+			literals = append(literals, lit)
 		}
 	}
-	return lits
+	return literals
 }
 
 // tokenize splits input on whitespace, respecting double-quoted strings.

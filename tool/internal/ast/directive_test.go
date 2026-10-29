@@ -358,7 +358,7 @@ func Foo() {}
 	assert.Equal(t, []DirectiveArg{{Key: "tag", Value: "first"}}, matches[0].Args)
 }
 
-func TestFindFuncsByDirective_FuncLits(t *testing.T) {
+func TestFindFuncsByDirective_FuncLiterals(t *testing.T) {
 	src := `package p
 
 type T struct{ F func() }
@@ -436,7 +436,7 @@ func main() {
 	assert.Empty(t, FindStrayDirectives(tree, "otelc:span"))
 }
 
-func TestFindFuncsByDirective_NestedFuncLits(t *testing.T) {
+func TestFindFuncsByDirective_NestedFuncLiterals(t *testing.T) {
 	src := `package p
 
 //otelc:span tag:outer
