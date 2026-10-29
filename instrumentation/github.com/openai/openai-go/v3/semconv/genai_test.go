@@ -52,12 +52,6 @@ func TestGenAIProviderName(t *testing.T) {
 	assert.Equal(t, "openai", kv.Value.AsString())
 }
 
-func TestGenAIRequestIsStream(t *testing.T) {
-	kv := GenAIRequestIsStream(true)
-	assert.Equal(t, attribute.Key("gen_ai.request.is_stream"), kv.Key)
-	assert.True(t, kv.Value.AsBool())
-}
-
 func TestGenAIRequestFrequencyPenalty(t *testing.T) {
 	kv := GenAIRequestFrequencyPenalty(0.5)
 	assert.Equal(t, attribute.Key("gen_ai.request.frequency_penalty"), kv.Key)
@@ -82,12 +76,6 @@ func TestGenAIResponseID(t *testing.T) {
 	assert.Equal(t, "chatcmpl-abc123", kv.Value.AsString())
 }
 
-func TestGenAIUsageTotalTokens(t *testing.T) {
-	kv := GenAIUsageTotalTokens(150)
-	assert.Equal(t, attribute.Key("gen_ai.usage.total_tokens"), kv.Key)
-	assert.Equal(t, int64(150), kv.Value.AsInt64())
-}
-
 func TestGenAIRequestMaxTokens(t *testing.T) {
 	kv := GenAIRequestMaxTokens(4096)
 	assert.Equal(t, attribute.Key("gen_ai.request.max_tokens"), kv.Key)
@@ -104,10 +92,4 @@ func TestGenAIRequestTopP(t *testing.T) {
 	kv := GenAIRequestTopP(0.95)
 	assert.Equal(t, attribute.Key("gen_ai.request.top_p"), kv.Key)
 	assert.Equal(t, 0.95, kv.Value.AsFloat64())
-}
-
-func TestGenAIResponseTimeToFirstToken(t *testing.T) {
-	kv := GenAIResponseTimeToFirstToken(12345)
-	assert.Equal(t, attribute.Key("gen_ai.response.time_to_first_token"), kv.Key)
-	assert.Equal(t, int64(12345), kv.Value.AsInt64())
 }
