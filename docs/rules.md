@@ -816,11 +816,11 @@ This rule wraps function calls at call sites with instrumentation code. Unlike t
 
 **Modifier (`do: - wrap_call:`):**
 
-| Field           | Type       | Required                                      | Notes                                                                                                                  |
-| --------------- | ---------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `replace`       | string     | No (one of `replace`/`append_args` required)  | Uses `{{ . }}` for the original call, or `{{ .CallReceiver }}`, `{{ .CallArguments }}` and `{{ .CallArgument N }}` for its parts. Must produce a Go call expression. |
-| `append_args`   | `[]string` | No (one of `replace`/`append_args` required)  | Go expression strings appended as additional arguments to the matched call                                             |
-| `variadic_type` | string     | No                                            | Element type for the ellipsis IIFE wrapper (e.g. `grpc.DialOption`). Required when any matched call uses `...` spread. |
+| Field           | Type       | Required                                     | Notes                                                                                                                                                                |
+| --------------- | ---------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `replace`       | string     | No (one of `replace`/`append_args` required) | Uses `{{ . }}` for the original call, or `{{ .CallReceiver }}`, `{{ .CallArguments }}` and `{{ .CallArgument N }}` for its parts. Must produce a Go call expression. |
+| `append_args`   | `[]string` | No (one of `replace`/`append_args` required) | Go expression strings appended as additional arguments to the matched call                                                                                           |
+| `variadic_type` | string     | No                                           | Element type for the ellipsis IIFE wrapper (e.g. `grpc.DialOption`). Required when any matched call uses `...` spread.                                               |
 
 Top-level `imports` (map[string]string, optional): Additional imports needed for injected code (alias: path). Packages must be in the target module's `go.mod`.
 
@@ -845,19 +845,19 @@ Currently supported replace string features:
 
 **Template Placeholders:**
 
-| Placeholder                    | Replaced with                                                                                          |
-| ------------------------------ | -----------------------------------------------------------------------------------------------------  |
-| `{{.FuncName}}`                | The name of the annotated function                                                                     |
-| `{{.FuncArgument N}}`          | The identifier of the N-th (0-indexed) parameter of the enclosing function, excluding the receiver     |
-| `{{.FuncReturn N}}`            | The identifier of the N-th (0-indexed) return value of the enclosing function                          |
-| `{{.FuncArgumentCount}}`       | The number of parameters of the enclosing function, excluding the receiver                             |
-| `{{.FuncReturnCount}}`         | The number of return values of the enclosing function                                                  |
-| `{{.Receiver}}`                | The identifier of the enclosing method's receiver                                                      |
-| `{{.CallReceiver}}`            | The source text of the receiver expression of the wrapped method call itself (`log` in `log.Info(msg)`) |
-| `{{.FuncArgumentOfType type}}` | The first parameter of the enclosing function, excluding the receiver, matching the given type         |
-| `{{.FuncReturnOfType type}}`   | The first return value of the enclosing function matching the given type                               |
-| `{{.CallArgument N}}`          | The source text of the N-th (0-indexed) argument of the wrapped call expression itself                 |
-| `{{.CallArgumentCount}}`       | The number of arguments in the wrapped call expression itself                                          |
+| Placeholder                    | Replaced with                                                                                               |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `{{.FuncName}}`                | The name of the annotated function                                                                          |
+| `{{.FuncArgument N}}`          | The identifier of the N-th (0-indexed) parameter of the enclosing function, excluding the receiver          |
+| `{{.FuncReturn N}}`            | The identifier of the N-th (0-indexed) return value of the enclosing function                               |
+| `{{.FuncArgumentCount}}`       | The number of parameters of the enclosing function, excluding the receiver                                  |
+| `{{.FuncReturnCount}}`         | The number of return values of the enclosing function                                                       |
+| `{{.Receiver}}`                | The identifier of the enclosing method's receiver                                                           |
+| `{{.CallReceiver}}`            | The source text of the receiver expression of the wrapped method call itself (`log` in `log.Info(msg)`)     |
+| `{{.FuncArgumentOfType type}}` | The first parameter of the enclosing function, excluding the receiver, matching the given type              |
+| `{{.FuncReturnOfType type}}`   | The first return value of the enclosing function matching the given type                                    |
+| `{{.CallArgument N}}`          | The source text of the N-th (0-indexed) argument of the wrapped call expression itself                      |
+| `{{.CallArgumentCount}}`       | The number of arguments in the wrapped call expression itself                                               |
 | `{{.CallArguments}}`           | The source text of all arguments of the wrapped call expression itself, as written, including a final `...` |
 
 These resolve against two different things: `Func*`/`Receiver` placeholders describe the **enclosing function** (the named top-level function whose body contains the matched call site), while `Call*` placeholders describe **the matched call expression itself** — e.g. for `fmt.Println("hello", name)`, `{{.CallArgument 0}}` is the literal `"hello"`, not one of the enclosing function's parameters. In the same way, in `func (s *Server) Handle(log *Logger) { log.Info("x") }`, `{{.Receiver}}` is `s` and `{{.CallReceiver}}` is `log`.
