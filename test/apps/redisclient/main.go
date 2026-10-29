@@ -17,9 +17,10 @@ import (
 )
 
 var (
-	addr  = flag.String("addr", "localhost:6379", "The Redis server address")
-	mode  = flag.String("mode", "client", "Which client to use: client, ring or cluster")
-	addr2 = flag.String("addr2", "", "In ring mode, a shard address to add with SetAddrs")
+	addr          = flag.String("addr", "localhost:6379", "The Redis server address")
+	mode          = flag.String("mode", "client", "Which client to use: client, ring or cluster")
+	addr2         = flag.String("addr2", "", "In ring mode, a shard address to add with SetAddrs")
+	timeoutClones = flag.Int("timeout-clones", 0, "number of WithTimeout clones")
 )
 
 func main() {
@@ -43,6 +44,10 @@ func runClient(ctx context.Context) {
 	rdb := redis.NewClient(&redis.Options{
 		Addr: *addr,
 	})
+
+	for i := 0; i < *timeoutClones; i++ {
+		rdb = rdb.WithTimeout(time.Minute)
+	}
 	defer rdb.Close()
 
 	// SET command

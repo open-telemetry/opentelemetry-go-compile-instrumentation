@@ -37,3 +37,15 @@ redis_client_hook:
     - inject_hooks:
         after: afterClientConnV9
         path: "go.opentelemetry.io/otelc/instrumentation/github.com/redis/go-redis/v9"
+
+redis_hook_withtimeout:
+  target: github.com/redis/go-redis/v9
+  version: v9.15.1
+  where:
+    func: WithTimeout
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        after: afterClientWithTimeoutV9
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/redis/go-redis/v9"
+
