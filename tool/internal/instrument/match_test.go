@@ -27,6 +27,31 @@ func TestLoadMissingMatchedRules(t *testing.T) {
 	assert.Contains(t, err.Error(), "otelc setup")
 }
 
+func TestMatchPicksRuleSetOfThisPackage(t *testing.T) {
+	// Every main package of a build compiles with -p main.
+	dir := t.TempDir()
+	mainA := filepath.Join(dir, "a", "main.go")
+	mainB := filepath.Join(dir, "b", "main.go")
+	argsA := []string{"compile", "-o", "_pkg_.a", "-p", "main", "-buildid", "x", mainA}
+	argsB := []string{"compile", "-o", "_pkg_.a", "-p", "main", "-buildid", "x", mainB}
+	ip := &instrumentPhase{logger: slog.Default(), workDir: dir}
+
+	setA := rule.NewInstRuleSet("main")
+	setA.AddFuncRule(mainA, &rule.InstFuncRule{Func: "Hello"})
+	setB := rule.NewInstRuleSet("main")
+	setB.AddFuncRule(mainB, &rule.InstFuncRule{Func: "Hello"})
+
+	assert.Same(t, setA, ip.match([]*rule.InstRuleSet{setA}, argsA))
+	assert.Nil(t, ip.match([]*rule.InstRuleSet{setA}, argsB),
+		"rules matched in a/main.go must not be applied to package b")
+	assert.Same(t, setB, ip.match([]*rule.InstRuleSet{setA, setB}, argsB))
+
+	// A set that names no file, such as one with only file rules, applies to
+	// any package with the import path.
+	fileRulesOnly := rule.NewInstRuleSet("main")
+	assert.Same(t, fileRulesOnly, ip.match([]*rule.InstRuleSet{fileRulesOnly}, argsB))
+}
+
 func TestAnyRuleSetHasIgnoredCallFiles(t *testing.T) {
 	t.Run("empty set", func(t *testing.T) {
 		assert.False(t, anyRuleSetHasIgnoredCallFiles(nil))
