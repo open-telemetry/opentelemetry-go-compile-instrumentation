@@ -113,9 +113,6 @@ func TestAddDeps(t *testing.T) {
 			goldenFile:        "",
 		},
 		{
-			// The generated file is correct. The link still fails, because this package and
-			// the instrumented package both define the same hook linkname. See
-			// https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/1361
 			name: "self_and_external_rules",
 			matched: []*rule.InstRuleSet{
 				newTestRuleSet(
