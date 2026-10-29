@@ -36,6 +36,41 @@ replace: "wrapper({{ . }})"
 			},
 		},
 		{
+			name: "replace with only CallArgument",
+			yaml: `
+function_call: github.com/jackc/pgx/v5.Connect
+replace: "pgxtrace.Connect({{ .CallArgument 0 }}, {{ .CallArgument 1 }})"
+`,
+			ruleName: "replace_pgx_connect",
+			check: func(t *testing.T, r *InstCallRule) {
+				assert.Equal(t, "pgxtrace.Connect({{ .CallArgument 0 }}, {{ .CallArgument 1 }})", r.Replace)
+			},
+		},
+		{
+			name: "replace with CallArgument without spaces",
+			yaml: `
+function_call: net/http.Get
+replace: "tracedGet({{.CallArgument 0}})"
+`,
+			ruleName: "wrap_http_get",
+		},
+		{
+			name: "replace with CallArgument trim markers",
+			yaml: `
+function_call: net/http.Get
+replace: "tracedGet({{- .CallArgument 0 -}})"
+`,
+			ruleName: "wrap_http_get",
+		},
+		{
+			name: "replace with CallArgument in range",
+			yaml: `
+function_call: fmt.Println
+replace: "fmt.Print({{ range $i := .CallArgumentCount }}{{ if $i }}, {{ end }}{{ $.CallArgument $i }}{{ end }})"
+`,
+			ruleName: "wrap_println",
+		},
+		{
 			name: "append_args only",
 			yaml: `
 function_call: net/http.Get
@@ -114,7 +149,27 @@ replace: "noPlaceholder()"
 `,
 			ruleName:    "bad",
 			wantErr:     true,
-			errContains: "replace must contain {{ . }} placeholder",
+			errContains: "replace must contain {{ . }} or {{ .CallArgument N }} placeholder",
+		},
+		{
+			name: "replace with only CallArgumentCount",
+			yaml: `
+function_call: net/http.Get
+replace: "count({{ .CallArgumentCount }})"
+`,
+			ruleName:    "bad",
+			wantErr:     true,
+			errContains: "replace must contain {{ . }} or {{ .CallArgument N }} placeholder",
+		},
+		{
+			name: "replace with CallArgument missing index",
+			yaml: `
+function_call: net/http.Get
+replace: "wrapper({{ .CallArgument }})"
+`,
+			ruleName:    "bad",
+			wantErr:     true,
+			errContains: "replace must contain {{ . }} or {{ .CallArgument N }} placeholder",
 		},
 		{
 			name: "empty append_args entry",
