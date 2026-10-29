@@ -136,7 +136,7 @@ func assertRedisClientSpans(t *testing.T, appsDir string) {
 		setSpan,
 		"set",
 		server.Addr(),
-		"set testkey testvalue",
+		"set testkey ?",
 	)
 
 	host, _, err := net.SplitHostPort(server.Addr())
