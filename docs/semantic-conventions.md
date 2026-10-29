@@ -83,7 +83,10 @@ Use `groups/http.yaml` as the template:
 
 Bumping `.semconv-version` can turn an attribute we declare with `id:` into one
 that upstream now defines too. `make lint-schema` then fails with
-`DuplicateAttributeId`, naming both the upstream file and ours.
+`DuplicateAttributeId`, naming both the upstream file and ours. Once
+`pkg/otelcconv` lands, local `id:` declarations move to `schemas/otelc/local/`
+(see [ADR 0006](adr/0006-semconv-telemetry-contract-organization.md)), and the
+same steps apply there.
 
 To fix it, replace the local declaration with a reference:
 
@@ -99,7 +102,7 @@ To fix it, replace the local declaration with a reference:
 If the upstream type or values differ, switching changes what users see, so
 raise it in an issue before changing anything. `rpc.system.name` in
 `groups/aws.yaml` is a current example: we declare it as a `string` and emit
-`aws-api`, while upstream (from v1.40.0) defines it as an enum whose members do
+`aws-api`, while upstream (from v1.39.0) defines it as an enum whose members do
 not include `aws-api`.
 
 ## Prerequisites
