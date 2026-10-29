@@ -10,11 +10,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/collector/pdata/ptrace"
 
 	"go.opentelemetry.io/otelc/test/testutil"
 )
@@ -49,18 +51,74 @@ func TestRedisClient(t *testing.T) {
 			}
 
 			assertRedisClientSpans(t, tc.appsDir)
+			assertRedisRingSpans(t, tc.appsDir)
+			assertRedisClusterSpans(t, tc.appsDir)
 		})
 	}
+}
+
+// assertRedisRingSpans checks that shards created by NewRing and Ring.SetAddrs
+// get exactly one otel hook. Ring builds them with redis.NewClient, which is
+// already instrumented.
+func assertRedisRingSpans(t *testing.T, appsDir string) {
+	t.Helper()
+
+	f := testutil.NewTestFixture(t, fixtureOpts(appsDir)...)
+	shard0 := StartRedisServer(t)
+	shard1 := StartRedisServer(t)
+
+	f.Run("redisclient", "-mode=ring", "-addr="+shard0.Addr(), "-addr2="+shard1.Addr())
+
+	for _, server := range []*miniredis.Miniredis{shard0, shard1} {
+		_, port, err := net.SplitHostPort(server.Addr())
+		require.NoError(t, err)
+		wantPort, err := strconv.Atoi(port)
+		require.NoError(t, err)
+
+		var shardPingSpans []ptrace.Span
+		for _, s := range testutil.AllSpans(f.Traces()) {
+			if testutil.IsClient(s) &&
+				testutil.HasAttribute("db.operation.name", "ping")(s) &&
+				testutil.HasAttribute("server.port", int64(wantPort))(s) {
+				shardPingSpans = append(shardPingSpans, s)
+			}
+		}
+		require.Len(t, shardPingSpans, 1, "expected exactly one ping span for shard at port %d", wantPort)
+		testutil.RequireRedisClientSemconv(t, shardPingSpans[0], "ping", server.Addr(), "ping")
+	}
+}
+
+// assertRedisClusterSpans checks that lazily created cluster nodes get exactly
+// one otel hook.
+func assertRedisClusterSpans(t *testing.T, appsDir string) {
+	t.Helper()
+
+	f := testutil.NewTestFixture(t, fixtureOpts(appsDir)...)
+	server := StartRedisServer(t)
+
+	f.Run("redisclient", "-mode=cluster", "-addr="+server.Addr())
+
+	var getSpans []ptrace.Span
+	for _, s := range testutil.AllSpans(f.Traces()) {
+		if testutil.IsClient(s) && testutil.HasAttribute("db.operation.name", "get")(s) {
+			getSpans = append(getSpans, s)
+		}
+	}
+	require.Len(t, getSpans, 1, "expected exactly one span for cluster command")
+	testutil.RequireRedisClientSemconv(t, getSpans[0], "get", server.Addr(), "get clusterkey")
+}
+
+func fixtureOpts(appsDir string) []testutil.TestFixtureOption {
+	if appsDir == "" {
+		return nil
+	}
+	return []testutil.TestFixtureOption{testutil.WithAppsDir(appsDir)}
 }
 
 func assertRedisClientSpans(t *testing.T, appsDir string) {
 	t.Helper()
 
-	var opts []testutil.TestFixtureOption
-	if appsDir != "" {
-		opts = append(opts, testutil.WithAppsDir(appsDir))
-	}
-	f := testutil.NewTestFixture(t, opts...)
+	f := testutil.NewTestFixture(t, fixtureOpts(appsDir)...)
 	server := StartRedisServer(t)
 
 	output := f.Run("redisclient", "-addr="+server.Addr())
@@ -78,7 +136,7 @@ func assertRedisClientSpans(t *testing.T, appsDir string) {
 		setSpan,
 		"set",
 		server.Addr(),
-		"set testkey testvalue",
+		"set testkey ?",
 	)
 
 	host, _, err := net.SplitHostPort(server.Addr())

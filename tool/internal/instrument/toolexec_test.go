@@ -24,6 +24,64 @@ import (
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
+func TestPGOBuildFlags(t *testing.T) {
+	const profile = "profile with spaces.pgo"
+	const compileProfile = "-pgoprofile=compiled.pgo"
+	tests := []struct {
+		name        string
+		compileArgs []string
+		profile     string
+		missing     bool
+		readError   bool
+		want        []string
+	}{
+		{
+			name: "profile applied", compileArgs: []string{compileProfile}, profile: profile,
+			want: []string{"-pgo=" + profile},
+		},
+		{
+			name: "separated compile flag", compileArgs: []string{"-pgoprofile", "compiled.pgo"}, profile: profile,
+			want: []string{"-pgo=" + profile},
+		},
+		{name: "unprofiled compile", profile: profile},
+		{name: "empty profile", compileArgs: []string{compileProfile}},
+		{name: "missing profile", compileArgs: []string{compileProfile}, missing: true},
+		{name: "read error", compileArgs: []string{compileProfile}, readError: true},
+		{name: "unprofiled compile does not read", readError: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+			require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+			if tt.readError {
+				require.NoError(t, os.Mkdir(util.GetPGOProfileFile(), 0o755))
+			} else if !tt.missing {
+				require.NoError(t, os.WriteFile(util.GetPGOProfileFile(), []byte(tt.profile), 0o644))
+			}
+			ip := &instrumentPhase{compileArgs: tt.compileArgs}
+			flags, err := ip.pgoBuildFlags()
+			if tt.readError && len(tt.compileArgs) > 0 {
+				require.ErrorContains(t, err, "failed to read PGO profile")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, flags)
+		})
+	}
+}
+
+func TestUpdateImportConfigPGOReadError(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	require.NoError(t, os.MkdirAll(util.GetPGOProfileFile(), 0o755))
+	ip := &instrumentPhase{
+		compileArgs:      []string{"-pgoprofile=compiled.pgo"},
+		importConfigPath: filepath.Join(t.TempDir(), "importcfg"),
+		importConfig:     imports.ImportConfig{PackageFile: map[string]string{"fmt": "fmt.a"}},
+	}
+	err := ip.updateImportConfig(t.Context(), map[string]string{"x": "example.com/x"})
+	require.ErrorContains(t, err, "failed to read PGO profile")
+}
+
 func TestStripCompleteFlag(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1048,6 +1106,19 @@ func TestEnableNestedToolexec(t *testing.T) {
 		assert.Contains(t, goflags, "-mod=mod", "existing flags are preserved")
 		assert.Contains(t, goflags, wantToken, "otelc is added as the toolexec")
 		assert.Equal(t, "1", os.Getenv(util.EnvOtelcNestedToolexec))
+	})
+
+	t.Run("strips only unpatterned gcflags from GOFLAGS", func(t *testing.T) {
+		t.Setenv("GOFLAGS", "-mod=mod -gcflags=-l '-gcflags=all=-N -l'")
+		t.Setenv(util.EnvOtelcNestedToolexec, "")
+
+		require.NoError(t, EnableNestedToolexec())
+
+		tokens := util.SplitGoflags(os.Getenv("GOFLAGS"))
+		assert.Contains(t, tokens, "-mod=mod")
+		assert.Contains(t, tokens, "'-gcflags=all=-N -l'")
+		assert.NotContains(t, tokens, "-gcflags=-l")
+		assert.Contains(t, tokens, wantToken)
 	})
 
 	t.Run("handles empty GOFLAGS without leading whitespace", func(t *testing.T) {
