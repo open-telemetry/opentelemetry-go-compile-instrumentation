@@ -12,3 +12,5 @@ extend-exclude = [
 LKE = "LKE"
 # Common Go abbreviation for "type" (e.g. AST type expressions).
 typ = "typ"
+# Azure Kubernetes Service, in the semconv acronym list (not a misspelling of "ask").
+AKS = "AKS"
