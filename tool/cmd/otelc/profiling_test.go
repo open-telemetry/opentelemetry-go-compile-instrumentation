@@ -69,6 +69,22 @@ func TestInitProfiling(t *testing.T) {
 		assert.Contains(t, err.Error(), "build temp")
 	})
 
+	t.Run("unresolvable profile-path reports a distinct error", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("a regular file standing in for a directory component resolves as not-exist on Windows, not ENOTDIR")
+		}
+		activeSession = nil
+		workDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, workDir)
+		notADir := filepath.Join(workDir, "not-a-dir")
+		require.NoError(t, os.WriteFile(notADir, []byte("x"), 0o644))
+		unresolvable := filepath.Join(notADir, "profiles")
+		err := runInitProfiling(t, "--profile", "cpu", "--profile-path", unresolvable)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "verify profile-path")
+		assert.NotContains(t, err.Error(), "must not be inside")
+	})
+
 	t.Run("profile-path equal to build temp errors", func(t *testing.T) {
 		activeSession = nil
 		workDir := t.TempDir()
@@ -232,6 +248,20 @@ func TestIsSubPath_ResolutionErrorFailsClosed(t *testing.T) {
 	target := filepath.Join(notADir, "profiles")
 
 	_, err := isSubPath(target, dir)
+	require.Error(t, err)
+}
+
+func TestIsSubPath_BaseResolutionErrorFailsClosed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a regular file standing in for a directory component resolves as not-exist on Windows, not ENOTDIR")
+	}
+	dir := t.TempDir()
+	notADir := filepath.Join(dir, "not-a-dir")
+	require.NoError(t, os.WriteFile(notADir, []byte("x"), 0o644))
+	base := filepath.Join(notADir, "build-temp")
+	target := filepath.Join(dir, "profiles")
+
+	_, err := isSubPath(target, base)
 	require.Error(t, err)
 }
 
