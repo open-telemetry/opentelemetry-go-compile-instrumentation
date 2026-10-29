@@ -531,6 +531,39 @@ func TestGetBuildPackages_TestSubcommandIncludesTestOnlyImports(t *testing.T) {
 	}
 }
 
+func TestGetBuildPackages_TestSubcommandResolvesSubpackageTestOnlyImports(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "go.mod"),
+		[]byte("module testmodule\n\ngo 1.21\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "main.go"),
+		[]byte("package main\n\nimport _ \"testmodule/svc\"\n\nfunc main() {}\n"),
+		0o644,
+	))
+	svcDir := filepath.Join(tmpDir, "svc")
+	require.NoError(t, os.MkdirAll(svcDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(svcDir, "svc.go"),
+		[]byte("package svc\n\nfunc Hello() string { return \"hello\" }\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(svcDir, "svc_test.go"),
+		[]byte("package svc\n\nimport (\n\t\"testing\"\n\t\"unicode\"\n)\n\n"+
+			"func TestUsesUnicode(t *testing.T) { _ = unicode.IsUpper('A') }\n"),
+		0o644,
+	))
+	t.Chdir(tmpDir)
+
+	_, testAllPkgs, err := getBuildPackages(t.Context(), subcmdTest, []string{"./..."})
+	require.NoError(t, err)
+	assert.Contains(t, pkgload.CollectPackageNames(testAllPkgs), "unicode",
+		"otelc go test must resolve names for imports that only appear in a subpackage's _test.go files")
+}
+
 // TestGetBuildPackages_TestSubcommandExcludesExternalTestPackage guards the
 // split of a test load. The external test package ("p_test [p.test]") must
 // only feed the name table: otelc.runtime.go for it would declare
