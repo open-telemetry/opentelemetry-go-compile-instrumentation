@@ -748,7 +748,7 @@ func TestCheckAliasOverrideShadowingAt_ScopeOnInjectionPathReportsConflict(t *te
 		t.Run(tt.name, func(t *testing.T) {
 			root := parseFile(t, "package main\n\nfunc Run() {\n\t"+tt.body+"\n}\n")
 			fn := findFuncDeclInFile(t, root, "Run")
-			call := findCallInFunc(t, fn, "Get")
+			call := findCallInFunc(t, fn)
 
 			err := checkAliasOverrideShadowingAt(map[string]string{"traced": "f"}, fn, call)
 
@@ -789,7 +789,7 @@ func TestCheckAliasOverrideShadowingAt_ScopeOutsideInjectionPathReportsNoError(t
 		t.Run(tt.name, func(t *testing.T) {
 			root := parseFile(t, "package main\n\nfunc Run() {\n\t"+tt.body+"\n}\n")
 			fn := findFuncDeclInFile(t, root, "Run")
-			call := findCallInFunc(t, fn, "Get")
+			call := findCallInFunc(t, fn)
 
 			err := checkAliasOverrideShadowingAt(map[string]string{"traced": "f"}, fn, call)
 
@@ -810,7 +810,7 @@ func Run() {
 }
 `)
 	fn := findFuncDeclInFile(t, root, "Run")
-	call := findCallInFunc(t, fn, "Get")
+	call := findCallInFunc(t, fn)
 
 	assert.NoError(t, checkAliasOverrideShadowingAt(nil, fn, call))
 	assert.NoError(t, checkAliasOverrideShadowingAt(map[string]string{"traced": "f"}, nil, call))
@@ -827,15 +827,15 @@ func Other() {
 `)
 	run := findFuncDeclInFile(t, root, "Run")
 	other := findFuncDeclInFile(t, root, "Other")
-	call := findCallInFunc(t, other, "Get")
+	call := findCallInFunc(t, other)
 
 	assert.Panics(t, func() {
 		scopeNamesBetween(run, call)
 	})
 }
 
-// findCallInFunc returns the first call to the named selector method in fn.
-func findCallInFunc(t *testing.T, fn *dst.FuncDecl, method string) *dst.CallExpr {
+// findCallInFunc returns the first Get selector call in fn.
+func findCallInFunc(t *testing.T, fn *dst.FuncDecl) *dst.CallExpr {
 	t.Helper()
 	var found *dst.CallExpr
 	dst.Inspect(fn, func(node dst.Node) bool {
@@ -847,12 +847,12 @@ func findCallInFunc(t *testing.T, fn *dst.FuncDecl, method string) *dst.CallExpr
 			return true
 		}
 		sel, ok := call.Fun.(*dst.SelectorExpr)
-		if ok && sel.Sel.Name == method {
+		if ok && sel.Sel.Name == "Get" {
 			found = call
 			return false
 		}
 		return true
 	})
-	require.NotNil(t, found, "no call to %s in %s", method, fn.Name.Name)
+	require.NotNil(t, found, "no Get call in %s", fn.Name.Name)
 	return found
 }
