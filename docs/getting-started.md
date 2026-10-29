@@ -123,6 +123,7 @@ The following libraries are automatically instrumented:
 | `google.golang.org/grpc` (client & server) | gRPC/RPC spans |
 | `database/sql` | DB client spans |
 | `github.com/gin-gonic/gin` | HTTP server spans |
+| `github.com/gofiber/fiber/v2` | HTTP server spans |
 | `github.com/gorilla/mux` | HTTP server span route enrichment |
 | `github.com/redis/go-redis/v9` | Redis DB spans |
 | `go.mongodb.org/mongo-driver` | MongoDB DB spans |
