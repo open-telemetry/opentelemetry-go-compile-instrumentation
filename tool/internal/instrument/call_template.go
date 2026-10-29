@@ -39,6 +39,9 @@ func callArgPlaceholderIdent(idx int) string {
 type callTemplate struct {
 	template *template.Template
 	source   string
+	// typeInfo gives the go/types view of the enclosing function for the
+	// ThatImplements helpers. When nil, they match the type name only.
+	typeInfo *funcTypes
 }
 
 // newCallTemplate creates a new callTemplate from the provided template text.
@@ -158,6 +161,27 @@ func (d *callTemplateData) FuncReturnOfType(typeStr string) (string, error) {
 	return d.enclosing.FuncReturnOfType(typeStr)
 }
 
+// FuncArgumentThatImplements returns the identifier of the first parameter of
+// the enclosing function (excluding the receiver) whose type is the interface
+// iface or implements it, or "" if none does. Template usage:
+// {{.FuncArgumentThatImplements "context.Context"}}
+func (d *callTemplateData) FuncArgumentThatImplements(iface string) (string, error) {
+	if d.enclosing == nil {
+		return "", noEnclosingFuncErr()
+	}
+	return d.enclosing.FuncArgumentThatImplements(iface)
+}
+
+// FuncReturnThatImplements returns the identifier of the first return value
+// of the enclosing function whose type is the interface iface or implements
+// it, or "" if none does. Template usage: {{.FuncReturnThatImplements "error"}}
+func (d *callTemplateData) FuncReturnThatImplements(iface string) (string, error) {
+	if d.enclosing == nil {
+		return "", noEnclosingFuncErr()
+	}
+	return d.enclosing.FuncReturnThatImplements(iface)
+}
+
 // renderingCallTemplateData wraps callTemplateData for use as text/template
 // render data. Use callTemplateData directly when the real name is needed
 // instead of the marked one, such as in tests.
@@ -197,6 +221,16 @@ func (d renderingCallTemplateData) FuncArgumentOfType(typeStr string) (string, e
 
 func (d renderingCallTemplateData) FuncReturnOfType(typeStr string) (string, error) {
 	name, err := d.callTemplateData.FuncReturnOfType(typeStr)
+	return markDynamicIdent(name), err
+}
+
+func (d renderingCallTemplateData) FuncArgumentThatImplements(iface string) (string, error) {
+	name, err := d.callTemplateData.FuncArgumentThatImplements(iface)
+	return markDynamicIdent(name), err
+}
+
+func (d renderingCallTemplateData) FuncReturnThatImplements(iface string) (string, error) {
+	name, err := d.callTemplateData.FuncReturnThatImplements(iface)
 	return markDynamicIdent(name), err
 }
 
@@ -270,6 +304,7 @@ func (t *callTemplate) compileExpression(
 	data := &callTemplateData{}
 	if enclosing != nil {
 		data.enclosing = newFuncTemplateData(enclosing, nil, imports, "")
+		data.enclosing.typeInfo = t.typeInfo
 	}
 	if call, ok := unwrap(node).(*dst.CallExpr); ok {
 		data.isCall = true
