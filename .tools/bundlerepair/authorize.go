@@ -172,10 +172,17 @@ func checkAutomaticRequest(ctx context.Context, client *github.Client, req autho
 }
 
 func pullRequestEligible(pull github.PullRequest, req authorizeRequest) bool {
+	return pull.Head.SHA == req.ExpectedHeadSHA && eligiblePullRequest(pull, req.Repo)
+}
+
+// eligiblePullRequest reports whether the pull request is open, is not a
+// draft, targets the default branch, and lets repository maintainers update
+// its head. The selection, authorization, and preparation checks all extend
+// this shared rule with their own conditions.
+func eligiblePullRequest(pull github.PullRequest, repo string) bool {
 	return pull.State == stateOpen &&
 		pull.Draft != nil && !*pull.Draft &&
 		pull.Base.Ref == defaultBranch &&
-		pull.Head.SHA == req.ExpectedHeadSHA &&
 		pull.Head.Repo != nil &&
-		(pull.Head.Repo.FullName == req.Repo || pull.MaintainerCanModify)
+		(pull.Head.Repo.FullName == repo || pull.MaintainerCanModify)
 }

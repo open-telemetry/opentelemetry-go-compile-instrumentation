@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"go.opentelemetry.io/otelc/tools/bundlerepair/internal/github"
 )
 
 const (
@@ -459,5 +461,47 @@ func TestAuthorizeUsesInjectedClock(t *testing.T) {
 func TestAuthorizeRejectsArguments(t *testing.T) {
 	if code, _ := runApp(t, nil, "authorize", "extra"); code != exitFailure {
 		t.Errorf("exit code = %d", code)
+	}
+}
+
+// D1: one shared eligibility rule that selection, authorization, and
+// preparation extend. The rule needs an open, non-draft pull request against
+// the default branch whose head repository the maintainers may update or own.
+func TestEligiblePullRequest(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(map[string]any)
+		want   bool
+	}{
+		{"eligible fork", nil, true},
+		{"same repository needs no edit rights", func(p map[string]any) {
+			p["maintainer_can_modify"] = false
+			p["head"] = map[string]any{"sha": headSHA, "ref": "c", "repo": map[string]any{"full_name": testRepo}}
+		}, true},
+		{"closed", func(p map[string]any) { p["state"] = "closed" }, false},
+		{"draft", func(p map[string]any) { p["draft"] = true }, false},
+		{"missing draft", func(p map[string]any) { delete(p, "draft") }, false},
+		{"null draft", func(p map[string]any) { p["draft"] = nil }, false},
+		{"retargeted", func(p map[string]any) { p["base"] = map[string]any{"sha": oldSHA, "ref": "release"} }, false},
+		{"deleted fork", func(p map[string]any) {
+			p["head"] = map[string]any{"sha": headSHA, "ref": "c", "repo": nil}
+		}, false},
+		{"edits disabled on a fork", func(p map[string]any) { p["maintainer_can_modify"] = false }, false},
+		{"foreign repository without edit rights", func(p map[string]any) {
+			p["maintainer_can_modify"] = false
+			p["head"] = map[string]any{"sha": headSHA, "ref": "c", "repo": map[string]any{"full_name": "other/fork"}}
+		}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := pullBody(t, tt.mutate)
+			var pull github.PullRequest
+			if err := json.Unmarshal([]byte(data), &pull); err != nil {
+				t.Fatal(err)
+			}
+			if got := eligiblePullRequest(pull, testRepo); got != tt.want {
+				t.Errorf("eligiblePullRequest = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

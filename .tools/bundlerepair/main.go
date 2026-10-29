@@ -27,7 +27,7 @@ const usageText = `Usage: bundlerepair <command> [arguments]
 
 Commands:
   authorize                          check who may request a bundle repair
-  stage <branch-dir> <trusted-dir>   copy the bundled source trees into the trusted checkout
+  stage <branch-dir> <trusted-dir> <base-sha>   copy the bundled source trees into the trusted checkout
   merge <checkout> <base-sha>        merge the base commit without committing
   select [--budget]                  choose conflicting pull requests for automatic repair
   prepare                            capture and check the pull request of a repair
@@ -69,7 +69,7 @@ func (a app) run(ctx context.Context, args []string) int {
 	case "authorize":
 		err = a.authorize(ctx, rest)
 	case "stage":
-		err = a.stage(rest)
+		err = a.stage(ctx, rest)
 	case "merge":
 		err = a.merge(ctx, rest)
 	case "select":

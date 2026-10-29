@@ -34,7 +34,7 @@ env:
   AUTO_DEADLINE: ${{ inputs.expires_at }}
   BASE_SHA: ${{ inputs.expected_base_sha }}
   CALLER_WORKFLOW_REF: ${{ github.workflow_ref }}
-  COMMENTER: ${{ github.event.comment.user.login || github.triggering_actor }}
+  COMMENTER: ${{ github.event.comment.user.login || github.actor }}
   EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
   PR_NUMBER: ${{ github.event.issue.number || inputs.pr_number }}
   REPO: ${{ github.repository }}

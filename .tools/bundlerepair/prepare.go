@@ -116,8 +116,9 @@ func (a app) requestedByCommandOrInput() bool {
 		a.getenv("COMMENT_BODY") == regenerateCommand
 }
 
-// preparable reports whether the pull request may be repaired. An automatic
-// request must also match the scanned head and still be eligible.
+// preparable reports whether the pull request may be repaired. A manual
+// request needs only an open pull request with a head repository; an
+// automatic request must also match the scanned head and stay eligible.
 func preparable(pull github.PullRequest, req authorizeRequest, automatic bool) bool {
 	if pull.State != stateOpen || pull.Head.Repo == nil {
 		return false
@@ -125,7 +126,5 @@ func preparable(pull github.PullRequest, req authorizeRequest, automatic bool) b
 	if !automatic {
 		return true
 	}
-	return pull.Draft != nil && !*pull.Draft && pull.Base.Ref == defaultBranch &&
-		pull.Head.SHA == req.ExpectedHeadSHA &&
-		(pull.Head.Repo.FullName == req.Repo || pull.MaintainerCanModify)
+	return pull.Head.SHA == req.ExpectedHeadSHA && eligiblePullRequest(pull, req.Repo)
 }

@@ -202,9 +202,9 @@ The scanner counts its recorded selections, including requests whose repair
 jobs never start. Missing or incomplete history stops selection. A missing
 selection record can pause automation for the three-hour history window.
 
-The scanner and its repair jobs run serially with other scans. Each scan
-starts at most two repairs in parallel. GitHub API quotas do not provide this
-limit.
+The scanner and its repair jobs run serially with other scans. The scanner
+workflow starts at most two repairs in parallel, and the scanner enforces the
+hourly budget and the cooldown. GitHub API quotas do not set these limits.
 
 Automatic requests use the head and base commits that the scanner captured.
 The workflow rechecks eligibility before generation and publication. Requests
@@ -219,15 +219,21 @@ checks authorization before requests enter the shared queue. Requests for the
 same pull request run serially.
 
 Repair builds the archive with the Makefile and the bundle tool from `main`.
-It copies only `pkg/` and `instrumentation/` from the pull request. A pull
-request that changes the bundle tool fails its own Verify Bundle check, so the
-author must run `make package` locally.
+It copies only `pkg/` and `instrumentation/` from the pull request. If `main`
+moves after a request is prepared, the generate job stops and the request must
+be made again.
+
+Verify Bundle runs only when `pkg/**`, `instrumentation/**`, or
+`tool/data/otelc-bundle.tgz` change. A pull request that changes only the
+bundle tool does not run it. In that case, CI does not catch a stale archive.
+The author must run `make package` locally and commit the archive.
 
 The repair workflows call one Go program, `bundlerepair`, in
 `.tools/bundlerepair`. It uses only the Go standard library. Each job builds it
-from the trusted checkout of `main`, with module downloads
-turned off. No job builds or runs code from the pull request. The program has
-these subcommands:
+from the trusted checkout of `main`, with module downloads turned off. No job
+runs code or build tooling from the pull request. The trusted build packages
+the `pkg/` and `instrumentation/` sources. It resolves their module
+dependencies through the public Go proxy. The program has these subcommands:
 
 - `authorize` checks who may request a repair.
 - `prepare` checks the pull request and captures its head and base commits.

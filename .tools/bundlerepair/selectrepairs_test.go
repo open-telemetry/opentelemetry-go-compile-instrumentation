@@ -5,7 +5,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -863,5 +865,405 @@ func TestSelectRejectsTrailingDataInRecord(t *testing.T) {
 	})
 	if code, _ := fx.run("--budget"); code != exitFailure {
 		t.Errorf("exit code = %d, want %d", code, exitFailure)
+	}
+}
+
+// Go test TestScannerSkipsResolvedConflicts: the author resolved every
+// conflict after the listing, so a clean merge at the new head is not a
+// bundle-only conflict. The worktree probe treated it as one.
+func TestSelectSkipsCleanMerge(t *testing.T) {
+	fx := newScanFixture(t)
+	gitIn(t, fx.dir, "checkout", "--quiet", "--detach", fx.head)
+	gitIn(t, fx.dir, "merge", "--quiet", "--no-edit", "-X", "ours", fx.base)
+	fx.head = gitIn(t, fx.dir, "rev-parse", "HEAD")
+	gitIn(t, fx.dir, "push", "--quiet", fx.remote, fx.head+":refs/pull/1/head")
+	fx.setOpenPullRequests(1)
+	fx.api.setBody("GET /repos/test/upstream/pulls/1", fx.pullBody(t, nil))
+	code, out := fx.run()
+	if code != 0 {
+		t.Fatalf("exit code = %d: %s", code, out.stderr)
+	}
+	fx.plan(t, "[]")
+	if strings.Contains(out.stdout, "Selected bundle repair") {
+		t.Errorf("a clean merge was selected: %q", out.stdout)
+	}
+	if !strings.Contains(out.stdout, "PR #1 no longer conflicts with the base. Skipping.") {
+		t.Errorf("stdout = %q", out.stdout)
+	}
+	if _, found := fx.last(t, "rate_record"); !found {
+		t.Error("the scan wrote no rate record")
+	}
+}
+
+// Go test TestScannerContinuesAfterProbeFailure: a failure that affects one
+// pull request writes a warning annotation and skips it. The scan still
+// writes its selection record, so a later scan can verify the budget.
+func TestSelectContinuesAfterCandidateFailure(t *testing.T) {
+	fx := newScanFixture(t)
+	gitIn(t, fx.remote, "update-ref", "-d", "refs/pull/1/head")
+	code, out := fx.run()
+	if code != 0 {
+		t.Fatalf("exit code = %d: %s", code, out.stderr)
+	}
+	if !strings.Contains(out.stdout, "::warning::PR #1: the pull request head cannot be fetched") {
+		t.Errorf("stdout = %q", out.stdout)
+	}
+	fx.plan(t, "[2]")
+	record, _ := fx.last(t, "rate_record")
+	if record != fmt.Sprintf(`{"at":%d,"prs":[2]}`, testNow) {
+		t.Errorf("rate_record = %s", record)
+	}
+}
+
+// The pull ref moved on between the listing and the probe. The scan warns
+// and continues; it does not fail the scan for one pull request.
+func TestSelectWarnsOnHeadMismatch(t *testing.T) {
+	fx := newScanFixture(t)
+	fx.setOpenPullRequests(1)
+	fx.api.setBody("GET /repos/test/upstream/pulls/1", fx.pullBody(t, func(pull map[string]any) {
+		pull["head"] = map[string]any{
+			"sha":  fx.base,
+			"ref":  "contribution",
+			"repo": map[string]any{"full_name": "test/fork"},
+		}
+	}))
+	code, out := fx.run()
+	if code != 0 {
+		t.Fatalf("exit code = %d: %s", code, out.stderr)
+	}
+	fx.plan(t, "[]")
+	if !strings.Contains(out.stdout, "::warning::PR #1: the fetched head does not match the reported head") {
+		t.Errorf("stdout = %q", out.stdout)
+	}
+}
+
+// The fetch of the base branch affects every candidate, so it still fails
+// the scan and writes no selection record.
+func TestSelectFailsWhenMainFetchFails(t *testing.T) {
+	fx := newScanFixture(t)
+	gitIn(t, fx.dir, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "missing.git"))
+	if code, _ := fx.run(); code != exitFailure {
+		t.Errorf("exit code = %d, want %d", code, exitFailure)
+	}
+	if _, found := fx.last(t, "rate_record"); found {
+		t.Error("a failed scan wrote a rate record")
+	}
+}
+
+// A conflict on a file other than the bundle, without a bundle conflict,
+// makes the pull request skip.
+func TestSelectSkipsConflictOnAnotherFile(t *testing.T) {
+	fx := newScanFixture(t)
+	// The head restores the original bundle, so source.txt is the only conflict.
+	gitIn(t, fx.dir, "checkout", "--quiet", "main")
+	write(t, filepath.Join(fx.dir, "source.txt"), "base source\n")
+	gitIn(t, fx.dir, "commit", "--quiet", "-am", "base source")
+	base := gitIn(t, fx.dir, "rev-parse", "HEAD")
+	gitIn(t, fx.dir, "checkout", "--quiet", "contribution")
+	write(t, filepath.Join(fx.dir, "source.txt"), "contributor source\n")
+	write(t, filepath.Join(fx.dir, bundlePath), "original\x00bundle")
+	commitAll(t, fx.dir, "contributor source")
+	head := gitIn(t, fx.dir, "rev-parse", "HEAD")
+	gitIn(t, fx.dir, "push", "--quiet", fx.remote, "main:refs/heads/main", head+":refs/pull/1/head")
+	fx.head, fx.base = head, base
+	fx.setOpenPullRequests(1)
+	fx.api.setBody("GET /repos/test/upstream/pulls/1", fx.pullBody(t, nil))
+	code, out := fx.run()
+	if code != 0 {
+		t.Fatalf("exit code = %d: %s", code, out.stderr)
+	}
+	fx.plan(t, "[]")
+	if !strings.Contains(out.stdout, "PR #1 has conflicts outside the bundle. Skipping.") {
+		t.Errorf("stdout = %q", out.stdout)
+	}
+}
+
+// Item 5: git merge-tree reads .gitattributes from the current checkout,
+// not from the merged trees. The scanner runs in a trusted checkout of main,
+// so a hostile .gitattributes in the pull request head is not consulted and
+// cannot hide a conflict from the probe.
+func TestSelectIgnoresHeadAttributes(t *testing.T) {
+	fx := newScanFixture(t)
+	hostileConflictFixture(t, fx)
+	// The trusted checkout of main is checked out while the scan probes.
+	gitIn(t, fx.dir, "checkout", "--quiet", "main")
+	fx.setOpenPullRequests(1)
+	fx.api.setBody("GET /repos/test/upstream/pulls/1", fx.pullBody(t, nil))
+	code, out := fx.run()
+	if code != 0 {
+		t.Fatalf("exit code = %d: %s", code, out.stderr)
+	}
+	fx.plan(t, "[]")
+	if !strings.Contains(out.stdout, "PR #1 has conflicts outside the bundle. Skipping.") {
+		t.Errorf("hostile head attributes changed the probe result: %q", out.stdout)
+	}
+}
+
+// Item 5, worst case: the checked-out branch of the scan checkout carries
+// hostile union attributes. The trusted info/attributes that the scan writes
+// take precedence over them and unset every merge driver, so the probe sees
+// the source conflict and skips the pull request. The repair merge would
+// also fail on the hidden conflict, so nothing can be pushed either way.
+func TestSelectHostileAttributesCannotHideConflicts(t *testing.T) {
+	fx := newScanFixture(t)
+	hostileConflictFixture(t, fx)
+	// The hostile attributes of the contribution branch are checked out.
+	gitIn(t, fx.dir, "checkout", "--quiet", "contribution")
+	fx.setOpenPullRequests(1)
+	fx.api.setBody("GET /repos/test/upstream/pulls/1", fx.pullBody(t, nil))
+	code, out := fx.run()
+	if code != 0 {
+		t.Fatalf("exit code = %d: %s", code, out.stderr)
+	}
+	fx.plan(t, "[]")
+	if !strings.Contains(out.stdout, "PR #1 has conflicts outside the bundle. Skipping.") {
+		t.Errorf("hostile checkout attributes changed the probe result: %q", out.stdout)
+	}
+	// Defense in depth: even a selected request would fail here, because the
+	// repair merge writes the same trusted attributes.
+	var stdout bytes.Buffer
+	mergeErr := mergeBase(t.Context(), fx.dir, fx.base, &stdout)
+	if mergeErr == nil {
+		t.Error("the repair merge accepted a hidden source conflict")
+	}
+	unmerged := gitIn(t, fx.dir, "diff", "--name-only", "--diff-filter=U")
+	if !strings.Contains(unmerged, "source.txt") {
+		t.Errorf("unmerged files = %q, want source.txt", unmerged)
+	}
+	gitIn(t, fx.dir, "merge", "--abort")
+}
+
+func TestParseConflictPaths(t *testing.T) {
+	const oid = "1e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f"
+	tests := []struct {
+		name string
+		out  string
+		want []string
+		ok   bool
+	}{
+		{"clean merge", oid + "\x00", nil, true},
+		{"bundle only", oid + "\x00" + bundlePath + "\x00", []string{bundlePath}, true},
+		{"two paths", oid + "\x00source.txt\x00" + bundlePath + "\x00", []string{"source.txt", bundlePath}, true},
+		{"empty output", "", nil, false},
+		{"only a nul", "\x00", nil, false},
+		{"no tree", "not a tree\x00" + bundlePath + "\x00", nil, false},
+		{"short tree", "abc\x00" + bundlePath + "\x00", nil, false},
+		{"empty path", oid + "\x00\x00", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseConflictPaths([]byte(tt.out))
+			if (err == nil) != tt.ok {
+				t.Fatalf("err = %v, want ok = %v", err, tt.ok)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("paths = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// hostileConflictFixture adds a hostile .gitattributes and a source conflict
+// to the contribution branch, and a source conflict to main. It records the
+// new head and base in fx and leaves main checked out.
+func hostileConflictFixture(t *testing.T, fx *scanFixture) {
+	t.Helper()
+	gitIn(t, fx.dir, "checkout", "--quiet", "main")
+	write(t, filepath.Join(fx.dir, "source.txt"), "base source\n")
+	gitIn(t, fx.dir, "commit", "--quiet", "-am", "base source")
+	fx.base = gitIn(t, fx.dir, "rev-parse", "HEAD")
+	gitIn(t, fx.dir, "checkout", "--quiet", "contribution")
+	write(t, filepath.Join(fx.dir, "source.txt"), "contributor source\n")
+	write(t, filepath.Join(fx.dir, ".gitattributes"), "* merge=union\n")
+	commitAll(t, fx.dir, "contributor source and hostile attributes")
+	fx.head = gitIn(t, fx.dir, "rev-parse", "HEAD")
+	gitIn(t, fx.dir, "push", "--quiet", fx.remote, "main:refs/heads/main", fx.head+":refs/pull/1/head")
+}
+
+// J1(a): the scan checkout carries the repository .gitattributes and may have
+// the bundle merge driver registered, for example after make setup-git. The
+// probe must pin the driver itself, so a registered driver cannot hide the
+// bundle conflict.
+func TestSelectIgnoresRegisteredBundleDriver(t *testing.T) {
+	fx := newScanFixture(t)
+	gitIn(t, fx.dir, "checkout", "--quiet", "main")
+	write(t, filepath.Join(fx.dir, ".gitattributes"), bundlePath+" -text -diff merge=otelc-bundle\n")
+	commitAll(t, fx.dir, "bundle attributes")
+	fx.base = gitIn(t, fx.dir, "rev-parse", "HEAD")
+	gitIn(t, fx.dir, "push", "--quiet", fx.remote, "main:refs/heads/main")
+	gitIn(t, fx.dir, "checkout", "--quiet", "contribution")
+	// The driver is registered as make setup-git would register it.
+	gitIn(t, fx.dir, "config", "merge.otelc-bundle.driver", "true")
+	// The scan runs in the trusted checkout of main, which carries the
+	// repository .gitattributes with the bundle merge driver.
+	gitIn(t, fx.dir, "checkout", "--quiet", "main")
+	fx.setOpenPullRequests(1)
+	fx.api.setBody("GET /repos/test/upstream/pulls/1", fx.pullBody(t, nil))
+	code, out := fx.run()
+	if code != 0 {
+		t.Fatalf("exit code = %d: %s", code, out.stderr)
+	}
+	fx.plan(t, "[1]")
+	if !strings.Contains(out.stdout, "Selected bundle repair for PR #1.") {
+		t.Errorf("a registered driver hid the bundle conflict: %q", out.stdout)
+	}
+}
+
+// J1(b): a delete/modify conflict on the bundle shows as a bundle-only
+// conflict, but the repair merge cannot resolve it, so the pull request
+// must be skipped in both directions.
+func TestSelectSkipsBundleDeleteModifyConflict(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(*testing.T, *scanFixture)
+	}{
+		{
+			"base deletes, head modifies",
+			func(t *testing.T, fx *scanFixture) {
+				gitIn(t, fx.dir, "checkout", "--quiet", "main")
+				gitIn(t, fx.dir, "rm", "-q", bundlePath)
+				gitIn(t, fx.dir, "commit", "--quiet", "-m", "base deletes the bundle")
+				fx.base = gitIn(t, fx.dir, "rev-parse", "HEAD")
+				gitIn(t, fx.dir, "checkout", "--quiet", "contribution")
+				gitIn(t, fx.dir, "push", "--quiet", fx.remote, "main:refs/heads/main")
+			},
+		},
+		{
+			"head deletes, base modifies",
+			func(t *testing.T, fx *scanFixture) {
+				gitIn(t, fx.dir, "checkout", "--quiet", "contribution")
+				gitIn(t, fx.dir, "rm", "-q", bundlePath)
+				gitIn(t, fx.dir, "commit", "--quiet", "-m", "head deletes the bundle")
+				fx.head = gitIn(t, fx.dir, "rev-parse", "HEAD")
+				gitIn(t, fx.dir, "push", "--quiet", fx.remote, fx.head+":refs/pull/1/head")
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fx := newScanFixture(t)
+			tt.setup(t, fx)
+			fx.setOpenPullRequests(1)
+			fx.api.setBody("GET /repos/test/upstream/pulls/1", fx.pullBody(t, nil))
+			code, out := fx.run()
+			if code != 0 {
+				t.Fatalf("exit code = %d: %s", code, out.stderr)
+			}
+			fx.plan(t, "[]")
+			if !strings.Contains(out.stdout, "PR #1 has a bundle conflict the repair merge cannot resolve. Skipping.") {
+				t.Errorf("stdout = %q", out.stdout)
+			}
+		})
+	}
+}
+
+// Review #2: a head commit id that is not a full SHA affects one pull
+// request only, so the scan warns and skips instead of failing.
+func TestSelectWarnsOnInvalidHead(t *testing.T) {
+	fx := newScanFixture(t)
+	fx.setOpenPullRequests(1)
+	fx.api.setBody("GET /repos/test/upstream/pulls/1", fx.pullBody(t, func(pull map[string]any) {
+		pull["head"] = map[string]any{"sha": "abc", "ref": "c", "repo": map[string]any{"full_name": "test/fork"}}
+	}))
+	code, out := fx.run()
+	if code != 0 {
+		t.Fatalf("exit code = %d: %s", code, out.stderr)
+	}
+	fx.plan(t, "[]")
+	if !strings.Contains(out.stdout, "::warning::PR #1: the head commit id is not valid") {
+		t.Errorf("stdout = %q", out.stdout)
+	}
+}
+
+// Review #3: a cancelled or expired context is a global failure. A probe
+// failure caused by it must fail the scan, not warn and skip.
+func TestSelectFailsWhenContextCancelled(t *testing.T) {
+	fx := newScanFixture(t)
+	fx.env["RECENT_REQUESTS"] = "[]"
+	fx.env["AUTO_DEADLINE"] = strconv.Itoa(testNow + 600)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	// The context is cancelled while the scan reads the first pull request,
+	// so the next git command of the probe fails with the context error.
+	fx.api.set("GET /repos/test/upstream/pulls/1", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cancel()
+		jsonHandler(http.StatusOK, fx.pullBody(t, nil))(w, r)
+	}))
+	var stdout, stderr bytes.Buffer
+	a := app{
+		getenv: func(key string) string { return fx.env[key] },
+		lookup: func(key string) (string, bool) { value, ok := fx.env[key]; return value, ok },
+		stdout: &stdout,
+		stderr: &stderr,
+		now:    func() time.Time { return time.Unix(testNow, 0) },
+	}
+	err := a.selectRepairs(ctx, nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("the scan continued after its context was cancelled: err = %v", err)
+	}
+}
+
+// Review #4: a gone pull request (404 or 410) affects one candidate, but a
+// denied (403) or broken (500) response affects the scan.
+func TestSelectPullRequestReadErrors(t *testing.T) {
+	for _, tt := range []struct {
+		status int
+		fail   bool
+	}{
+		{http.StatusNotFound, false},
+		{http.StatusGone, false},
+		{http.StatusForbidden, true},
+		{http.StatusInternalServerError, true},
+	} {
+		t.Run(strconv.Itoa(tt.status), func(t *testing.T) {
+			fx := newScanFixture(t)
+			fx.setOpenPullRequests(1)
+			fx.api.set("GET /repos/test/upstream/pulls/1", jsonHandler(tt.status, `{"message":"boom"}`))
+			code, out := fx.run()
+			if tt.fail {
+				if code != exitFailure {
+					t.Errorf("exit code = %d, want %d", code, exitFailure)
+				}
+				if _, found := fx.last(t, "rate_record"); found {
+					t.Error("a failed scan wrote a rate record")
+				}
+				return
+			}
+			if code != 0 {
+				t.Fatalf("exit code = %d: %s", code, out.stderr)
+			}
+			fx.plan(t, "[]")
+			if !strings.Contains(out.stdout, "::warning::PR #1: the pull request cannot be read") {
+				t.Errorf("stdout = %q", out.stdout)
+			}
+			if _, found := fx.last(t, "rate_record"); !found {
+				t.Error("the scan wrote no rate record")
+			}
+		})
+	}
+}
+
+// C8 end to end: the head commit is present but its tree object is missing,
+// so git merge-tree fails (git 2.56 exits 128, other versions exit 1, both
+// with empty output). The scan must warn and skip, not select.
+func TestSelectWarnsWhenMergeTreeFails(t *testing.T) {
+	fx := newScanFixture(t)
+	fx.setOpenPullRequests(1)
+	tree := gitIn(t, fx.dir, "rev-parse", fx.head+"^{tree}")
+	// The fetch does not restore the tree: the scan repository advertises the
+	// head commit through its own refs, so the remote sends nothing.
+	if err := os.Remove(filepath.Join(fx.dir, ".git", "objects", tree[:2], tree[2:])); err != nil {
+		t.Fatal(err)
+	}
+	code, out := fx.run()
+	if code != 0 {
+		t.Fatalf("exit code = %d: %s", code, out.stderr)
+	}
+	if !strings.Contains(out.stdout, "::warning::PR #1: the conflict probe failed") {
+		t.Errorf("stdout = %q", out.stdout)
+	}
+	fx.plan(t, "[]")
+	if _, found := fx.last(t, "rate_record"); !found {
+		t.Error("the scan wrote no rate record")
 	}
 }

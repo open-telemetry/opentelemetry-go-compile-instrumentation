@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,13 +12,19 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"go.opentelemetry.io/otelc/tools/bundlerepair/internal/errs"
+	"go.opentelemetry.io/otelc/tools/bundlerepair/internal/gitcmd"
 )
 
 const (
-	stageUsage = "Usage: bundlerepair stage <branch-dir> <trusted-dir>"
-	stageArgs  = 2
+	stageUsage = "Usage: bundlerepair stage <branch-dir> <trusted-dir> <base-sha>"
+	stageArgs  = 3
+
+	// baseMovedMessage explains why staging stopped. The prepare job captured
+	// the base commit, so a newer trusted HEAD means main moved in between.
+	baseMovedMessage = "main moved after the request was prepared; request the repair again"
 
 	// writableDir lets the copy add entries to a directory whose final mode
 	// is read-only. The copy sets the final mode after it fills the directory.
@@ -31,21 +38,40 @@ func stagedTrees() []string {
 }
 
 // stage copies the bundled source trees from an untrusted checkout into the
-// trusted one. It copies only plain files and directories. It checks every
-// tree before it changes the trusted checkout.
-func (a app) stage(args []string) error {
+// trusted one. It copies only plain files and directories. It checks the
+// trusted base commit and every tree before it changes the trusted checkout.
+func (a app) stage(ctx context.Context, args []string) error {
 	if len(args) > 0 && args[0] == "--help" {
 		_, err := fmt.Fprintln(a.stdout, stageUsage)
 		return err
 	}
-	if len(args) != stageArgs || args[0] == "" || args[1] == "" {
-		return errors.New("a branch directory and a trusted directory are required")
+	if len(args) != stageArgs || args[0] == "" || args[1] == "" || !sha1Pattern.MatchString(args[2]) {
+		return errors.New("a branch directory, a trusted directory, and a full base commit SHA are required")
 	}
 	branchDir, trustedDir := filepath.Clean(args[0]), filepath.Clean(args[1])
 	if !isDir(branchDir) || !isDir(trustedDir) {
 		return errors.New("a branch directory and a trusted directory are required")
 	}
+	if err := checkTrustedBase(ctx, trustedDir, args[2]); err != nil {
+		return err
+	}
 	return stageSources(branchDir, trustedDir)
+}
+
+// checkTrustedBase fails unless the trusted checkout is at baseSHA. The
+// prepare job captured the base commit, so a newer trusted HEAD means main
+// moved after the request. The build must then stop instead of publishing a
+// bundle that the older Makefile and bundle tool produced.
+func checkTrustedBase(ctx context.Context, trustedDir, baseSHA string) error {
+	git := gitcmd.Runner{Dir: trustedDir}
+	out, err := git.Output(ctx, "rev-parse", "HEAD")
+	if err != nil {
+		return errs.Wrap(err, "read the trusted HEAD")
+	}
+	if strings.TrimSpace(out) != baseSHA {
+		return errors.New(baseMovedMessage)
+	}
+	return nil
 }
 
 func isDir(path string) bool {

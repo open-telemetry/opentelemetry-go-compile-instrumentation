@@ -4,14 +4,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"math"
+	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
+	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
@@ -40,6 +41,9 @@ const (
 	budgetFlag       = "--budget"
 	isoLayout        = "2006-01-02T15:04:05Z"
 	conflictingState = "CONFLICTING"
+	// originBase and fetchBaseSpec address the base branch of the scan.
+	originBase    = "refs/remotes/origin/" + defaultBranch
+	fetchBaseSpec = "refs/heads/" + defaultBranch + ":" + originBase
 )
 
 // repairRequest is one selected pull request. The field order is the order of
@@ -230,7 +234,7 @@ func (s selector) loadBudget(ctx context.Context, runID int64, now time.Time) (s
 // during the last hour. It fails when the history is incomplete or unclear.
 func (s selector) recentRequests(ctx context.Context, current int64, now time.Time) ([]json.Number, error) {
 	query := url.Values{
-		"branch":   {"main"},
+		"branch":   {defaultBranch},
 		"created":  {">=" + now.Add(-requestLookback).UTC().Format(isoLayout)},
 		"per_page": {"100"},
 	}
@@ -402,48 +406,46 @@ func (s selector) selectPullRequests(ctx context.Context, remaining int) error {
 		"--no-prune",
 		"--no-tags",
 		"origin",
-		"refs/heads/main:refs/remotes/origin/main",
+		fetchBaseSpec,
 	); err != nil {
 		return err
 	}
-	baseOut, err := git.Output(ctx, "rev-parse", "refs/remotes/origin/main")
+	baseOut, err := git.Output(ctx, "rev-parse", originBase)
 	if err != nil {
 		return err
 	}
 	base := strings.TrimSpace(baseOut)
+	// The probe must merge with the attributes of the repair merge: write the
+	// trusted local attributes into the scan repository before any probe.
+	if err = writeLocalAttributes(ctx, git); err != nil {
+		return err
+	}
 	open, err := s.client.OpenPullRequests(ctx, s.repo, openPRLimit)
 	if err != nil {
 		return err
 	}
-	workDir, err := os.MkdirTemp("", "bundlerepair-")
-	if err != nil {
-		return errs.Wrap(err, "create the work directory")
-	}
-	checkout := filepath.Join(workDir, "checkout")
-	defer func() {
-		// Best effort: the worktree may not exist.
-		_ = git.Run(context.WithoutCancel(ctx), "worktree", "remove", "--force", checkout)
-		_ = os.RemoveAll(workDir)
-	}()
-
 	selected := []repairRequest{}
 	for _, pull := range open {
-		if pull.IsDraft || pull.Mergeable != conflictingState || pull.BaseRefName != "main" {
+		if pull.IsDraft || pull.Mergeable != conflictingState || pull.BaseRefName != defaultBranch {
 			continue
 		}
 		if s.expiresAt <= s.app.now().Unix() {
 			return errors.New("the automatic deadline has expired")
 		}
-		request, ok, probeErr := s.probe(ctx, git, pull.Number, base, checkout)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		request, ok, probeErr := s.probe(ctx, git, pull.Number, base)
 		if probeErr != nil {
 			return probeErr
 		}
-		if ok {
-			if !s.dryRun {
-				selected = append(selected, request)
-			}
-			remaining--
+		if !ok {
+			continue
 		}
+		if !s.dryRun {
+			selected = append(selected, request)
+		}
+		remaining--
 		if remaining <= 0 {
 			break
 		}
@@ -471,9 +473,13 @@ func (s selector) writeSelection(selected []repairRequest) error {
 }
 
 // probe reports whether the conflicts of one pull request are limited to the
-// bundle. It merges the base into a temporary worktree of the pull request head.
+// bundle and whether the repair merge can resolve them. git merge-tree
+// merges the base into the head without a working tree, an index, or a
+// commit, so the probe runs no contributor content and no hooks. A failure
+// that affects only this pull request writes a warning annotation and skips
+// it, so the scan continues and writes its record.
 func (s selector) probe(
-	ctx context.Context, git gitcmd.Runner, number int, base, checkout string,
+	ctx context.Context, git gitcmd.Runner, number int, base string,
 ) (repairRequest, bool, error) {
 	label := "PR #" + strconv.Itoa(number)
 	if slices.ContainsFunc(s.requests, func(request json.Number) bool {
@@ -484,55 +490,54 @@ func (s selector) probe(
 	}
 	pull, err := s.client.PullRequest(ctx, s.repo, number)
 	if err != nil {
+		if ctxErr := contextError(ctx, err); ctxErr != nil {
+			return repairRequest{}, false, ctxErr
+		}
+		// 404 and 410 mean the pull request went away between the listing and
+		// the probe; every other response is a problem of the whole scan.
+		var status *github.StatusError
+		gone := errors.As(err, &status) &&
+			(status.StatusCode == http.StatusNotFound || status.StatusCode == http.StatusGone)
+		if gone {
+			return repairRequest{}, false, s.warn(number, "the pull request cannot be read")
+		}
 		return repairRequest{}, false, err
 	}
-	if !automaticEligible(pull, s.repo) {
+	if !eligiblePullRequest(pull, s.repo) {
 		return repairRequest{}, false, s.say(label + " is not eligible for automatic repair.\n")
 	}
 	head := pull.Head.SHA
 	if !sha1Pattern.MatchString(head) {
-		return repairRequest{}, false, errors.New(label + " has an invalid head commit")
+		return repairRequest{}, false, s.warn(number, "the head commit id is not valid")
 	}
-	if err = git.Run(
-		ctx,
-		"fetch",
-		"--no-prune",
-		"--no-tags",
-		"origin",
-		"refs/pull/"+strconv.Itoa(number)+"/head",
-	); err != nil {
-		return repairRequest{}, false, err
-	}
-	fetched, err := git.Output(ctx, "rev-parse", "FETCH_HEAD")
+	fetched, err := fetchPullHead(ctx, git, number)
 	if err != nil {
-		return repairRequest{}, false, err
+		if ctxErr := contextError(ctx, err); ctxErr != nil {
+			return repairRequest{}, false, ctxErr
+		}
+		return repairRequest{}, false, s.warn(number, "the pull request head cannot be fetched")
 	}
 	if strings.TrimSpace(fetched) != head {
-		return repairRequest{}, false, nil
+		return repairRequest{}, false, s.warn(number, "the fetched head does not match the reported head")
 	}
-	if err = git.Run(ctx, "worktree", "add", "--detach", checkout, head); err != nil {
-		return repairRequest{}, false, err
-	}
-	mergeErr := mergeBase(ctx, checkout, base, s.app.stdout)
-	request, ok := repairRequest{}, false
-	if mergeErr == nil {
-		ok = true
-		request = repairRequest{PRNumber: number, HeadSHA: head, BaseSHA: base, ExpiresAt: s.expiresAt}
-		if s.dryRun {
-			err = s.say("Dry run: would request bundle repair for " + label + ".\n")
-		} else {
-			err = s.say("Selected bundle repair for " + label + ".\n")
+	skipReason, probeErr := probeMerges(ctx, git, base, head)
+	if probeErr != nil {
+		if ctxErr := contextError(ctx, probeErr); ctxErr != nil {
+			return repairRequest{}, false, ctxErr
 		}
-	} else {
-		err = s.say(label + " has conflicts outside the bundle. Skipping.\n")
+		return repairRequest{}, false, s.warn(number, "the conflict probe failed")
 	}
-	if err != nil {
+	if skipReason != "" {
+		return repairRequest{}, false, s.say(label + " " + skipReason + ". Skipping.\n")
+	}
+	message := "Selected bundle repair for " + label + ".\n"
+	if s.dryRun {
+		message = "Dry run: would request bundle repair for " + label + ".\n"
+	}
+	if err = s.say(message); err != nil {
 		return repairRequest{}, false, err
 	}
-	if err = git.Run(ctx, "worktree", "remove", "--force", checkout); err != nil {
-		return repairRequest{}, false, err
-	}
-	return request, ok, nil
+	return repairRequest{PRNumber: number, HeadSHA: head, BaseSHA: base, ExpiresAt: s.expiresAt}, true, nil
 }
 
 func (s selector) say(text string) error {
@@ -540,11 +545,123 @@ func (s selector) say(text string) error {
 	return err
 }
 
-// automaticEligible reports whether an automatic repair may touch the pull request.
-func automaticEligible(pull github.PullRequest, repo string) bool {
-	return pull.State == stateOpen &&
-		pull.Draft != nil && !*pull.Draft &&
-		pull.Base.Ref == defaultBranch &&
-		pull.Head.Repo != nil &&
-		(pull.Head.Repo.FullName == repo || pull.MaintainerCanModify)
+// warn writes a GitHub warning annotation for one pull request. The reason is
+// a fixed line without command output, so no token and no repository data
+// leaks into the annotation.
+func (s selector) warn(number int, reason string) error {
+	return s.say("::warning::PR #" + strconv.Itoa(number) + ": " + reason + "\n")
+}
+
+// fetchPullHead fetches the head of one pull request and returns the commit
+// id that the remote reported.
+func fetchPullHead(ctx context.Context, git gitcmd.Runner, number int) (string, error) {
+	if err := git.Run(
+		ctx,
+		"fetch",
+		"--no-prune",
+		"--no-tags",
+		"origin",
+		"refs/pull/"+strconv.Itoa(number)+"/head",
+	); err != nil {
+		return "", err
+	}
+	return git.Output(ctx, "rev-parse", "FETCH_HEAD")
+}
+
+// probeMerges runs the two conflict probes of one pull request and returns
+// the reason a pull request is skipped, or an empty reason when the scan
+// selects it. Probe A runs the merge with the bundle merge driver off: the
+// merge must conflict on the bundle alone, because a driver registered in
+// the scan checkout must not hide the conflict, and any conflict outside the
+// bundle must stay visible. Probe B runs the merge with the driver of the
+// repair merge: the merge must be clean, because a delete/modify conflict
+// on the bundle stays a conflict that the repair cannot resolve.
+func probeMerges(ctx context.Context, git gitcmd.Runner, base, head string) (string, error) {
+	conflicts, err := conflictPaths(ctx, git, false, base, head)
+	if err != nil {
+		return "", err
+	}
+	switch {
+	case len(conflicts) == 0:
+		return "no longer conflicts with the base", nil
+	case len(conflicts) > 1 || conflicts[0] != bundleFile:
+		return "has conflicts outside the bundle", nil
+	}
+	repair, err := conflictPaths(ctx, git, true, base, head)
+	if err != nil {
+		return "", err
+	}
+	if len(repair) != 0 {
+		return "has a bundle conflict the repair merge cannot resolve", nil
+	}
+	return "", nil
+}
+
+// contextError returns the context error of a cancelled or expired scan, so
+// the scan fails instead of skipping pull requests. A nil result means the
+// error is not a cancellation.
+func contextError(ctx context.Context, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	return nil
+}
+
+// conflictPaths reports the paths that conflict when the base merges into the
+// head. A nil result without an error is a clean merge. The merge runs with
+// the trusted info/attributes of the scan repository, which pin the bundle
+// path to the otelc-bundle driver and unset every other driver, filter, and
+// conversion, so the probe mirrors the repair merge. The repairDriver
+// setting selects the bundle driver: off for the conflict probe, on for the
+// repair probe. Git exits 0 for a clean merge and 1 for conflicts; any other
+// exit status is an error. Some git versions, including 2.56, also exit 1
+// for failures such as a missing object, so output that does not parse is an
+// error too.
+func conflictPaths(ctx context.Context, git gitcmd.Runner, repairDriver bool, base, head string) ([]string, error) {
+	driver := "false"
+	if repairDriver {
+		driver = "true"
+	}
+	var out bytes.Buffer
+	probeGit := git
+	probeGit.Stdout = &out
+	// The -c setting overrides a driver that the checkout registered, for
+	// example after make setup-git.
+	probeGit.Config = append(slices.Clone(git.Config), "merge.otelc-bundle.driver="+driver)
+	err := probeGit.Run(
+		ctx,
+		"merge-tree",
+		"--write-tree",
+		"--name-only",
+		"--no-messages",
+		"-z",
+		base,
+		head,
+	)
+	if err == nil {
+		return nil, nil
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+		return nil, errs.Wrap(err, "probe the conflicts with git merge-tree")
+	}
+	return parseConflictPaths(out.Bytes())
+}
+
+// parseConflictPaths splits the NUL-separated output of
+// git merge-tree --write-tree --name-only -z: the tree of the merge first,
+// then one conflicted path per entry. The tree must be a full object id, and
+// every path must hold text.
+func parseConflictPaths(out []byte) ([]string, error) {
+	entries := strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00")
+	if !sha1Pattern.MatchString(entries[0]) {
+		return nil, errors.New("the merge-tree output has no tree")
+	}
+	if slices.Contains(entries[1:], "") {
+		return nil, errors.New("the merge-tree output has an empty path")
+	}
+	return entries[1:], nil
 }

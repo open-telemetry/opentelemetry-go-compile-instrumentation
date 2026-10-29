@@ -16,7 +16,14 @@ import (
 type stageFixture struct {
 	branch  string
 	trusted string
+	baseSHA string
 }
+
+// testSHA is a structurally valid commit SHA for argument tests.
+const testSHA = "0123456789abcdef0123456789abcdef01234567"
+
+// wantBaseMoved is the fail-closed message that staging must print.
+const wantBaseMoved = "main moved after the request was prepared; request the repair again"
 
 func write(t *testing.T, path, content string) {
 	t.Helper()
@@ -28,7 +35,8 @@ func write(t *testing.T, path, content string) {
 	}
 }
 
-// newStageFixture mirrors stage_fixture in the old shell test.
+// newStageFixture mirrors stage_fixture in the old shell test. The trusted
+// directory is a git checkout at baseSHA.
 func newStageFixture(t *testing.T) stageFixture {
 	t.Helper()
 	fx := stageFixture{branch: t.TempDir(), trusted: t.TempDir()}
@@ -41,12 +49,24 @@ func newStageFixture(t *testing.T) stageFixture {
 	write(t, filepath.Join(fx.trusted, "pkg/stale.go"), "stale\n")
 	write(t, filepath.Join(fx.trusted, "instrumentation/lib/stale.go"), "stale\n")
 	write(t, filepath.Join(fx.trusted, "pkg/sub/kept.go"), "old\n")
+	fx.baseSHA = initStageBase(t, fx.trusted)
 	return fx
+}
+
+// initStageBase makes dir a git checkout and returns its HEAD commit.
+func initStageBase(t *testing.T, dir string) string {
+	t.Helper()
+	gitIn(t, dir, "init", "--quiet", "--initial-branch=main")
+	gitIn(t, dir, "config", "user.name", "Test Author")
+	gitIn(t, dir, "config", "user.email", "test@example.com")
+	gitIn(t, dir, "add", "-A")
+	gitIn(t, dir, "commit", "--quiet", "--allow-empty", "-m", "base")
+	return gitIn(t, dir, "rev-parse", "HEAD")
 }
 
 func (fx stageFixture) run(t *testing.T) (int, output) {
 	t.Helper()
-	return runApp(t, nil, "stage", fx.branch, fx.trusted)
+	return runApp(t, nil, "stage", fx.branch, fx.trusted, fx.baseSHA)
 }
 
 // snapshot records every entry below root without following links. The map
@@ -147,7 +167,10 @@ func TestStageSync(t *testing.T) {
 	}
 }
 
-func TestStagePreservesModes(t *testing.T) {
+// TestStagePreservesTree checks the copy of the tree itself. The exact
+// permission bits are in stage_unix_test.go, because Windows os.Chmod only
+// changes the owner-write bit.
+func TestStagePreservesTree(t *testing.T) {
 	fx := newStageFixture(t)
 	script := filepath.Join(fx.branch, "pkg/sub/run.sh")
 	write(t, script, "#!/bin/sh\n")
@@ -170,12 +193,46 @@ func TestStagePreservesModes(t *testing.T) {
 		assertSameTree(t, snapshot(t, filepath.Join(fx.branch, tree)), snapshot(t, filepath.Join(fx.trusted, tree)),
 			"the trusted "+tree+" tree")
 	}
-	for rel, want := range map[string]os.FileMode{"pkg/sub/run.sh": 0o755, "pkg/sub/readonly.txt": 0o444, "instrumentation/locked": 0o555} {
-		info, err := os.Lstat(filepath.Join(fx.trusted, rel))
-		if err != nil || info.Mode().Perm() != want {
-			t.Errorf("%s mode = %v, %v, want %v", rel, info, err, want)
-		}
+}
+
+// TestStageRejectsMovedBase checks the fail-closed guard. A trusted checkout
+// that is not at the captured base must stop staging before any write.
+func TestStageRejectsMovedBase(t *testing.T) {
+	fx := newStageFixture(t)
+	write(t, filepath.Join(fx.branch, "pkg/sub/added.go"), "package pkg\n")
+	before := []map[string]string{
+		snapshot(t, filepath.Join(fx.trusted, "pkg")),
+		snapshot(t, filepath.Join(fx.trusted, "instrumentation")),
 	}
+	other := strings.Repeat("0", 40)
+	code, out := runApp(t, nil, "stage", fx.branch, fx.trusted, other)
+	if code != exitFailure {
+		t.Fatalf("exit code = %d, want %d (stderr %q)", code, exitFailure, out.stderr)
+	}
+	if !strings.Contains(out.stderr, wantBaseMoved) {
+		t.Errorf("stderr = %q, want %q", out.stderr, wantBaseMoved)
+	}
+	for i, tree := range []string{"pkg", "instrumentation"} {
+		assertSameTree(t, before[i], snapshot(t, filepath.Join(fx.trusted, tree)),
+			"the trusted "+tree+" tree after a moved base")
+	}
+}
+
+// TestStageRejectsForeignTrustedDir checks a trusted directory that is not a
+// git checkout. The guard cannot confirm the base, so staging must stop.
+func TestStageRejectsForeignTrustedDir(t *testing.T) {
+	fx := newStageFixture(t)
+	if err := os.RemoveAll(filepath.Join(fx.trusted, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(fx.branch, "pkg/sub/added.go"), "package pkg\n")
+	before := snapshot(t, filepath.Join(fx.trusted, "pkg"))
+	code, out := runApp(t, nil, "stage", fx.branch, fx.trusted, fx.baseSHA)
+	if code != exitFailure {
+		t.Fatalf("exit code = %d, want %d (stderr %q)", code, exitFailure, out.stderr)
+	}
+	assertSameTree(t, before, snapshot(t, filepath.Join(fx.trusted, "pkg")),
+		"the trusted pkg tree after a non-git trusted directory")
 }
 
 func TestStageReplacesTrustedTreeLink(t *testing.T) {
@@ -204,6 +261,7 @@ func TestStageMissingTrustedTrees(t *testing.T) {
 	fx := stageFixture{branch: t.TempDir(), trusted: t.TempDir()}
 	write(t, filepath.Join(fx.branch, "pkg/a.go"), "a\n")
 	write(t, filepath.Join(fx.branch, "instrumentation/b.go"), "b\n")
+	fx.baseSHA = initStageBase(t, fx.trusted)
 	if code, out := fx.run(t); code != 0 {
 		t.Fatalf("staging failed with %d: %s", code, out.stderr)
 	}
@@ -307,17 +365,22 @@ func TestStageArguments(t *testing.T) {
 	}{
 		{"help", []string{"--help"}, 0},
 		{"no arguments", nil, exitFailure},
-		{"empty arguments", []string{"", ""}, exitFailure},
-		{"empty trusted directory", []string{dir, ""}, exitFailure},
+		{"empty arguments", []string{"", "", ""}, exitFailure},
+		{"empty trusted directory", []string{dir, "", testSHA}, exitFailure},
+		{"empty base SHA", []string{dir, dir, ""}, exitFailure},
 		{"one argument", []string{dir}, exitFailure},
-		{"three arguments", []string{dir, dir, dir}, exitFailure},
+		{"two arguments", []string{dir, dir}, exitFailure},
+		{"four arguments", []string{dir, dir, testSHA, testSHA}, exitFailure},
+		{"short base SHA", []string{dir, dir, testSHA[:39]}, exitFailure},
+		{"uppercase base SHA", []string{dir, dir, strings.ToUpper(testSHA)}, exitFailure},
+		{"non-hex base SHA", []string{dir, dir, strings.Repeat("g", 40)}, exitFailure},
 		{
 			"missing directories",
-			[]string{filepath.Join(dir, "missing-a"), filepath.Join(dir, "missing-b")},
+			[]string{filepath.Join(dir, "missing-a"), filepath.Join(dir, "missing-b"), testSHA},
 			exitFailure,
 		},
-		{"missing trusted directory", []string{dir, filepath.Join(dir, "missing")}, exitFailure},
-		{"file instead of directory", []string{file, dir}, exitFailure},
+		{"missing trusted directory", []string{dir, filepath.Join(dir, "missing"), testSHA}, exitFailure},
+		{"file instead of directory", []string{file, dir, testSHA}, exitFailure},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

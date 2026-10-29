@@ -301,8 +301,8 @@ func TestGenerateRunsOnlyTrustedBuild(t *testing.T) {
 	}
 
 	run, ok := runOf(steps[stage])
-	if !ok || strings.TrimSpace(run.Run.Value) != toolCall+"stage branch trusted" {
-		t.Fatal("staging must run the tool on the branch and trusted directories")
+	if !ok || strings.TrimSpace(run.Run.Value) != toolCall+`stage branch trusted "${BASE_SHA}"` {
+		t.Fatal("staging must run the tool on the branch and trusted directories with the captured base SHA")
 	}
 	if run.WorkingDirectory != nil {
 		t.Error("the staging step must run from the workspace root")
@@ -535,20 +535,94 @@ func TestPublisherCredentialSteps(t *testing.T) {
 	}
 }
 
-// Regression guard: the generate job gets no secrets. This holds before and
-// after the rewiring.
-func TestSecretsStayInPublisherJob(t *testing.T) {
-	data, err := os.ReadFile("../../.github/workflows/regenerate-bundle-worker.yaml")
-	if err != nil {
-		t.Fatal(err)
+// Regression guard: the generate job gets no secrets. The publisher job alone
+// may read them. This holds before and after the rewiring.
+func TestSecretsStayOutOfGenerateJob(t *testing.T) {
+	workflow := loadWorkflow(t, "regenerate-bundle-worker.yaml")
+	if workflow.Jobs["generate"] == nil {
+		t.Fatal("missing generate job")
 	}
-	text := string(data)
-	generate := strings.Index(text, "\n  generate:")
-	publish := strings.Index(text, "\n  push_update:")
-	if generate < 0 || publish < generate {
-		t.Fatal("cannot find the jobs")
+	for id, job := range workflow.Jobs {
+		for i, step := range job.Steps {
+			for _, value := range stepExpressions(step) {
+				if id != "push_update" && strings.Contains(value, "secrets.") {
+					t.Errorf("job %s step %d %q reads a secret in %q", id, i, stepName(step), value)
+				}
+			}
+		}
 	}
-	if strings.Contains(text[generate:publish], "secrets.") {
-		t.Error("the generate job must not use secrets")
+}
+
+// stepExpressions returns every string of a step that can hold an expression:
+// the run script, the env values, the condition, and the action inputs.
+func stepExpressions(step *actionlint.Step) []string {
+	var values []string
+	if step.If != nil {
+		values = append(values, step.If.Value)
+	}
+	if step.Env != nil {
+		for _, variable := range step.Env.Vars {
+			if variable.Value != nil {
+				values = append(values, variable.Value.Value)
+			}
+		}
+		if step.Env.Expression != nil {
+			values = append(values, step.Env.Expression.Value)
+		}
+	}
+	switch exec := step.Exec.(type) {
+	case *actionlint.ExecRun:
+		values = append(values, exec.Run.Value)
+	case *actionlint.ExecAction:
+		values = append(values, exec.Uses.Value)
+		for _, in := range exec.Inputs {
+			if in.Value != nil {
+				values = append(values, in.Value.Value)
+			}
+		}
+	}
+	return values
+}
+
+// The requester on a rerun is the original actor, not the person who reran the
+// workflow. TRIGGERING_ACTOR separately keeps the rerunner.
+func TestCommenterUsesOriginalActor(t *testing.T) {
+	for _, name := range []string{"regenerate-bundle.yaml", "regenerate-bundle-worker.yaml"} {
+		workflow := loadWorkflow(t, name)
+		if workflow.Env == nil {
+			t.Fatalf("%s: missing workflow env", name)
+		}
+		want := map[string]string{
+			"COMMENTER":        "${{ github.event.comment.user.login || github.actor }}",
+			"TRIGGERING_ACTOR": "${{ github.triggering_actor }}",
+		}
+		for key, value := range want {
+			variable := workflow.Env.Vars[strings.ToLower(key)]
+			if variable == nil || variable.Value == nil {
+				t.Errorf("%s: missing workflow env %s", name, key)
+				continue
+			}
+			if variable.Value.Value != value {
+				t.Errorf("%s: %s = %q, want %q", name, key, variable.Value.Value, value)
+			}
+		}
+	}
+}
+
+// A rerun repeats every job in the same run. The upload artifact name must
+// include the run attempt, or the second upload of the same name fails.
+func TestUploadArtifactNameIsUniquePerAttempt(t *testing.T) {
+	steps := generateSteps(t)
+	upload := stepIndex(steps, "Upload bundle")
+	if upload < 0 {
+		t.Fatal("missing upload step")
+	}
+	action, ok := usesOf(steps[upload])
+	if !ok || !strings.HasPrefix(action.Uses.Value, "actions/upload-artifact@") {
+		t.Fatal("the upload step must use actions/upload-artifact")
+	}
+	want := "otelc-bundle-pr-${{ inputs.pr_number }}-${{ github.run_attempt }}"
+	if name, _ := input(action, "name"); name != want {
+		t.Errorf("upload name = %q, want %q", name, want)
 	}
 }

@@ -40,7 +40,7 @@ env:
   AUTO_DEADLINE: ${{ inputs.expires_at }}
   BASE_SHA: ${{ inputs.base_sha }}
   CALLER_WORKFLOW_REF: ${{ github.workflow_ref }}
-  COMMENTER: ${{ github.event.comment.user.login || github.triggering_actor }}
+  COMMENTER: ${{ github.event.comment.user.login || github.actor }}
   EXPECTED_HEAD_SHA: ${{ inputs.head_sha }}
   PR_NUMBER: ${{ inputs.pr_number }}
   REPO: ${{ github.repository }}
@@ -101,7 +101,7 @@ jobs:
 
       - name: Stage bundle sources
         run: |
-          "${RUNNER_TEMP}/bundlerepair" stage branch trusted
+          "${RUNNER_TEMP}/bundlerepair" stage branch trusted "${BASE_SHA}"
 
       - name: Regenerate bundle
         working-directory: trusted
@@ -114,7 +114,7 @@ jobs:
         id: bundle
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
         with:
-          name: otelc-bundle-pr-${{ inputs.pr_number }}
+          name: otelc-bundle-pr-${{ inputs.pr_number }}-${{ github.run_attempt }}
           path: trusted/tool/data/otelc-bundle.tgz
           compression-level: 0
           if-no-files-found: error
