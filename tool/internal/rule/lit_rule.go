@@ -23,8 +23,8 @@ type InstLitField struct {
 	Wrap  string `json:"wrap,omitempty"  yaml:"wrap,omitempty"`
 }
 
-// InstLitRule represents a rule that sets fields on composite literals of a
-// given struct type, wherever those literals are written.
+// InstLitRule represents a rule that sets fields on, or wraps, composite
+// literals of a given struct type, wherever those literals are written.
 //
 // The struct_literal field uses the qualified format "package/path.TypeName",
 // matching the convention of function_call. Unqualified literals of a type
@@ -48,6 +48,11 @@ type InstLitRule struct {
 	ImportPath    string          `json:"import-path"    yaml:"-"` // "net/http", parsed from StructLiteral
 	TypeName      string          `json:"type-name"      yaml:"-"` // "Transport", parsed from StructLiteral
 	Field         []*InstLitField `json:"field"          yaml:"field"`
+	// Pointer and Value are wrap_literal templates for the whole literal:
+	// Pointer for &T{...}, Value for T{...}. A form without a template is
+	// left alone.
+	Pointer string `json:"pointer,omitempty" yaml:"pointer,omitempty"`
+	Value   string `json:"value,omitempty"   yaml:"value,omitempty"`
 }
 
 // typeNamePattern matches qualified type names like "net/http.Transport",
@@ -83,8 +88,16 @@ func (r *InstLitRule) validate() error {
 	if strings.TrimSpace(r.StructLiteral) == "" {
 		return ex.Newf("struct_literal cannot be empty")
 	}
-	if len(r.Field) == 0 {
-		return ex.Newf("field must list at least one field to set")
+	hasPointer := strings.TrimSpace(r.Pointer) != ""
+	hasLitValue := strings.TrimSpace(r.Value) != ""
+	if len(r.Field) == 0 && !hasPointer && !hasLitValue {
+		return ex.Newf("set_fields must list at least one field, or wrap_literal must set pointer or value")
+	}
+	if hasPointer && !replacePlaceholderPattern.MatchString(r.Pointer) {
+		return ex.Newf("pointer must contain {{ . }} placeholder (also accepts {{.}}, {{- . -}}, etc.)")
+	}
+	if hasLitValue && !replacePlaceholderPattern.MatchString(r.Value) {
+		return ex.Newf("value must contain {{ . }} placeholder (also accepts {{.}}, {{- . -}}, etc.)")
 	}
 	seen := make(map[string]bool, len(r.Field))
 	for i, f := range r.Field {

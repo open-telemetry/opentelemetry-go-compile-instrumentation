@@ -5,23 +5,36 @@ package instrument
 
 import (
 	"context"
+	"go/token"
 	"slices"
 
 	"github.com/dave/dst"
+	"github.com/dave/dst/dstutil"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
-// applyLitRule sets fields on every composite literal of the rule's type found
-// in the target file. It reports whether it changed root.
+// applyLitRule sets fields on, then wraps, every composite literal of the
+// rule's type found in the target file. It reports whether it changed root.
 func (ip *instrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule, root *dst.File) (bool, error) {
 	importAliases, aliasOverrides := ip.resolveImportOverrides(root, r.Imports)
 
 	setters, err := newLitFieldSetters(r, aliasOverrides)
 	if err != nil {
 		return false, err
+	}
+	var pointerTmpl, valueTmpl *callTemplate
+	if r.Pointer != "" {
+		if pointerTmpl, err = newCallTemplate(r.Pointer); err != nil {
+			return false, ex.Wrapf(err, "failed to compile pointer template for %s", r.StructLiteral)
+		}
+	}
+	if r.Value != "" {
+		if valueTmpl, err = newCallTemplate(r.Value); err != nil {
+			return false, ex.Wrapf(err, "failed to compile value template for %s", r.StructLiteral)
+		}
 	}
 
 	var matched []litWithEnclosingFunc
@@ -36,25 +49,41 @@ func (ip *instrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule
 	// Walk matched in reverse. dst.Inspect visits a literal before the literals
 	// nested inside it, so the reverse order edits the innermost literal first
 	// and an enclosing literal always wraps a finished subtree.
+	wrapsLiteral := pointerTmpl != nil || valueTmpl != nil
 	for _, m := range slices.Backward(matched) {
 		lit, enclosing := m.lit, m.enclosing
+		setFields := len(setters) > 0
 		// Go rejects a literal that mixes keyed and positional elements, so a
 		// positional literal cannot take the keyed elements this rule produces.
 		// The skip also precedes the shadowing check: a literal the rule never
 		// injects code into cannot resolve a rewritten alias to a local.
-		if hasPositionalElements(lit) {
+		if setFields && hasPositionalElements(lit) {
 			ip.Warn("Skipping positional composite literal; set_fields requires keyed elements",
 				"rule", r.Name, "type", r.StructLiteral)
+			setFields = false
+		}
+		if !setFields && !wrapsLiteral {
 			continue
 		}
 		if shadowErr := checkAliasOverrideShadowingAt(aliasOverrides, enclosing, lit); shadowErr != nil {
 			return false, shadowErr
+		}
+		if !setFields {
+			continue
 		}
 		litModified, setErr := ip.setLitFields(lit, enclosing, setters, r, aliasOverrides)
 		if setErr != nil {
 			return false, setErr
 		}
 		modified = modified || litModified
+	}
+
+	if wrapsLiteral {
+		wrapped, wrapErr := wrapLiterals(root, matched, pointerTmpl, valueTmpl, aliasOverrides)
+		if wrapErr != nil {
+			return false, ex.Wrapf(wrapErr, "failed to wrap literal of %s", r.StructLiteral)
+		}
+		modified = modified || wrapped
 	}
 
 	if !modified {
@@ -136,6 +165,68 @@ func newLitFieldSetters(r *rule.InstLitRule, aliasOverrides map[string]string) (
 		setters = append(setters, setter)
 	}
 	return setters, nil
+}
+
+// wrapLiterals replaces each matched literal with its wrap_literal template:
+// pointer for &T{...} (the whole & expression) and value for T{...}. A form
+// without a template is left alone. It reports whether root changed.
+func wrapLiterals(
+	root *dst.File,
+	matched []litWithEnclosingFunc,
+	pointer, value *callTemplate,
+	aliasOverrides map[string]string,
+) (bool, error) {
+	enclosingOf := make(map[*dst.CompositeLit]*dst.FuncDecl, len(matched))
+	for _, m := range matched {
+		enclosingOf[m.lit] = m.enclosing
+	}
+	// Literals whose address is taken, as in &T{...} or &(T{...}). The value
+	// template must not wrap these: &f(T{...}) does not compile.
+	addressed := make(map[*dst.CompositeLit]bool)
+	dst.Inspect(root, func(node dst.Node) bool {
+		if u, ok := node.(*dst.UnaryExpr); ok && u.Op == token.AND {
+			if lit, isLit := unwrap(u.X).(*dst.CompositeLit); isLit {
+				addressed[lit] = true
+			}
+		}
+		return true
+	})
+
+	changed := false
+	var wrapErr error
+	// Post-order: a nested literal is wrapped before the literal around it,
+	// and a replacement is never walked again, so it cannot match twice.
+	dstutil.Apply(root, nil, func(cursor *dstutil.Cursor) bool {
+		var (
+			lit  *dst.CompositeLit
+			expr dst.Expr
+			tmpl *callTemplate
+		)
+		switch node := cursor.Node().(type) {
+		case *dst.UnaryExpr:
+			if node.Op == token.AND {
+				lit, _ = unwrap(node.X).(*dst.CompositeLit)
+				expr, tmpl = node, pointer
+			}
+		case *dst.CompositeLit:
+			if !addressed[node] {
+				lit, expr, tmpl = node, node, value
+			}
+		}
+		enclosing, isMatched := enclosingOf[lit]
+		if !isMatched || tmpl == nil {
+			return true
+		}
+		wrapped, err := tmpl.compileExpression(expr, enclosing, nil, aliasOverrides)
+		if err != nil {
+			wrapErr = err
+			return false
+		}
+		cursor.Replace(wrapped)
+		changed = true
+		return true
+	})
+	return changed, wrapErr
 }
 
 // matchesLitRule reports whether a composite literal builds the rule's type.
