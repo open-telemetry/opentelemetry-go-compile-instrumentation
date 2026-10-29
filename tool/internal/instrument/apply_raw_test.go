@@ -390,7 +390,8 @@ func a() {
 				pattern:   regexp.MustCompile(tt.pattern),
 				placement: tt.placement,
 			}
-			inserted := insertRawAtPattern(ctx, fn, restorer, pos, stmts)
+			inserted, insertErr := insertRawAtPattern(ctx, fn, restorer, rawInsertion{pos: pos, stmts: stmts})
+			require.NoError(t, insertErr)
 			require.Equal(t, tt.expectInserted, inserted)
 
 			var modifiedSrc strings.Builder
@@ -445,7 +446,9 @@ func a() {
 		pattern:   regexp.MustCompile(`^println\("x"\)$`),
 		placement: "",
 	}
-	require.True(t, insertRawAtPattern(ctx, fn, restorer, pos, stmts))
+	inserted, insertErr := insertRawAtPattern(ctx, fn, restorer, rawInsertion{pos: pos, stmts: stmts})
+	require.NoError(t, insertErr)
+	require.True(t, inserted)
 
 	var modifiedSrc strings.Builder
 	require.NoError(t, decorator.Fprint(&modifiedSrc, dstFile))
@@ -780,6 +783,101 @@ func Run() {
 	assert.Contains(t, err.Error(), "alias override conflict")
 	fn := findFuncDeclInFile(t, root, "Run")
 	assert.Len(t, fn.Body.List, 2, "must not inject code that would resolve to the wrong identifier")
+}
+
+func TestApplyRawRule_PatternShadowedByNestedLocalReportsConflict(t *testing.T) {
+	// The pattern matches a statement inside a nested block that rebinds the
+	// file's alias, so the injected qualifier would resolve to that local
+	// instead of the import.
+	root := parseFile(t, `package main
+
+import (
+	f "fmt"
+	"net/http"
+)
+
+func Run(ok bool) {
+	if ok {
+		f := sink{}
+		_ = f
+		http.Get("url")
+	}
+}
+`)
+	r := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "inject_fmt",
+			Imports: map[string]string{"traced": "fmt"},
+		},
+		Func:    "Run",
+		Pattern: `^http\.Get\("url"\)$`,
+		Raw:     `traced.Println("hi")`,
+	}
+
+	err := newTestPhase().applyRawRule(context.Background(), r, root)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "alias override conflict")
+	fn := findFuncDeclInFile(t, root, "Run")
+	stmt, ok := fn.Body.List[0].(*dst.IfStmt)
+	require.True(t, ok, "expected *dst.IfStmt, got %T", fn.Body.List[0])
+	require.Len(t, stmt.Body.List, 3, "must not inject code that would resolve to the wrong identifier")
+	last, ok := stmt.Body.List[2].(*dst.ExprStmt)
+	require.True(t, ok, "expected *dst.ExprStmt, got %T", stmt.Body.List[2])
+	assert.Equal(t, "http", last.X.(*dst.CallExpr).Fun.(*dst.SelectorExpr).X.(*dst.Ident).Name)
+}
+
+func TestApplyRawRule_PatternShadowInBlockOutsideMatchPathAppliesRule(t *testing.T) {
+	// The shadowing local lives in the then-block while the pattern matches a
+	// statement in the else-block; the local is not visible at the insertion
+	// point, so the rule applies and the injected qualifier stays bound to the
+	// import.
+	root := parseFile(t, `package main
+
+import (
+	f "fmt"
+	"net/http"
+)
+
+func Run(ok bool) {
+	if ok {
+		f := sink{}
+		_ = f
+	} else {
+		http.Get("url")
+	}
+}
+`)
+	r := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "inject_fmt",
+			Imports: map[string]string{"traced": "fmt"},
+		},
+		Func:    "Run",
+		Pattern: `^http\.Get\("url"\)$`,
+		Raw:     `traced.Println("hi")`,
+	}
+
+	err := newTestPhase().applyRawRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	fn := findFuncDeclInFile(t, root, "Run")
+	ifStmt, ok := fn.Body.List[0].(*dst.IfStmt)
+	require.True(t, ok, "expected *dst.IfStmt, got %T", fn.Body.List[0])
+	require.NotNil(t, ifStmt.Else)
+	elseBlock, ok := ifStmt.Else.(*dst.BlockStmt)
+	require.True(t, ok, "expected *dst.BlockStmt, got %T", ifStmt.Else)
+	require.Len(t, elseBlock.List, 2, "the raw statement must be inserted before the matched statement")
+	injected, ok := elseBlock.List[0].(*dst.ExprStmt)
+	require.True(t, ok, "expected *dst.ExprStmt, got %T", elseBlock.List[0])
+	call, ok := injected.X.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", injected.X)
+	sel, ok := call.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
+	ident, ok := sel.X.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "f", ident.Name, "injected code must use the file's existing alias, not the rule's")
+	assert.Equal(t, "Println", sel.Sel.Name)
 }
 
 func TestInsertRaw_DoesNotRewriteArgumentNamedSameAsRuleAlias(t *testing.T) {
