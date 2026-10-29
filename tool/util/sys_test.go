@@ -35,6 +35,11 @@ func TestRunCmd(t *testing.T) {
 			args:      []string{"nonexistent-command-xyz"},
 			expectErr: true,
 		},
+		{
+			name:      "empty command slice",
+			args:      []string{},
+			expectErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -45,6 +50,12 @@ func TestRunCmd(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRunCmdEmptyArgs(t *testing.T) {
+	err := RunCmd(t.Context())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no command specified")
 }
 
 func TestRunCmdWithEnv(t *testing.T) {

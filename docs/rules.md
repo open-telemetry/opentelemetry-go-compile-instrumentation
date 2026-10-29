@@ -587,6 +587,10 @@ hook_fallible:
         path: example.com/hooks/db
 ```
 
+**Stack frames and line markers:**
+
+The trampoline call that the tool adds to the target function gets the same line markers as the code of the Raw Code Injection Rule. In stack traces, it shows the file `/<generated>` (on Windows, `<generated>` at the root of the volume). The original statements of the function keep their original file path and line number. See "Stack frames and line markers" in the [Raw Code Injection Rule](#3-raw-code-injection-rule) section.
+
 ### 2. Struct Field Injection Rule
 
 This rule adds one or more new fields to a specified struct type.
@@ -780,6 +784,18 @@ Note the pattern starts with `^`. During AST traversal, outer statements (such a
 
 Anchoring the pattern with `^` (and usually `$`) ensures that only the exact statement is matched, preventing insertion at the wrong level (e.g., before an entire block instead of the intended inner statement).
 
+**Stack frames and line markers:**
+
+The tool puts a `/*line /<generated>:1*/` directive on the first statement of each run of injected statements. The next injected lines get the next line numbers in `/<generated>`: 2, 3, and so on. These numbers count printed lines, not statements. An injected statement that uses several lines takes several numbers. In stack traces, injected code shows the file `/<generated>`. On Windows, the file is at the root of the volume of the instrumented file, for example `C:\<generated>`, or `\\server\share\<generated>` for a UNC path. For an extended UNC path (`\\?\UNC\server\share\...`), the file is `\\?\UNC\server\share\<generated>` with Go 1.27 and later, and `\\?\UNC\<generated>` with Go 1.26, because the volume that Go finds for this path is different. The name is absolute, so Go does not join it with the directory of the file, and it does not depend on the work directory of the compiler. A stack filter can match it exactly, or by the suffix `<generated>`. For an extended UNC path, use the suffix if the filter must work with Go 1.26 and Go 1.27. The first original statement after a run gets a directive that restores its original absolute file path and line number. The next original statements keep their original lines. The first original declaration of an instrumented file also gets a restore directive, also when no rule changed it. The reason is that the compiler reads a copy of the file in a work directory, so without this directive the code above the first run shows the path of the copy. Exception: the tool cannot restore an original file name (from a `//line` directive in the source) that has characters that cannot be in a comment, or that ends in `:` and digits (for example `foo:7`), because Go would read these digits as a line number. Then the code after the injected code can show `/<generated>` until the next valid position. Exception: injected code that starts with its own line directive that Go reads (a `/*line*/` comment, or a `//line` comment at the top level) keeps that position, and gets no `/<generated>` directive. Exception: when the printer changes the layout of the user code, the lines after it are off until the next directive. For example, the printer puts two statements of one line on two lines, so the second statement and the code after it are one line late. Exception: if the volume name of the instrumented file has characters that cannot be in a comment, the file of the injected code is `<generated>`, without a volume. This name is relative, so Go 1.27 joins it with the directory of the instrumented file, and Go 1.26 does not.
+
+The same applies to the trampoline code of the [Function Hook Rule](#1-function-hook-rule).
+
+A `//line` comment of the user inside a function body (for example, in code that goyacc writes) stays in the file. The printer indents it, so Go would ignore it. The tool adds a restore directive after it, so the code keeps the line that the comment gives. This is done in every function of an instrumented file, also in a function that no rule changed. The same exceptions apply as above. Also, the tool cannot restore a statement directly after a comment that gives line 1 (for example `//line foo.go:1`), because its directive must give line 0, which Go does not accept. The tool then restores the next statement. Directives have a line and no column. A `/*line*/` comment of the user is not changed.
+
+A rule can also put generated code inside a statement that the user wrote (for example, a call rule that replaces a call with a wrapper of several lines, or a struct rule that adds a field to a type declaration). The tool does not put a directive on this code: it keeps the line of the statement. Known limit: a stack frame in this code shows the user file, and not `/<generated>`. The extra printed lines move the lines after it, so the tool restores the next original statement (or the closing brace of the block, or the next top-level declaration). The same is true for a `//line` comment of the user inside an expression (for example, in the arguments of a call or in a composite literal): the printer indents it, so the tool restores the code after it.
+
+With `go build -trimpath`, the Go compiler rewrites the original file path in the same way as for normal Go files. Injected code stays in `/<generated>` (on Windows, `<generated>` at the root of the volume), because the compiler does not rewrite this name. For a UNC path, the name includes the server and the share (for an extended UNC path, only with Go 1.27 and later).
+
 ### 4. Call Wrapping Rule
 
 This rule wraps function calls at call sites with instrumentation code. Unlike the Function Hook Rule which instruments function definitions, this rule instruments where functions are called.
@@ -802,7 +818,7 @@ This rule wraps function calls at call sites with instrumentation code. Unlike t
 
 | Field           | Type       | Required                                      | Notes                                                                                                                  |
 | --------------- | ---------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `replace`       | string     | No (one of `replace`/`append_args` required)  | Replace string with `{{ . }}` placeholder for the original call. Must produce a Go call expression.                    |
+| `replace`       | string     | No (one of `replace`/`append_args` required)  | Uses `{{ . }}` for the original call or `{{ .CallArgument N }}` for its arguments. Must produce a Go call expression.  |
 | `append_args`   | `[]string` | No (one of `replace`/`append_args` required)  | Go expression strings appended as additional arguments to the matched call                                             |
 | `variadic_type` | string     | No                                            | Element type for the ellipsis IIFE wrapper (e.g. `grpc.DialOption`). Required when any matched call uses `...` spread. |
 
@@ -815,6 +831,7 @@ Top-level `imports` (map[string]string, optional): Additional imports needed for
 The `replace` field uses Go's standard [text/template](https://pkg.go.dev/text/template) package for code generation. This provides:
 
 - **Placeholder Substitution**: `{{ . }}` is replaced with the original function call's AST node
+- **Placeholder Requirement**: The replace string must contain `{{ . }}` or `{{ .CallArgument N }}`. With only `{{ .CallArgument N }}`, the original call is dropped and the new expression is built from its arguments
 - **Type Safety**: The replace string is compiled at rule creation time and validated
 - **Expression Output**: The replace string must produce a valid Go expression; the result may be any expression type (not limited to call expressions)
 
@@ -823,6 +840,7 @@ Currently supported replace string features:
 - Simple wrapping: `wrapper({{ . }})`
 - IIFE (Immediately-Invoked Function Expression): `(func() T { return {{ . }} })()`
 - Complex expressions with multiple statements using IIFE
+- Replacing the call with another call that takes the same arguments: `tracedConnect({{ .CallArgument 0 }}, {{ .CallArgument 1 }})`
 
 **Template Placeholders:**
 
@@ -1200,8 +1218,8 @@ func fetch(db *sql.DB, ctx context.Context) {
 
 **Important Notes:**
 
-- The `{{ . }}` placeholder in the `replace` string represents the original function or method call.
-- The `replace` string must be a valid Go expression that includes the placeholder and produces a call expression (current limitation).
+- The `{{ . }}` placeholder in the `replace` string represents the original function or method call. Use `{{ .CallArgument N }}` instead to build the new expression from the call's arguments.
+- The `replace` string must be a valid Go expression that includes `{{ . }}` or `{{ .CallArgument N }}` and produces a call expression (current limitation).
 - The `replace` string can only reference packages and functions that are already imported or defined in the target file.
 - Call rules only affect call sites in the target package, not the function or method definition itself.
 - Multiple calls to the same function or method will all be wrapped independently.
@@ -1341,6 +1359,8 @@ This rule adds a new Go source file to the target package.
 - Introducing new functionalities or APIs to an existing package.
 
 **Selectors:** none. File rules apply to the target package as a whole and have no point selector.
+
+A rule targeting `main` also applies to the `main` package that `go test` generates, so the added file — including any `func init()` in it — is compiled into test binaries built by `otelc go test` as well as into the application binary.
 
 **Modifier (`do: - add_file:`):**
 

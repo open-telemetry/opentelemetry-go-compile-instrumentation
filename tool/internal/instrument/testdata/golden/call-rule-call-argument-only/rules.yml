@@ -1,0 +1,18 @@
+# A wrap_call replace can rebuild the call from its arguments with
+# {{ .CallArgument N }} alone, without the original call {{ . }}.
+replace_to_upper:
+  target: main
+  where:
+    function_call: strings.ToUpper
+  do:
+    - wrap_call:
+        replace: "strings.ToLower({{ .CallArgument 0 }})"
+replace_println:
+  target: main
+  where:
+    function_call: fmt.Println
+  do:
+    - wrap_call:
+        replace: "fmt.Fprintln(os.Stdout{{ range $i := .CallArgumentCount }}, {{ $.CallArgument $i }}{{ end }})"
+  imports:
+    os: "os"

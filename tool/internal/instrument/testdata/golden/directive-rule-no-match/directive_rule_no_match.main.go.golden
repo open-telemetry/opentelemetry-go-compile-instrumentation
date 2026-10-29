@@ -5,6 +5,7 @@ package main
 
 // The directive is not a leading comment on a top-level func, so the rule
 // matches no function and must not inject anything -- including its imports.
+//line /golden/work/main.go:8
 func main() {
 	//otelc:span
 	value := 1

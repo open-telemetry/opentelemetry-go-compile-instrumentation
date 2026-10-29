@@ -31,9 +31,18 @@ var (
 const (
 	redisAuthCmd         = "auth"
 	redisHelloCmd        = "hello"
+	redisEvalCmd         = "eval"
+	redisEvalROCmd       = "eval_ro"
+	redisEchoCmd         = "echo"
+	redisSlaveOfCmd      = "slaveof"
+	redisReplicaOfCmd    = "replicaof"
 	redisSetNameOption   = "setname"
-	redisHelloAuthArgN   = 2
 	redisQueryTextRedact = "?"
+	// redisValueArgsStart is the index at which a command's data-value
+	// arguments conventionally begin: args[0] is the command name, args[1]
+	// is the key. EVAL, AUTH, and the pipeline pseudo-command carry other
+	// data at args[1]; see redisV9RedactRange.
+	redisValueArgsStart = 2
 )
 
 func initInstrumentation() {
@@ -150,7 +159,7 @@ func (o *otelRedisHook) DialHook(next redis.DialHook) redis.DialHook {
 
 func getRedisV9Statement(cmd redis.Cmder) string {
 	args := cmd.Args()
-	redactStart, redactEnd := redisV9CredentialRedactRange(cmd.Name(), args)
+	redactStart, redactEnd := redisV9RedactRange(cmd.Name(), args)
 
 	b := make([]byte, 0, 64)
 	for i, arg := range args {
@@ -172,10 +181,11 @@ func getRedisV9Statement(cmd redis.Cmder) string {
 	return string(b)
 }
 
-// redisV9CredentialRedactRange returns a half-open index range of args that
-// must not appear in db.query.text. AUTH arguments are credentials. HELLO
-// AUTH username/password are too; SETNAME and the protocol version are not.
-func redisV9CredentialRedactRange(name string, args []interface{}) (start, end int) {
+// redisV9RedactRange returns the half-open index range of arguments to redact in db.query.text.
+// Credentials in AUTH/HELLO, scripts/arguments in EVAL/EVAL_RO, and keyless command arguments
+// (ECHO, SLAVEOF, REPLICAOF) are redacted entirely. For all other commands, arguments after
+// the key (args[1]) are redacted to avoid leaking values.
+func redisV9RedactRange(name string, args []any) (start, end int) {
 	switch name {
 	case redisAuthCmd:
 		if len(args) > 1 {
@@ -183,7 +193,19 @@ func redisV9CredentialRedactRange(name string, args []interface{}) (start, end i
 		}
 	case redisHelloCmd:
 		if i := redisV9HelloAuthIndex(args); i >= 0 {
-			return i + 1, min(i+1+redisHelloAuthArgN, len(args))
+			// Redact to the end: a crafted HELLO can repeat the AUTH block.
+			return i + 1, len(args)
+		}
+	case redisEvalCmd, redisEvalROCmd, redisEchoCmd, redisSlaveOfCmd, redisReplicaOfCmd:
+		// EVAL carries its Lua script at args[1], not a key, and keyless commands
+		// (ECHO, SLAVEOF, REPLICAOF) carry non-key arguments at args[1], so redaction
+		// starts one index before redisValueArgsStart.
+		if len(args) > 1 {
+			return 1, len(args)
+		}
+	default:
+		if len(args) > redisValueArgsStart {
+			return redisValueArgsStart, len(args)
 		}
 	}
 	return 0, 0

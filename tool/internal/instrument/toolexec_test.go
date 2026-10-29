@@ -18,9 +18,69 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/imports"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
+
+func TestPGOBuildFlags(t *testing.T) {
+	const profile = "profile with spaces.pgo"
+	const compileProfile = "-pgoprofile=compiled.pgo"
+	tests := []struct {
+		name        string
+		compileArgs []string
+		profile     string
+		missing     bool
+		readError   bool
+		want        []string
+	}{
+		{
+			name: "profile applied", compileArgs: []string{compileProfile}, profile: profile,
+			want: []string{"-pgo=" + profile},
+		},
+		{
+			name: "separated compile flag", compileArgs: []string{"-pgoprofile", "compiled.pgo"}, profile: profile,
+			want: []string{"-pgo=" + profile},
+		},
+		{name: "unprofiled compile", profile: profile},
+		{name: "empty profile", compileArgs: []string{compileProfile}},
+		{name: "missing profile", compileArgs: []string{compileProfile}, missing: true},
+		{name: "read error", compileArgs: []string{compileProfile}, readError: true},
+		{name: "unprofiled compile does not read", readError: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+			require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+			if tt.readError {
+				require.NoError(t, os.Mkdir(util.GetPGOProfileFile(), 0o755))
+			} else if !tt.missing {
+				require.NoError(t, os.WriteFile(util.GetPGOProfileFile(), []byte(tt.profile), 0o644))
+			}
+			ip := &instrumentPhase{compileArgs: tt.compileArgs}
+			flags, err := ip.pgoBuildFlags()
+			if tt.readError && len(tt.compileArgs) > 0 {
+				require.ErrorContains(t, err, "failed to read PGO profile")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, flags)
+		})
+	}
+}
+
+func TestUpdateImportConfigPGOReadError(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	require.NoError(t, os.MkdirAll(util.GetPGOProfileFile(), 0o755))
+	ip := &instrumentPhase{
+		compileArgs:      []string{"-pgoprofile=compiled.pgo"},
+		importConfigPath: filepath.Join(t.TempDir(), "importcfg"),
+		importConfig:     imports.ImportConfig{PackageFile: map[string]string{"fmt": "fmt.a"}},
+	}
+	err := ip.updateImportConfig(t.Context(), map[string]string{"x": "example.com/x"})
+	require.ErrorContains(t, err, "failed to read PGO profile")
+}
 
 func TestStripCompleteFlag(t *testing.T) {
 	tests := []struct {
@@ -257,8 +317,8 @@ func TestTrackAddedImports(t *testing.T) {
 		require.NoError(t, err)
 
 		// No file should be created
-		pattern := util.GetAddedImportsPattern()
-		files, _ := filepath.Glob(pattern)
+		files, err := addedImportFiles()
+		require.NoError(t, err)
 		assert.Empty(t, files)
 	})
 
@@ -303,6 +363,16 @@ func TestLoadAddedImports(t *testing.T) {
 		// Create build temp directory (empty)
 		err := os.MkdirAll(util.GetBuildTempDir(), 0o755)
 		require.NoError(t, err)
+
+		result, err := loadAddedImports(t.Context())
+		require.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Empty(t, result)
+	})
+
+	t.Run("missing build directory returns empty map", func(t *testing.T) {
+		// No .otelc-build directory was ever created.
+		t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
 
 		result, err := loadAddedImports(t.Context())
 		require.NoError(t, err)
@@ -378,7 +448,7 @@ func TestLoadAddedImports(t *testing.T) {
 		require.NoError(t, err)
 
 		// Two files with same package but different archives
-		// Note: filepath.Glob returns files in lexical order
+		// Note: os.ReadDir returns entries in lexical order
 		file1 := filepath.Join(buildDir, "added_imports.1111.json")
 		file2 := filepath.Join(buildDir, "added_imports.2222.json")
 
@@ -393,6 +463,25 @@ func TestLoadAddedImports(t *testing.T) {
 
 		// The second file (lexically) should win
 		assert.Equal(t, "/new/path/fmt.a", result["fmt"])
+	})
+
+	t.Run("ignores entries that do not match the tracking pattern", func(t *testing.T) {
+		tempDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, tempDir)
+
+		buildDir := util.GetBuildTempDir()
+		require.NoError(t, os.MkdirAll(buildDir, 0o755))
+
+		validData, _ := json.Marshal(map[string]string{"fmt": "/path/to/fmt.a"})
+		require.NoError(t, os.WriteFile(filepath.Join(buildDir, "added_imports.1.json"), validData, 0o644))
+
+		// None of these should be picked up: wrong suffix or wrong prefix.
+		require.NoError(t, os.WriteFile(filepath.Join(buildDir, "added_imports.1.txt"), validData, 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(buildDir, "other_added_imports.1.json"), validData, 0o644))
+
+		result, err := loadAddedImports(t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"fmt": "/path/to/fmt.a"}, result)
 	})
 }
 
@@ -440,6 +529,43 @@ func TestCleanupImportTrackingFiles(t *testing.T) {
 		// Should not panic
 		CleanupImportTrackingFiles()
 	})
+
+	t.Run("handles missing directory gracefully", func(t *testing.T) {
+		// The very first build has no .otelc-build directory yet.
+		t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+
+		// Should not panic
+		CleanupImportTrackingFiles()
+	})
+}
+
+func TestLoadAddedImportsWithGlobMetaCharactersInPath(t *testing.T) {
+	// A workspace path containing glob meta-characters (here a character
+	// class) must not stop the tracking files from being discovered.
+	workDir := filepath.Join(t.TempDir(), "project-[dev]")
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	writeAddedImports(t, map[string]string{"fmt": "/path/to/fmt.a"})
+
+	result, err := loadAddedImports(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"fmt": "/path/to/fmt.a"}, result)
+}
+
+func TestCleanupImportTrackingFilesWithGlobMetaCharactersInPath(t *testing.T) {
+	workDir := filepath.Join(t.TempDir(), "project-[dev]")
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	buildDir := util.GetBuildTempDir()
+	require.NoError(t, os.MkdirAll(buildDir, 0o755))
+	trackingFile := filepath.Join(buildDir, "added_imports.1.json")
+	require.NoError(t, os.WriteFile(trackingFile, []byte("{}"), 0o644))
+
+	CleanupImportTrackingFiles()
+
+	_, err := os.Stat(trackingFile)
+	assert.True(t, os.IsNotExist(err), "tracking file should be removed")
 }
 
 // goCompileToolPath returns the path to the toolchain's compile binary, which
@@ -587,29 +713,32 @@ func TestTrackAddedImportsWriteError(t *testing.T) {
 	assert.Contains(t, err.Error(), "writing imports file")
 }
 
-func TestCleanupImportTrackingFilesGlobError(t *testing.T) {
-	workDir := t.TempDir()
-	// '[' makes the glob pattern malformed, so filepath.Glob errors and the
-	// cleanup bails out.
-	t.Setenv(util.EnvOtelcWorkDir, filepath.Join(workDir, "bad[glob"))
-	CleanupImportTrackingFiles()
-}
-
-func TestLoadAddedImportsGlobError(t *testing.T) {
+func TestLoadAddedImportsScanError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// On Windows a regular file used as a directory reports a missing
+		// path, which loadAddedImports treats like an absent directory.
+		t.Skip("directory-scan error cannot be triggered on Windows")
+	}
 	ctx := util.ContextWithLogger(t.Context(), slog.Default())
-	t.Setenv(util.EnvOtelcWorkDir, filepath.Join(t.TempDir(), "bad[glob"))
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	// A regular file where the build temp directory is expected makes the
+	// directory scan fail with a non-not-exist error.
+	require.NoError(t, os.WriteFile(util.GetBuildTempDir(), []byte("not a directory"), 0o644))
+
 	_, err := loadAddedImports(ctx)
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reading build temp directory")
 }
 
-func TestLoadAddedImportsReadError(t *testing.T) {
+func TestLoadAddedImportsIgnoresDirectoryEntry(t *testing.T) {
 	ctx := util.ContextWithLogger(t.Context(), slog.Default())
 	workDir := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, workDir)
 
 	buildDir := util.GetBuildTempDir()
 	require.NoError(t, os.MkdirAll(buildDir, 0o755))
-	// A directory matching the tracking-file pattern cannot be read.
+	// A directory whose name matches the tracking-file pattern is ignored.
 	require.NoError(t, os.Mkdir(filepath.Join(buildDir, "added_imports.1.json"), 0o755))
 
 	result, err := loadAddedImports(ctx)
@@ -635,10 +764,17 @@ func TestInterceptLinkNoImportCfg(t *testing.T) {
 }
 
 func TestInterceptLinkLoadError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// On Windows a regular file used as a directory reports a missing
+		// path, which loadAddedImports treats like an absent directory.
+		t.Skip("directory-scan error cannot be triggered on Windows")
+	}
 	ctx := util.ContextWithLogger(t.Context(), slog.Default())
-	// A malformed glob pattern makes loadAddedImports fail; the link command
-	// is then passed through unchanged.
-	t.Setenv(util.EnvOtelcWorkDir, filepath.Join(t.TempDir(), "bad[glob"))
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	// A regular file where the build temp directory is expected makes
+	// loadAddedImports fail; the link command is then passed through unchanged.
+	require.NoError(t, os.WriteFile(util.GetBuildTempDir(), []byte("not a directory"), 0o644))
 
 	args := []string{"link", "-o", "exe", "-buildid", "id", "-importcfg", "importcfg.link"}
 	result, err := interceptLink(ctx, args)
@@ -697,6 +833,123 @@ func TestInterceptLinkAllImportsPresent(t *testing.T) {
 	content, err := os.ReadFile(linkCfg)
 	require.NoError(t, err)
 	assert.Equal(t, "packagefile fmt=/old/fmt.a\n", string(content))
+}
+
+func TestResolvePackageName(t *testing.T) {
+	dir := t.TempDir()
+	testMain := filepath.Join(dir, "_testmain.go")
+	require.NoError(t, os.WriteFile(testMain,
+		[]byte("// Code generated by 'go test'. DO NOT EDIT.\n\npackage main\n"), 0o644))
+
+	t.Run("reads the package clause from the compile sources", func(t *testing.T) {
+		ip := &instrumentPhase{compileArgs: []string{
+			"compile", "-o", "_pkg_.a", "-p", "main", "-pack", testMain,
+		}}
+		name, err := ip.resolvePackageName()
+		require.NoError(t, err)
+		assert.Equal(t, "main", name)
+	})
+
+	t.Run("prefers the package clause over the -p import path", func(t *testing.T) {
+		ip := &instrumentPhase{compileArgs: []string{
+			"compile", "-o", "_pkg_.a", "-p", "example.com/foo", "-pack", testMain,
+		}}
+		name, err := ip.resolvePackageName()
+		require.NoError(t, err)
+		assert.Equal(t, "main", name)
+	})
+
+	t.Run("skips flag values that are not readable Go files", func(t *testing.T) {
+		ip := &instrumentPhase{compileArgs: []string{
+			"compile", "-o", filepath.Join(dir, "absent.go"), "-pack", testMain,
+		}}
+		name, err := ip.resolvePackageName()
+		require.NoError(t, err)
+		assert.Equal(t, "main", name)
+	})
+
+	t.Run("returns empty when the command lists no Go source", func(t *testing.T) {
+		ip := &instrumentPhase{compileArgs: []string{"compile", "-o", "_pkg_.a", "-p", "main"}}
+		name, err := ip.resolvePackageName()
+		require.NoError(t, err)
+		assert.Empty(t, name)
+	})
+
+	t.Run("propagates a parse failure", func(t *testing.T) {
+		broken := filepath.Join(dir, "broken.go")
+		require.NoError(t, os.WriteFile(broken, []byte("not a go file"), 0o644))
+		ip := &instrumentPhase{compileArgs: []string{"compile", broken}}
+		_, err := ip.resolvePackageName()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "parsing package clause")
+	})
+}
+
+func TestInterceptCompileFileRuleWithoutPackageName(t *testing.T) {
+	setup := func(t *testing.T, sources ...string) (string, []string) {
+		t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+
+		rulesDir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(rulesDir, "added.go"),
+			[]byte("//go:build ignore\n\npackage myrules\n\nfunc init() {}\n"), 0o644))
+
+		// Setup hands over an empty PackageName for the generated test main.
+		set := rule.NewInstRuleSet("main")
+		fileRule := &rule.InstFileRule{File: "added.go", Path: rulesDir, ResolvedPath: rulesDir}
+		fileRule.Name = "add_to_main"
+		set.AddFileRule(fileRule)
+		data, err := json.Marshal([]*rule.InstRuleSet{set})
+		require.NoError(t, err)
+		matched := util.GetMatchedRuleFile()
+		require.NoError(t, os.MkdirAll(filepath.Dir(matched), 0o755))
+		require.NoError(t, os.WriteFile(matched, data, 0o644))
+
+		buildDir := t.TempDir()
+		args := make([]string, 0, 7+len(sources))
+		args = append(args, "compile", "-o", filepath.Join(buildDir, "_pkg_.a"), "-p", "main", "-buildid", "x")
+		for _, name := range sources {
+			path := filepath.Join(buildDir, name)
+			require.NoError(t, os.WriteFile(path, []byte("package main\n"), 0o644))
+			args = append(args, path)
+		}
+		return buildDir, args
+	}
+
+	t.Run("resolves the name from the compile sources", func(t *testing.T) {
+		buildDir, args := setup(t, "_testmain.go")
+		ctx := util.ContextWithLogger(t.Context(), slog.New(slog.DiscardHandler))
+
+		newArgs, err := interceptCompile(ctx, args)
+		require.NoError(t, err)
+
+		added := filepath.Join(buildDir, "otelc.added.go")
+		assert.Contains(t, newArgs, added)
+		name, err := ast.ParsePackageName(added)
+		require.NoError(t, err)
+		assert.Equal(t, "main", name)
+	})
+
+	t.Run("errors when there is nothing to resolve from", func(t *testing.T) {
+		buildDir, args := setup(t)
+		ctx := util.ContextWithLogger(t.Context(), slog.New(slog.DiscardHandler))
+
+		_, err := interceptCompile(ctx, args)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot resolve the package name")
+		assert.NoFileExists(t, filepath.Join(buildDir, "otelc.added.go"))
+	})
+
+	t.Run("propagates a parse failure", func(t *testing.T) {
+		buildDir, args := setup(t, "_testmain.go")
+		broken := filepath.Join(buildDir, "_testmain.go")
+		require.NoError(t, os.WriteFile(broken, []byte("not a go file"), 0o644))
+		ctx := util.ContextWithLogger(t.Context(), slog.New(slog.DiscardHandler))
+
+		_, err := interceptCompile(ctx, args)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "parsing package clause")
+		assert.NoFileExists(t, filepath.Join(buildDir, "otelc.added.go"))
+	})
 }
 
 func TestInterceptLinkWriteError(t *testing.T) {
@@ -822,6 +1075,19 @@ func TestEnableNestedToolexec(t *testing.T) {
 		assert.Contains(t, goflags, "-mod=mod", "existing flags are preserved")
 		assert.Contains(t, goflags, wantToken, "otelc is added as the toolexec")
 		assert.Equal(t, "1", os.Getenv(util.EnvOtelcNestedToolexec))
+	})
+
+	t.Run("strips only unpatterned gcflags from GOFLAGS", func(t *testing.T) {
+		t.Setenv("GOFLAGS", "-mod=mod -gcflags=-l '-gcflags=all=-N -l'")
+		t.Setenv(util.EnvOtelcNestedToolexec, "")
+
+		require.NoError(t, EnableNestedToolexec())
+
+		tokens := util.SplitGoflags(os.Getenv("GOFLAGS"))
+		assert.Contains(t, tokens, "-mod=mod")
+		assert.Contains(t, tokens, "'-gcflags=all=-N -l'")
+		assert.NotContains(t, tokens, "-gcflags=-l")
+		assert.Contains(t, tokens, wantToken)
 	})
 
 	t.Run("handles empty GOFLAGS without leading whitespace", func(t *testing.T) {
@@ -1054,4 +1320,10 @@ func TestUserBuildTags(t *testing.T) {
 			assert.Equal(t, tt.expected, userBuildTags(tt.goflags, tt.buildFlags))
 		})
 	}
+}
+
+func TestToolexecEmptyArgs(t *testing.T) {
+	err := Toolexec(t.Context(), []string{}, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no tool command specified")
 }
