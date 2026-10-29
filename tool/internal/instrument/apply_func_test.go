@@ -24,6 +24,7 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 func TestApplyFuncRuleSignatureFilterMismatchIsLookupMiss(t *testing.T) {
@@ -709,4 +710,26 @@ func TestInstrumentFile_ApplyIgnoredCallSitesErrorIsWrapped(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "applying //otelc:ignore call sites")
+}
+
+func TestWriteInstrumentedDebugCopiesSourceWithDiff(t *testing.T) {
+	buildDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, buildDir)
+	t.Setenv(util.EnvOtelcDebug, "1")
+	original := filepath.Join(t.TempDir(), "source.go")
+	require.NoError(t, os.WriteFile(original, []byte("package main\n\nvar X = 1\n"), 0o644))
+	root, err := ast.NewAstParser().ParseSource("package main\n\nvar X = 2\n")
+	require.NoError(t, err)
+	ip := newTestPhase()
+	ip.workDir = t.TempDir()
+	ip.compileArgs = []string{"-p", "example.com/app", original}
+	require.NoError(t, ip.writeInstrumented(root, original, nil))
+	debugFile := util.GetBuildTemp(filepath.Join("debug", "example_com_app", "source.go"))
+	content, err := os.ReadFile(debugFile)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "var X = 2")
+	content, err = os.ReadFile(debugFile + ".diff")
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "-var X = 1")
+	assert.Contains(t, string(content), "+var X = 2")
 }

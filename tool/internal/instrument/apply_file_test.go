@@ -427,6 +427,37 @@ func TestApplyFileRule_FileNotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "file nonexistent.go not found in")
 }
 
+func TestApplyFileRule_EmptyPackageName(t *testing.T) {
+	srcDir := t.TempDir()
+	workDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(srcDir, "added.go"),
+		[]byte("package myrules\n\nfunc init() {}\n"),
+		0o644,
+	))
+
+	ip := &instrumentPhase{
+		logger:  slog.New(slog.DiscardHandler),
+		workDir: workDir,
+	}
+
+	fileRule := &rule.InstFileRule{
+		File:         "added.go",
+		Path:         "example.com/myrules",
+		ResolvedPath: srcDir,
+	}
+	fileRule.Name = "test_empty_package_name"
+
+	err := ip.applyFileRule(t.Context(), fileRule, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot resolve the package name")
+
+	entries, readErr := os.ReadDir(workDir)
+	require.NoError(t, readErr)
+	assert.Empty(t, entries)
+	assert.Empty(t, ip.compileArgs)
+}
+
 func TestApplyFileRule_SubdirectoryFile(t *testing.T) {
 	srcDir := t.TempDir()
 	workDir := t.TempDir()
@@ -670,4 +701,48 @@ func TestApplyFileRule_UsesForwardedBuildTags(t *testing.T) {
 		assert.NoFileExists(t, outPath)
 		assert.NotContains(t, ip.compileArgs, outPath)
 	})
+}
+
+func TestApplyFileRule_DiffUnderDebug(t *testing.T) {
+	srcDir := t.TempDir()
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	t.Setenv(util.EnvOtelcDebug, "1")
+
+	content := `package sourcepkg
+
+func Helper() string {
+	return "ok"
+}
+`
+	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "helper.go"), []byte(content), 0o644))
+
+	ip := &instrumentPhase{
+		logger:      slog.New(slog.DiscardHandler),
+		workDir:     workDir,
+		compileArgs: []string{"-p", "example.com/mypkg"},
+	}
+
+	fileRule := &rule.InstFileRule{
+		File:         "helper.go",
+		Path:         "example.com/mypkg",
+		ResolvedPath: srcDir,
+	}
+	fileRule.Name = "test_file_rule"
+
+	err := ip.applyFileRule(t.Context(), fileRule, "targetpkg")
+	require.NoError(t, err)
+
+	outPath := filepath.Join(workDir, "otelc.helper.go")
+	require.FileExists(t, outPath)
+	assert.Contains(t, ip.compileArgs, outPath)
+
+	diffPath := filepath.Join(ip.debugArtifactDir(), "otelc.helper.go.diff")
+	require.FileExists(t, diffPath)
+	diffBytes, err := os.ReadFile(diffPath)
+	require.NoError(t, err)
+	diffText := string(diffBytes)
+	assert.Contains(t, diffText, "=== rule: test_file_rule ===")
+	assert.Contains(t, diffText, "--- /dev/null")
+	assert.Contains(t, diffText, "+++ "+outPath)
 }

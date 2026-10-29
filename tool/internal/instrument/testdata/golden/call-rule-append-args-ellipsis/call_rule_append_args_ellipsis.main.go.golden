@@ -3,9 +3,10 @@
 
 package main
 
+//line /golden/work/main.go:6
 import "fmt"
 
 func main() {
 	args := []any{"hello"}
-	fmt.Println(func(v ...any) []any { return append(v, "world") }(args...)...)
+	fmt.Println(func(v ...any) []any { return append(v, "world") }(args...)...) /*line /golden/work/main.go:10*/
 }
