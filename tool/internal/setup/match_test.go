@@ -1154,7 +1154,8 @@ func TestPreciseMatching_WhereFileFilterBuildError(t *testing.T) {
 
 	_, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{badRule}, set)
 	require.Error(t, err)
-	require.ErrorContains(t, err, "where.file has multiple active predicates")
+	require.ErrorContains(t, err,
+		"where.file has multiple active predicates (has_func, has_struct); combine them with all-of")
 }
 
 // Helper functions for constructing test data
