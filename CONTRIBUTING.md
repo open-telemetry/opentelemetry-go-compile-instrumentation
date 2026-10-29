@@ -23,8 +23,7 @@ This project uses several tools for development. Most tools will be automaticall
   `gmake` (or add `$(brew --prefix make)/libexec/gnubin` to your `PATH` to use it as
   `make`)
 
-The bundle workflow tests also require Bash, [jq](https://jqlang.org/), and
-[ShellCheck](https://www.shellcheck.net/).
+The tests of the bundle repair tool need only Git and Go.
 
 ### Getting Started
 
@@ -114,7 +113,7 @@ The license header checker has a dedicated CI workflow (`check-license-headers.y
 - `make test-unit` - Run unit tests only with formatted output
 - `make test-integration` - Run integration tests only with formatted output
 - `make test-e2e` - Run end-to-end tests
-- `make test-bundle-workflows` - Check bundle scripts and run local Git regression fixtures
+- `make test-bundle-workflows` - Test the bundle repair tool in `.tools/bundlerepair` and check the repair workflows
 - `make test-latestlibbuild` - Build instrumented test apps against the `@latest` version of each instrumented library
 - `make test-latestlibrun` - Bump instrumented test apps to `@latest` and run the full integration suite
 
@@ -223,6 +222,26 @@ Repair builds the archive with the Makefile and the bundle tool from `main`.
 It copies only `pkg/` and `instrumentation/` from the pull request. A pull
 request that changes the bundle tool fails its own Verify Bundle check, so the
 author must run `make package` locally.
+
+The repair workflows call one Go program, `bundlerepair`, in
+`.tools/bundlerepair`. It uses only the Go standard library. Each job builds it
+from the trusted checkout of `main`, with module downloads
+turned off. No job builds or runs code from the pull request. The program has
+these subcommands:
+
+- `authorize` checks who may request a repair.
+- `prepare` checks the pull request and captures its head and base commits.
+- `select` chooses the conflicting pull requests for automatic repair.
+  `select --budget` reports the requests of the last hour.
+- `merge` merges the captured base commit into the pull request checkout.
+- `stage` copies `pkg/` and `instrumentation/` from the pull request into the
+  trusted checkout.
+- `publish` commits and pushes the regenerated archive.
+- `identity` checks the publisher token and reports its account.
+- `credentials` chooses the App token or the maintainer token.
+
+Run the tests of the program with `make test-bundle-workflows`. The target also
+checks the structure of the repair workflows.
 
 Generation runs without write credentials or a shared cache. A separate
 publisher downloads the archive by its immutable artifact ID, merges the

@@ -4,12 +4,9 @@
 package workflows_test
 
 import (
-	"bytes"
-	"compress/gzip"
-	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -17,228 +14,27 @@ import (
 	"github.com/rhysd/actionlint"
 )
 
-const fixtureSetup = `
-source "$1"
-mkdir -p "${WORK_DIR}/bin"
-cat >"${WORK_DIR}/bin/gh" <<'MOCK'
-#!/usr/bin/env bash
-case "$*" in
-  *'/collaborators/'*'/permission'*) printf '{"role_name":"maintain"}\n' ;;
-  *'/git/ref/heads/'*) cat "${GH_BASE_RESPONSE}" ;;
-  *) cat "${GH_RESPONSE}" ;;
-esac
-MOCK
-chmod +x "${WORK_DIR}/bin/gh"
-export PATH="${WORK_DIR}/bin:${PATH}" GH_TOKEN=test-token COMMENTER=maintainer
-unset CALLER_WORKFLOW_REF RUN_ATTEMPT TRIGGERING_ACTOR AUTO_DEADLINE
-`
+const (
+	// setupGo is the pinned setup-go action that the repair jobs use.
+	setupGo = "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+	// toolCall starts every line that runs the bundle repair tool.
+	toolCall = `"${RUNNER_TEMP}/bundlerepair" `
+)
 
-func runFixture(t *testing.T, script string, env ...string) {
-	t.Helper()
-	path, err := filepath.Abs("../../.github/scripts/test-bundle-workflows.sh")
-	if err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.CommandContext(t.Context(), "bash", "-c", fixtureSetup+script, "bundle-review-test", path)
-	cmd.Env = append(os.Environ(), env...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("fixture failed: %v\n%s", err, out)
-	}
-}
+var (
+	// buildStep matches the one command that builds the tool.
+	buildStep = regexp.MustCompile(
+		`^go -C ((?:trusted/)?\.tools/bundlerepair) build -trimpath -o "\$\{RUNNER_TEMP\}/bundlerepair" \.$`)
+	// forbiddenInRun are the programs whose decisions now live in the Go tool.
+	forbiddenInRun = regexp.MustCompile(`\bjq\b|\bgh api\b|\bcurl\b|\.github/scripts/`)
+)
 
-func TestArchiveConversionAttributes(t *testing.T) {
-	var archive bytes.Buffer
-	writer, err := gzip.NewWriterLevel(&archive, gzip.NoCompression)
-	if err != nil {
-		t.Fatal(err)
-	}
-	payload := []byte("bundle\r\n$Id: 0123456789012345678901234567890123456789 $\r\n")
-	if _, err := writer.Write(payload); err != nil {
-		t.Fatal(err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	for _, attr := range []string{"text", "ident", "text eol=crlf", "working-tree-encoding=UTF-16"} {
-		t.Run(attr, func(t *testing.T) {
-			input := filepath.Join(t.TempDir(), "input.tgz")
-			output := filepath.Join(t.TempDir(), "output.tgz")
-			if err := os.WriteFile(input, archive.Bytes(), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			runFixture(t, `
-publication_fixture
-printf 'tool/data/otelc-bundle.tgz %s\n' "${ATTRIBUTES}" >.gitattributes
-cp "${ARCHIVE}" "${GENERATED_BUNDLE}"
-bash "${SCRIPT_DIR}/publish-bundle.sh"
-git --git-dir="${REMOTE}" show contribution:tool/data/otelc-bundle.tgz >"${PUBLISHED}"
-`, "ATTRIBUTES="+attr, "ARCHIVE="+input, "PUBLISHED="+output)
-			got, err := os.ReadFile(output)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !bytes.Equal(got, archive.Bytes()) {
-				t.Error("Git changed the generated archive bytes")
-			}
-			reader, err := gzip.NewReader(bytes.NewReader(got))
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer reader.Close()
-			decoded, err := io.ReadAll(reader)
-			if err != nil || !bytes.Equal(decoded, payload) {
-				t.Fatalf("published gzip is invalid: %v", err)
-			}
-		})
-	}
-}
-
-func TestAutomaticPublicationEligibility(t *testing.T) {
-	for _, tc := range []struct {
-		name, filter, baseFilter, allowed string
-	}{
-		{"valid", ".", ".", "true"},
-		{"older base snapshot", ".base.sha = $prior", ".", "true"},
-		{"draft", ".draft = true", ".", "false"},
-		{"missing draft", "del(.draft)", ".", "false"},
-		{"head", `.head.sha = "0000000000000000000000000000000000000000"`, ".", "false"},
-		{"base", ".", `.object.sha = "0000000000000000000000000000000000000000"`, "false"},
-		{"missing base reference", ".", "{}", "false"},
-		{"retargeted", `.base.ref = "release"`, ".", "false"},
-		{"edits disabled", ".maintainer_can_modify = false", ".", "false"},
-		{"closed", `.state = "closed"`, ".", "false"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			runFixture(t, `
-publication_fixture
-export CALLER_WORKFLOW_REF="${REPO}/.github/workflows/autofix-bundle-conflicts.yaml@refs/heads/main"
-export RUN_ATTEMPT=1 AUTO_DEADLINE
-AUTO_DEADLINE="$(jq -nr 'now + 300 | floor')"
-prior="$(git merge-base "${EXPECTED_HEAD_SHA}" "${BASE_SHA}")"
-jq --arg prior "${prior}" "${PR_FILTER}" "${GH_RESPONSE}" >"${GH_RESPONSE}.new"
-mv "${GH_RESPONSE}.new" "${GH_RESPONSE}"
-jq "${BASE_FILTER}" "${GH_BASE_RESPONSE}" >"${GH_BASE_RESPONSE}.new"
-mv "${GH_BASE_RESPONSE}.new" "${GH_BASE_RESPONSE}"
-before="$(git --git-dir="${REMOTE}" rev-parse contribution)"
-if [[ "${ALLOW_PUBLICATION}" == 'true' ]]; then
-  bash "${SCRIPT_DIR}/publish-bundle.sh"
-  [[ "$(git --git-dir="${REMOTE}" rev-parse contribution)" != "${before}" ]] || fail 'valid automatic publication did not update the fork'
-else
-  if bash "${SCRIPT_DIR}/publish-bundle.sh"; then
-    fail 'publication accepted an ineligible automatic request'
-  fi
-  [[ "$(git --git-dir="${REMOTE}" rev-parse contribution)" == "${before}" ]] || fail 'rejected publication changed the fork'
-fi
-`, "PR_FILTER="+tc.filter, "BASE_FILTER="+tc.baseFilter, "ALLOW_PUBLICATION="+tc.allowed)
-		})
-	}
-}
-
-func TestScannerUsesLiveBase(t *testing.T) {
-	runFixture(t, `
-scanner_fixture
-prior="$(git merge-base "${EXPECTED_HEAD_SHA}" "${BASE_SHA}")"
-jq --arg prior "${prior}" '.base.sha = $prior' "${GH_RESPONSE}" >"${GH_RESPONSE}.new"
-mv "${GH_RESPONSE}.new" "${GH_RESPONSE}"
-DRY_RUN=false bash "${SCRIPT_DIR}/autofix-bundle-conflicts.sh"
-check_plan '[1,2]'
-`)
-}
-
-func TestManualPublicationUsesLiveBase(t *testing.T) {
-	runFixture(t, `
-publication_fixture
-prior="$(git merge-base "${EXPECTED_HEAD_SHA}" "${BASE_SHA}")"
-jq --arg prior "${prior}" '.base.sha = $prior' "${GH_RESPONSE}" >"${GH_RESPONSE}.new"
-mv "${GH_RESPONSE}.new" "${GH_RESPONSE}"
-bash "${SCRIPT_DIR}/publish-bundle.sh"
-[[ "$(git --git-dir="${REMOTE}" rev-parse contribution)" == "$(git rev-parse HEAD)" ]] || fail 'manual publication did not update the fork'
-`)
-}
-
-func TestPrepareCapturesLiveBase(t *testing.T) {
-	workflow := loadWorkflow(t, "regenerate-bundle.yaml")
-	var body string
-	for _, step := range workflow.Jobs["prepare"].Steps {
-		if step.ID != nil && step.ID.Value == "pr" {
-			if run, ok := step.Exec.(*actionlint.ExecRun); ok {
-				body = run.Run.Value
-			}
-		}
-	}
-	if body == "" {
-		t.Fatal("missing pull request preparation step")
-	}
-	for _, mode := range []string{"manual", "automatic"} {
-		t.Run(mode, func(t *testing.T) {
-			runFixture(t, `
-publication_fixture
-expected_base="${BASE_SHA}"
-export GITHUB_OUTPUT="${WORK_DIR}/prepare-output"
-prior="$(git merge-base "${EXPECTED_HEAD_SHA}" "${BASE_SHA}")"
-jq --arg prior "${prior}" '.base.sha = $prior' "${GH_RESPONSE}" >"${GH_RESPONSE}.new"
-mv "${GH_RESPONSE}.new" "${GH_RESPONSE}"
-if [[ "${MODE}" == automatic ]]; then
-  export CALLER_WORKFLOW_REF="${REPO}/.github/workflows/autofix-bundle-conflicts.yaml@refs/heads/main"
-else
-  export CALLER_WORKFLOW_REF="${REPO}/.github/workflows/regenerate-bundle.yaml@refs/heads/main"
-  export BASE_SHA=''
-fi
-bash -euo pipefail -c "${PREPARE_SCRIPT}"
-grep -qx "base_sha=${expected_base}" "${GITHUB_OUTPUT}" || fail 'preparation used the older pull request base snapshot'
-grep -qx 'authorized=true' "${GITHUB_OUTPUT}" || fail 'preparation rejected the current branch ref'
-`, "MODE="+mode, "PREPARE_SCRIPT="+body)
-		})
-	}
-}
-
-func TestAutomaticDeadline(t *testing.T) {
-	runFixture(t, `
-export REPO=test/upstream RUN_ATTEMPT=1
-export CALLER_WORKFLOW_REF="${REPO}/.github/workflows/autofix-bundle-conflicts.yaml@refs/heads/main"
-for AUTO_DEADLINE in '' invalid "$(jq -nr 'now | floor')" "$(jq -nr 'now - 3600 | floor')" "$(jq -nr 'now + 7200 | floor')"; do
-  export AUTO_DEADLINE
-  if bash "${SCRIPT_DIR}/check-bundle-maintainer.sh"; then
-    fail 'automatic authorization accepted a missing, invalid, or expired deadline'
-  fi
-done
-AUTO_DEADLINE="$(jq -nr 'now + 300 | floor')"
-export AUTO_DEADLINE
-bash "${SCRIPT_DIR}/check-bundle-maintainer.sh"
-`)
-}
-
-func TestSelectionRecordedBeforeRepairJobs(t *testing.T) {
-	for _, conclusion := range []string{"success", "failure", "skipped"} {
-		t.Run(conclusion, func(t *testing.T) {
-			runFixture(t, `
-scanner_fixture
-jq -n --arg conclusion "${RECORD_CONCLUSION}" '[{total_count:1,jobs:[{name:"Select bundle repairs",completed_at:(now | strftime("%Y-%m-%dT%H:%M:%SZ")),steps:[{name:("Bundle repair selection: " + ({at:(now | floor),prs:[range(1;11)]} | tojson)),conclusion:$conclusion}]}]}]' >"${JOBS_JSON}"
-DRY_RUN=false bash "${SCRIPT_DIR}/autofix-bundle-conflicts.sh"
-check_plan '[]'
-`, "RECORD_CONCLUSION="+conclusion)
-		})
-	}
-}
-
-func TestAmbiguousSelectionHistory(t *testing.T) {
-	runFixture(t, `
-scanner_fixture
-jq -n '[{total_count:1,jobs:[{name:"Select bundle repairs",completed_at:(now | strftime("%Y-%m-%dT%H:%M:%SZ")),steps:[{name:"Select bounded bundle repairs",conclusion:"success"}]}]}]' >"${JOBS_JSON}"
-if DRY_RUN=false bash "${SCRIPT_DIR}/autofix-bundle-conflicts.sh"; then
-  fail 'ambiguous selection history reset the automatic budget'
-fi
-check_plan '[]'
-`)
-}
-
-func TestSkippedSelectionDoesNotReserveBudget(t *testing.T) {
-	runFixture(t, `
-scanner_fixture
-jq -n '[{total_count:1,jobs:[{name:"Select bundle repairs",steps:[{name:"Select bounded bundle repairs",conclusion:"skipped"},{name:"Bundle repair selection: ",conclusion:"skipped"}]}]}]' >"${JOBS_JSON}"
-DRY_RUN=true bash "${SCRIPT_DIR}/autofix-bundle-conflicts.sh"
-check_plan '[]'
-`)
+// toolJobs lists, for every repair workflow, the jobs that call the tool and
+// the checkout path that holds the trusted sources in that job.
+var toolJobs = map[string]map[string]string{
+	"regenerate-bundle.yaml":        {"prepare": ""},
+	"regenerate-bundle-worker.yaml": {"generate": "trusted", "push_update": "trusted"},
+	"autofix-bundle-conflicts.yaml": {"autofix": ""},
 }
 
 func loadWorkflow(t *testing.T, name string) *actionlint.Workflow {
@@ -252,6 +48,332 @@ func loadWorkflow(t *testing.T, name string) *actionlint.Workflow {
 		t.Fatalf("parse %s: %v", name, errs)
 	}
 	return workflow
+}
+
+func runOf(step *actionlint.Step) (*actionlint.ExecRun, bool) {
+	run, ok := step.Exec.(*actionlint.ExecRun)
+	return run, ok
+}
+
+func usesOf(step *actionlint.Step) (*actionlint.ExecAction, bool) {
+	action, ok := step.Exec.(*actionlint.ExecAction)
+	return action, ok
+}
+
+func stepName(step *actionlint.Step) string {
+	if step.Name == nil {
+		return ""
+	}
+	return step.Name.Value
+}
+
+func envValue(step *actionlint.Step, key string) (string, bool) {
+	if step.Env == nil {
+		return "", false
+	}
+	variable := step.Env.Vars[strings.ToLower(key)]
+	if variable == nil || variable.Value == nil {
+		return "", false
+	}
+	return variable.Value.Value, true
+}
+
+func input(action *actionlint.ExecAction, key string) (string, bool) {
+	value := action.Inputs[key]
+	if value == nil || value.Value == nil {
+		return "", false
+	}
+	return value.Value.Value, true
+}
+
+// nonBlankLines returns the trimmed lines of a script that are not comments.
+func nonBlankLines(script string) []string {
+	var lines []string
+	for line := range strings.SplitSeq(script, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, "#") {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+func callsTool(step *actionlint.Step) bool {
+	run, ok := runOf(step)
+	if !ok {
+		return false
+	}
+	return slices.ContainsFunc(nonBlankLines(run.Run.Value), func(line string) bool {
+		return strings.HasPrefix(line, toolCall)
+	})
+}
+
+func buildDir(step *actionlint.Step) (string, bool) {
+	run, ok := runOf(step)
+	if !ok {
+		return "", false
+	}
+	match := buildStep.FindStringSubmatch(strings.TrimSpace(run.Run.Value))
+	if match == nil {
+		return "", false
+	}
+	return match[1], true
+}
+
+// Every job that calls the tool builds it once, from the trusted checkout,
+// with the three pins, after setup-go and before the first call.
+func TestToolIsBuiltFromTrustedSourcesBeforeUse(t *testing.T) {
+	for name, jobs := range toolJobs {
+		workflow := loadWorkflow(t, name)
+		for id, trustedPath := range jobs {
+			t.Run(name+"/"+id, func(t *testing.T) {
+				job := workflow.Jobs[id]
+				if job == nil {
+					t.Fatalf("missing job %s", id)
+				}
+				first, build := -1, -1
+				for i, step := range job.Steps {
+					if callsTool(step) && first < 0 {
+						first = i
+					}
+					if _, ok := buildDir(step); ok {
+						if build >= 0 {
+							t.Error("the job builds the tool more than once")
+						}
+						build = i
+					}
+				}
+				if first < 0 {
+					t.Fatal("the job never calls the tool")
+				}
+				if build < 0 || build > first {
+					t.Fatalf("the tool must be built before its first call: build=%d first call=%d", build, first)
+				}
+				dir, _ := buildDir(job.Steps[build])
+				want := ".tools/bundlerepair"
+				if trustedPath != "" {
+					want = trustedPath + "/" + want
+				}
+				if dir != want {
+					t.Errorf("the tool is built from %q, want %q", dir, want)
+				}
+				if run, _ := runOf(job.Steps[build]); run.WorkingDirectory != nil {
+					t.Error("the build step must run from the workspace root")
+				}
+				for key, wantValue := range map[string]string{"GOTOOLCHAIN": "local", "GOPROXY": "off", "GOFLAGS": "-mod=readonly"} {
+					if got, ok := envValue(job.Steps[build], key); !ok || got != wantValue {
+						t.Errorf("the build step must set %s=%s, got %q", key, wantValue, got)
+					}
+				}
+				checkTrustedCheckoutAndGo(t, job.Steps[:build], trustedPath)
+			})
+		}
+	}
+}
+
+// checkTrustedCheckoutAndGo checks the steps before the build: one checkout of
+// the trusted path at the default ref, and the pinned setup-go.
+func checkTrustedCheckoutAndGo(t *testing.T, steps []*actionlint.Step, trustedPath string) {
+	t.Helper()
+	checkouts, setups := 0, 0
+	for _, step := range steps {
+		action, ok := usesOf(step)
+		if !ok {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(action.Uses.Value, "actions/checkout@"):
+			path, _ := input(action, "path")
+			if path != trustedPath {
+				continue
+			}
+			checkouts++
+			for _, key := range []string{"ref", "repository"} {
+				if value, set := input(action, key); set {
+					t.Errorf("the trusted checkout sets %s=%q", key, value)
+				}
+			}
+			if value, _ := input(action, "persist-credentials"); value != "false" {
+				t.Error("the trusted checkout must not persist credentials")
+			}
+		case strings.HasPrefix(action.Uses.Value, "actions/setup-go@"):
+			setups++
+			if action.Uses.Value != setupGo {
+				t.Errorf("setup-go is %q, want the pinned %q", action.Uses.Value, setupGo)
+			}
+			if value, _ := input(action, "cache"); value != "false" {
+				t.Error("setup-go must disable the cache")
+			}
+			wantFile := "go.mod"
+			if trustedPath != "" {
+				wantFile = trustedPath + "/go.mod"
+			}
+			if value, _ := input(action, "go-version-file"); value != wantFile {
+				t.Errorf("setup-go reads %q, want %q", value, wantFile)
+			}
+		}
+	}
+	if checkouts != 1 {
+		t.Errorf("found %d trusted checkouts before the build, want 1", checkouts)
+	}
+	if setups != 1 {
+		t.Errorf("found %d setup-go steps before the build, want 1", setups)
+	}
+}
+
+// The decisions live in the Go tool. No step reads or calls the API by hand.
+func TestNoDecisionLogicInRunSteps(t *testing.T) {
+	for name := range toolJobs {
+		workflow := loadWorkflow(t, name)
+		for id, job := range workflow.Jobs {
+			for _, step := range job.Steps {
+				run, ok := runOf(step)
+				if !ok {
+					continue
+				}
+				if found := forbiddenInRun.FindString(run.Run.Value); found != "" {
+					t.Errorf("%s job %s step %q runs %q", name, id, stepName(step), found)
+				}
+			}
+		}
+	}
+}
+
+// Each tool call in a run step is exactly one subcommand call.
+func TestRunStepsOnlyCallOneSubcommand(t *testing.T) {
+	subcommand := regexp.MustCompile(`^"\$\{RUNNER_TEMP\}/bundlerepair" (authorize|prepare|select|stage|merge|publish|identity|credentials)\b`)
+	for name, jobs := range toolJobs {
+		workflow := loadWorkflow(t, name)
+		for id := range jobs {
+			total := 0
+			for _, step := range workflow.Jobs[id].Steps {
+				if !callsTool(step) {
+					continue
+				}
+				total++
+				run, _ := runOf(step)
+				calls := 0
+				for _, line := range nonBlankLines(run.Run.Value) {
+					if strings.HasPrefix(line, toolCall) {
+						calls++
+						if !subcommand.MatchString(line) {
+							t.Errorf("%s job %s: %q is not a known subcommand call", name, id, line)
+						}
+					}
+				}
+				if calls != 1 {
+					t.Errorf("%s job %s step %q makes %d tool calls, want 1", name, id, stepName(step), calls)
+				}
+			}
+			if total == 0 {
+				t.Errorf("%s job %s never calls the tool", name, id)
+			}
+		}
+	}
+}
+
+func generateSteps(t *testing.T) []*actionlint.Step {
+	t.Helper()
+	job := loadWorkflow(t, "regenerate-bundle-worker.yaml").Jobs["generate"]
+	if job == nil {
+		t.Fatal("missing generate job")
+	}
+	return job.Steps
+}
+
+func stepIndex(steps []*actionlint.Step, name string) int {
+	return slices.IndexFunc(steps, func(s *actionlint.Step) bool { return stepName(s) == name })
+}
+
+func TestGenerateRunsOnlyTrustedBuild(t *testing.T) {
+	steps := generateSteps(t)
+	merge := stepIndex(steps, "Merge captured base commit")
+	stage := stepIndex(steps, "Stage bundle sources")
+	build := stepIndex(steps, "Regenerate bundle")
+	if merge < 0 || stage < 0 || build < 0 {
+		t.Fatalf("missing steps: merge=%d stage=%d build=%d", merge, stage, build)
+	}
+	if merge >= stage || stage >= build {
+		t.Errorf("steps must run in the order merge, stage, build: %d %d %d", merge, stage, build)
+	}
+	if check := stepIndex(steps, "Check request before generation"); check < 0 || check > stage {
+		t.Error("the request check must run before staging")
+	}
+
+	run, ok := runOf(steps[stage])
+	if !ok || strings.TrimSpace(run.Run.Value) != toolCall+"stage branch trusted" {
+		t.Fatal("staging must run the tool on the branch and trusted directories")
+	}
+	if run.WorkingDirectory != nil {
+		t.Error("the staging step must run from the workspace root")
+	}
+
+	run, ok = runOf(steps[build])
+	if !ok || strings.TrimSpace(run.Run.Value) != "make package" {
+		t.Fatal("the build step must run make package")
+	}
+	if wd := run.WorkingDirectory; wd == nil || wd.Value != "trusted" {
+		t.Error("make package must run in the trusted checkout")
+	}
+	for key, want := range map[string]string{"GOTOOLCHAIN": "local", "GOPROXY": "https://proxy.golang.org"} {
+		if got, ok := envValue(steps[build], key); !ok || got != want {
+			t.Errorf("the build step must pin %s=%s", key, want)
+		}
+	}
+	makeSteps := 0
+	for _, step := range steps {
+		if run, ok := runOf(step); ok {
+			for _, line := range nonBlankLines(run.Run.Value) {
+				if strings.HasPrefix(line, "make ") {
+					makeSteps++
+				}
+			}
+		}
+		if upload, ok := usesOf(step); ok && strings.HasPrefix(upload.Uses.Value, "actions/upload-artifact@") {
+			if path, _ := input(upload, "path"); path != "trusted/tool/data/otelc-bundle.tgz" {
+				t.Error("the upload must read the archive from the trusted checkout")
+			}
+		}
+	}
+	if makeSteps != 1 {
+		t.Errorf("the generate job runs make %d times, want once", makeSteps)
+	}
+}
+
+// Contributor files must never run. Only git may run in the branch checkout,
+// and no command may name a path in it.
+func TestNothingRunsInBranchCheckout(t *testing.T) {
+	branchPath := regexp.MustCompile(`(^|[\s"'=])(\./)?branch/`)
+	for name := range toolJobs {
+		workflow := loadWorkflow(t, name)
+		for id, job := range workflow.Jobs {
+			for _, step := range job.Steps {
+				where := name + " job " + id + " step " + stepName(step)
+				if action, ok := usesOf(step); ok && strings.Contains(action.Uses.Value, "branch") {
+					t.Errorf("%s uses a local action from the branch checkout", where)
+				}
+				run, ok := runOf(step)
+				if !ok {
+					continue
+				}
+				inBranch := run.WorkingDirectory != nil && strings.HasPrefix(run.WorkingDirectory.Value, "branch")
+				for _, line := range nonBlankLines(run.Run.Value) {
+					switch {
+					case inBranch && !strings.HasPrefix(line, "git "):
+						t.Errorf("%s runs %q in the branch checkout", where, line)
+					case branchPath.MatchString(line):
+						t.Errorf("%s names a path in the branch checkout in %q", where, line)
+					case strings.HasPrefix(line, "make ") && (stepName(step) != "Regenerate bundle" || inBranch):
+						t.Errorf("%s runs make outside the trusted build", where)
+					case strings.HasPrefix(line, "go ") && !buildStep.MatchString(line):
+						t.Errorf("%s runs go directly: %q", where, line)
+					case strings.HasPrefix(line, toolCall) && inBranch:
+						t.Errorf("%s runs the tool in the branch checkout", where)
+					}
+				}
+			}
+		}
+	}
 }
 
 func TestAuthorizationBeforeConcurrency(t *testing.T) {
@@ -274,6 +396,32 @@ func TestAuthorizationBeforeConcurrency(t *testing.T) {
 	}
 }
 
+// The prepare job runs one command to authorize and capture the snapshot.
+func TestPrepareStepCapturesSnapshot(t *testing.T) {
+	job := loadWorkflow(t, "regenerate-bundle.yaml").Jobs["prepare"]
+	if job == nil {
+		t.Fatal("missing prepare job")
+	}
+	idx := slices.IndexFunc(job.Steps, func(s *actionlint.Step) bool { return s.ID != nil && s.ID.Value == "pr" })
+	if idx < 0 {
+		t.Fatal("missing step with id pr")
+	}
+	run, ok := runOf(job.Steps[idx])
+	if !ok || strings.TrimSpace(run.Run.Value) != toolCall+"prepare" {
+		t.Fatal("the pr step must run the prepare command")
+	}
+	for _, key := range []string{"GH_TOKEN", "EVENT_NAME", "ISSUE_IS_PULL_REQUEST", "AUTHOR_ASSOCIATION", "COMMENT_BODY", "INPUT_PR_NUMBER"} {
+		if _, ok := envValue(job.Steps[idx], key); !ok {
+			t.Errorf("the pr step does not set %s", key)
+		}
+	}
+	for i, step := range job.Steps {
+		if i != idx && callsTool(step) {
+			t.Errorf("step %q calls the tool besides the pr step", stepName(step))
+		}
+	}
+}
+
 func TestScannedSnapshotPropagation(t *testing.T) {
 	workflow := loadWorkflow(t, "autofix-bundle-conflicts.yaml")
 	job := workflow.Jobs["repair"]
@@ -285,6 +433,45 @@ func TestScannedSnapshotPropagation(t *testing.T) {
 		if input == nil || !strings.Contains(input.Value.Value, "matrix.") {
 			t.Errorf("repair does not receive the scanned %s", name)
 		}
+	}
+}
+
+// The scanner records its selection under step names that the history parser reads.
+func TestScannerStepNamesStayStable(t *testing.T) {
+	workflow := loadWorkflow(t, "autofix-bundle-conflicts.yaml")
+	job := workflow.Jobs["autofix"]
+	if job == nil || job.Name == nil || job.Name.Value != "Select bundle repairs" {
+		t.Fatal("the scanner job must be named Select bundle repairs")
+	}
+	budget, scan, record := -1, -1, -1
+	for i, step := range job.Steps {
+		switch {
+		case step.ID != nil && step.ID.Value == "budget":
+			budget = i
+			assertSingleCall(t, step, "select --budget")
+		case step.ID != nil && step.ID.Value == "scan":
+			scan = i
+			assertSingleCall(t, step, "select")
+			if stepName(step) != "Select bounded bundle repairs" {
+				t.Errorf("the scan step is named %q", stepName(step))
+			}
+		case strings.HasPrefix(stepName(step), "Bundle repair selection: "):
+			record = i
+			if stepName(step) != "Bundle repair selection: ${{ steps.scan.outputs.rate_record }}" {
+				t.Errorf("the record step is named %q", stepName(step))
+			}
+		}
+	}
+	if budget < 0 || scan < 0 || record < 0 || budget >= scan || scan >= record {
+		t.Errorf("steps must run in the order budget, scan, record: %d %d %d", budget, scan, record)
+	}
+}
+
+func assertSingleCall(t *testing.T, step *actionlint.Step, subcommand string) {
+	t.Helper()
+	run, ok := runOf(step)
+	if !ok || strings.TrimSpace(run.Run.Value) != toolCall+subcommand {
+		t.Errorf("step %q must run only %q", stepName(step), toolCall+subcommand)
 	}
 }
 
@@ -306,150 +493,62 @@ func TestPublisherEnvironmentTokenRouting(t *testing.T) {
 	}
 }
 
-func TestPublisherCredentialSelection(t *testing.T) {
-	workflow := loadWorkflow(t, "regenerate-bundle-worker.yaml")
-	job := workflow.Jobs["push_update"]
+// The App path: the tool decides whether to use the App, and the App token
+// step follows that output. The identity step reports the token owner.
+func TestPublisherCredentialSteps(t *testing.T) {
+	job := loadWorkflow(t, "regenerate-bundle-worker.yaml").Jobs["push_update"]
 	if job == nil {
 		t.Fatal("missing protected publisher job")
 	}
-	var selector *actionlint.Step
+	var credentials, appToken, identity *actionlint.Step
 	for _, step := range job.Steps {
-		if step.ID != nil && step.ID.Value == "credentials" {
-			selector = step
+		switch {
+		case step.ID != nil && step.ID.Value == "credentials":
+			credentials = step
+		case step.ID != nil && step.ID.Value == "app-token":
+			appToken = step
+		case step.ID != nil && step.ID.Value == "identity":
+			identity = step
 		}
 	}
-	if selector == nil {
-		t.Fatal("publisher must select complete App credentials before creating a token")
+	if credentials == nil || appToken == nil || identity == nil {
+		t.Fatalf("missing steps: credentials=%v app-token=%v identity=%v", credentials != nil, appToken != nil, identity != nil)
 	}
-	run, ok := selector.Exec.(*actionlint.ExecRun)
-	if !ok {
-		t.Fatal("credential selector must be a trusted shell step")
+	assertSingleCall(t, credentials, "credentials")
+	for _, key := range []string{"CLIENT_ID", "PRIVATE_KEY", "IS_CROSS_REPOSITORY"} {
+		if _, ok := envValue(credentials, key); !ok {
+			t.Errorf("the credentials step does not set %s", key)
+		}
 	}
-	for _, tc := range []struct {
-		name, client, key, fork, want string
-	}{
-		{"missing both", "", "", "false", "false"},
-		{"missing key", "client", "", "false", "false"},
-		{"missing client", "", "test-key", "false", "false"},
-		{"complete App", "client", "test-key", "false", "true"},
-		{"fork", "client", "test-key", "true", "false"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			output := filepath.Join(t.TempDir(), "outputs")
-			cmd := exec.CommandContext(t.Context(), "bash", "-euo", "pipefail", "-c", run.Run.Value)
-			cmd.Env = append(os.Environ(), "CLIENT_ID="+tc.client, "PRIVATE_KEY="+tc.key, "IS_CROSS_REPOSITORY="+tc.fork, "GITHUB_OUTPUT="+output)
-			if out, err := cmd.CombinedOutput(); err != nil {
-				t.Fatalf("credential selection: %v\n%s", err, out)
-			}
-			data, err := os.ReadFile(output)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if string(data) != "use_app="+tc.want+"\n" {
-				t.Errorf("unexpected App decision: %q", data)
-			}
-		})
+	if appToken.If == nil || strings.TrimSpace(appToken.If.Value) != "steps.credentials.outputs.use_app == 'true'" {
+		t.Error("the App token must follow the credentials decision")
+	}
+	assertSingleCall(t, identity, "identity")
+	for _, key := range []string{"APP_SLUG", "GH_TOKEN"} {
+		if _, ok := envValue(identity, key); !ok {
+			t.Errorf("the identity step does not set %s", key)
+		}
+	}
+	first := slices.IndexFunc(job.Steps, callsTool)
+	if first < 0 || job.Steps[first].Name == nil || job.Steps[first].Name.Value != "Check request permission" {
+		t.Error("the publisher must authorize the request before it touches credentials")
 	}
 }
 
-func TestStageBundleSources(t *testing.T) {
-	for _, name := range []string{"test_stage_sync", "test_stage_rejections", "test_stage_arguments"} {
-		t.Run(name, func(t *testing.T) {
-			runFixture(t, name+"\n")
-		})
+// Regression guard: the generate job gets no secrets. This holds before and
+// after the rewiring.
+func TestSecretsStayInPublisherJob(t *testing.T) {
+	data, err := os.ReadFile("../../.github/workflows/regenerate-bundle-worker.yaml")
+	if err != nil {
+		t.Fatal(err)
 	}
-}
-
-func generateSteps(t *testing.T) []*actionlint.Step {
-	t.Helper()
-	job := loadWorkflow(t, "regenerate-bundle-worker.yaml").Jobs["generate"]
-	if job == nil {
-		t.Fatal("missing generate job")
+	text := string(data)
+	generate := strings.Index(text, "\n  generate:")
+	publish := strings.Index(text, "\n  push_update:")
+	if generate < 0 || publish < generate {
+		t.Fatal("cannot find the jobs")
 	}
-	return job.Steps
-}
-
-func stepIndex(steps []*actionlint.Step, name string) int {
-	return slices.IndexFunc(steps, func(s *actionlint.Step) bool {
-		return s.Name != nil && s.Name.Value == name
-	})
-}
-
-func TestGenerateRunsOnlyTrustedBuild(t *testing.T) {
-	steps := generateSteps(t)
-	merge := stepIndex(steps, "Merge captured base commit")
-	stage := stepIndex(steps, "Stage bundle sources")
-	build := stepIndex(steps, "Regenerate bundle")
-	if merge < 0 || stage < 0 || build < 0 {
-		t.Fatalf("missing steps: merge=%d stage=%d build=%d", merge, stage, build)
-	}
-	if !(merge < stage && stage < build) {
-		t.Errorf("steps must run in the order merge, stage, build: %d %d %d", merge, stage, build)
-	}
-	if check := stepIndex(steps, "Check request before generation"); check < 0 || check > stage {
-		t.Error("the request check must run before staging")
-	}
-
-	run, ok := steps[stage].Exec.(*actionlint.ExecRun)
-	if !ok || strings.TrimSpace(run.Run.Value) != "bash trusted/.github/scripts/stage-bundle-sources.sh branch trusted" {
-		t.Fatal("staging must run the trusted script on the branch and trusted directories")
-	}
-	if run.WorkingDirectory != nil {
-		t.Error("the staging step must run from the workspace root")
-	}
-
-	run, ok = steps[build].Exec.(*actionlint.ExecRun)
-	if !ok || strings.TrimSpace(run.Run.Value) != "make package" {
-		t.Fatal("the build step must run make package")
-	}
-	if wd := run.WorkingDirectory; wd == nil || wd.Value != "trusted" {
-		t.Error("make package must run in the trusted checkout")
-	}
-	for key, want := range map[string]string{"GOTOOLCHAIN": "local", "GOPROXY": "https://proxy.golang.org"} {
-		got := steps[build].Env.Vars[strings.ToLower(key)]
-		if got == nil || got.Value == nil || got.Value.Value != want {
-			t.Errorf("the build step must pin %s=%s", key, want)
-		}
-	}
-
-	for _, step := range steps {
-		if step.Exec == nil {
-			continue
-		}
-		if upload, ok := step.Exec.(*actionlint.ExecAction); ok && strings.HasPrefix(upload.Uses.Value, "actions/upload-artifact@") {
-			if path := upload.Inputs["path"]; path == nil || path.Value.Value != "trusted/tool/data/otelc-bundle.tgz" {
-				t.Error("the upload must read the archive from the trusted checkout")
-			}
-		}
-	}
-}
-
-func TestGenerateNeverRunsBranchCode(t *testing.T) {
-	for _, step := range generateSteps(t) {
-		run, ok := step.Exec.(*actionlint.ExecRun)
-		if !ok {
-			continue
-		}
-		name := ""
-		if step.Name != nil {
-			name = step.Name.Value
-		}
-		inBranch := run.WorkingDirectory != nil && strings.HasPrefix(run.WorkingDirectory.Value, "branch")
-		for line := range strings.SplitSeq(run.Run.Value, "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" || strings.HasPrefix(line, "#") {
-				continue
-			}
-			switch {
-			case strings.Contains(line, "branch/") && !strings.HasPrefix(line, "bash trusted/.github/scripts/"):
-				t.Errorf("step %q runs %q against the branch checkout", name, line)
-			case inBranch && !strings.HasPrefix(line, "git ") && !strings.HasPrefix(line, "bash ../trusted/.github/scripts/merge-bundle-branch.sh "):
-				t.Errorf("step %q runs %q in the branch checkout", name, line)
-			case strings.HasPrefix(line, "make ") && (!strings.Contains(name, "Regenerate") || inBranch):
-				t.Errorf("step %q runs make outside the trusted build", name)
-			case strings.HasPrefix(line, "go "):
-				t.Errorf("step %q runs go directly", name)
-			}
-		}
+	if strings.Contains(text[generate:publish], "secrets.") {
+		t.Error("the generate job must not use secrets")
 	}
 }

@@ -19,9 +19,3 @@ indent_size = 2
 [*.{yml,yaml}]
 indent_style = space
 indent_size = 2
-
-[.github/scripts/*bundle*.sh]
-indent_style = space
-indent_size = 2
-binary_next_line = true
-switch_case_indent = true

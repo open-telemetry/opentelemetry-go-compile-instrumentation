@@ -62,10 +62,23 @@ jobs:
           path: trusted
           persist-credentials: false
 
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          cache: false
+          go-version-file: trusted/go.mod
+
+      - name: Build bundle repair tool
+        env:
+          GOFLAGS: -mod=readonly
+          GOPROXY: 'off'
+          GOTOOLCHAIN: local
+        run: go -C trusted/.tools/bundlerepair build -trimpath -o "${RUNNER_TEMP}/bundlerepair" .
+
       - name: Check request permission
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash trusted/.github/scripts/check-bundle-maintainer.sh
+        run: |
+          "${RUNNER_TEMP}/bundlerepair" authorize
 
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
@@ -75,24 +88,20 @@ jobs:
           ref: ${{ inputs.head_sha }}
           repository: ${{ inputs.head_repo_full }}
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
-        with:
-          cache: false
-          go-version-file: trusted/go.mod
-
       - name: Merge captured base commit
-        working-directory: branch
         run: |
-          git fetch --no-tags "https://github.com/${REPO}.git" "${BASE_SHA}"
-          bash ../trusted/.github/scripts/merge-bundle-branch.sh . "${BASE_SHA}"
+          git -C branch fetch --no-tags "https://github.com/${REPO}.git" "${BASE_SHA}"
+          "${RUNNER_TEMP}/bundlerepair" merge branch "${BASE_SHA}"
 
       - name: Check request before generation
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash trusted/.github/scripts/check-bundle-maintainer.sh
+        run: |
+          "${RUNNER_TEMP}/bundlerepair" authorize
 
       - name: Stage bundle sources
-        run: bash trusted/.github/scripts/stage-bundle-sources.sh branch trusted
+        run: |
+          "${RUNNER_TEMP}/bundlerepair" stage branch trusted
 
       - name: Regenerate bundle
         working-directory: trusted
@@ -125,10 +134,23 @@ jobs:
           path: trusted
           persist-credentials: false
 
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          cache: false
+          go-version-file: trusted/go.mod
+
+      - name: Build bundle repair tool
+        env:
+          GOFLAGS: -mod=readonly
+          GOPROXY: 'off'
+          GOTOOLCHAIN: local
+        run: go -C trusted/.tools/bundlerepair build -trimpath -o "${RUNNER_TEMP}/bundlerepair" .
+
       - name: Check request permission
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash trusted/.github/scripts/check-bundle-maintainer.sh
+        run: |
+          "${RUNNER_TEMP}/bundlerepair" authorize
 
       - name: Select publisher credentials
         id: credentials
@@ -138,12 +160,7 @@ jobs:
             ${{ secrets.OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY }}
           IS_CROSS_REPOSITORY: ${{ inputs.is_cross_repository }}
         run: |
-          use_app=false
-          if [[ "${IS_CROSS_REPOSITORY}" == 'false' &&
-            -n "${CLIENT_ID}" && -n "${PRIVATE_KEY}" ]]; then
-            use_app=true
-          fi
-          printf 'use_app=%s\n' "${use_app}" >>"${GITHUB_OUTPUT}"
+          "${RUNNER_TEMP}/bundlerepair" credentials
 
       - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510  # v3.3.0
         id: app-token
@@ -164,25 +181,7 @@ jobs:
             ${{ steps.app-token.outputs.token ||
             secrets.OTELC_BUNDLE_PUSH_TOKEN }}
         run: |
-          if [[ -z "${GH_TOKEN}" ]]; then
-            echo '::error::Missing publisher token in bundle-publisher.'
-            echo 'Configure OTELC_BUNDLE_PUSH_TOKEN as an environment secret.'
-            echo 'The App remains supported for repository branches.'
-            {
-              echo 'Publishing requires a configured token.'
-              echo 'The generated artifact remains available for one day.'
-            } >>"${GITHUB_STEP_SUMMARY}"
-            exit 1
-          fi
-          if [[ -n "${APP_SLUG}" ]]; then
-            identity="$(gh api "users/${APP_SLUG}[bot]")"
-          else
-            identity="$(gh api user)"
-          fi
-          {
-            echo "login=$(jq -r '.login' <<<"${identity}")"
-            echo "id=$(jq -r '.id' <<<"${identity}")"
-          } >>"${GITHUB_OUTPUT}"
+          "${RUNNER_TEMP}/bundlerepair" identity
 
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
@@ -199,13 +198,11 @@ jobs:
           path: generated
 
       - name: Merge captured base commit
-        working-directory: branch
         run: |
-          git fetch --no-tags "https://github.com/${REPO}.git" "${BASE_SHA}"
-          bash ../trusted/.github/scripts/merge-bundle-branch.sh . "${BASE_SHA}"
+          git -C branch fetch --no-tags "https://github.com/${REPO}.git" "${BASE_SHA}"
+          "${RUNNER_TEMP}/bundlerepair" merge branch "${BASE_SHA}"
 
       - name: Commit and push
-        working-directory: branch
         env:
           BASE_REF: ${{ inputs.base_ref }}
           BOT_ID: ${{ steps.identity.outputs.id }}
@@ -216,7 +213,8 @@ jobs:
             secrets.OTELC_BUNDLE_PUSH_TOKEN }}
           HEAD_REF: ${{ inputs.head_ref }}
           HEAD_REPO_FULL: ${{ inputs.head_repo_full }}
-        run: bash ../trusted/.github/scripts/publish-bundle.sh
+        run: |
+          "${RUNNER_TEMP}/bundlerepair" publish branch
 
       - name: Report publication failure
         if: failure()

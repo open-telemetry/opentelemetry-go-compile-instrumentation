@@ -40,6 +40,18 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          cache: false
+          go-version-file: go.mod
+
+      - name: Build bundle repair tool
+        env:
+          GOFLAGS: -mod=readonly
+          GOPROXY: 'off'
+          GOTOOLCHAIN: local
+        run: go -C .tools/bundlerepair build -trimpath -o "${RUNNER_TEMP}/bundlerepair" .
+
       - name: Check manual scanner permission
         if: github.event_name == 'workflow_dispatch'
         env:
@@ -47,7 +59,8 @@ jobs:
           COMMENTER: ${{ github.triggering_actor }}
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-        run: bash .github/scripts/check-bundle-maintainer.sh
+        run: |
+          "${RUNNER_TEMP}/bundlerepair" authorize
 
       - name: Check automatic repair budget
         id: budget
@@ -55,7 +68,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
-        run: bash .github/scripts/autofix-bundle-conflicts.sh --budget
+        run: |
+          "${RUNNER_TEMP}/bundlerepair" select --budget
 
       - name: Select bounded bundle repairs
         id: scan
@@ -67,7 +81,8 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run }}
           AUTO_DEADLINE: ${{ steps.budget.outputs.expires_at }}
           RECENT_REQUESTS: ${{ steps.budget.outputs.requests }}
-        run: bash .github/scripts/autofix-bundle-conflicts.sh
+        run: |
+          "${RUNNER_TEMP}/bundlerepair" select
 
       - name: 'Bundle repair selection: ${{ steps.scan.outputs.rate_record }}'
         if: steps.scan.conclusion == 'success'

@@ -9,7 +9,8 @@ on:
       - ".github/actions/**/action.yaml"
       - ".tools/go.mod"
       - ".tools/go.sum"
-      - ".github/scripts/*bundle*.sh"
+      - ".tools/bundlerepair/**"
+      - ".tools/workflows/**"
       - "Makefile"
   push:
     branches: [main]
@@ -20,7 +21,8 @@ on:
       - ".github/actions/**/action.yaml"
       - ".tools/go.mod"
       - ".tools/go.sum"
-      - ".github/scripts/*bundle*.sh"
+      - ".tools/bundlerepair/**"
+      - ".tools/workflows/**"
       - "Makefile"
 
 permissions:

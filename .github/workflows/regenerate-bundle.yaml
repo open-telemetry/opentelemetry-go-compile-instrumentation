@@ -72,65 +72,29 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Check request permission
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          cache: false
+          go-version-file: go.mod
+
+      - name: Build bundle repair tool
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash .github/scripts/check-bundle-maintainer.sh
+          GOFLAGS: -mod=readonly
+          GOPROXY: 'off'
+          GOTOOLCHAIN: local
+        run: go -C .tools/bundlerepair build -trimpath -o "${RUNNER_TEMP}/bundlerepair" .
 
       - name: Get pull request details
         id: pr
         env:
+          AUTHOR_ASSOCIATION: ${{ github.event.comment.author_association }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          EVENT_NAME: ${{ github.event_name }}
           GH_TOKEN: ${{ github.token }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+          ISSUE_IS_PULL_REQUEST: ${{ github.event.issue.pull_request && 'true' || 'false' }}
         run: |
-          [[ "${PR_NUMBER}" =~ ^[1-9][0-9]*$ ]]
-          pr_json="$(gh api "repos/${REPO}/pulls/${PR_NUMBER}")"
-          automatic=false
-          automatic_caller="${REPO}/.github/workflows/"
-          automatic_caller+='autofix-bundle-conflicts.yaml@refs/heads/main'
-          if [[ "${CALLER_WORKFLOW_REF}" == "${automatic_caller}" ]]; then
-            automatic=true
-          fi
-          jq -e --argjson automatic "${automatic}" \
-            --arg head "${EXPECTED_HEAD_SHA}" \
-            --arg repository "${REPO}" '
-            .state == "open" and .head.repo != null and
-            (if $automatic then .draft == false and .base.ref == "main"
-              and .head.sha == $head
-              and (.head.repo.full_name == $repository
-                or .maintainer_can_modify == true)
-             else true end)' <<<"${pr_json}" >/dev/null
-          base_ref="$(jq -r '.base.ref' <<<"${pr_json}")"
-          head_ref="$(jq -r '.head.ref' <<<"${pr_json}")"
-          head_repo_full="$(jq -r '.head.repo.full_name' <<<"${pr_json}")"
-          head_sha="$(jq -r '.head.sha' <<<"${pr_json}")"
-          git check-ref-format "refs/heads/${base_ref}"
-          git check-ref-format "refs/heads/${head_ref}"
-          base_ref_uri="$(jq -nr --arg ref "${base_ref}" '$ref | @uri')"
-          base_json="$(gh api "repos/${REPO}/git/ref/heads/${base_ref_uri}")"
-          base_sha="$(jq -er \
-            '.object | select(.type == "commit") | .sha' <<<"${base_json}")"
-          if [[ "${automatic}" == true \
-            && "${base_sha}" != "${BASE_SHA}" ]]; then
-            printf 'The captured base branch head is no longer current.\n' >&2
-            exit 1
-          fi
-          [[ "${head_repo_full}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
-          [[ "${base_sha}" =~ ^[0-9a-f]{40}$ \
-            && "${head_sha}" =~ ^[0-9a-f]{40}$ ]]
-          {
-            echo 'authorized=true'
-            echo "pr_number=${PR_NUMBER}"
-            echo "base_ref=${base_ref}"
-            echo "base_sha=${base_sha}"
-            echo "head_ref=${head_ref}"
-            echo "head_repo_full=${head_repo_full}"
-            echo "head_sha=${head_sha}"
-            if [[ "${head_repo_full}" == "${REPO}" ]]; then
-              echo 'is_cross_repository=false'
-            else
-              echo 'is_cross_repository=true'
-            fi
-          } >>"${GITHUB_OUTPUT}"
+          "${RUNNER_TEMP}/bundlerepair" prepare
 
   repair:
     needs: prepare
