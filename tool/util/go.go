@@ -131,12 +131,36 @@ func SplitGoflags(goflags string) []string {
 // `otelc go build`, and nested mode, which instruments compiles, during
 // instrumentation.
 func StripToolexecFromGoflags(goflags string) string {
+	return filterGoflags(goflags, func(unquoted string) bool {
+		return unquoted == "-toolexec" || strings.HasPrefix(unquoted, "-toolexec=") ||
+			unquoted == "--toolexec" || strings.HasPrefix(unquoted, "--toolexec=")
+	})
+}
+
+// HasPackagePattern reports whether a per-package flag value starts with a
+// package pattern, following cmd/go/internal/load.(*PerPackageFlag).set.
+// A value without a pattern applies only to the go command's command-line packages.
+func HasPackagePattern(value string) bool {
+	value = strings.TrimSpace(value)
+	return value != "" && !strings.HasPrefix(value, "-")
+}
+
+// StripUnpatternedGcflagsFromGoflags returns goflags without -gcflags entries
+// that apply only to the go command's command-line packages.
+func StripUnpatternedGcflagsFromGoflags(goflags string) string {
+	return filterGoflags(goflags, func(unquoted string) bool {
+		name, value, ok := strings.Cut(unquoted, "=")
+		return ok && (name == "-gcflags" || name == "--gcflags") && !HasPackagePattern(value)
+	})
+}
+
+// filterGoflags returns goflags without the tokens drop reports. drop sees each
+// token with its surrounding quotes removed; kept tokens are joined verbatim.
+func filterGoflags(goflags string, drop func(unquoted string) bool) string {
 	tokens := SplitGoflags(goflags)
 	kept := make([]string, 0, len(tokens))
 	for _, token := range tokens {
-		unquoted := UnquoteGoflagsToken(token)
-		if unquoted == "-toolexec" || strings.HasPrefix(unquoted, "-toolexec=") ||
-			unquoted == "--toolexec" || strings.HasPrefix(unquoted, "--toolexec=") {
+		if drop(UnquoteGoflagsToken(token)) {
 			continue
 		}
 		kept = append(kept, token)
