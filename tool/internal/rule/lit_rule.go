@@ -88,6 +88,9 @@ func (r *InstLitRule) validate() error {
 	}
 	seen := make(map[string]bool, len(r.Field))
 	for i, f := range r.Field {
+		if f == nil {
+			return ex.Newf("field[%d] cannot be empty", i)
+		}
 		if strings.TrimSpace(f.Name) == "" {
 			return ex.Newf("field[%d].name cannot be empty", i)
 		}
