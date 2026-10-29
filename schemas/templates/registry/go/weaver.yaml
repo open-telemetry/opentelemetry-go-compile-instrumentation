@@ -2,7 +2,7 @@
 # in schemas/otelc/. See docs/adr/0006-semconv-telemetry-contract-organization.md.
 #
 # attribute_group.go.j2 and helpers.j2 are vendored from go.opentelemetry.io/otel
-# v1.46.0 (semconv/templates/registry/go). The only local change is the package
+# v1.47.0 (semconv/templates/registry/go). The only local change is the package
 # name in attribute_group.go.j2 (semconv -> otelcconv). The text maps, comment
 # formats and acronyms below are copied from the same weaver.yaml, because the
 # helpers depend on them.
