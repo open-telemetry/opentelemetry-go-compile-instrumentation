@@ -26,6 +26,8 @@ var allowlist = []string{ //nolint:gochecknoglobals // private lookup table
 	"instrumentation/github.com/openai/openai-go/v2/testhelpers_test.go",
 	"instrumentation/github.com/openai/openai-go/v3/testhelpers_test.go",
 
+	"instrumentation/github.com/modelcontextprotocol/go-sdk/semconv/helpers_test.go", // shared asMap helper for mcp_test.go
+
 	"instrumentation/net/http/client/propagation_test.go",
 	"instrumentation/net/http/server/propagation_test.go",
 }

@@ -19,6 +19,7 @@ schemas/otelc/
 │   ├── k8s.yaml             # k8s.io/client-go informer spans
 │   ├── openai.yaml          # openai/openai-go GenAI client spans
 │   ├── anthropic.yaml       # anthropics/anthropic-sdk-go GenAI client spans
+│   ├── mcp.yaml             # modelcontextprotocol/go-sdk GenAI client spans
 │   ├── mongo.yaml           # go.mongodb.org/mongo-driver client spans
 │   ├── elasticsearch.yaml   # olivere/elastic (v7) client spans
 │   ├── gin.yaml             # gin-gonic/gin server-span enrichment
@@ -56,6 +57,7 @@ signals an undeclared instrumentation.
 | `k8s.io/client-go`                                  | `k8s.yaml`          | Informer spans                                                         |
 | `github.com/openai/openai-go` (v1/v2/v3)            | `openai.yaml`       | GenAI client spans                                                     |
 | `github.com/anthropics/anthropic-sdk-go`            | `anthropic.yaml`    | GenAI client spans                                                     |
+| `github.com/modelcontextprotocol/go-sdk`            | `mcp.yaml`         | GenAI MCP client spans                                                 |
 | `go.mongodb.org/mongo-driver/mongo`                 | `mongo.yaml`        | DB client spans                                                        |
 | `go.mongodb.org/mongo-driver/v2/mongo`              | `mongo.yaml`        | DB client spans                                                        |
 | `github.com/olivere/elastic/v7`                     | `elasticsearch.yaml` | DB client spans                                                        |
