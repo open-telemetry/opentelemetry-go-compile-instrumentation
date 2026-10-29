@@ -537,6 +537,7 @@ test-bundle-workflows: ## Check bundle workflow scripts and Git regression fixtu
 	@for script in .github/scripts/*bundle*.sh; do bash -n "$$script"; done
 	@shellcheck .github/scripts/*bundle*.sh
 	@bash .github/scripts/test-bundle-workflows.sh
+	@go -C .tools test -count=1 ./workflows
 
 test-unit: test-unit/tool test-unit/pkg test-unit/instrumentation test-unit/demo test-unit/helper ## Run all unit tests (tool + pkg + demo + test helpers)
 

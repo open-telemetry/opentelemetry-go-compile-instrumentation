@@ -20,8 +20,9 @@ main() {
   local attributes
   attributes="$(git -C "$1" rev-parse --path-format=absolute --git-path info/attributes)"
   mkdir -p "$(dirname "${attributes}")"
-  # Local attributes override merge drivers and filters from contributor files.
-  printf '%s\n%s\n' '* !merge -filter' 'tool/data/otelc-bundle.tgz merge=otelc-bundle' >"${attributes}"
+  # Local attributes block contributor merge drivers, filters, and bundle conversion.
+  printf '%s\n' '* !merge -filter' \
+    'tool/data/otelc-bundle.tgz merge=otelc-bundle -text -ident !working-tree-encoding !eol' >"${attributes}"
   git -C "$1" -c core.hooksPath=/dev/null \
     -c user.name='github-actions[bot]' \
     -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \

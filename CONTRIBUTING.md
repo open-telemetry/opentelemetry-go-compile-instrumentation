@@ -199,18 +199,30 @@ The repair workflow checks the caller workflow and its `main` ref.
 
 The scanner permits ten automatic requests per repository per hour and one
 request per pull request per hour. Failed requests count toward both limits.
-It counts selected requests from Actions job history. Missing or incomplete
-history stops selection. The scanner and its repair jobs run serially with
-other scans. Each scan starts at most two repairs in parallel. GitHub API
-quotas do not provide this limit.
+The scanner counts its recorded selections, including requests whose repair
+jobs never start. Missing or incomplete history stops selection. A missing
+selection record can pause automation for the three-hour history window.
 
-Start a new scanner run to retry automatic repairs. Stale scanner runs and
-automatic reruns cannot start new repairs.
+The scanner and its repair jobs run serially with other scans. Each scan
+starts at most two repairs in parallel. GitHub API quotas do not provide this
+limit.
+
+Automatic requests use the head and base commits that the scanner captured.
+The workflow rechecks eligibility before generation and publication. Requests
+expire one hour after GitHub creates the scanner run. Queue delays do not
+extend this deadline. Start a new scanner run to retry automatic repairs.
+Automatic reruns cannot start new repairs.
 
 Users with the GitHub `maintain` or `admin` role can comment
 `/regenerate-bundle` to request a repair, including during the automatic
-cooldown. The `write` role alone does not authorize the command. Requests for
-the same pull request run serially.
+cooldown. The `write` role alone does not authorize the command. The workflow
+checks authorization before requests enter the shared queue. Requests for the
+same pull request run serially.
+
+Repair builds the archive with the Makefile and the bundle tool from `main`.
+It copies only `pkg/` and `instrumentation/` from the pull request. A pull
+request that changes the bundle tool fails its own Verify Bundle check, so the
+author must run `make package` locally.
 
 Generation runs without write credentials or a shared cache. A separate
 publisher downloads the archive by its immutable artifact ID, merges the
@@ -226,6 +238,9 @@ Before enabling fork publication, an administrator must:
    unattended repair, leave required reviewers unset.
 3. Add `OTELC_BUNDLE_PUSH_TOKEN` as an environment secret. Do not create a
    repository or organization copy. Only the publisher uses this environment.
+
+The caller passes an empty placeholder for this secret. The protected publisher
+job resolves the environment value.
 
 Use an expiring classic token from a dedicated identity with upstream write
 access. For this public repository, the token needs `public_repo` and

@@ -8,14 +8,23 @@ set -o nounset
 set -o pipefail
 
 readonly BUNDLE='tool/data/otelc-bundle.tgz'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
 
 check_pull_request() {
-  local current
+  if [[ "${CALLER_WORKFLOW_REF:-}" == "${REPO}/.github/workflows/autofix-bundle-conflicts.yaml@refs/heads/main" ]]; then
+    bash "${SCRIPT_DIR}/check-bundle-maintainer.sh"
+  fi
+  local current reference base_ref_uri
   current="$(gh api "repos/${REPO}/pulls/${PR_NUMBER}")"
+  base_ref_uri="$(jq -nr --arg ref "${BASE_REF}" '$ref | @uri')"
+  reference="$(gh api "repos/${REPO}/git/ref/heads/${base_ref_uri}")"
   if ! jq -e --arg head "${EXPECTED_HEAD_SHA}" --arg base "${BASE_SHA}" \
     --arg branch "${HEAD_REF}" --arg base_ref "${BASE_REF}" --arg repository "${HEAD_REPO_FULL}" \
-    '.state == "open" and .head.sha == $head and .base.sha == $base
-     and .head.ref == $branch and .base.ref == $base_ref and .head.repo.full_name == $repository' \
+    --argjson reference "${reference}" \
+    '.state == "open" and .head.sha == $head
+     and .head.ref == $branch and .base.ref == $base_ref and .head.repo.full_name == $repository
+     and $reference.object.type == "commit" and $reference.object.sha == $base' \
     <<<"${current}" >/dev/null; then
     printf 'The pull request closed or changed. No update will be pushed.\n' >&2
     return 1

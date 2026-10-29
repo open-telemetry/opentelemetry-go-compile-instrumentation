@@ -7,14 +7,44 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
+check_automatic_request() {
+  if [[ "${RUN_ATTEMPT:-1}" != 1 ]]; then
+    printf 'Start a new scanner run instead of retrying automatic repairs.\n' >&2
+    return 1
+  fi
+  local now current reference
+  now="$(jq -nr 'now | floor')"
+  if [[ ! "${AUTO_DEADLINE:-}" =~ ^[1-9][0-9]{0,10}$ ]] \
+    || ((AUTO_DEADLINE <= now || AUTO_DEADLINE > now + 3600)); then
+    printf 'The automatic request has no valid unexpired deadline.\n' >&2
+    return 1
+  fi
+  if [[ -n "${PR_NUMBER:-}" ]]; then
+    [[ "${PR_NUMBER}" =~ ^[1-9][0-9]*$ &&
+      "${EXPECTED_HEAD_SHA:-}" =~ ^[0-9a-f]{40}$ && "${BASE_SHA:-}" =~ ^[0-9a-f]{40}$ ]]
+    current="$(gh api "repos/${REPO}/pulls/${PR_NUMBER}")"
+    if ! jq -e --arg head "${EXPECTED_HEAD_SHA}" --arg repository "${REPO}" '
+      .state == "open" and .draft == false and .base.ref == "main"
+      and .head.sha == $head and .head.repo != null
+      and (.head.repo.full_name == $repository or .maintainer_can_modify == true)' \
+      <<<"${current}" >/dev/null; then
+      printf 'The automatic request changed or is no longer eligible.\n' >&2
+      return 1
+    fi
+    reference="$(gh api "repos/${REPO}/git/ref/heads/main")"
+    if ! jq -e --arg base "${BASE_SHA}" '.object.type == "commit" and .object.sha == $base' \
+      <<<"${reference}" >/dev/null; then
+      printf 'The captured base branch head is no longer current.\n' >&2
+      return 1
+    fi
+  fi
+}
+
 main() {
   : "${REPO:?REPO must be set}"
   [[ "${REPO}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
   if [[ "${CALLER_WORKFLOW_REF:-}" == "${REPO}/.github/workflows/autofix-bundle-conflicts.yaml@refs/heads/main" ]]; then
-    if [[ "${RUN_ATTEMPT:-1}" != 1 ]]; then
-      printf 'Start a new scanner run instead of retrying automatic repairs.\n' >&2
-      return 1
-    fi
+    check_automatic_request
     return
   fi
   if [[ -n "${CALLER_WORKFLOW_REF:-}" &&

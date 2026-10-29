@@ -64,7 +64,10 @@ test_authorization() {
   mkdir -p "${WORK_DIR}/bin"
   cat >"${WORK_DIR}/bin/gh" <<'MOCK'
 #!/usr/bin/env bash
-cat "${GH_RESPONSE}"
+case "$*" in
+  *'/git/ref/heads/'*) cat "${GH_BASE_RESPONSE}" ;;
+  *) cat "${GH_RESPONSE}" ;;
+esac
 MOCK
   chmod +x "${WORK_DIR}/bin/gh"
   export PATH="${WORK_DIR}/bin:${PATH}" GH_RESPONSE="${WORK_DIR}/permission.json"
@@ -83,6 +86,8 @@ MOCK
     fail 'a bot name alone authorized a request'
   fi
   export CALLER_WORKFLOW_REF="${REPO}/.github/workflows/autofix-bundle-conflicts.yaml@refs/heads/main"
+  AUTO_DEADLINE="$(jq -nr 'now + 300 | floor')"
+  export AUTO_DEADLINE
   bash "${SCRIPT_DIR}/check-bundle-maintainer.sh"
   RUN_ATTEMPT=2
   if bash "${SCRIPT_DIR}/check-bundle-maintainer.sh"; then
@@ -98,7 +103,7 @@ MOCK
   if bash "${SCRIPT_DIR}/check-bundle-maintainer.sh"; then
     fail 'a maintainer actor hid an untrusted reusable caller'
   fi
-  unset CALLER_WORKFLOW_REF RUN_ATTEMPT
+  unset CALLER_WORKFLOW_REF RUN_ATTEMPT AUTO_DEADLINE
   printf 'PASS: automatic requests require the trusted caller and a new scan\n'
 }
 
@@ -108,7 +113,8 @@ publication_fixture() {
   export EXPECTED_HEAD_SHA BASE_SHA
   export REPO=test/upstream HEAD_REPO_FULL=test/fork HEAD_REF=contribution BASE_REF=main PR_NUMBER=1
   export BOT_LOGIN=test-bot BOT_ID=123 GH_TOKEN=test-token
-  export GH_RESPONSE="${WORK_DIR}/pull.json"
+  export GH_RESPONSE="${WORK_DIR}/pull.json" GH_BASE_RESPONSE="${WORK_DIR}/base.json"
+  jq -n --arg base "${BASE_SHA}" '{ref:"refs/heads/main",object:{type:"commit",sha:$base}}' >"${GH_BASE_RESPONSE}"
   REMOTE="$(mktemp -d "${WORK_DIR}/remote.XXXXXX")/fork.git"
   git clone --quiet --bare . "${REMOTE}"
   git remote add origin "${REMOTE}"
@@ -116,7 +122,7 @@ publication_fixture() {
   export GENERATED_BUNDLE
   printf 'regenerated\0bundle' >"${GENERATED_BUNDLE}"
   jq -n --arg head "${EXPECTED_HEAD_SHA}" --arg base "${BASE_SHA}" \
-    '{state:"open", maintainer_can_modify:true, head:{sha:$head, ref:"contribution", repo:{full_name:"test/fork"}}, base:{sha:$base, ref:"main"}}' >"${GH_RESPONSE}"
+    '{state:"open", draft:false, maintainer_can_modify:true, head:{sha:$head, ref:"contribution", repo:{full_name:"test/fork"}}, base:{sha:$base, ref:"main"}}' >"${GH_RESPONSE}"
   bash "${SCRIPT_DIR}/merge-bundle-branch.sh" . "${BASE_SHA}"
 }
 
@@ -184,7 +190,10 @@ test_publication_rejections() {
     case "${scenario}" in
       closed) filter='.state = "closed"' ;;
       head) filter='.head.sha = "0000000000000000000000000000000000000000"' ;;
-      base) filter='.base.sha = "0000000000000000000000000000000000000000"' ;;
+      base)
+        jq '.object.sha = "0000000000000000000000000000000000000000"' "${GH_BASE_RESPONSE}" >"${GH_BASE_RESPONSE}.new"
+        mv "${GH_BASE_RESPONSE}.new" "${GH_BASE_RESPONSE}"
+        ;;
       repository) filter='.head.repo.full_name = "other/fork"' ;;
       edits) filter='.maintainer_can_modify = false' ;;
       symlink)
@@ -214,7 +223,7 @@ scanner_fixture() {
   export RUN_ID=999 GITHUB_OUTPUT="${WORK_DIR}/outputs"
   export RUNS_JSON="${WORK_DIR}/runs.json" JOBS_JSON="${WORK_DIR}/jobs.json" RUN_JSON="${WORK_DIR}/run.json"
   printf '[{"total_count":2,"workflow_runs":[{"id":123},{"id":999}]}]\n' >"${RUNS_JSON}"
-  printf '[{"total_count":0,"jobs":[]}]\n' >"${JOBS_JSON}"
+  scanner_history 1 1
   jq -n '{created_at:(now | strftime("%Y-%m-%dT%H:%M:%SZ")), run_attempt:1}' >"${RUN_JSON}"
   : >"${GITHUB_OUTPUT}"
   cat >"${WORK_DIR}/bin/gh" <<'MOCK'
@@ -240,7 +249,8 @@ MOCK
 
 scanner_history() {
   jq -n --argjson first "$1" --argjson last "$2" \
-    '[{jobs:([{name:"Select bundle repairs", completed_at:(now | strftime("%Y-%m-%dT%H:%M:%SZ"))}] +
+    '[{jobs:([{name:"Select bundle repairs", completed_at:(now | strftime("%Y-%m-%dT%H:%M:%SZ")),
+    steps:[{name:("Bundle repair selection: " + ({at:(now | floor),prs:[range($first;$last)]} | tojson)),conclusion:"success"}]}] +
     [range($first;$last) as $pr | ["Prepare bundle regeneration", "Generate bundle", "Push regenerated bundle"][] |
     {name:("Bundle repair #" + ($pr | tostring) + " / " + .), conclusion:"failure"}])}] |
     map(. + {total_count:(.jobs | length)})' >"${JOBS_JSON}"
@@ -249,6 +259,13 @@ scanner_history() {
 check_plan() {
   local actual
   actual="$(grep '^prs=' "${GITHUB_OUTPUT}" | tail -n 1 | cut -d= -f2-)"
+  jq -e --arg head "${EXPECTED_HEAD_SHA}" --arg base "${BASE_SHA}" '
+    type == "array" and all(.[]; type == "object" and
+      (.pr_number | type) == "number" and .pr_number > 0 and
+      .head_sha == $head and .base_sha == $base and
+      (.expires_at | type) == "number" and .expires_at > 0)' \
+    <<<"${actual}" >/dev/null || fail 'the plan lost its captured snapshot'
+  actual="$(jq -c 'map(.pr_number)' <<<"${actual}")"
   [[ "${actual}" == "$1" ]] || fail "expected plan $1, got ${actual}"
 }
 
@@ -272,13 +289,15 @@ test_scanner_selection() {
   check_plan '[2]'
   printf 'PASS: skip a pull request during its one-hour cooldown\n'
 
-  printf '[{"total_count":0,"jobs":[]}]\n' >"${JOBS_JSON}"
+  scanner_history 1 1
   DRY_RUN=true bash "${SCRIPT_DIR}/autofix-bundle-conflicts.sh"
   check_plan '[]'
   printf 'PASS: dry run probes forks without requesting repairs\n'
 
   scanner_history 1 11
-  jq '.[0].jobs[0].completed_at = (now - 7200 | strftime("%Y-%m-%dT%H:%M:%SZ"))' "${JOBS_JSON}" >"${JOBS_JSON}.new"
+  jq '.[0].jobs[0] |= (.completed_at = (now - 7200 | strftime("%Y-%m-%dT%H:%M:%SZ")) |
+    .steps[0].name |= (ltrimstr("Bundle repair selection: ") | fromjson | .at -= 7200 |
+      "Bundle repair selection: " + tojson))' "${JOBS_JSON}" >"${JOBS_JSON}.new"
   mv "${JOBS_JSON}.new" "${JOBS_JSON}"
   DRY_RUN=false bash "${SCRIPT_DIR}/autofix-bundle-conflicts.sh"
   check_plan '[1,2]'
@@ -330,6 +349,104 @@ test_scanner_selection() {
   printf 'PASS: stale scanner runs cannot escape the history window\n'
 }
 
+stage_fixture() {
+  BRANCH_DIR="$(mktemp -d "${WORK_DIR}/branch.XXXXXX")"
+  TRUSTED_DIR="$(mktemp -d "${WORK_DIR}/trusted.XXXXXX")"
+  local root
+  for root in "${BRANCH_DIR}" "${TRUSTED_DIR}"; do
+    mkdir -p "${root}/pkg/sub" "${root}/instrumentation/lib"
+    printf 'package pkg\n' >"${root}/pkg/sub/kept.go"
+    printf 'package lib\n' >"${root}/instrumentation/lib/kept.go"
+    printf 'trusted\n' >"${root}/Makefile"
+  done
+  # The trusted checkout starts with files that the branch deleted or edited.
+  printf 'stale\n' >"${TRUSTED_DIR}/pkg/stale.go"
+  printf 'stale\n' >"${TRUSTED_DIR}/instrumentation/lib/stale.go"
+  printf 'old\n' >"${TRUSTED_DIR}/pkg/sub/kept.go"
+}
+
+stage() {
+  local status=0
+  bash "${SCRIPT_DIR}/stage-bundle-sources.sh" "${BRANCH_DIR}" "${TRUSTED_DIR}" >"${WORK_DIR}/stage.log" 2>&1 || status=$?
+  return "${status}"
+}
+
+test_stage_sync() {
+  stage_fixture
+  # Add, edit, and delete files under both trees.
+  printf 'package pkg\nvar added int\n' >"${BRANCH_DIR}/pkg/sub/added.go"
+  printf 'package pkg\nvar edited int\n' >"${BRANCH_DIR}/pkg/sub/kept.go"
+  mkdir -p "${BRANCH_DIR}/instrumentation/new/deep"
+  printf 'package deep\n' >"${BRANCH_DIR}/instrumentation/new/deep/added.go"
+  printf 'hidden\n' >"${BRANCH_DIR}/instrumentation/lib/.hidden"
+  printf 'data\n' >"${TRUSTED_DIR}/pkg/gone.txt"
+  # The branch controls these files, but staging must not copy them.
+  printf 'hostile\n' >"${BRANCH_DIR}/Makefile"
+  mkdir -p "${BRANCH_DIR}/.tools/bundle"
+  printf 'hostile\n' >"${BRANCH_DIR}/.tools/bundle/main.go"
+  printf 'hostile\n' >"${BRANCH_DIR}/go.mod"
+  stage || fail "staging failed: $(cat "${WORK_DIR}/stage.log")"
+  local tree
+  for tree in pkg instrumentation; do
+    diff -r "${BRANCH_DIR}/${tree}" "${TRUSTED_DIR}/${tree}" || fail "the trusted ${tree} tree differs from the branch"
+  done
+  [[ "$(cat "${TRUSTED_DIR}/Makefile")" == trusted ]] || fail 'staging copied a hostile Makefile'
+  [[ ! -e "${TRUSTED_DIR}/.tools" && ! -e "${TRUSTED_DIR}/go.mod" ]] || fail 'staging copied files outside the bundled trees'
+  [[ ! -e "${TRUSTED_DIR}/pkg/stale.go" ]] || fail 'staging kept a stale file'
+  printf 'PASS: stage the bundled trees and nothing else\n'
+}
+
+test_stage_rejections() {
+  local tree scenario
+  for tree in pkg instrumentation; do
+    for scenario in file-link dir-link fifo root-link missing root-file other-tree-link; do
+      stage_fixture
+      case "${scenario}" in
+        file-link) ln -s /etc/passwd "${BRANCH_DIR}/${tree}/link.go" ;;
+        dir-link) ln -s /tmp "${BRANCH_DIR}/${tree}/dir-link" ;;
+        fifo) mkfifo "${BRANCH_DIR}/${tree}/pipe" ;;
+        root-link)
+          mkdir "${BRANCH_DIR}/elsewhere"
+          rm -rf "${BRANCH_DIR:?}/${tree}"
+          ln -s "${BRANCH_DIR}/elsewhere" "${BRANCH_DIR}/${tree}"
+          ;;
+        missing) rm -rf "${BRANCH_DIR:?}/${tree}" ;;
+        root-file)
+          rm -rf "${BRANCH_DIR:?}/${tree}"
+          printf 'file\n' >"${BRANCH_DIR}/${tree}"
+          ;;
+        other-tree-link)
+          # A bad entry in the other tree must also stop the copy of this one.
+          if [[ "${tree}" == pkg ]]; then
+            ln -s /etc/passwd "${BRANCH_DIR}/instrumentation/lib/link.go"
+          else
+            ln -s /etc/passwd "${BRANCH_DIR}/pkg/sub/link.go"
+          fi
+          printf 'changed\n' >"${BRANCH_DIR}/${tree}/changed.go"
+          ;;
+      esac
+      cp -R "${TRUSTED_DIR}" "${WORK_DIR}/trusted.before"
+      local status=0
+      stage || status=$?
+      [[ "${status}" == 1 ]] || fail "staging exited ${status} for ${scenario} in ${tree}: $(cat "${WORK_DIR}/stage.log")"
+      diff -r "${WORK_DIR}/trusted.before" "${TRUSTED_DIR}" || fail "staging changed the trusted tree for ${scenario} in ${tree}"
+      rm -rf "${WORK_DIR}/trusted.before"
+    done
+  done
+  printf 'PASS: reject unsafe bundled trees before changing the trusted checkout\n'
+}
+
+test_stage_arguments() {
+  local status=0
+  bash "${SCRIPT_DIR}/stage-bundle-sources.sh" --help >/dev/null || fail 'staging rejected --help'
+  bash "${SCRIPT_DIR}/stage-bundle-sources.sh" >/dev/null 2>&1 || status=$?
+  [[ "${status}" == 1 ]] || fail "staging exited ${status} without arguments"
+  status=0
+  bash "${SCRIPT_DIR}/stage-bundle-sources.sh" "${WORK_DIR}/missing-a" "${WORK_DIR}/missing-b" >/dev/null 2>&1 || status=$?
+  [[ "${status}" == 1 ]] || fail "staging exited ${status} for missing directories"
+  printf 'PASS: staging validates its arguments\n'
+}
+
 main() {
   fixture
   bash "${SCRIPT_DIR}/merge-bundle-branch.sh" . "${BASE_SHA}"
@@ -345,6 +462,9 @@ main() {
   test_publication_rejections
   test_scanner_limit
   test_scanner_selection
+  test_stage_sync
+  test_stage_rejections
+  test_stage_arguments
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
