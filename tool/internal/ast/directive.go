@@ -234,11 +234,12 @@ func HasLeadingDirective(stmt dst.Stmt, directive string) bool {
 	return false
 }
 
-// FuncDirectiveMatch pairs a function declaration matched by
-// FindFuncsByDirective with the key:value arguments parsed from its matching
-// directive comment
+// FuncDirectiveMatch pairs a function matched by FindFuncsByDirective with
+// the key:value arguments parsed from its matching directive comment. Exactly
+// one of Func and Lit is set.
 type FuncDirectiveMatch struct {
 	Func *dst.FuncDecl
+	Lit  *dst.FuncLit
 	Args []DirectiveArg
 }
 
@@ -253,29 +254,170 @@ func FileHasLeadingDirective(file *dst.File, directive string) bool {
 	return false
 }
 
-// FindFuncsByDirective returns all top-level function declarations whose
-// leading decorations contain the specified directive comment, together with
-// the directive's key:value arguments for each match.
+// FindFuncsByDirective returns the functions annotated with the specified
+// directive comment, in source order, together with the directive's key:value
+// arguments for each match. A directive in the leading decorations of a node
+// annotates:
+//   - a top-level function declaration or a function literal: the node itself.
+//   - a var declaration or spec, an assignment, or a return statement: the
+//     function literals among its values.
+//   - a go, defer, or expression statement: its function literal.
+//   - a send statement or a key:value element: its value, if it is a function
+//     literal.
+//
+// A call of a function literal counts as that literal. A literal that more
+// than one directive annotates is returned once, with the arguments of the
+// first directive.
 func FindFuncsByDirective(file *dst.File, directive string) ([]FuncDirectiveMatch, error) {
-	var matches []FuncDirectiveMatch
-	for _, decl := range file.Decls {
-		funcDecl, ok := decl.(*dst.FuncDecl)
-		if !ok {
-			continue
+	var (
+		matches []FuncDirectiveMatch
+		err     error
+	)
+	seen := make(map[*dst.FuncLit]bool)
+	visit := func(n dst.Node) bool {
+		if err != nil || n == nil {
+			return false
 		}
-		for _, dec := range funcDecl.Decs.Start {
-			if _, matched := matchDirective(dec, directive); !matched {
-				continue
-			}
-			args, err := parseDirectiveArgs(dec, directive)
-			if err != nil {
-				return nil, ex.Wrapf(err, "parsing directive args for func %s", funcDecl.Name.Name)
+		dec, found := leadingDirective(n, directive)
+		if !found {
+			return true
+		}
+		if funcDecl, isDecl := n.(*dst.FuncDecl); isDecl {
+			args, argsErr := parseDirectiveArgs(dec, directive)
+			if argsErr != nil {
+				err = ex.Wrapf(argsErr, "parsing directive args for func %s", funcDecl.Name.Name)
+				return false
 			}
 			matches = append(matches, FuncDirectiveMatch{Func: funcDecl, Args: args})
-			break
+			return true
 		}
+		var lits []*dst.FuncLit
+		for _, lit := range annotatedFuncLits(n) {
+			if !seen[lit] {
+				seen[lit] = true
+				lits = append(lits, lit)
+			}
+		}
+		if len(lits) == 0 {
+			return true
+		}
+		args, argsErr := parseDirectiveArgs(dec, directive)
+		if argsErr != nil {
+			err = ex.Wrapf(argsErr, "parsing directive args for func literal")
+			return false
+		}
+		for _, lit := range lits {
+			matches = append(matches, FuncDirectiveMatch{Lit: lit, Args: args})
+		}
+		return true
+	}
+	for _, decl := range file.Decls {
+		dst.Inspect(decl, visit)
+	}
+	if err != nil {
+		return nil, err
 	}
 	return matches, nil
+}
+
+// FindStrayDirectives returns the nodes that carry the specified directive
+// comment but that FindFuncsByDirective does not match: a leading directive
+// that annotates no function (see FindFuncsByDirective), or a trailing one.
+// Only the declarations of the file are searched, so a file-level directive
+// before the package clause is not returned.
+func FindStrayDirectives(file *dst.File, directive string) []dst.Node {
+	var stray []dst.Node
+	visit := func(n dst.Node) bool {
+		if n == nil {
+			return false
+		}
+		decs := n.Decorations()
+		if decs == nil {
+			return true
+		}
+		_, lead := leadingDirective(n, directive)
+		_, isDecl := n.(*dst.FuncDecl)
+		if lead && !isDecl && len(annotatedFuncLits(n)) == 0 {
+			stray = append(stray, n)
+			return true
+		}
+		for _, dec := range decs.End {
+			if _, matched := matchDirective(dec, directive); matched {
+				stray = append(stray, n)
+				break
+			}
+		}
+		return true
+	}
+	for _, decl := range file.Decls {
+		dst.Inspect(decl, visit)
+	}
+	return stray
+}
+
+// leadingDirective returns the first leading decoration of n that matches the
+// directive.
+func leadingDirective(n dst.Node, directive string) (string, bool) {
+	decs := n.Decorations()
+	if decs == nil {
+		return "", false
+	}
+	for _, dec := range decs.Start {
+		if _, matched := matchDirective(dec, directive); matched {
+			return dec, true
+		}
+	}
+	return "", false
+}
+
+// annotatedFuncLits returns the function literals that a directive in the
+// leading decorations of n annotates. See FindFuncsByDirective.
+func annotatedFuncLits(n dst.Node) []*dst.FuncLit {
+	switch node := n.(type) {
+	case *dst.GenDecl:
+		lits := make([]*dst.FuncLit, 0, len(node.Specs))
+		for _, spec := range node.Specs {
+			lits = append(lits, annotatedFuncLits(spec)...)
+		}
+		return lits
+	case *dst.DeclStmt:
+		return annotatedFuncLits(node.Decl)
+	case *dst.ValueSpec:
+		return funcLitValues(node.Values...)
+	case *dst.AssignStmt:
+		return funcLitValues(node.Rhs...)
+	case *dst.ReturnStmt:
+		return funcLitValues(node.Results...)
+	case *dst.GoStmt:
+		return funcLitValues(node.Call)
+	case *dst.DeferStmt:
+		return funcLitValues(node.Call)
+	case *dst.ExprStmt:
+		return funcLitValues(node.X)
+	case *dst.SendStmt:
+		return funcLitValues(node.Value)
+	case *dst.KeyValueExpr:
+		return funcLitValues(node.Value)
+	case dst.Expr:
+		return funcLitValues(node)
+	default:
+		return nil
+	}
+}
+
+// funcLitValues returns the function literals among exprs. A call of a
+// function literal counts as that literal. The arguments of a call do not.
+func funcLitValues(exprs ...dst.Expr) []*dst.FuncLit {
+	var lits []*dst.FuncLit
+	for _, expr := range exprs {
+		if call, isCall := expr.(*dst.CallExpr); isCall {
+			expr = call.Fun
+		}
+		if lit, isLit := expr.(*dst.FuncLit); isLit {
+			lits = append(lits, lit)
+		}
+	}
+	return lits
 }
 
 // tokenize splits input on whitespace, respecting double-quoted strings.

@@ -1,0 +1,121 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+//line /golden/work/main.go:6
+type handler struct {
+	fn func()
+}
+
+//otelc:span tag:top
+func topLevel() {
+	/*line /<generated>:1*/ println("span start: name=topLevel args=0 tag=top") /*line /golden/work/main.go:10*/
+}
+
+//otelc:span tag:var
+var pkgVar = func() {
+	/*line /<generated>:1*/ println("span start: name= args=0 tag=var") /*line /golden/work/main.go:13*/
+}
+
+var (
+	//otelc:span tag:spec
+	pkgSpec = func(_ignoredParam_2887651769_0 int) {
+		/*line /<generated>:1*/ println("span start: name= args=1 tag=spec") /*line /golden/work/main.go:17*/
+	}
+)
+
+//line /golden/work/main.go:21
+var pkgValue =
+//otelc:span tag:value
+func() {
+	/*line /<generated>:1*/ println("span start: name= args=0 tag=value") /*line /golden/work/main.go:22*/
+}
+
+func run(f func()) { f() }
+
+func newFunc() func() {
+	//otelc:span tag:return
+	return func() {
+		/*line /<generated>:1*/ println("span start: name= args=0 tag=return") /*line /golden/work/main.go:28*/
+	}
+}
+
+func main() {
+	topLevel()
+	pkgVar()
+	pkgSpec(1)
+	pkgValue()
+
+	//otelc:span tag:define
+	local := func(a, b int) {
+		/*line /<generated>:1*/ println("span start: name= args=2 tag=define") /*line /golden/work/main.go:38*/
+	}
+	local(1, 2)
+
+	//otelc:span tag:local-var
+	var localVar = func() {
+		/*line /<generated>:1*/ println("span start: name= args=0 tag=local-var") /*line /golden/work/main.go:42*/
+	}
+	localVar()
+
+	//otelc:span tag:assign
+	local = func(_ignoredParam_2887651769_0 int, _ignoredParam_2887651769_1 int) {
+		/*line /<generated>:1*/ println("span start: name= args=2 tag=assign") /*line /golden/work/main.go:46*/
+	}
+	/*line /golden/work/main.go:48*/ local(3, 4)
+
+	run(
+		//otelc:span tag:argument
+		func() {
+			/*line /<generated>:1*/ println("span start: name= args=0 tag=argument") /*line /golden/work/main.go:51*/
+		},
+	)
+
+	//otelc:span tag:go
+	go func() {
+		/*line /<generated>:1*/ println("span start: name= args=0 tag=go") /*line /golden/work/main.go:55*/
+	}()
+
+	//otelc:span tag:defer
+	defer func() {
+		/*line /<generated>:1*/ println("span start: name= args=0 tag=defer") /*line /golden/work/main.go:58*/
+	}()
+
+	//otelc:span tag:call
+	func() {
+		/*line /<generated>:1*/ println("span start: name= args=0 tag=call") /*line /golden/work/main.go:61*/
+	}()
+
+	//otelc:span tag:call-result
+	result := func() int {
+		/*line /<generated>:1*/ println("span start: name= args=0 tag=call-result")
+		/*line /golden/work/main.go:65*/ return 1
+	}()
+	_ = result
+
+	h := handler{
+		//otelc:span tag:field
+		fn: func() {
+			/*line /<generated>:1*/ println("span start: name= args=0 tag=field") /*line /golden/work/main.go:69*/
+		},
+	}
+	h.fn()
+
+	funcs := []func(){
+		//otelc:span tag:element
+		func() {
+			/*line /<generated>:1*/ println("span start: name= args=0 tag=element") /*line /golden/work/main.go:75*/
+		},
+	}
+	funcs[0]()
+
+	ch := make(chan func(), 1)
+	//otelc:span tag:send
+	ch <- func() {
+		/*line /<generated>:1*/ println("span start: name= args=0 tag=send") /*line /golden/work/main.go:81*/
+	}
+	(<-ch)()
+
+	newFunc()()
+}
