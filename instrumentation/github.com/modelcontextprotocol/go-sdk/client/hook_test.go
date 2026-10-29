@@ -110,8 +110,7 @@ func TestCallTool_MetaInjectionDoesNotMutateCaller(t *testing.T) {
 	// (it passes even when the caller's map itself was mutated).
 	assert.NotContains(t, origMeta, "traceparent")
 	assert.Equal(t, "value", origMeta["existing"])
-	injected, ok := params.Meta["traceparent"]
-	_ = injected
+	_, ok := params.Meta["traceparent"]
 	require.False(t, ok, "the caller's own Meta map must not receive the traceparent")
 }
 

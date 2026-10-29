@@ -23,6 +23,9 @@ groups:
   #   - `jsonrpc.request.id` is recorded only when the span context survives
   #     into internal/jsonrpc2.(*Connection).Call, i.e. for requests started
   #     from an instrumented session call (tools/call, ...).
+  #   - `network.transport` is recorded on the client span once a transport is
+  #     detected. `*mcp.InMemoryTransport` emits the custom value `inproc`, which
+  #     is outside the standard `tcp`/`udp`/`pipe`/`unix`/`quic` enum.
   #   - Call arguments and results are intentionally not emitted: the GenAI
   #     convention marks `gen_ai.tool.call.arguments` /
   #     `gen_ai.tool.call.result` as Opt-In to avoid leaking user data.
@@ -73,3 +76,4 @@ groups:
       - ref: jsonrpc.request.id
       - ref: rpc.response.status_code
       - ref: error.type
+      - ref: network.transport
