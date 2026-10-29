@@ -848,6 +848,10 @@ var executablePath = os.Executable
 // existing -toolexec was stripped at startup. Must only be called from the
 // real otelc binary, since os.Executable is what nested go commands will run.
 //
+// A -gcflags value without a package pattern applies only to a go command's
+// command-line packages. The outer build applied it to its targets, whereas
+// nested `go list -export` targets the added import, so strip such values here.
+//
 // Nested mode assumes its go commands are `go list -export` spawned from
 // updateImportConfig: those run compile (instrumented), asm, cgo, and pack,
 // and answer -V=full probes, but never link or vet. A new go command spawned
@@ -862,7 +866,7 @@ func EnableNestedToolexec() error {
 	if err != nil {
 		return err
 	}
-	goflags := strings.TrimSpace(os.Getenv("GOFLAGS") + " " + toolexecFlag)
+	goflags := strings.TrimSpace(util.StripUnpatternedGcflagsFromGoflags(os.Getenv("GOFLAGS")) + " " + toolexecFlag)
 	if err = os.Setenv("GOFLAGS", goflags); err != nil {
 		return ex.Wrapf(err, "setting GOFLAGS for nested go commands")
 	}
