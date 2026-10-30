@@ -111,10 +111,10 @@ func OtelAfterTrampoline_UnderscoreReturnFunc2035128499(hookContext HookContext,
 		}
 	}()
 	hookContext.(*HookContextImpl2035128499).returnVals = []interface{}{arg0, arg1}
-	if H12UnderscoreReturnAfter != nil {
-		H12UnderscoreReturnAfter(hookContext, *arg0, *arg1)
+	if otelc_hook_3599636213_H12UnderscoreReturnAfter != nil {
+		otelc_hook_3599636213_H12UnderscoreReturnAfter(hookContext, *arg0, *arg1)
 	}
 }
 
-//go:linkname H12UnderscoreReturnAfter testdata/golden/underscore-return-syntax.H12UnderscoreReturnAfter
-func H12UnderscoreReturnAfter(hookContext HookContext, arg0 int, arg1 error)
+//go:linkname otelc_hook_3599636213_H12UnderscoreReturnAfter testdata/golden/underscore-return-syntax.H12UnderscoreReturnAfter
+func otelc_hook_3599636213_H12UnderscoreReturnAfter(hookContext HookContext, arg0 int, arg1 error)

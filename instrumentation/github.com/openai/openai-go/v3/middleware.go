@@ -25,8 +25,8 @@ import (
 
 	"go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go/internal/streaming"
 	"go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go/v3/semconv"
-	"go.opentelemetry.io/otelc/pkg/otelcconv"
 	"go.opentelemetry.io/otelc/pkg/netutil"
+	"go.opentelemetry.io/otelc/pkg/otelcconv"
 	"go.opentelemetry.io/otelc/pkg/runtime"
 )
 
@@ -213,12 +213,12 @@ func otelMiddleware(
 		spanName := opName
 		baseAttrs := []attribute.KeyValue{
 			semconv.GenAISystem("openai"),
-			semconv.GenAIOperationName(opName),
-			semconv.GenAIProviderName(provider),
+			otelsemconv.GenAIOperationNameKey.String(opName),
+			otelsemconv.GenAIProviderNameKey.String(provider),
 		}
 		if model != "" {
 			spanName = opName + " " + model
-			baseAttrs = append(baseAttrs, semconv.GenAIRequestModel(model))
+			baseAttrs = append(baseAttrs, otelsemconv.GenAIRequestModel(model))
 		}
 		serverAddress, serverPort := netutil.HTTPServerEndpoint(req.URL)
 		if serverAddress != "" && serverPort > 0 {
@@ -348,21 +348,21 @@ func parseChatRequest(body []byte, captureContent bool) (string, []attribute.Key
 
 	var attrs []attribute.KeyValue
 	if req.MaxCompletionTokens != nil {
-		attrs = append(attrs, semconv.GenAIRequestMaxTokens(*req.MaxCompletionTokens))
+		attrs = append(attrs, otelsemconv.GenAIRequestMaxTokensKey.Int64(*req.MaxCompletionTokens))
 	} else if req.MaxTokens != nil {
-		attrs = append(attrs, semconv.GenAIRequestMaxTokens(*req.MaxTokens))
+		attrs = append(attrs, otelsemconv.GenAIRequestMaxTokensKey.Int64(*req.MaxTokens))
 	}
 	if req.Temperature != nil {
-		attrs = append(attrs, semconv.GenAIRequestTemperature(*req.Temperature))
+		attrs = append(attrs, otelsemconv.GenAIRequestTemperature(*req.Temperature))
 	}
 	if req.TopP != nil {
-		attrs = append(attrs, semconv.GenAIRequestTopP(*req.TopP))
+		attrs = append(attrs, otelsemconv.GenAIRequestTopP(*req.TopP))
 	}
 	if req.FrequencyPenalty != nil {
-		attrs = append(attrs, semconv.GenAIRequestFrequencyPenalty(*req.FrequencyPenalty))
+		attrs = append(attrs, otelsemconv.GenAIRequestFrequencyPenalty(*req.FrequencyPenalty))
 	}
 	if req.PresencePenalty != nil {
-		attrs = append(attrs, semconv.GenAIRequestPresencePenalty(*req.PresencePenalty))
+		attrs = append(attrs, otelsemconv.GenAIRequestPresencePenalty(*req.PresencePenalty))
 	}
 	if !captureContent {
 		return req.Model, attrs, nil
@@ -385,19 +385,19 @@ func parseCompletionRequest(body []byte, captureContent bool) (string, []attribu
 
 	var attrs []attribute.KeyValue
 	if req.MaxTokens != nil {
-		attrs = append(attrs, semconv.GenAIRequestMaxTokens(*req.MaxTokens))
+		attrs = append(attrs, otelsemconv.GenAIRequestMaxTokensKey.Int64(*req.MaxTokens))
 	}
 	if req.Temperature != nil {
-		attrs = append(attrs, semconv.GenAIRequestTemperature(*req.Temperature))
+		attrs = append(attrs, otelsemconv.GenAIRequestTemperature(*req.Temperature))
 	}
 	if req.TopP != nil {
-		attrs = append(attrs, semconv.GenAIRequestTopP(*req.TopP))
+		attrs = append(attrs, otelsemconv.GenAIRequestTopP(*req.TopP))
 	}
 	if req.FrequencyPenalty != nil {
-		attrs = append(attrs, semconv.GenAIRequestFrequencyPenalty(*req.FrequencyPenalty))
+		attrs = append(attrs, otelsemconv.GenAIRequestFrequencyPenalty(*req.FrequencyPenalty))
 	}
 	if req.PresencePenalty != nil {
-		attrs = append(attrs, semconv.GenAIRequestPresencePenalty(*req.PresencePenalty))
+		attrs = append(attrs, otelsemconv.GenAIRequestPresencePenalty(*req.PresencePenalty))
 	}
 	if !captureContent {
 		return req.Model, attrs, nil
@@ -525,11 +525,11 @@ func parseChatResponse(body []byte, span trace.Span, captureContent bool) {
 	}
 
 	span.SetAttributes(
-		semconv.GenAIResponseID(resp.ID),
-		semconv.GenAIResponseModel(resp.Model),
-		semconv.GenAIResponseFinishReasons(reasons),
-		semconv.GenAIUsageInputTokens(resp.Usage.PromptTokens),
-		semconv.GenAIUsageOutputTokens(resp.Usage.CompletionTokens),
+		otelsemconv.GenAIResponseID(resp.ID),
+		otelsemconv.GenAIResponseModel(resp.Model),
+		otelsemconv.GenAIResponseFinishReasonsKey.StringSlice(reasons),
+		otelsemconv.GenAIUsageInputTokensKey.Int64(resp.Usage.PromptTokens),
+		otelsemconv.GenAIUsageOutputTokensKey.Int64(resp.Usage.CompletionTokens),
 		otelcconv.GenAIUsageTotalTokensKey.Int64(resp.Usage.TotalTokens),
 	)
 }
@@ -562,11 +562,11 @@ func parseCompletionResponse(body []byte, span trace.Span, captureContent bool) 
 	}
 
 	span.SetAttributes(
-		semconv.GenAIResponseID(resp.ID),
-		semconv.GenAIResponseModel(resp.Model),
-		semconv.GenAIResponseFinishReasons(reasons),
-		semconv.GenAIUsageInputTokens(resp.Usage.PromptTokens),
-		semconv.GenAIUsageOutputTokens(resp.Usage.CompletionTokens),
+		otelsemconv.GenAIResponseID(resp.ID),
+		otelsemconv.GenAIResponseModel(resp.Model),
+		otelsemconv.GenAIResponseFinishReasonsKey.StringSlice(reasons),
+		otelsemconv.GenAIUsageInputTokensKey.Int64(resp.Usage.PromptTokens),
+		otelsemconv.GenAIUsageOutputTokensKey.Int64(resp.Usage.CompletionTokens),
 		otelcconv.GenAIUsageTotalTokensKey.Int64(resp.Usage.TotalTokens),
 	)
 }
@@ -622,8 +622,8 @@ func parseEmbeddingResponse(body []byte, span trace.Span) {
 	}
 
 	span.SetAttributes(
-		semconv.GenAIResponseModel(resp.Model),
-		semconv.GenAIUsageInputTokens(resp.Usage.PromptTokens),
+		otelsemconv.GenAIResponseModel(resp.Model),
+		otelsemconv.GenAIUsageInputTokensKey.Int64(resp.Usage.PromptTokens),
 		otelcconv.GenAIUsageTotalTokensKey.Int64(resp.Usage.TotalTokens),
 	)
 }

@@ -19,7 +19,10 @@ import (
 
 // TestPGOBuildIsInstrumented checks that a main package with a default.pgo is
 // still instrumented. With -pgo=auto (the default) every compile command gets a
-// -pgoprofile flag, so none of them may be skipped.
+// -pgoprofile flag, so none of them may be skipped. The profile must make library
+// code hot: one hot only in main hid a fingerprint mismatch between the outer and
+// the nested build. The workload runs for a fixed time, because a short profile
+// has too few samples to make library code hot.
 func TestPGOBuildIsInstrumented(t *testing.T) {
 	otelcPath, err := testutil.OtelcPath()
 	require.NoError(t, err)
@@ -38,16 +41,40 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"os"
 	"runtime/pprof"
+	"time"
 )
 
-func fib(n int) int {
-	if n < 2 {
-		return n
+func profileHTTP() {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		panic(err)
 	}
-	return fib(n-1) + fib(n-2)
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "profile response")
+	})}
+	defer server.Close()
+	go server.Serve(listener)
+	url := "http://" + listener.Addr().String()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(url)
+		if err != nil {
+			panic(err)
+		}
+		_, err = io.Copy(io.Discard, resp.Body)
+		closeErr := resp.Body.Close()
+		if err != nil {
+			panic(err)
+		}
+		if closeErr != nil {
+			panic(closeErr)
+		}
+	}
 }
 
 func main() {
@@ -59,7 +86,7 @@ func main() {
 		if err := pprof.StartCPUProfile(f); err != nil {
 			panic(err)
 		}
-		fmt.Println(fib(35))
+		profileHTTP()
 		pprof.StopCPUProfile()
 		_ = f.Close()
 		return

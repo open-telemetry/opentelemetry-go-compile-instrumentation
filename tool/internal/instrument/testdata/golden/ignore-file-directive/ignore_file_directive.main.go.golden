@@ -123,8 +123,8 @@ func OtelBeforeTrampoline_ForcedFunc191951179(param0 *string) (hookContext *Hook
 	hookContext.params = []interface{}{param0}
 	hookContext.funcName = "ForcedFunc"
 	hookContext.packageName = "main"
-	if HBefore != nil {
-		HBefore(hookContext, *param0)
+	if otelc_hook_1508112018_HBefore != nil {
+		otelc_hook_1508112018_HBefore(hookContext, *param0)
 	}
 	return hookContext, hookContext.skipCall
 }
@@ -143,13 +143,13 @@ func OtelAfterTrampoline_ForcedFunc191951179(hookContext HookContext) {
 		}
 	}()
 	hookContext.(*HookContextImpl191951179).returnVals = []interface{}{}
-	if HAfter != nil {
-		HAfter(hookContext)
+	if otelc_hook_1508112018_HAfter != nil {
+		otelc_hook_1508112018_HAfter(hookContext)
 	}
 }
 
-//go:linkname HBefore testdata/golden/ignore-file-directive.HBefore
-func HBefore(hookContext HookContext, param0 string)
+//go:linkname otelc_hook_1508112018_HBefore testdata/golden/ignore-file-directive.HBefore
+func otelc_hook_1508112018_HBefore(hookContext HookContext, param0 string)
 
-//go:linkname HAfter testdata/golden/ignore-file-directive.HAfter
-func HAfter(hookContext HookContext)
+//go:linkname otelc_hook_1508112018_HAfter testdata/golden/ignore-file-directive.HAfter
+func otelc_hook_1508112018_HAfter(hookContext HookContext)

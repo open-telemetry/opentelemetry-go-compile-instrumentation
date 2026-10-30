@@ -260,6 +260,7 @@ format/go: ## Format Go code only
 format/go: $(GOLANGCI_LINT)
 	@echo "Formatting Go code..."
 	$(GOLANGCI_LINT) fmt --config .tools/golangci.yml
+	cd $(TOOLS_DIR)/bundlerepair && GOWORK=off $(GOLANGCI_LINT) fmt --config ../golangci.yml
 
 format/yaml: ## Format YAML files only (excludes testdata and schemas/otelc/.deps)
 format/yaml: $(YAMLFMT)
@@ -281,11 +282,13 @@ lint/go: ## Run golangci-lint on Go code
 lint/go: $(GOLANGCI_LINT) package
 	@echo "Linting Go code..."
 	$(GOLANGCI_LINT) run --config .tools/golangci.yml
+	cd $(TOOLS_DIR)/bundlerepair && GOWORK=off $(GOLANGCI_LINT) run --config ../golangci.yml
 
 lint/go/fix: ## Run golangci-lint on Go code and fix the issues
 lint/go/fix: $(GOLANGCI_LINT)
 	@echo "Linting Go code..."
 	$(GOLANGCI_LINT) run --config .tools/golangci.yml --fix
+	cd $(TOOLS_DIR)/bundlerepair && GOWORK=off $(GOLANGCI_LINT) run --config ../golangci.yml --fix
 
 lint/yaml: ## Lint YAML formatting
 lint/yaml: $(YAMLFMT)
@@ -529,7 +532,12 @@ benchmark/threshold: build ## Enforce absolute otelc overhead ceiling (fails if 
 # when Go compiles the test packages, the embed will fail.
 
 test: ## Run all tests (unit + integration + e2e)
-test: test-unit test-integration test-e2e
+test: test-bundle-workflows test-unit test-integration test-e2e
+
+.PHONY: test-bundle-workflows
+test-bundle-workflows: ## Test the bundle repair tool and check the repair workflows
+	@GOWORK=off go -C .tools test -count=1 ./workflows
+	@GOWORK=off go -C .tools/bundlerepair test -count=1 -race ./...
 
 test-unit: test-unit/tool test-unit/pkg test-unit/instrumentation test-unit/demo test-unit/helper ## Run all unit tests (tool + pkg + demo + test helpers)
 

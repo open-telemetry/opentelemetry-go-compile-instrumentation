@@ -1,0 +1,347 @@
+type: object
+additionalProperties: false
+properties:
+  general:
+    $ref: "#/$defs/ExperimentalGeneralInstrumentation"
+    description: |
+      Configure general SemConv options that may apply to multiple languages and instrumentations.
+      Instrumentation may merge general config options with the language specific configuration at .instrumentation.<language>.
+    defaultBehavior: default values as described in ExperimentalGeneralInstrumentation are used
+  cpp:
+    $ref: "#/$defs/ExperimentalLanguageSpecificInstrumentation"
+    description: Configure C++ language-specific instrumentation libraries.
+    defaultBehavior: instrumentation defaults are used
+  dotnet:
+    $ref: "#/$defs/ExperimentalLanguageSpecificInstrumentation"
+    description: |
+      Configure .NET language-specific instrumentation libraries.
+      Each entry's key identifies a particular instrumentation library. The corresponding value configures it.
+    defaultBehavior: instrumentation defaults are used
+  erlang:
+    $ref: "#/$defs/ExperimentalLanguageSpecificInstrumentation"
+    description: |
+      Configure Erlang language-specific instrumentation libraries.
+      Each entry's key identifies a particular instrumentation library. The corresponding value configures it.
+    defaultBehavior: instrumentation defaults are used
+  go:
+    $ref: "#/$defs/ExperimentalLanguageSpecificInstrumentation"
+    description: |
+      Configure Go language-specific instrumentation libraries.
+      Each entry's key identifies a particular instrumentation library. The corresponding value configures it.
+    defaultBehavior: instrumentation defaults are used
+  java:
+    $ref: "#/$defs/ExperimentalLanguageSpecificInstrumentation"
+    description: |
+      Configure Java language-specific instrumentation libraries.
+      Each entry's key identifies a particular instrumentation library. The corresponding value configures it.
+    defaultBehavior: instrumentation defaults are used
+  js:
+    $ref: "#/$defs/ExperimentalLanguageSpecificInstrumentation"
+    description: |
+      Configure JavaScript language-specific instrumentation libraries.
+      Each entry's key identifies a particular instrumentation library. The corresponding value configures it.
+    defaultBehavior: instrumentation defaults are used
+  php:
+    $ref: "#/$defs/ExperimentalLanguageSpecificInstrumentation"
+    description: |
+      Configure PHP language-specific instrumentation libraries.
+      Each entry's key identifies a particular instrumentation library. The corresponding value configures it.
+    defaultBehavior: instrumentation defaults are used
+  python:
+    $ref: "#/$defs/ExperimentalLanguageSpecificInstrumentation"
+    description: |
+      Configure Python language-specific instrumentation libraries.
+      Each entry's key identifies a particular instrumentation library. The corresponding value configures it.
+    defaultBehavior: instrumentation defaults are used
+  ruby:
+    $ref: "#/$defs/ExperimentalLanguageSpecificInstrumentation"
+    description: |
+      Configure Ruby language-specific instrumentation libraries.
+      Each entry's key identifies a particular instrumentation library. The corresponding value configures it.
+    defaultBehavior: instrumentation defaults are used
+  rust:
+    $ref: "#/$defs/ExperimentalLanguageSpecificInstrumentation"
+    description: |
+      Configure Rust language-specific instrumentation libraries.
+      Each entry's key identifies a particular instrumentation library. The corresponding value configures it.
+    defaultBehavior: instrumentation defaults are used
+  swift:
+    $ref: "#/$defs/ExperimentalLanguageSpecificInstrumentation"
+    description: |
+      Configure Swift language-specific instrumentation libraries.
+      Each entry's key identifies a particular instrumentation library. The corresponding value configures it.
+    defaultBehavior: instrumentation defaults are used
+$defs:
+  ExperimentalGeneralInstrumentation:
+    type: object
+    additionalProperties: false
+    properties:
+      http:
+        $ref: "#/$defs/ExperimentalHttpInstrumentation"
+        description: |
+          Configure instrumentations following the http semantic conventions.
+          See http semantic conventions: https://opentelemetry.io/docs/specs/semconv/http/
+        defaultBehavior: defaults as described in ExperimentalHttpInstrumentation are used
+      code:
+        $ref: "#/$defs/ExperimentalCodeInstrumentation"
+        description: |
+          Configure instrumentations following the code semantic conventions.
+          See code semantic conventions: https://opentelemetry.io/docs/specs/semconv/registry/attributes/code/
+        defaultBehavior: defaults as described in ExperimentalCodeInstrumentation are used
+      db:
+        $ref: "#/$defs/ExperimentalDbInstrumentation"
+        description: |
+          Configure instrumentations following the database semantic conventions.
+          See database semantic conventions: https://opentelemetry.io/docs/specs/semconv/database/
+        defaultBehavior: defaults as described in ExperimentalDbInstrumentation are used
+      gen_ai:
+        $ref: "#/$defs/ExperimentalGenAiInstrumentation"
+        description: |
+          Configure instrumentations following the GenAI semantic conventions.
+          See GenAI semantic conventions: https://opentelemetry.io/docs/specs/semconv/gen-ai/
+        defaultBehavior: defaults as described in ExperimentalGenAiInstrumentation are used
+      messaging:
+        $ref: "#/$defs/ExperimentalMessagingInstrumentation"
+        description: |
+          Configure instrumentations following the messaging semantic conventions.
+          See messaging semantic conventions: https://opentelemetry.io/docs/specs/semconv/messaging/
+        defaultBehavior: defaults as described in ExperimentalMessagingInstrumentation are used
+      rpc:
+        $ref: "#/$defs/ExperimentalRpcInstrumentation"
+        description: |
+          Configure instrumentations following the RPC semantic conventions.
+          See RPC semantic conventions: https://opentelemetry.io/docs/specs/semconv/rpc/
+        defaultBehavior: defaults as described in ExperimentalRpcInstrumentation are used
+      sanitization:
+        $ref: "#/$defs/ExperimentalSanitization"
+        description: |
+          Configure general sanitization options.
+        defaultBehavior: defaults as described in ExperimentalSanitization are used
+      stability_opt_in_list:
+        type: [string, "null"]
+        description: |
+          Configure semantic convention stability opt-in as a comma-separated list.
+          This property follows the format and semantics of the OTEL_SEMCONV_STABILITY_OPT_IN environment variable.
+          Controls the emission of stable vs. experimental semantic conventions for instrumentation.
+          This setting is only intended for migrating from experimental to stable semantic conventions.
+
+          Known values include:
+          - http: Emit stable HTTP and networking conventions only
+          - http/dup: Emit both old and stable HTTP and networking conventions (for phased migration)
+          - database: Emit stable database conventions only
+          - database/dup: Emit both old and stable database conventions (for phased migration)
+          - rpc: Emit stable RPC conventions only
+          - rpc/dup: Emit both experimental and stable RPC conventions (for phased migration)
+          - messaging: Emit stable messaging conventions only
+          - messaging/dup: Emit both old and stable messaging conventions (for phased migration)
+          - code: Emit stable code conventions only
+          - code/dup: Emit both old and stable code conventions (for phased migration)
+
+          Multiple values can be specified as a comma-separated list (e.g., "http,database/dup").
+          Additional signal types may be supported in future versions.
+
+          Domain-specific semconv properties (e.g., .instrumentation/development.general.db.semconv) take precedence over this general setting.
+
+          See:
+          - HTTP migration: https://opentelemetry.io/docs/specs/semconv/non-normative/http-migration/
+          - Database migration: https://opentelemetry.io/docs/specs/semconv/database/
+          - RPC: https://opentelemetry.io/docs/specs/semconv/rpc/
+          - Messaging: https://opentelemetry.io/docs/specs/semconv/messaging/messaging-spans/
+        defaultBehavior: no opt-in is configured and instrumentations continue emitting their default semantic convention version
+  ExperimentalSemconvConfig:
+    type: object
+    additionalProperties: false
+    properties:
+      version:
+        type: [integer, "null"]
+        minimum: 0
+        description: |
+          The target semantic convention version for this domain (e.g., 1).
+        defaultBehavior: the latest stable version is used, or if no stable version is available and .experimental is true then the latest experimental version is used
+      experimental:
+        type: [boolean, "null"]
+        description: |
+          Use latest experimental semantic conventions (before stable is available or to enable experimental features on top of stable conventions).
+        defaultBehavior: "false is used"
+      dual_emit:
+        type: [boolean, "null"]
+        description: |
+          When true, also emit the previous major version alongside the target version.
+          For version=1, the previous version refers to the pre-stable conventions that the instrumentation emitted before the first stable semantic convention version was defined.
+          For version=2 and above, the previous version is the prior stable major version (e.g., version=2, dual_emit=true emits both v2 and v1).
+          Enables dual-emit for phased migration between versions.
+        defaultBehavior: "false is used"
+  ExperimentalHttpClientInstrumentation:
+    type: object
+    additionalProperties: false
+    properties:
+      request_captured_headers:
+        type: array
+        minItems: 1
+        items:
+          type: string
+        description: |
+          Configure headers to capture for outbound http requests.
+        defaultBehavior: no outbound request headers are captured
+      response_captured_headers:
+        type: array
+        minItems: 1
+        items:
+          type: string
+        description: |
+          Configure headers to capture for inbound http responses.
+        defaultBehavior: no inbound response headers are captured
+      known_methods:
+        type: array
+        minItems: 0
+        items:
+          type: string
+        description: |
+          Override the default list of known HTTP methods.
+          Known methods are case-sensitive.
+          This is a full override of the default known methods, not a list of known methods in addition to the defaults.
+        defaultBehavior: HTTP methods GET, HEAD, POST, PUT, DELETE, CONNECT, OPTIONS, TRACE, PATCH are known
+  ExperimentalHttpServerInstrumentation:
+    type: object
+    additionalProperties: false
+    properties:
+      request_captured_headers:
+        type: array
+        minItems: 1
+        items:
+          type: string
+        description: |
+          Configure headers to capture for inbound http requests.
+        defaultBehavior: no request headers are captured
+      response_captured_headers:
+        type: array
+        minItems: 1
+        items:
+          type: string
+        description: |
+          Configure headers to capture for outbound http responses.
+        defaultBehavior: no response headers are captures
+      known_methods:
+        type: array
+        minItems: 0
+        items:
+          type: string
+        description: |
+          Override the default list of known HTTP methods.
+          Known methods are case-sensitive.
+          This is a full override of the default known methods, not a list of known methods in addition to the defaults.
+        defaultBehavior: HTTP methods GET, HEAD, POST, PUT, DELETE, CONNECT, OPTIONS, TRACE, PATCH are known
+  ExperimentalHttpInstrumentation:
+    type: object
+    additionalProperties: false
+    properties:
+      semconv:
+        $ref: "#/$defs/ExperimentalSemconvConfig"
+        description: |
+          Configure HTTP semantic convention version and migration behavior.
+
+          This property takes precedence over the .instrumentation/development.general.stability_opt_in_list setting.
+
+          See HTTP migration: https://opentelemetry.io/docs/specs/semconv/non-normative/http-migration/
+        defaultBehavior: uses the general stability_opt_in_list setting, or instrumentations continue emitting their default semantic convention version if not set
+      client:
+        $ref: "#/$defs/ExperimentalHttpClientInstrumentation"
+        description: Configure instrumentations following the http client semantic conventions.
+        defaultBehavior: defaults as described in ExperimentalHttpClientInstrumentation are used
+      server:
+        $ref: "#/$defs/ExperimentalHttpServerInstrumentation"
+        description: Configure instrumentations following the http server semantic conventions.
+        defaultBehavior: defaults as described in ExperimentalHttpServerInstrumentation are used
+  ExperimentalCodeInstrumentation:
+    type: object
+    additionalProperties: false
+    properties:
+      semconv:
+        $ref: "#/$defs/ExperimentalSemconvConfig"
+        description: |
+          Configure code semantic convention version and migration behavior.
+
+          This property takes precedence over the .instrumentation/development.general.stability_opt_in_list setting.
+
+          See code semantic conventions: https://opentelemetry.io/docs/specs/semconv/registry/attributes/code/
+        defaultBehavior: uses the general stability_opt_in_list setting, or instrumentations continue emitting their default semantic convention version if not set
+  ExperimentalDbInstrumentation:
+    type: object
+    additionalProperties: false
+    properties:
+      semconv:
+        $ref: "#/$defs/ExperimentalSemconvConfig"
+        description: |
+          Configure database semantic convention version and migration behavior.
+
+          This property takes precedence over the .instrumentation/development.general.stability_opt_in_list setting.
+
+          See database migration: https://opentelemetry.io/docs/specs/semconv/database/
+        defaultBehavior: uses the general stability_opt_in_list setting, or instrumentations continue emitting their default semantic convention version if not set
+  ExperimentalGenAiInstrumentation:
+    type: object
+    additionalProperties: false
+    properties:
+      semconv:
+        $ref: "#/$defs/ExperimentalSemconvConfig"
+        description: |
+          Configure GenAI semantic convention version and migration behavior.
+
+          This property takes precedence over the .instrumentation/development.general.stability_opt_in_list setting.
+
+          See GenAI semantic conventions: https://opentelemetry.io/docs/specs/semconv/gen-ai/
+        defaultBehavior: uses the general stability_opt_in_list setting, or instrumentations continue emitting their default semantic convention version if not set
+  ExperimentalRpcInstrumentation:
+    type: object
+    additionalProperties: false
+    properties:
+      semconv:
+        $ref: "#/$defs/ExperimentalSemconvConfig"
+        description: |
+          Configure RPC semantic convention version and migration behavior.
+
+          This property takes precedence over the .instrumentation/development.general.stability_opt_in_list setting.
+
+          See RPC semantic conventions: https://opentelemetry.io/docs/specs/semconv/rpc/
+        defaultBehavior: uses the general stability_opt_in_list setting, or instrumentations continue emitting their default semantic convention version if not set
+  ExperimentalMessagingInstrumentation:
+    type: object
+    additionalProperties: false
+    properties:
+      semconv:
+        $ref: "#/$defs/ExperimentalSemconvConfig"
+        description: |
+          Configure messaging semantic convention version and migration behavior.
+
+          This property takes precedence over the .instrumentation/development.general.stability_opt_in_list setting.
+
+          See messaging semantic conventions: https://opentelemetry.io/docs/specs/semconv/messaging/
+        defaultBehavior: uses the general stability_opt_in_list setting, or instrumentations continue emitting their default semantic convention version if not set
+  ExperimentalSanitization:
+    type: object
+    additionalProperties: false
+    properties:
+      url:
+        $ref: "#/$defs/ExperimentalUrlSanitization"
+        description: |
+          Configure URL sanitization options.
+        defaultBehavior: defaults as described in ExperimentalUrlSanitization are used
+  ExperimentalUrlSanitization:
+    type: object
+    additionalProperties: false
+    properties:
+      sensitive_query_parameters:
+        type: array
+        minItems: 0
+        items:
+          type: string
+        description: |
+          List of query parameter names whose values should be redacted from URLs.
+          Query parameter names are case-sensitive.
+          This is a full override of the default sensitive query parameter keys, it is not a list of keys in addition to the defaults.
+          Set to an empty array to disable query parameter redaction.
+        defaultBehavior: the default sensitive query parameter list as defined by the url semantic conventions (https://github.com/open-telemetry/semantic-conventions/blob/main/docs/registry/attributes/url.md) is used
+  ExperimentalLanguageSpecificInstrumentation:
+    type: object
+    additionalProperties:
+      type: object

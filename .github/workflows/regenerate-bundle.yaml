@@ -1,271 +1,123 @@
 name: Regenerate Bundle
-
+run-name: 'Bundle repair #${{ github.event.issue.number || inputs.pr_number }}'
 on:
   issue_comment:
     types: [created]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number
+        required: true
+        type: string
+
+  workflow_call:
+    inputs:
+      pr_number:
+        required: true
+        type: string
+      expected_head_sha:
+        required: false
+        type: string
+      expected_base_sha:
+        required: false
+        type: string
+      expires_at:
+        required: false
+        type: string
+    secrets:
+      OTELC_BUNDLE_PUSH_TOKEN:
+        description: Publisher token. The bundle-publisher environment supplies the value.
+        required: false
+      OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY:
+        required: false
 
 permissions: {}
+
+env:
+  AUTO_DEADLINE: ${{ inputs.expires_at }}
+  BASE_SHA: ${{ inputs.expected_base_sha }}
+  CALLER_WORKFLOW_REF: ${{ github.workflow_ref }}
+  COMMENTER: ${{ github.event.comment.user.login || github.actor }}
+  EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
+  PR_NUMBER: ${{ github.event.issue.number || inputs.pr_number }}
+  REPO: ${{ github.repository }}
+  RUN_ATTEMPT: ${{ github.run_attempt }}
+  TRIGGERING_ACTOR: ${{ github.triggering_actor }}
 
 jobs:
   prepare:
     name: Prepare bundle regeneration
     runs-on: ubuntu-latest
-    if: >-
-      github.event.issue.pull_request && contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
-      && github.event.comment.body == '/regenerate-bundle' && vars.OTELBOT_COMPILE_INSTRUMENTATION_CLIENT_ID != ''
+    timeout-minutes: 5
+    if: |-
+      github.repository ==
+      'open-telemetry/opentelemetry-go-compile-instrumentation' &&
+      github.ref == 'refs/heads/main' &&
+      ((github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'),
+      github.event.comment.author_association) &&
+      github.event.comment.body == '/regenerate-bundle') ||
+      inputs.pr_number != '')
     permissions:
       contents: read
     outputs:
+      authorized: ${{ steps.pr.outputs.authorized }}
+      pr_number: ${{ steps.pr.outputs.pr_number }}
       base_ref: ${{ steps.pr.outputs.base_ref }}
       base_sha: ${{ steps.pr.outputs.base_sha }}
-      bot_id: ${{ steps.pr.outputs.bot_id }}
-      bot_login: ${{ steps.pr.outputs.bot_login }}
       head_ref: ${{ steps.pr.outputs.head_ref }}
       head_repo_full: ${{ steps.pr.outputs.head_repo_full }}
       head_sha: ${{ steps.pr.outputs.head_sha }}
       is_cross_repository: ${{ steps.pr.outputs.is_cross_repository }}
     steps:
-      - name: Check commenter permission
-        env:
-          COMMENTER: ${{ github.event.comment.user.login }}
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-        run: |
-          if [[ ! "${COMMENTER}" =~ ^[A-Za-z0-9-]+$ ]]; then
-            echo "invalid commenter login" >&2
-            exit 1
-          fi
-          permission="$(gh api "repos/${REPO}/collaborators/${COMMENTER}/permission" --jq '.permission')"
-          if [[ "${permission}" != "admin" && "${permission}" != "maintain" \
-            && "${permission}" != "write" ]]; then
-            echo "${COMMENTER} does not have permission to update pull request branches" >&2
-            exit 1
-          fi
-
-      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510  # v3.3.0
-        id: app-token
-        with:
-          client-id: ${{ vars.OTELBOT_COMPILE_INSTRUMENTATION_CLIENT_ID }}
-          private-key: ${{ secrets.OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY }}
-          permission-pull-requests: write
-
-      - name: Get PR and bot details
-        id: pr
-        env:
-          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.issue.number }}
-        run: |
-          pr_json="$(gh api "repos/${REPO}/pulls/${PR_NUMBER}")"
-          base_ref="$(jq -r '.base.ref' <<<"${pr_json}")"
-          base_sha="$(jq -r '.base.sha' <<<"${pr_json}")"
-          head_ref="$(jq -r '.head.ref' <<<"${pr_json}")"
-          head_repo_full="$(jq -r '.head.repo.full_name' <<<"${pr_json}")"
-          head_sha="$(jq -r '.head.sha' <<<"${pr_json}")"
-          if ! git check-ref-format "refs/heads/${base_ref}" >/dev/null \
-            || ! git check-ref-format "refs/heads/${head_ref}" >/dev/null \
-            || [[ ! "${head_repo_full}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ \
-            || ! "${base_sha}" =~ ^[0-9a-f]{40}$ \
-            || ! "${head_sha}" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "pull request contains invalid repository or ref metadata" >&2
-            exit 1
-          fi
-          bot_login="${APP_SLUG}[bot]"
-          bot_id="$(gh api "users/${bot_login}" --jq '.id')"
-          if [[ ! "${bot_id}" =~ ^[0-9]+$ ]]; then
-            echo "cannot resolve the bot identity for ${bot_login}" >&2
-            exit 1
-          fi
-          {
-            echo "base_ref=${base_ref}"
-            echo "base_sha=${base_sha}"
-            echo "bot_id=${bot_id}"
-            echo "bot_login=${bot_login}"
-            echo "head_ref=${head_ref}"
-            echo "head_repo_full=${head_repo_full}"
-            echo "head_sha=${head_sha}"
-            if [[ "${head_repo_full}" == "${REPO}" ]]; then
-              echo "is_cross_repository=false"
-            else
-              echo "is_cross_repository=true"
-            fi
-          } >>"${GITHUB_OUTPUT}"
-
-      - name: Add reaction
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          REPO: ${{ github.repository }}
-          COMMENT_ID: ${{ github.event.comment.id }}
-        run: gh api "repos/${REPO}/issues/comments/${COMMENT_ID}/reactions" -f content='+1'
-
-  generate:
-    name: Generate bundle
-    needs: prepare
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
-          fetch-depth: 0
           persist-credentials: false
-          ref: ${{ needs.prepare.outputs.head_sha }}
-          repository: ${{ needs.prepare.outputs.head_repo_full }}
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           cache: false
           go-version-file: go.mod
 
-      - name: Merge base branch
+      - name: Build bundle repair tool
         env:
-          BASE_REF: ${{ needs.prepare.outputs.base_ref }}
-          BASE_SHA: ${{ needs.prepare.outputs.base_sha }}
-          BOT_ID: ${{ needs.prepare.outputs.bot_id }}
-          BOT_LOGIN: ${{ needs.prepare.outputs.bot_login }}
-          REPO: ${{ github.repository }}
-        run: |
-          git config user.name "${BOT_LOGIN}"
-          git config user.email "${BOT_ID}+${BOT_LOGIN}@users.noreply.github.com"
-          git config merge.otelc-bundle.name "Keep current otelc-bundle.tgz"
-          git config merge.otelc-bundle.driver true
-          git_dir="$(git rev-parse --git-dir)"
-          mkdir -p "${git_dir}/info"
-          printf '%s\n%s\n' '* !merge' 'tool/data/otelc-bundle.tgz merge=otelc-bundle' \
-            >"${git_dir}/info/attributes"
-          git fetch --no-tags --force "https://github.com/${REPO}.git" \
-            "refs/heads/${BASE_REF}:refs/remotes/upstream/${BASE_REF}"
-          if [[ "$(git rev-parse "refs/remotes/upstream/${BASE_REF}")" != "${BASE_SHA}" ]]; then
-            echo "base branch moved while preparing regeneration; retry /regenerate-bundle" >&2
-            exit 1
-          fi
-          git merge --no-ff --no-commit "refs/remotes/upstream/${BASE_REF}"
+          GOFLAGS: -mod=readonly
+          GOPROXY: 'off'
+          GOTOOLCHAIN: local
+        run: go -C .tools/bundlerepair build -trimpath -o "${RUNNER_TEMP}/bundlerepair" .
 
-      - name: Regenerate bundle
-        run: make package
-
-      - name: Upload bundle
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
-        with:
-          name: otelc-bundle-pr-${{ github.event.issue.number }}
-          path: tool/data/otelc-bundle.tgz
-          compression-level: 0
-          if-no-files-found: error
-          retention-days: 1
-
-  push_update:
-    name: Push regenerated bundle
-    needs: [prepare, generate]
-    if: needs.prepare.outputs.is_cross_repository == 'false'
-    runs-on: ubuntu-latest
-    permissions: {}
-    steps:
-      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510  # v3.3.0
-        id: app-token
-        with:
-          client-id: ${{ vars.OTELBOT_COMPILE_INSTRUMENTATION_CLIENT_ID }}
-          private-key: ${{ secrets.OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY }}
-          permission-contents: write
-          permission-pull-requests: read
-          permission-workflows: write
-
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: true
-          ref: ${{ needs.prepare.outputs.head_sha }}
-          repository: ${{ needs.prepare.outputs.head_repo_full }}
-          token: ${{ steps.app-token.outputs.token }}
-
-      - uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3  # v8.0.0
-        with:
-          name: otelc-bundle-pr-${{ github.event.issue.number }}
-          path: generated
-
-      - name: Commit and push
+      - name: Get pull request details
+        id: pr
         env:
-          BASE_REF: ${{ needs.prepare.outputs.base_ref }}
-          BASE_SHA: ${{ needs.prepare.outputs.base_sha }}
-          BOT_ID: ${{ needs.prepare.outputs.bot_id }}
-          BOT_LOGIN: ${{ needs.prepare.outputs.bot_login }}
-          EXPECTED_HEAD_SHA: ${{ needs.prepare.outputs.head_sha }}
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          HEAD_REF: ${{ needs.prepare.outputs.head_ref }}
-          PR_NUMBER: ${{ github.event.issue.number }}
-          REPO: ${{ github.repository }}
+          AUTHOR_ASSOCIATION: ${{ github.event.comment.author_association }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+          ISSUE_IS_PULL_REQUEST: ${{ github.event.issue.pull_request && 'true' || 'false' }}
         run: |
-          git config user.name "${BOT_LOGIN}"
-          git config user.email "${BOT_ID}+${BOT_LOGIN}@users.noreply.github.com"
-          git config merge.otelc-bundle.name "Keep current otelc-bundle.tgz"
-          git config merge.otelc-bundle.driver true
-          git_dir="$(git rev-parse --git-dir)"
-          mkdir -p "${git_dir}/info"
-          printf '%s\n%s\n' '* !merge' 'tool/data/otelc-bundle.tgz merge=otelc-bundle' \
-            >"${git_dir}/info/attributes"
-          git fetch --no-tags --force origin \
-            "refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
-          if [[ "$(git rev-parse "refs/remotes/origin/${BASE_REF}")" != "${BASE_SHA}" ]]; then
-            echo "base branch moved while generating the bundle; retry /regenerate-bundle" >&2
-            exit 1
-          fi
-          git merge --no-ff --no-commit "refs/remotes/origin/${BASE_REF}"
-          cp generated/otelc-bundle.tgz tool/data/otelc-bundle.tgz
-          git add tool/data/otelc-bundle.tgz
-          if ! git rev-parse -q --verify MERGE_HEAD >/dev/null \
-            && git diff --quiet --cached; then
-            echo "Bundle is already up to date."
-            exit 0
-          fi
-          git commit -m "chore: merge ${BASE_REF} and regenerate otelc-bundle.tgz"
+          "${RUNNER_TEMP}/bundlerepair" prepare
 
-          current="$(gh api "repos/${REPO}/pulls/${PR_NUMBER}")"
-          if [[ "$(jq -r '.state' <<<"${current}")" != "open" \
-            || "$(jq -r '.head.sha' <<<"${current}")" != "${EXPECTED_HEAD_SHA}" \
-            || "$(jq -r '.base.ref' <<<"${current}")" != "${BASE_REF}" \
-            || "$(jq -r '.base.sha' <<<"${current}")" != "${BASE_SHA}" ]]; then
-            echo "pull request closed or changed; not pushing" >&2
-            exit 1
-          fi
-          git push --force-with-lease="refs/heads/${HEAD_REF}:${EXPECTED_HEAD_SHA}" \
-            origin "HEAD:refs/heads/${HEAD_REF}"
-
-  report:
-    name: Report regeneration result
-    needs: [prepare, generate, push_update]
-    if: >-
-      always() && needs.prepare.result == 'success' && (needs.generate.result != 'success' || (needs.prepare.outputs.is_cross_repository
-      == 'true' && needs.generate.result == 'success') || (needs.prepare.outputs.is_cross_repository == 'false' && needs.push_update.result
-      == 'failure'))
-    runs-on: ubuntu-latest
-    permissions: {}
-    steps:
-      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510  # v3.3.0
-        id: app-token
-        with:
-          client-id: ${{ vars.OTELBOT_COMPILE_INSTRUMENTATION_CLIENT_ID }}
-          private-key: ${{ secrets.OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY }}
-          permission-pull-requests: write
-
-      - name: Report result
-        env:
-          BASE_REF: ${{ needs.prepare.outputs.base_ref }}
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          GENERATE_RESULT: ${{ needs.generate.result }}
-          IS_CROSS_REPOSITORY: ${{ needs.prepare.outputs.is_cross_repository }}
-          PR_NUMBER: ${{ github.event.issue.number }}
-          PUSH_RESULT: ${{ needs.push_update.result }}
-          REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.run_id }}
-          SERVER_URL: ${{ github.server_url }}
-        run: |
-          if [[ "${GENERATE_RESULT}" != "success" ]]; then
-            body="Bundle regeneration failed after attempting to merge \`${BASE_REF}\`. Check the [workflow run](${SERVER_URL}/${REPO}/actions/runs/${RUN_ID}) for the conflict or build error."
-          elif [[ "${IS_CROSS_REPOSITORY}" == "true" ]]; then
-            body="The regenerated bundle for this fork PR is available as the \`otelc-bundle-pr-${PR_NUMBER}\` artifact in the [workflow run](${SERVER_URL}/${REPO}/actions/runs/${RUN_ID}). Download it, replace \`tool/data/otelc-bundle.tgz\` after merging \`${BASE_REF}\`, then commit and push the archive. The artifact expires after one day."
-          elif [[ "${PUSH_RESULT}" == "failure" ]]; then
-            body="The bundle was regenerated, but the update could not be pushed because the pull request changed during the run. Retry \`/regenerate-bundle\`."
-          else
-            exit 0
-          fi
-          gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" -f body="${body}"
+  repair:
+    needs: prepare
+    if: needs.prepare.outputs.authorized == 'true'
+    concurrency:
+      group: bundle-regeneration-${{ needs.prepare.outputs.pr_number }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    uses: ./.github/workflows/regenerate-bundle-worker.yaml
+    with:
+      pr_number: ${{ needs.prepare.outputs.pr_number }}
+      base_ref: ${{ needs.prepare.outputs.base_ref }}
+      base_sha: ${{ needs.prepare.outputs.base_sha }}
+      head_ref: ${{ needs.prepare.outputs.head_ref }}
+      head_repo_full: ${{ needs.prepare.outputs.head_repo_full }}
+      head_sha: ${{ needs.prepare.outputs.head_sha }}
+      is_cross_repository: ${{ needs.prepare.outputs.is_cross_repository }}
+      expires_at: ${{ inputs.expires_at }}
+    secrets:
+      OTELC_BUNDLE_PUSH_TOKEN: ${{ secrets.OTELC_BUNDLE_PUSH_TOKEN }}
+      OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY: >-
+        ${{ secrets.OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY }}
