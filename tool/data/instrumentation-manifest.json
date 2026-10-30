@@ -78,7 +78,7 @@
   {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/redis/go-redis/v9",
     "target": "github.com/redis/go-redis/v9",
-    "versionRange": "v9.15.1"
+    "versionRange": "v9.16.0,v9.23.1"
   },
   {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/segmentio/kafka-go/consumer",
