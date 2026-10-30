@@ -138,3 +138,71 @@ func TestB(t *testing.T) {
 	require.Contains(t, output, "pkgB ran")
 	require.Contains(t, output, "hook ran")
 }
+
+// TestBuildSkipsTestOnlyCommandPackage runs `otelc go build ./...` on a
+// module with a matched rule and a directory whose only Go file is a _test.go
+// file declaring `package main`. The no-GoFiles fallback is a test-target
+// mechanism: a generated non-test file would turn the directory into a
+// command without main() and break the wildcard build, so build invocations
+// keep the previous skip.
+func TestBuildSkipsTestOnlyCommandPackage(t *testing.T) {
+	otelcPath, err := testutil.OtelcPath()
+	require.NoError(t, err)
+	otelcPath, err = filepath.Abs(otelcPath)
+	require.NoError(t, err)
+
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	require.NoError(t, err)
+
+	moduleDir := t.TempDir()
+	writeTestFile(t, moduleDir, "go.mod", fmt.Sprintf(`module example.com/otelc-build-skip
+
+go 1.25.0
+
+require go.opentelemetry.io/otelc/pkg v0.0.0
+
+replace go.opentelemetry.io/otelc/pkg => %s
+`, filepath.ToSlash(filepath.Join(repoRoot, "pkg"))))
+	writeTestFile(t, moduleDir, filepath.Join("lib", "lib.go"), `// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package lib
+
+func Do() int {
+	return 1
+}
+`)
+	writeTestFile(t, moduleDir, filepath.Join("hooks", "hooks.go"), `// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package hooks
+
+import "go.opentelemetry.io/otelc/pkg/hook"
+
+func Before(ctx hook.HookContext) { _ = ctx }
+`)
+	writeTestFile(t, moduleDir, filepath.Join("cmd", "main_test.go"), `// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+import "testing"
+
+func TestX(t *testing.T) {}
+`)
+	writeTestFile(t, moduleDir, "rules.yml", `instrument_do:
+  target: example.com/otelc-build-skip/lib
+  where:
+    func: Do
+  do:
+    - inject_hooks:
+        before: Before
+        path: example.com/otelc-build-skip/hooks
+`)
+
+	env := append(os.Environ(), "OTELC_RULES=rules.yml")
+	runOtelcCommand(t, moduleDir, env, otelcPath, "go", "build", "./...")
+
+	_, err = os.Stat(filepath.Join(moduleDir, "cmd", "otelc.runtime.go"))
+	require.True(t, os.IsNotExist(err), "build must not generate a runtime file for a test-only package")
+}

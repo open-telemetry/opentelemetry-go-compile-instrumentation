@@ -31,6 +31,10 @@ type setupPhase struct {
 	ruleConfig    string
 	buildPackages []*packages.Package
 	buildFlags    []string
+	// subcommand is the wrapped go subcommand: "build", "install", or "test".
+	// A standalone `otelc setup` does not know the command that follows it,
+	// so it keeps the conservative "build" value.
+	subcommand string
 	// pgo is the build's effective -pgo value; see pgoValue.
 	pgo             string
 	rootModulePaths []string
@@ -321,6 +325,16 @@ func (sp *setupPhase) generateRuntimePerPackage(
 		pkgDir := pkgload.PackageDir(pkg)
 		name := pkg.Name
 		if pkgDir == "" {
+			if sp.subcommand != subcmdTest {
+				// The fallback below is a test-target mechanism: it relies on the
+				// _test.go files of the directory to compile the generated file
+				// into the test binary. Under `go build` or `go install` the same
+				// generated file would instead change what gets built: a
+				// test-only `package main` directory becomes a command without
+				// main(). Keep the previous skip for those invocations.
+				sp.Warn("skipping package without Go files", "package", pkg.PkgPath)
+				continue
+			}
 			// The package's non-test Go files are all excluded by build
 			// constraints (for example a suite whose files are linux-only built
 			// with -tags=githubci on darwin). Its test binary still compiles the
@@ -522,6 +536,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		logger:     logger,
 		ruleConfig: cmd.String("rules"),
 		buildFlags: extractBuildFlags(subcommand, args),
+		subcommand: subcommand,
 		pgo:        pgoValue(subcommand, args),
 	}
 

@@ -1458,6 +1458,7 @@ func TestGenerateRuntimePerPackageSkipsPackagesWithoutFiles(t *testing.T) {
 // package name recovered from the test file and the hook packages imported.
 func TestGenerateRuntimePerPackageTestOnlyPackage(t *testing.T) {
 	sp := newTestSetupPhase()
+	sp.subcommand = subcmdTest
 
 	tmpDir := t.TempDir()
 	pkgDir := filepath.Join(tmpDir, "pkga")
@@ -1486,6 +1487,7 @@ func TestGenerateRuntimePerPackageTestOnlyPackage(t *testing.T) {
 // not compile, so the package is skipped instead.
 func TestGenerateRuntimePerPackageTestOnlyPackageUnresolvableName(t *testing.T) {
 	sp := newTestSetupPhase()
+	sp.subcommand = subcmdTest
 
 	tmpDir := t.TempDir()
 	pkgDir := filepath.Join(tmpDir, "pkga")
@@ -1503,6 +1505,33 @@ func TestGenerateRuntimePerPackageTestOnlyPackageUnresolvableName(t *testing.T) 
 	require.NoError(t, sp.generateRuntimePerPackage(t.Context(), pkgs, []*rule.InstRuleSet{rset}))
 
 	_, err := os.Stat(filepath.Join(pkgDir, otelcRuntimeFile))
+	assert.True(t, os.IsNotExist(err))
+}
+
+// TestGenerateRuntimePerPackageBuildSkipsTestOnlyPackage covers `go build` on
+// a package whose only Go file is a _test.go file. A generated non-test file
+// would turn a test-only `package main` directory into a command without
+// main(), so build invocations keep the previous skip.
+func TestGenerateRuntimePerPackageBuildSkipsTestOnlyPackage(t *testing.T) {
+	sp := newTestSetupPhase()
+	sp.subcommand = subcmdBuild
+
+	tmpDir := t.TempDir()
+	cmdDir := filepath.Join(tmpDir, "cmd")
+	mustWriteFile(t, filepath.Join(cmdDir, "main_test.go"), "package main\n")
+
+	pkgs := []*packages.Package{{
+		PkgPath: "example.com/app/cmd",
+		Module:  &packages.Module{Path: "example.com/app", Dir: tmpDir, Main: true},
+	}}
+	rset := newTestRuleSet(
+		"example.com/app/lib",
+		[]*rule.InstFuncRule{newTestFuncRule("example.com/app/hooks", "example.com/app/lib")},
+		[]*rule.InstFileRule{},
+	)
+	require.NoError(t, sp.generateRuntimePerPackage(t.Context(), pkgs, []*rule.InstRuleSet{rset}))
+
+	_, err := os.Stat(filepath.Join(cmdDir, otelcRuntimeFile))
 	assert.True(t, os.IsNotExist(err))
 }
 
