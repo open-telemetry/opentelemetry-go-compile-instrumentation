@@ -115,6 +115,26 @@ This command:
 
 **When to use**: Run this before committing changes to `schemas/otelc/**`, `instrumentation/**/semconv/`, or `.semconv-version`.
 
+### Generate Go Code for Local Attributes
+
+Attributes otelc declares itself with `id:` are generated into the
+`pkg/otelcconv` module (see [ADR-0006](adr/0006-semconv-telemetry-contract-organization.md)):
+
+```bash
+make generate
+```
+
+This command:
+
+- Runs `weaver registry generate` (from the `otel/weaver` OCI image) with the templates in `schemas/templates/registry/go/`, vendored from `go.opentelemetry.io/otel`
+- Selects only the locally declared attributes, using weaver's lineage output
+- Writes and `gofmt`s `pkg/otelcconv/attribute_group.go`
+
+CI regenerates the file and fails if it differs from the committed one, so run
+`make generate` and commit the result whenever you add or change an `id:`
+attribute. Attributes that upstream defines are imported from
+`go.opentelemetry.io/otel/semconv` and are never generated.
+
 ### Generate Registry Diff
 
 Compare the current version against the latest to see available updates:

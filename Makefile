@@ -20,7 +20,7 @@ endif
         test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage test-unit/instrumentation/coverage \
         check-coverage test-integration/coverage test-e2e/coverage test-latestlibrun test-versionmatrix \
         weaver-install tidy/test-apps \
-        fetch-upstream-semconv lint-schema \
+        fetch-upstream-semconv lint-schema generate \
         adr-tools adr-new adr-list \
         benchmark/codspeed benchmark/threshold govulncheck govulncheck/instrumentation
 
@@ -938,6 +938,11 @@ lint-schema: fetch-upstream-semconv
 	fi; \
 	echo "Upstream semconv dependency: v$$MANIFEST_VERSION (matches .semconv-version)"
 	@scripts/semconv/lint-schema.sh $(OCI_BIN) $(WEAVER_IMAGE) "$(OTELC_REGISTRY_DIR)"
+
+generate: ## Generate pkg/otelcconv from the attributes declared with `id:` in schemas/otelc/
+generate: fetch-upstream-semconv
+	@scripts/semconv/generate.sh $(OCI_BIN) $(WEAVER_IMAGE) "$(OTELC_REGISTRY_DIR)" \
+		"$(CURDIR)/schemas/templates/registry" "$(CURDIR)/pkg/otelcconv"
 
 # `lint/semantic-conventions` is the umbrella entry point used by CI and the
 # top-level `lint` target; it now validates the project's own registry.

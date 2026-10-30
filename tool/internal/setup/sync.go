@@ -224,6 +224,11 @@ func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) e
 	// hook code to be present.
 	replaces[util.OtelcPkgRoot+"/runtime"] = filepath.Join(util.GetBuildTempDir(), unzippedPkgDir, "runtime")
 
+	// Add replace directive for the otelcconv module, which holds the semantic
+	// convention attributes generated from schemas/otelc/. It is a separate
+	// module so the pkg module itself keeps no dependencies.
+	replaces[util.OtelcPkgRoot+"/otelcconv"] = filepath.Join(util.GetBuildTempDir(), unzippedPkgDir, "otelcconv")
+
 	// Add replace directive for instrumentation module
 	// instrumentation module contains shared semconv packages.
 	replaces[util.OtelcInstRoot] = filepath.Join(util.GetBuildTempDir(), unzippedInstDir)
