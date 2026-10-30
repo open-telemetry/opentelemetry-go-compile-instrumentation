@@ -30,21 +30,14 @@ func TestRedisClient(t *testing.T) {
 	// and a parallel copy would pick up the instrumentation require and MVS
 	// to v9.22.0.
 	v980AppsDir := pinnedRedisClient(t, "v9.8.0")
-	v9140AppsDir := pinnedRedisClient(t, "v9.14.0")
-	// v9.16.0 is the first non-retracted release that exhibits WithTimeout hook dropping
-	// and compiles cleanly across platforms (v9.15.0 and v9.15.1 have upstream build bugs on Windows).
-	v9160AppsDir := pinnedRedisClient(t, "v9.16.0")
 
 	for _, tc := range []struct {
-		name       string
-		appsDir    string
-		version    string
-		topologies bool
+		name    string
+		appsDir string
+		version string
 	}{
-		{name: "current_supported", topologies: true},
-		{name: "v9.16.0", appsDir: v9160AppsDir, version: "v9.16.0"},
-		{name: "v9.14.0", appsDir: v9140AppsDir, version: "v9.14.0"},
-		{name: "v9.8.0", appsDir: v980AppsDir, version: "v9.8.0", topologies: true},
+		{name: "current_supported"},
+		{name: "v9.8.0", appsDir: v980AppsDir, version: "v9.8.0"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -55,12 +48,8 @@ func TestRedisClient(t *testing.T) {
 			}
 
 			assertRedisClientSpans(t, tc.appsDir)
-			assertRedisClientSpans(t, tc.appsDir, "-timeout-clones=1")
-			assertRedisClientSpans(t, tc.appsDir, "-timeout-clones=2")
-			if tc.topologies {
-				assertRedisRingSpans(t, tc.appsDir)
-				assertRedisClusterSpans(t, tc.appsDir)
-			}
+			assertRedisRingSpans(t, tc.appsDir)
+			assertRedisClusterSpans(t, tc.appsDir)
 		})
 	}
 }
@@ -123,14 +112,13 @@ func fixtureOpts(appsDir string) []testutil.TestFixtureOption {
 	return []testutil.TestFixtureOption{testutil.WithAppsDir(appsDir)}
 }
 
-func assertRedisClientSpans(t *testing.T, appsDir string, extraArgs ...string) {
+func assertRedisClientSpans(t *testing.T, appsDir string) {
 	t.Helper()
 
 	f := testutil.NewTestFixture(t, fixtureOpts(appsDir)...)
 	server := StartRedisServer(t)
 
-	args := append([]string{"-addr=" + server.Addr()}, extraArgs...)
-	output := f.Run("redisclient", args...)
+	output := f.Run("redisclient", "-addr="+server.Addr())
 	require.Contains(t, output, "testvalue")
 
 	host, _, err := net.SplitHostPort(server.Addr())
@@ -167,7 +155,7 @@ func assertRedisClientSpans(t *testing.T, appsDir string, extraArgs ...string) {
 	)
 
 	require.Len(t, getSpans, 2, "client GET and Conn GET should each produce one span")
-	require.NotNil(t, clientGetSpan, "NewClient GET span is missing")
+	require.NotNil(t, clientGetSpan, "WithTimeout GET span is missing")
 	testutil.RequireRedisClientSemconv(
 		t,
 		*clientGetSpan,

@@ -17,10 +17,9 @@ import (
 )
 
 var (
-	addr          = flag.String("addr", "localhost:6379", "The Redis server address")
-	mode          = flag.String("mode", "client", "Which client to use: client, ring or cluster")
-	addr2         = flag.String("addr2", "", "In ring mode, a shard address to add with SetAddrs")
-	timeoutClones = flag.Int("timeout-clones", 0, "number of WithTimeout clones")
+	addr  = flag.String("addr", "localhost:6379", "The Redis server address")
+	mode  = flag.String("mode", "client", "Which client to use: client, ring or cluster")
+	addr2 = flag.String("addr2", "", "In ring mode, a shard address to add with SetAddrs")
 )
 
 func main() {
@@ -45,9 +44,6 @@ func runClient(ctx context.Context) {
 		Addr: *addr,
 	})
 
-	for i := 0; i < *timeoutClones; i++ {
-		rdb = rdb.WithTimeout(time.Minute)
-	}
 	defer rdb.Close()
 
 	// SET command
@@ -58,7 +54,7 @@ func runClient(ctx context.Context) {
 	slog.Info("SET", "key", "testkey", "value", "testvalue")
 
 	// GET command
-	val, err := rdb.Get(ctx, "testkey").Result()
+	val, err := rdb.WithTimeout(time.Minute).Get(ctx, "testkey").Result()
 	if err != nil {
 		log.Fatalf("failed to get key: %v", err)
 	}
@@ -73,7 +69,7 @@ func runClient(ctx context.Context) {
 	slog.Info("CONN GET", "key", "testkey", "value", connVal)
 
 	// DEL command
-	err = rdb.Del(ctx, "testkey").Err()
+	err = rdb.WithTimeout(time.Minute).WithTimeout(time.Minute).Del(ctx, "testkey").Err()
 	if err != nil {
 		log.Fatalf("failed to del key: %v", err)
 	}
