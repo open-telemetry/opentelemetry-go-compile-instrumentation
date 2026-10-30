@@ -689,3 +689,339 @@ func TestEnvironmentVariableName(t *testing.T) {
 		})
 	}
 }
+
+func TestParseMetadataRejectsMalformedDocuments(t *testing.T) {
+	tests := []struct{ name, input, want string }{
+		{"invalid YAML", "configurations: [", "parse metadata.yaml"},
+		{"non-mapping document", "[]", "metadata document must be a mapping"},
+		{"duplicate root key", "configurations: []\nconfigurations: []\n", "duplicate key"},
+		{"configurations is not a sequence", "configurations: {}", "configurations must be a sequence"},
+		{"entry is not a mapping", "configurations: [null]", "expected a mapping"},
+		{
+			"examples is not a sequence",
+			"configurations: [{name: go.x, type: string, examples: example}]",
+			"examples: expected a sequence of strings",
+		},
+		{
+			"example is not a string",
+			"configurations: [{name: go.x, type: string, examples: [1]}]",
+			"examples[0]: expected a string",
+		},
+		{
+			"default behavior is not a string",
+			"configurations: [{name: go.x, type: string, default_behavior: true}]",
+			"default_behavior: expected a string",
+		},
+		{
+			"replacement is not a string",
+			"configurations: [{name: go.x, type: string, deprecated: true, replaced_by: true}]",
+			"replaced_by: expected a string",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseMetadata([]byte(tt.input), "metadata.yaml")
+			require.ErrorContains(t, err, tt.want)
+		})
+	}
+}
+
+func TestParseMetadataRejectsMalformedSchemas(t *testing.T) {
+	tests := []struct{ name, schema, want string }{
+		{"schema is not a mapping", "[]", "schema: expected a mapping"},
+		{"schema type missing", "{properties: {}}", "schema: type is required"},
+		{"schema type is not a string", "{type: true, properties: {}}", "schema.type: expected a string"},
+		{"properties missing", "{type: object}", "schema: properties is required"},
+		{"properties is not a mapping", "{type: object, properties: []}", "schema.properties: expected a mapping"},
+		{
+			"required is not a sequence",
+			"{type: object, required: name, properties: {}}",
+			"schema.required: expected a sequence",
+		},
+		{
+			"required member is not a string",
+			"{type: object, required: [1], properties: {}}",
+			"schema.required[0]: expected a string",
+		},
+		{
+			"duplicate required member",
+			"{type: object, required: [name, name], properties: {name: {type: string}}}",
+			"schema.required: duplicate key",
+		},
+		{
+			"empty property name",
+			"{type: object, properties: {\"\": {type: string}}}",
+			"schema.properties: property name must not be empty",
+		},
+		{
+			"property is not a mapping",
+			"{type: object, properties: {name: []}}",
+			"schema.properties.name: expected a mapping",
+		},
+		{
+			"property type missing",
+			"{type: object, properties: {name: {description: a name}}}",
+			"schema.properties.name: type is required",
+		},
+		{
+			"property description is not a string",
+			"{type: object, properties: {name: {type: string, description: true}}}",
+			"schema.properties.name.description: expected a string",
+		},
+		{
+			"unsupported property type",
+			"{type: object, properties: {name: {type: date}}}",
+			"unsupported property type \"date\"",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := "configurations:\n  - name: go.x\n    type: structured_list\n    schema: " + tt.schema + "\n"
+			_, err := ParseMetadata([]byte(input), "metadata.yaml")
+			require.ErrorContains(t, err, tt.want)
+		})
+	}
+}
+
+func TestParseCatalogRejectsMalformedDocuments(t *testing.T) {
+	valid := string(catalogFixture("name: go.test\ntype: string"))
+	sourceFields := fmt.Sprintf(
+		"source:\n  repository: %s\n  release: %s\n  commit: %s\n  file: %s\n",
+		OpenTelemetryConfigurationRepository,
+		OpenTelemetryConfigurationRelease,
+		OpenTelemetryConfigurationCommit,
+		OpenTelemetryConfigurationFile,
+	)
+	definitions := "definitions:\n  go.test:\n    name: go.test\n    type: string\n"
+	withoutDefinitions := strings.TrimSuffix(valid, definitions)
+	tests := []struct{ name, input, want string }{
+		{"invalid YAML", "catalog_version: [", "parse configuration catalog"},
+		{"multiple documents", valid + "---\nother: document\n", "single YAML document"},
+		{"malformed trailing document", valid + "---\nother: [\n", "parse trailing configuration catalog document"},
+		{"non-mapping root", "[]", "expected a mapping"},
+		{
+			"unknown root field",
+			strings.Replace(valid, "catalog_version:", "unknown: value\ncatalog_version:", 1),
+			"unknown field",
+		},
+		{"unsupported version", strings.Replace(valid, "catalog_version: 1", "catalog_version: 2", 1), "expected 1"},
+		{"source missing", strings.Replace(valid, sourceFields, "", 1), "source is required"},
+		{
+			"unknown source field",
+			strings.Replace(valid, "  release:", "  unexpected: value\n  release:", 1),
+			"unknown field",
+		},
+		{
+			"source pin mismatch",
+			strings.Replace(valid, OpenTelemetryConfigurationCommit, "wrong-commit", 1),
+			"must pin",
+		},
+		{"definitions missing", withoutDefinitions, "has no definitions"},
+		{
+			"definitions is not a mapping",
+			strings.Replace(valid, definitions, "definitions: []\n", 1),
+			"expected a mapping",
+		},
+		{"definitions are empty", strings.Replace(valid, definitions, "definitions: {}\n", 1), "has no definitions"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseCatalog([]byte(tt.input))
+			require.ErrorContains(t, err, tt.want)
+		})
+	}
+}
+
+func TestParsePreviousCatalogDefinitionsRejectsInvalidCatalogs(t *testing.T) {
+	base := catalogDocument{
+		CatalogVersion: 1,
+		Source: catalogSource{
+			Repository: OpenTelemetryConfigurationRepository,
+			Release:    OpenTelemetryConfigurationRelease,
+			Commit:     OpenTelemetryConfigurationCommit,
+			File:       OpenTelemetryConfigurationFile,
+		},
+		Definitions: map[string]Entry{
+			"general.http.legacy": {Name: "general.http.legacy", Type: stringType},
+		},
+	}
+	valid, err := yaml.Marshal(base)
+	require.NoError(t, err)
+	unknownField := strings.Replace(string(valid), "catalog_version: 1", "unknown: value\ncatalog_version: 1", 1)
+	unsupportedVersion := strings.Replace(string(valid), "catalog_version: 1", "catalog_version: 2", 1)
+	wrongRepository := strings.Replace(string(valid), OpenTelemetryConfigurationRepository, "other/repository", 1)
+	emptyDefinitions, err := yaml.Marshal(catalogDocument{
+		CatalogVersion: 1,
+		Source:         base.Source,
+		Definitions:    map[string]Entry{},
+	})
+	require.NoError(t, err)
+	withoutDefinitions := fmt.Sprintf(
+		"catalog_version: 1\nsource:\n  repository: %s\n  release: %s\n  commit: %s\n  file: %s\n",
+		OpenTelemetryConfigurationRepository,
+		OpenTelemetryConfigurationRelease,
+		OpenTelemetryConfigurationCommit,
+		OpenTelemetryConfigurationFile,
+	)
+	tests := []struct {
+		name  string
+		input []byte
+		want  string
+	}{
+		{"invalid YAML", []byte("catalog_version: ["), "parse previous configuration catalog"},
+		{"unknown field", []byte(unknownField), "field unknown not found"},
+		{"unsupported version", []byte(unsupportedVersion), "unsupported previous configuration catalog version"},
+		{"wrong repository", []byte(wrongRepository), "must identify a pinned"},
+		{"missing definitions", []byte(withoutDefinitions), "no definitions"},
+		{"empty definitions", emptyDefinitions, "no definitions"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, parseErr := parsePreviousCatalogDefinitions(tt.input)
+			require.ErrorContains(t, parseErr, tt.want)
+		})
+	}
+}
+
+func TestGenerateCatalogRejectsInvalidSources(t *testing.T) {
+	const upstream = `properties:
+  general:
+    properties:
+      http:
+        properties:
+          client:
+            properties:
+              request_captured_headers:
+                type: array
+                items: {type: string}
+`
+	tests := []struct {
+		name                               string
+		upstream, goOptions, compatibility []byte
+		want                               string
+	}{
+		{
+			"invalid upstream YAML",
+			[]byte("properties: ["),
+			[]byte("configurations: []"),
+			[]byte("configurations: []"),
+			"parse pinned instrumentation schema",
+		},
+		{
+			"general section missing",
+			[]byte("properties: {}"),
+			[]byte("configurations: []"),
+			[]byte("configurations: []"),
+			"has no general property",
+		},
+		{
+			"invalid compatibility YAML",
+			[]byte(upstream),
+			[]byte("configurations: []"),
+			[]byte("configurations: ["),
+			"parse general-compatibility.yaml",
+		},
+		{
+			"invalid Go metadata",
+			[]byte(upstream),
+			[]byte("configurations: ["),
+			[]byte("configurations: []"),
+			"parse go-configurations.yaml",
+		},
+		{
+			"Go metadata uses a general path",
+			[]byte(upstream),
+			[]byte("configurations:\n  - name: general.http.client.request_captured_headers\n    type: list\n"),
+			[]byte("configurations: []"),
+			"must name a go.* path directly",
+		},
+		{
+			"Go metadata uses a ref",
+			[]byte(upstream),
+			[]byte("configurations:\n  - ref: general.http.client.request_captured_headers\n"),
+			[]byte("configurations: []"),
+			"must name a go.* path directly",
+		},
+		{
+			"duplicate Go path",
+			[]byte(upstream),
+			[]byte(
+				"configurations:\n  - name: go.http.client.rules\n    type: string\n  - name: go.http.client.rules\n    type: string\n",
+			),
+			[]byte("configurations: []"),
+			"duplicate catalog name",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := generateCatalog(tt.upstream, tt.goOptions, tt.compatibility, embeddedCatalog)
+			require.ErrorContains(t, err, tt.want)
+		})
+	}
+}
+
+func TestCollectGeneralDefinitionsRejectsCyclicReference(t *testing.T) {
+	node := &upstreamSchema{Ref: "#/$defs/Loop"}
+	definitions := map[string]*upstreamSchema{"Loop": {Ref: "#/$defs/Loop"}}
+
+	err := collectGeneralDefinitions(node, "general.loop", definitions, make(map[string]bool), make(map[string]Entry))
+
+	require.ErrorContains(t, err, "unsupported or cyclic schema reference")
+}
+
+func TestUpstreamTypeRejectsNullOnlyUnion(t *testing.T) {
+	var schema upstreamSchema
+	require.NoError(t, yaml.Unmarshal([]byte(`type: ["null"]`), &schema))
+
+	_, err := upstreamType(schema.Type)
+
+	require.ErrorContains(t, err, "must not be null-only")
+}
+
+func TestResolveMetadataClonesCatalogEntries(t *testing.T) {
+	defaultValue := "enabled"
+	replacement := "go.http.client.rules.v2"
+	definition := Entry{
+		Name:       "go.http.client.rules",
+		Type:       structuredListType,
+		Default:    &defaultValue,
+		Examples:   []string{"first"},
+		Deprecated: true,
+		ReplacedBy: &replacement,
+		Schema: &Schema{
+			Type:       "object",
+			Required:   []string{"name"},
+			Properties: map[string]Property{"name": {Type: stringType}},
+		},
+	}
+	metadata := Metadata{Entries: []Entry{{Ref: definition.Name, Source: "metadata.yaml"}}}
+
+	resolved, err := ResolveMetadata([]Metadata{metadata}, map[string]Entry{definition.Name: definition})
+	require.NoError(t, err)
+	require.Len(t, resolved, 1)
+	*resolved[0].Default = "changed"
+	resolved[0].Examples[0] = "changed"
+	*resolved[0].ReplacedBy = "changed"
+	resolved[0].Schema.Required[0] = "changed"
+	resolved[0].Schema.Properties["extra"] = Property{Type: stringType}
+
+	assert.Equal(t, "enabled", *definition.Default)
+	assert.Equal(t, []string{"first"}, definition.Examples)
+	assert.Equal(t, "go.http.client.rules.v2", *definition.ReplacedBy)
+	assert.Equal(t, []string{"name"}, definition.Schema.Required)
+	assert.NotContains(t, definition.Schema.Properties, "extra")
+}
+
+func TestEnvironmentVariableNameRejectsInvalidPaths(t *testing.T) {
+	for _, tt := range []struct{ path, want string }{
+		{"", "non-empty"},
+		{" go.option ", "surrounding whitespace"},
+		{"general.", "no environment-variable path"},
+		{"go.caf\u00e9", "unsupported character"},
+	} {
+		t.Run(tt.path, func(t *testing.T) {
+			_, err := EnvironmentVariableName(tt.path)
+			require.ErrorContains(t, err, tt.want)
+		})
+	}
+}
