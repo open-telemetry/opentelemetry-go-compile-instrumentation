@@ -4,8 +4,6 @@
 package v9
 
 import (
-	"context"
-
 	redis "github.com/redis/go-redis/v9"
 
 	"go.opentelemetry.io/otelc/pkg/hook"
@@ -26,36 +24,15 @@ func (g redisClientEnabler) Enable() bool {
 
 var redisEnabler = redisClientEnabler{}
 
+// Ring and ClusterClient use redis.NewClient by default to create their node
+// clients (unless overridden via RingOptions.NewClient or ClusterOptions.NewClient),
+// so this hook instruments them too.
 func afterNewRedisClientV9(ictx hook.HookContext, client *redis.Client) {
 	client.AddHook(newOtelRedisHook(client.Options().Addr))
 }
 
 func afterNewFailOverRedisClientV9(call hook.HookContext, client *redis.Client) {
 	client.AddHook(newOtelRedisHook(client.Options().Addr))
-}
-
-func afterNewRingClientV9(call hook.HookContext, client *redis.Ring) {
-	client.OnNewNode(func(rdb *redis.Client) {
-		rdb.AddHook(newOtelRedisHook(rdb.Options().Addr))
-	})
-	// NewRing creates the configured shards before this hook runs, so
-	// OnNewNode never sees them.
-	attachHookToExistingShards(client)
-}
-
-func attachHookToExistingShards(client *redis.Ring) {
-	_ = client.ForEachShard(context.Background(), func(_ context.Context, rdb *redis.Client) error {
-		rdb.AddHook(newOtelRedisHook(rdb.Options().Addr))
-		return nil
-	})
-}
-
-// Cluster nodes are created lazily, after this callback is registered, so
-// OnNewNode alone covers them.
-func afterNewClusterClientV9(call hook.HookContext, client *redis.ClusterClient) {
-	client.OnNewNode(func(rdb *redis.Client) {
-		rdb.AddHook(newOtelRedisHook(rdb.Options().Addr))
-	})
 }
 
 func afterNewSentinelClientV9(call hook.HookContext, client *redis.SentinelClient) {

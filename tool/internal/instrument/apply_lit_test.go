@@ -644,6 +644,36 @@ func run(f sink) *http.Transport {
 	assert.Contains(t, err.Error(), "run", "the error names the offending function")
 }
 
+func TestApplyLitRule_OverrideShadowedByNestedLocalReportsConflict(t *testing.T) {
+	// The matched composite literal sits inside a nested block that rebinds
+	// the file's alias, so the wrapped field value would resolve to that local
+	// instead of the import.
+	root := parseFile(t, `package main
+
+import (
+	f "fmt"
+	"net/http"
+)
+
+func run() *http.Transport {
+	if myCond {
+		f := sink{}
+		_ = f
+		return &http.Transport{Proxy: myProxy}
+	}
+	return nil
+}
+`)
+	r := transportRule(&rule.InstLitField{Name: "Proxy", Wrap: "traced.Sprint({{ . }})"})
+	r.Imports = map[string]string{"traced": "fmt"}
+
+	_, err := newTestPhase().applyLitRule(context.Background(), r, root)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "alias override conflict")
+	assert.Contains(t, err.Error(), "run", "the error names the offending function")
+}
+
 func TestApplyLitRule_OverrideNonShadowingSignatureAppliesRule(t *testing.T) {
 	// Same rule and file aliases as the shadowing test above, but the
 	// enclosing function's signature does not name "f", so the rule applies

@@ -73,18 +73,28 @@ type insertPos struct {
 	placement string
 }
 
+// rawInsertion bundles the statements to insert, the position to insert them
+// at, and the alias overrides guarding that position, keeping
+// insertRawAtPattern's parameter count within the linter's limit.
+type rawInsertion struct {
+	pos            insertPos
+	stmts          []dst.Stmt
+	aliasOverrides map[string]string
+}
+
 func insertRawAtPattern(
 	ctx context.Context,
 	decl *dst.FuncDecl,
 	restorer *decorator.Restorer,
-	pos insertPos,
-	stmts []dst.Stmt,
-) bool {
+	insertion rawInsertion,
+) (bool, error) {
+	pos, stmts, aliasOverrides := insertion.pos, insertion.stmts, insertion.aliasOverrides
 	inserted := false
+	var shadowErr error
 	logger := util.LoggerFromContext(ctx)
 
 	dstutil.Apply(decl.Body, func(cursor *dstutil.Cursor) bool {
-		if inserted {
+		if inserted || shadowErr != nil {
 			return false
 		}
 
@@ -108,6 +118,12 @@ func insertRawAtPattern(
 			return true
 		}
 
+		// The raw code is injected at stmt, so a local bound between the
+		// function body and stmt would shadow the rewritten qualifiers there.
+		if shadowErr = checkAliasOverrideShadowingAt(aliasOverrides, decl, stmt); shadowErr != nil {
+			return false
+		}
+
 		switch pos.placement {
 		default: // default to "before"
 			for _, s := range stmts {
@@ -123,7 +139,7 @@ func insertRawAtPattern(
 		return false
 	}, nil)
 
-	return inserted
+	return inserted, shadowErr
 }
 
 // rawAliasContext bundles the file's import aliases and the rule-import
@@ -180,7 +196,14 @@ func insertRaw(
 			placement: r.Placement,
 		}
 
-		inserted := insertRawAtPattern(ctx, decl, restorer, pos, stmts)
+		inserted, insertErr := insertRawAtPattern(ctx, decl, restorer, rawInsertion{
+			pos:            pos,
+			stmts:          stmts,
+			aliasOverrides: aliases.overrides,
+		})
+		if insertErr != nil {
+			return insertErr
+		}
 		if !inserted {
 			return ex.Newf("no statement matches the pattern %s", r.Pattern)
 		}
