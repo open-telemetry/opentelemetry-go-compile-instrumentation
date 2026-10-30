@@ -114,36 +114,62 @@ replace example.com/warmcache/extra => ./extra
 
 	// One GOCACHE for the cold and the warm build: the warm build must reuse
 	// the archives the cold build stored, which is what a restored CI cache
-	// provides.
+	// provides. OTELC_STATS makes every tool run the build executes log a
+	// "toolexec stats" line, so the debug log records exactly which compiles
+	// ran and which the cache answered.
 	goCache := filepath.Join(t.TempDir(), "gocache")
 	baseEnv := append(
 		preparedBuildBaseEnvironment(),
 		"GOWORK=off",
 		"GOCACHE="+goCache,
 		"OTELC_RULES=rules.yml",
+		"OTELC_STATS=1",
 	)
 
-	runOtelcTest := func(env []string) string {
+	runOtelcTest := func() string {
 		t.Helper()
 		cmd := exec.CommandContext(t.Context(), otelcPath, "go", "test", "-count=1", "-run", "TestWork", "-v", ".")
 		cmd.Dir = appDir
-		cmd.Env = env
+		cmd.Env = baseEnv
 		out, err := cmd.CombinedOutput()
 		require.NoError(t, err, "otelc go test failed:\n%s", out)
 		return string(out)
 	}
 
+	// debugLog returns what the run's toolexec processes logged. The dep
+	// import path appears in a stats line exactly when a compile of dep ran.
+	debugLog := func(t *testing.T) string {
+		t.Helper()
+		content, err := os.ReadFile(filepath.Join(appDir, ".otelc-build", "debug.log"))
+		require.NoError(t, err)
+		return string(content)
+	}
+
 	t.Run("cold build compiles and instruments", func(t *testing.T) {
-		out := runOtelcTest(baseEnv)
+		out := runOtelcTest()
 		assert.Contains(t, out, "extra: note called")
+		// The cold build must compile dep through toolexec, or the warm run
+		// below cannot demonstrate a cache hit for it.
+		assert.Contains(t, debugLog(t), "package=example.com/warmcache/dep")
 	})
 
 	t.Run("warm build after cache hit keeps the link working", func(t *testing.T) {
 		// The CI shape: a fresh checkout holds no .otelc-build, so setup runs
 		// from scratch while the restored GOCACHE answers every compile.
 		require.NoError(t, os.RemoveAll(filepath.Join(appDir, ".otelc-build")))
-		out := runOtelcTest(baseEnv)
+		out := runOtelcTest()
 		assert.Contains(t, out, "extra: note called")
+
+		log := debugLog(t)
+		// The warm run must not recompile dep: the restored cache answers
+		// its instrumented compile, so no toolexec compile of it runs.
+		assert.NotContains(t, log, "package=example.com/warmcache/dep",
+			"the warm build recompiled example.com/warmcache/dep, so the run exercised cold recovery, not the cache-hit shape")
+		// The fresh .otelc-build starts with no tracking files, so the only
+		// way the link importcfg gained the rule-added import is the
+		// matched.json recovery in the link phase.
+		assert.Contains(t, log, "Updated link importcfg",
+			"the warm link ran no importcfg update; the rule-added import was never recovered")
 	})
 }
 
