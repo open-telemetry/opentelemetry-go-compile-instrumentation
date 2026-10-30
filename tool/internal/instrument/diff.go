@@ -78,15 +78,14 @@ func (ip *instrumentPhase) applyRulesCapturingDiffsWithRenderer(
 		changes []ruleChange
 	)
 	for _, r := range rules {
-		var funcDecl *dst.FuncDecl
-		var found bool
-		if fr, ok := r.(*rule.InstFuncRule); ok {
-			var err error
-			funcDecl, found, err = ast.FindFuncDecl(root, fr, ip.importNames)
-			if err != nil {
-				return result, changes, ex.Wrapf(err, "finding function %s", fr.Func)
-			}
+		target, err := ip.findFuncRuleTarget(r, root)
+		if err != nil {
+			return result, changes, err
 		}
+		if target.skip {
+			continue
+		}
+		funcDecl, found := target.decl, target.found
 		if fileIgnored && ip.skipRuleForFileIgnore(r, funcDecl, found) {
 			continue
 		}
@@ -117,6 +116,33 @@ func (ip *instrumentPhase) applyRulesCapturingDiffsWithRenderer(
 		prev = after
 	}
 	return result, changes, nil
+}
+
+// funcRuleTarget is the function a func rule targets in a file.
+type funcRuleTarget struct {
+	decl  *dst.FuncDecl
+	found bool
+	// skip reports that the function does not satisfy the rule's
+	// *_implements sub-filters.
+	skip bool
+}
+
+// findFuncRuleTarget finds the function r targets in root when r is a func
+// rule. It returns the zero value for other rules.
+func (ip *instrumentPhase) findFuncRuleTarget(r rule.InstRule, root *dst.File) (funcRuleTarget, error) {
+	fr, ok := r.(*rule.InstFuncRule)
+	if !ok {
+		return funcRuleTarget{}, nil
+	}
+	decl, found, err := ast.FindFuncDecl(root, fr, ip.importNames)
+	if err != nil {
+		return funcRuleTarget{}, ex.Wrapf(err, "finding function %s", fr.Func)
+	}
+	skip, err := ip.skipFuncRuleForImplements(fr, decl, found, root)
+	if err != nil {
+		return funcRuleTarget{}, ex.Wrapf(err, "matching function %s", fr.Func)
+	}
+	return funcRuleTarget{decl: decl, found: found, skip: skip}, nil
 }
 
 // removeStaleDiff removes a stale diff file at dest if it exists.

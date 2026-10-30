@@ -1,0 +1,21 @@
+hook_custom:
+  target: main
+  where:
+    func: HandleCustom
+    param_implements: context.Context
+    last_result_implements: error
+  do:
+    - inject_hooks:
+        before: H1Before
+        after: H1After
+        path: testdata/golden/func-sig-implements
+
+hook_plain:
+  target: main
+  where:
+    func: HandlePlain
+    param_implements: context.Context
+  do:
+    - inject_hooks:
+        before: H2Before
+        path: testdata/golden/func-sig-implements

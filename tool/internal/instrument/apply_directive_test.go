@@ -155,6 +155,27 @@ func TestRenderDirective(t *testing.T) {
 			expected:    "check()",
 		},
 		{
+			name:        "FuncArgumentThatImplements matched",
+			src:         "package main\nimport \"context\"\nfunc Foo(name string, ctx context.Context) {}",
+			template:    "use({{ .FuncArgumentThatImplements \"context.Context\" }})",
+			withImports: true,
+			expected:    "use(" + dynamicIdentMarker + "ctx)",
+		},
+		{
+			name:        "FuncArgumentThatImplements no match",
+			src:         "package main\nfunc Foo(name string) {}",
+			template:    "use({{ .FuncArgumentThatImplements \"context.Context\" }})",
+			withImports: true,
+			expected:    "use()",
+		},
+		{
+			name:        "FuncReturnThatImplements matched",
+			src:         "package main\nfunc Foo() (int, error) { return 0, nil }",
+			template:    "check({{ .FuncReturnThatImplements \"error\" }})",
+			withImports: true,
+			expected:    "check(" + dynamicIdentMarker + "_unnamedRetVal_h1_1)",
+		},
+		{
 			name:          "DirectiveArgs ranges over key:value pairs",
 			src:           "package main\nfunc Foo() {}",
 			template:      "{{ range .DirectiveArgs }}{{.Key}}={{.Value}} {{ end }}",

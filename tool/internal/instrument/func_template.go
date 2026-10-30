@@ -4,6 +4,8 @@
 package instrument
 
 import (
+	"go/types"
+
 	"github.com/dave/dst"
 
 	"go.opentelemetry.io/otelc/tool/ex"
@@ -18,6 +20,9 @@ type funcTemplateData struct {
 	directiveArgs []ast.DirectiveArg
 	imports       map[string]string
 	hash          string
+	// typeInfo gives the go/types view of funcDecl for the ThatImplements
+	// helpers. When nil, they match the type name only.
+	typeInfo *funcTypes
 
 	fullArgsCollected bool
 	fullArgs          []string
@@ -164,6 +169,39 @@ func (d *funcTemplateData) FuncReturnOfType(typeStr string) (string, error) {
 	return "", nil
 }
 
+// FuncArgumentThatImplements returns the identifier of the first parameter
+// (excluding the receiver) whose type is the interface iface or implements
+// it, or "" if none does. Template usage:
+// {{ .FuncArgumentThatImplements "context.Context" }}
+func (d *funcTemplateData) FuncArgumentThatImplements(iface string) (string, error) {
+	args := d.arguments() // ensures synthetic names are assigned first
+	var vars *types.Tuple
+	if sig := d.typeInfo.signature(d.funcDecl); sig != nil {
+		vars = sig.Params()
+	}
+	idx, err := d.typeInfo.firstImplementing(typedSlots(d.funcDecl.Type.Params, vars), iface, d.imports)
+	if err != nil || idx < 0 {
+		return "", err
+	}
+	return args[idx], nil
+}
+
+// FuncReturnThatImplements returns the identifier of the first return value
+// whose type is the interface iface or implements it, or "" if none does.
+// Template usage: {{ .FuncReturnThatImplements "error" }}
+func (d *funcTemplateData) FuncReturnThatImplements(iface string) (string, error) {
+	rets := d.returns() // ensures synthetic names are assigned first
+	var vars *types.Tuple
+	if sig := d.typeInfo.signature(d.funcDecl); sig != nil {
+		vars = sig.Results()
+	}
+	idx, err := d.typeInfo.firstImplementing(typedSlots(d.funcDecl.Type.Results, vars), iface, d.imports)
+	if err != nil || idx < 0 {
+		return "", err
+	}
+	return rets[idx], nil
+}
+
 // DirectiveArgs returns the key:value arguments parsed from the directive
 // comment that matched this function. Template usage:
 // {{ range .DirectiveArgs }}{{.Key}}={{.Value}} {{ end }}
@@ -228,5 +266,15 @@ func (d renderingFuncTemplateData) FuncArgumentOfType(typeStr string) (string, e
 
 func (d renderingFuncTemplateData) FuncReturnOfType(typeStr string) (string, error) {
 	name, err := d.funcTemplateData.FuncReturnOfType(typeStr)
+	return markDynamicIdent(name), err
+}
+
+func (d renderingFuncTemplateData) FuncArgumentThatImplements(iface string) (string, error) {
+	name, err := d.funcTemplateData.FuncArgumentThatImplements(iface)
+	return markDynamicIdent(name), err
+}
+
+func (d renderingFuncTemplateData) FuncReturnThatImplements(iface string) (string, error) {
+	name, err := d.funcTemplateData.FuncReturnThatImplements(iface)
 	return markDynamicIdent(name), err
 }

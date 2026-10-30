@@ -97,6 +97,7 @@ func (ip *instrumentPhase) applyCallReplace(
 	if err != nil {
 		return false, err
 	}
+	tmpl.typeInfo = ip.fileTypes()
 
 	stmts := ast.CallEnclosingStmts(root)
 
@@ -372,7 +373,8 @@ func (ip *instrumentPhase) logUnresolvedMethodCall(
 	ip.Debug("method_call: call could not be resolved to a receiver type, rule will not match", args...)
 }
 
-// ensureMethodCallInfo type-checks the package at most once.
+// ensureMethodCallInfo type-checks the package at most once. It must run
+// before any file of the package is rewritten.
 func (ip *instrumentPhase) ensureMethodCallInfo() *methodCallPackageInfo {
 	if ip.methodCallInfoLoaded {
 		return ip.methodCallInfo
@@ -383,7 +385,8 @@ func (ip *instrumentPhase) ensureMethodCallInfo() *methodCallPackageInfo {
 	files := packageSourceFiles(ip.compileArgs)
 	info, err := checkPackageForMethodCalls(pkgPath, files, ip.importConfig)
 	if err != nil {
-		ip.Warn("method_call type-checking failed; method_call rules will not match in this package",
+		ip.Warn("type-checking failed; method_call rules will not match in this package, "+
+			"and *_implements selectors and ThatImplements helpers will match the type name only",
 			"package", pkgPath, "error", err)
 		return nil
 	}
@@ -417,9 +420,13 @@ type methodCallPosition struct {
 }
 
 // methodCallPackageInfo is the result of type-checking one package for
-// method_call matching.
+// method_call matching and for the *_implements selectors and the
+// ThatImplements template helpers.
 type methodCallPackageInfo struct {
 	selByPos       map[methodCallPosition]*types.Selection
+	funcByPos      map[methodCallPosition]*types.Func // keyed by the position of the declared name
+	pkg            *types.Package
+	importer       *exportImporter
 	firstTypeError error
 }
 
@@ -441,6 +448,7 @@ func checkPackageForMethodCalls(
 
 	info := &types.Info{
 		Selections: make(map[*goast.SelectorExpr]*types.Selection),
+		Defs:       make(map[*goast.Ident]types.Object),
 	}
 	var firstTypeError error
 	// Sizes is nil, so go/types uses SizesFor("gc", "amd64") — unsafe sizing
@@ -448,23 +456,39 @@ func checkPackageForMethodCalls(
 	// surface as type errors, which degrade method_call matching, never break
 	// the build. Set Sizes explicitly if the setup phase learns the target
 	// GOARCH.
+	importer := newExportImporter(fset, cfg.PackageFile, cfg.ImportMap)
 	tcfg := &types.Config{
-		Importer: newExportImporter(fset, cfg.PackageFile, cfg.ImportMap),
+		Importer: importer,
 		Error: func(err error) {
 			if firstTypeError == nil {
 				firstTypeError = err
 			}
 		},
 	}
-	_, _ = tcfg.Check(pkgPath, fset, astFiles, info)
+	pkg, _ := tcfg.Check(pkgPath, fset, astFiles, info)
 
 	pi := &methodCallPackageInfo{
 		selByPos:       make(map[methodCallPosition]*types.Selection, len(info.Selections)),
+		funcByPos:      make(map[methodCallPosition]*types.Func),
+		pkg:            pkg,
+		importer:       importer,
 		firstTypeError: firstTypeError,
 	}
 	for sel, selection := range info.Selections {
 		pos := fset.Position(sel.Sel.Pos())
 		pi.selByPos[methodCallPosition{file: pos.Filename, line: pos.Line, col: pos.Column}] = selection
+	}
+	for _, astFile := range astFiles {
+		for _, decl := range astFile.Decls {
+			funcDecl, isFunc := decl.(*goast.FuncDecl)
+			if !isFunc {
+				continue
+			}
+			if fn, isTypesFunc := info.Defs[funcDecl.Name].(*types.Func); isTypesFunc {
+				pos := fset.Position(funcDecl.Name.Pos())
+				pi.funcByPos[methodCallPosition{file: pos.Filename, line: pos.Line, col: pos.Column}] = fn
+			}
+		}
 	}
 	return pi, nil
 }

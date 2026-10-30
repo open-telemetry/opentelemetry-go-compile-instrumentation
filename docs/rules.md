@@ -519,7 +519,7 @@ The tool automatically reads the hook source file and ensures all of its imports
 
 #### Signature Sub-Filters
 
-By default the rule matches any function with the given name (and optional receiver). Five optional sub-filters, placed under `where` alongside `func`, can narrow the match further by inspecting the function's parameter and result types. All specified sub-filters must match (AND logic); omitting a sub-filter places no constraint on that aspect of the signature.
+By default the rule matches any function with the given name (and optional receiver). Eight optional sub-filters, placed under `where` alongside `func`, can narrow the match further by inspecting the function's parameter and result types. All specified sub-filters must match (AND logic); omitting a sub-filter places no constraint on that aspect of the signature.
 
 | Field | Type | Semantics |
 | --- | --- | --- |
@@ -528,6 +528,9 @@ By default the rule matches any function with the given name (and optional recei
 | `result` | string | Any return type matches the named type |
 | `last_result` | string | The last return type matches the named type |
 | `param` | string | Any parameter type matches the named type |
+| `param_implements` | string | Any parameter type is the named interface or implements it |
+| `result_implements` | string | Any return type is the named interface or implements it |
+| `last_result_implements` | string | The last return type is the named interface or implements it |
 
 `signature` and `signature_contains` each take an object with two optional lists:
 
@@ -536,7 +539,7 @@ By default the rule matches any function with the given name (and optional recei
 
 Type names follow the form `[*][pkg.]Name`, for example `error`, `context.Context`, `*http.Request`. Matching is structural (AST-level) rather than type-checker-based, so the package qualifier must match the local identifier used in the source file (typically the last path component, e.g. `http` for `"net/http"`).
 
-> **Note on scalar filter semantics:** Because there is no type checker at instrumentation time, `result`, `last_result`, and `param` perform an exact type-name match. For example, `result: error` matches functions that literally return the `error` type, but not functions that return a concrete type (e.g. `*MyError`) that happens to implement `error`.
+> **Note on scalar filter semantics:** `result`, `last_result`, and `param` perform an exact type-name match. For example, `result: error` matches functions that literally return the `error` type, but not functions that return a concrete type (e.g. `*MyError`) that happens to implement `error`. Use `result_implements`, `last_result_implements`, and `param_implements` to also match such types; see [Matching by interface](#matching-by-interface).
 >
 > **Unsupported type expressions:** Complex type expressions — `chan`, `func`, `map`, slice (`[]T`), and non-empty interface literals — cannot be matched by type-name filters. If a parameter or return value uses one of these forms, the filter will never match it.
 
@@ -586,6 +589,37 @@ hook_fallible:
         before: OnQuery
         path: example.com/hooks/db
 ```
+
+**Example — match by interface:**
+
+```yaml
+hook_fallible_custom:
+  target: example.com/db
+  where:
+    func: Query
+    param_implements: context.Context
+    last_result_implements: error
+  do:
+    - inject_hooks:
+        before: OnQuery
+        path: example.com/hooks/db
+```
+
+This rule matches `func Query(c *RequestContext, q string) (*Rows, *QueryError)` when `*RequestContext` implements `context.Context` (for example through an embedded `context.Context` field) and `*QueryError` implements `error`.
+
+#### Matching by interface
+
+The `param_implements`, `result_implements`, and `last_result_implements` selectors and the `FuncArgumentThatImplements` and `FuncReturnThatImplements` template helpers take the name of an interface type, written as `[pkg.]Name` where `pkg` is the import path of its package (for example `error`, `context.Context`, `net/http.Handler`). A parameter or result matches when its type is that interface or implements it:
+
+- The method set of the declared type decides, as in Go. A `T` value whose methods have pointer receivers does not implement the interface, and a `*T` does.
+- A struct that embeds the interface, such as `struct{ context.Context }`, implements it.
+- A parameter whose type is a type parameter matches when its constraint implements the interface, for example `T` in `func F[T context.Context](t T)`. A type parameter constrained by `any` does not match.
+- The receiver of a method is never a parameter.
+- A pointer type, or a name that resolves to a type that is not an interface (for example `int` or `net/http.Request`), is an error.
+
+otelc type checks the target package once, before it changes any file, and only when one of its rules uses these selectors or helpers. A setup-phase match does not use type information, so a function rule with these selectors is first matched by name, receiver and the other sub-filters, and the instrument phase then skips the functions that do not satisfy them.
+
+When there is no type information for a parameter or result, it matches by type name, as `param` and `FuncArgumentOfType` do. This happens when the package has a type error that affects that type (otelc ignores type errors in the rest of the package), and for every parameter when the package of the interface is not visible from the target package: the target package does not import it, and the exported API of its imports does not refer to it.
 
 **Stack frames and line markers:**
 
@@ -675,14 +709,16 @@ Top-level `imports` (map[string]string, optional): A map of imports to inject in
 
 **Template Placeholders:**
 
-| Placeholder              | Replaced with                                                                        |
-| ------------------------ | ------------------------------------------------------------------------------------ |
-| `{{.FuncName}}`          | The name of the target function                                                      |
-| `{{.FuncArgument N}}`    | The identifier of the N-th (0-indexed) parameter, excluding the receiver             |
-| `{{.FuncReturn N}}`      | The identifier of the N-th (0-indexed) return value                                  |
-| `{{.FuncArgumentCount}}` | The number of parameters, excluding the receiver                                     |
-| `{{.FuncReturnCount}}`   | The number of return values                                                          |
-| `{{.Receiver}}`          | The identifier of the target method's receiver; errors if the target has no receiver |
+| Placeholder                             | Replaced with                                                                                 |
+| --------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `{{.FuncName}}`                         | The name of the target function                                                               |
+| `{{.FuncArgument N}}`                   | The identifier of the N-th (0-indexed) parameter, excluding the receiver                      |
+| `{{.FuncReturn N}}`                     | The identifier of the N-th (0-indexed) return value                                           |
+| `{{.FuncArgumentCount}}`                | The number of parameters, excluding the receiver                                              |
+| `{{.FuncReturnCount}}`                  | The number of return values                                                                   |
+| `{{.Receiver}}`                         | The identifier of the target method's receiver; errors if the target has no receiver          |
+| `{{.FuncArgumentThatImplements iface}}` | The first parameter, excluding the receiver, whose type is or implements the interface, or "" |
+| `{{.FuncReturnThatImplements iface}}`   | The first return value whose type is or implements the interface, or ""                       |
 
 Whitespace and `-` trim markers around the placeholder are honored per normal `text/template` rules, so `{{.FuncName}}`, `{{ .FuncName }}`, and `{{- .FuncName -}}` are equivalent. Unnamed parameters and return values, and blank (`_`) names, are assigned a synthetic name the first time a template references them. A `{{ ... }}` span that names one of these placeholders but is otherwise malformed (an out-of-range index, or `{{.Receiver}}` on a function with no receiver) fails the build with a descriptive error. Because the template engine is Go's `text/template`, standard control-flow actions such as `{{if}}`/`{{else}}`/`{{end}}` and `{{range}}` are also available.
 
@@ -844,18 +880,20 @@ Currently supported replace string features:
 
 **Template Placeholders:**
 
-| Placeholder                    | Replaced with                                                                                          |
-| ------------------------------ | -----------------------------------------------------------------------------------------------------  |
-| `{{.FuncName}}`                | The name of the annotated function                                                                     |
-| `{{.FuncArgument N}}`          | The identifier of the N-th (0-indexed) parameter of the enclosing function, excluding the receiver     |
-| `{{.FuncReturn N}}`            | The identifier of the N-th (0-indexed) return value of the enclosing function                          |
-| `{{.FuncArgumentCount}}`       | The number of parameters of the enclosing function, excluding the receiver                             |
-| `{{.FuncReturnCount}}`         | The number of return values of the enclosing function                                                  |
-| `{{.Receiver}}`                | The identifier of the enclosing method's receiver                                                      |
-| `{{.FuncArgumentOfType type}}` | The first parameter of the enclosing function, excluding the receiver, matching the given type         |
-| `{{.FuncReturnOfType type}}`   | The first return value of the enclosing function matching the given type                               |
-| `{{.CallArgument N}}`          | The source text of the N-th (0-indexed) argument of the wrapped call expression itself                 |
-| `{{.CallArgumentCount}}`       | The number of arguments in the wrapped call expression itself                                          |
+| Placeholder                             | Replaced with                                                                                                    |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `{{.FuncName}}`                         | The name of the annotated function                                                                               |
+| `{{.FuncArgument N}}`                   | The identifier of the N-th (0-indexed) parameter of the enclosing function, excluding the receiver               |
+| `{{.FuncReturn N}}`                     | The identifier of the N-th (0-indexed) return value of the enclosing function                                    |
+| `{{.FuncArgumentCount}}`                | The number of parameters of the enclosing function, excluding the receiver                                       |
+| `{{.FuncReturnCount}}`                  | The number of return values of the enclosing function                                                            |
+| `{{.Receiver}}`                         | The identifier of the enclosing method's receiver                                                                |
+| `{{.FuncArgumentOfType type}}`          | The first parameter of the enclosing function, excluding the receiver, matching the given type                   |
+| `{{.FuncReturnOfType type}}`            | The first return value of the enclosing function matching the given type                                         |
+| `{{.FuncArgumentThatImplements iface}}` | The first parameter of the enclosing function, excluding the receiver, whose type is or implements the interface |
+| `{{.FuncReturnThatImplements iface}}`   | The first return value of the enclosing function whose type is or implements the interface                       |
+| `{{.CallArgument N}}`                   | The source text of the N-th (0-indexed) argument of the wrapped call expression itself                           |
+| `{{.CallArgumentCount}}`                | The number of arguments in the wrapped call expression itself                                                    |
 
 These resolve against two different things: `Func*`/`Receiver` placeholders describe the **enclosing function** (the named top-level function whose body contains the matched call site), while `Call*` placeholders describe **the matched call expression itself** — e.g. for `fmt.Println("hello", name)`, `{{.CallArgument 0}}` is the literal `"hello"`, not one of the enclosing function's parameters.
 
@@ -1252,17 +1290,19 @@ Top-level `imports` (map[string]string, optional): Additional imports needed by 
 
 **Template Placeholders:**
 
-| Placeholder                     | Replaced with                                                               |
-| ------------------------------- | --------------------------------------------------------------------------- |
-| `{{.FuncName}}`                 | The name of the annotated function                                          |
-| `{{.FuncArgument N}}`           | The identifier of the N-th (0-indexed) parameter, excluding the receiver    |
-| `{{.FuncReturn N}}`             | The identifier of the N-th (0-indexed) return value                         |
-| `{{.FuncArgumentCount}}`        | The number of parameters, excluding the receiver                            |
-| `{{.FuncReturnCount}}`          | The number of return values                                                 |
-| `{{.FuncArgumentOfType type}}`  | The first parameter (excluding the receiver) matching the given type, or "" |
-| `{{.FuncReturnOfType type}}`    | The first return value matching the given type, or ""                       |
-| `{{.DirectiveArgs}}`            | The `key:value` arguments parsed from the matched directive comment         |
-| `{{.DirectiveArg key}}`         | The value of the named directive argument, or "" if not present             |
+| Placeholder                             | Replaced with                                                                                 |
+| --------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `{{.FuncName}}`                         | The name of the annotated function                                                            |
+| `{{.FuncArgument N}}`                   | The identifier of the N-th (0-indexed) parameter, excluding the receiver                      |
+| `{{.FuncReturn N}}`                     | The identifier of the N-th (0-indexed) return value                                           |
+| `{{.FuncArgumentCount}}`                | The number of parameters, excluding the receiver                                              |
+| `{{.FuncReturnCount}}`                  | The number of return values                                                                   |
+| `{{.FuncArgumentOfType type}}`          | The first parameter (excluding the receiver) matching the given type, or ""                   |
+| `{{.FuncReturnOfType type}}`            | The first return value matching the given type, or ""                                         |
+| `{{.FuncArgumentThatImplements iface}}` | The first parameter (excluding the receiver) whose type is or implements the interface, or "" |
+| `{{.FuncReturnThatImplements iface}}`   | The first return value whose type is or implements the interface, or ""                       |
+| `{{.DirectiveArgs}}`                    | The `key:value` arguments parsed from the matched directive comment                           |
+| `{{.DirectiveArg key}}`                 | The value of the named directive argument, or "" if not present                               |
 
 Unnamed parameters and return values (e.g. `func(int, string)`) and blank (`_`) names are assigned a synthetic name the first time a template references them, so they can be read via `{{.FuncArgument N}}` / `{{.FuncReturn N}}` like any other. A `{{ ... }}` span that names one of these placeholders but is otherwise malformed (an out-of-range index) fails the build with an error.
 
@@ -1340,6 +1380,47 @@ func divide(ctx context.Context, a int, b int) (_unnamedRetVal0 int, _unnamedRet
 }
 ```
 
+**Example: `FuncArgumentThatImplements` and `FuncReturnThatImplements`**
+
+```yaml
+span_directive:
+  target: main
+  where:
+    directive: "otelc:span"
+  do:
+    - expand_directive:
+        template: |-
+          println("parent ctx:", {{ .FuncArgumentThatImplements "context.Context" }} != nil)
+          defer func() { println("failed:", {{ .FuncReturnThatImplements "error" }} != nil) }()
+```
+
+Given:
+
+```go
+// RequestContext implements context.Context, like *gin.Context.
+type RequestContext struct{ context.Context }
+
+type QueryError struct{}
+
+func (*QueryError) Error() string { return "query failed" }
+
+//otelc:span
+func query(c *RequestContext, q string) (int, *QueryError) {
+    return 0, nil
+}
+```
+
+`{{ .FuncArgumentThatImplements "context.Context" }}` resolves to `c`, and `{{ .FuncReturnThatImplements "error" }}` resolves to the synthesized name of the `*QueryError` result. `FuncArgumentOfType` and `FuncReturnOfType` would resolve to "" for both:
+
+```go
+//otelc:span
+func query(c *RequestContext, q string) (_unnamedRetVal0 int, _unnamedRetVal1 *QueryError) {
+    println("parent ctx:", c != nil)
+    defer func() { println("failed:", _unnamedRetVal1 != nil) }()
+    return 0, nil
+}
+```
+
 **Important Notes:**
 
 - The directive comment must be placed immediately before the function declaration.
@@ -1347,7 +1428,7 @@ func divide(ctx context.Context, a int, b int) (_unnamedRetVal0 int, _unnamedRet
 - The `directive` field must not include the leading `//`.
 - Functions without the directive comment are not affected.
 - Multiple functions in the same file can carry the directive; each gets the template applied independently with its own placeholder values.
-- `FuncArgumentOfType` and `FuncReturnOfType` match on syntactic type name only (e.g. `context.Context`, `*http.Request`, `error`); they do not perform interface-satisfaction checks, so a custom type that merely implements `context.Context` is not matched.
+- `FuncArgumentOfType` and `FuncReturnOfType` match on syntactic type name only (e.g. `context.Context`, `*http.Request`, `error`); they do not perform interface-satisfaction checks, so a custom type that merely implements `context.Context` is not matched. Use `FuncArgumentThatImplements` and `FuncReturnThatImplements` for that; see [Matching by interface](#matching-by-interface).
 
 ### 6. File Addition Rule
 

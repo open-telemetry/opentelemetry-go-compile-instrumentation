@@ -49,6 +49,34 @@ func TestParseTypeName(t *testing.T) {
 	}
 }
 
+func TestParseInterfaceName(t *testing.T) {
+	tests := []struct {
+		input      string
+		wantErr    bool
+		wantImport string
+		wantName   string
+	}{
+		{input: "error", wantName: "error"},
+		{input: "context.Context", wantImport: "context", wantName: "Context"},
+		{input: "net/http.Handler", wantImport: "net/http", wantName: "Handler"},
+		{input: "*context.Context", wantErr: true},
+		{input: "[]error", wantErr: true},
+		{input: "", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			importPath, name, err := ParseInterfaceName(tt.input)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantImport, importPath)
+			assert.Equal(t, tt.wantName, name)
+		})
+	}
+}
+
 func TestTypeNameMatches(t *testing.T) {
 	tests := []struct {
 		name    string

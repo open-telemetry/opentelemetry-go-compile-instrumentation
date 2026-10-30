@@ -584,7 +584,7 @@ func TestRenderRawCode(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			funcDecl := parseFunc(t, tt.src)
 
-			result, err := renderRawCode(tt.raw, funcDecl, nil, "h1")
+			result, err := renderRawCode(tt.raw, funcDecl, nil, "h1", nil)
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected, result)
@@ -597,10 +597,10 @@ func TestRenderRawCode_HashSaltsSyntheticNames(t *testing.T) {
 	src := "package main\nfunc Foo(int) {}"
 	raw := "use({{ .FuncArgument 0 }})"
 
-	result1, err := renderRawCode(raw, parseFunc(t, src), nil, "h1")
+	result1, err := renderRawCode(raw, parseFunc(t, src), nil, "h1", nil)
 	require.NoError(t, err)
 
-	result2, err := renderRawCode(raw, parseFunc(t, src), nil, "h2")
+	result2, err := renderRawCode(raw, parseFunc(t, src), nil, "h2", nil)
 	require.NoError(t, err)
 
 	assert.NotEqual(t, result1, result2, "different hashes must salt the synthetic name differently")
@@ -611,7 +611,7 @@ func TestRenderRawCode_HashSaltsSyntheticNames(t *testing.T) {
 func TestRenderRawCode_UnknownTagFails(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo() {}")
 
-	_, err := renderRawCode("{{Foo}}", funcDecl, nil, "h1")
+	_, err := renderRawCode("{{Foo}}", funcDecl, nil, "h1", nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not defined")
@@ -625,7 +625,7 @@ func TestRenderRawCode_CompositeLiteralFails(t *testing.T) {
 	// escaping).
 	funcDecl := parseFunc(t, "package main\nfunc Foo() {}")
 
-	_, err := renderRawCode(`attrs := []Point{{X: 1, Y: 2}}; call({{.FuncName}})`, funcDecl, nil, "h1")
+	_, err := renderRawCode(`attrs := []Point{{X: 1, Y: 2}}; call({{.FuncName}})`, funcDecl, nil, "h1", nil)
 
 	require.Error(t, err)
 }
@@ -633,7 +633,7 @@ func TestRenderRawCode_CompositeLiteralFails(t *testing.T) {
 func TestRenderRawCode_OutOfRangeArgument(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo() {}")
 
-	_, err := renderRawCode("{{.FuncArgument 0}}", funcDecl, nil, "h1")
+	_, err := renderRawCode("{{.FuncArgument 0}}", funcDecl, nil, "h1", nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "out of range")
@@ -642,7 +642,7 @@ func TestRenderRawCode_OutOfRangeArgument(t *testing.T) {
 func TestRenderRawCode_NegativeArgumentIndex(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo(a int) {}")
 
-	_, err := renderRawCode("{{.FuncArgument -1}}", funcDecl, nil, "h1")
+	_, err := renderRawCode("{{.FuncArgument -1}}", funcDecl, nil, "h1", nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "out of range")
@@ -651,7 +651,7 @@ func TestRenderRawCode_NegativeArgumentIndex(t *testing.T) {
 func TestRenderRawCode_OutOfRangeReturn(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo() {}")
 
-	_, err := renderRawCode("{{.FuncReturn 0}}", funcDecl, nil, "h1")
+	_, err := renderRawCode("{{.FuncReturn 0}}", funcDecl, nil, "h1", nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "out of range")
@@ -660,7 +660,7 @@ func TestRenderRawCode_OutOfRangeReturn(t *testing.T) {
 func TestRenderRawCode_NegativeReturnIndex(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo() (int, error) { return 0, nil }")
 
-	_, err := renderRawCode("{{.FuncReturn -1}}", funcDecl, nil, "h1")
+	_, err := renderRawCode("{{.FuncReturn -1}}", funcDecl, nil, "h1", nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "out of range")
@@ -669,7 +669,7 @@ func TestRenderRawCode_NegativeReturnIndex(t *testing.T) {
 func TestRenderRawCode_ReceiverOnFunctionWithoutReceiver(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo() {}")
 
-	_, err := renderRawCode("{{.Receiver}}", funcDecl, nil, "h1")
+	_, err := renderRawCode("{{.Receiver}}", funcDecl, nil, "h1", nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no receiver")
@@ -678,7 +678,7 @@ func TestRenderRawCode_ReceiverOnFunctionWithoutReceiver(t *testing.T) {
 func TestRenderRawCode_InvalidTemplateSyntax(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo() {}")
 
-	_, err := renderRawCode("{{.FuncName", funcDecl, nil, "h1")
+	_, err := renderRawCode("{{.FuncName", funcDecl, nil, "h1", nil)
 
 	require.Error(t, err)
 }
@@ -686,7 +686,7 @@ func TestRenderRawCode_InvalidTemplateSyntax(t *testing.T) {
 func TestRenderRawCode_NonIntegerArgumentIndex(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo(a int) {}")
 
-	_, err := renderRawCode("{{.FuncArgument abc}}", funcDecl, nil, "h1")
+	_, err := renderRawCode("{{.FuncArgument abc}}", funcDecl, nil, "h1", nil)
 
 	require.Error(t, err)
 }
