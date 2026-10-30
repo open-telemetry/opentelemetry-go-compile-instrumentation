@@ -1932,13 +1932,20 @@ func TestSetupPhase_GetBuildContext(t *testing.T) {
 	})
 }
 
+// matchAllDepsFixture is the module that matchAllDepsTestModule writes.
+type matchAllDepsFixture struct {
+	dir      string
+	ruleFile string
+	deps     []*Dependency
+}
+
 // matchAllDepsTestModule writes a module whose original packages (aaa, zzz)
 // and hook-injected packages (mmm, and nnn through a second hook only mmm's
 // own rule names) interleave alphabetically, so the merge boundary in
 // matchAllDeps is the only thing standing between a deterministic matched.json
 // and worker-completion order. It returns the module directory, the rule file
 // path, and the original dependencies.
-func matchAllDepsTestModule(t *testing.T) (string, string, []*Dependency) {
+func matchAllDepsTestModule(t *testing.T) matchAllDepsFixture {
 	t.Helper()
 
 	dir := t.TempDir()
@@ -1976,10 +1983,18 @@ nnnRule:
 `)
 
 	deps := []*Dependency{
-		{ImportPath: "example.com/maddeps/zzz", Sources: []string{filepath.Join(dir, "zzz", "zzz.go")}, CgoFiles: map[string]string{}},
-		{ImportPath: "example.com/maddeps/aaa", Sources: []string{filepath.Join(dir, "aaa", "aaa.go")}, CgoFiles: map[string]string{}},
+		{
+			ImportPath: "example.com/maddeps/zzz",
+			Sources:    []string{filepath.Join(dir, "zzz", "zzz.go")},
+			CgoFiles:   map[string]string{},
+		},
+		{
+			ImportPath: "example.com/maddeps/aaa",
+			Sources:    []string{filepath.Join(dir, "aaa", "aaa.go")},
+			CgoFiles:   map[string]string{},
+		},
 	}
-	return dir, ruleFile, deps
+	return matchAllDepsFixture{dir: dir, ruleFile: ruleFile, deps: deps}
 }
 
 // TestMatchAllDeps_DeterministicOrder drives the full matchAllDeps flow —
@@ -1993,7 +2008,8 @@ nnnRule:
 // stays fixed.
 func TestMatchAllDeps_DeterministicOrder(t *testing.T) {
 	t.Setenv(util.EnvOtelcRules, "")
-	dir, ruleFile, deps := matchAllDepsTestModule(t)
+	fixture := matchAllDepsTestModule(t)
+	dir, ruleFile, deps := fixture.dir, fixture.ruleFile, fixture.deps
 
 	sp := newTestSetupPhase()
 	sp.ruleConfig = ruleFile
@@ -2012,7 +2028,7 @@ func TestMatchAllDeps_DeterministicOrder(t *testing.T) {
 		require.Len(t, matched, len(wantModules))
 		modules := make([]string, 0, len(matched))
 		for _, set := range matched {
-			require.Len(t, set.FileRules, 0)
+			require.Empty(t, set.FileRules)
 			require.NotEmpty(t, set.FuncRules, "every matched package has a func rule")
 			modules = append(modules, set.ModulePath)
 		}
@@ -2069,7 +2085,11 @@ func TestMatchAllDeps_ResolveRulePathsError(t *testing.T) {
 	sp.ruleConfig = ruleFile
 
 	deps := []*Dependency{
-		{ImportPath: "example.com/maddeps/aaa", Sources: []string{filepath.Join(dir, "aaa", "aaa.go")}, CgoFiles: map[string]string{}},
+		{
+			ImportPath: "example.com/maddeps/aaa",
+			Sources:    []string{filepath.Join(dir, "aaa", "aaa.go")},
+			CgoFiles:   map[string]string{},
+		},
 	}
 	_, err := sp.matchAllDeps(t.Context(), deps, []string{dir}, nil)
 	require.Error(t, err)
@@ -2107,7 +2127,11 @@ mmmRule:
 	sp.ruleConfig = ruleFile
 
 	deps := []*Dependency{
-		{ImportPath: "example.com/maddeps2/orig", Sources: []string{filepath.Join(dir, "orig", "aaa.go")}, CgoFiles: map[string]string{}},
+		{
+			ImportPath: "example.com/maddeps2/orig",
+			Sources:    []string{filepath.Join(dir, "orig", "aaa.go")},
+			CgoFiles:   map[string]string{},
+		},
 	}
 	_, err := sp.matchAllDeps(t.Context(), deps, []string{dir}, []string{"-C", dir})
 	require.Error(t, err)

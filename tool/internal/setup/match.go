@@ -689,7 +689,7 @@ func sortMatchedRuleSets(matched []*rule.InstRuleSet) error {
 	keyed := make([]keyedRuleSet, len(matched))
 	for i, set := range matched {
 		keyed[i] = keyedRuleSet{set: set}
-		if count[set.ModulePath] < 2 {
+		if count[set.ModulePath] == 1 {
 			continue
 		}
 		key, err := json.Marshal(set)
