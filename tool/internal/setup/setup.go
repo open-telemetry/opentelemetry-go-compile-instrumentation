@@ -482,27 +482,14 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Match the hook code with these dependencies
-	matched, err := sp.matchDeps(ctx, deps, moduleDirs)
-	if err != nil {
-		return ex.Wrapf(err, "matching dependencies to hook rules")
-	}
-
-	// Resolve rule import paths before matching injected dependencies so add_file
-	// sources can be located and parsed for dependencies that must enter the build graph.
-	if err = resolveRulePaths(ctx, matched, moduleDirs); err != nil {
-		return ex.Wrapf(err, "resolving rule paths")
-	}
-
-	// The hook packages the pass above selected get blank-imported into the
-	// application below, which compiles their dependencies too. The build plan
-	// never saw those, so match them now.
-	injected, err := sp.matchInjectedDeps(
-		ctx, matched, deps, moduleDirs, sp.buildFlags,
-	)
+	matched, err := sp.matchRules(ctx, deps, moduleDirs)
 	if err != nil {
 		return err
 	}
-	matched = append(matched, injected...)
+
+	if err = sp.checkRuleImportCycles(ctx, matched, allPkgs); err != nil {
+		return err
+	}
 
 	// Reported here rather than per matching pass: an individual pass matching
 	// nothing is normal, it is the combined result that tells the user whether
@@ -519,6 +506,36 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 
 	// Write the matched ruleset to matched.json for further instrument phase
 	return sp.store(matched)
+}
+
+// matchRules matches the rules with the dependencies of the build and with the
+// packages otelc injects into it.
+func (sp *setupPhase) matchRules(
+	ctx context.Context,
+	deps []*Dependency,
+	moduleDirs []string,
+) ([]*rule.InstRuleSet, error) {
+	matched, err := sp.matchDeps(ctx, deps, moduleDirs)
+	if err != nil {
+		return nil, ex.Wrapf(err, "matching dependencies to hook rules")
+	}
+
+	// Resolve rule import paths before matching injected dependencies so add_file
+	// sources can be located and parsed for dependencies that must enter the build graph.
+	if err = resolveRulePaths(ctx, matched, moduleDirs); err != nil {
+		return nil, ex.Wrapf(err, "resolving rule paths")
+	}
+
+	// The hook packages the pass above selected get blank-imported into the
+	// application, which compiles their dependencies too. The build plan never
+	// saw those, so match them now.
+	injected, err := sp.matchInjectedDeps(
+		ctx, matched, deps, moduleDirs, sp.buildFlags,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return append(matched, injected...), nil
 }
 
 // setupGoCache creates a persistent GOCACHE in .otelc-build/gocache if one isn't already set.
