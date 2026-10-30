@@ -69,6 +69,11 @@ type instrumentPhase struct {
 	// whole package because HookContext declarations accumulate into one globals
 	// file across all instrumented source files.
 	appliedFuncIdentities map[string]struct{}
+	// Local //go:linkname stub names already emitted in this package. Hook
+	// stubs are named from the hook path and function (see hookLinkName), so
+	// the same hook used in two files is declared once and both trampolines
+	// call that name.
+	emittedHookDecls map[string]struct{}
 	// Raw-rule applications already performed during this package's
 	// instrumentation, keyed by the target *dst.FuncDecl. The inner key is
 	// rawRuleDedupKey (Identity plus Pattern, Placement, and Imports).

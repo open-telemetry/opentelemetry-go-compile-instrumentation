@@ -119,8 +119,8 @@ func OtelBeforeTrampoline_InstrumentedMethod3533141232(recv0 **T, param0 *string
 	hookContext.params = []interface{}{recv0, param0}
 	hookContext.funcName = "InstrumentedMethod"
 	hookContext.packageName = "main"
-	if HBefore != nil {
-		HBefore(hookContext, *recv0, *param0)
+	if otelc_hook_2848419980_HBefore != nil {
+		otelc_hook_2848419980_HBefore(hookContext, *recv0, *param0)
 	}
 	return hookContext, hookContext.skipCall
 }
@@ -139,13 +139,13 @@ func OtelAfterTrampoline_InstrumentedMethod3533141232(hookContext HookContext) {
 		}
 	}()
 	hookContext.(*HookContextImpl3533141232).returnVals = []interface{}{}
-	if HAfter != nil {
-		HAfter(hookContext)
+	if otelc_hook_2848419980_HAfter != nil {
+		otelc_hook_2848419980_HAfter(hookContext)
 	}
 }
 
-//go:linkname HBefore testdata/golden/ignore-directive-method.HBefore
-func HBefore(hookContext HookContext, recv0 interface{}, param0 string)
+//go:linkname otelc_hook_2848419980_HBefore testdata/golden/ignore-directive-method.HBefore
+func otelc_hook_2848419980_HBefore(hookContext HookContext, recv0 interface{}, param0 string)
 
-//go:linkname HAfter testdata/golden/ignore-directive-method.HAfter
-func HAfter(hookContext HookContext)
+//go:linkname otelc_hook_2848419980_HAfter testdata/golden/ignore-directive-method.HAfter
+func otelc_hook_2848419980_HAfter(hookContext HookContext)
