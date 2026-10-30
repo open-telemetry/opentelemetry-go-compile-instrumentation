@@ -587,7 +587,7 @@ func TestFindModuleDirs(t *testing.T) {
 
 // writeBatchFixture writes a module whose packages a and c both import b,
 // the shared transitive dependency the batch resolver must walk once.
-func writeBatchFixture(t *testing.T) string {
+func writeBatchFixture(t *testing.T) {
 	t.Helper()
 	root := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"),
@@ -602,7 +602,6 @@ func writeBatchFixture(t *testing.T) string {
 		require.NoError(t, os.WriteFile(filepath.Join(root, name, name+".go"), []byte(content), 0o644))
 	}
 	t.Chdir(root)
-	return root
 }
 
 func TestResolveExportFilesBatch_EmptyInput(t *testing.T) {
