@@ -589,7 +589,7 @@ func TestModuleRelativeDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	pkgADir := filepath.Join(tmpDir, "pkga")
 	require.NoError(t, os.MkdirAll(pkgADir, 0o755))
-	module := &packages.Module{Path: "example.com/app", Dir: tmpDir}
+	module := &packages.Module{Path: "example.com/app", Dir: tmpDir, Main: true}
 
 	tests := []struct {
 		name string
@@ -624,6 +624,14 @@ func TestModuleRelativeDir(t *testing.T) {
 		{
 			name: "no module",
 			pkg:  &packages.Package{PkgPath: "example.com/app/pkga"},
+			want: "",
+		},
+		{
+			name: "dependency module package",
+			pkg: &packages.Package{
+				PkgPath: "example.com/dep/pkga",
+				Module:  &packages.Module{Path: "example.com/dep", Dir: tmpDir, Main: false},
+			},
 			want: "",
 		},
 		{

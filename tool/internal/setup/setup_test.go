@@ -1466,7 +1466,7 @@ func TestGenerateRuntimePerPackageTestOnlyPackage(t *testing.T) {
 
 	pkgs := []*packages.Package{{
 		PkgPath: "example.com/app/pkga",
-		Module:  &packages.Module{Path: "example.com/app", Dir: tmpDir},
+		Module:  &packages.Module{Path: "example.com/app", Dir: tmpDir, Main: true},
 	}}
 	rset := newTestRuleSet(
 		"example.com/app/lib",
@@ -1495,7 +1495,7 @@ func TestGenerateRuntimePerPackageTestOnlyPackageUnresolvableName(t *testing.T) 
 
 	pkgs := []*packages.Package{{
 		PkgPath: "example.com/app/pkga",
-		Module:  &packages.Module{Path: "example.com/app", Dir: tmpDir},
+		Module:  &packages.Module{Path: "example.com/app", Dir: tmpDir, Main: true},
 	}}
 	rset := newTestRuleSet(
 		"example.com/app/lib",
@@ -1532,6 +1532,33 @@ func TestGenerateRuntimePerPackageBuildSkipsTestOnlyPackage(t *testing.T) {
 	require.NoError(t, sp.generateRuntimePerPackage(t.Context(), pkgs, []*rule.InstRuleSet{rset}))
 
 	_, err := os.Stat(filepath.Join(cmdDir, otelcRuntimeFile))
+	assert.True(t, os.IsNotExist(err))
+}
+
+// TestGenerateRuntimePerPackageDependencyTestOnlyPackage covers a test-only
+// package that belongs to a dependency module (a replace target or the
+// module cache). Writing there can fail on a read-only checkout, so
+// dependency packages keep the previous skip even under `go test`.
+func TestGenerateRuntimePerPackageDependencyTestOnlyPackage(t *testing.T) {
+	sp := newTestSetupPhase()
+	sp.subcommand = subcmdTest
+
+	tmpDir := t.TempDir()
+	pkgDir := filepath.Join(tmpDir, "extpkg")
+	mustWriteFile(t, filepath.Join(pkgDir, "x_test.go"), "package extpkg\n")
+
+	pkgs := []*packages.Package{{
+		PkgPath: "example.com/ext/extpkg",
+		Module:  &packages.Module{Path: "example.com/ext", Dir: tmpDir, Main: false},
+	}}
+	rset := newTestRuleSet(
+		"example.com/app/lib",
+		[]*rule.InstFuncRule{newTestFuncRule("example.com/app/hooks", "example.com/app/lib")},
+		[]*rule.InstFileRule{},
+	)
+	require.NoError(t, sp.generateRuntimePerPackage(t.Context(), pkgs, []*rule.InstRuleSet{rset}))
+
+	_, err := os.Stat(filepath.Join(pkgDir, otelcRuntimeFile))
 	assert.True(t, os.IsNotExist(err))
 }
 
