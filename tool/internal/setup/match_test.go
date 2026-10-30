@@ -6,6 +6,7 @@ package setup
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -1190,9 +1191,12 @@ func newTestRuleSet(
 	fileRules []*rule.InstFileRule,
 ) *rule.InstRuleSet {
 	rs := rule.NewInstRuleSet(modulePath)
-	fakeFilePath := filepath.Join(os.TempDir(), "file.go")
-	for _, fr := range funcRules {
-		rs.AddFuncRule(fakeFilePath, fr)
+	// One file key per rule. Filing them all under a single key leaves the
+	// per-file map with no order to get wrong, which is how the flattening
+	// bug in #1526 stayed invisible to every test using this helper. The
+	// zero-padded names keep lexical order equal to insertion order.
+	for i, fr := range funcRules {
+		rs.AddFuncRule(filepath.Join(os.TempDir(), fmt.Sprintf("file%02d.go", i)), fr)
 	}
 	for _, fr := range fileRules {
 		rs.AddFileRule(fr)
@@ -1522,6 +1526,16 @@ func TestRunMatch_EmptyRules(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, set)
 	assert.True(t, set.IsEmpty())
+}
+
+func TestRunMatch_RecordsTestBuild(t *testing.T) {
+	sp := newTestSetupPhase()
+	for _, isTest := range []bool{false, true} {
+		dep := &Dependency{ImportPath: "example.com/lib", CgoFiles: map[string]string{}, IsTest: isTest}
+		set, err := sp.runMatch(context.Background(), dep, map[string][]rule.InstRule{}, nil)
+		require.NoError(t, err)
+		assert.Equal(t, isTest, set.IsTest)
+	}
 }
 
 func TestRunMatch_FileRuleInvalidSource(t *testing.T) {

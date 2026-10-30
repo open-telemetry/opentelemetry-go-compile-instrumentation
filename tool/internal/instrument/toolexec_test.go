@@ -195,6 +195,37 @@ func TestInterceptVetLogsUnexpectedArguments(t *testing.T) {
 	assert.Contains(t, logs.String(), "vet invocation missing expected vet.cfg argument")
 }
 
+// TestInterceptVetWithoutGoFiles covers a vet config that carries no GoFiles
+// key. There is no source list to rewrite, so the command passes through; the
+// previous code indexed the missing key and reported the resulting nil as
+// malformed JSON, failing the build.
+func TestInterceptVetWithoutGoFiles(t *testing.T) {
+	ctx := util.ContextWithLogger(t.Context(), slog.New(slog.DiscardHandler))
+
+	t.Run("absent key passes through", func(t *testing.T) {
+		cfg := filepath.Join(t.TempDir(), "vet.cfg")
+		require.NoError(t, os.WriteFile(cfg,
+			[]byte(`{"Compiler":"gc","ImportPath":"example.com/p"}`), 0o644))
+		args := []string{vetToolName, cfg}
+
+		got, err := interceptVet(ctx, args)
+
+		require.NoError(t, err)
+		assert.Equal(t, args, got)
+	})
+
+	t.Run("malformed value still errors", func(t *testing.T) {
+		cfg := filepath.Join(t.TempDir(), "vet.cfg")
+		require.NoError(t, os.WriteFile(cfg,
+			[]byte(`{"GoFiles":"not-a-list"}`), 0o644))
+
+		_, err := interceptVet(ctx, []string{vetToolName, cfg})
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "parsing GoFiles from vet config")
+	})
+}
+
 func TestUpdateImportConfig(t *testing.T) {
 	t.Run("no importcfg path", func(t *testing.T) {
 		ip := &instrumentPhase{
@@ -898,6 +929,8 @@ func TestInterceptCompileFileRuleWithoutPackageName(t *testing.T) {
 		fileRule := &rule.InstFileRule{File: "added.go", Path: rulesDir, ResolvedPath: rulesDir}
 		fileRule.Name = "add_to_main"
 		set.AddFileRule(fileRule)
+		// Setup records whether the compile belongs to a test binary.
+		set.IsTest = util.IsTestBuild(sources)
 		data, err := json.Marshal([]*rule.InstRuleSet{set})
 		require.NoError(t, err)
 		matched := util.GetMatchedRuleFile()
@@ -1317,7 +1350,7 @@ func TestUserBuildTags(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, userBuildTags(tt.goflags, tt.buildFlags))
+			assert.Equal(t, tt.expected, util.UserBuildTags(tt.goflags, tt.buildFlags))
 		})
 	}
 }
