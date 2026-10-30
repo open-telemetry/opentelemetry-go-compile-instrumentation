@@ -47,6 +47,20 @@ func TestSetupPhaseStoreCreateError(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestSetupPhaseStore_FailsOnMissingRuntimeSupport(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	other := rule.NewInstRuleSet("example.com/other")
+	other.AddIgnoredCallFile(fakeSrcFile("other.go"))
+
+	sp := newTestSetupPhase()
+	err := sp.store([]*rule.InstRuleSet{other})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), ignoreDirectiveSupportModule)
+}
+
 func TestSetupPhaseStorePGOProfile(t *testing.T) {
 	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
 	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))

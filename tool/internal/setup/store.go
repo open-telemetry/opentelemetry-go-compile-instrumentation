@@ -151,6 +151,10 @@ func ensureIgnoreDirectiveSupport(matched []*rule.InstRuleSet) error {
 // It's the pair of the InstrumentPhase.load.
 // Rule paths must already be resolved via resolveRulePaths.
 func (sp *setupPhase) store(matched []*rule.InstRuleSet) error {
+	if err := ensureIgnoreDirectiveSupport(matched); err != nil {
+		return err
+	}
+
 	bs, err := json.Marshal(matched)
 	if err != nil {
 		return ex.Wrapf(err, "failed to marshal rules to JSON")

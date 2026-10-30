@@ -487,12 +487,6 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		return ex.Wrapf(err, "matching dependencies to hook rules")
 	}
 
-	// Fail fast, before any further matching or compiling, if the build uses
-	// //otelc:ignore without instrumentation/runtime loaded.
-	if err = ensureIgnoreDirectiveSupport(matched); err != nil {
-		return err
-	}
-
 	// Resolve rule import paths before matching injected dependencies so add_file
 	// sources can be located and parsed for dependencies that must enter the build graph.
 	if err = resolveRulePaths(ctx, matched, moduleDirs); err != nil {
