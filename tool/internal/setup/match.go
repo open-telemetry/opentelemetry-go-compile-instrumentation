@@ -138,6 +138,7 @@ func (sp *setupPhase) runMatch(
 	globRules []targetRule,
 ) (*rule.InstRuleSet, error) {
 	set := rule.NewInstRuleSet(dep.ImportPath)
+	set.IsTest = dep.IsTest
 
 	if len(dep.CgoFiles) > 0 {
 		set.SetCgoFileMap(dep.CgoFiles)
@@ -251,7 +252,7 @@ func (sp *setupPhase) preciseMatching(
 
 	// IsTest is a property of the whole compile (every file in a test build
 	// shares it), so compute it once and reuse it across each file's context.
-	isTest := isTestBuild(dep.Sources)
+	isTest := util.IsTestBuild(dep.Sources)
 
 	known := knownDirectiveNames(rules)
 
@@ -319,31 +320,6 @@ func (sp *setupPhase) warnUnknownDirectives(source string, tree *dst.File, known
 	for _, name := range ast.UnknownDirectiveNames(tree, known) {
 		sp.Warn("Unrecognized directive comment", "directive", name, "file", source)
 	}
-}
-
-// isTestBuild reports whether a compile invocation is part of a `go test` run.
-// The Go toolchain only ever feeds these inputs to the compiler while building
-// a test binary: a package augmented with its in-package _test.go files, the
-// external xxx_test package (whose sources are also _test.go files), and the
-// generated _testmain.go runner. None of them appear in a normal `go build`,
-// so their presence in the source set is the signal. There is no dedicated
-// "is test" compiler flag — verified against the toolchain — so the source set
-// is the only thing to key on.
-//
-// ponytail: known gap, no fix possible at compile granularity. A package whose
-// tests live only in an external xxx_test package (no in-package _test.go) is
-// compiled once and shared between normal and test builds — the toolchain emits
-// no test-only variant of it — so is_test cannot gate that package's production
-// code. The external xxx_test package and any in-package _test.go files are
-// still detected.
-func isTestBuild(sources []string) bool {
-	for _, src := range sources {
-		base := filepath.Base(src)
-		if base == "_testmain.go" || strings.HasSuffix(base, "_test.go") {
-			return true
-		}
-	}
-	return false
 }
 
 // matchOneRule performs precise AST matching for a single rule against a parsed
