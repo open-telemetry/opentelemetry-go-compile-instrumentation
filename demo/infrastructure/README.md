@@ -331,7 +331,7 @@ ports:
 ## Next Steps
 
 - Explore [Docker Compose documentation](./docker-compose/README.md) for detailed configuration
-- Review [gRPC demo](../grpc/README.md) for application-level instrumentation
+- Review [gRPC demo](../app/grpc/README.md) for application-level instrumentation
 - Customize dashboards for your specific metrics
 - Add persistent storage for production-like testing
 
