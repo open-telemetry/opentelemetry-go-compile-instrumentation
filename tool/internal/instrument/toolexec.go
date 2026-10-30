@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"errors"
 	"go/build"
+	"go/parser"
+	"go/token"
 	"io/fs"
 	"log/slog"
 	"maps"
@@ -17,6 +19,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -315,10 +318,17 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 // pgoBuildFlags returns the -pgo flag that makes a nested go list compile the
 // added imports with the profile whose path storePGOProfile recorded during
 // setup, when this compile uses one.
-// Without it the nested build compiles them unprofiled, and the link rejects
-// the mix of export data with a fingerprint mismatch.
 func (ip *instrumentPhase) pgoBuildFlags() ([]string, error) {
-	if util.FindFlagValue(ip.compileArgs, "-pgoprofile") == "" {
+	return pgoBuildFlagsFor(ip.compileArgs)
+}
+
+// pgoBuildFlagsFor returns the -pgo flag that makes a nested go list compile
+// the added imports with the profile whose path storePGOProfile recorded
+// during setup, when the command in args uses one. Without it the nested
+// build compiles them unprofiled, and the link rejects the mix of export data
+// with a fingerprint mismatch.
+func pgoBuildFlagsFor(args []string) ([]string, error) {
+	if util.FindFlagValue(args, "-pgoprofile") == "" {
 		return nil, nil
 	}
 	f := util.GetPGOProfileFile()
@@ -555,16 +565,13 @@ func interceptLink(ctx context.Context, args []string) ([]string, error) {
 		return args, nil
 	}
 
-	// Load imports that were added during compilation
+	// Load imports that were added during compilation. A failure is not
+	// fatal: matched.json still says which imports rules add, and
+	// resolveRuleAddedImports recovers them below.
 	addedImports, err := loadAddedImports(ctx)
 	if err != nil {
 		logger.WarnContext(ctx, "failed to load added imports for link phase", "error", err)
-		return args, nil // Non-fatal, proceed with original args
-	}
-
-	if len(addedImports) == 0 {
-		// No imports were added during compilation
-		return args, nil
+		addedImports = nil
 	}
 
 	// Parse the link importcfg
@@ -587,6 +594,18 @@ func interceptLink(ctx context.Context, args []string) ([]string, error) {
 		}
 	}
 
+	// The merge above depends on a side effect of compile actions that a
+	// build cache hit skips: a cached compile writes no tracking file, so on
+	// a warm GOCACHE the link misses the imports rules added to the cached
+	// packages. matched.json survives that, because setup rewrites it
+	// deterministically before every build, so recover the imports from it
+	// and resolve whatever the link does not list yet.
+	ruleUpdated, err := resolveRuleAddedImports(ctx, args, &linkConfig)
+	if err != nil {
+		return nil, err
+	}
+	updated = updated || ruleUpdated
+
 	if !updated {
 		return args, nil
 	}
@@ -602,6 +621,153 @@ func interceptLink(ctx context.Context, args []string) ([]string, error) {
 	// Cleanup happens at the start of the next build via CleanupImportTrackingFiles.
 
 	return args, nil
+}
+
+// resolveRuleAddedImports completes the link importcfg with the imports that
+// instrumentation rules can add, resolved the same way the compile phase
+// resolves them: a nested go list -export that shares the build cache keys.
+// It reports whether the import config changed.
+func resolveRuleAddedImports(ctx context.Context, linkArgs []string, linkConfig *imports.ImportConfig) (bool, error) {
+	candidates := ruleAddedImports(ctx)
+	if len(candidates) == 0 {
+		return false, nil
+	}
+
+	logger := util.LoggerFromContext(ctx)
+	missing := make([]string, 0, len(candidates))
+	for path := range candidates {
+		if path == unsafePackageName || path == "C" {
+			// unsafe is built-in, C is the cgo pseudo-package; neither has an archive file
+			continue
+		}
+		if _, exists := linkConfig.PackageFile[path]; !exists {
+			missing = append(missing, path)
+		}
+	}
+	if len(missing) == 0 {
+		return false, nil
+	}
+	// Sorting keeps the go list output and the importcfg edits stable.
+	slices.Sort(missing)
+
+	pgoFlags, err := pgoBuildFlagsFor(linkArgs)
+	if err != nil {
+		return false, err
+	}
+	buildFlags := append(util.GetBuildFlags(), pgoFlags...)
+	archives, failed, err := pkgload.ResolveExportFilesBatch(ctx, missing, buildFlags...)
+	if err != nil {
+		return false, err
+	}
+	for path, loadErr := range failed {
+		// A candidate the rules declare but this build never compiles can be
+		// unresolvable, for example under another platform's build
+		// constraints. Skip it: the link fails with go's own error when the
+		// import was genuinely needed.
+		logger.WarnContext(ctx, "skipping unresolvable rule-added import for the link",
+			"import", path, "error", loadErr)
+	}
+
+	var updated bool
+	for pkg, archive := range archives {
+		if _, exists := linkConfig.PackageFile[pkg]; exists {
+			continue
+		}
+		logger.DebugContext(ctx, "Adding rule-added package to link importcfg", "package", pkg, "archive", archive)
+		linkConfig.PackageFile[pkg] = archive
+		updated = true
+	}
+	return updated, nil
+}
+
+// ruleAddedImports collects the import paths instrumentation rules can add to
+// a package's compile: the imports every rule declares, plus the imports of
+// the source files add_file rules insert. It reads matched.json, which setup
+// wrote before the build, so the answer never depends on a compile running.
+// The result is a superset of what the current link needs: rules whose targets
+// are outside this build, and imports a rule declared but never used, resolve
+// to nothing the link lists, and resolveRuleAddedImports skips them.
+func ruleAddedImports(ctx context.Context) map[string]struct{} {
+	logger := util.LoggerFromContext(ctx)
+
+	content, err := os.ReadFile(util.GetMatchedRuleFile())
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			logger.WarnContext(ctx, "failed to read matched rules for link imports", "error", err)
+		}
+		return nil
+	}
+	var sets []*rule.InstRuleSet
+	if err = json.Unmarshal(content, &sets); err != nil {
+		logger.WarnContext(ctx, "failed to parse matched rules for link imports", "error", err)
+		return nil
+	}
+
+	paths := make(map[string]struct{})
+	for _, set := range sets {
+		addImportsOf(paths, set.RawRules)
+		addImportsOf(paths, set.FuncRules)
+		addImportsOf(paths, set.StructRules)
+		addImportsOf(paths, set.CallRules)
+		addImportsOf(paths, set.LitRules)
+		addImportsOf(paths, set.DirectiveRules)
+		addImportsOf(paths, set.DeclRules)
+		for _, fileRule := range set.FileRules {
+			for _, path := range fileRuleImports(ctx, fileRule) {
+				paths[path] = struct{}{}
+			}
+		}
+	}
+	return paths
+}
+
+// addImportsOf adds the declared imports of every rule in a file-keyed rule
+// map. It is generic because every rule kind embeds InstBaseRule and promotes
+// its Base accessor.
+func addImportsOf[T interface{ Base() *rule.InstBaseRule }](
+	paths map[string]struct{},
+	rules map[string][]T,
+) {
+	for _, fileRules := range rules {
+		for _, r := range fileRules {
+			for _, path := range r.Base().Imports {
+				paths[path] = struct{}{}
+			}
+		}
+	}
+}
+
+// fileRuleImports returns the import paths an add_file rule's source declares.
+// The source joins a target package's compile only through toolexec, so its
+// imports are as invisible to go's build graph as the imports rules declare.
+// The parse ignores build constraints: a file whose constraints exclude it
+// yields an unresolvable candidate, which the link phase reports as a warning.
+func fileRuleImports(ctx context.Context, fileRule *rule.InstFileRule) []string {
+	if fileRule.ResolvedPath == "" {
+		return nil
+	}
+	file := filepath.Join(fileRule.ResolvedPath, fileRule.File)
+	src, err := os.ReadFile(file)
+	if err != nil {
+		util.LoggerFromContext(ctx).WarnContext(ctx,
+			"failed to read add_file rule source for link imports", "file", file, "error", err)
+		return nil
+	}
+	parsed, err := parser.ParseFile(token.NewFileSet(), file, src, parser.ImportsOnly)
+	if err != nil {
+		util.LoggerFromContext(ctx).WarnContext(ctx,
+			"failed to parse add_file rule source for link imports", "file", file, "error", err)
+		return nil
+	}
+	paths := make([]string, 0, len(parsed.Imports))
+	for _, imp := range parsed.Imports {
+		path, unquoteErr := strconv.Unquote(imp.Path.Value)
+		if unquoteErr != nil {
+			continue
+		}
+		paths = append(paths, path)
+	}
+	return paths
 }
 
 const vetToolName = "vet"

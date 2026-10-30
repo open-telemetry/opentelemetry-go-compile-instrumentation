@@ -180,6 +180,67 @@ func ResolveExportFiles(ctx context.Context, importPath string, buildFlags ...st
 	return result, nil
 }
 
+// ResolveExportFilesBatch resolves several import paths with one packages.Load
+// call. It returns importPath -> exportFile for every requested package that
+// loaded cleanly and for all their transitive dependencies. Load failures are
+// reported per requested import path in failed, so a caller can treat one
+// unresolvable candidate as non-fatal while keeping the rest.
+func ResolveExportFilesBatch(
+	ctx context.Context,
+	importPaths []string,
+	buildFlags ...string,
+) (map[string]string, map[string]error, error) {
+	if len(importPaths) == 0 {
+		return map[string]string{}, nil, nil
+	}
+
+	mode := packages.NeedName | packages.NeedImports | packages.NeedDeps | packages.NeedExportFile
+	pkgs, err := LoadPackages(ctx, mode, buildFlags, false, importPaths...)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(pkgs) == 0 {
+		return nil, nil, ex.Newf("no packages found for %v", importPaths)
+	}
+
+	requested := make(map[string]bool, len(importPaths))
+	for _, path := range importPaths {
+		requested[path] = true
+	}
+
+	resolved := make(map[string]string)
+	failed := make(map[string]error)
+	visited := make(map[string]bool)
+
+	var walk func(pkg *packages.Package)
+	walk = func(pkg *packages.Package) {
+		if visited[pkg.PkgPath] {
+			return
+		}
+		visited[pkg.PkgPath] = true
+		if len(pkg.Errors) == 0 && pkg.ExportFile != "" {
+			resolved[pkg.PkgPath] = pkg.ExportFile
+		}
+		for _, dep := range pkg.Imports {
+			walk(dep)
+		}
+	}
+
+	for _, pkg := range pkgs {
+		walk(pkg)
+		if !requested[pkg.PkgPath] {
+			continue
+		}
+		if len(pkg.Errors) > 0 {
+			failed[pkg.PkgPath] = pkg.Errors[0]
+		} else if _, ok := resolved[pkg.PkgPath]; !ok {
+			failed[pkg.PkgPath] = ex.Newf("package %q has no export file", pkg.PkgPath)
+		}
+	}
+
+	return resolved, failed, nil
+}
+
 // CollectPackageNames walks pkgs and their transitive imports, mapping
 // each import path to its declared package name. Load pkgs with
 // packages.NeedImports and packages.NeedDeps, or the walk finds no

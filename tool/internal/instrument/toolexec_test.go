@@ -804,10 +804,14 @@ func TestInterceptLinkLoadError(t *testing.T) {
 	workDir := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, workDir)
 	// A regular file where the build temp directory is expected makes
-	// loadAddedImports fail; the link command is then passed through unchanged.
+	// loadAddedImports fail. That failure is not fatal: the link still
+	// recovers rule-added imports from matched.json. With no matched rules
+	// and nothing to add, the link command is passed through unchanged.
 	require.NoError(t, os.WriteFile(util.GetBuildTempDir(), []byte("not a directory"), 0o644))
 
-	args := []string{"link", "-o", "exe", "-buildid", "id", "-importcfg", "importcfg.link"}
+	cfgPath := filepath.Join(workDir, "importcfg.link")
+	require.NoError(t, os.WriteFile(cfgPath, []byte("packagefile fmt=/unused/fmt.a\n"), 0o644))
+	args := []string{"link", "-o", "exe", "-buildid", "id", "-importcfg", cfgPath}
 	result, err := interceptLink(ctx, args)
 	require.NoError(t, err)
 	assert.Equal(t, args, result)
