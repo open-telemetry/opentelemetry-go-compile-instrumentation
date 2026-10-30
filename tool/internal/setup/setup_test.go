@@ -2092,6 +2092,24 @@ func TestRuntimePackageName(t *testing.T) {
 			files: map[string]string{},
 			want:  "",
 		},
+		{
+			name: "subdirectories and non-Go files are skipped",
+			files: map[string]string{
+				"README.md":           "package wrong\n",
+				"a_sub.go/keep.txt":   "not a Go file\n",
+				"b_sub/inner_test.go": "package wrong\n",
+				"z_test.go":           "package right\n",
+			},
+			want: "right",
+		},
+		{
+			name: "a file without a parsable package clause is skipped",
+			files: map[string]string{
+				"a_broken_test.go": "this is not Go\n",
+				"z_test.go":        "package right\n",
+			},
+			want: "right",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2103,4 +2121,9 @@ func TestRuntimePackageName(t *testing.T) {
 			assert.Equal(t, tt.want, sp.runtimePackageName(dir))
 		})
 	}
+
+	t.Run("unreadable directory", func(t *testing.T) {
+		sp := newTestSetupPhase()
+		assert.Empty(t, sp.runtimePackageName(filepath.Join(t.TempDir(), "missing")))
+	})
 }
