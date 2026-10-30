@@ -531,6 +531,39 @@ func TestGetBuildPackages_TestSubcommandIncludesTestOnlyImports(t *testing.T) {
 	}
 }
 
+func TestGetBuildPackages_TestSubcommandResolvesSubpackageTestOnlyImports(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "go.mod"),
+		[]byte("module testmodule\n\ngo 1.21\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "main.go"),
+		[]byte("package main\n\nimport _ \"testmodule/svc\"\n\nfunc main() {}\n"),
+		0o644,
+	))
+	svcDir := filepath.Join(tmpDir, "svc")
+	require.NoError(t, os.MkdirAll(svcDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(svcDir, "svc.go"),
+		[]byte("package svc\n\nfunc Hello() string { return \"hello\" }\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(svcDir, "svc_test.go"),
+		[]byte("package svc\n\nimport (\n\t\"testing\"\n\t\"unicode\"\n)\n\n"+
+			"func TestUsesUnicode(t *testing.T) { _ = unicode.IsUpper('A') }\n"),
+		0o644,
+	))
+	t.Chdir(tmpDir)
+
+	_, testAllPkgs, err := getBuildPackages(t.Context(), subcmdTest, []string{"./..."})
+	require.NoError(t, err)
+	assert.Contains(t, pkgload.CollectPackageNames(testAllPkgs), "unicode",
+		"otelc go test must resolve names for imports that only appear in a subpackage's _test.go files")
+}
+
 // TestGetBuildPackages_TestSubcommandExcludesExternalTestPackage guards the
 // split of a test load. The external test package ("p_test [p.test]") must
 // only feed the name table: otelc.runtime.go for it would declare
@@ -1195,6 +1228,52 @@ func TestExtractBuildFlags(t *testing.T) {
 			args:     []string{"build", "-cover=false", "-tags=foo", "-cover", "./..."},
 			expected: []string{"-tags=foo", "-cover"}, // value flags first, then bool
 		},
+		{
+			name:     "joined patterned gcflags",
+			args:     []string{"-gcflags=all=-N -l", "./..."},
+			expected: []string{"-gcflags=all=-N -l"},
+		},
+		{
+			name:     "separated patterned gcflags",
+			args:     []string{"-gcflags", "all=-N -l", "./..."},
+			expected: []string{"-gcflags", "all=-N -l"},
+		},
+		{
+			name:     "joined unpatterned gcflags",
+			args:     []string{"-gcflags=-N -l", "./..."},
+			expected: nil,
+		},
+		{
+			name:     "separated unpatterned gcflags",
+			args:     []string{"-gcflags", "-N -l", "./..."},
+			expected: nil,
+		},
+		{
+			name:     "empty gcflags",
+			args:     []string{"-gcflags=", "./..."},
+			expected: nil,
+		},
+		{
+			name:     "double dash patterned gcflags",
+			args:     []string{"--gcflags=all=-l", "./..."},
+			expected: []string{"--gcflags=all=-l"},
+		},
+		{
+			name:     "repeated gcflags keep patterned values in order",
+			args:     []string{"-gcflags=all=-N -l", "-gcflags=-l", "-gcflags", "std=-l", "./..."},
+			expected: []string{"-gcflags=all=-N -l", "-gcflags", "std=-l"},
+		},
+		{
+			name:     "gcflags mixed with tags keep order",
+			args:     []string{"-tags=foo", "-gcflags", "all=-N -l", "-tags", "bar", "-gcflags=std=-l", "./..."},
+			expected: []string{"-tags=foo", "-gcflags", "all=-N -l", "-tags", "bar", "-gcflags=std=-l"},
+		},
+		{
+			name:       "patterned gcflags in go test",
+			subcommand: subcmdTest,
+			args:       []string{"-gcflags=all=-N -l", "./pkg"},
+			expected:   []string{"-gcflags=all=-N -l"},
+		},
 		// go test tail preservation tests
 		{
 			name:       "test delimiter dash-dash ignores tags in tail",
@@ -1637,6 +1716,30 @@ func TestSetup_MatchDepsError(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestSetup_ResolveRulePathsError(t *testing.T) {
+	setupTestModule(t, []string{"cmd"})
+	_ = os.RemoveAll(util.GetBuildTempDir())
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	dir := t.TempDir()
+	ruleFile := filepath.Join(dir, "rules.yaml")
+	mustWriteFile(t, ruleFile, `brokenRule:
+  target: main
+  func: main
+  path: example.com/nonexistent/package
+  after: SomeHook
+`)
+
+	cmd := &cli.Command{
+		Name:   "setup",
+		Flags:  []cli.Flag{&cli.StringFlag{Name: "rules"}},
+		Action: Setup,
+	}
+	err := cmd.Run(t.Context(), []string{"setup", "--rules", ruleFile, "."})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "resolving rule paths")
+}
+
 func TestSetupLocked_FindModuleDirsError(t *testing.T) {
 	// A standalone .go file outside any Go module causes FindModuleDirs to fail in setupLocked (line 377)
 	tmp := t.TempDir()
@@ -1789,4 +1892,23 @@ func TestRuntime(t *testing.T) {
 			assert.Contains(t, string(output), "ok")
 		})
 	}
+}
+
+func TestSetupPhase_GetBuildContext(t *testing.T) {
+	t.Run("from GOFLAGS", func(t *testing.T) {
+		t.Setenv("GOFLAGS", "-tags=envtag")
+		sp := &setupPhase{}
+		bctx := sp.getBuildContext()
+		require.NotNil(t, bctx)
+		assert.Contains(t, bctx.BuildTags, "envtag")
+	})
+
+	t.Run("from buildFlags overriding GOFLAGS", func(t *testing.T) {
+		t.Setenv("GOFLAGS", "-tags=envtag")
+		sp := &setupPhase{buildFlags: []string{"-tags", "clitag"}}
+		bctx := sp.getBuildContext()
+		require.NotNil(t, bctx)
+		assert.Contains(t, bctx.BuildTags, "clitag")
+		assert.NotContains(t, bctx.BuildTags, "envtag")
+	})
 }

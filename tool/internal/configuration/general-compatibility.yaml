@@ -1,0 +1,6 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+# Keep deprecated general.* paths here. For a live upstream path, include its
+# type and deprecation metadata; upstream descriptions/default behavior win. For
+# a retired path, include its complete definition so it remains in the catalog.
+configurations: []

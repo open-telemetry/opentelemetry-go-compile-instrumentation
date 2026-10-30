@@ -4,13 +4,13 @@
 package setup
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/tools/go/packages"
 
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
@@ -25,7 +25,7 @@ func TestSetupPhaseStore(t *testing.T) {
 
 	// An empty rule set resolves no paths and writes an empty JSON array to the
 	// matched-rule file.
-	err := sp.store(context.Background(), []*rule.InstRuleSet{}, []string{})
+	err := sp.store([]*rule.InstRuleSet{})
 	require.NoError(t, err)
 
 	matchedFile := util.GetMatchedRuleFile()
@@ -43,8 +43,62 @@ func TestSetupPhaseStoreCreateError(t *testing.T) {
 	t.Setenv(util.EnvOtelcWorkDir, workDir)
 
 	sp := newTestSetupPhase()
-	err := sp.store(context.Background(), []*rule.InstRuleSet{}, []string{})
+	err := sp.store([]*rule.InstRuleSet{})
 	require.Error(t, err)
+}
+
+func TestSetupPhaseStorePGOProfile(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	sp := newTestSetupPhase()
+	for _, tt := range []struct{ pgo, want string }{
+		{pgo: "profile.pgo", want: "profile.pgo"},
+		// A later setup without a profile clears the one recorded before.
+		{pgo: "off", want: ""},
+	} {
+		sp.pgo = tt.pgo
+		require.NoError(t, sp.store([]*rule.InstRuleSet{}))
+		data, err := os.ReadFile(util.GetPGOProfileFile())
+		require.NoError(t, err)
+		assert.Equal(t, tt.want, string(data))
+	}
+}
+
+func TestSetupPhaseStorePGOProfileAmbiguous(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	sp := newTestSetupPhase()
+	sp.pgo = "auto"
+	for range 2 {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "default.pgo"), nil, 0o644))
+		sp.buildPackages = append(sp.buildPackages, &packages.Package{
+			Name:    "main",
+			GoFiles: []string{filepath.Join(dir, "main.go")},
+		})
+	}
+
+	require.NoError(t, sp.store([]*rule.InstRuleSet{}))
+	data, err := os.ReadFile(util.GetPGOProfileFile())
+	require.NoError(t, err)
+	assert.Empty(t, string(data))
+}
+
+func TestSetupPhaseStorePGOProfileWriteError(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	require.NoError(t, os.MkdirAll(util.GetPGOProfileFile(), 0o755))
+	err := newTestSetupPhase().store([]*rule.InstRuleSet{})
+	require.ErrorContains(t, err, "failed to write PGO profile")
+}
+
+func TestSetupPhaseStoreResolvedNamesWriteError(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	require.NoError(t, os.MkdirAll(util.GetImportNamesFile(), 0o755))
+	sp := newTestSetupPhase()
+	sp.resolvedNames = map[string]string{"example.com/a": "a"}
+
+	err := sp.store([]*rule.InstRuleSet{})
+	require.ErrorContains(t, err, "failed to write import names")
 }
 
 func TestStoreResolvedNames_WriteError(t *testing.T) {
