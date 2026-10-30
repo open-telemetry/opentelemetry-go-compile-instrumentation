@@ -20,16 +20,11 @@ func TestValidateSelectedConfigurationMetadata(t *testing.T) {
 	module := makeConfigurationModule(t, "example.com/instrumentation", `configurations:
   - ref: general.http.client.request_captured_headers
 `)
-	matched := []*rule.InstRuleSet{{
-		FuncRules: map[string][]*rule.InstFuncRule{
-			"http.go": {{Path: module.hookPath}},
-		},
-	}}
+	matched := matchedConfigurationRules(module)
 	sp := newTestSetupPhase()
 
-	err := sp.validateSelectedConfigurationMetadata(t.Context(), matched, []string{module.dir})
+	err := sp.validateSelectedConfigurationMetadata(matched)
 	require.NoError(t, err)
-	assert.True(t, sp.rulePathsResolved)
 	assert.Equal(t, filepath.Join(module.dir, "hooks"), matched[0].AllFuncRules()[0].ResolvedPath)
 }
 
@@ -37,13 +32,9 @@ func TestValidateSelectedConfigurationMetadataUnknownReference(t *testing.T) {
 	module := makeConfigurationModule(t, "example.com/instrumentation", `configurations:
   - ref: missing.definition
 `)
-	matched := []*rule.InstRuleSet{{
-		FuncRules: map[string][]*rule.InstFuncRule{
-			"http.go": {{Path: module.hookPath}},
-		},
-	}}
+	matched := matchedConfigurationRules(module)
 
-	err := newTestSetupPhase().validateSelectedConfigurationMetadata(t.Context(), matched, []string{module.dir})
+	err := newTestSetupPhase().validateSelectedConfigurationMetadata(matched)
 	require.ErrorContains(t, err, `unknown configuration ref "missing.definition"`)
 	require.ErrorContains(t, err, filepath.Join(module.dir, "metadata.yaml"))
 }
@@ -53,58 +44,28 @@ func TestValidateSelectedConfigurationMetadataSkipsUnselectedModules(t *testing.
 	unselected := makeConfigurationModule(t, "example.com/unselected", `configurations:
   - ref: missing.definition
 `)
-	matched := []*rule.InstRuleSet{{
-		FuncRules: map[string][]*rule.InstFuncRule{
-			"http.go": {{Path: selected.hookPath}},
-		},
-	}}
+	matched := matchedConfigurationRules(selected)
+	assert.NotContains(t, selectedHookPackageDirs(matched), filepath.Join(unselected.dir, "hooks"))
 
-	err := newTestSetupPhase().validateSelectedConfigurationMetadata(
-		t.Context(),
-		matched,
-		[]string{selected.dir, unselected.dir},
-	)
+	err := newTestSetupPhase().validateSelectedConfigurationMetadata(matched)
 	require.NoError(t, err)
-}
-
-func TestValidateSelectedConfigurationMetadataRejectsUnresolvableHookPackage(t *testing.T) {
-	module := makeConfigurationModule(t, "example.com/instrumentation", "")
-	matched := []*rule.InstRuleSet{{
-		FuncRules: map[string][]*rule.InstFuncRule{
-			"http.go": {{Path: "example.com/instrumentation/missing"}},
-		},
-	}}
-	sp := newTestSetupPhase()
-
-	err := sp.validateSelectedConfigurationMetadata(t.Context(), matched, []string{module.dir})
-
-	require.ErrorContains(t, err, "resolving selected instrumentation packages")
-	assert.False(t, sp.rulePathsResolved)
 }
 
 func TestValidateSelectedConfigurationMetadataReportsMetadataReadErrors(t *testing.T) {
 	module := makeConfigurationModule(t, "example.com/instrumentation", "")
 	require.NoError(t, os.Mkdir(filepath.Join(module.dir, instrumentationMetadataFilename), 0o755))
-	matched := []*rule.InstRuleSet{{
-		FuncRules: map[string][]*rule.InstFuncRule{
-			"http.go": {{Path: module.hookPath}},
-		},
-	}}
+	matched := matchedConfigurationRules(module)
 
-	err := newTestSetupPhase().validateSelectedConfigurationMetadata(t.Context(), matched, []string{module.dir})
+	err := newTestSetupPhase().validateSelectedConfigurationMetadata(matched)
 
 	require.ErrorContains(t, err, "read selected instrumentation metadata")
 }
 
 func TestValidateSelectedConfigurationMetadataReportsParseErrors(t *testing.T) {
 	module := makeConfigurationModule(t, "example.com/instrumentation", "configurations: [\n")
-	matched := []*rule.InstRuleSet{{
-		FuncRules: map[string][]*rule.InstFuncRule{
-			"http.go": {{Path: module.hookPath}},
-		},
-	}}
+	matched := matchedConfigurationRules(module)
 
-	err := newTestSetupPhase().validateSelectedConfigurationMetadata(t.Context(), matched, []string{module.dir})
+	err := newTestSetupPhase().validateSelectedConfigurationMetadata(matched)
 
 	require.ErrorContains(t, err, filepath.Join(module.dir, instrumentationMetadataFilename))
 	require.ErrorContains(t, err, "parse")
@@ -113,10 +74,9 @@ func TestValidateSelectedConfigurationMetadataReportsParseErrors(t *testing.T) {
 func TestValidateSelectedConfigurationMetadataWithNoMatchedHooks(t *testing.T) {
 	sp := newTestSetupPhase()
 
-	err := sp.validateSelectedConfigurationMetadata(t.Context(), nil, nil)
+	err := sp.validateSelectedConfigurationMetadata(nil)
 
 	require.NoError(t, err)
-	assert.True(t, sp.rulePathsResolved)
 }
 
 func TestModuleRootForPackage(t *testing.T) {
@@ -173,6 +133,17 @@ func TestWarnIfNoInstrumentationMatched(t *testing.T) {
 type configurationTestModule struct {
 	dir      string
 	hookPath string
+}
+
+func matchedConfigurationRules(module configurationTestModule) []*rule.InstRuleSet {
+	return []*rule.InstRuleSet{{
+		FuncRules: map[string][]*rule.InstFuncRule{
+			"http.go": {{
+				Path:         module.hookPath,
+				ResolvedPath: filepath.Join(module.dir, "hooks"),
+			}},
+		},
+	}}
 }
 
 func makeConfigurationModule(t *testing.T, modulePath, metadata string) configurationTestModule {

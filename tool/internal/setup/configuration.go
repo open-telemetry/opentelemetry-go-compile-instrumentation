@@ -4,7 +4,6 @@
 package setup
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -22,10 +21,7 @@ const instrumentationMetadataFilename = "metadata.yaml"
 // exists, then resolves and validates declarative definitions. Discovery does
 // not select instrumentation: only paths already present in matched rules are
 // considered.
-func (sp *setupPhase) validateSelectedConfigurationMetadata(
-	ctx context.Context,
-	matched []*rule.InstRuleSet,
-) error {
+func (sp *setupPhase) validateSelectedConfigurationMetadata(matched []*rule.InstRuleSet) error {
 	packageDirs := selectedHookPackageDirs(matched)
 	moduleRootsSet := make(map[string]struct{}, len(packageDirs))
 	for _, packageDir := range packageDirs {

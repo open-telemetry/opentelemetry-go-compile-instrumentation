@@ -504,7 +504,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	}
 	matched = append(matched, injected...)
 
-	if err = sp.validateSelectedConfigurationMetadata(ctx, matched); err != nil {
+	if err = sp.validateSelectedConfigurationMetadata(matched); err != nil {
 		return ex.Wrapf(err, "validating selected instrumentation configuration metadata")
 	}
 

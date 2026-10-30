@@ -58,6 +58,7 @@ After changing either source file, regenerate and test the catalog:
 
 ```sh
 go generate ./tool/internal/configuration
+make format/yaml
 go test ./tool/internal/configuration
 ```
 

@@ -1017,7 +1017,7 @@ func TestEnvironmentVariableNameRejectsInvalidPaths(t *testing.T) {
 		{"", "non-empty"},
 		{" go.option ", "surrounding whitespace"},
 		{"general.", "no environment-variable path"},
-		{"go.caf\u00e9", "unsupported character"},
+		{"go.\u00e9", "unsupported character"},
 	} {
 		t.Run(tt.path, func(t *testing.T) {
 			_, err := EnvironmentVariableName(tt.path)
