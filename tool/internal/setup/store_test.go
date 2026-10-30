@@ -280,3 +280,17 @@ func TestResolveRulePaths_DuplicateAndUnsortedModuleDirs(t *testing.T) {
 	require.Equal(t, hooksDir, rs.AllFuncRules()[0].ResolvedPath)
 	assert.Equal(t, callerOrig, callerDirs, "caller slice must not be mutated")
 }
+
+// TestRulePackageDir: in vendor mode the directory of an otelc hook package
+// is the one of the extracted bundle, which has all the files.
+func TestRulePackageDir(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	bundleDir := filepath.Join(workDir, util.BuildTempDir, unzippedPkgDir, "hook")
+	require.NoError(t, os.MkdirAll(bundleDir, 0o755))
+	vendorDir := filepath.Join(workDir, "vendor", "go.opentelemetry.io", "otelc", "pkg", "hook")
+
+	assert.Equal(t, bundleDir, rulePackageDir(&packages.Package{PkgPath: util.OtelcPkgRoot + "/hook", Dir: vendorDir}))
+	other := filepath.Join(workDir, "vendor", "example.com", "x")
+	assert.Equal(t, other, rulePackageDir(&packages.Package{PkgPath: "example.com/x", Dir: other}))
+}

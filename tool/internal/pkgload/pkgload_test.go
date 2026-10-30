@@ -103,13 +103,23 @@ func TestLoadPackagesWithChangeDirectoryFlag(t *testing.T) {
 	))
 	t.Chdir(tmpDir)
 
-	for _, buildFlags := range [][]string{{"-C", "app"}, {"-C=app"}} {
+	// The go command accepts the flag with one or two dashes.
+	for _, buildFlags := range [][]string{{"-C", "app"}, {"-C=app"}, {"--C", "app"}, {"--C=app"}} {
 		pkgs, err := LoadPackages(t.Context(), packages.NeedName|packages.NeedModule, buildFlags, false, ".")
-		require.NoError(t, err)
+		require.NoError(t, err, "%v", buildFlags)
 		require.Len(t, pkgs, 1)
 		require.NotNil(t, pkgs[0].Module)
 		assert.Equal(t, "example.com/app", pkgs[0].Module.Path)
+
+		dir, err := BuildDir(buildFlags)
+		require.NoError(t, err)
+		assert.Equal(t, appDir, dir, "%v", buildFlags)
+		_, filtered, err := loadDirFromBuildFlags(append(slices.Clone(buildFlags), "-trimpath"))
+		require.NoError(t, err)
+		assert.Equal(t, []string{"-trimpath"}, filtered, "the -C flag is removed: %v", buildFlags)
 	}
+	_, err := BuildDir([]string{"--C"})
+	require.Error(t, err, "--C without a value")
 }
 
 func TestResolvePackageName(t *testing.T) {

@@ -56,10 +56,13 @@ func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDi
 			break
 		}
 
+		// otelc changed go.mod before this load, so the load uses the -mod
+		// flag of the build (see modBuildFlags).
 		pkgs, loadErr := packages.Load(&packages.Config{
-			Mode:    packages.NeedName | packages.NeedFiles,
-			Context: ctx,
-			Dir:     moduleDir,
+			Mode:       packages.NeedName | packages.NeedFiles,
+			Context:    ctx,
+			Dir:        moduleDir,
+			BuildFlags: modBuildFlags(ctx),
 		}, pending...)
 		if loadErr != nil {
 			lastErr = loadErr
@@ -75,7 +78,7 @@ func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDi
 			case pkg == nil:
 				next = append(next, p)
 			default:
-				resolved[p] = pkg.Dir
+				resolved[p] = rulePackageDir(pkg)
 			}
 		}
 		pending = next
@@ -95,6 +98,19 @@ func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDi
 	}
 
 	return nil
+}
+
+// rulePackageDir returns the directory of the hook package pkg. In vendor
+// mode, the go command gives the directory in vendor/. "go mod vendor" does not
+// copy all the files (for example the //go:build ignore files that file rules
+// add), so for an otelc package the directory of the extracted bundle is used.
+func rulePackageDir(pkg *packages.Package) string {
+	if isInVendorDir(pkg.Dir) {
+		if dir, ok := embeddedSourceDir(pkg.PkgPath); ok {
+			return dir
+		}
+	}
+	return pkg.Dir
 }
 
 // store stores the matched rules to the file.

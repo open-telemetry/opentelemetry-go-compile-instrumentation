@@ -103,6 +103,114 @@ If no instrumentation file exists, `otelc go build` automatically analyzes the a
 > [!NOTE]
 > Support for committing an `otelc pin`-generated `otel.instrumentation.go` file is still under development. Until the work in [#585](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/585) to decouple instrumentation packages from the `otelc` executable is complete, `otelc pin` should be considered a local workflow. `otelc go build` continues to work without a committed instrumentation file by automatically generating a temporary configuration during the build.
 
+## Vendored Projects
+
+When your module has a `vendor/` directory, `otelc` keeps vendor mode in the
+same cases as the go command: `go.mod` has go 1.14 or higher, the build is
+not in workspace mode, and no `-mod=mod` or `-mod=readonly` flag is set (see
+[the go version rules](#go-version-for-vendor-mode) below). Your
+dependencies come from `vendor/`, and `otelc` keeps your changes to vendored
+files: it never replaces a file that is in `vendor/`.
+
+The hook code of `otelc` needs more modules (for example the OpenTelemetry
+SDK). For the time of the build, `otelc go build` adds them to `vendor/`,
+`vendor/modules.txt` and `go.mod`. After the build, `go.mod`, `go.sum` and
+`vendor/` are the same as before. These modules come from the module cache or
+the network.
+
+`otelc` downloads a module that you vendor in one case only: the hook code
+needs a package of this module that `vendor/` does not have. Then `otelc`
+gets the module at the vendored version (from the module cache or the
+network), and adds only the missing package. If `otelc` cannot get it (for
+example a private module, or no network), the build stops. The message names
+the package and the module version. To fix it, import the package in your
+module and run `go mod vendor`, or run `otelc vendor` with network access.
+The download uses your Go settings: set `GOPRIVATE` (or `GOPROXY=off`) if the
+path of a private module must not go to a public proxy.
+
+To build with no network and no module cache (for example in an air-gapped
+CI), add the modules of the hook code to `vendor/` for all time:
+
+```bash
+go mod vendor
+otelc vendor
+```
+
+`otelc vendor` writes `otel.instrumentation.go`, and adds the modules to
+`vendor/`, `go.mod` and `go.sum`. You can commit these files, but know what
+works in a new checkout (a checkout without `.otelc-build/`):
+
+- `otelc go build` and `go build` work, also without network.
+- `go mod tidy`, `go mod vendor` and `go mod verify` fail. The `replace`
+  directives that `otelc vendor` adds point to `./.otelc-build`, which you do
+  not commit, and these commands read the directories. Run `otelc vendor`
+  first: it makes the directory again. This also applies to tools that run
+  these commands, for example Dependabot or a CI job.
+
+This stays until the instrumentation modules are published (see
+[#585](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/585)),
+the same as for `otelc pin` above.
+
+`go mod vendor` writes a new `vendor/modules.txt` without the `otelc-bundle`
+annotations (see below), so run `otelc vendor` again after `go mod vendor`.
+If `otelc vendor` fails, it reverts all its changes.
+
+`otelc vendor` works like `go mod vendor`, but it includes the needs of the
+hook code. When the hook code (or one of its dependencies) needs a higher
+version of a vendored module, `otelc vendor` gets this version, like
+`go get` does. This also applies to the vendored modules that minimal
+version selection raises because of the new modules, so that `go.mod` stays
+correct for a later `go mod vendor`. It changes the requirement in `go.mod` and replaces the
+vendored files of the module, so your changes to the files of this module are
+lost. It prints each change, for example
+`Bumped dependency golang.org/x/net (v0.51.0 -> v0.58.0)`.
+
+`otelc vendor` writes a fingerprint of the `otelc` version in
+`vendor/modules.txt` (the `otelc-bundle` annotation; the go command ignores
+it). When a different `otelc` version builds the project, it finds that the
+otelc modules in `vendor/` are old, and adds its own modules for the time of
+the build. Run `otelc vendor` again after you update `otelc`.
+
+<a id="go-version-for-vendor-mode"></a>
+Vendor mode needs go 1.14 or higher in `go.mod`, as for the go command:
+
+- With a lower go version (or no `go` directive) and no `-mod` flag, the go
+  command does not use `vendor/`, so `otelc` does not use it either.
+- With a lower go version, `-mod=vendor` (in the arguments or in `GOFLAGS`)
+  and `otelc vendor` stop with an error. To fix it, run
+  `go mod edit -go=1.14 && go mod vendor`.
+
+`otelc vendor` uses only the vendor directory. It rejects `-mod=mod`,
+`-mod=readonly` and `-modfile`.
+
+`otelc` finds the vendor mode in the directory of the build: the `-C`
+directory when you give one, else the current directory. A `-mod` flag on the
+command line applies to all the go commands that `otelc` runs for the build.
+
+Custom rules (`--rules` or `OTELC_RULES`) also work in vendor mode: `otelc`
+adds the hook packages of the matched rules to `vendor/` for the time of the
+build, as for the built-in instrumentation.
+
+If the hook code (or one of its dependencies) needs a higher version of a
+module than the one in `vendor/`, `otelc go build` stops with a
+`vendor conflict` error. See
+[Troubleshooting](troubleshooting.md#vendor-conflict).
+
+Limitations:
+
+- The vendor directory of a workspace (`go work vendor`) is not supported.
+  In workspace mode, `otelc` uses module mode.
+- For each build that adds modules to `vendor/`, `otelc` copies the vendored
+  packages of your modules into `.otelc-build/vendor-scratch`. On macOS
+  (APFS) the copies are clones, and on Linux hard links, when the file system
+  supports them; else they are full copies. With a large `vendor/` directory
+  (about 20,000 files), this step takes about 3 s on macOS, and less than
+  1 s on Linux with hard links. After `otelc vendor`, no copy is necessary.
+- `otelc` does not follow symbolic links in `vendor/`. A symbolic link at a
+  path that `otelc` reads or writes stops the build. `otelc` checks the paths
+  before it uses them. It does not protect against a different process that
+  changes `vendor/` at the same time.
+
 ## How It Works
 
 The tool uses compile-time instrumentation through:

@@ -45,6 +45,11 @@ func normalizePath(name string) string {
 	return cleanName
 }
 
+// extract writes the archive entry header to targetPath. The caller makes
+// sure that targetPath and its parent directories (below the extraction root)
+// are not symbolic links. A regular file is written to a temporary file in
+// the same directory, then renamed to targetPath: thus otelc does not write
+// through a symbolic link or a hard link at targetPath.
 func extract(tarReader *tar.Reader, header *tar.Header, targetPath string) error {
 	fileInfo := header.FileInfo()
 	switch header.Typeflag {
@@ -55,11 +60,19 @@ func extract(tarReader *tar.Reader, header *tar.Header, targetPath string) error
 		}
 
 	case tar.TypeReg:
-		file, err := os.OpenFile(targetPath, os.O_CREATE|os.O_TRUNC|os.O_RDWR,
-			fileInfo.Mode())
+		dir := filepath.Dir(targetPath)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return ex.Wrap(err)
+		}
+		file, err := os.CreateTemp(dir, filepath.Base(targetPath)+".tmp-*")
 		if err != nil {
 			return ex.Wrap(err)
 		}
+		tmpPath := file.Name()
+		defer func() {
+			// After a successful rename, the file does not exist anymore.
+			_ = os.Remove(tmpPath)
+		}()
 
 		_, err = io.CopyN(file, tarReader, header.Size)
 		if err != nil {
@@ -70,6 +83,12 @@ func extract(tarReader *tar.Reader, header *tar.Header, targetPath string) error
 		if err != nil {
 			return ex.Wrap(err)
 		}
+		if err = os.Chmod(tmpPath, fileInfo.Mode().Perm()); err != nil {
+			return ex.Wrap(err)
+		}
+		if err = util.RenameReplace(tmpPath, targetPath); err != nil {
+			return ex.Wrap(err)
+		}
 	default:
 		return ex.Newf("unsupported file type: %c in %s",
 			header.Typeflag, header.Name)
@@ -78,6 +97,13 @@ func extract(tarReader *tar.Reader, header *tar.Header, targetPath string) error
 }
 
 func extractGZip(bundleReader io.Reader, targetDir string) (retErr error) {
+	// The target directory itself must not be a symbolic link: else all the
+	// files go to the target of the link, which can be outside the project.
+	// checkNoSymlink below checks only the paths below the target directory.
+	if info, err := os.Lstat(targetDir); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return ex.Newf("%s is a symbolic link: otelc does not extract its bundle through a symbolic link",
+			targetDir)
+	}
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		return ex.Wrap(err)
 	}
@@ -116,21 +142,21 @@ func extractGZip(bundleReader io.Reader, targetDir string) (retErr error) {
 			continue
 		}
 
-		// Ensure the resolved path is within the target directory
-		targetPath := filepath.Join(targetDir, cleanName)
-		resolvedPath, err := filepath.EvalSymlinks(targetPath)
-		if err != nil {
-			// If symlink evaluation fails, use the original path
-			resolvedPath = targetPath
-		}
-
-		// Check if the resolved path is within the target directory
-		relPath, err := filepath.Rel(targetDir, resolvedPath)
-		if err != nil || strings.HasPrefix(relPath, "..") ||
-			filepath.IsAbs(relPath) {
+		// The path must be inside the target directory, and otelc does not
+		// follow a symbolic link below the target directory: a link (for
+		// example one that a forged state file restored) can point outside
+		// it. A part of the path that does not exist yet is not a link.
+		// filepath.IsLocal is checked here, not in a helper function, so that
+		// CodeQL sees that the path is sanitized.
+		name := filepath.FromSlash(cleanName)
+		if !filepath.IsLocal(name) {
 			continue // Skip files that would be extracted outside target dir
 		}
-		err = extract(tarReader, header, filepath.Join(targetDir, relPath))
+		targetPath := filepath.Join(targetDir, name)
+		if err = checkNoSymlink(targetDir, targetPath); err != nil {
+			return ex.Wrapf(err, "extracting %s", header.Name)
+		}
+		err = extract(tarReader, header, targetPath)
 		if err != nil {
 			return err
 		}
