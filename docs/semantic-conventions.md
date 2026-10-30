@@ -83,10 +83,9 @@ Use `groups/http.yaml` as the template:
 
 Bumping `.semconv-version` can turn an attribute we declare with `id:` into one
 that upstream now defines too. `make lint-schema` then fails with
-`DuplicateAttributeId`, naming both the upstream file and ours. Once
-`pkg/otelcconv` lands, local `id:` declarations move to `schemas/otelc/local/`
-(see [ADR 0006](adr/0006-semconv-telemetry-contract-organization.md)), and the
-same steps apply there.
+`DuplicateAttributeId`, naming both the upstream file and ours. See
+[ADR 0006](adr/0006-semconv-telemetry-contract-organization.md) for how local
+declarations are organized.
 
 To fix it, replace the local declaration with a reference:
 
