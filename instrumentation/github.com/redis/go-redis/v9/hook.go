@@ -42,7 +42,8 @@ const (
 	// arguments conventionally begin: args[0] is the command name, args[1]
 	// is the key. EVAL, AUTH, and the pipeline pseudo-command carry other
 	// data at args[1]; see redisV9RedactRange.
-	redisValueArgsStart = 2
+	redisValueArgsStart    = 2
+	redisErrArgsEchoMarker = "with args beginning with:"
 	// redisMaxArgBytes caps each unredacted argument in db.query.text so
 	// large keys or payloads do not produce unbounded span attributes while
 	// still accommodating normal structured Redis keys and pipeline summaries.
@@ -97,8 +98,7 @@ func (o *otelRedisHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 
 		err := next(ctx, cmd)
 		if err != nil && !errors.Is(err, redis.Nil) {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
+			recordRedisError(span, err)
 		}
 		return err
 	}
@@ -145,8 +145,7 @@ func (o *otelRedisHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redi
 
 		err := next(ctx, cmds)
 		if err != nil && !errors.Is(err, redis.Nil) {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
+			recordRedisError(span, err)
 		}
 		return err
 	}
@@ -178,12 +177,28 @@ func getRedisV9Statement(cmd redis.Cmder) string {
 		b = redisV9AppendArg(b, arg)
 	}
 
-	if err := cmd.Err(); err != nil && !errors.Is(err, redis.Nil) {
-		b = append(b, ": "...)
-		b = append(b, err.Error()...)
-	}
-
 	return string(b)
+}
+
+// recordRedisError records a sanitized error on the span so that Redis
+// unknown-command replies that echo command arguments (see
+// https://github.com/redis/redis/blob/c9d29f6a918c335bc1778d9f68e521c1bbb36a0f/src/server.c#L3828-L3835)
+// do not leak redacted values.
+func recordRedisError(span trace.Span, err error) {
+	sanitized := sanitizeRedisError(err)
+	span.RecordError(sanitized)
+	span.SetStatus(codes.Error, sanitized.Error())
+}
+
+func sanitizeRedisError(err error) error {
+	if err == nil {
+		return nil
+	}
+	before, _, ok := strings.Cut(err.Error(), redisErrArgsEchoMarker)
+	if !ok {
+		return err
+	}
+	return errors.New(before + redisErrArgsEchoMarker + " " + redisQueryTextRedact)
 }
 
 // redisV9RedactRange returns the half-open index range of arguments to redact in db.query.text.
