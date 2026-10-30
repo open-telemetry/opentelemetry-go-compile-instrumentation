@@ -25,10 +25,12 @@ import (
 )
 
 type setupPhase struct {
-	logger          *slog.Logger
-	ruleConfig      string
-	buildPackages   []*packages.Package
-	buildFlags      []string
+	logger        *slog.Logger
+	ruleConfig    string
+	buildPackages []*packages.Package
+	buildFlags    []string
+	// pgo is the build's effective -pgo value; see pgoValue.
+	pgo             string
 	rootModulePaths []string
 	// resolvedNames maps an import path to a package name, built from
 	// buildPackages' dependency graph.
@@ -99,6 +101,9 @@ const (
 	delimiterDashDash = "--"
 	// flagJSON makes the go command report its output as JSON events.
 	flagJSON = "-json"
+	// flagGcflags is forwarded to `go list` only with a package pattern; see
+	// forwardedValueFlag.
+	flagGcflags = "-gcflags"
 )
 
 func lastFileTargetIndex(subcommand string, args []string) int {
@@ -137,11 +142,24 @@ func getBuildPackages(
 	subcommand string,
 	args []string,
 ) ([]*packages.Package, []*packages.Package, error) {
-	logger := util.LoggerFromContext(ctx)
-	// NeedForTest marks the test packages, so the loop below can split them
+	// NeedForTest marks the test packages, so loadBuildPackages can split them
 	// from the real build packages.
 	mode := packages.NeedName | packages.NeedFiles | packages.NeedModule |
 		packages.NeedImports | packages.NeedDeps | packages.NeedForTest
+	return loadBuildPackages(ctx, mode, subcommand, args)
+}
+
+// loadBuildPackages loads the build packages of getBuildPackages with the
+// given load mode.
+//
+//nolint:revive // needed to balance confusing-results and nonamedreturns linters
+func loadBuildPackages(
+	ctx context.Context,
+	mode packages.LoadMode,
+	subcommand string,
+	args []string,
+) ([]*packages.Package, []*packages.Package, error) {
+	logger := util.LoggerFromContext(ctx)
 	tests := subcommand == subcmdTest
 
 	pkgTargets, fileTargets, err := splitBuildTargets(subcommand, args)
@@ -410,6 +428,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		logger:     logger,
 		ruleConfig: cmd.String("rules"),
 		buildFlags: extractBuildFlags(subcommand, args),
+		pgo:        pgoValue(subcommand, args),
 	}
 
 	// Introduce additional hook code by generating otelc.runtime.go
@@ -511,6 +530,8 @@ func setupGoCache(ctx context.Context, env []string) ([]string, error) {
 // extractBuildFlags extracts flags that affect the build context from the arguments.
 // These flags need to be forwarded to `go list` when resolving import archives.
 // Returns a slice of flag arguments preserving their original form.
+// Only patterned -gcflags values are forwarded: unpatterned values apply to the
+// outer command's targets, not the imports resolved by the nested go command.
 //
 // For boolean flags, the last occurrence wins. This correctly handles cases like:
 //   - GOFLAGS=-race with -race=false on CLI (result: -race=false)
@@ -534,11 +555,7 @@ func extractBuildFlags(subcommand string, args []string) []string {
 		}
 
 		if isBuildContextFlagWithValue(a.FlagName) {
-			if a.HasValue {
-				valueFlags = append(valueFlags, a.Raw)
-			} else if i+1 < len(classified) && classified[i+1].Kind == ArgBuildFlagValue {
-				valueFlags = append(valueFlags, a.Raw, classified[i+1].Raw)
-			}
+			valueFlags = append(valueFlags, forwardedValueFlag(classified, i)...)
 			continue
 		}
 
@@ -568,6 +585,28 @@ func extractBuildFlags(subcommand string, args []string) []string {
 	slices.Sort(enabledBoolFlags)
 
 	return append(valueFlags, enabledBoolFlags...)
+}
+
+// forwardedValueFlag returns the tokens of the value flag at classified[i] as
+// the user wrote them, in its joined or separated form, or nil when it has no
+// value or must not be forwarded. cmd/go applies a -gcflags value without a
+// package pattern only to the packages named on its own command line: the
+// targets of this build, but the added import in a nested `go list`.
+func forwardedValueFlag(classified []ClassifiedArg, i int) []string {
+	a := classified[i]
+	tokens := []string{a.Raw}
+	value := a.Value
+	if !a.HasValue {
+		if i+1 >= len(classified) || classified[i+1].Kind != ArgBuildFlagValue {
+			return nil
+		}
+		value = classified[i+1].Raw
+		tokens = append(tokens, value)
+	}
+	if a.FlagName == flagGcflags && !util.HasPackagePattern(value) {
+		return nil
+	}
+	return tokens
 }
 
 // toolexecInsertArg builds the -toolexec=... argument for execPath. Split out
