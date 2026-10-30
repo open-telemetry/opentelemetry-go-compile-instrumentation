@@ -3,21 +3,20 @@
 
 package users
 
+//line /<generated>:1
 import _ "unsafe"
 
+//line /golden/work/main.go:6
 func Handler(p1 string, p2 int) (_unnamedRetVal_4272340228_0 float32, _unnamedRetVal_4272340228_1 error) {
-	//line <generated>:1
-	if hookContext4272340228, _ := OtelBeforeTrampoline_Handler4272340228(&p1, &p2); false {
+	/*line /<generated>:1*/ if hookContext4272340228, _ := OtelBeforeTrampoline_Handler4272340228(&p1, &p2); false {
 	} else {
 		defer OtelAfterTrampoline_Handler4272340228(hookContext4272340228, &_unnamedRetVal_4272340228_0, &_unnamedRetVal_4272340228_1)
 	}
-	//line main.go:7:2
-	println("Hello, World!")
-	//line main.go:8:2
+	/*line /golden/work/main.go:7*/ println("Hello, World!")
 	return 0.0, nil
 }
 
-//line <generated>:1
+//line /<generated>:1
 type HookContextImpl4272340228 struct {
 	params      []interface{}
 	returnVals  []interface{}
@@ -131,8 +130,8 @@ func OtelBeforeTrampoline_Handler4272340228(param0 *string, param1 *int) (hookCo
 	hookContext.params = []interface{}{param0, param1}
 	hookContext.funcName = "Handler"
 	hookContext.packageName = "users"
-	if H1Before != nil {
-		H1Before(hookContext, *param0, *param1)
+	if otelc_hook_3732310868_H1Before != nil {
+		otelc_hook_3732310868_H1Before(hookContext, *param0, *param1)
 	}
 	return hookContext, hookContext.skipCall
 }
@@ -151,13 +150,13 @@ func OtelAfterTrampoline_Handler4272340228(hookContext HookContext, arg0 *float3
 		}
 	}()
 	hookContext.(*HookContextImpl4272340228).returnVals = []interface{}{arg0, arg1}
-	if H1After != nil {
-		H1After(hookContext, *arg0, *arg1)
+	if otelc_hook_3732310868_H1After != nil {
+		otelc_hook_3732310868_H1After(hookContext, *arg0, *arg1)
 	}
 }
 
-//go:linkname H1Before testdata/golden/target-glob-deep-match.H1Before
-func H1Before(hookContext HookContext, param0 string, param1 int)
+//go:linkname otelc_hook_3732310868_H1Before testdata/golden/target-glob-deep-match.H1Before
+func otelc_hook_3732310868_H1Before(hookContext HookContext, param0 string, param1 int)
 
-//go:linkname H1After testdata/golden/target-glob-deep-match.H1After
-func H1After(hookContext HookContext, arg0 float32, arg1 error)
+//go:linkname otelc_hook_3732310868_H1After testdata/golden/target-glob-deep-match.H1After
+func otelc_hook_3732310868_H1After(hookContext HookContext, arg0 float32, arg1 error)

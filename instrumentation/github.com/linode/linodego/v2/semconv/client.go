@@ -84,8 +84,13 @@ func LinodegoRequestTraceAttrs(req LinodegoRequest) []attribute.KeyValue {
 }
 
 // LinodegoOperationTraceAttrs returns attributes for a public API method span.
-func LinodegoOperationTraceAttrs(operation string) []attribute.KeyValue {
-	server := DefaultServerAddress
+// serverAddress is the host the client is actually configured to call; when
+// empty (e.g. it could not be determined) it defaults to DefaultServerAddress.
+func LinodegoOperationTraceAttrs(operation, serverAddress string) []attribute.KeyValue {
+	server := strings.TrimSpace(serverAddress)
+	if server == "" {
+		server = DefaultServerAddress
+	}
 	attrs := []attribute.KeyValue{
 		semconv.ServerAddress(server),
 	}
@@ -173,31 +178,55 @@ func NewMetrics(meter metric.Meter) Metrics {
 // MetricAttributes returns moderate-cardinality attributes for linodego metrics.
 //
 // Included (bounded sets):
-//   - server.address — fixed default host
+//   - server.address — the configured client host (falls back to the default when unknown)
 //   - code.function.name — public Client method (finite API surface, ~hundreds)
 //   - http.response.status_code — when known (HTTP status range)
+//   - error.type — on failures (HTTP status code or Go error type)
 //
 // Omitted (unbounded / path IDs):
 //   - url.path / raw endpoints like "linode/instances/123"
 //   - resource UIDs, request IDs, etc.
 //
 // Per-request HTTP method/path detail stays on spans (and optional net/http metrics).
-func MetricAttributes(operation string, statusCode int) []attribute.KeyValue {
-	attrs := make([]attribute.KeyValue, 0, 3)
-	attrs = append(attrs, semconv.ServerAddress(DefaultServerAddress))
+func MetricAttributes(operation string, statusCode int, errorType string, serverAddress string) []attribute.KeyValue {
+	server := strings.TrimSpace(serverAddress)
+	if server == "" {
+		server = DefaultServerAddress
+	}
+
+	const maxAttributes = 4
+	attrs := make([]attribute.KeyValue, 0, maxAttributes)
+	attrs = append(attrs, semconv.ServerAddress(server))
 	if op := strings.TrimSpace(operation); op != "" {
 		attrs = append(attrs, semconv.CodeFunctionName(op))
 	}
 	if statusCode > 0 {
 		attrs = append(attrs, semconv.HTTPResponseStatusCode(statusCode))
 	}
+	if errorType != "" {
+		attrs = append(attrs, semconv.ErrorTypeKey.String(errorType))
+	}
 	return attrs
 }
 
 // RecordOperationDuration records public API method duration in seconds.
-func (m Metrics) RecordOperationDuration(ctx context.Context, seconds float64, operation string, statusCode int) {
+// errorType is the span's error.type value, or empty for a successful operation.
+// serverAddress is the host the client is actually configured to call; when
+// empty it defaults to DefaultServerAddress.
+func (m Metrics) RecordOperationDuration(
+	ctx context.Context,
+	seconds float64,
+	operation string,
+	statusCode int,
+	errorType string,
+	serverAddress string,
+) {
 	if m.operationDuration == nil {
 		return
 	}
-	m.operationDuration.Record(ctx, seconds, metric.WithAttributes(MetricAttributes(operation, statusCode)...))
+	m.operationDuration.Record(
+		ctx,
+		seconds,
+		metric.WithAttributes(MetricAttributes(operation, statusCode, errorType, serverAddress)...),
+	)
 }

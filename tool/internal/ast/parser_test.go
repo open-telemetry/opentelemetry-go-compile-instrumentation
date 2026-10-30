@@ -5,6 +5,7 @@ package ast
 
 import (
 	"errors"
+	goast "go/ast"
 	"go/parser"
 	"go/token"
 	"os"
@@ -62,6 +63,171 @@ func TestFindPosition(t *testing.T) {
 	})
 }
 
+func TestOriginalPosition(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "orig.go")
+	src := "package main\n\nfunc Foo() {\n\tbar(1)\n}\n"
+	require.NoError(t, os.WriteFile(path, []byte(src), 0o600))
+	p := NewAstParser()
+	file, err := p.Parse(path, parser.ParseComments)
+	require.NoError(t, err)
+	fn := FindFuncDeclWithoutRecv(file, "Foo")
+	require.NotNil(t, fn)
+	call := fn.Body.List[0]
+
+	t.Run("node of the parsed file", func(t *testing.T) {
+		pos, ok := p.OriginalPosition(call)
+		require.True(t, ok)
+		assert.Equal(t, "orig.go", pos.Filename)
+		assert.Equal(t, 4, pos.Line)
+		assert.Equal(t, 2, pos.Column)
+	})
+
+	t.Run("closing brace of a block", func(t *testing.T) {
+		pos, ok := p.Rbrace(fn.Body)
+		require.True(t, ok)
+		assert.Equal(t, 5, pos.Line)
+		assert.Equal(t, 1, pos.Column)
+	})
+
+	t.Run("node that is not in a map", func(t *testing.T) {
+		_, ok := p.OriginalPosition(Ident("orphan"))
+		assert.False(t, ok)
+		_, ok = p.Rbrace(&dst.BlockStmt{})
+		assert.False(t, ok)
+	})
+
+	t.Run("snippet of the same parser", func(t *testing.T) {
+		// The snippet has its own file in the same file set.
+		stmts, snippetErr := p.ParseSnippet("baz()")
+		require.NoError(t, snippetErr)
+		_, ok := p.OriginalPosition(stmts[0])
+		assert.False(t, ok)
+	})
+
+	t.Run("source of the same parser that Parse did not read", func(t *testing.T) {
+		// ParseSource uses the same decorator, so the node is in the map. But
+		// its position is in a file that Parse did not read.
+		other, srcErr := p.ParseSource("package main\n\nfunc Other() {}\n")
+		require.NoError(t, srcErr)
+		otherFn := FindFuncDeclWithoutRecv(other, "Other")
+		require.NotNil(t, otherFn)
+		_, ok := p.OriginalPosition(otherFn)
+		assert.False(t, ok)
+		_, ok = p.Rbrace(otherFn.Body)
+		assert.False(t, ok)
+	})
+
+	t.Run("node without a position", func(t *testing.T) {
+		node := Ident("noPos")
+		p.dec.Ast.Nodes[node] = &goast.Ident{Name: "noPos"}
+		_, ok := p.OriginalPosition(node)
+		assert.False(t, ok)
+	})
+
+	t.Run("source with a line directive", func(t *testing.T) {
+		lineFile := filepath.Join(t.TempDir(), "gen.go")
+		lineSrc := "package main\n\n//line other.go:100\nfunc Foo() {\n\tbar(1)\n}\n"
+		require.NoError(t, os.WriteFile(lineFile, []byte(lineSrc), 0o600))
+		lineParser := NewAstParser()
+		lineRoot, parseErr := lineParser.Parse(lineFile, parser.ParseComments)
+		require.NoError(t, parseErr)
+		pos, ok := lineParser.OriginalPosition(FindFuncDeclWithoutRecv(lineRoot, "Foo").Body.List[0])
+		require.True(t, ok)
+		assert.Equal(t, "other.go", pos.Filename)
+		assert.Equal(t, 101, pos.Line)
+	})
+}
+
+// findCallExpr returns the first *dst.CallExpr for a call to funcName in root.
+func findCallExpr(t *testing.T, root dst.Node, funcName string) *dst.CallExpr {
+	t.Helper()
+	var found *dst.CallExpr
+	dst.Inspect(root, func(n dst.Node) bool {
+		if found != nil {
+			return false
+		}
+		call, ok := n.(*dst.CallExpr)
+		if !ok {
+			return true
+		}
+		ident, ok := call.Fun.(*dst.Ident)
+		if !ok || ident.Name != funcName {
+			return true
+		}
+		found = call
+		return false
+	})
+	require.NotNil(t, found, "no call to %s found", funcName)
+	return found
+}
+
+func TestParsed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "orig.go")
+	require.NoError(t, os.WriteFile(path, []byte("package main\n"), 0o600))
+	p := NewAstParser()
+	file, err := p.Parse(path, parser.ParseComments)
+	require.NoError(t, err)
+	assert.True(t, p.Parsed(file))
+
+	// The same file, read by another parser.
+	assert.False(t, NewAstParser().Parsed(file))
+	// A file that ParseSource parsed.
+	source, err := p.ParseSource("package main\n")
+	require.NoError(t, err)
+	assert.False(t, p.Parsed(source))
+	// A file that has only the package clause.
+	clause, err := p.Parse(path, parser.PackageClauseOnly)
+	require.NoError(t, err)
+	assert.False(t, p.Parsed(clause))
+}
+
+func TestPropagatePositions(t *testing.T) {
+	p := NewAstParser()
+	file, err := p.ParseSource("package main\n\nfunc Foo() {\n\tbar(1)\n}\n")
+	require.NoError(t, err)
+
+	orig := findCallExpr(t, file, "bar")
+	origPos := p.FindPosition(orig)
+	require.True(t, origPos.IsValid(), "orig call must have a known source position")
+
+	cloned, ok := dst.Clone(orig).(*dst.CallExpr)
+	require.True(t, ok)
+	clonedPos := p.FindPosition(cloned)
+	require.False(t, clonedPos.IsValid(), "a freshly cloned node starts out unmapped")
+
+	p.PropagatePositions(orig, cloned)
+
+	assert.Equal(t, origPos, p.FindPosition(cloned), "cloned node must inherit orig's position")
+	// Nested nodes (e.g. the argument) must be propagated too.
+	origArg := orig.Args[0]
+	clonedArg := cloned.Args[0]
+	assert.Equal(t, p.FindPosition(origArg), p.FindPosition(clonedArg))
+}
+
+func TestPropagatePositions_ShapeMismatchIsNoop(t *testing.T) {
+	p := NewAstParser()
+	file, err := p.ParseSource("package main\n\nfunc Foo() {\n\tbar(1)\n}\n")
+	require.NoError(t, err)
+
+	orig := findCallExpr(t, file, "bar")
+
+	// cloned has a different node count than orig (an extra argument), so
+	// PropagatePositions must bail out without mapping any position.
+	cloned := &dst.CallExpr{
+		Fun: dst.NewIdent("bar"),
+		Args: []dst.Expr{
+			&dst.BasicLit{Kind: token.INT, Value: "1"},
+			&dst.BasicLit{Kind: token.INT, Value: "2"},
+		},
+	}
+
+	p.PropagatePositions(orig, cloned)
+
+	pos := p.FindPosition(cloned)
+	assert.False(t, pos.IsValid(),
+		"a shape mismatch between orig and cloned must leave the clone's positions unmapped")
+}
+
 func TestWriteFile(t *testing.T) {
 	p := NewAstParser()
 	file, err := p.ParseSource("package main\n\nfunc Foo() {}\n")
@@ -99,6 +265,15 @@ func TestWriteFileAtomic(t *testing.T) {
 	assert.Contains(t, string(data), "func Bar()")
 }
 
+func TestWriteFileAtomic_WriteError(t *testing.T) {
+	p := NewAstParser()
+	file, err := p.ParseSource("package main\n\nfunc Bar() {}\n")
+	require.NoError(t, err)
+
+	badPath := filepath.Join(t.TempDir(), "missing-dir", "atomic.go")
+	require.Error(t, WriteFileAtomic(badPath, file))
+}
+
 // unprintableFile returns an AST that the restorer cannot turn back into
 // source: go/format re-parses files with grouped imports, and a function
 // named "1bad" does not parse.
@@ -113,8 +288,8 @@ func unprintableFile(t *testing.T) *dst.File {
 	return file
 }
 
-func TestPrintFile_RestoreError(t *testing.T) {
-	data, err := PrintFile(unprintableFile(t))
+func TestRenderFile_RestoreError(t *testing.T) {
+	data, err := RenderFile(unprintableFile(t))
 	require.ErrorContains(t, err, "failed to restore AST")
 	assert.Nil(t, data)
 }
@@ -247,4 +422,14 @@ func TestWriteFile_PanicSafety(t *testing.T) {
 	mock := &mockWriteCloser{panicOnWrite: true}
 	require.Panics(t, func() { _ = writeFile(mock, "out.go", f) })
 	assert.True(t, mock.closed, "the file must be closed even when writing panics")
+}
+
+func TestRenderFile(t *testing.T) {
+	p := NewAstParser()
+	file, err := p.ParseSource("package main\n\nfunc Bar() {}\n")
+	require.NoError(t, err)
+
+	buf, err := RenderFile(file)
+	require.NoError(t, err)
+	assert.Contains(t, string(buf), "func Bar()")
 }

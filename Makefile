@@ -4,6 +4,14 @@
 # Use bash for all shell commands (required for pipefail and other bash features)
 SHELL := /bin/bash
 
+# Many recipes use .ONESHELL, so that "set -euo pipefail" applies to all the
+# lines of the recipe. GNU Make 3.81 (the default on macOS) does not support
+# .ONESHELL: it runs each line in a different shell, and failures can be
+# hidden. Thus GNU Make 3.82 or later is required.
+ifeq ($(filter oneshell,$(.FEATURES)),)
+$(error GNU Make 3.82 or later is required (found $(MAKE_VERSION)). On macOS, run "brew install make", then use "gmake")
+endif
+
 .PHONY: all test test-unit test-integration test-e2e format lint build build-all build/pkg install package manifest verify-manifest clean setup-git \
         build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
         lint/action lint/makefile lint/license-header lint/license-header/fix lint/dockerfile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
@@ -37,10 +45,7 @@ PKG_COVERAGE_THRESHOLD ?= 70
 # Instrumentation is scanned separately via instrumented integration-test binaries
 # (see govulncheck/instrumentation): source scans skip //go:build ignore files and
 # cannot typecheck modules that need compile-time field injection (e.g. database/sql).
-# Known gap: that makes instrumentation coverage only as good as the test apps.
-# An instrumentation module that no app under test/apps builds against is scanned
-# by neither job, so adding a module without an app leaves it uncovered (currently
-# instrumentation/github.com/openai/openai-go/v3).
+# This coverage is only as complete as the top-level apps under test/apps.
 # Demos are intentionally excluded (pinned example deps).
 GOVULNCHECK_CORE_MODULES := . $(shell find pkg -type f -name 'go.mod' -exec dirname {} \; | sort)
 # Top-level integration apps only (skip nested modules such as
@@ -86,7 +91,11 @@ RATCHET = $(TOOLS)/ratchet
 $(RATCHET): PACKAGE=github.com/sethvargo/ratchet
 
 BUNDLE = $(TOOLS)/bundle
-$(BUNDLE): | $(TOOLS)
+# The sources are real prerequisites, not order-only: with only `| $(TOOLS)`
+# make never rebuilds an existing .bin/bundle, so editing the bundle tool (or
+# switching to a branch that changed it) silently keeps using the stale binary
+# and `make package` then writes an archive that fails Verify Bundle in CI.
+$(BUNDLE): $(wildcard $(TOOLS_DIR)/bundle/*.go) $(TOOLS_DIR)/bundle/go.mod | $(TOOLS)
 	cd $(TOOLS_DIR)/bundle && GOWORK=off go build -o $@
 
 EMBEDMD = $(TOOLS)/embedmd
@@ -251,6 +260,7 @@ format/go: ## Format Go code only
 format/go: $(GOLANGCI_LINT)
 	@echo "Formatting Go code..."
 	$(GOLANGCI_LINT) fmt --config .tools/golangci.yml
+	cd $(TOOLS_DIR)/bundlerepair && GOWORK=off $(GOLANGCI_LINT) fmt --config ../golangci.yml
 
 format/yaml: ## Format YAML files only (excludes testdata and schemas/otelc/.deps)
 format/yaml: $(YAMLFMT)
@@ -272,11 +282,13 @@ lint/go: ## Run golangci-lint on Go code
 lint/go: $(GOLANGCI_LINT) package
 	@echo "Linting Go code..."
 	$(GOLANGCI_LINT) run --config .tools/golangci.yml
+	cd $(TOOLS_DIR)/bundlerepair && GOWORK=off $(GOLANGCI_LINT) run --config ../golangci.yml
 
 lint/go/fix: ## Run golangci-lint on Go code and fix the issues
 lint/go/fix: $(GOLANGCI_LINT)
 	@echo "Linting Go code..."
 	$(GOLANGCI_LINT) run --config .tools/golangci.yml --fix
+	cd $(TOOLS_DIR)/bundlerepair && GOWORK=off $(GOLANGCI_LINT) run --config ../golangci.yml --fix
 
 lint/yaml: ## Lint YAML formatting
 lint/yaml: $(YAMLFMT)
@@ -520,7 +532,12 @@ benchmark/threshold: build ## Enforce absolute otelc overhead ceiling (fails if 
 # when Go compiles the test packages, the embed will fail.
 
 test: ## Run all tests (unit + integration + e2e)
-test: test-unit test-integration test-e2e
+test: test-bundle-workflows test-unit test-integration test-e2e
+
+.PHONY: test-bundle-workflows
+test-bundle-workflows: ## Test the bundle repair tool and check the repair workflows
+	@GOWORK=off go -C .tools test -count=1 ./workflows
+	@GOWORK=off go -C .tools/bundlerepair test -count=1 -race ./...
 
 test-unit: test-unit/tool test-unit/pkg test-unit/instrumentation test-unit/demo test-unit/helper ## Run all unit tests (tool + pkg + demo + test helpers)
 

@@ -123,6 +123,8 @@ The following libraries are automatically instrumented:
 | `google.golang.org/grpc` (client & server) | gRPC/RPC spans |
 | `database/sql` | DB client spans |
 | `github.com/gin-gonic/gin` | HTTP server spans |
+| `github.com/gofiber/fiber/v2` | HTTP server spans |
+| `github.com/labstack/echo/v4` | HTTP server spans |
 | `github.com/redis/go-redis/v9` | Redis DB spans |
 | `go.mongodb.org/mongo-driver` | MongoDB DB spans |
 | `k8s.io/client-go` | K8s resource spans |
@@ -136,6 +138,7 @@ The following libraries are automatically instrumented:
 | `log`, `log/slog`, `github.com/sirupsen/logrus`, `go.uber.org/zap` | Trace/span ID log correlation |
 | `github.com/apache/cassandra-gocql-driver/v2` | Cassandra DB spans |
 | `github.com/olivere/elastic/v7` | Elasticsearch DB spans |
+| `github.com/opensearch-project/opensearch-go/v5` | OpenSearch DB spans |
 
 ## Learn More
 

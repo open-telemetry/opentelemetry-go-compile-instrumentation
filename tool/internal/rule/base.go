@@ -5,7 +5,9 @@ package rule
 
 import (
 	"fmt"
+	"maps"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"go.opentelemetry.io/otelc/tool/util"
@@ -60,6 +62,7 @@ type WhereDef struct {
 	Struct        string     `json:"struct,omitempty"         yaml:"struct,omitempty"`
 	StructLiteral string     `json:"struct_literal,omitempty" yaml:"struct_literal,omitempty"`
 	FunctionCall  string     `json:"function_call,omitempty"  yaml:"function_call,omitempty"`
+	MethodCall    string     `json:"method_call,omitempty"    yaml:"method_call,omitempty"`
 	Directive     string     `json:"directive,omitempty"      yaml:"directive,omitempty"`
 	Kind          string     `json:"kind,omitempty"           yaml:"kind,omitempty"`
 	Identifier    string     `json:"identifier,omitempty"     yaml:"identifier,omitempty"`
@@ -97,6 +100,12 @@ type InstRuleSet struct {
 	DirectiveRules map[string][]*InstDirectiveRule `json:"directive_rules"`
 	DeclRules      map[string][]*InstDeclRule      `json:"decl_rules"`
 	FileRules      []*InstFileRule                 `json:"file_rules"`
+	// IgnoredCallFiles lists source files that hold a //otelc:ignore comment
+	// above a call.
+	IgnoredCallFiles []string `json:"ignored_call_files,omitempty"`
+	// IsTest reports whether the set was matched against a test build of the
+	// package. A go test run can compile the same import path both ways.
+	IsTest bool `json:"is_test,omitempty"`
 }
 
 func NewInstRuleSet(importPath string) *InstRuleSet {
@@ -138,7 +147,8 @@ func (irs *InstRuleSet) IsEmpty() bool {
 			len(irs.LitRules) == 0 &&
 			len(irs.DirectiveRules) == 0 &&
 			len(irs.DeclRules) == 0 &&
-			len(irs.FileRules) == 0)
+			len(irs.FileRules) == 0 &&
+			len(irs.IgnoredCallFiles) == 0)
 }
 
 // AddRule is a generic method that adds any type of rule to the appropriate map.
@@ -176,6 +186,13 @@ func (irs *InstRuleSet) AddDeclRule(file string, rule *InstDeclRule) {
 	addRule(file, rule, irs.DeclRules)
 }
 
+// AddIgnoredCallFile records that file holds a //otelc:ignore comment above
+// a call.
+func (irs *InstRuleSet) AddIgnoredCallFile(file string) {
+	util.Assert(filepath.IsAbs(file), "file must be an absolute path")
+	irs.IgnoredCallFiles = append(irs.IgnoredCallFiles, file)
+}
+
 func (irs *InstRuleSet) AddFileRule(rule *InstFileRule) {
 	irs.FileRules = append(irs.FileRules, rule)
 }
@@ -190,28 +207,28 @@ func (irs *InstRuleSet) SetCgoFileMap(cgoFiles map[string]string) {
 	irs.CgoFileMap = cgoFiles
 }
 
-// AllFuncRules returns all function rules from the rule set as a flat slice.
-func (irs *InstRuleSet) AllFuncRules() []*InstFuncRule {
+// allRules flattens a per-file rule map into one slice, visiting files in
+// sorted order so the result does not depend on map iteration order.
+func allRules[T InstRule](rulesByFile map[string][]T) []T {
 	n := 0
-	for _, rs := range irs.FuncRules {
-		n += len(rs)
+	for _, rules := range rulesByFile {
+		n += len(rules)
 	}
-	rules := make([]*InstFuncRule, 0, n)
-	for _, rs := range irs.FuncRules {
-		rules = append(rules, rs...)
+	rules := make([]T, 0, n)
+	for _, file := range slices.Sorted(maps.Keys(rulesByFile)) {
+		rules = append(rules, rulesByFile[file]...)
 	}
 	return rules
 }
 
-// AllStructRules returns all struct rules from the rule set as a flat slice.
+// AllFuncRules returns all function rules from the rule set as a flat slice,
+// ordered by the source file each rule matched.
+func (irs *InstRuleSet) AllFuncRules() []*InstFuncRule {
+	return allRules(irs.FuncRules)
+}
+
+// AllStructRules returns all struct rules from the rule set as a flat slice,
+// ordered by the source file each rule matched.
 func (irs *InstRuleSet) AllStructRules() []*InstStructRule {
-	n := 0
-	for _, rs := range irs.StructRules {
-		n += len(rs)
-	}
-	rules := make([]*InstStructRule, 0, n)
-	for _, rs := range irs.StructRules {
-		rules = append(rules, rs...)
-	}
-	return rules
+	return allRules(irs.StructRules)
 }

@@ -22,6 +22,15 @@
     "target": "github.com/gin-gonic/gin"
   },
   {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/gofiber/fiber/v2",
+    "target": "github.com/gofiber/fiber/v2"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/labstack/echo/v4",
+    "target": "github.com/labstack/echo/v4",
+    "versionRange": "v4.2.0"
+  },
+  {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2",
     "target": "github.com/linode/linodego/v2",
     "versionRange": "v2.0.0"
@@ -49,6 +58,10 @@
     "target": "github.com/openai/openai-go/v3"
   },
   {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/opensearch-project/opensearch-go/v5",
+    "target": "github.com/opensearch-project/opensearch-go/v5"
+  },
+  {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/rabbitmq/amqp091-go",
     "target": "github.com/rabbitmq/amqp091-go",
     "versionRange": "v1.9.0"
@@ -61,6 +74,11 @@
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/redis/go-redis/v9",
     "target": "github.com/redis/go-redis/v9",
     "versionRange": "v9.0.0,v9.9.0"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/redis/go-redis/v9",
+    "target": "github.com/redis/go-redis/v9",
+    "versionRange": "v9.16.0,v9.23.1"
   },
   {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/segmentio/kafka-go/consumer",

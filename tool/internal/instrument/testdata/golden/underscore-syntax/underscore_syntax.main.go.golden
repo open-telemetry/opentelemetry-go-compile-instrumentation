@@ -3,17 +3,17 @@
 
 package main
 
+//line /<generated>:1
 import _ "unsafe"
 
+//line /golden/work/main.go:6
 func UnderscoreFunc(_ignoredParam_418572368_0 int, _ignoredParam_418572368_1 float32) {
-	//line <generated>:1
-	if OtelBeforeTrampoline_UnderscoreFunc418572368(&_ignoredParam_418572368_0, &_ignoredParam_418572368_1); false {
+	/*line /<generated>:1*/ if OtelBeforeTrampoline_UnderscoreFunc418572368(&_ignoredParam_418572368_0, &_ignoredParam_418572368_1); false {
 	} else {
-	}
-	//line main.go:6:39
+	} /*line /golden/work/main.go:5*/
 }
 
-//line <generated>:1
+//line /<generated>:1
 type HookContextImpl418572368 struct {
 	params      []interface{}
 	returnVals  []interface{}
@@ -111,11 +111,11 @@ func OtelBeforeTrampoline_UnderscoreFunc418572368(param0 *int, param1 *float32) 
 	hookContext.params = []interface{}{param0, param1}
 	hookContext.funcName = "UnderscoreFunc"
 	hookContext.packageName = "main"
-	if H10Before != nil {
-		H10Before(hookContext, *param0, *param1)
+	if otelc_hook_4254536111_H10Before != nil {
+		otelc_hook_4254536111_H10Before(hookContext, *param0, *param1)
 	}
 	return hookContext, hookContext.skipCall
 }
 
-//go:linkname H10Before testdata/golden/underscore-syntax.H10Before
-func H10Before(hookContext HookContext, param0 int, param1 float32)
+//go:linkname otelc_hook_4254536111_H10Before testdata/golden/underscore-syntax.H10Before
+func otelc_hook_4254536111_H10Before(hookContext HookContext, param0 int, param1 float32)

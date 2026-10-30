@@ -53,10 +53,13 @@ const (
 	mainGoFileName     = "main.go"
 	mainTestFileName   = "main_test.go"
 	otherGoFileName    = "other.go"
+	runtimeStubName    = "runtime_stub.go"
 	mainPackage        = "main"
 	buildID            = "foo/bar"
 	compiledOutput     = "_pkg_.a"
 	goldenExt          = ".golden"
+	// goldenWorkDir replaces the temporary directory in golden files.
+	goldenWorkDir      = "/golden/work"
 	invalidReceiver    = "invalid-receiver"
 	invalidReceiverMsg = "can not find function"
 )
@@ -86,7 +89,7 @@ func runTest(t *testing.T, testName string) {
 	// source_test.go (a test build — a file the Go toolchain only compiles
 	// under `go test`). The chosen name is preserved into the temp dir so the
 	// compiled unit is genuinely a _test.go file, which is what is_test gates
-	// on. This mirrors setup.isTestBuild: test-ness is a source-set property,
+	// on. This mirrors util.IsTestBuild: test-ness is a source-set property,
 	// not an import-path suffix.
 	srcName, compiledName := sourceFileName, mainGoFileName
 	if testSrc := filepath.Join(testdataDir, goldenDir, testName, sourceTestFileName); util.PathExists(testSrc) {
@@ -113,6 +116,9 @@ func runTest(t *testing.T, testName string) {
 
 	testcaseDir := filepath.Join(testdataDir, goldenDir, testName)
 	helpers := buildTestcaseHelpers(ctx, t, testcaseDir)
+	if stub := buildRuntimeStub(ctx, t, testcaseDir, tempDir); stub != nil {
+		helpers = append(helpers, *stub)
+	}
 
 	args := compileArgs(tempDir, helpers, importPath, packageFiles...)
 	err := Toolexec(ctx, args, false)
@@ -170,6 +176,7 @@ func loadRulesYAML(t *testing.T, p loadRulesParams) *rule.InstRuleSet {
 		// the default "main" fixtures but differ for a deep-path glob fixture.
 		PackageName:    sourceTree.Name.Name,
 		ModulePath:     p.importPath,
+		IsTest:         p.isTest,
 		FuncRules:      make(map[string][]*rule.InstFuncRule),
 		StructRules:    make(map[string][]*rule.InstStructRule),
 		RawRules:       make(map[string][]*rule.InstRawRule),
@@ -443,6 +450,34 @@ func buildTestcaseHelpers(ctx context.Context, t *testing.T, testcaseDir string)
 	return out
 }
 
+// buildRuntimeStub compiles testcaseDir's runtime_stub.go, if present, as a
+// stand-in for the real "runtime" package, whose SuppressHooks and
+// UnsuppressHooks otelc's real build adds at compile time.
+func buildRuntimeStub(ctx context.Context, t *testing.T, testcaseDir, tempDir string) *helperPkg {
+	t.Helper()
+	stubFile := filepath.Join(testcaseDir, runtimeStubName)
+	if !util.PathExists(stubFile) {
+		return nil
+	}
+
+	gotooldir, err := exec.Command("go", "env", "GOTOOLDIR").Output()
+	require.NoError(t, err)
+
+	stubArchive := filepath.Join(tempDir, "runtime_stub.a")
+	cmd := exec.CommandContext(
+		ctx,
+		filepath.Join(strings.TrimSpace(string(gotooldir)), "compile"),
+		"-p", suppressHooksPackage,
+		"-o", stubArchive,
+		stubFile,
+	)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	require.NoError(t, cmd.Run(), "compiling %s: %s", stubFile, stderr.String())
+
+	return &helperPkg{importPath: suppressHooksPackage, archive: stubArchive}
+}
+
 func verifyGoldenFiles(t *testing.T, tempDir, testName string) {
 	entries, _ := os.ReadDir(filepath.Join(testdataDir, goldenDir, testName))
 	for _, entry := range entries {
@@ -458,6 +493,10 @@ func verifyGoldenFiles(t *testing.T, tempDir, testName string) {
 		// The dave/dst stringifier occasionally introduces CRLF on Windows.
 		// We normalize the generated string to LF before comparing to the .gitattributes LF golden file.
 		actualNorm := strings.ReplaceAll(string(actualBytes), "\r\n", "\n")
+		// Line directives hold the absolute path of the original file, which
+		// is in the temporary directory. Replace it so the golden files are
+		// the same on all machines.
+		actualNorm = strings.ReplaceAll(actualNorm, tempDir, goldenWorkDir)
 		golden.Assert(t, actualNorm, goldenPath)
 	}
 }
@@ -704,6 +743,26 @@ func TestGroupRules(t *testing.T) {
 	}
 }
 
+func TestRsetHasMethodCallRule(t *testing.T) {
+	t.Run("no call rules", func(t *testing.T) {
+		rset := rule.NewInstRuleSet("example.com/p")
+		assert.False(t, rsetHasMethodCallRule(rset))
+	})
+
+	t.Run("function_call rule only", func(t *testing.T) {
+		rset := rule.NewInstRuleSet("example.com/p")
+		rset.AddCallRule("/f.go", &rule.InstCallRule{FunctionCall: "net/http.Get"})
+		assert.False(t, rsetHasMethodCallRule(rset))
+	})
+
+	t.Run("method_call rule present", func(t *testing.T) {
+		rset := rule.NewInstRuleSet("example.com/p")
+		rset.AddCallRule("/f.go", &rule.InstCallRule{FunctionCall: "net/http.Get"})
+		rset.AddCallRule("/g.go", &rule.InstCallRule{MethodCall: "example.com/p.*Buffer.Write"})
+		assert.True(t, rsetHasMethodCallRule(rset))
+	})
+}
+
 // TestInstrumentSkipsFilesNoRuleChanged checks that a file a call rule is
 // attached to, but that has no matching call, stays in the compile command as
 // it is. Setup attaches call rules to every file of a target package, so with
@@ -745,4 +804,59 @@ func G() int { return 1 }
 	assert.Equal(t, unmatched, ip.compileArgs[4],
 		"a file no rule changed must stay in the compile command as it is")
 	assert.NoFileExists(t, filepath.Join(ip.workDir, "unmatched.go"))
+}
+
+func TestInstrumentMethodCallMatchesRegardlessOfFileOrder(t *testing.T) {
+	src := t.TempDir()
+	setup := filepath.Join(src, "a_setup.go")
+	call := filepath.Join(src, "b_call.go")
+	require.NoError(t, os.WriteFile(setup, []byte(`package p
+
+import "net/http"
+
+type Buffer struct{}
+
+func (b *Buffer) Write(p []byte) (int, error) { return len(p), nil }
+
+func F() { _, _ = http.Get("http://example.com") }
+`), 0o600))
+	require.NoError(t, os.WriteFile(call, []byte(`package p
+
+func G(b *Buffer) { _, _ = b.Write(nil) }
+`), 0o600))
+
+	unrelatedRule := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_get"},
+		FunctionCall: "net/http.Get",
+		ImportPath:   "net/http",
+		FuncName:     "Get",
+		Replace:      "({{ . }})",
+	}
+	methodRule := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_write"},
+		MethodCall:   "example.com/p.*Buffer.Write",
+		ImportPath:   "example.com/p",
+		RecvType:     "*Buffer",
+		FuncName:     "Write",
+		Replace:      "({{ . }})",
+	}
+	rset := rule.NewInstRuleSet("example.com/p")
+	rset.PackageName = "p"
+	rset.AddCallRule(setup, unrelatedRule)
+	rset.AddCallRule(call, methodRule)
+
+	ip := newTestPhase()
+	ip.workDir = t.TempDir()
+	ip.compileArgs = []string{"compile", "-p", "example.com/p", setup, call}
+	require.NoError(t, ip.instrument(context.Background(), rset))
+
+	assert.True(t, ip.methodCallInfoLoaded)
+	assert.Equal(t, filepath.Join(ip.workDir, "a_setup.go"), ip.compileArgs[3],
+		"a_setup.go's own rule must still rewrite it")
+	assert.Equal(t, filepath.Join(ip.workDir, "b_call.go"), ip.compileArgs[4],
+		"the method_call rule must still match b_call.go even though a_setup.go was rewritten first")
+
+	written, err := os.ReadFile(filepath.Join(ip.workDir, "b_call.go"))
+	require.NoError(t, err)
+	assert.Contains(t, string(written), "(b.Write(nil))")
 }

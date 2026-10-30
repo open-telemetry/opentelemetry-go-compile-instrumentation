@@ -5,7 +5,9 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"math"
 	"os"
 	"os/signal"
 	"strings"
@@ -24,12 +26,6 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
-const (
-	// Default export intervals and batch sizes
-	defaultTraceBatchTimeout = time.Second
-	defaultTraceBatchSize    = 512
-)
-
 var (
 	logger                *slog.Logger
 	meterProvider         *sdkmetric.MeterProvider
@@ -41,7 +37,8 @@ var (
 func init() {
 	// Initialize logger early so hook packages can use it with the correct log level
 	// This is called at package load time, before any hooks execute
-	logger = slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+	// Stderr, not stdout: stdout belongs to the instrumented program and may carry data.
+	logger = slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
 		Level: logLevel(),
 	}))
 }
@@ -77,7 +74,11 @@ func Logger() *slog.Logger {
 	return logger
 }
 
-// logLevel returns the log level from environment variable
+// levelNone is above every slog level, so a handler set to it logs nothing.
+const levelNone = slog.Level(math.MaxInt)
+
+// logLevel returns the log level from OTEL_LOG_LEVEL. Logging is off unless the
+// variable is set to a known level.
 func logLevel() slog.Level {
 	levelStr := strings.ToLower(strings.TrimSpace(os.Getenv("OTEL_LOG_LEVEL")))
 	switch levelStr {
@@ -90,7 +91,7 @@ func logLevel() slog.Level {
 	case "error":
 		return slog.LevelError
 	default:
-		return slog.LevelInfo
+		return levelNone
 	}
 }
 
@@ -201,10 +202,9 @@ func newSpanProcessor(traceExporter sdktrace.SpanExporter) sdktrace.SpanProcesso
 		return sdktrace.NewSimpleSpanProcessor(traceExporter)
 	}
 
-	return sdktrace.NewBatchSpanProcessor(traceExporter,
-		sdktrace.WithBatchTimeout(defaultTraceBatchTimeout),
-		sdktrace.WithMaxExportBatchSize(defaultTraceBatchSize),
-	)
+	// No explicit options: NewBatchSpanProcessor already reads the standard
+	// OTEL_BSP_* env vars and falls back to the SDK defaults.
+	return sdktrace.NewBatchSpanProcessor(traceExporter)
 }
 
 func useSimpleSpanProcessor() bool {
@@ -275,30 +275,30 @@ func setupLoggerProvider(ctx context.Context, res *resource.Resource) error {
 
 // Shutdown gracefully shuts down the OpenTelemetry SDK
 func Shutdown(ctx context.Context) error {
-	var err error
+	var errs []error
 
 	if tracerProvider != nil {
 		if shutdownErr := tracerProvider.Shutdown(ctx); shutdownErr != nil {
 			Logger().Error("failed to shutdown tracer provider", "error", shutdownErr)
-			err = shutdownErr
+			errs = append(errs, shutdownErr)
 		}
 	}
 
 	if meterProvider != nil {
 		if shutdownErr := meterProvider.Shutdown(ctx); shutdownErr != nil {
 			Logger().Error("failed to shutdown meter provider", "error", shutdownErr)
-			err = shutdownErr
+			errs = append(errs, shutdownErr)
 		}
 	}
 
 	if loggerProvider != nil {
 		if shutdownErr := loggerProvider.Shutdown(ctx); shutdownErr != nil {
 			Logger().Error("failed to shutdown logger provider", "error", shutdownErr)
-			err = shutdownErr
+			errs = append(errs, shutdownErr)
 		}
 	}
 
-	return err
+	return errors.Join(errs...)
 }
 
 // StartRuntimeMetrics enables Go runtime metrics collection.
