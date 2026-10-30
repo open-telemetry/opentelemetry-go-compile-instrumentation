@@ -244,7 +244,7 @@ dependencies through the public Go proxy. The program has these subcommands:
   trusted checkout.
 - `publish` commits and pushes the regenerated archive.
 - `identity` checks the publisher token and reports its account.
-- `credentials` chooses the App token or the maintainer token.
+- `credentials` chooses between the App token and the environment token.
 
 Run the tests of the program with `make test-bundle-workflows`. The target also
 checks the structure of the repair workflows.
@@ -256,7 +256,13 @@ scripts or Git hooks. It checks the current
 base, head, branch, and fork permission before pushing a descendant commit.
 An expected-head lease rejects concurrent branch updates.
 
-Before enabling fork publication, an administrator must:
+The publisher uses the repository App for repository and fork branches when
+`OTELBOT_COMPILE_INSTRUMENTATION_CLIENT_ID` and
+`OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY` are configured. A fork author
+must allow edits from maintainers.
+
+The `OTELC_BUNDLE_PUSH_TOKEN` environment token is the fallback when the App
+is not configured. To use the fallback, an administrator must:
 
 1. Create the `bundle-publisher` environment.
 2. Restrict its deployment branch rules to the `main` branch only. For
@@ -269,20 +275,14 @@ supplies the value. Only the publisher job reads the secret. A caller can pass
 an environment secret by name even when the value lives only in that environment
 ([Reuse workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows)).
 
-Use an expiring classic token from a dedicated identity with upstream write
-access. For this public repository, the token needs `public_repo` and
-`workflow` scopes. Organization policy and SSO authorization must permit its
-use. Do not put the token in a comment or a workflow file. The fork author
-must allow maintainer edits unless the token identity has direct write access
-to the fork.
+Use an expiring classic token from an identity with push access to this
+repository. The token needs `public_repo` and `workflow` scopes. Organization
+policy and SSO authorization must permit its use. Do not put the token in a
+comment or a workflow file.
 
-Repository branches continue to use the GitHub App when
-`OTELBOT_COMPILE_INSTRUMENTATION_CLIENT_ID` and
-`OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY` are configured. Otherwise, they
-use the maintainer token. App and user-token pushes trigger normal pull request
-checks. The workflow reports missing credentials and denied updates in its
-logs and job summary. If publication fails, the generated artifact remains
-available for one day.
+App and token pushes trigger normal pull request checks. The workflow reports
+missing credentials and denied updates in its logs and job summary. If
+publication fails, the generated artifact remains available for one day.
 
 To inspect automatic selection without starting repair jobs, run
 `Auto-fix Bundle Conflicts` from the Actions tab with `dry_run` enabled.

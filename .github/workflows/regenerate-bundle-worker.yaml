@@ -158,7 +158,6 @@ jobs:
           CLIENT_ID: ${{ vars.OTELBOT_COMPILE_INSTRUMENTATION_CLIENT_ID }}
           PRIVATE_KEY: >-
             ${{ secrets.OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY }}
-          IS_CROSS_REPOSITORY: ${{ inputs.is_cross_repository }}
         run: |
           "${RUNNER_TEMP}/bundlerepair" credentials
 

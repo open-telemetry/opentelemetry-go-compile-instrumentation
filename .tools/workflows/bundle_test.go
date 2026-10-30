@@ -555,10 +555,13 @@ func TestPublisherCredentialSteps(t *testing.T) {
 		t.Fatalf("missing steps: credentials=%v app-token=%v identity=%v", credentials != nil, appToken != nil, identity != nil)
 	}
 	assertSingleCall(t, credentials, "credentials")
-	for _, key := range []string{"CLIENT_ID", "PRIVATE_KEY", "IS_CROSS_REPOSITORY"} {
+	for _, key := range []string{"CLIENT_ID", "PRIVATE_KEY"} {
 		if _, ok := envValue(credentials, key); !ok {
 			t.Errorf("the credentials step does not set %s", key)
 		}
+	}
+	if _, ok := envValue(credentials, "IS_CROSS_REPOSITORY"); ok {
+		t.Error("the credentials step must not set IS_CROSS_REPOSITORY")
 	}
 	if appToken.If == nil || strings.TrimSpace(appToken.If.Value) != "steps.credentials.outputs.use_app == 'true'" {
 		t.Error("the App token must follow the credentials decision")
