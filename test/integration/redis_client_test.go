@@ -26,21 +26,18 @@ const redisGoRedisModule = "github.com/redis/go-redis/v9"
 func TestRedisClient(t *testing.T) {
 	t.Parallel()
 
-	// Copy before either build. otelc setup mutates test/apps/redisclient/go.mod,
+	// Copy before any build. otelc setup mutates test/apps/redisclient/go.mod,
 	// and a parallel copy would pick up the instrumentation require and MVS
 	// to v9.22.0.
-	legacyAppsDir := pinnedRedisClient(t, "v9.8.0")
+	v980AppsDir := pinnedRedisClient(t, "v9.8.0")
 
-	// Both cases go through otelc. Equal GET counts fail if the Conn version
-	// gate is wrong: missing the pre-v9.9 hook drops a span, injecting the
-	// hook after v9.9.0 adds a duplicate.
 	for _, tc := range []struct {
 		name    string
 		appsDir string
 		version string
 	}{
-		{name: "conn_after_v9.9"},
-		{name: "conn_v9.8.0", appsDir: legacyAppsDir, version: "v9.8.0"},
+		{name: "current_supported"},
+		{name: "v9.8.0", appsDir: v980AppsDir, version: "v9.8.0"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -124,54 +121,53 @@ func assertRedisClientSpans(t *testing.T, appsDir string) {
 	output := f.Run("redisclient", "-addr="+server.Addr())
 	require.Contains(t, output, "testvalue")
 
-	spans := testutil.AllSpans(f.Traces())
-	require.GreaterOrEqual(t, len(spans), 4, "expected at least 4 spans (SET, GET, CONN GET, DEL)")
-
-	setSpan := testutil.RequireSpan(t, f.Traces(),
-		testutil.IsClient,
-		testutil.HasAttribute("db.operation.name", "set"),
-	)
-	testutil.RequireRedisClientSemconv(
-		t,
-		setSpan,
-		"set",
-		server.Addr(),
-		"set testkey testvalue",
-	)
-
 	host, _, err := net.SplitHostPort(server.Addr())
 	require.NoError(t, err)
 
-	getCount := 0
-	clientGet := false
-	for _, span := range spans {
-		if !testutil.IsClient(span) || !testutil.HasAttribute("db.operation.name", "get")(span) {
+	var setSpans, getSpans, delSpans []ptrace.Span
+	var clientGetSpan *ptrace.Span
+	for _, span := range testutil.AllSpans(f.Traces()) {
+		if !testutil.IsClient(span) {
 			continue
 		}
-		getCount++
-		// Pre-v9.9 Conn hooks store Conn.String() as the endpoint, so only the
-		// NewClient GET is guaranteed to have server.address == host.
-		if testutil.HasAttribute("server.address", host)(span) {
-			clientGet = true
-			testutil.RequireRedisClientSemconv(
-				t,
-				span,
-				"get",
-				server.Addr(),
-				"get testkey",
-			)
+		attrs := testutil.Attrs(span)
+		switch attrs["db.operation.name"] {
+		case "set":
+			setSpans = append(setSpans, span)
+		case "get":
+			getSpans = append(getSpans, span)
+			if attrs["server.address"] == host {
+				s := span
+				clientGetSpan = &s
+			}
+		case "del":
+			delSpans = append(delSpans, span)
 		}
 	}
-	require.Equal(t, 2, getCount, "client GET and Conn GET should each produce one span")
-	require.True(t, clientGet, "NewClient GET span is missing")
 
-	delSpan := testutil.RequireSpan(t, f.Traces(),
-		testutil.IsClient,
-		testutil.HasAttribute("db.operation.name", "del"),
-	)
+	require.Len(t, setSpans, 1, "expected exactly one SET span")
 	testutil.RequireRedisClientSemconv(
 		t,
-		delSpan,
+		setSpans[0],
+		"set",
+		server.Addr(),
+		"set testkey ?",
+	)
+
+	require.Len(t, getSpans, 2, "client GET and Conn GET should each produce one span")
+	require.NotNil(t, clientGetSpan, "WithTimeout GET span is missing")
+	testutil.RequireRedisClientSemconv(
+		t,
+		*clientGetSpan,
+		"get",
+		server.Addr(),
+		"get testkey",
+	)
+
+	require.Len(t, delSpans, 1, "expected exactly one DEL span")
+	testutil.RequireRedisClientSemconv(
+		t,
+		delSpans[0],
 		"del",
 		server.Addr(),
 		"del testkey",

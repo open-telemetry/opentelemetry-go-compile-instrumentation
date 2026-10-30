@@ -1,0 +1,46 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+//line /golden/work/main.go:6
+import (
+	"strings"
+
+	"go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/call-rule-call-receiver/helpers/logger"
+)
+
+var std = &logger.Logger{}
+
+func getLogger() *logger.Logger { return std }
+
+type server struct{ log *logger.Logger }
+
+// The receiver of the matched call is log, not the enclosing method's s.
+func (s *server) serve(log *logger.Logger) {
+	log.With(logger.String("traced", "yes")).Info("serve")
+	/*line /golden/work/main.go:21*/ s.log.With(logger.String("traced", "yes")).Info("field") /*line /golden/work/main.go:21*/
+}
+
+type base struct{ *logger.Logger }
+
+// The receiver renders as written: the outer value of a promoted method, and
+// no implicit & for an addressable value.
+func promoted(b base, value logger.Logger) {
+	b.With(logger.String("traced", "yes")).Info("promoted")
+	/*line /golden/work/main.go:30*/ value.With(logger.String("traced", "yes")).Info("addressable") /*line /golden/work/main.go:30*/
+}
+
+func handle(log *logger.Logger, fields []logger.Field) {
+	defer log.With(logger.String("traced", "yes")).Info("done", logger.String("n", strings.Repeat("x", len(fields))))
+	/*line /golden/work/main.go:35*/ go log.With(logger.String("traced", "yes")).Info("async", fields...)
+	/*line /golden/work/main.go:36*/ getLogger().With(logger.String("traced", "yes")).Info("spread", fields...)
+	/*line /golden/work/main.go:37*/ log.With(logger.String("traced", "yes")).Info("none")
+	/*line /golden/work/main.go:38*/ _ = logger.Flush(log) /*line /golden/work/main.go:38*/
+}
+
+func main() {
+	(&server{log: std}).serve(std)
+	handle(std, []logger.Field{logger.String("k", "v")})
+	promoted(base{std}, logger.Logger{})
+}

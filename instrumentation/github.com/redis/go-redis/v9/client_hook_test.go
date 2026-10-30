@@ -158,6 +158,26 @@ func TestAfterClientConnV9_AttachesHook(t *testing.T) {
 	assertRedisSpan(t, spans, wantAddr)
 }
 
+func TestAfterClientWithTimeoutV9_AttachesHook(t *testing.T) {
+	sr := newRecordingClient(t)
+
+	client := redis.NewClient(failFastOptions())
+	t.Cleanup(func() { _ = client.Close() })
+
+	afterNewRedisClientV9(hooktest.NewMockHookContext(), client)
+
+	clone := client.WithTimeout(time.Minute)
+	t.Cleanup(func() { _ = clone.Close() })
+
+	afterClientWithTimeoutV9(hooktest.NewMockHookContext(), clone)
+
+	spans := pingAndCollect(t, func(ctx context.Context) error {
+		return clone.Ping(ctx).Err()
+	}, sr)
+	require.Len(t, spans, 1, "expected exactly one client span")
+	assertRedisSpan(t, spans, unreachableHost)
+}
+
 func TestRedisClientEnabler(t *testing.T) {
 	tests := []struct {
 		name     string

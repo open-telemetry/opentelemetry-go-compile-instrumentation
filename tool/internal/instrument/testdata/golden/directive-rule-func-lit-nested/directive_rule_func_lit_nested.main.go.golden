@@ -1,0 +1,42 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+//otelc:span tag:outer-decl
+//line /golden/work/main.go:7
+func outer() {
+	/*line /<generated>:1*/ println("span start: name=outer tag=outer-decl")
+	//otelc:span tag:inner
+	/*line /golden/work/main.go:8*/
+	inner := func() {
+		/*line /<generated>:1*/ println("span start: name= tag=inner")
+		/*line /golden/work/main.go:10*/ plain := func() {}
+		plain()
+	}
+	inner()
+}
+
+func main() {
+	outer()
+
+	//otelc:span tag:outer-lit
+	outerLit := func() {
+		/*line /<generated>:1*/ println("span start: name= tag=outer-lit")
+		//otelc:span tag:inner-lit
+		/*line /golden/work/main.go:21*/
+		innerLit := func() {
+			/*line /<generated>:1*/ println("span start: name= tag=inner-lit") /*line /golden/work/main.go:21*/
+		}
+		innerLit()
+	}
+	outerLit()
+
+	//otelc:span tag:statement
+	twice :=
+		//otelc:span tag:literal
+		func() {
+			/*line /<generated>:1*/ println("span start: name= tag=statement") /*line /golden/work/main.go:29*/
+		}
+	twice()
+}

@@ -1,0 +1,23 @@
+span_directive:
+  target: main
+  where:
+    directive: "otelc:span"
+  imports:
+    fmt: "fmt"
+  do:
+    - expand_directive:
+        template: |-
+          fmt.Println("span start:", {{ printf "%q" .FuncName }}, {{ printf "%q" (.DirectiveArg "span.name") }})
+          {{- if gt .FuncArgumentCount 0 }}
+          println("arg0:", {{ .FuncArgument 0 }})
+          {{- end }}
+          {{- with .FuncArgumentOfType "context.Context" }}
+          println("ctx arg:", {{ . }} != nil)
+          {{- end }}
+          {{- with .FuncReturnOfType "error" }}
+          defer func() {
+            fmt.Println("span end, error:", {{ . }})
+          }()
+          {{- else }}
+          defer println("span end")
+          {{- end }}

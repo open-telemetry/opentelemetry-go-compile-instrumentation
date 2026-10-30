@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -25,6 +26,54 @@ func TestLoadMissingMatchedRules(t *testing.T) {
 	_, err := ip.load()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "otelc setup")
+}
+
+func TestMatchPicksRuleSetOfThisPackage(t *testing.T) {
+	// Every main package of a build compiles with -p main.
+	dir := t.TempDir()
+	mainA := filepath.Join(dir, "a", "main.go")
+	mainB := filepath.Join(dir, "b", "main.go")
+	argsA := []string{"compile", "-o", "_pkg_.a", "-p", "main", "-buildid", "x", mainA}
+	argsB := []string{"compile", "-o", "_pkg_.a", "-p", "main", "-buildid", "x", mainB}
+	ip := &instrumentPhase{logger: slog.Default(), workDir: dir}
+
+	setA := rule.NewInstRuleSet("main")
+	setA.AddFuncRule(mainA, &rule.InstFuncRule{Func: "Hello"})
+	setB := rule.NewInstRuleSet("main")
+	setB.AddFuncRule(mainB, &rule.InstFuncRule{Func: "Hello"})
+
+	assert.Same(t, setA, ip.match([]*rule.InstRuleSet{setA}, argsA))
+	assert.Nil(t, ip.match([]*rule.InstRuleSet{setA}, argsB),
+		"rules matched in a/main.go must not be applied to package b")
+	assert.Same(t, setB, ip.match([]*rule.InstRuleSet{setA, setB}, argsB))
+
+	// A set that names no file, such as one with only file rules, applies to
+	// any package with the import path.
+	fileRulesOnly := rule.NewInstRuleSet("main")
+	assert.Same(t, fileRulesOnly, ip.match([]*rule.InstRuleSet{fileRulesOnly}, argsB))
+}
+
+func TestMatchPicksRuleSetOfSameCompileKind(t *testing.T) {
+	// go test compiles example.com/lib with lib_test.go for its own test
+	// binary, and without it for the test binaries of packages importing it.
+	normalArgs := []string{"compile", "-o", "_pkg_.a", "-p", "example.com/lib", "-buildid", "x", "lib.go"}
+	testArgs := append(slices.Clone(normalArgs), "lib_test.go")
+	ip := &instrumentPhase{logger: slog.Default()}
+
+	t.Run("a normal build set is not applied to the test build", func(t *testing.T) {
+		normal := rule.NewInstRuleSet("example.com/lib")
+		allSet := []*rule.InstRuleSet{normal}
+		assert.Same(t, normal, ip.match(allSet, normalArgs))
+		assert.Nil(t, ip.match(allSet, testArgs))
+	})
+	t.Run("each build gets its own set", func(t *testing.T) {
+		normal := rule.NewInstRuleSet("example.com/lib")
+		test := rule.NewInstRuleSet("example.com/lib")
+		test.IsTest = true
+		allSet := []*rule.InstRuleSet{test, normal}
+		assert.Same(t, normal, ip.match(allSet, normalArgs))
+		assert.Same(t, test, ip.match(allSet, testArgs))
+	})
 }
 
 func TestAnyRuleSetHasIgnoredCallFiles(t *testing.T) {
