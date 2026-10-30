@@ -60,23 +60,19 @@ per module. Today that is 19 files for the 33 modules under
 `log/slog`, `logrus` and `zap`. Sub-directories are permitted as the set
 grows.
 
-**Local declarations are kept apart from references.** Attributes
-`otelc` declares itself with `id:` live in `schemas/otelc/local/`, a
-registry that depends on upstream semconv. Spans, metrics and `ref:`
-attributes live in `schemas/otelc/groups/`, a registry that depends on
-`local/`. Because Weaver allows one dependency per registry this is a
-chain, `groups/` to `local/` to upstream, and `groups/` still resolves
-upstream references through it. A lint fails when an `id:` attribute
-appears under `groups/`, so a new local declaration cannot silently be
-left out of generation.
+**Local declarations stay in one tree.** Attributes `otelc` declares
+itself with `id:` live in `schemas/otelc/groups/`, next to the spans,
+metrics and `ref:` attributes that use them. Weaver's resolved output
+records provenance: each group names the registry it came from, and each
+`ref:` attribute names its upstream source group, while `id:` attributes
+have none. Filtering on that selects the 17 local attributes.
 
-Weaver's resolved output also records provenance: each group names the
-registry it came from, and each `ref:` attribute names its upstream
-source group, while `id:` attributes have none. Filtering on that
-selects the same 17 attributes from a single tree. It relies on output
-that the `--lineage` flag still describes as not implemented, so it is
-evaluated in the first generator change rather than adopted here. If it
-is adopted, this decision is amended to a single tree.
+That output is one the `--lineage` flag still describes as not
+implemented, so a test compares the generated keys with the `id:` entries
+parsed from the YAML and fails if the two differ. If the output stops
+being reliable, the fallback is a separate `schemas/otelc/local/` registry
+between `groups/` and upstream, since Weaver allows one dependency per
+registry.
 
 **One upstream version.** A single upstream semconv version is pinned in
 `.semconv-version`, currently v1.37.0. The manifest that depends on
@@ -86,7 +82,7 @@ is no per-instrumentation pin.
 
 **Locally declared attributes are generated.** A new `make generate`
 target renders
-the attributes in `local/` into one Go package, `pkg/otelcconv`, with
+the attributes declared with `id:` into one Go package, `pkg/otelcconv`, with
 the attribute template that `go.opentelemetry.io/otel` uses for its own
 semconv packages. The template is vendored with its source version
 recorded rather than read from the module cache, so the output does not
@@ -113,7 +109,7 @@ declaration instead of drifting into three.
 
 A local attribute that later appears upstream is already caught:
 `make lint-schema` reports `DuplicateAttributeId`. The fix is an `id:`
-to `ref:` swap, moving the declaration out of `local/`, after checking
+to `ref:` swap, after checking
 that the upstream type matches. `rpc.system.name` is the current case
 where it does not: a string locally, an enum upstream.
 `docs/semantic-conventions.md` gains a line stating this remedy, since
