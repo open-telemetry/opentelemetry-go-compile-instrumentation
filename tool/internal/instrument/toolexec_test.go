@@ -70,6 +70,59 @@ func TestPGOBuildFlags(t *testing.T) {
 	}
 }
 
+// TestPGOBuildFlagsForLinkCommand covers the link-side decision. A link
+// command never carries -pgoprofile, because the profile shapes compile
+// actions only, so the decision must follow the profile setup recorded; the
+// compile-side table above cannot express that shape.
+func TestPGOBuildFlagsForLinkCommand(t *testing.T) {
+	const profile = "warm profile.pgo"
+	linkTool := func() string {
+		name := "link"
+		if runtime.GOOS == "windows" {
+			name += ".exe"
+		}
+		return filepath.Join(string(filepath.Separator)+"go", "pkg", "tool", name)
+	}()
+	args := []string{linkTool, "-o", "app.test", "-buildid=x", "-importcfg", "importcfg.link"}
+
+	tests := []struct {
+		name      string
+		profile   string
+		missing   bool
+		readError bool
+		want      []string
+		wantErr   string
+	}{
+		{
+			name: "recorded profile applies to the link", profile: profile,
+			want: []string{"-pgo=" + profile},
+		},
+		{name: "empty recorded profile"},
+		{name: "missing profile file", missing: true},
+		{name: "read error", readError: true, wantErr: "failed to read PGO profile"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+			require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+			if tt.readError {
+				require.NoError(t, os.Mkdir(util.GetPGOProfileFile(), 0o755))
+			} else if !tt.missing {
+				require.NoError(t, os.WriteFile(util.GetPGOProfileFile(), []byte(tt.profile), 0o644))
+			}
+
+			flags, err := pgoBuildFlagsFor(args)
+
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, flags)
+		})
+	}
+}
+
 func TestUpdateImportConfigPGOReadError(t *testing.T) {
 	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
 	require.NoError(t, os.MkdirAll(util.GetPGOProfileFile(), 0o755))

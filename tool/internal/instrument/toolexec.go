@@ -323,12 +323,18 @@ func (ip *instrumentPhase) pgoBuildFlags() ([]string, error) {
 }
 
 // pgoBuildFlagsFor returns the -pgo flag that makes a nested go list compile
-// the added imports with the profile whose path storePGOProfile recorded
-// during setup, when the command in args uses one. Without it the nested
-// build compiles them unprofiled, and the link rejects the mix of export data
-// with a fingerprint mismatch.
+// the added imports of the command in args with the profile whose path
+// storePGOProfile recorded during setup, when that command uses one. Without
+// it the nested build compiles them unprofiled, and the link rejects the
+// mix of export data with a fingerprint mismatch.
+//
+// A compile command decides from -pgoprofile, which the toolchain adds
+// exactly when it profiles that compile. A link command never carries
+// -pgoprofile: the profile shapes compile actions, not the link. Link-side
+// resolution therefore follows the profile setup recorded, which setup
+// rewrites before every build, empty when the build uses none.
 func pgoBuildFlagsFor(args []string) ([]string, error) {
-	if util.FindFlagValue(args, "-pgoprofile") == "" {
+	if !util.IsLinkCommandWithArgs(args) && util.FindFlagValue(args, "-pgoprofile") == "" {
 		return nil, nil
 	}
 	f := util.GetPGOProfileFile()

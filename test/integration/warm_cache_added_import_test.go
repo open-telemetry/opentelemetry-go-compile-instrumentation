@@ -146,3 +146,206 @@ replace example.com/warmcache/extra => ./extra
 		assert.Contains(t, out, "extra: note called")
 	})
 }
+
+// TestWarmCacheKeepsRuleAddedImportsWithPGO covers the warm-cache link
+// recovery under a PGO build. The cold compile of dep runs profiled, and so
+// does the nested build that resolves the import the rule adds to it. On the
+// warm build the compile of dep is a cache hit, so only the link resolves the
+// import, and the archives it resolves must be compiled with the same
+// profile: the link rejects export data whose fingerprint differs from what
+// the cached compile of dep recorded. The profile makes extra.Note hot, the
+// one shape in which profiled and unprofiled compiles of a package differ.
+func TestWarmCacheKeepsRuleAddedImportsWithPGO(t *testing.T) {
+	otelcPath, err := testutil.OtelcPath()
+	require.NoError(t, err)
+	otelcPath, err = filepath.Abs(otelcPath)
+	require.NoError(t, err)
+
+	appDir := t.TempDir()
+
+	writeTestFile(t, appDir, filepath.Join("extra", "go.mod"), `module example.com/warmcache/extra
+
+go 1.25.0
+`)
+	writeTestFile(t, appDir, filepath.Join("extra", "extra.go"), `// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package extra
+
+// Note reports that the rule-injected code ran. Its body is tuned so the
+// compiler cannot inline it on an ordinary build (cost past the inlining
+// budget) but can inline it once the recorded profile marks it hot: the
+// profiled and unprofiled compiles of this package then produce different
+// export data, which is the fingerprint mismatch this test relies on.
+func Note() int {
+	x := 0
+	x += 1 * 1
+	x += 2 * 2
+	x += 3 * 3
+	x += 4 * 4
+	x += 5 * 5
+	x += 6 * 6
+	x += 7 * 7
+	x += 8 * 8
+	x += 9 * 9
+	x += 10 * 10
+	x += 11 * 11
+	x += 12 * 12
+	x += 13 * 13
+	x += 14 * 14
+	x += 15 * 15
+	x += 16 * 16
+	x += 17 * 17
+	x += 18 * 18
+	x += 19 * 19
+	x += 20 * 20
+	x += 21 * 21
+	x += 22 * 22
+	x += 23 * 23
+	x += 24 * 24
+	x += 25 * 25
+	x += 26 * 26
+	x += 27 * 27
+	x += 28 * 28
+	x += 29 * 29
+	x += 30 * 30
+	x += 31 * 31
+	x += 32 * 32
+	x += 33 * 33
+	return x
+}
+`)
+	writeTestFile(t, appDir, filepath.Join("dep", "dep.go"), `// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package dep
+
+import "strings"
+
+func Work() string {
+	return strings.ToUpper("work")
+}
+`)
+	writeTestFile(t, appDir, "main.go", `// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+import (
+	"fmt"
+
+	"example.com/warmcache/dep"
+)
+
+func main() {
+	fmt.Println("warmcache: " + dep.Work())
+}
+`)
+	writeTestFile(t, appDir, "main_test.go", `// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+import (
+	"testing"
+
+	"example.com/warmcache/dep"
+)
+
+func TestWork(t *testing.T) {
+	if got := dep.Work(); got != "WORK" {
+		t.Fatalf("dep.Work() = %q, want WORK", got)
+	}
+}
+`)
+	writeTestFile(t, appDir, "go.mod", `module example.com/warmcache
+
+go 1.25.0
+
+require example.com/warmcache/extra v0.0.0
+
+replace example.com/warmcache/extra => ./extra
+`)
+	writeTestFile(t, appDir, "rules.yml", `dep_wrap_call:
+  target: example.com/warmcache/dep
+  where:
+    function_call: strings.ToUpper
+  do:
+    - wrap_call:
+        replace: '(func() string { _ = extra.Note(); return {{ . }} })()'
+  imports:
+    extra: example.com/warmcache/extra
+`)
+	writeTestFile(t, appDir, filepath.Join("profilegen", "main.go"), `// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+import (
+	"os"
+	"runtime/pprof"
+
+	"example.com/warmcache/extra"
+)
+
+// main records a CPU profile in which extra.Note is the dominant cost. The
+// loop does no allocation and no timing calls, so the samples land on Note
+// instead of on the runtime.
+func main() {
+	f, err := os.Create(os.Args[1])
+	if err != nil {
+		panic(err)
+	}
+	if err := pprof.StartCPUProfile(f); err != nil {
+		panic(err)
+	}
+	for i := 0; i < 1000000000; i++ {
+		_ = extra.Note()
+	}
+	pprof.StopCPUProfile()
+	if err := f.Close(); err != nil {
+		panic(err)
+	}
+}
+`)
+
+	// Record a real CPU profile with a plain go run; the compiler rejects
+	// profiles it cannot parse.
+	profile := filepath.Join(appDir, "cpu.pgo")
+	gen := exec.CommandContext(t.Context(), "go", "run", "./profilegen", profile)
+	gen.Dir = appDir
+	gen.Env = append(preparedBuildBaseEnvironment(), "GOWORK=off")
+	out, err := gen.CombinedOutput()
+	require.NoError(t, err, "recording the CPU profile failed:\n%s", out)
+
+	// The profile path must be absolute: the nested builds toolexec runs
+	// for the link resolution work from other directories.
+	baseEnv := append(
+		preparedBuildBaseEnvironment(),
+		"GOWORK=off",
+		"GOCACHE="+filepath.Join(t.TempDir(), "gocache"),
+		"OTELC_RULES=rules.yml",
+	)
+
+	runOtelcTest := func() string {
+		t.Helper()
+		cmd := exec.CommandContext(t.Context(), otelcPath,
+			"go", "test", "-pgo="+profile, "-count=1", "-run", "TestWork", "-v", ".")
+		cmd.Dir = appDir
+		cmd.Env = baseEnv
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "otelc go test failed:\n%s", out)
+		return string(out)
+	}
+
+	t.Run("cold profiled build links", func(t *testing.T) {
+		assert.Contains(t, runOtelcTest(), "PASS")
+	})
+
+	t.Run("warm build resolves the added import with the recorded profile", func(t *testing.T) {
+		// The CI shape: a fresh checkout holds no .otelc-build, so setup runs
+		// from scratch while the restored GOCACHE answers every compile.
+		require.NoError(t, os.RemoveAll(filepath.Join(appDir, ".otelc-build")))
+		assert.Contains(t, runOtelcTest(), "PASS")
+	})
+}
