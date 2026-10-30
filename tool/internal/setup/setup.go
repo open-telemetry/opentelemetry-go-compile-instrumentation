@@ -348,7 +348,7 @@ func (sp *setupPhase) generateRuntimePerPackage(
 				continue
 			}
 			if name == "" {
-				name = runtimePackageName(pkgDir)
+				name = sp.runtimePackageName(pkgDir)
 			}
 			if name == "" {
 				sp.Warn("skipping package without a resolvable package name", "package", pkg.PkgPath)
@@ -372,12 +372,17 @@ func (sp *setupPhase) generateRuntimePerPackage(
 
 // runtimePackageName resolves the package name for a package whose Go files
 // are all excluded by build constraints, so pkg.Name can be empty. The
-// package clause of a Go file in the directory (the _test.go files that the
-// test binary compiles) is the fallback. An external test clause (package
-// x_test) must not name the generated non-test file, so an in-package clause
-// wins, and a directory with only external test files uses the name without
-// the _test suffix.
-func runtimePackageName(pkgDir string) string {
+// package clause of a Go file the effective build context selects (the
+// _test.go files that the test binary compiles) is the fallback: a generator
+// excluded by //go:build ignore never compiles into the test binary, so its
+// clause must not name the generated file. ast.MatchFileConstraints is not
+// used here because it drops the ignore tag, which otelc wants only when it
+// compiles ignored add_file rule sources itself. An external test clause
+// (package x_test) must not name the generated non-test file, so an
+// in-package clause wins, and a directory with only external test files uses
+// the name without the _test suffix.
+func (sp *setupPhase) runtimePackageName(pkgDir string) string {
+	bctx := sp.getBuildContext()
 	// os.ReadDir returns entries sorted by filename, so the first matching
 	// clause is deterministic.
 	entries, err := os.ReadDir(pkgDir)
@@ -387,6 +392,10 @@ func runtimePackageName(pkgDir string) string {
 	external := ""
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != goSuffix {
+			continue
+		}
+		match, matchErr := bctx.MatchFile(pkgDir, entry.Name())
+		if matchErr != nil || !match {
 			continue
 		}
 		name, parseErr := ast.ParsePackageName(filepath.Join(pkgDir, entry.Name()))

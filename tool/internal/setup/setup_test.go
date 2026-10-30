@@ -2043,10 +2043,13 @@ func TestSetupPhase_GetBuildContext(t *testing.T) {
 }
 
 // TestRuntimePackageName pins which package clause names a generated runtime
-// file when pkg.Name is empty. A directory can hold both in-package and
-// external test files; the external clause (package x_test) must never name
-// the generated non-test file, and a directory with only external test files
-// still names it after the package without the _test suffix.
+// file when pkg.Name is empty. Only files the effective build context selects
+// contribute a clause: a generator excluded by //go:build ignore never
+// compiles into the test binary and must not name the file. A directory can
+// hold both in-package and external test files; the external clause (package
+// x_test) must never name the generated non-test file, and a directory with
+// only external test files still names it after the package without the
+// _test suffix.
 func TestRuntimePackageName(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -2069,6 +2072,22 @@ func TestRuntimePackageName(t *testing.T) {
 			want: "pkgb",
 		},
 		{
+			name: "ignored generator file cannot name the runtime file",
+			files: map[string]string{
+				"a_test.go": "package pkga_test\n",
+				"gen.go":    "//go:build ignore\n\npackage main\n",
+			},
+			want: "pkga",
+		},
+		{
+			name: "file excluded by an unsatisfied constraint cannot name the runtime file",
+			files: map[string]string{
+				"a_stub.go": "//go:build otelc_never\n\npackage wrong\n",
+				"z_test.go": "package right\n",
+			},
+			want: "right",
+		},
+		{
 			name:  "directory without Go files",
 			files: map[string]string{},
 			want:  "",
@@ -2076,11 +2095,12 @@ func TestRuntimePackageName(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			sp := newTestSetupPhase()
 			dir := t.TempDir()
 			for name, content := range tt.files {
 				mustWriteFile(t, filepath.Join(dir, name), content)
 			}
-			assert.Equal(t, tt.want, runtimePackageName(dir))
+			assert.Equal(t, tt.want, sp.runtimePackageName(dir))
 		})
 	}
 }
