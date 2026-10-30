@@ -101,6 +101,9 @@ type InstRuleSet struct {
 	// IgnoredCallFiles lists source files that hold a //otelc:ignore comment
 	// above a call.
 	IgnoredCallFiles []string `json:"ignored_call_files,omitempty"`
+	// IsTest reports whether the set was matched against a test build of the
+	// package. A go test run can compile the same import path both ways.
+	IsTest bool `json:"is_test,omitempty"`
 }
 
 func NewInstRuleSet(importPath string) *InstRuleSet {
