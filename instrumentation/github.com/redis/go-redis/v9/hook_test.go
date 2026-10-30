@@ -572,7 +572,9 @@ func TestProcessPipelineHook_SanitizesEchoedArgsInError(t *testing.T) {
 	sr := setupTestTracer(t)
 
 	hook := newOtelRedisHook("localhost:6379")
-	echoedErr := errors.New("ERR unknown subcommand or wrong number of arguments for 'set'. Try SET HELP., with args beginning with: 'k' 's3cret-token'")
+	echoedErr := errors.New(
+		"ERR unknown subcommand or wrong number of arguments for 'set'. Try SET HELP., with args beginning with: 'k' 's3cret-token'",
+	)
 	pipelineHook := hook.ProcessPipelineHook(func(ctx context.Context, cmds []redis.Cmder) error {
 		return echoedErr
 	})
