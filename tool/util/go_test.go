@@ -930,3 +930,37 @@ func TestStripToolexecFromGoflags(t *testing.T) {
 		})
 	}
 }
+
+func TestUserBuildTags(t *testing.T) {
+	tests := []struct {
+		name       string
+		goflags    []string
+		buildFlags []string
+		expected   []string
+	}{
+		{name: "empty flags", expected: nil},
+		{name: "tags in goflags with equals", goflags: []string{"-tags=a,b"}, expected: []string{"a", "b"}},
+		{name: "tags in goflags with space", goflags: []string{"-tags", "a,b"}, expected: []string{"a", "b"}},
+		{name: "tags in goflags with double dash", goflags: []string{"--tags=a,b"}, expected: []string{"a", "b"}},
+		{name: "space-separated tags", goflags: []string{"-tags=a b"}, expected: []string{"a", "b"}},
+		{name: "quoted tags value", goflags: []string{`-tags="a,b"`}, expected: []string{"a", "b"}},
+		{
+			name:       "buildFlags overrides goflags",
+			goflags:    []string{"-tags=a"},
+			buildFlags: []string{"-tags=b,c"},
+			expected:   []string{"b", "c"},
+		},
+		{name: "last value wins", goflags: []string{"-tags=a", "-tags=b"}, expected: []string{"b"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, UserBuildTags(tt.goflags, tt.buildFlags))
+		})
+	}
+}
+
+func TestActiveBuildTags(t *testing.T) {
+	t.Setenv("GOFLAGS", "-tags=integration,test")
+	tags := ActiveBuildTags()
+	assert.Equal(t, []string{"integration", "test"}, tags)
+}
