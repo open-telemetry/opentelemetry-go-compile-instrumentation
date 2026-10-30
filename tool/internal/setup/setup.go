@@ -18,6 +18,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/instrument"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
@@ -318,9 +319,27 @@ func (sp *setupPhase) generateRuntimePerPackage(
 ) error {
 	for _, pkg := range pkgs {
 		pkgDir := pkgload.PackageDir(pkg)
+		name := pkg.Name
 		if pkgDir == "" {
-			sp.Warn("skipping package without Go files", "package", pkg.PkgPath)
-			continue
+			// The package's non-test Go files are all excluded by build
+			// constraints (for example a suite whose files are linux-only built
+			// with -tags=githubci on darwin). Its test binary still compiles the
+			// directory through its _test.go files, so the hook imports must be
+			// generated there: instrumented dependencies reference hook functions
+			// only through //go:linkname, and without the blank imports no package
+			// in the test binary's closure defines those symbols, so the link fails.
+			pkgDir = pkgload.ModuleRelativeDir(pkg)
+			if pkgDir == "" {
+				sp.Warn("skipping package without Go files", "package", pkg.PkgPath)
+				continue
+			}
+			if name == "" {
+				name = runtimePackageName(pkgDir)
+			}
+			if name == "" {
+				sp.Warn("skipping package without a resolvable package name", "package", pkg.PkgPath)
+				continue
+			}
 		}
 
 		// Introduce additional hook code by generating otelc.runtime.go
@@ -328,13 +347,47 @@ func (sp *setupPhase) generateRuntimePerPackage(
 			dir:        pkgDir,
 			importPath: sp.runtimeImportPath(ctx, pkg, pkgDir),
 			debugPath:  pkg.PkgPath,
-			name:       pkg.Name,
+			name:       name,
 		}); err != nil {
 			return ex.Wrapf(err, "adding deps for package at %s", pkgDir)
 		}
 	}
 
 	return nil
+}
+
+// runtimePackageName resolves the package name for a package whose Go files
+// are all excluded by build constraints, so pkg.Name can be empty. The
+// package clause of a Go file in the directory (the _test.go files that the
+// test binary compiles) is the fallback. An external test clause (package
+// x_test) must not name the generated non-test file, so an in-package clause
+// wins, and a directory with only external test files uses the name without
+// the _test suffix.
+func runtimePackageName(pkgDir string) string {
+	// os.ReadDir returns entries sorted by filename, so the first matching
+	// clause is deterministic.
+	entries, err := os.ReadDir(pkgDir)
+	if err != nil {
+		return ""
+	}
+	external := ""
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != goSuffix {
+			continue
+		}
+		name, parseErr := ast.ParsePackageName(filepath.Join(pkgDir, entry.Name()))
+		if parseErr != nil || name == "" {
+			continue
+		}
+		if pkgName, isExternal := strings.CutSuffix(name, "_test"); isExternal {
+			if external == "" {
+				external = pkgName
+			}
+			continue
+		}
+		return name
+	}
+	return external
 }
 
 // runtimeImportPath returns the import path of the package that receives a

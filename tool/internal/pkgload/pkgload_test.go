@@ -584,3 +584,60 @@ func TestFindModuleDirs(t *testing.T) {
 		})
 	}
 }
+
+func TestModuleRelativeDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	pkgADir := filepath.Join(tmpDir, "pkga")
+	require.NoError(t, os.MkdirAll(pkgADir, 0o755))
+	module := &packages.Module{Path: "example.com/app", Dir: tmpDir}
+
+	tests := []struct {
+		name string
+		pkg  *packages.Package
+		want string
+	}{
+		{
+			name: "package below the module root",
+			pkg:  &packages.Package{PkgPath: "example.com/app/pkga", Module: module},
+			want: pkgADir,
+		},
+		{
+			name: "module root package",
+			pkg:  &packages.Package{PkgPath: "example.com/app", Module: module},
+			want: tmpDir,
+		},
+		{
+			name: "package outside the module",
+			pkg:  &packages.Package{PkgPath: "example.com/other/pkga", Module: module},
+			want: "",
+		},
+		{
+			name: "module path prefix without a path boundary",
+			pkg:  &packages.Package{PkgPath: "example.com/application/pkga", Module: module},
+			want: "",
+		},
+		{
+			name: "directory does not exist",
+			pkg:  &packages.Package{PkgPath: "example.com/app/missing", Module: module},
+			want: "",
+		},
+		{
+			name: "no module",
+			pkg:  &packages.Package{PkgPath: "example.com/app/pkga"},
+			want: "",
+		},
+		{
+			name: "synthetic command-line-arguments package",
+			pkg: &packages.Package{
+				PkgPath: CommandLineArgumentsPackage,
+				Module:  module,
+			},
+			want: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, ModuleRelativeDir(tt.pkg))
+		})
+	}
+}

@@ -1451,6 +1451,61 @@ func TestGenerateRuntimePerPackageSkipsPackagesWithoutFiles(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestGenerateRuntimePerPackageTestOnlyPackage covers a test target whose
+// non-test Go files are all excluded by build constraints, so the package load
+// reports no Go files. Its test binary still compiles the directory through
+// its _test.go files, so the generated otelc.runtime.go must join it, with the
+// package name recovered from the test file and the hook packages imported.
+func TestGenerateRuntimePerPackageTestOnlyPackage(t *testing.T) {
+	sp := newTestSetupPhase()
+
+	tmpDir := t.TempDir()
+	pkgDir := filepath.Join(tmpDir, "pkga")
+	mustWriteFile(t, filepath.Join(pkgDir, "a_test.go"), "package pkga\n")
+
+	pkgs := []*packages.Package{{
+		PkgPath: "example.com/app/pkga",
+		Module:  &packages.Module{Path: "example.com/app", Dir: tmpDir},
+	}}
+	rset := newTestRuleSet(
+		"example.com/app/lib",
+		[]*rule.InstFuncRule{newTestFuncRule("example.com/app/hooks", "example.com/app/lib")},
+		[]*rule.InstFileRule{},
+	)
+	require.NoError(t, sp.generateRuntimePerPackage(t.Context(), pkgs, []*rule.InstRuleSet{rset}))
+
+	generated, err := os.ReadFile(filepath.Join(pkgDir, otelcRuntimeFile))
+	require.NoError(t, err)
+	assert.Contains(t, string(generated), "package pkga")
+	assert.Contains(t, string(generated), "import _ \"example.com/app/hooks\"")
+}
+
+// TestGenerateRuntimePerPackageTestOnlyPackageUnresolvableName covers the same
+// package state when the directory holds no Go file at all and pkg.Name is
+// empty: without a package clause to recover, a generated runtime file would
+// not compile, so the package is skipped instead.
+func TestGenerateRuntimePerPackageTestOnlyPackageUnresolvableName(t *testing.T) {
+	sp := newTestSetupPhase()
+
+	tmpDir := t.TempDir()
+	pkgDir := filepath.Join(tmpDir, "pkga")
+	require.NoError(t, os.MkdirAll(pkgDir, 0o755))
+
+	pkgs := []*packages.Package{{
+		PkgPath: "example.com/app/pkga",
+		Module:  &packages.Module{Path: "example.com/app", Dir: tmpDir},
+	}}
+	rset := newTestRuleSet(
+		"example.com/app/lib",
+		[]*rule.InstFuncRule{newTestFuncRule("example.com/app/hooks", "example.com/app/lib")},
+		[]*rule.InstFileRule{},
+	)
+	require.NoError(t, sp.generateRuntimePerPackage(t.Context(), pkgs, []*rule.InstRuleSet{rset}))
+
+	_, err := os.Stat(filepath.Join(pkgDir, otelcRuntimeFile))
+	assert.True(t, os.IsNotExist(err))
+}
+
 // TestGenerateRuntimePerPackageSkipsSelfImport covers the import path reaching
 // addDeps for each selected package. A hook package in the application module
 // is selected by `otelc go test ./...` and must not import itself.
@@ -1929,4 +1984,47 @@ func TestSetupPhase_GetBuildContext(t *testing.T) {
 		assert.Contains(t, bctx.BuildTags, "clitag")
 		assert.NotContains(t, bctx.BuildTags, "envtag")
 	})
+}
+
+// TestRuntimePackageName pins which package clause names a generated runtime
+// file when pkg.Name is empty. A directory can hold both in-package and
+// external test files; the external clause (package x_test) must never name
+// the generated non-test file, and a directory with only external test files
+// still names it after the package without the _test suffix.
+func TestRuntimePackageName(t *testing.T) {
+	tests := []struct {
+		name  string
+		files map[string]string
+		want  string
+	}{
+		{
+			name: "in-package clause wins over an earlier external clause",
+			files: map[string]string{
+				"a_external_test.go": "package pkga_test\n",
+				"b_test.go":          "package pkga\n",
+			},
+			want: "pkga",
+		},
+		{
+			name: "external-only test files drop the _test suffix",
+			files: map[string]string{
+				"x_test.go": "package pkgb_test\n",
+			},
+			want: "pkgb",
+		},
+		{
+			name:  "directory without Go files",
+			files: map[string]string{},
+			want:  "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for name, content := range tt.files {
+				mustWriteFile(t, filepath.Join(dir, name), content)
+			}
+			assert.Equal(t, tt.want, runtimePackageName(dir))
+		})
+	}
 }
