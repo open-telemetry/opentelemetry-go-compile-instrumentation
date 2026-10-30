@@ -69,9 +69,12 @@ func loadImportNames() (map[string]string, error) {
 func (ip *instrumentPhase) match(allSet []*rule.InstRuleSet, args []string) *rule.InstRuleSet {
 	// Several packages can share an import path, such as every main package
 	// of a build, so a rule set only matches a compile that holds the files
-	// its rules were matched in.
+	// its rules were matched in. A go test run can also compile one package
+	// twice, with and without its _test.go files, so the rule set must come
+	// from the same kind of compile as this one.
 	importPath := util.FindFlagValue(args, "-p")
 	util.Assert(importPath != "", "sanity check")
+	isTest := util.IsTestBuild(args)
 	compiled := make(map[string]bool, len(args))
 	for _, arg := range args {
 		if !util.IsGoFile(arg) {
@@ -82,7 +85,7 @@ func (ip *instrumentPhase) match(allSet []*rule.InstRuleSet, args []string) *rul
 		}
 	}
 	for _, rset := range allSet {
-		if rset.ModulePath == importPath && ip.compilesRuleFiles(rset, compiled) {
+		if rset.ModulePath == importPath && rset.IsTest == isTest && ip.compilesRuleFiles(rset, compiled) {
 			ip.Debug("Match rule set", "set", rset)
 			return rset
 		}
