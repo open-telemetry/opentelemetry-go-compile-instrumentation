@@ -132,7 +132,8 @@ func SplitGoflags(goflags string) []string {
 // instrumentation.
 func StripToolexecFromGoflags(goflags string) string {
 	return filterGoflags(goflags, func(unquoted string) bool {
-		return unquoted == "-toolexec" || strings.HasPrefix(unquoted, "-toolexec=")
+		return unquoted == "-toolexec" || strings.HasPrefix(unquoted, "-toolexec=") ||
+			unquoted == "--toolexec" || strings.HasPrefix(unquoted, "--toolexec=")
 	})
 }
 
