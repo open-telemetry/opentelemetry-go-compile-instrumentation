@@ -31,6 +31,10 @@ func TestAddDeps(t *testing.T) {
 		packageImportPath string
 		packageName       string
 		goldenFile        string // Empty means no file should be generated
+		wantErr           bool
+		importedByHooks   map[string]bool
+		testMode          bool
+		testHooks         []string
 	}{
 		{
 			name:        "empty_matched_rules",
@@ -134,6 +138,82 @@ func TestAddDeps(t *testing.T) {
 			packageName:       "hooks",
 			goldenFile:        "mixed_self_and_external.otelc.runtime.go.golden",
 		},
+		{
+			// The hook package imports this package. A generated file here would
+			// import the hook back and close an import cycle.
+			name: "hook_imports_package",
+			matched: []*rule.InstRuleSet{
+				newTestRuleSet(
+					"example.com/app",
+					[]*rule.InstFuncRule{newTestFuncRule("example.com/app/hooks", "example.com/app")},
+					[]*rule.InstFileRule{newTestFileRule("example.com/app/hooks", "example.com/app")},
+				),
+			},
+			packageImportPath: "example.com/app/internal/log",
+			packageName:       "log",
+			importedByHooks:   map[string]bool{"example.com/app/hooks": true},
+			goldenFile:        "",
+			testMode:          true,
+			testHooks:         []string{"example.com/app/hooks"},
+		},
+		{
+			// Only the hook that imports this package is dropped. Other hooks stay.
+			name: "hook_imports_package_and_external_hook",
+			matched: []*rule.InstRuleSet{
+				newTestRuleSet(
+					"example.com/app",
+					[]*rule.InstFuncRule{
+						newTestFuncRule("example.com/app/hooks", "example.com/app"),
+						newTestFuncRule("example.com/external-hooks", "example.com/app"),
+					},
+					nil,
+				),
+			},
+			packageImportPath: "example.com/app/internal/log",
+			packageName:       "log",
+			importedByHooks:   map[string]bool{"example.com/app/hooks": true},
+			goldenFile:        "hook_imports_package_and_external_hook.otelc.runtime.go.golden",
+			testMode:          true,
+			testHooks:         []string{"example.com/app/hooks"},
+		},
+		{
+			// The rule targets the very package its hook imports. The cycle is
+			// unavoidable, so addDeps must error instead of silently dropping the hook.
+			name: "hook_imports_its_own_target",
+			matched: []*rule.InstRuleSet{
+				newTestRuleSet(
+					"example.com/app/internal/log",
+					[]*rule.InstFuncRule{newTestFuncRule("example.com/app/hooks", "example.com/app/internal/log")},
+					nil,
+				),
+			},
+			packageImportPath: "example.com/app/internal/log",
+			packageName:       "log",
+			importedByHooks:   map[string]bool{"example.com/app/hooks": true},
+			goldenFile:        "",
+			wantErr:           true,
+		},
+		{
+			name: "hook_file_rule_imports_its_own_target",
+			matched: []*rule.InstRuleSet{
+				newTestRuleSet(
+					"example.com/app/internal/log",
+					nil,
+					[]*rule.InstFileRule{
+						newTestFileRule(
+							"example.com/app/hooks",
+							"example.com/app/internal/log",
+						),
+					},
+				),
+			},
+			packageImportPath: "example.com/app/internal/log",
+			packageName:       "log",
+			importedByHooks: map[string]bool{
+				"example.com/app/hooks": true,
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -145,10 +225,17 @@ func TestAddDeps(t *testing.T) {
 			ctx := contextWithStateManager(t.Context(), stateManager)
 
 			err := sp.addDeps(ctx, tt.matched, runtimePackage{
-				dir:        tmpDir,
-				importPath: tt.packageImportPath,
-				name:       tt.packageName,
+				dir:             tmpDir,
+				importPath:      tt.packageImportPath,
+				name:            tt.packageName,
+				importedByHooks: tt.importedByHooks,
+				testMode:        tt.testMode,
 			})
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.NoFileExists(t, filepath.Join(tmpDir, otelcRuntimeFile))
+				return
+			}
 			require.NoError(t, err)
 
 			runtimeFilePath := filepath.Join(tmpDir, otelcRuntimeFile)
@@ -477,4 +564,187 @@ func TestAddDeps_RuntimeDiffCollision(t *testing.T) {
 	internalRetainedPath := filepath.Join(setupDebugDir(internalPkgPath), otelcRuntimeFile)
 	assert.FileExists(t, cmdRetainedPath)
 	assert.FileExists(t, internalRetainedPath)
+}
+
+func TestAddRuntimeTestDeps(t *testing.T) {
+	hookPaths := []string{"example.com/app/hooks"}
+
+	tests := []struct {
+		name      string
+		hookPaths []string
+		pkg       runtimePackage
+		seedFile  bool
+		wantErr   string
+		wantFile  bool
+	}{
+		{
+			name:     "no hooks removes stale file",
+			pkg:      runtimePackage{name: "log"},
+			seedFile: true,
+		},
+		{
+			name:      "named files are rejected",
+			hookPaths: hookPaths,
+			pkg: runtimePackage{
+				name:       "log",
+				testMode:   true,
+				fileTarget: true,
+			},
+			seedFile: true,
+			wantErr:  "use a package pattern instead",
+		},
+		{
+			name:      "non-test mode removes stale file",
+			hookPaths: hookPaths,
+			pkg: runtimePackage{
+				name:       "log",
+				importPath: "example.com/app/internal/log",
+			},
+			seedFile: true,
+		},
+		{
+			name:      "test mode generates external test package",
+			hookPaths: hookPaths,
+			pkg: runtimePackage{
+				name:     "log",
+				testMode: true,
+			},
+			wantFile: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			pkg := tt.pkg
+			pkg.dir = dir
+
+			filePath := filepath.Join(dir, otelcRuntimeTestFile)
+			if tt.seedFile {
+				require.NoError(t, os.WriteFile(
+					filePath, []byte("stale"), 0o600,
+				))
+			}
+
+			stateManager := newStateManager()
+			ctx := contextWithStateManager(t.Context(), stateManager)
+
+			err := newTestSetupPhase().addRuntimeTestDeps(
+				ctx, pkg, tt.hookPaths,
+			)
+
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
+
+			if tt.wantFile {
+				require.FileExists(t, filePath)
+
+				content, readErr := os.ReadFile(filePath)
+				require.NoError(t, readErr)
+				assert.Contains(t, string(content), "package log_test")
+				assert.Contains(t, string(content), "example.com/app/hooks")
+				assert.Contains(t, stateManager.files, filePath)
+			} else {
+				assert.NoFileExists(t, filePath)
+			}
+		})
+	}
+}
+
+func TestAddRuntimeTestDeps_WriteError(t *testing.T) {
+	root := t.TempDir()
+	pkgDir := filepath.Join(root, "not-a-directory")
+	require.NoError(t, os.WriteFile(pkgDir, []byte("x"), 0o600))
+
+	err := newTestSetupPhase().addRuntimeTestDeps(
+		t.Context(),
+		runtimePackage{
+			dir:        pkgDir,
+			name:       "log",
+			importPath: "example.com/app/internal/log",
+			testMode:   true,
+		},
+		[]string{"example.com/app/hooks"},
+	)
+
+	require.ErrorContains(t, err, "writing otelc runtime test file")
+}
+
+func TestAddRuntimeTestDeps_RemoveError(t *testing.T) {
+	tests := []struct {
+		name string
+		pkg  runtimePackage
+	}{
+		{
+			name: "named files",
+			pkg: runtimePackage{
+				testMode:   true,
+				fileTarget: true,
+			},
+		},
+		{
+			name: "non-test mode",
+			pkg:  runtimePackage{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			staleDir := filepath.Join(dir, otelcRuntimeTestFile)
+			require.NoError(t, os.Mkdir(staleDir, 0o700))
+			require.NoError(t, os.WriteFile(
+				filepath.Join(staleDir, "child"),
+				[]byte("x"),
+				0o600,
+			))
+
+			pkg := tt.pkg
+			pkg.dir = dir
+			pkg.importPath = "example.com/app/internal/log"
+
+			err := newTestSetupPhase().addRuntimeTestDeps(
+				t.Context(),
+				pkg,
+				[]string{"example.com/app/hooks"},
+			)
+
+			require.ErrorContains(t, err, "removing stale generated runtime file")
+		})
+	}
+}
+
+func TestAddDeps_RuntimeTestDepsError(t *testing.T) {
+	hookPath := "example.com/app/hooks"
+	targetPath := "example.com/lib"
+
+	matched := []*rule.InstRuleSet{
+		newTestRuleSet(
+			targetPath,
+			[]*rule.InstFuncRule{
+				newTestFuncRule(hookPath, targetPath),
+			},
+			nil,
+		),
+	}
+
+	err := newTestSetupPhase().addDeps(
+		t.Context(),
+		matched,
+		runtimePackage{
+			dir:        t.TempDir(),
+			importPath: "example.com/app/internal/log",
+			name:       "log",
+			importedByHooks: map[string]bool{
+				hookPath: true,
+			},
+			testMode:   true,
+			fileTarget: true,
+		},
+	)
+
+	require.ErrorContains(t, err, "use a package pattern instead")
 }
