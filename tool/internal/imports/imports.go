@@ -221,14 +221,31 @@ func AddToFile(ctx context.Context, root *dst.File, newImports map[string]string
 	return nil
 }
 
-// CollectPaths returns a map of all unique import paths in the file.
-// The map uses import path as both key and value, ensuring that multiple blank (_) or
-// dot (.) imports don't collapse to a single entry.
-func CollectPaths(ctx context.Context, root *dst.File, buildFlags ...string) map[string]string {
-	existing := parseFile(ctx, root, buildFlags...)
-	paths := make(map[string]string, len(existing.PathToAlias))
-	for importPath := range existing.PathToAlias {
-		paths[importPath] = importPath
+// CollectImportPaths returns a map of all unique import paths declared in root
+// without resolving package names. Both key and value are the import path string.
+func CollectImportPaths(root *dst.File) map[string]string {
+	if root == nil {
+		return nil
+	}
+	paths := make(map[string]string)
+	for _, decl := range root.Decls {
+		genDecl, ok := decl.(*dst.GenDecl)
+		if !ok || genDecl.Tok != token.IMPORT {
+			continue
+		}
+		for _, spec := range genDecl.Specs {
+			importSpec, specOk := spec.(*dst.ImportSpec)
+			if !specOk || importSpec.Path == nil {
+				continue
+			}
+			p, err := strconv.Unquote(importSpec.Path.Value)
+			if err != nil {
+				p = strings.Trim(importSpec.Path.Value, `"`)
+			}
+			if p != "" {
+				paths[p] = p
+			}
+		}
 	}
 	return paths
 }

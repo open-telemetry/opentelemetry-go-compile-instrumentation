@@ -1317,7 +1317,7 @@ func TestUserBuildTags(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, userBuildTags(tt.goflags, tt.buildFlags))
+			assert.Equal(t, tt.expected, util.UserBuildTags(tt.goflags, tt.buildFlags))
 		})
 	}
 }

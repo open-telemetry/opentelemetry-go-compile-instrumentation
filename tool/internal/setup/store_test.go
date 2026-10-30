@@ -4,7 +4,6 @@
 package setup
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -26,7 +25,7 @@ func TestSetupPhaseStore(t *testing.T) {
 
 	// An empty rule set resolves no paths and writes an empty JSON array to the
 	// matched-rule file.
-	err := sp.store(context.Background(), []*rule.InstRuleSet{}, []string{})
+	err := sp.store([]*rule.InstRuleSet{})
 	require.NoError(t, err)
 
 	matchedFile := util.GetMatchedRuleFile()
@@ -44,7 +43,7 @@ func TestSetupPhaseStoreCreateError(t *testing.T) {
 	t.Setenv(util.EnvOtelcWorkDir, workDir)
 
 	sp := newTestSetupPhase()
-	err := sp.store(context.Background(), []*rule.InstRuleSet{}, []string{})
+	err := sp.store([]*rule.InstRuleSet{})
 	require.Error(t, err)
 }
 
@@ -58,7 +57,7 @@ func TestSetupPhaseStorePGOProfile(t *testing.T) {
 		{pgo: "off", want: ""},
 	} {
 		sp.pgo = tt.pgo
-		require.NoError(t, sp.store(t.Context(), []*rule.InstRuleSet{}, nil))
+		require.NoError(t, sp.store([]*rule.InstRuleSet{}))
 		data, err := os.ReadFile(util.GetPGOProfileFile())
 		require.NoError(t, err)
 		assert.Equal(t, tt.want, string(data))
@@ -79,7 +78,7 @@ func TestSetupPhaseStorePGOProfileAmbiguous(t *testing.T) {
 		})
 	}
 
-	require.NoError(t, sp.store(t.Context(), []*rule.InstRuleSet{}, nil))
+	require.NoError(t, sp.store([]*rule.InstRuleSet{}))
 	data, err := os.ReadFile(util.GetPGOProfileFile())
 	require.NoError(t, err)
 	assert.Empty(t, string(data))
@@ -88,7 +87,7 @@ func TestSetupPhaseStorePGOProfileAmbiguous(t *testing.T) {
 func TestSetupPhaseStorePGOProfileWriteError(t *testing.T) {
 	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
 	require.NoError(t, os.MkdirAll(util.GetPGOProfileFile(), 0o755))
-	err := newTestSetupPhase().store(t.Context(), []*rule.InstRuleSet{}, nil)
+	err := newTestSetupPhase().store([]*rule.InstRuleSet{})
 	require.ErrorContains(t, err, "failed to write PGO profile")
 }
 
@@ -98,7 +97,7 @@ func TestSetupPhaseStoreResolvedNamesWriteError(t *testing.T) {
 	sp := newTestSetupPhase()
 	sp.resolvedNames = map[string]string{"example.com/a": "a"}
 
-	err := sp.store(t.Context(), []*rule.InstRuleSet{}, nil)
+	err := sp.store([]*rule.InstRuleSet{})
 	require.ErrorContains(t, err, "failed to write import names")
 }
 

@@ -151,7 +151,7 @@ func assertRedisClientSpans(t *testing.T, appsDir string) {
 		setSpans[0],
 		"set",
 		server.Addr(),
-		"set testkey testvalue",
+		"set testkey ?",
 	)
 
 	require.Len(t, getSpans, 2, "client GET and Conn GET should each produce one span")
