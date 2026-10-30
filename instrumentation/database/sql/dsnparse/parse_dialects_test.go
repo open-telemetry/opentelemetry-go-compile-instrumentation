@@ -137,6 +137,27 @@ func TestParseDSN_Oracle(t *testing.T) {
 			wantDB:   "ORCL",
 		},
 		{
+			name:     "easy connect with tcps protocol prefix",
+			dsn:      "user/pass@tcps://dbhost:2484/ORCL",
+			wantHost: "dbhost",
+			wantPort: "2484",
+			wantDB:   "ORCL",
+		},
+		{
+			name:     "easy connect with tcp protocol prefix",
+			dsn:      "user/pass@tcp://dbhost:1521/ORCL",
+			wantHost: "dbhost",
+			wantPort: "1521",
+			wantDB:   "ORCL",
+		},
+		{
+			name:     "easy connect protocol prefix is case insensitive",
+			dsn:      "user/pass@TCPS://dbhost:2484/ORCL",
+			wantHost: "dbhost",
+			wantPort: "2484",
+			wantDB:   "ORCL",
+		},
+		{
 			name:     "easy connect default port",
 			dsn:      "user/pass@dbhost/ORCL",
 			wantHost: "dbhost",
@@ -157,6 +178,41 @@ func TestParseDSN_Oracle(t *testing.T) {
 			wantPort: "1521",
 			wantDB:   "",
 		},
+		{
+			name:     "easy connect with parameters",
+			dsn:      "user/pass@dbhost:1521/ORCL?connect_timeout=5&retry_count=3",
+			wantHost: "dbhost",
+			wantPort: "1521",
+			wantDB:   "ORCL",
+		},
+		{
+			name:     "easy connect with server type and instance name",
+			dsn:      "user/pass@//dbhost:1521/ORCL:dedicated/inst1",
+			wantHost: "dbhost",
+			wantPort: "1521",
+			wantDB:   "ORCL",
+		},
+		{
+			name:     "easy connect with parameters and no service name",
+			dsn:      "user/pass@dbhost:1521?connect_timeout=5",
+			wantHost: "dbhost",
+			wantPort: "1521",
+			wantDB:   "",
+		},
+		{
+			name:     "url with server type and instance name",
+			dsn:      "oracle://user:pass@dbhost:1521/ORCL:pooled/inst1?x=1",
+			wantHost: "dbhost",
+			wantPort: "1521",
+			wantDB:   "ORCL",
+		},
+		{
+			name:     "easy connect with bracketed ipv6 and parameters",
+			dsn:      "user/pass@[::1]:1521/ORCL?x=1",
+			wantHost: "::1",
+			wantPort: "1521",
+			wantDB:   "ORCL",
+		},
 	}
 
 	for _, tt := range tests {
@@ -167,6 +223,29 @@ func TestParseDSN_Oracle(t *testing.T) {
 				assert.Equal(t, tt.wantPort, got.Port, "driver=%s Port", driver)
 				assert.Equal(t, tt.wantDB, got.DBName, "driver=%s DBName", driver)
 			}
+		})
+	}
+}
+
+// TestOracleStripProtocol pins that the "//" separator and only a leading known
+// transport keyword are removed: a "//" later in the DSN belongs to the service
+// name or a parameter, not to the address.
+func TestOracleStripProtocol(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"tcps prefix", "tcps://dbhost:2484/ORCL", "dbhost:2484/ORCL"},
+		{"uppercase prefix", "TCPS://dbhost/ORCL", "dbhost/ORCL"},
+		{"unknown protocol", "foo://dbhost/ORCL", "foo://dbhost/ORCL"},
+		{"bare double slash", "//dbhost:1521/ORCL", "dbhost:1521/ORCL"},
+		{"protocol later in the string", "dbhost:1521/ORCL?retry=://x", "dbhost:1521/ORCL?retry=://x"},
+		{"separator later in the string", "dbhost:1521/ORCL?retry=//x", "dbhost:1521/ORCL?retry=//x"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, oracleStripProtocol(tt.in))
 		})
 	}
 }

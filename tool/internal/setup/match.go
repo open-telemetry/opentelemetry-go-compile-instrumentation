@@ -42,6 +42,23 @@ func checkRuleFileVersion(ctx context.Context, path string, doc rule.File, curre
 	return nil
 }
 
+// parseRuleFile parses file's already-read content into the rules it
+// declares, checking the rule-file version along the way. Shared by
+// loadCustomRuleFile and loadRulesFromToolFiles, which otherwise differ only
+// in how they find file paths and in the wording each gives for its own
+// read error. otelcVersion is the version of otelc that the rule file must
+// support.
+func parseRuleFile(ctx context.Context, file string, content []byte, otelcVersion string) ([]rule.InstRule, error) {
+	doc, parseErr := rule.ParseFile(content)
+	if parseErr != nil {
+		return nil, ex.Wrapf(parseErr, "parsing rule file %s", file)
+	}
+	if err := checkRuleFileVersion(ctx, file, doc, otelcVersion); err != nil {
+		return nil, err
+	}
+	return doc.Rules()
+}
+
 func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
 	return util.VersionInRange(dependency.Version, rule.GetVersion())
 }
@@ -121,6 +138,7 @@ func (sp *setupPhase) runMatch(
 	globRules []targetRule,
 ) (*rule.InstRuleSet, error) {
 	set := rule.NewInstRuleSet(dep.ImportPath)
+	set.IsTest = dep.IsTest
 
 	if len(dep.CgoFiles) > 0 {
 		set.SetCgoFileMap(dep.CgoFiles)
@@ -234,7 +252,7 @@ func (sp *setupPhase) preciseMatching(
 
 	// IsTest is a property of the whole compile (every file in a test build
 	// shares it), so compute it once and reuse it across each file's context.
-	isTest := isTestBuild(dep.Sources)
+	isTest := util.IsTestBuild(dep.Sources)
 
 	known := knownDirectiveNames(rules)
 
@@ -302,31 +320,6 @@ func (sp *setupPhase) warnUnknownDirectives(source string, tree *dst.File, known
 	for _, name := range ast.UnknownDirectiveNames(tree, known) {
 		sp.Warn("Unrecognized directive comment", "directive", name, "file", source)
 	}
-}
-
-// isTestBuild reports whether a compile invocation is part of a `go test` run.
-// The Go toolchain only ever feeds these inputs to the compiler while building
-// a test binary: a package augmented with its in-package _test.go files, the
-// external xxx_test package (whose sources are also _test.go files), and the
-// generated _testmain.go runner. None of them appear in a normal `go build`,
-// so their presence in the source set is the signal. There is no dedicated
-// "is test" compiler flag — verified against the toolchain — so the source set
-// is the only thing to key on.
-//
-// ponytail: known gap, no fix possible at compile granularity. A package whose
-// tests live only in an external xxx_test package (no in-package _test.go) is
-// compiled once and shared between normal and test builds — the toolchain emits
-// no test-only variant of it — so is_test cannot gate that package's production
-// code. The external xxx_test package and any in-package _test.go files are
-// still detected.
-func isTestBuild(sources []string) bool {
-	for _, src := range sources {
-		base := filepath.Base(src)
-		if base == "_testmain.go" || strings.HasSuffix(base, "_test.go") {
-			return true
-		}
-	}
-	return false
 }
 
 // matchOneRule performs precise AST matching for a single rule against a parsed
@@ -444,14 +437,7 @@ func loadCustomRuleFile(
 	if err != nil {
 		return nil, ex.Wrapf(err, "failed to read %s from -rules flag", file)
 	}
-	doc, err := rule.ParseFile(content)
-	if err != nil {
-		return nil, ex.Wrapf(err, "parsing rule file %s", file)
-	}
-	if err = checkRuleFileVersion(ctx, file, doc, otelcVersion); err != nil {
-		return nil, err
-	}
-	rules, err := doc.Rules()
+	rules, err := parseRuleFile(ctx, file, content, otelcVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -531,15 +517,7 @@ func loadRulesFromToolFiles(
 			if readErr != nil {
 				return false, ex.Wrapf(readErr, "reading %s", file)
 			}
-			doc, parseErr := rule.ParseFile(content)
-			if parseErr != nil {
-				return false, ex.Wrapf(parseErr, "parsing rule file %s", file)
-			}
-			if versionErr := checkRuleFileVersion(ctx, file, doc, otelcVersion); versionErr != nil {
-				return false, versionErr
-			}
-
-			rules, parseErr := doc.Rules()
+			rules, parseErr := parseRuleFile(ctx, file, content, otelcVersion)
 			if parseErr != nil {
 				return false, parseErr
 			}
@@ -559,13 +537,28 @@ func loadRulesFromToolFiles(
 // paths to the same file (relative paths, symbolic links) give the same key.
 // If the path cannot be resolved, the key is the cleaned path.
 func ruleFileKey(path string) string {
-	// Make the path absolute first: EvalSymlinks keeps a relative path
-	// relative, and the working directory can itself contain a symbolic link.
-	if abs, err := filepath.Abs(path); err == nil {
-		path = abs
-	}
+	// Resolve symbolic links first, on the raw (possibly relative) path:
+	// filepath.Abs cleans ".." components lexically, so running it before
+	// EvalSymlinks would delete a ".." path segment's preceding component
+	// without ever resolving the symbolic link it might have named, letting
+	// two different files collide on the same key. EvalSymlinks still
+	// resolves correctly on a relative path, and filepath.Abs below anchors
+	// the result, covering a working directory that itself contains a
+	// symbolic link.
 	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		return resolved
+		path = resolved
+	}
+	if abs, absErr := filepath.Abs(path); absErr == nil {
+		// Abs joins a relative path using the working directory as Getwd
+		// reports it, which on some platforms doesn't itself resolve every
+		// symbolic link (macOS's /var -> /private/var APFS firmlink is one:
+		// Getwd keeps the firmlinked form, but an explicit EvalSymlinks call
+		// on the resulting absolute path still sees through it). Resolve
+		// again on the now-absolute result to catch that.
+		if resolved, evalErr := filepath.EvalSymlinks(abs); evalErr == nil {
+			return resolved
+		}
+		return abs
 	}
 	return filepath.Clean(path)
 }

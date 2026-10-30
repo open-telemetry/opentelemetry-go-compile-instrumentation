@@ -3,24 +3,24 @@
 
 package main
 
+//line /<generated>:1
 import _ "unsafe"
 
+//line /golden/work/main.go:6
 type T struct{ NewField string }
 
+//line /golden/work/main.go:8
 func Func1(p1 string, p2 int) (_unnamedRetVal_2706976935_0 float32, _unnamedRetVal_2706976935_1 error) {
-	_ = 789
-	//line <generated>:1
+	/*line /<generated>:1*/ _ = 789
 	if hookContext2706976935, _ := OtelBeforeTrampoline_Func12706976935(&p1, &p2); false {
 	} else {
 		defer OtelAfterTrampoline_Func12706976935(hookContext2706976935, &_unnamedRetVal_2706976935_0, &_unnamedRetVal_2706976935_1)
 	}
-	//line main.go:9:2
-	println("Hello, World!")
-	//line main.go:10:2
+	/*line /golden/work/main.go:9*/ println("Hello, World!")
 	return 0.0, nil
 }
 
-//line <generated>:1
+//line /<generated>:1
 type HookContextImpl2706976935 struct {
 	params      []interface{}
 	returnVals  []interface{}
@@ -134,8 +134,8 @@ func OtelBeforeTrampoline_Func12706976935(param0 *string, param1 *int) (hookCont
 	hookContext.params = []interface{}{param0, param1}
 	hookContext.funcName = "Func1"
 	hookContext.packageName = "main"
-	if H1Before != nil {
-		H1Before(hookContext, *param0, *param1)
+	if otelc_hook_4156483641_H1Before != nil {
+		otelc_hook_4156483641_H1Before(hookContext, *param0, *param1)
 	}
 	return hookContext, hookContext.skipCall
 }
@@ -154,13 +154,13 @@ func OtelAfterTrampoline_Func12706976935(hookContext HookContext, arg0 *float32,
 		}
 	}()
 	hookContext.(*HookContextImpl2706976935).returnVals = []interface{}{arg0, arg1}
-	if H1After != nil {
-		H1After(hookContext, *arg0, *arg1)
+	if otelc_hook_4156483641_H1After != nil {
+		otelc_hook_4156483641_H1After(hookContext, *arg0, *arg1)
 	}
 }
 
-//go:linkname H1Before testdata/golden/combined-rules.H1Before
-func H1Before(hookContext HookContext, param0 string, param1 int)
+//go:linkname otelc_hook_4156483641_H1Before testdata/golden/combined-rules.H1Before
+func otelc_hook_4156483641_H1Before(hookContext HookContext, param0 string, param1 int)
 
-//go:linkname H1After testdata/golden/combined-rules.H1After
-func H1After(hookContext HookContext, arg0 float32, arg1 error)
+//go:linkname otelc_hook_4156483641_H1After testdata/golden/combined-rules.H1After
+func otelc_hook_4156483641_H1After(hookContext HookContext, arg0 float32, arg1 error)

@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"strings"
 
+	"golang.org/x/mod/module"
+
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -26,6 +28,10 @@ type Dependency struct {
 	Version    string
 	Sources    []string
 	CgoFiles   map[string]string
+	// IsTest reports whether the compile is part of a test binary. It is read
+	// from the compile command, because the generated _testmain.go does not
+	// exist yet when the build plan is listed and so is not in Sources.
+	IsTest bool
 }
 
 func (d *Dependency) String() string {
@@ -172,7 +178,11 @@ func findModVersion(path string) string {
 	if version == "" {
 		return ""
 	}
-	return version[1 : len(version)-1]
+	raw := version[1 : len(version)-1]
+	if unescaped, err := module.UnescapeVersion(raw); err == nil {
+		return unescaped
+	}
+	return raw
 }
 
 // findGoSources extracts Go source files from compile command arguments,
@@ -184,6 +194,7 @@ func findGoSources(ctx context.Context, args []string, cgoObjDirs map[string]str
 		ImportPath: util.FindFlagValue(args, "-p"),
 		Sources:    make([]string, 0),
 		CgoFiles:   make(map[string]string),
+		IsTest:     util.IsTestBuild(args),
 	}
 	util.Assert(dep.ImportPath != "", "import path is empty")
 
@@ -238,6 +249,10 @@ func findDeps(ctx context.Context, subcommand string, cmdArgs []string) ([]*Depe
 		deps       []*Dependency
 		cgoObjDirs = make(map[string]string)
 		currentDir string
+		// A package can be compiled more than once with the same sources,
+		// e.g. once with and once without a PGO profile when only some of the
+		// main packages have a default.pgo. Keep one of them.
+		seen = make(map[string]bool)
 	)
 
 	for _, cmd := range buildPlan {
@@ -252,6 +267,11 @@ func findDeps(ctx context.Context, subcommand string, cmdArgs []string) ([]*Depe
 			if err1 != nil {
 				return nil, err1
 			}
+			key := dep.ImportPath + "\x00" + strings.Join(dep.Sources, "\x00")
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
 			deps = append(deps, dep)
 			logger.InfoContext(ctx, "Found dependency", "dep", dep)
 		} else if util.IsCgoCommand(cmd) && currentDir != "" {

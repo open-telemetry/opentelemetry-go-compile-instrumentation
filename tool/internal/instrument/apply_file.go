@@ -6,7 +6,6 @@ package instrument
 import (
 	"context"
 	"fmt"
-	"go/build/constraint"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,23 +16,12 @@ import (
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
-// stripBuildIgnoreTag removes genuine "//go:build ignore" constraint lines
-// from content, line by line. It leaves every other occurrence of that text —
-// inside a string literal, inside comment prose, anywhere that isn't itself a
-// build-constraint line — untouched. See #1069: a whole-file substring
-// replace corrupted both of those.
-func stripBuildIgnoreTag(content string) string {
-	lines := strings.Split(content, "\n")
-	for i, line := range lines {
-		if constraint.IsGoBuild(line) {
-			lines[i] = ""
-		}
-	}
-	return strings.Join(lines, "\n")
-}
-
-// applyFileRule introduces the new file to the target package at compile time.
 func (ip *instrumentPhase) applyFileRule(ctx context.Context, rule *rule.InstFileRule, pkgName string) error {
+	if pkgName == "" {
+		return ex.Newf("cannot resolve the package name for rule %q; refusing to add %s",
+			rule.Name, rule.File)
+	}
+
 	file := filepath.Join(rule.ResolvedPath, rule.File)
 	if !util.PathExists(file) {
 		return ex.Newf("file %s not found in %s", rule.File, rule.ResolvedPath)
@@ -45,7 +33,21 @@ func (ip *instrumentPhase) applyFileRule(ctx context.Context, rule *rule.InstFil
 	if err != nil {
 		return ex.Wrapf(err, "reading rule source file %s", file)
 	}
-	root, err := ast.NewAstParser().ParseSource(stripBuildIgnoreTag(string(data)))
+
+	// Evaluate build constraints before adding the file to compilation.
+	// go tool compile compiles all explicit CLI arguments unconditionally,
+	// so we must skip files whose build constraints do not match the target platform.
+	match, err := ast.MatchFileConstraints(ip.getBuildContext(), rule.ResolvedPath, rule.File, data)
+	if err != nil {
+		return ex.Wrapf(err, "matching build constraints for %s", file)
+	}
+	if !match {
+		ip.Debug("File rule build constraints not satisfied; skipping", "rule", rule.Name, "file", rule.File)
+		return nil
+	}
+
+	strippedSource := ast.StripBuildIgnoreTag(string(data))
+	root, err := ast.NewAstParser().ParseSource(strippedSource)
 	if err != nil {
 		return ex.Wrapf(err, "parsing rule source file %s", file)
 	}
@@ -72,5 +74,10 @@ func (ip *instrumentPhase) applyFileRule(ctx context.Context, rule *rule.InstFil
 	// Add the new file as part of the source files to be compiled
 	ip.addCompileArg(newFile)
 	ip.keepForDebug(newFile)
+	ruleName := rule.Name
+	if ruleName == "" {
+		ruleName = rule.File
+	}
+	ip.writeFileRuleDiffForDebug(newFile, ruleName)
 	return nil
 }

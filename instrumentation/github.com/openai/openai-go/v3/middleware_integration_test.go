@@ -8,8 +8,11 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -549,6 +552,196 @@ func TestOtelMiddleware_StreamingResponse(t *testing.T) {
 	assertInt64Attribute(t, attrs, "gen_ai.usage.total_tokens", 7)
 }
 
+// TestOtelMiddleware_ResponseBodyTruncated covers Issue #1309: a response
+// larger than maxResponseBodySize (e.g. a large batch embeddings call) must
+// not produce a span that silently looks fully successful. The span should
+// still carry request-side attributes, the caller must still see the
+// complete, untruncated body, and the drop should be logged rather than
+// silent.
+func TestOtelMiddleware_ResponseBodyTruncated(t *testing.T) {
+	sr := setupTestTracer(t)
+	responseTruncatedWarnOnce = [opUnknown + 1]sync.Once{}
+
+	var logBuf bytes.Buffer
+	origLogger := logger
+	t.Cleanup(func() { logger = origLogger })
+	logger = slog.New(slog.NewJSONHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	middleware := OtelMiddleware()
+
+	reqBody := `{"model":"gpt-4"}`
+	req, _ := http.NewRequest(
+		"POST",
+		"http://api.openai.com/v1/chat/completions",
+		io.NopCloser(bytes.NewReader([]byte(reqBody))),
+	)
+
+	// A response whose JSON would otherwise be valid, but padded past
+	// maxResponseBodySize the way a large batch response would be.
+	padding := strings.Repeat("x", maxResponseBodySize)
+	oversized := `{"id":"chatcmpl-big","model":"gpt-4","choices":[{"finish_reason":"stop"}],` +
+		`"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2},"padding":"` + padding + `"}`
+	next := func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(oversized)),
+		}, nil
+	}
+
+	resp, err := middleware(req, next)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// The full, untruncated body must still reach the caller - only the
+	// telemetry parse is bounded, not what the SDK receives.
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Equal(t, oversized, string(body))
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	attrs := spans[0].Attributes()
+	assertAttribute(t, attrs, "gen_ai.request.model", "gpt-4")
+	assertNoAttribute(t, attrs, "gen_ai.response.model")
+	assertNoAttribute(t, attrs, "gen_ai.response.id")
+	assertNoAttribute(t, attrs, "gen_ai.usage.total_tokens")
+
+	assert.Contains(t, logBuf.String(), "response body exceeded size cap",
+		"a truncated response must be logged instead of silently dropped")
+}
+
+// TestOtelMiddleware_RequestBodyTruncated covers Issue #1314: a request
+// larger than maxRequestBodySize must not silently vanish from telemetry
+// without at least a log line, and the SDK must still receive the complete
+// body.
+func TestOtelMiddleware_RequestBodyTruncated(t *testing.T) {
+	sr := setupTestTracer(t)
+	requestTruncatedWarnOnce = [opUnknown + 1]sync.Once{}
+
+	var logBuf bytes.Buffer
+	origLogger := logger
+	t.Cleanup(func() { logger = origLogger })
+	logger = slog.New(slog.NewJSONHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	middleware := OtelMiddleware()
+
+	padding := strings.Repeat("x", maxRequestBodySize)
+	oversized := `{"model":"gpt-4","padding":"` + padding + `"}`
+	req, _ := http.NewRequest(
+		"POST",
+		"http://api.openai.com/v1/chat/completions",
+		io.NopCloser(strings.NewReader(oversized)),
+	)
+
+	called := false
+	next := func(r *http.Request) (*http.Response, error) {
+		called = true
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		assert.Equal(t, oversized, string(body), "the SDK must still see the full, untruncated request body")
+		return &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(bytes.NewReader([]byte(
+				`{"id":"chatcmpl-1","model":"gpt-4","choices":[],"usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10}}`,
+			))),
+		}, nil
+	}
+
+	resp, err := middleware(req, next)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.True(t, called)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1, "an oversized request must still produce a span for its response telemetry")
+	attrs := spans[0].Attributes()
+	assertAttribute(t, attrs, "gen_ai.operation.name", "chat")
+	assertNoAttribute(t, attrs, "gen_ai.request.model")
+	assertAttribute(t, attrs, "gen_ai.response.model", "gpt-4")
+	assertInt64Attribute(t, attrs, "gen_ai.usage.input_tokens", 7)
+	assert.Contains(t, logBuf.String(), "request body exceeded size cap",
+		"a truncated request must be logged instead of silently dropped")
+}
+
+// TestOtelMiddleware_TruncatedBodyWarnsOncePerOperation covers a workload
+// that regularly exceeds the cap: it must not log on every single request,
+// only once per operation, so a noisy caller doesn't flood the logs. It also
+// guards against a single package-wide sync.Once: a second, distinct
+// operation must still get its own warning, and the request and response
+// warnings must be independent of each other since they use separate arrays.
+func TestOtelMiddleware_TruncatedBodyWarnsOncePerOperation(t *testing.T) {
+	setupTestTracer(t)
+	requestTruncatedWarnOnce = [opUnknown + 1]sync.Once{}
+	responseTruncatedWarnOnce = [opUnknown + 1]sync.Once{}
+
+	var logBuf bytes.Buffer
+	origLogger := logger
+	t.Cleanup(func() { logger = origLogger })
+	logger = slog.New(slog.NewJSONHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	middleware := OtelMiddleware()
+	requestPadding := strings.Repeat("x", maxRequestBodySize)
+	oversizedChatReq := `{"model":"gpt-4","padding":"` + requestPadding + `"}`
+	oversizedEmbeddingReq := `{"model":"text-embedding-3-small","padding":"` + requestPadding + `"}`
+	normalResp := func(r *http.Request) (*http.Response, error) {
+		_, _ = io.ReadAll(r.Body)
+		return &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"model":"gpt-4","choices":[]}`))),
+		}, nil
+	}
+
+	// Three oversized chat requests must warn once for chat, not three times.
+	for i := 0; i < 3; i++ {
+		req, _ := http.NewRequest("POST", "http://api.openai.com/v1/chat/completions",
+			io.NopCloser(strings.NewReader(oversizedChatReq)))
+		_, err := middleware(req, normalResp)
+		require.NoError(t, err)
+	}
+
+	// A distinct operation (embeddings) must still get its own warning. If
+	// the implementation used a single package-wide sync.Once instead of one
+	// per operation, this would be silently swallowed by the chat warning
+	// above.
+	embedReq, _ := http.NewRequest("POST", "http://api.openai.com/v1/embeddings",
+		io.NopCloser(strings.NewReader(oversizedEmbeddingReq)))
+	_, err := middleware(embedReq, normalResp)
+	require.NoError(t, err)
+
+	// An oversized response for chat must still warn even though the chat
+	// request warning already fired above: request and response truncation
+	// use separate sync.Once arrays and must not suppress each other.
+	normalChatReq, _ := http.NewRequest("POST", "http://api.openai.com/v1/chat/completions",
+		io.NopCloser(strings.NewReader(`{"model":"gpt-4"}`)))
+	oversizedResp := func(r *http.Request) (*http.Response, error) {
+		_, _ = io.ReadAll(r.Body)
+		padding := strings.Repeat("x", maxResponseBodySize)
+		body := `{"id":"chatcmpl-big","model":"gpt-4","choices":[],"padding":"` + padding + `"}`
+		return &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}, nil
+	}
+	_, err = middleware(normalChatReq, oversizedResp)
+	require.NoError(t, err)
+
+	requestChatWarns := strings.Count(logBuf.String(),
+		`"msg":"openai request body exceeded size cap, skipping request attributes","operation":"chat"`)
+	requestEmbedWarns := strings.Count(logBuf.String(),
+		`"msg":"openai request body exceeded size cap, skipping request attributes","operation":"embeddings"`)
+	responseChatWarns := strings.Count(logBuf.String(),
+		`"msg":"openai response body exceeded size cap, skipping response attributes","operation":"chat"`)
+
+	assert.Equal(t, 1, requestChatWarns, "three oversized chat requests must warn once, not three times")
+	assert.Equal(t, 1, requestEmbedWarns, "a distinct operation must still get its own warning")
+	assert.Equal(t, 1, responseChatWarns, "the response warning must fire independently of the request warning for the same operation")
+}
+
 func TestOtelMiddleware_AzurePath(t *testing.T) {
 	sr := setupTestTracer(t)
 
@@ -580,4 +773,96 @@ func TestOtelMiddleware_AzurePath(t *testing.T) {
 	attrs := spans[0].Attributes()
 	assertAttribute(t, attrs, "gen_ai.operation.name", "chat")
 	assertAttribute(t, attrs, "gen_ai.provider.name", "azure")
+}
+
+// streamingChatResponse returns a next func serving a two-chunk SSE chat
+// completion, the shape the middleware hands to the streaming reader.
+func streamingChatResponse() func(*http.Request) (*http.Response, error) {
+	const streamData = "data: {\"id\":\"chatcmpl-stream\",\"model\":\"gpt-4\"," +
+		"\"choices\":[{\"delta\":{\"content\":\"Hello\"},\"finish_reason\":null}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-stream\",\"model\":\"gpt-4\"," +
+		"\"choices\":[{\"delta\":{\"content\":\" world\"},\"finish_reason\":\"stop\"}]," +
+		"\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2,\"total_tokens\":7}}\n\n" +
+		"data: [DONE]\n\n"
+
+	return func(_ *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(streamData))),
+		}, nil
+	}
+}
+
+func streamingChatRequest(t *testing.T) *http.Request {
+	t.Helper()
+	req, err := http.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		"http://api.openai.com/v1/chat/completions",
+		io.NopCloser(bytes.NewReader([]byte(`{"model":"gpt-4","stream":true}`))),
+	)
+	require.NoError(t, err)
+	return req
+}
+
+// A streaming span outlives the middleware call: the middleware hands it to the
+// streaming reader, which ends it when the stream finishes. Ending it in the
+// middleware instead would cut the response attributes, which only arrive in
+// the final chunk, so this pins where the span may be ended.
+func TestOtelMiddleware_StreamingSpanOutlivesMiddleware(t *testing.T) {
+	sr := setupTestTracer(t)
+
+	resp, err := OtelMiddleware()(streamingChatRequest(t), streamingChatResponse())
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	require.Empty(t, sr.Ended(),
+		"the span must stay open until the stream finishes, not end when the middleware returns")
+
+	_, err = io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1, "draining the stream must end the span exactly once")
+	assertInt64Attribute(t, spans[0].Attributes(), "gen_ai.usage.total_tokens", 7)
+}
+
+// A caller that closes the response body without reading it still gets one
+// ended span. Nothing else ends the span in that path, so without this the
+// span would leak.
+func TestOtelMiddleware_StreamingSpanEndedOnCloseWithoutRead(t *testing.T) {
+	sr := setupTestTracer(t)
+
+	resp, err := OtelMiddleware()(streamingChatRequest(t), streamingChatResponse())
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Empty(t, sr.Ended())
+
+	require.NoError(t, resp.Body.Close())
+
+	require.Len(t, sr.Ended(), 1, "closing an unread stream must end the span exactly once")
+}
+
+// Closing twice, or closing after draining, must not finalize the stream a
+// second time. Span.End() is idempotent, so a span count cannot show this: the
+// SDK drops the second end before an exporter sees anything. The duration
+// histogram can, because every finalization records a measurement.
+func TestOtelMiddleware_StreamingFinalizesOnceOnRepeatedClose(t *testing.T) {
+	reader := setupTestMeter(t)
+
+	resp, err := OtelMiddleware()(streamingChatRequest(t), streamingChatResponse())
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	_, err = io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.NoError(t, resp.Body.Close())
+
+	dps := durationDataPoints(t, reader)
+	require.Len(t, dps, 1)
+	require.Equal(t, uint64(1), dps[0].Count,
+		"draining then closing twice must record the operation duration once")
 }

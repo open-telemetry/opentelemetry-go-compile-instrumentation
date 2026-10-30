@@ -1,75 +1,123 @@
 name: Regenerate Bundle
-
+run-name: 'Bundle repair #${{ github.event.issue.number || inputs.pr_number }}'
 on:
   issue_comment:
     types: [created]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number
+        required: true
+        type: string
 
-permissions:
-  contents: write
-  pull-requests: write
+  workflow_call:
+    inputs:
+      pr_number:
+        required: true
+        type: string
+      expected_head_sha:
+        required: false
+        type: string
+      expected_base_sha:
+        required: false
+        type: string
+      expires_at:
+        required: false
+        type: string
+    secrets:
+      OTELC_BUNDLE_PUSH_TOKEN:
+        description: Publisher token. The bundle-publisher environment supplies the value.
+        required: false
+      OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY:
+        required: false
+
+permissions: {}
+
+env:
+  AUTO_DEADLINE: ${{ inputs.expires_at }}
+  BASE_SHA: ${{ inputs.expected_base_sha }}
+  CALLER_WORKFLOW_REF: ${{ github.workflow_ref }}
+  COMMENTER: ${{ github.event.comment.user.login || github.actor }}
+  EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
+  PR_NUMBER: ${{ github.event.issue.number || inputs.pr_number }}
+  REPO: ${{ github.repository }}
+  RUN_ATTEMPT: ${{ github.run_attempt }}
+  TRIGGERING_ACTOR: ${{ github.triggering_actor }}
 
 jobs:
-  regenerate:
-    name: Regenerate Bundle
+  prepare:
+    name: Prepare bundle regeneration
     runs-on: ubuntu-latest
-    if: >-
-      github.event.issue.pull_request && contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
-      && github.event.comment.body == '/regenerate-bundle'
+    timeout-minutes: 5
+    if: |-
+      github.repository ==
+      'open-telemetry/opentelemetry-go-compile-instrumentation' &&
+      github.ref == 'refs/heads/main' &&
+      ((github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'),
+      github.event.comment.author_association) &&
+      github.event.comment.body == '/regenerate-bundle') ||
+      inputs.pr_number != '')
+    permissions:
+      contents: read
+    outputs:
+      authorized: ${{ steps.pr.outputs.authorized }}
+      pr_number: ${{ steps.pr.outputs.pr_number }}
+      base_ref: ${{ steps.pr.outputs.base_ref }}
+      base_sha: ${{ steps.pr.outputs.base_sha }}
+      head_ref: ${{ steps.pr.outputs.head_ref }}
+      head_repo_full: ${{ steps.pr.outputs.head_repo_full }}
+      head_sha: ${{ steps.pr.outputs.head_sha }}
+      is_cross_repository: ${{ steps.pr.outputs.is_cross_repository }}
     steps:
-      - name: Get PR details
-        id: pr
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          pr_json=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.issue.number }})
-          head_ref=$(echo "$pr_json" | jq -r '.head.ref')
-          head_repo_full=$(echo "$pr_json" | jq -r '.head.repo.full_name')
-          is_fork=$(echo "$pr_json" | jq -r '.head.repo.fork')
-          {
-            echo "head_ref=$head_ref"
-            echo "head_repo_full=$head_repo_full"
-            echo "is_fork=$is_fork"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Abort if fork PR
-        if: steps.pr.outputs.is_fork == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh api repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments \
-            -f body="Cannot regenerate bundle for fork PRs (GITHUB_TOKEN cannot push to forks). Please run \`make package\` locally and push the updated archive."
-          exit 1
-
-      - name: Add reaction
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh api repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions \
-            -f content='+1'
-
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
-          # zizmor: ignore[artipacked]: credentials are required by the git push later in this job
-          persist-credentials: true
-          ref: ${{ steps.pr.outputs.head_ref }}
-          repository: ${{ steps.pr.outputs.head_repo_full }}
-          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
+          cache: false
           go-version-file: go.mod
 
-      - name: Regenerate bundle
-        run: make package
+      - name: Build bundle repair tool
+        env:
+          GOFLAGS: -mod=readonly
+          GOPROXY: 'off'
+          GOTOOLCHAIN: local
+        run: go -C .tools/bundlerepair build -trimpath -o "${RUNNER_TEMP}/bundlerepair" .
 
-      - name: Commit and push if changed
+      - name: Get pull request details
+        id: pr
+        env:
+          AUTHOR_ASSOCIATION: ${{ github.event.comment.author_association }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+          ISSUE_IS_PULL_REQUEST: ${{ github.event.issue.pull_request && 'true' || 'false' }}
         run: |
-          if git diff --quiet -- tool/data/otelc-bundle.tgz; then
-            echo "Bundle is already up to date."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add tool/data/otelc-bundle.tgz
-          git commit -m "chore: regenerate otelc-bundle.tgz"
-          git push
+          "${RUNNER_TEMP}/bundlerepair" prepare
+
+  repair:
+    needs: prepare
+    if: needs.prepare.outputs.authorized == 'true'
+    concurrency:
+      group: bundle-regeneration-${{ needs.prepare.outputs.pr_number }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    uses: ./.github/workflows/regenerate-bundle-worker.yaml
+    with:
+      pr_number: ${{ needs.prepare.outputs.pr_number }}
+      base_ref: ${{ needs.prepare.outputs.base_ref }}
+      base_sha: ${{ needs.prepare.outputs.base_sha }}
+      head_ref: ${{ needs.prepare.outputs.head_ref }}
+      head_repo_full: ${{ needs.prepare.outputs.head_repo_full }}
+      head_sha: ${{ needs.prepare.outputs.head_sha }}
+      is_cross_repository: ${{ needs.prepare.outputs.is_cross_repository }}
+      expires_at: ${{ inputs.expires_at }}
+    secrets:
+      OTELC_BUNDLE_PUSH_TOKEN: ${{ secrets.OTELC_BUNDLE_PUSH_TOKEN }}
+      OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY: >-
+        ${{ secrets.OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY }}

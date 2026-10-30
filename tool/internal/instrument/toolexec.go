@@ -8,6 +8,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"go/build"
+	"io/fs"
 	"log/slog"
 	"maps"
 	"os"
@@ -23,11 +26,15 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/imports"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
 type instrumentPhase struct {
 	logger *slog.Logger
+	// buildContext evaluates build constraints (GOOS, GOARCH, etc.) for file rules.
+	// If nil, defaults to &build.Default.
+	buildContext *build.Context
 	// The working directory during compilation
 	workDir string
 	// The importcfg configuration
@@ -62,6 +69,18 @@ type instrumentPhase struct {
 	// whole package because HookContext declarations accumulate into one globals
 	// file across all instrumented source files.
 	appliedFuncIdentities map[string]struct{}
+	// Local //go:linkname stub names already emitted in this package. Hook
+	// stubs are named from the hook path and function (see hookLinkName), so
+	// the same hook used in two files is declared once and both trampolines
+	// call that name.
+	emittedHookDecls map[string]struct{}
+	// Raw-rule applications already performed during this package's
+	// instrumentation, keyed by the target *dst.FuncDecl. The inner key is
+	// rawRuleDedupKey (Identity plus Pattern, Placement, and Imports).
+	// Scoped to the function, not the package, because inject_code inserts
+	// into a specific function body; a package may have several func init()
+	// declarations across files, each of which must receive the injection.
+	appliedRawIdentities map[*dst.FuncDecl]map[string]struct{}
 	// importNames maps an import path to a package name, resolved
 	// during setup instead of guessed from the import path. importNames
 	// has no entries when the table is unavailable, such as after an
@@ -78,6 +97,9 @@ type instrumentPhase struct {
 	// methodCallInfo is built lazily by ensureMethodCallInfo.
 	methodCallInfo       *methodCallPackageInfo
 	methodCallInfoLoaded bool
+	// Rules whose application required globals, recorded in application order
+	// so writeGlobals can attribute the generated globals file to its contributors.
+	globalsContributors []string
 }
 
 func (ip *instrumentPhase) Info(msg string, args ...any)  { ip.logger.Info(msg, args...) }
@@ -85,16 +107,30 @@ func (ip *instrumentPhase) Error(msg string, args ...any) { ip.logger.Error(msg,
 func (ip *instrumentPhase) Warn(msg string, args ...any)  { ip.logger.Warn(msg, args...) }
 func (ip *instrumentPhase) Debug(msg string, args ...any) { ip.logger.Debug(msg, args...) }
 
+func (ip *instrumentPhase) getBuildContext() *build.Context {
+	if ip.buildContext != nil {
+		return ip.buildContext
+	}
+	// The go command does not forward -tags to the compiler, so start from
+	// build.Default and apply the tags the user passed to the build.
+	bctx := build.Default
+	bctx.BuildTags = util.ActiveBuildTags()
+	ip.buildContext = &bctx
+	return ip.buildContext
+}
+
+// debugArtifactDir returns the directory under .otelc-build holding this
+// package's debug artifacts (.otelc-build/debug/<escaped-package>/).
+func (ip *instrumentPhase) debugArtifactDir() string {
+	modPath := util.FindFlagValue(ip.compileArgs, "-p")
+	pkgDir := util.EscapePackagePath(modPath)
+	return util.GetBuildTemp(filepath.Join("debug", pkgDir))
+}
+
 // keepForDebug keeps the the file to .otelc-build directory for debugging
 func (ip *instrumentPhase) keepForDebug(name string) {
-	escape := func(s string) string {
-		dirName := strings.ReplaceAll(s, "/", "_")
-		dirName = strings.ReplaceAll(dirName, ".", "_")
-		return dirName
-	}
-	modPath := util.FindFlagValue(ip.compileArgs, "-p")
-	dest := filepath.Join("debug", escape(modPath), filepath.Base(name))
-	err := util.CopyFile(name, util.GetBuildTemp(dest))
+	dest := filepath.Join(ip.debugArtifactDir(), filepath.Base(name))
+	err := util.CopyFile(name, dest)
 	if err != nil { // error is tolerable here as this is only for debugging
 		ip.Warn("failed to save modified file", "dest", dest, "error", err)
 	}
@@ -108,6 +144,43 @@ func stripCompleteFlag(args []string) []string {
 		}
 	}
 	return args
+}
+
+// resolvePackageName reads the package clause from the compile command's own
+// sources. Setup's build-plan dry run lists no readable source for the
+// go-test-generated main, so setup leaves the rule set unnamed and this method
+// recovers it (see #1348). Returns an empty name if the command lists no
+// readable Go file.
+func (ip *instrumentPhase) resolvePackageName() (string, error) {
+	for _, arg := range ip.compileArgs {
+		if !util.IsGoFile(arg) || !util.PathExists(arg) {
+			continue
+		}
+		name, err := ast.ParsePackageName(arg)
+		if err != nil {
+			return "", ex.Wrapf(err, "parsing package clause from %s", arg)
+		}
+		return name, nil
+	}
+	return "", nil
+}
+
+// ensurePackageName fills in a rule set that setup left unnamed. It must run
+// before instrument(), because file rules need the name and compileArgs still
+// holds only the original sources at that point.
+func (ip *instrumentPhase) ensurePackageName(matched *rule.InstRuleSet) error {
+	if matched.PackageName != "" {
+		return nil
+	}
+	name, err := ip.resolvePackageName()
+	if err != nil {
+		return err
+	}
+	if name != "" {
+		matched.SetPackageName(name)
+		ip.Debug("Resolved package name from compile command", "package", name)
+	}
+	return nil
 }
 
 func interceptCompile(ctx context.Context, args []string) ([]string, error) {
@@ -151,6 +224,10 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 	// Check if the current compile command matches the rules.
 	matched := ip.match(allSet, args)
 	if !matched.IsEmpty() {
+		if err = ip.ensurePackageName(matched); err != nil {
+			return nil, err
+		}
+
 		ip.Info("Instrument package", "rules", matched, "args", args)
 		// Okay, this package should be instrumented.
 		err = ip.instrument(ctx, matched)
@@ -179,6 +256,10 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 		ip.importConfig.PackageFile = make(map[string]string)
 	}
 
+	pgoFlags, pgoErr := ip.pgoBuildFlags()
+	if pgoErr != nil {
+		return pgoErr
+	}
 	var updated bool
 	for _, importPath := range newImports {
 		if importPath == "unsafe" || importPath == "C" {
@@ -196,7 +277,7 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 			return err
 		}
 		// Resolve package archive location, passing build flags to match the current build context
-		buildFlags := util.GetBuildFlags()
+		buildFlags := append(util.GetBuildFlags(), pgoFlags...)
 		archives, err := pkgload.ResolveExportFiles(ctx, importPath, buildFlags...)
 		restore()
 		if err != nil {
@@ -229,6 +310,30 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 	}
 
 	return nil
+}
+
+// pgoBuildFlags returns the -pgo flag that makes a nested go list compile the
+// added imports with the profile whose path storePGOProfile recorded during
+// setup, when this compile uses one.
+// Without it the nested build compiles them unprofiled, and the link rejects
+// the mix of export data with a fingerprint mismatch.
+func (ip *instrumentPhase) pgoBuildFlags() ([]string, error) {
+	if util.FindFlagValue(ip.compileArgs, "-pgoprofile") == "" {
+		return nil, nil
+	}
+	f := util.GetPGOProfileFile()
+	profilePath, err := os.ReadFile(f)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, ex.Wrapf(err, "failed to read PGO profile from file %s", f)
+	}
+	if len(profilePath) == 0 {
+		return nil, nil
+	}
+	// go/packages passes -pgo=off; a later -pgo flag overrides it.
+	return []string{"-pgo=" + string(profilePath)}, nil
 }
 
 // resolution is a compile waiting on a nested build to resolve an import a rule
@@ -340,12 +445,36 @@ func trackAddedImports(packages map[string]string) error {
 	return nil
 }
 
+// addedImportFiles returns the per-process import tracking files written during
+// compilation. It scans the build temp directory instead of globbing so that a
+// workspace whose path contains glob meta-characters (for example square
+// brackets) still resolves its files.
+func addedImportFiles() ([]string, error) {
+	dir := util.GetBuildTempDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, ex.Wrapf(err, "reading build temp directory %q", dir)
+	}
+
+	files := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasPrefix(name, "added_imports.") || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		files = append(files, filepath.Join(dir, name))
+	}
+	return files, nil
+}
+
 // CleanupImportTrackingFiles removes import tracking files from previous builds.
 // Should be called at the start of a new build to clean up stale files from prior runs.
 // This is exported for use by the setup phase.
 func CleanupImportTrackingFiles() {
-	pattern := util.GetAddedImportsPattern()
-	files, err := filepath.Glob(pattern)
+	files, err := addedImportFiles()
 	if err != nil {
 		return
 	}
@@ -355,15 +484,22 @@ func CleanupImportTrackingFiles() {
 	}
 }
 
+// CleanupDebugArtifacts removes debug artifacts from previous builds.
+// Should be called at the start of a build under debug mode to clean up
+// stale diffs and debug files from prior runs.
+// This is exported for use by the setup phase.
+func CleanupDebugArtifacts() error {
+	return os.RemoveAll(util.GetBuildTemp("debug"))
+}
+
 // loadAddedImports discovers and merges all per-process import tracking files.
 func loadAddedImports(ctx context.Context) (map[string]string, error) {
 	logger := util.LoggerFromContext(ctx)
-	pattern := util.GetAddedImportsPattern()
 
 	// Find all per-process import files
-	files, err := filepath.Glob(pattern)
+	files, err := addedImportFiles()
 	if err != nil {
-		return nil, ex.Wrapf(err, "globbing import files")
+		return nil, err
 	}
 
 	if len(files) == 0 {
@@ -496,8 +632,16 @@ func interceptVet(ctx context.Context, args []string) ([]string, error) {
 		return nil, ex.Wrapf(err, "parsing vet config")
 	}
 
+	// A config without GoFiles has no source list to rewrite, so leave the
+	// command alone rather than failing the build. Indexing a missing key
+	// yields a nil RawMessage, which Unmarshal reports as malformed JSON.
+	raw, ok := config["GoFiles"]
+	if !ok {
+		return args, nil
+	}
+
 	var goFiles []string
-	if err = json.Unmarshal(config["GoFiles"], &goFiles); err != nil {
+	if err = json.Unmarshal(raw, &goFiles); err != nil {
 		return nil, ex.Wrapf(err, "parsing GoFiles from vet config")
 	}
 
@@ -566,6 +710,11 @@ func toolVersionLine(line, rulesHash string) string {
 func markedToolVersion(rawOutput string) string {
 	var rulesHash string
 	if content, err := os.ReadFile(util.GetMatchedRuleFile()); err == nil {
+		// Build tags decide which add_file rule files apply, so a tagged build
+		// must not reuse artifacts compiled without those tags.
+		if tags := util.ActiveBuildTags(); len(tags) > 0 {
+			content = append(content, "\ntags="+strings.Join(tags, ",")...)
+		}
 		sum := sha256.Sum256(content)
 		rulesHash = hex.EncodeToString(sum[:8])
 	}
@@ -599,6 +748,10 @@ func interceptToolVersion(ctx context.Context, args []string) error {
 // a rule added. Those invocations instrument compiles and run every other
 // command unchanged.
 func Toolexec(ctx context.Context, args []string, nested bool) error {
+	if len(args) == 0 {
+		return ex.New("no tool command specified")
+	}
+
 	// Use slice-based detection to correctly handle tool paths with spaces
 	// (common on Windows, e.g., "C:\Program Files\Go\pkg\tool\...")
 
@@ -607,7 +760,7 @@ func Toolexec(ctx context.Context, args []string, nested bool) error {
 	// appended so instrumented artifacts never share cache entries with plain
 	// builds; instrumentation changes compile output without changing any
 	// input go hashes.
-	if len(args) == 2 && args[1] == "-V=full" {
+	if len(args) == 2 && args[1] == "-V=full" { //nolint:gosec // false positive: args[1] is guarded by len(args) == 2
 		return interceptToolVersion(ctx, args)
 	}
 
@@ -703,6 +856,10 @@ var executablePath = os.Executable
 // existing -toolexec was stripped at startup. Must only be called from the
 // real otelc binary, since os.Executable is what nested go commands will run.
 //
+// A -gcflags value without a package pattern applies only to a go command's
+// command-line packages. The outer build applied it to its targets, whereas
+// nested `go list -export` targets the added import, so strip such values here.
+//
 // Nested mode assumes its go commands are `go list -export` spawned from
 // updateImportConfig: those run compile (instrumented), asm, cgo, and pack,
 // and answer -V=full probes, but never link or vet. A new go command spawned
@@ -717,7 +874,7 @@ func EnableNestedToolexec() error {
 	if err != nil {
 		return err
 	}
-	goflags := strings.TrimSpace(os.Getenv("GOFLAGS") + " " + toolexecFlag)
+	goflags := strings.TrimSpace(util.StripUnpatternedGcflagsFromGoflags(os.Getenv("GOFLAGS")) + " " + toolexecFlag)
 	if err = os.Setenv("GOFLAGS", goflags); err != nil {
 		return ex.Wrapf(err, "setting GOFLAGS for nested go commands")
 	}

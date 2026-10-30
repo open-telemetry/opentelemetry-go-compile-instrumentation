@@ -6,6 +6,7 @@ package setup
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -772,6 +773,32 @@ func TestRuleFileKey(t *testing.T) {
 		}
 		assert.Equal(t, want, ruleFileKey(filepath.Join(link, "a.otelc.yml")))
 	})
+
+	t.Run("dot-dot through a symbolic link does not collide with the link's sibling", func(t *testing.T) {
+		// base/link -> other/sub. base/link/../r.yml resolves, through the
+		// link, to other/r.yml on disk. filepath.Abs alone would instead
+		// clean ".." lexically against "link" and land on base/r.yml, a
+		// different file. The path must be built by plain concatenation,
+		// not filepath.Join: Join calls Clean internally and would collapse
+		// the ".." itself before ruleFileKey ever saw it, same as the raw
+		// string a shell command line would pass in.
+		base := t.TempDir()
+		other := t.TempDir()
+		sub := filepath.Join(other, "sub")
+		require.NoError(t, os.Mkdir(sub, 0o755))
+		link := filepath.Join(base, "link")
+		if err := os.Symlink(sub, link); err != nil {
+			t.Skipf("cannot create symbolic link: %v", err)
+		}
+		otherFile := filepath.Join(other, "r.yml")
+		baseFile := filepath.Join(base, "r.yml")
+		require.NoError(t, os.WriteFile(otherFile, []byte(""), 0o644))
+		require.NoError(t, os.WriteFile(baseFile, []byte(""), 0o644))
+
+		viaLink := ruleFileKey(link + string(filepath.Separator) + ".." + string(filepath.Separator) + "r.yml")
+		assert.Equal(t, ruleFileKey(otherFile), viaLink)
+		assert.NotEqual(t, ruleFileKey(baseFile), viaLink)
+	})
 }
 
 func ruleNames(rules []rule.InstRule) []string {
@@ -1128,7 +1155,8 @@ func TestPreciseMatching_WhereFileFilterBuildError(t *testing.T) {
 
 	_, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{badRule}, set)
 	require.Error(t, err)
-	require.ErrorContains(t, err, "where.file has multiple active predicates")
+	require.ErrorContains(t, err,
+		"where.file has multiple active predicates (has_func, has_struct); combine them with all-of")
 }
 
 // Helper functions for constructing test data
@@ -1163,9 +1191,12 @@ func newTestRuleSet(
 	fileRules []*rule.InstFileRule,
 ) *rule.InstRuleSet {
 	rs := rule.NewInstRuleSet(modulePath)
-	fakeFilePath := filepath.Join(os.TempDir(), "file.go")
-	for _, fr := range funcRules {
-		rs.AddFuncRule(fakeFilePath, fr)
+	// One file key per rule. Filing them all under a single key leaves the
+	// per-file map with no order to get wrong, which is how the flattening
+	// bug in #1526 stayed invisible to every test using this helper. The
+	// zero-padded names keep lexical order equal to insertion order.
+	for i, fr := range funcRules {
+		rs.AddFuncRule(filepath.Join(os.TempDir(), fmt.Sprintf("file%02d.go", i)), fr)
 	}
 	for _, fr := range fileRules {
 		rs.AddFileRule(fr)
@@ -1337,6 +1368,24 @@ func TestCheckRuleFileVersion(t *testing.T) {
 	})
 }
 
+func TestParseRuleFile(t *testing.T) {
+	t.Run("parse error", func(t *testing.T) {
+		_, err := parseRuleFile(t.Context(), "bad.yaml", []byte("not: valid: yaml:"), util.Version)
+		require.ErrorContains(t, err, "bad.yaml")
+	})
+
+	t.Run("valid file returns its rules", func(t *testing.T) {
+		content := []byte(`my_rule:
+  target: main
+  func: Example
+  raw: "_ = 1"`)
+		rules, err := parseRuleFile(t.Context(), "rules.yaml", content, util.Version)
+		require.NoError(t, err)
+		require.Len(t, rules, 1)
+		assert.Equal(t, "my_rule", rules[0].GetName())
+	})
+}
+
 func TestLoadCustomRulesDeterministicOrder(t *testing.T) {
 	content := `zebra:
   target: main
@@ -1477,6 +1526,16 @@ func TestRunMatch_EmptyRules(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, set)
 	assert.True(t, set.IsEmpty())
+}
+
+func TestRunMatch_RecordsTestBuild(t *testing.T) {
+	sp := newTestSetupPhase()
+	for _, isTest := range []bool{false, true} {
+		dep := &Dependency{ImportPath: "example.com/lib", CgoFiles: map[string]string{}, IsTest: isTest}
+		set, err := sp.runMatch(context.Background(), dep, map[string][]rule.InstRule{}, nil)
+		require.NoError(t, err)
+		assert.Equal(t, isTest, set.IsTest)
+	}
 }
 
 func TestRunMatch_FileRuleInvalidSource(t *testing.T) {

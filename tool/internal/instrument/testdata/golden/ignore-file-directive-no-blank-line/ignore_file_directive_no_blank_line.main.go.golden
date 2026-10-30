@@ -4,23 +4,23 @@
 //otelc:ignore
 package main
 
+//line /<generated>:1
 import _ "unsafe"
 
+//line /golden/work/main.go:7
 func SkippedFunc(p1 string) {}
 
 //otelc:instrument
 func ForcedFunc(p1 string) {
-	//line <generated>:1
-	if hookContext3499725793, _ := OtelBeforeTrampoline_ForcedFunc3499725793(&p1); false {
+	/*line /<generated>:1*/ if hookContext3499725793, _ := OtelBeforeTrampoline_ForcedFunc3499725793(&p1); false {
 	} else {
 		defer OtelAfterTrampoline_ForcedFunc3499725793(hookContext3499725793)
-	}
-	//line main.go:10:28
+	} /*line /golden/work/main.go:9*/
 }
 
 func main() {}
 
-//line <generated>:1
+//line /<generated>:1
 type HookContextImpl3499725793 struct {
 	params      []interface{}
 	returnVals  []interface{}
@@ -110,8 +110,8 @@ func OtelBeforeTrampoline_ForcedFunc3499725793(param0 *string) (hookContext *Hoo
 	hookContext.params = []interface{}{param0}
 	hookContext.funcName = "ForcedFunc"
 	hookContext.packageName = "main"
-	if HBefore != nil {
-		HBefore(hookContext, *param0)
+	if otelc_hook_3379395441_HBefore != nil {
+		otelc_hook_3379395441_HBefore(hookContext, *param0)
 	}
 	return hookContext, hookContext.skipCall
 }
@@ -130,13 +130,13 @@ func OtelAfterTrampoline_ForcedFunc3499725793(hookContext HookContext) {
 		}
 	}()
 	hookContext.(*HookContextImpl3499725793).returnVals = []interface{}{}
-	if HAfter != nil {
-		HAfter(hookContext)
+	if otelc_hook_3379395441_HAfter != nil {
+		otelc_hook_3379395441_HAfter(hookContext)
 	}
 }
 
-//go:linkname HBefore testdata/golden/ignore-file-directive-no-blank-line.HBefore
-func HBefore(hookContext HookContext, param0 string)
+//go:linkname otelc_hook_3379395441_HBefore testdata/golden/ignore-file-directive-no-blank-line.HBefore
+func otelc_hook_3379395441_HBefore(hookContext HookContext, param0 string)
 
-//go:linkname HAfter testdata/golden/ignore-file-directive-no-blank-line.HAfter
-func HAfter(hookContext HookContext)
+//go:linkname otelc_hook_3379395441_HAfter testdata/golden/ignore-file-directive-no-blank-line.HAfter
+func otelc_hook_3379395441_HAfter(hookContext HookContext)

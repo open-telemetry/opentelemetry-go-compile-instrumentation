@@ -36,6 +36,84 @@ replace: "wrapper({{ . }})"
 			},
 		},
 		{
+			name: "replace with only CallArgument",
+			yaml: `
+function_call: github.com/jackc/pgx/v5.Connect
+replace: "pgxtrace.Connect({{ .CallArgument 0 }}, {{ .CallArgument 1 }})"
+`,
+			ruleName: "replace_pgx_connect",
+			check: func(t *testing.T, r *InstCallRule) {
+				assert.Equal(t, "pgxtrace.Connect({{ .CallArgument 0 }}, {{ .CallArgument 1 }})", r.Replace)
+			},
+		},
+		{
+			name: "replace with CallArgument without spaces",
+			yaml: `
+function_call: net/http.Get
+replace: "tracedGet({{.CallArgument 0}})"
+`,
+			ruleName: "wrap_http_get",
+		},
+		{
+			name: "replace with CallArgument trim markers",
+			yaml: `
+function_call: net/http.Get
+replace: "tracedGet({{- .CallArgument 0 -}})"
+`,
+			ruleName: "wrap_http_get",
+		},
+		{
+			name: "replace with CallArgument in range",
+			yaml: `
+function_call: fmt.Println
+replace: "fmt.Print({{ range $i := .CallArgumentCount }}{{ if $i }}, {{ end }}{{ $.CallArgument $i }}{{ end }})"
+`,
+			ruleName: "wrap_println",
+		},
+		{
+			name: "replace with only CallReceiver and CallArguments",
+			yaml: `
+method_call: go.uber.org/zap.*Logger.Info
+replace: "{{ .CallReceiver }}.With(fields()...).Info({{ .CallArguments }})"
+`,
+			ruleName: "wrap_zap_info",
+			check: func(t *testing.T, r *InstCallRule) {
+				assert.Equal(t, "{{ .CallReceiver }}.With(fields()...).Info({{ .CallArguments }})", r.Replace)
+			},
+		},
+		{
+			name: "replace with only CallReceiver",
+			yaml: `
+method_call: go.uber.org/zap.*Logger.Sync
+replace: "flush({{.CallReceiver}})"
+`,
+			ruleName: "wrap_zap_sync",
+		},
+		{
+			name: "replace with only CallArguments trim markers",
+			yaml: `
+function_call: fmt.Println
+replace: "tracedPrintln({{- .CallArguments -}})"
+`,
+			ruleName: "wrap_println",
+		},
+		{
+			name: "replace with CallArguments in a pipeline",
+			yaml: `
+function_call: fmt.Println
+replace: "tracedPrintln({{ .CallArguments | print }})"
+`,
+			ruleName: "wrap_println",
+		},
+		{
+			name: "replace with CallReceiver in range",
+			yaml: `
+method_call: go.uber.org/zap.*Logger.Info
+replace: "{{ range $i := .CallArgumentCount }}{{ end }}{{ $.CallReceiver }}.Info({{ $.CallArguments }})"
+`,
+			ruleName: "wrap_zap_info",
+		},
+		{
 			name: "append_args only",
 			yaml: `
 function_call: net/http.Get
@@ -114,7 +192,57 @@ replace: "noPlaceholder()"
 `,
 			ruleName:    "bad",
 			wantErr:     true,
-			errContains: "replace must contain {{ . }} placeholder",
+			errContains: "replace must contain a {{ . }}, {{ .CallArgument N }}, {{ .CallArguments }} or {{ .CallReceiver }} placeholder",
+		},
+		{
+			name: "replace with only CallArgumentCount",
+			yaml: `
+function_call: net/http.Get
+replace: "count({{ .CallArgumentCount }})"
+`,
+			ruleName:    "bad",
+			wantErr:     true,
+			errContains: "replace must contain a {{ . }}, {{ .CallArgument N }}, {{ .CallArguments }} or {{ .CallReceiver }} placeholder",
+		},
+		{
+			name: "replace with CallArgument missing index",
+			yaml: `
+function_call: net/http.Get
+replace: "wrapper({{ .CallArgument }})"
+`,
+			ruleName:    "bad",
+			wantErr:     true,
+			errContains: "replace must contain a {{ . }}, {{ .CallArgument N }}, {{ .CallArguments }} or {{ .CallReceiver }} placeholder",
+		},
+		{
+			name: "replace with CallReceiver as a prefix of another name",
+			yaml: `
+method_call: go.uber.org/zap.*Logger.Info
+replace: "wrapper({{ .CallReceiverName }})"
+`,
+			ruleName:    "bad",
+			wantErr:     true,
+			errContains: "replace must contain a {{ . }}, {{ .CallArgument N }}, {{ .CallArguments }} or {{ .CallReceiver }} placeholder",
+		},
+		{
+			name: "function_call with CallReceiver",
+			yaml: `
+function_call: fmt.Println
+replace: "{{ .CallReceiver }}.Println({{ .CallArguments }})"
+`,
+			ruleName:    "bad",
+			wantErr:     true,
+			errContains: "replace uses {{ .CallReceiver }}, which requires method_call, but the rule uses function_call",
+		},
+		{
+			name: "replace with only Receiver",
+			yaml: `
+method_call: go.uber.org/zap.*Logger.Info
+replace: "{{ .Receiver }}.Info()"
+`,
+			ruleName:    "bad",
+			wantErr:     true,
+			errContains: "replace must contain a {{ . }}, {{ .CallArgument N }}, {{ .CallArguments }} or {{ .CallReceiver }} placeholder",
 		},
 		{
 			name: "empty append_args entry",
