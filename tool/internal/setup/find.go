@@ -28,6 +28,10 @@ type Dependency struct {
 	Version    string
 	Sources    []string
 	CgoFiles   map[string]string
+	// IsTest reports whether the compile is part of a test binary. It is read
+	// from the compile command, because the generated _testmain.go does not
+	// exist yet when the build plan is listed and so is not in Sources.
+	IsTest bool
 }
 
 func (d *Dependency) String() string {
@@ -190,6 +194,7 @@ func findGoSources(ctx context.Context, args []string, cgoObjDirs map[string]str
 		ImportPath: util.FindFlagValue(args, "-p"),
 		Sources:    make([]string, 0),
 		CgoFiles:   make(map[string]string),
+		IsTest:     util.IsTestBuild(args),
 	}
 	util.Assert(dep.ImportPath != "", "import path is empty")
 

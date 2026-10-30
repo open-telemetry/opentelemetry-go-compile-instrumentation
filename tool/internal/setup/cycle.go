@@ -37,6 +37,9 @@ type ruleImport struct {
 
 // collectRuleImports returns, for each instrumented package, the imports that
 // its matched rules add to it.
+// unsafePackageName is the import path of package unsafe.
+const unsafePackageName = "unsafe"
+
 func collectRuleImports(matched []*rule.InstRuleSet) map[string][]*ruleImport {
 	result := make(map[string][]*ruleImport)
 	seen := make(map[[3]string]*ruleImport)
@@ -46,7 +49,7 @@ func collectRuleImports(matched []*rule.InstRuleSet) map[string][]*ruleImport {
 			imports, call := addedImports(r)
 			for _, path := range imports {
 				// Neither has dependencies.
-				if path == "C" || path == "unsafe" {
+				if path == "C" || path == unsafePackageName {
 					continue
 				}
 				key := [3]string{pkg, r.GetName(), path}
