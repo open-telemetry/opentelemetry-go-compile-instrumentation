@@ -7,9 +7,11 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
@@ -363,6 +365,43 @@ func TestRedisV9AppendArg_InvalidUTF8Bytes(t *testing.T) {
 	b := redisV9AppendArg(nil, invalidBytes)
 	result := string(b)
 	assert.Equal(t, "<byte>", result)
+}
+
+func TestRedisV9AppendArg_TruncatesLongArg(t *testing.T) {
+	// Exactly at the limit: not truncated.
+	atLimit := strings.Repeat("a", redisMaxArgBytes)
+	got := string(redisV9AppendArg(nil, atLimit))
+	assert.Equal(t, atLimit, got)
+
+	// One byte over the limit: truncated with suffix.
+	overLimit := strings.Repeat("a", redisMaxArgBytes+100)
+	got = string(redisV9AppendArg(nil, overLimit))
+	assert.Equal(t, atLimit+redisArgTruncatedSuffix, got)
+
+	// []byte argument over the limit is also truncated.
+	gotBytes := string(redisV9AppendArg(nil, []byte(overLimit)))
+	assert.Equal(t, atLimit+redisArgTruncatedSuffix, gotBytes)
+}
+
+func TestRedisV9AppendArg_TruncatesPreservingUTF8(t *testing.T) {
+	// Place a 3-byte rune ('€', 0xE2 0x82 0xAC) straddling the 256-byte boundary
+	// (starting at index 255). Truncation must step back to index 255 so the
+	// result remains valid UTF-8.
+	prefix := strings.Repeat("a", redisMaxArgBytes-1)
+	s := prefix + "€" + strings.Repeat("b", 50)
+	got := string(redisV9AppendArg(nil, s))
+
+	assert.True(t, utf8.ValidString(got), "truncated argument must be valid UTF-8")
+	assert.Equal(t, prefix+redisArgTruncatedSuffix, got)
+}
+
+func TestGetRedisV9Statement_BoundsLargeKey(t *testing.T) {
+	largeKey := strings.Repeat("k", 10*1024)
+	cmd := redis.NewCmd(context.Background(), "get", largeKey)
+	stmt := getRedisV9Statement(cmd)
+
+	wantKey := strings.Repeat("k", redisMaxArgBytes) + redisArgTruncatedSuffix
+	assert.Equal(t, "get "+wantKey, stmt)
 }
 
 func TestNewOtelRedisHook(t *testing.T) {
