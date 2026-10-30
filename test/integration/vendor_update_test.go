@@ -38,6 +38,12 @@ const (
 // fixture that the dependencies of the hook code need. A fixture that vendors
 // them builds without a vendor conflict.
 //
+// These versions come from the requirements of the modules that the hook
+// packages import (for example, google.golang.org/grpc requires
+// golang.org/x/net v0.58.0), as the vendor conflict check sees them. They are
+// not the versions that the go.mod files of otelc select, which can be
+// higher.
+//
 //nolint:gochecknoglobals // test data
 var hookDepVersions = []string{
 	hookDepModule + "@" + hookDepMinVersion,

@@ -65,9 +65,11 @@ import (
 // higher version instead, like "go get" and "go mod vendor" do: it replaces
 // the vendored files of this module and changes go.mod.
 //
-// When a state manager is in the context (otelc go build, otelc setup), all
-// the changes are tracked, and the cleanup removes them after the build.
-// Without a state manager (otelc vendor, otelc pin) the changes stay.
+// When a state manager is in the context, all the changes are tracked. For
+// otelc go build and otelc setup, the cleanup removes them after the build.
+// otelc vendor reverts them when it fails, and discards the saved state when
+// it succeeds, so the changes stay. Without a state manager (otelc pin) the
+// changes stay.
 
 const (
 	vendorScratchDir     = "vendor-scratch"

@@ -312,6 +312,50 @@ func TestVendorSyncRuleSets(t *testing.T) {
 		"no state manager")
 }
 
+// TestSyncHooks: syncHooks adds the hook packages to vendor/ only for custom
+// rules in vendor mode. Else autoPin adds them (built-in rules), or vendor/ is
+// not used (module mode).
+func TestSyncHooks(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		vendored   bool
+		ruleConfig string
+		wantSync   bool
+	}{
+		{name: "custom rules in vendor mode", vendored: true, ruleConfig: "rules.yaml", wantSync: true},
+		{name: "custom rules in module mode", vendored: false, ruleConfig: "rules.yaml"},
+		{name: "built-in rules in vendor mode", vendored: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Chdir(dir)
+			t.Setenv(util.EnvOtelcWorkDir, dir)
+			t.Setenv(util.EnvOtelcRules, "")
+			mustWriteFile(t, filepath.Join(dir, goModFileName), "module example.com/app\n\ngo 1.25.0\n")
+
+			var synced []map[string]bool
+			orig := vendorSyncHook
+			t.Cleanup(func() { vendorSyncHook = orig })
+			vendorSyncHook = func(_ context.Context, imports map[string]bool, _ string) error {
+				synced = append(synced, imports)
+				return nil
+			}
+
+			rs := rule.NewInstRuleSet("example.com/app")
+			rs.AddFuncRule(filepath.Join(dir, "main.go"), &rule.InstFuncRule{Path: "example.com/hook"})
+			ctx := contextWithStateManager(contextWithVendorMode(t.Context(), tt.vendored), newStateManager())
+			sp := &setupPhase{ruleConfig: tt.ruleConfig}
+
+			require.NoError(t, sp.syncHooks(ctx, []*rule.InstRuleSet{rs}, []string{dir}))
+			if tt.wantSync {
+				assert.Equal(t, []map[string]bool{{"example.com/hook": true}}, synced)
+			} else {
+				assert.Empty(t, synced)
+			}
+		})
+	}
+}
+
 // TestSetupVendorSyncsCustomRuleHooks: with custom rules (OTELC_RULES), the
 // hook packages are only required in go.mod, not in vendor/. Setup adds them
 // to vendor/ for the build.
