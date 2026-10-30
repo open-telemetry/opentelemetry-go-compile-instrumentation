@@ -47,6 +47,20 @@ func TestSetupPhaseStoreCreateError(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestSetupPhaseStore_FailsOnMissingRuntimeSupport(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	other := rule.NewInstRuleSet("example.com/other")
+	other.AddIgnoredCallFile(fakeSrcFile("other.go"))
+
+	sp := newTestSetupPhase()
+	err := sp.store([]*rule.InstRuleSet{other})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), ignoreDirectiveSupportModule)
+}
+
 func TestSetupPhaseStorePGOProfile(t *testing.T) {
 	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
 	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
@@ -112,6 +126,55 @@ func TestStoreResolvedNames_WriteError(t *testing.T) {
 	err := sp.storeResolvedNames()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to write import names")
+}
+
+func TestEnsureIgnoreDirectiveSupport(t *testing.T) {
+	t.Run("no rule set uses the directive", func(t *testing.T) {
+		matched := []*rule.InstRuleSet{rule.NewInstRuleSet("example.com/a")}
+		require.NoError(t, ensureIgnoreDirectiveSupport(matched))
+	})
+
+	t.Run("directive used, instrumentation/runtime not loaded", func(t *testing.T) {
+		other := rule.NewInstRuleSet("example.com/other")
+		other.AddIgnoredCallFile(fakeSrcFile("other.go"))
+		other.AddFuncRule(fakeSrcFile("a.go"), funcRuleWithPath("fn", "example.com/hooks"))
+
+		err := ensureIgnoreDirectiveSupport([]*rule.InstRuleSet{other})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), ignoreDirectiveSupportModule)
+		assert.Contains(t, err.Error(), util.DirectiveIgnore)
+	})
+
+	t.Run("directive used, instrumentation/runtime loaded via a func rule", func(t *testing.T) {
+		other := rule.NewInstRuleSet("example.com/other")
+		other.AddIgnoredCallFile(fakeSrcFile("other.go"))
+		runtimeSet := rule.NewInstRuleSet("runtime")
+		runtimeSet.AddFuncRule(fakeSrcFile("runtime_gls.go"), funcRuleWithPath("fn", ignoreDirectiveSupportModule))
+
+		require.NoError(t, ensureIgnoreDirectiveSupport([]*rule.InstRuleSet{other, runtimeSet}))
+	})
+
+	t.Run("directive used, instrumentation/runtime loaded via a file rule", func(t *testing.T) {
+		other := rule.NewInstRuleSet("example.com/other")
+		other.AddIgnoredCallFile(fakeSrcFile("other.go"))
+		runtimeSet := rule.NewInstRuleSet("runtime")
+		runtimeSet.AddFileRule(fileRuleWithPath("gls_linker", ignoreDirectiveSupportModule))
+
+		require.NoError(t, ensureIgnoreDirectiveSupport([]*rule.InstRuleSet{other, runtimeSet}))
+	})
+
+	t.Run("ModulePath alone does not satisfy the check", func(t *testing.T) {
+		// Regression guard: a rule set's ModulePath is the target package
+		// (e.g. "runtime" for the standard library package), not the module
+		// that supplies the rule's hook code, so it must never be compared
+		// against ignoreDirectiveSupportModule directly.
+		other := rule.NewInstRuleSet("example.com/other")
+		other.AddIgnoredCallFile(fakeSrcFile("other.go"))
+		runtimeTargetOnly := rule.NewInstRuleSet(ignoreDirectiveSupportModule)
+
+		err := ensureIgnoreDirectiveSupport([]*rule.InstRuleSet{other, runtimeTargetOnly})
+		require.Error(t, err)
+	})
 }
 
 func TestResolveRulePaths(t *testing.T) {

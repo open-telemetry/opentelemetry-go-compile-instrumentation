@@ -264,8 +264,10 @@ Before enabling fork publication, an administrator must:
 3. Add `OTELC_BUNDLE_PUSH_TOKEN` as an environment secret. Do not create a
    repository or organization copy. Only the publisher uses this environment.
 
-The caller passes an empty placeholder for this secret. The protected publisher
-job resolves the environment value.
+The callers forward the secret by name. The `bundle-publisher` environment
+supplies the value. Only the publisher job reads the secret. A caller can pass
+an environment secret by name even when the value lives only in that environment
+([Reuse workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows)).
 
 Use an expiring classic token from a dedicated identity with upstream write
 access. For this public repository, the token needs `public_repo` and
