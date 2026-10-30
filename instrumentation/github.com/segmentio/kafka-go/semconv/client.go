@@ -71,15 +71,20 @@ func KafkaMessageKey(key []byte) string {
 	return strings.ToValidUTF8(string(key), "\uFFFD")
 }
 
+// kafkaRequestAttrCap is the most attributes KafkaRequestTraceAttrs can return:
+// three required fields plus up to nine optionals.
+const kafkaRequestAttrCap = 12
+
 // KafkaRequestTraceAttrs returns the trace attributes for a Kafka client
 // operation. Optional attributes are only included when they carry a
 // meaningful value to avoid cluttering spans with empty attributes.
 func KafkaRequestTraceAttrs(req KafkaRequest) []attribute.KeyValue {
-	attrs := []attribute.KeyValue{
+	attrs := make([]attribute.KeyValue, 0, kafkaRequestAttrCap)
+	attrs = append(attrs,
 		semconv.MessagingSystemKafka,
 		semconv.MessagingOperationName(string(req.Operation)),
 		semconv.MessagingDestinationName(req.Destination),
-	}
+	)
 
 	switch req.Operation {
 	case KafkaOperationSend:

@@ -89,7 +89,7 @@ func runTest(t *testing.T, testName string) {
 	// source_test.go (a test build — a file the Go toolchain only compiles
 	// under `go test`). The chosen name is preserved into the temp dir so the
 	// compiled unit is genuinely a _test.go file, which is what is_test gates
-	// on. This mirrors setup.isTestBuild: test-ness is a source-set property,
+	// on. This mirrors util.IsTestBuild: test-ness is a source-set property,
 	// not an import-path suffix.
 	srcName, compiledName := sourceFileName, mainGoFileName
 	if testSrc := filepath.Join(testdataDir, goldenDir, testName, sourceTestFileName); util.PathExists(testSrc) {
@@ -176,6 +176,7 @@ func loadRulesYAML(t *testing.T, p loadRulesParams) *rule.InstRuleSet {
 		// the default "main" fixtures but differ for a deep-path glob fixture.
 		PackageName:    sourceTree.Name.Name,
 		ModulePath:     p.importPath,
+		IsTest:         p.isTest,
 		FuncRules:      make(map[string][]*rule.InstFuncRule),
 		StructRules:    make(map[string][]*rule.InstStructRule),
 		RawRules:       make(map[string][]*rule.InstRawRule),

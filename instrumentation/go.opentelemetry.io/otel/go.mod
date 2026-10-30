@@ -1,15 +1,15 @@
 module go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel
 
-go 1.25.0
+go 1.26.0
 
 replace go.opentelemetry.io/otelc/pkg => ../../../pkg
 
 require (
-	go.opentelemetry.io/otel/trace v1.46.0
+	go.opentelemetry.io/otel/trace v1.47.0
 	go.opentelemetry.io/otelc/pkg v0.0.0-00010101000000-000000000000
 )
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	go.opentelemetry.io/otel v1.46.0 // indirect
+	go.opentelemetry.io/otel v1.47.0 // indirect
 )

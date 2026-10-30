@@ -190,6 +190,17 @@ field:
 			ruleName: "bad",
 			wantErr:  true,
 		},
+		{
+			name: "null field entry",
+			yaml: `
+struct_literal: net/http.Transport
+field:
+  - null
+`,
+			ruleName:    "bad",
+			wantErr:     true,
+			errContains: "field[0] cannot be empty",
+		},
 	}
 
 	for _, tt := range tests {

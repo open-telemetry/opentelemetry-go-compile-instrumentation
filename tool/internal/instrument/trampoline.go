@@ -182,6 +182,14 @@ func getHookFuncName(t *rule.InstFuncRule, before bool) string {
 	return t.After
 }
 
+// hookLinkName is the local //go:linkname stub for a hook. The path hash
+// keeps two hooks with the same short name from different packages distinct,
+// and keeps the stub from colliding with a function of that name in the
+// target file.
+func hookLinkName(path, fnName string) string {
+	return "otelc_hook_" + util.CRC32(path) + "_" + fnName
+}
+
 func isHookDefined(root *dst.File, rule *rule.InstFuncRule) bool {
 	if rule.Before != "" {
 		decl := ast.FindFuncDeclWithoutRecv(root, rule.Before)
@@ -513,7 +521,7 @@ func (ip *instrumentPhase) callBeforeHook(t *rule.InstFuncRule) {
 			}
 		}
 	}
-	fnName := getHookFuncName(t, trampolineBefore)
+	fnName := hookLinkName(t.Path, getHookFuncName(t, trampolineBefore))
 	call := ast.ExprStmt(ast.CallTo(fnName, nil, args))
 	iff := &dst.IfStmt{Cond: ip.hookGuardCond(fnName), Body: ast.Block(call)}
 	insertAt(ip.beforeTrampFunc, iff, len(ip.beforeTrampFunc.Body.List)-1)
@@ -534,7 +542,7 @@ func (ip *instrumentPhase) callAfterHook(t *rule.InstFuncRule) {
 			args = append(args, ast.DereferenceOf(ast.Ident(name.Name)))
 		}
 	}
-	fnName := getHookFuncName(t, trampolineAfter)
+	fnName := hookLinkName(t.Path, getHookFuncName(t, trampolineAfter))
 	call := ast.ExprStmt(ast.CallTo(fnName, nil, args))
 	iff := &dst.IfStmt{Cond: ip.hookGuardCond(fnName), Body: ast.Block(call)}
 	insertAtEnd(ip.afterTrampFunc, iff)
@@ -570,7 +578,18 @@ func suppressHooksCall(funcName string, selfPackage bool) *dst.CallExpr {
 }
 
 func (ip *instrumentPhase) addHookDecl(t *rule.InstFuncRule, paramTypes *dst.FieldList, before bool) error {
-	fnName := getHookFuncName(t, before)
+	origName := getHookFuncName(t, before)
+	fnName := hookLinkName(t.Path, origName)
+	if ip.emittedHookDecls == nil {
+		ip.emittedHookDecls = make(map[string]struct{})
+	}
+	if _, seen := ip.emittedHookDecls[fnName]; seen {
+		return nil
+	}
+	if ast.FindFuncDeclWithoutRecv(ip.target, fnName) != nil {
+		ip.emittedHookDecls[fnName] = struct{}{}
+		return nil
+	}
 	funcDecl := &dst.FuncDecl{
 		Name: ast.Ident(fnName),
 		Type: &dst.FuncType{
@@ -579,15 +598,12 @@ func (ip *instrumentPhase) addHookDecl(t *rule.InstFuncRule, paramTypes *dst.Fie
 		},
 		Decs: dst.FuncDeclDecorations{
 			NodeDecs: ast.LineComments(
-				fmt.Sprintf("//go:linkname %s %s.%s", fnName, t.Path, fnName),
+				fmt.Sprintf("//go:linkname %s %s.%s", fnName, t.Path, origName),
 			),
 		},
 	}
-
-	exist := ast.FindFuncDeclWithoutRecv(ip.target, fnName)
-	if exist == nil {
-		ip.addDecl(funcDecl)
-	}
+	ip.addDecl(funcDecl)
+	ip.emittedHookDecls[fnName] = struct{}{}
 	return nil
 }
 

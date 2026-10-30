@@ -130,9 +130,9 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 		spanName := opName + " " + model
 		baseAttrs := []attribute.KeyValue{
 			semconv.GenAISystem("anthropic"),
-			semconv.GenAIOperationName(opName),
-			semconv.GenAIRequestModel(model),
-			semconv.GenAIProviderName(provider),
+			otelsemconv.GenAIOperationNameKey.String(opName),
+			otelsemconv.GenAIRequestModel(model),
+			otelsemconv.GenAIProviderNameKey.String(provider),
 		}
 		serverAddress, serverPort := netutil.HTTPServerEndpoint(req.URL)
 		if serverAddress != "" && serverPort > 0 {
@@ -236,7 +236,7 @@ func parseCountTokensResponse(body []byte, span trace.Span) {
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return
 	}
-	span.SetAttributes(semconv.GenAIUsageInputTokens(resp.InputTokens))
+	span.SetAttributes(otelsemconv.GenAIUsageInputTokensKey.Int64(resp.InputTokens))
 }
 
 func parseMessagesRequest(body []byte) (string, bool, []attribute.KeyValue) {
@@ -254,16 +254,16 @@ func parseMessagesRequest(body []byte) (string, bool, []attribute.KeyValue) {
 
 	var attrs []attribute.KeyValue
 	if req.MaxTokens != nil {
-		attrs = append(attrs, semconv.GenAIRequestMaxTokens(*req.MaxTokens))
+		attrs = append(attrs, otelsemconv.GenAIRequestMaxTokensKey.Int64(*req.MaxTokens))
 	}
 	if req.Temperature != nil {
-		attrs = append(attrs, semconv.GenAIRequestTemperature(*req.Temperature))
+		attrs = append(attrs, otelsemconv.GenAIRequestTemperature(*req.Temperature))
 	}
 	if req.TopP != nil {
-		attrs = append(attrs, semconv.GenAIRequestTopP(*req.TopP))
+		attrs = append(attrs, otelsemconv.GenAIRequestTopP(*req.TopP))
 	}
 	if req.TopK != nil {
-		attrs = append(attrs, semconv.GenAIRequestTopK(*req.TopK))
+		attrs = append(attrs, otelsemconv.GenAIRequestTopKKey.Int64(*req.TopK))
 	}
 	return req.Model, req.Stream, attrs
 }
@@ -299,11 +299,11 @@ func parseMessagesResponse(body []byte, span trace.Span) {
 		resp.Usage.CacheCreationInputTokens
 
 	span.SetAttributes(
-		semconv.GenAIResponseID(resp.ID),
-		semconv.GenAIResponseModel(resp.Model),
-		semconv.GenAIResponseFinishReasons(reasons),
-		semconv.GenAIUsageInputTokens(totalInput),
-		semconv.GenAIUsageOutputTokens(resp.Usage.OutputTokens),
+		otelsemconv.GenAIResponseID(resp.ID),
+		otelsemconv.GenAIResponseModel(resp.Model),
+		otelsemconv.GenAIResponseFinishReasonsKey.StringSlice(reasons),
+		otelsemconv.GenAIUsageInputTokensKey.Int64(totalInput),
+		otelsemconv.GenAIUsageOutputTokensKey.Int64(resp.Usage.OutputTokens),
 		// The Messages API reports no total_tokens field; derive it so the
 		// span shape matches the other GenAI instrumentations.
 		semconv.GenAIUsageTotalTokens(totalInput+resp.Usage.OutputTokens),
