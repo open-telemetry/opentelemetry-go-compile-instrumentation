@@ -1468,7 +1468,10 @@ func TestInterceptLinkRecoversRuleAddedImportFromMatchedRules(t *testing.T) {
 	})
 
 	cfgPath := filepath.Join(workDir, "importcfg.link")
-	require.NoError(t, os.WriteFile(cfgPath, []byte("packagefile context=/unused/context.a\n"), 0o644))
+	// The link lists the rule set's target package, the shape a real link
+	// importcfg always has: the target's compile is part of the binary.
+	require.NoError(t, os.WriteFile(cfgPath,
+		[]byte("packagefile context=/unused/context.a\npackagefile example.com/app/dep=/unused/dep.a\n"), 0o644))
 
 	_, err := interceptLink(t.Context(), linkArgs(cfgPath))
 	require.NoError(t, err)
@@ -1503,7 +1506,7 @@ func TestInterceptLinkLeavesCompleteImportcfgUnchanged(t *testing.T) {
 	})
 
 	cfgPath := filepath.Join(workDir, "importcfg.link")
-	original := "packagefile fmt=/unused/fmt.a\npackagefile context=/unused/context.a\n"
+	original := "packagefile fmt=/unused/fmt.a\npackagefile context=/unused/context.a\npackagefile example.com/app/dep=/unused/dep.a\n"
 	require.NoError(t, os.WriteFile(cfgPath, []byte(original), 0o644))
 
 	_, err := interceptLink(t.Context(), linkArgs(cfgPath))
@@ -1562,7 +1565,9 @@ func TestRuleAddedImportsCollectsEveryRuleKind(t *testing.T) {
 		},
 	})
 
-	paths := ruleAddedImports(t.Context())
+	paths := ruleAddedImports(t.Context(), &imports.ImportConfig{
+		PackageFile: map[string]string{"example.com/app/dep": "/unused/dep.a"},
+	})
 	assert.Equal(t, map[string]struct{}{
 		"example.com/a":     {},
 		"example.com/b":     {},
@@ -1580,7 +1585,10 @@ func TestResolveRuleAddedImportsSkipsUnresolvableImports(t *testing.T) {
 	t.Setenv(util.EnvOtelcWorkDir, workDir)
 
 	linkConfig := imports.ImportConfig{
-		PackageFile: map[string]string{"context": "/unused/context.a"},
+		PackageFile: map[string]string{
+			"context":           "/unused/context.a",
+			"example.com/app/dep": "/unused/dep.a",
+		},
 	}
 	updated, err := resolveRuleAddedImports(t.Context(), nil, &linkConfig)
 	require.NoError(t, err)
@@ -1607,4 +1615,87 @@ func TestResolveRuleAddedImportsSkipsUnresolvableImports(t *testing.T) {
 	assert.True(t, updated)
 	assert.Contains(t, linkConfig.PackageFile, "fmt")
 	assert.NotContains(t, linkConfig.PackageFile, "example.invalid/nonexistent/pkg")
+}
+
+// TestResolveRuleAddedImportsRestrictedToLinkPackages checks that rule sets
+// whose target package is not part of the link contribute no candidates: a
+// multi-binary build must not resolve the imports of another binary's rules.
+func TestResolveRuleAddedImportsRestrictedToLinkPackages(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	writeMatchedRules(t, []*rule.InstRuleSet{
+		{
+			PackageName: "a",
+			ModulePath:  "example.com/app/a",
+			FuncRules: map[string][]*rule.InstFuncRule{
+				"a.go": {{InstBaseRule: rule.InstBaseRule{
+					Name: "rule-a", Imports: map[string]string{"fmt": "fmt"},
+				}}},
+			},
+		},
+		{
+			PackageName: "b",
+			ModulePath:  "example.com/app/b",
+			FuncRules: map[string][]*rule.InstFuncRule{
+				"b.go": {{InstBaseRule: rule.InstBaseRule{
+					Name: "rule-b", Imports: map[string]string{"strings": "strings"},
+				}}},
+			},
+		},
+	})
+
+	// The link lists target a but not target b, so only a's imports may be
+	// recovered. Both imports resolve, so only the filter can keep b's out.
+	linkConfig := imports.ImportConfig{
+		PackageFile: map[string]string{
+			"context":           "/unused/context.a",
+			"example.com/app/a": "/unused/a.a",
+		},
+	}
+	updated, err := resolveRuleAddedImports(t.Context(), nil, &linkConfig)
+	require.NoError(t, err)
+	assert.True(t, updated)
+	assert.Contains(t, linkConfig.PackageFile, "fmt")
+	assert.NotContains(t, linkConfig.PackageFile, "strings",
+		"the link does not list example.com/app/b, so its rule imports must not be resolved")
+}
+
+// TestResolveRuleAddedImportsSkipsConstraintExcludedAddFileSource checks that
+// an add_file source the active build constraints exclude contributes no
+// candidates. Its import resolves on this platform, so only the constraint
+// check can keep it out of the link.
+func TestResolveRuleAddedImportsSkipsConstraintExcludedAddFileSource(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	sourceDir := filepath.Join(workDir, "hooksrc")
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "excluded.go"),
+		[]byte("//go:build otelc_never_active\n\npackage hooks\n\nimport \"os\"\n"), 0o644))
+
+	writeMatchedRules(t, []*rule.InstRuleSet{
+		{
+			PackageName: "dep",
+			ModulePath:  "example.com/app/dep",
+			FileRules: []*rule.InstFileRule{{
+				InstBaseRule: rule.InstBaseRule{Name: "file-rule"},
+				File:         "excluded.go",
+				Path:         "example.com/app/hooks",
+				ResolvedPath: sourceDir,
+			}},
+		},
+	})
+
+	linkConfig := imports.ImportConfig{
+		PackageFile: map[string]string{
+			"context":             "/unused/context.a",
+			"example.com/app/dep": "/unused/dep.a",
+		},
+	}
+	updated, err := resolveRuleAddedImports(t.Context(), nil, &linkConfig)
+	require.NoError(t, err)
+	assert.False(t, updated)
+	assert.NotContains(t, linkConfig.PackageFile, "os",
+		"the build constraints exclude the add_file source, so its imports must not be resolved")
 }

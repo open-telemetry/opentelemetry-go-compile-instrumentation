@@ -634,7 +634,7 @@ func interceptLink(ctx context.Context, args []string) ([]string, error) {
 // resolves them: a nested go list -export that shares the build cache keys.
 // It reports whether the import config changed.
 func resolveRuleAddedImports(ctx context.Context, linkArgs []string, linkConfig *imports.ImportConfig) (bool, error) {
-	candidates := ruleAddedImports(ctx)
+	candidates := ruleAddedImports(ctx, linkConfig)
 	if len(candidates) == 0 {
 		return false, nil
 	}
@@ -666,10 +666,10 @@ func resolveRuleAddedImports(ctx context.Context, linkArgs []string, linkConfig 
 		return false, err
 	}
 	for path, loadErr := range failed {
-		// A candidate the rules declare but this build never compiles can be
-		// unresolvable, for example under another platform's build
-		// constraints. Skip it: the link fails with go's own error when the
-		// import was genuinely needed.
+		// A candidate the rules declare but that this build never compiles can
+		// be unresolvable, for example a hook package that only builds on
+		// another platform. Skip it: the link fails with go's own error when
+		// the import was genuinely needed.
 		logger.WarnContext(ctx, "skipping unresolvable rule-added import for the link",
 			"import", path, "error", loadErr)
 	}
@@ -686,14 +686,19 @@ func resolveRuleAddedImports(ctx context.Context, linkArgs []string, linkConfig 
 	return updated, nil
 }
 
-// ruleAddedImports collects the import paths instrumentation rules can add to
-// a package's compile: the imports every rule declares, plus the imports of
+// ruleAddedImports collects the import paths instrumentation rules can add
+// to a package's compile: the imports every rule declares, plus the imports of
 // the source files add_file rules insert. It reads matched.json, which setup
 // wrote before the build, so the answer never depends on a compile running.
-// The result is a superset of what the current link needs: rules whose targets
-// are outside this build, and imports a rule declared but never used, resolve
-// to nothing the link lists, and resolveRuleAddedImports skips them.
-func ruleAddedImports(ctx context.Context) map[string]struct{} {
+// Only rule sets whose target package takes part in the link described by
+// linkConfig contribute: a link importcfg lists every package the binary
+// links, including the linked root itself, so the imports of another
+// binary's rules are never resolved for this one. The generated test main
+// is the one root a link importcfg never lists, so a set for it is always
+// kept. The result stays a superset of what the link needs: a rule can
+// declare an import the build never uses, and resolveRuleAddedImports skips
+// unresolvable candidates.
+func ruleAddedImports(ctx context.Context, linkConfig *imports.ImportConfig) map[string]struct{} {
 	logger := util.LoggerFromContext(ctx)
 
 	content, err := os.ReadFile(util.GetMatchedRuleFile())
@@ -709,8 +714,21 @@ func ruleAddedImports(ctx context.Context) map[string]struct{} {
 		return nil
 	}
 
+	// The same constraint context the compile phase applies: build.Default
+	// with the tags the user passed to the build, so add_file sources the
+	// active constraints exclude are skipped exactly as the compile skips
+	// them. See instrumentPhase.getBuildContext.
+	bctx := build.Default
+	bctx.BuildTags = util.ActiveBuildTags()
+
 	paths := make(map[string]struct{})
 	for _, set := range sets {
+		if _, linked := linkConfig.PackageFile[set.ModulePath]; !linked && set.ModulePath != "main" {
+			// The target package takes no part in this link: another binary's
+			// rules, or a package this build never compiled. The generated
+			// test main has import path "main", which no importcfg lists.
+			continue
+		}
 		addImportsOf(paths, set.RawRules)
 		addImportsOf(paths, set.FuncRules)
 		addImportsOf(paths, set.StructRules)
@@ -719,7 +737,7 @@ func ruleAddedImports(ctx context.Context) map[string]struct{} {
 		addImportsOf(paths, set.DirectiveRules)
 		addImportsOf(paths, set.DeclRules)
 		for _, fileRule := range set.FileRules {
-			for _, path := range fileRuleImports(ctx, fileRule) {
+			for _, path := range fileRuleImports(ctx, &bctx, fileRule) {
 				paths[path] = struct{}{}
 			}
 		}
@@ -746,9 +764,11 @@ func addImportsOf[T interface{ Base() *rule.InstBaseRule }](
 // fileRuleImports returns the import paths an add_file rule's source declares.
 // The source joins a target package's compile only through toolexec, so its
 // imports are as invisible to go's build graph as the imports rules declare.
-// The parse ignores build constraints: a file whose constraints exclude it
-// yields an unresolvable candidate, which the link phase reports as a warning.
-func fileRuleImports(ctx context.Context, fileRule *rule.InstFileRule) []string {
+// The source must satisfy the active build constraints, the same check the
+// compile applies: a source the constraints exclude is never added to a
+// compile, so its imports are not candidates either. An "ignore" tag counts
+// as satisfied, because otelc compiles files ordinary builds ignore.
+func fileRuleImports(ctx context.Context, bctx *build.Context, fileRule *rule.InstFileRule) []string {
 	if fileRule.ResolvedPath == "" {
 		return nil
 	}
@@ -757,6 +777,15 @@ func fileRuleImports(ctx context.Context, fileRule *rule.InstFileRule) []string 
 	if err != nil {
 		util.LoggerFromContext(ctx).WarnContext(ctx,
 			"failed to read add_file rule source for link imports", "file", file, "error", err)
+		return nil
+	}
+	match, err := ast.MatchFileConstraints(bctx, fileRule.ResolvedPath, fileRule.File, src)
+	if err != nil {
+		util.LoggerFromContext(ctx).WarnContext(ctx,
+			"failed to match add_file rule constraints for link imports", "file", file, "error", err)
+		return nil
+	}
+	if !match {
 		return nil
 	}
 	parsed, err := parser.ParseFile(token.NewFileSet(), file, src, parser.ImportsOnly)
