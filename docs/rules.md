@@ -1275,7 +1275,7 @@ func fetch(db *sql.DB, ctx context.Context) {
 
 ### 5. Directive Rule
 
-This rule instruments functions annotated with a magic comment (a "directive") by prepending templated Go code into their bodies. The template is rendered once per annotated function, and the resulting statements are inserted at the top of the function body.
+This rule instruments functions and function literals annotated with a magic comment (a "directive") by prepending templated Go code into their bodies. The template is rendered once per annotated function, and the resulting statements are inserted at the top of the function body.
 
 **Use Cases:**
 
@@ -1299,7 +1299,7 @@ Top-level `imports` (map[string]string, optional): Additional imports needed by 
 
 | Placeholder                     | Replaced with                                                               |
 | ------------------------------- | --------------------------------------------------------------------------- |
-| `{{.FuncName}}`                 | The name of the annotated function                                          |
+| `{{.FuncName}}`                 | The name of the annotated function, or "" for a function literal            |
 | `{{.FuncArgument N}}`           | The identifier of the N-th (0-indexed) parameter, excluding the receiver    |
 | `{{.FuncReturn N}}`             | The identifier of the N-th (0-indexed) return value                         |
 | `{{.FuncArgumentCount}}`        | The number of parameters, excluding the receiver                            |
@@ -1385,9 +1385,56 @@ func divide(ctx context.Context, a int, b int) (_unnamedRetVal0 int, _unnamedRet
 }
 ```
 
+**Function literals:**
+
+A directive also annotates function literals. The directive comment is placed on its own line, immediately before one of these:
+
+| Placement                                                      | Annotated literals                       |
+| -------------------------------------------------------------- | ---------------------------------------- |
+| The literal itself (e.g. a call argument or a slice element)   | The literal                              |
+| A `var` declaration or spec, at package level or in a function | Each literal among the values            |
+| An assignment (`x := func() {...}` or `x = func() {...}`)      | Each literal on the right side           |
+| A `return` statement                                           | Each literal among the results           |
+| A `go`, `defer`, or expression statement                       | The called literal (`go func() {...}()`) |
+| A send statement (`ch <- func() {...}`)                        | The sent literal                         |
+| A key:value element (`Field: func() {...}`)                    | The value literal                        |
+
+A call of a literal counts as that literal, so `x := func() int {...}()` annotates the literal. The arguments of a call do not: a directive before `run(func() {...})` annotates nothing, but a directive on its own line before the argument annotates it.
+
+The template placeholders work the same way as for a declaration, with these differences:
+
+- `{{.FuncName}}` is "" because a literal has no name. A template can test it with `{{ if .FuncName }}`, or take a name from a directive argument with `{{ .DirectiveArg "span.name" }}`.
+- Unnamed parameters and results of the literal get synthetic names, so a deferred statement can read a returned `error` through `{{.FuncReturnOfType "error"}}`.
+
+A directive applies only to the function it annotates. In an annotated function, a nested literal is instrumented only if it carries its own directive. A literal that two directives annotate (for example, the statement and the literal itself) is instrumented once, with the arguments of the first directive.
+
+Example:
+
+```go
+func main() {
+    //otelc:span span.name:"load"
+    load := func(ctx context.Context) error {
+        return nil
+    }
+    _ = load(context.Background())
+}
+```
+
+With the first example rule above, the literal becomes:
+
+```go
+    //otelc:span span.name:"load"
+    load := func(ctx context.Context) error {
+        println("span start: , arg0=ctx")
+        defer println("span end: ")
+        return nil
+    }
+```
+
 **Important Notes:**
 
-- The directive comment must be placed immediately before the function declaration.
+- The directive comment must be placed immediately before the function declaration, or before a function literal or a statement that holds one (see **Function literals** above).
+- A directive comment that annotates no function (for example, before a statement without a function literal, or at the end of a line) is ignored, and the tool logs a warning with its position.
 - The `//` must not be followed by a space (i.e., `//otelc:span`, not `// otelc:span`).
 - The `directive` field must not include the leading `//`.
 - Functions without the directive comment are not affected.
