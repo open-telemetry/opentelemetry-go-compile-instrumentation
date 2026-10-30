@@ -654,3 +654,34 @@ func TestResolveExportFilesBatch_NoExportFile(t *testing.T) {
 	require.Contains(t, failed, "unsafe")
 	assert.Contains(t, failed["unsafe"].Error(), "no export file")
 }
+
+func TestResolveExportFilesBatch_LoadError(t *testing.T) {
+	_, _, err := ResolveExportFilesBatch(t.Context(), []string{"fmt"}, "-otelc-not-a-go-flag")
+
+	require.Error(t, err)
+}
+
+func TestResolveExportFilesBatch_PatternRoots(t *testing.T) {
+	writeBatchFixture(t)
+
+	// A pattern is not an import path: the packages it expands to are roots
+	// that were not requested by path, so they resolve but never count as
+	// failures of the pattern.
+	resolved, failed, err := ResolveExportFilesBatch(t.Context(), []string{"./..."})
+
+	require.NoError(t, err)
+	assert.Empty(t, failed)
+	for _, path := range []string{"example.com/batch/a", "example.com/batch/b", "example.com/batch/c"} {
+		assert.Contains(t, resolved, path)
+	}
+}
+
+func TestResolveExportFilesBatch_NoPackages(t *testing.T) {
+	writeBatchFixture(t)
+	require.NoError(t, os.MkdirAll("empty", 0o755))
+
+	_, _, err := ResolveExportFilesBatch(t.Context(), []string{"./empty/..."})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no packages found")
+}

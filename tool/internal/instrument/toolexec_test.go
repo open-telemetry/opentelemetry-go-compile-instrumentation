@@ -6,6 +6,7 @@ package instrument
 import (
 	"bytes"
 	"encoding/json"
+	"go/build"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -76,13 +77,7 @@ func TestPGOBuildFlags(t *testing.T) {
 // compile-side table above cannot express that shape.
 func TestPGOBuildFlagsForLinkCommand(t *testing.T) {
 	const profile = "warm profile.pgo"
-	linkTool := func() string {
-		name := "link"
-		if runtime.GOOS == "windows" {
-			name += ".exe"
-		}
-		return filepath.Join(string(filepath.Separator)+"go", "pkg", "tool", name)
-	}()
+	linkTool := linkToolPath()
 	args := []string{linkTool, "-o", "app.test", "-buildid=x", "-importcfg", "importcfg.link"}
 
 	tests := []struct {
@@ -1801,4 +1796,131 @@ func TestResolveRuleAddedImportsSkipsBuiltinPseudoPackages(t *testing.T) {
 	assert.Contains(t, linkConfig.PackageFile, "fmt")
 	assert.NotContains(t, linkConfig.PackageFile, "unsafe")
 	assert.NotContains(t, linkConfig.PackageFile, "C")
+}
+
+// TestRuleAddedImportsIgnoresMalformedMatchedRules checks that a matched.json
+// the link cannot parse yields no candidates instead of failing the link.
+func TestRuleAddedImportsIgnoresMalformedMatchedRules(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), []byte("{not json"), 0o600))
+
+	linkConfig := imports.ImportConfig{PackageFile: map[string]string{"example.com/app/dep": "/unused/dep.a"}}
+	assert.Empty(t, ruleAddedImports(t.Context(), &linkConfig))
+}
+
+// TestFileRuleImportsSkipsUnusableSources checks every add_file source the
+// link cannot use: no resolved path, a missing file, a malformed build
+// constraint, and a file without a valid package clause.
+func TestFileRuleImportsSkipsUnusableSources(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "badconstraint.go"),
+		[]byte("//go:build (\n\npackage hooks\n\nimport \"os\"\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "notgo.go"),
+		[]byte("this is not Go\n"), 0o644))
+
+	bctx := build.Default
+	for _, tt := range []struct {
+		name string
+		rule *rule.InstFileRule
+	}{
+		{name: "no resolved path", rule: &rule.InstFileRule{File: "hooks.go"}},
+		{name: "missing file", rule: &rule.InstFileRule{File: "missing.go", ResolvedPath: dir}},
+		{name: "malformed build constraint", rule: &rule.InstFileRule{File: "badconstraint.go", ResolvedPath: dir}},
+		{name: "no package clause", rule: &rule.InstFileRule{File: "notgo.go", ResolvedPath: dir}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Empty(t, fileRuleImports(t.Context(), &bctx, tt.rule))
+		})
+	}
+}
+
+// TestResolveRuleAddedImportsKeepsListedDependencies checks that a resolved
+// transitive dependency the link already lists keeps its archive: only the
+// missing packages are added.
+func TestResolveRuleAddedImportsKeepsListedDependencies(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	writeMatchedRules(t, []*rule.InstRuleSet{{
+		PackageName: "dep",
+		ModulePath:  "example.com/app/dep",
+		FuncRules: map[string][]*rule.InstFuncRule{
+			"dep.go": {{InstBaseRule: rule.InstBaseRule{
+				Name:    "rule",
+				Target:  rule.NewTarget("example.com/app/dep"),
+				Imports: map[string]string{"std": "fmt"},
+			}}},
+		},
+	}})
+
+	linkConfig := imports.ImportConfig{PackageFile: map[string]string{
+		"example.com/app/dep": "/unused/dep.a",
+		"errors":              "/listed/errors.a",
+	}}
+	updated, err := resolveRuleAddedImports(t.Context(), nil, &linkConfig)
+	require.NoError(t, err)
+	assert.True(t, updated)
+	assert.Contains(t, linkConfig.PackageFile, "fmt")
+	assert.Equal(t, "/listed/errors.a", linkConfig.PackageFile["errors"],
+		"a dependency the link already lists must keep its archive")
+}
+
+// TestInterceptLinkFailsWhenRecoveryFails checks that an error while
+// recovering rule-added imports stops the link: an unreadable recorded PGO
+// profile and a nested go list that cannot run both surface as errors.
+func TestInterceptLinkFailsWhenRecoveryFails(t *testing.T) {
+	sets := []*rule.InstRuleSet{{
+		PackageName: "dep",
+		ModulePath:  "example.com/app/dep",
+		FuncRules: map[string][]*rule.InstFuncRule{
+			"dep.go": {{InstBaseRule: rule.InstBaseRule{
+				Name:    "rule",
+				Target:  rule.NewTarget("example.com/app/dep"),
+				Imports: map[string]string{"std": "fmt"},
+			}}},
+		},
+	}}
+	writeLinkConfig := func(t *testing.T, workDir string) string {
+		t.Helper()
+		cfgPath := filepath.Join(workDir, "importcfg.link")
+		require.NoError(t, os.WriteFile(cfgPath, []byte("packagefile example.com/app/dep=/unused/dep.a\n"), 0o644))
+		return cfgPath
+	}
+
+	t.Run("unreadable recorded PGO profile", func(t *testing.T) {
+		workDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, workDir)
+		writeMatchedRules(t, sets)
+		// A directory where the profile record belongs makes the read fail.
+		require.NoError(t, os.MkdirAll(util.GetPGOProfileFile(), 0o755))
+
+		// pgoBuildFlagsFor reads the recorded profile only for a real link
+		// tool path, so this case uses one.
+		args := linkArgs(writeLinkConfig(t, workDir))
+		args[0] = linkToolPath()
+		_, err := interceptLink(t.Context(), args)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "PGO profile")
+	})
+
+	t.Run("nested go list cannot run", func(t *testing.T) {
+		workDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, workDir)
+		t.Setenv(util.EnvOtelcBuildFlags, `["-otelc-not-a-go-flag"]`)
+		writeMatchedRules(t, sets)
+
+		_, err := interceptLink(t.Context(), linkArgs(writeLinkConfig(t, workDir)))
+		require.Error(t, err)
+	})
+}
+
+// linkToolPath returns a path that util.IsLinkCommandWithArgs accepts as the
+// link tool.
+func linkToolPath() string {
+	name := "link"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	return filepath.Join(string(filepath.Separator)+"go", "pkg", "tool", name)
 }
