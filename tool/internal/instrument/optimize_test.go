@@ -632,6 +632,50 @@ func assertCasePanics(t *testing.T, stmt dst.Stmt) {
 	assert.Equal(t, "panic", callIdent.Name)
 }
 
+// TestIsPanicClause exercises isPanicClause directly against the clause
+// shapes dropConcreteSlotClauses can encounter in a generic target's
+// GetReturnVal/SetReturnVal switch: the type-parameter panic clause kept as
+// is; a bare return, the shape GetReturnVal's concrete-slot clauses take;
+// an expression statement that isn't a call (a channel receive stands in
+// for SetReturnVal's assignment-shaped concrete-slot clauses, since a bare
+// assignment doesn't parse as an *dst.ExprStmt at all and would otherwise
+// exercise the same branch as the bare return above); and a clause with
+// more than one statement, which no current codegen path produces but
+// which the body-length guard must still reject correctly.
+func TestIsPanicClause(t *testing.T) {
+	funcDecl := parseFunc(t, `
+		package main
+
+		func f(idx int, ch chan int) {
+			switch idx {
+			case 0:
+				panic("unsupported")
+			case 1:
+				return
+			case 2:
+				<-ch
+			case 3:
+				foo()
+				bar()
+			}
+		}
+	`)
+	switchStmt, ok := funcDecl.Body.List[0].(*dst.SwitchStmt)
+	require.True(t, ok, "test fixture should parse to a switch statement")
+	require.Len(t, switchStmt.Body.List, 4)
+
+	caseClause := func(i int) *dst.CaseClause {
+		clause, isClause := switchStmt.Body.List[i].(*dst.CaseClause)
+		require.True(t, isClause)
+		return clause
+	}
+
+	assert.True(t, isPanicClause(caseClause(0)), "a single panic call is a panic clause")
+	assert.False(t, isPanicClause(caseClause(1)), "a bare return is not a panic clause")
+	assert.False(t, isPanicClause(caseClause(2)), "a non-call expression statement is not a panic clause")
+	assert.False(t, isPanicClause(caseClause(3)), "more than one statement is not a panic clause")
+}
+
 func TestFlattenTJump(t *testing.T) {
 	tests := []struct {
 		name          string
