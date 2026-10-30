@@ -21,7 +21,7 @@ import (
 // This is used when adding a new file (e.g., via file rules) that has its own imports which may
 // not be in the target package's importcfg.
 func (ip *instrumentPhase) updateImportConfigForFile(ctx context.Context, root *dst.File, ruleName string) error {
-	paths := imports.CollectPaths(ctx, root)
+	paths := imports.CollectImportPaths(root)
 
 	if len(paths) == 0 {
 		return nil
