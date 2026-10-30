@@ -504,13 +504,11 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	}
 	matched = append(matched, injected...)
 
-	// Reported here rather than per matching pass: an individual pass matching
-	// nothing is normal, it is the combined result that tells the user whether
-	// anything will be instrumented.
-	if len(matched) == 0 {
-		_, _ = fmt.Fprintf(os.Stderr, "Warning: no instrumentation will be applied\n")
-		sp.Warn("no instrumentation rules matched any dependencies")
+	if err = sp.validateSelectedConfigurationMetadata(matched); err != nil {
+		return ex.Wrapf(err, "validating selected instrumentation configuration metadata")
 	}
+
+	sp.warnIfNoInstrumentationMatched(matched)
 
 	// Generate otelc.runtime.go for all packages
 	if err = sp.generateRuntimePerPackage(ctx, buildPkgs, matched); err != nil {
@@ -519,6 +517,15 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 
 	// Write the matched ruleset to matched.json for further instrument phase
 	return sp.store(matched)
+}
+
+// warnIfNoInstrumentationMatched reports the combined result. An individual
+// matching pass may legitimately find no instrumentation rules.
+func (sp *setupPhase) warnIfNoInstrumentationMatched(matched []*rule.InstRuleSet) {
+	if len(matched) == 0 {
+		_, _ = fmt.Fprintf(os.Stderr, "Warning: no instrumentation will be applied\n")
+		sp.Warn("no instrumentation rules matched any dependencies")
+	}
 }
 
 // setupGoCache creates a persistent GOCACHE in .otelc-build/gocache if one isn't already set.
