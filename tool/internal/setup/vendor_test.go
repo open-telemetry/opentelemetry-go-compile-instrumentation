@@ -269,8 +269,8 @@ func TestRuleSetImports(t *testing.T) {
 		"example.com/file": true, "example.com/file/imp": true,
 		"example.com/raw": true, "example.com/struct": true, "example.com/call": true,
 		"example.com/lit": true, "example.com/directive": true, "fmt": true,
-	}, ruleSetImports([]*rule.InstRuleSet{rs}))
-	assert.Empty(t, ruleSetImports(nil))
+	}, (&setupPhase{}).ruleSetImports([]*rule.InstRuleSet{rs}))
+	assert.Empty(t, (&setupPhase{}).ruleSetImports(nil))
 }
 
 // TestVendorSyncRuleSets: the packages of the matched rules reach vendorSync
@@ -297,18 +297,18 @@ func TestVendorSyncRuleSets(t *testing.T) {
 	}
 
 	ctx := contextWithStateManager(t.Context(), sm)
-	require.NoError(t, vendorSyncRuleSets(ctx, nil, []string{dir}))
+	require.NoError(t, (&setupPhase{}).vendorSyncRuleSets(ctx, nil, []string{dir}))
 	assert.Empty(t, calls, "no rules: no vendorSync")
 
 	rs := rule.NewInstRuleSet("example.com/app")
 	rs.AddFuncRule(filepath.Join(dir, "main.go"), &rule.InstFuncRule{Path: "example.com/hook"})
-	require.NoError(t, vendorSyncRuleSets(ctx, []*rule.InstRuleSet{rs}, []string{dir, dir}))
+	require.NoError(t, (&setupPhase{}).vendorSyncRuleSets(ctx, []*rule.InstRuleSet{rs}, []string{dir, dir}))
 	require.Len(t, calls, 1, "one call for each module")
 	assert.Equal(t, map[string]bool{"example.com/hook": true}, calls[0].imports)
 	assert.Equal(t, dir, calls[0].moduleDir)
 	assert.True(t, calls[0].tracked, "go.mod is tracked before vendorSync")
 
-	require.Error(t, vendorSyncRuleSets(t.Context(), []*rule.InstRuleSet{rs}, []string{dir}),
+	require.Error(t, (&setupPhase{}).vendorSyncRuleSets(t.Context(), []*rule.InstRuleSet{rs}, []string{dir}),
 		"no state manager")
 }
 
@@ -331,6 +331,39 @@ func TestSetupVendorSyncsCustomRuleHooks(t *testing.T) {
   raw: "_ = 1"
   imports:
     _: example.com/extra
+`)
+	t.Setenv(util.EnvOtelcRules, rules)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	require.NoError(t, Setup(t.Context(), newParsedCommand(t, "setup", ".")))
+
+	assert.Contains(t, readAppFile(t, appDir, filepath.Join(vendorDirName, modulesTxtFileName)),
+		"# example.com/extra v1.0.0\n## explicit; go 1.21\nexample.com/extra\n")
+	assert.FileExists(t, filepath.Join(appDir, vendorDirName, "example.com", "extra", "extra.go"))
+}
+
+// TestSetupVendorSyncsCustomRuleFileImports: with custom rules in vendor mode,
+// an add_file source file (a //go:build ignore file, which "go mod vendor"
+// does not see) can import a package that is not in vendor/. Setup must add
+// this package to vendor/ after it resolves the path of the rule, because
+// only then can it read the imports of the file.
+func TestSetupVendorSyncsCustomRuleFileImports(t *testing.T) {
+	appDir := newVendorSyncApp(t)
+	goMod := readAppFile(t, appDir, goModFileName)
+	mustWriteFile(t, filepath.Join(appDir, goModFileName), goMod+"\nrequire example.com/extra v1.0.0\n")
+	modulesTxt := readAppFile(t, appDir, filepath.Join(vendorDirName, modulesTxtFileName))
+	mustWriteFile(t, filepath.Join(appDir, vendorDirName, modulesTxtFileName),
+		modulesTxt+"# example.com/extra v1.0.0\n## explicit; go 1.21\n")
+	mustWriteFile(t, filepath.Join(appDir, "hooks", "doc.go"), "package hooks\n")
+	mustWriteFile(t, filepath.Join(appDir, "hooks", "added.go"),
+		"//go:build ignore\n\npackage hooks\n\nimport _ \"example.com/extra\"\n")
+	rules := filepath.Join(t.TempDir(), "rules.yaml")
+	mustWriteFile(t, rules, `add_hooks_file:
+  target: main
+  do:
+    - add_file:
+        file: added.go
+        path: example.com/app/hooks
 `)
 	t.Setenv(util.EnvOtelcRules, rules)
 	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
@@ -470,14 +503,14 @@ func TestVendorSyncRuleSetsErrors(t *testing.T) {
 			return os.ErrPermission
 		}
 		ctx := contextWithStateManager(t.Context(), newStateManager())
-		require.ErrorIs(t, vendorSyncRuleSets(ctx, matched, []string{dir}), os.ErrPermission)
+		require.ErrorIs(t, (&setupPhase{}).vendorSyncRuleSets(ctx, matched, []string{dir}), os.ErrPermission)
 	})
 
 	t.Run("the go command is not found", func(t *testing.T) {
 		dir := newModule(t)
 		t.Setenv("PATH", "")
 		ctx := contextWithStateManager(t.Context(), newStateManager())
-		err := vendorSyncRuleSets(ctx, matched, []string{dir})
+		err := (&setupPhase{}).vendorSyncRuleSets(ctx, matched, []string{dir})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "GOWORK")
 	})
@@ -495,7 +528,7 @@ func TestVendorSyncRuleSetsErrors(t *testing.T) {
 			return nil
 		}
 		ctx := contextWithStateManager(t.Context(), newStateManager())
-		err := vendorSyncRuleSets(ctx, matched, []string{dir})
+		err := (&setupPhase{}).vendorSyncRuleSets(ctx, matched, []string{dir})
 		require.ErrorIs(t, err, os.ErrPermission)
 		// The error comes from the snapshot in the state directory, not
 		// from an earlier step (for example the go env call).

@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"strings"
 
+	"golang.org/x/mod/module"
+
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -172,7 +174,11 @@ func findModVersion(path string) string {
 	if version == "" {
 		return ""
 	}
-	return version[1 : len(version)-1]
+	raw := version[1 : len(version)-1]
+	if unescaped, err := module.UnescapeVersion(raw); err == nil {
+		return unescaped
+	}
+	return raw
 }
 
 // findGoSources extracts Go source files from compile command arguments,

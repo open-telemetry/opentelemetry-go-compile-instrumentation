@@ -635,7 +635,7 @@ func applyVendorMerge(ctx context.Context, moduleDir, scratchVendor string, res 
 		}
 	}
 
-	keepForDebug(ctx, goModPath)
+	keepForDebug(ctx, goModPath, "")
 	util.LoggerFromContext(ctx).InfoContext(ctx, "added the packages of the hook code to the vendor directory",
 		"vendor", vendorDir, "packages", len(res.added), "files", len(copies), "removed", len(res.deleted))
 	return nil

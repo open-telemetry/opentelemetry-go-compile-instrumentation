@@ -34,6 +34,37 @@ func TestCollectPackageNames(t *testing.T) {
 	}, names)
 }
 
+func TestCollectPackageNames_TestVariantImports(t *testing.T) {
+	// The in-package test variant shares PkgPath with the base package but has
+	// a distinct ID (e.g. "example.com/a [example.com/a.test]"). Imports used
+	// only by _test.go files must still be collected into the name table.
+	helper := &packages.Package{
+		ID:      "example.com/helper",
+		PkgPath: "example.com/helper",
+		Name:    "helper",
+	}
+	basePkg := &packages.Package{
+		ID:      "example.com/a",
+		PkgPath: "example.com/a",
+		Name:    "apkg",
+	}
+	testPkg := &packages.Package{
+		ID:      "example.com/a [example.com/a.test]",
+		PkgPath: "example.com/a",
+		Name:    "apkg",
+		Imports: map[string]*packages.Package{
+			"example.com/helper": helper,
+		},
+	}
+
+	names := CollectPackageNames([]*packages.Package{basePkg, testPkg})
+
+	assert.Equal(t, map[string]string{
+		"example.com/a":      "apkg",
+		"example.com/helper": "helper",
+	}, names)
+}
+
 func TestCollectPackageNames_SkipsEmptyName(t *testing.T) {
 	pkg := &packages.Package{PkgPath: "example.com/broken", Name: ""}
 

@@ -202,10 +202,14 @@ func CollectPackageNames(pkgs []*packages.Package) map[string]string {
 
 	var walk func(pkg *packages.Package)
 	walk = func(pkg *packages.Package) {
-		if visited[pkg.PkgPath] {
+		key := pkg.ID
+		if key == "" {
+			key = pkg.PkgPath
+		}
+		if visited[key] {
 			return
 		}
-		visited[pkg.PkgPath] = true
+		visited[key] = true
 
 		if pkg.Name != "" {
 			result[pkg.PkgPath] = pkg.Name

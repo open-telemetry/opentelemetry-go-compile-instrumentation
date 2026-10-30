@@ -195,9 +195,9 @@ var vendorSyncHook = vendorSync
 // ruleSetImports returns the packages that the rules of matched add to the
 // build: the hook packages of the function and file rules, and the values of
 // the imports maps of all the rules.
-func ruleSetImports(matched []*rule.InstRuleSet) map[string]bool {
+func (sp *setupPhase) ruleSetImports(matched []*rule.InstRuleSet) map[string]bool {
 	imports := make(map[string]bool)
-	for _, path := range hookPackagePaths(matched) {
+	for _, path := range sp.hookPackagePaths(matched) {
 		imports[path] = true
 	}
 	for _, rs := range matched {
@@ -263,8 +263,8 @@ func appendBaseRules[R any](
 // change, it tracks go.mod, go.sum and the tool file of each module, so the
 // state manager restores them after the build. vendorSync tracks the files in
 // vendor/.
-func vendorSyncRuleSets(ctx context.Context, matched []*rule.InstRuleSet, moduleDirs []string) error {
-	imports := ruleSetImports(matched)
+func (sp *setupPhase) vendorSyncRuleSets(ctx context.Context, matched []*rule.InstRuleSet, moduleDirs []string) error {
+	imports := sp.ruleSetImports(matched)
 	if len(imports) == 0 {
 		return nil
 	}

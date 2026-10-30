@@ -41,7 +41,7 @@ const (
 //nolint:gochecknoglobals // test data
 var hookDepVersions = []string{
 	hookDepModule + "@" + hookDepMinVersion,
-	"golang.org/x/sys@v0.47.0",
+	"golang.org/x/sys@v0.48.0",
 	"google.golang.org/protobuf@v1.36.12",
 }
 

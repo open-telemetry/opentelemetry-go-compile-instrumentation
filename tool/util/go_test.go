@@ -789,6 +789,61 @@ func TestNewFileScanner(t *testing.T) {
 	assert.Equal(t, []string{"line1", "line2", "line3"}, lines)
 }
 
+func TestHasPackagePattern(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    string
+		expected bool
+	}{
+		{name: "all packages", value: "all=-N -l", expected: true},
+		{name: "standard library", value: "std=-l", expected: true},
+		{name: "import path pattern", value: "example.com/...=-m", expected: true},
+		{name: "relative pattern", value: "./...=-l", expected: true},
+		{name: "multiple flags without pattern", value: "-N -l", expected: false},
+		{name: "single flag without pattern", value: "-l", expected: false},
+		{name: "empty", value: "", expected: false},
+		{name: "whitespace", value: "  ", expected: false},
+		{name: "leading space", value: " all=-l", expected: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, HasPackagePattern(tt.value))
+		})
+	}
+}
+
+func TestStripUnpatternedGcflagsFromGoflags(t *testing.T) {
+	tests := []struct {
+		name     string
+		goflags  string
+		expected string
+	}{
+		{name: "empty", goflags: "", expected: ""},
+		{name: "no gcflags", goflags: "-mod=mod -race", expected: "-mod=mod -race"},
+		{name: "unpatterned", goflags: "-gcflags=-l", expected: ""},
+		{name: "single quoted unpatterned", goflags: "'-gcflags=-N -l'", expected: ""},
+		{name: "double quoted unpatterned", goflags: `"-gcflags=-l"`, expected: ""},
+		{name: "empty value", goflags: "-gcflags=", expected: ""},
+		{name: "double dash unpatterned", goflags: "--gcflags=-l", expected: ""},
+		{name: "patterned", goflags: "-gcflags=all=-l", expected: "-gcflags=all=-l"},
+		{
+			name:     "quoted patterned preserved verbatim",
+			goflags:  `"-gcflags=all=-N -l"`,
+			expected: `"-gcflags=all=-N -l"`,
+		},
+		{
+			name:     "mixed flags keep order",
+			goflags:  "-mod=mod -gcflags=-l -tags=x '-gcflags=std=-N -l'",
+			expected: "-mod=mod -tags=x '-gcflags=std=-N -l'",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, StripUnpatternedGcflagsFromGoflags(tt.goflags))
+		})
+	}
+}
+
 func TestStripToolexecFromGoflags(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -835,6 +890,36 @@ func TestStripToolexecFromGoflags(t *testing.T) {
 			goflags:  "  -mod=mod   -toolexec=otelc  ",
 			expected: "-mod=mod",
 		},
+		{
+			name:     "bare toolexec boolean flag",
+			goflags:  "-toolexec",
+			expected: "",
+		},
+		{
+			name:     "bare double-dash toolexec flag",
+			goflags:  "--toolexec=otelc",
+			expected: "",
+		},
+		{
+			name:     "bare double-dash toolexec boolean flag",
+			goflags:  "--toolexec",
+			expected: "",
+		},
+		{
+			name:     "single-quoted double-dash toolexec flag with space",
+			goflags:  "'--toolexec=otelc toolexec'",
+			expected: "",
+		},
+		{
+			name:     "double-quoted double-dash toolexec flag with space",
+			goflags:  `"--toolexec=otelc toolexec"`,
+			expected: "",
+		},
+		{
+			name:     "double-dash toolexec flag between other flags",
+			goflags:  "-mod=mod '--toolexec=otelc toolexec' -race",
+			expected: "-mod=mod -race",
+		},
 	}
 
 	for _, tt := range tests {
@@ -844,4 +929,38 @@ func TestStripToolexecFromGoflags(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUserBuildTags(t *testing.T) {
+	tests := []struct {
+		name       string
+		goflags    []string
+		buildFlags []string
+		expected   []string
+	}{
+		{name: "empty flags", expected: nil},
+		{name: "tags in goflags with equals", goflags: []string{"-tags=a,b"}, expected: []string{"a", "b"}},
+		{name: "tags in goflags with space", goflags: []string{"-tags", "a,b"}, expected: []string{"a", "b"}},
+		{name: "tags in goflags with double dash", goflags: []string{"--tags=a,b"}, expected: []string{"a", "b"}},
+		{name: "space-separated tags", goflags: []string{"-tags=a b"}, expected: []string{"a", "b"}},
+		{name: "quoted tags value", goflags: []string{`-tags="a,b"`}, expected: []string{"a", "b"}},
+		{
+			name:       "buildFlags overrides goflags",
+			goflags:    []string{"-tags=a"},
+			buildFlags: []string{"-tags=b,c"},
+			expected:   []string{"b", "c"},
+		},
+		{name: "last value wins", goflags: []string{"-tags=a", "-tags=b"}, expected: []string{"b"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, UserBuildTags(tt.goflags, tt.buildFlags))
+		})
+	}
+}
+
+func TestActiveBuildTags(t *testing.T) {
+	t.Setenv("GOFLAGS", "-tags=integration,test")
+	tags := ActiveBuildTags()
+	assert.Equal(t, []string{"integration", "test"}, tags)
 }

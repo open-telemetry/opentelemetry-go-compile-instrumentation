@@ -131,11 +131,36 @@ func SplitGoflags(goflags string) []string {
 // `otelc go build`, and nested mode, which instruments compiles, during
 // instrumentation.
 func StripToolexecFromGoflags(goflags string) string {
+	return filterGoflags(goflags, func(unquoted string) bool {
+		return unquoted == "-toolexec" || strings.HasPrefix(unquoted, "-toolexec=") ||
+			unquoted == "--toolexec" || strings.HasPrefix(unquoted, "--toolexec=")
+	})
+}
+
+// HasPackagePattern reports whether a per-package flag value starts with a
+// package pattern, following cmd/go/internal/load.(*PerPackageFlag).set.
+// A value without a pattern applies only to the go command's command-line packages.
+func HasPackagePattern(value string) bool {
+	value = strings.TrimSpace(value)
+	return value != "" && !strings.HasPrefix(value, "-")
+}
+
+// StripUnpatternedGcflagsFromGoflags returns goflags without -gcflags entries
+// that apply only to the go command's command-line packages.
+func StripUnpatternedGcflagsFromGoflags(goflags string) string {
+	return filterGoflags(goflags, func(unquoted string) bool {
+		name, value, ok := strings.Cut(unquoted, "=")
+		return ok && (name == "-gcflags" || name == "--gcflags") && !HasPackagePattern(value)
+	})
+}
+
+// filterGoflags returns goflags without the tokens drop reports. drop sees each
+// token with its surrounding quotes removed; kept tokens are joined verbatim.
+func filterGoflags(goflags string, drop func(unquoted string) bool) string {
 	tokens := SplitGoflags(goflags)
 	kept := make([]string, 0, len(tokens))
 	for _, token := range tokens {
-		unquoted := UnquoteGoflagsToken(token)
-		if unquoted == "-toolexec" || strings.HasPrefix(unquoted, "-toolexec=") {
+		if drop(UnquoteGoflagsToken(token)) {
 			continue
 		}
 		kept = append(kept, token)
@@ -327,4 +352,42 @@ func NewFileScanner(file *os.File, size int) (*bufio.Scanner, error) {
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 0, size), size)
 	return scanner, nil
+}
+
+// ActiveBuildTags returns the build tags of the current go build.
+func ActiveBuildTags() []string {
+	return UserBuildTags(SplitGoflags(os.Getenv("GOFLAGS")), GetBuildFlags())
+}
+
+// UserBuildTags returns the build tags of the effective -tags flag. Flags from
+// buildFlags (the command line) override GOFLAGS, as they do in the go command.
+func UserBuildTags(goflags, buildFlags []string) []string {
+	value, found := lastTagsValue(goflags)
+	if v, ok := lastTagsValue(buildFlags); ok {
+		value, found = v, true
+	}
+	if !found {
+		return nil
+	}
+	return strings.FieldsFunc(strings.Trim(value, `"'`), func(r rune) bool {
+		return r == ',' || r == ' '
+	})
+}
+
+func lastTagsValue(flags []string) (string, bool) {
+	value, found := "", false
+	for i := 0; i < len(flags); i++ {
+		flag := flags[i]
+		if strings.HasPrefix(flag, "--") {
+			flag = flag[1:]
+		}
+		switch {
+		case flag == "-tags" && i+1 < len(flags):
+			value, found = flags[i+1], true
+			i++
+		case strings.HasPrefix(flag, "-tags="):
+			value, found = strings.TrimPrefix(flag, "-tags="), true
+		}
+	}
+	return value, found
 }

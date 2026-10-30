@@ -24,7 +24,6 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
-	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -456,7 +455,7 @@ func updateToolFile(ctx context.Context, toolFile string, prunedImports map[stri
 
 	updateGenerateDirective(f, vendorPinOptions(ctx, filepath.Dir(toolFile), opts))
 
-	updated, printErr := ast.PrintFile(f)
+	updated, printErr := ast.RenderFile(f)
 	if printErr != nil {
 		return printErr
 	}
@@ -703,7 +702,7 @@ func generatePinnedProjects(ctx context.Context, moduleDirs []string, opts PinOp
 			}
 		}
 
-		keepForDebug(ctx, path)
+		keepForDebug(ctx, path, "")
 	}
 
 	// Intentionally return an empty PinResult
@@ -769,12 +768,7 @@ func pinLocked(ctx context.Context, opts PinOptions) (*PinResult, error) {
 	// (not as part of a setup run), so use opts.Args to find module directories.
 	if len(moduleDirs) == 0 {
 		// Use opts.Args to find module directories
-		buildPkgs, _, getErr := getBuildPackages(ctx, subcommand, opts.Args)
-		if getErr != nil {
-			return nil, getErr
-		}
-
-		moduleDirs, err = pkgload.FindModuleDirs(ctx, buildPkgs)
+		moduleDirs, err = findBuildModuleDirs(ctx, subcommand, opts.Args)
 		if err != nil {
 			return nil, err
 		}

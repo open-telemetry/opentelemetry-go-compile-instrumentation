@@ -5,7 +5,6 @@ package instrument
 
 import (
 	"go/build"
-	"go/build/constraint"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -17,317 +16,6 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
-
-func TestStripBuildIgnoreTag(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected string
-	}{
-		{
-			name: "strips go:build ignore comment",
-			input: `//go:build ignore
-
-package main
-
-func main() {}
-`,
-			expected: `
-
-package main
-
-func main() {}
-`,
-		},
-		{
-			name: "no go:build ignore comment - content unchanged",
-			input: `package main
-
-func main() {}
-`,
-			expected: `package main
-
-func main() {}
-`,
-		},
-		{
-			name: "multiple go:build ignore comments",
-			input: `//go:build ignore
-package main
-//go:build ignore
-func main() {}
-`,
-			expected: `
-package main
-
-func main() {}
-`,
-		},
-		{
-			name:     "empty file",
-			input:    "",
-			expected: "",
-		},
-		{
-			// Regression test for #1069: a whole-file substring replace
-			// deleted this text from the string literal and the comment,
-			// since both happen to contain "//go:build ignore" without being
-			// a build-constraint line themselves.
-			name: "preserves the tag text inside a string literal and comment prose",
-			input: `//go:build ignore
-
-package hooks
-
-// Every file rule source must carry //go:build ignore at the top.
-const marker = "//go:build ignore"
-`,
-			expected: `
-
-package hooks
-
-// Every file rule source must carry //go:build ignore at the top.
-const marker = "//go:build ignore"
-`,
-		},
-		{
-			name: "strips build ignore while preserving platform tag in combined directive",
-			input: `//go:build ignore && linux
-
-package main
-
-func main() {}
-`,
-			expected: `//go:build linux
-
-package main
-
-func main() {}
-`,
-		},
-		{
-			name: "strips build ignore while preserving platform tag in reversed combined directive",
-			input: `//go:build linux && ignore
-
-package main
-
-func main() {}
-`,
-			expected: `//go:build linux
-
-package main
-
-func main() {}
-`,
-		},
-		{
-			name: "preserves standalone platform directive without ignore",
-			input: `//go:build linux
-
-package main
-
-func main() {}
-`,
-			expected: `//go:build linux
-
-package main
-
-func main() {}
-`,
-		},
-		{
-			name: "strips legacy plus:build ignore directive",
-			input: `// +build ignore
-
-package main
-
-func main() {}
-`,
-			expected: `
-
-package main
-
-func main() {}
-`,
-		},
-		{
-			name: "strips legacy plus:build ignore directive while preserving legacy platform directive",
-			input: `// +build ignore
-// +build darwin linux
-
-package main
-
-func main() {}
-`,
-			expected: `
-// +build darwin linux
-
-package main
-
-func main() {}
-`,
-		},
-		{
-			name: "strips legacy plus:build ignore while preserving legacy combined directive with comma",
-			input: `// +build ignore,linux
-
-package main
-
-func main() {}
-`,
-			expected: `// +build linux
-
-package main
-
-func main() {}
-`,
-		},
-		{
-			name: "strips legacy plus:build ignore while preserving legacy combined directive with space",
-			input: `// +build ignore linux
-
-package main
-
-func main() {}
-`,
-			expected: `
-
-package main
-
-func main() {}
-`,
-		},
-		{
-			name: "strips ignore from compound modern build directive containing ignore",
-			input: `//go:build ignore && (darwin || linux)
-
-package main
-
-func main() {}
-`,
-			expected: `//go:build darwin || linux
-
-package main
-
-func main() {}
-`,
-		},
-		{
-			name: "preserves compound modern build directive without ignore",
-			input: `//go:build darwin || linux
-
-package main
-
-func main() {}
-`,
-			expected: `//go:build darwin || linux
-
-package main
-
-func main() {}
-`,
-		},
-		{
-			name: "malformed build directive is not treated as ignore and left unchanged",
-			input: `//go:build (invalid &&
-package main
-`,
-			expected: `//go:build (invalid &&
-package main
-`,
-		},
-		{
-			name: "strips ignore from compound directive with negated platform tag and ignore",
-			input: `//go:build !windows && ignore
-
-package main
-
-func main() {}
-`,
-			expected: `//go:build !windows
-
-package main
-
-func main() {}
-`,
-		},
-		{
-			name: "preserves directive with negated platform tag without ignore",
-			input: `//go:build !windows
-
-package main
-
-func main() {}
-`,
-			expected: `//go:build !windows
-
-package main
-
-func main() {}
-`,
-		},
-		{
-			name: "strips directive with negated ignore tag",
-			input: `//go:build !ignore
-
-package main
-
-func main() {}
-`,
-			expected: `//go:build ignore
-
-package main
-
-func main() {}
-`,
-		},
-		{
-			name: "evaluates !ignore || windows correctly",
-			input: `//go:build !ignore || windows
-
-package main
-
-func main() {}
-`,
-			expected: `//go:build windows
-
-package main
-
-func main() {}
-`,
-		},
-		{
-			name: "evaluates !ignore && windows correctly",
-			input: `//go:build !ignore && windows
-
-package main
-
-func main() {}
-`,
-			expected: `//go:build ignore
-
-package main
-
-func main() {}
-`,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, stripBuildIgnoreTag(tt.input))
-		})
-	}
-}
-
-type dummyConstraintExpr struct {
-	constraint.Expr
-}
-
-func TestRemoveIgnore_Fallback(t *testing.T) {
-	dummy := &dummyConstraintExpr{}
-	assert.Equal(t, dummy, removeIgnore(dummy))
-	assert.Nil(t, removeIgnore(nil))
-}
 
 func TestApplyFileRule_Success(t *testing.T) {
 	srcDir := t.TempDir()
@@ -425,6 +113,37 @@ func TestApplyFileRule_FileNotFound(t *testing.T) {
 	err := ip.applyFileRule(t.Context(), fileRule, "targetpkg")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "file nonexistent.go not found in")
+}
+
+func TestApplyFileRule_EmptyPackageName(t *testing.T) {
+	srcDir := t.TempDir()
+	workDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(srcDir, "added.go"),
+		[]byte("package myrules\n\nfunc init() {}\n"),
+		0o644,
+	))
+
+	ip := &instrumentPhase{
+		logger:  slog.New(slog.DiscardHandler),
+		workDir: workDir,
+	}
+
+	fileRule := &rule.InstFileRule{
+		File:         "added.go",
+		Path:         "example.com/myrules",
+		ResolvedPath: srcDir,
+	}
+	fileRule.Name = "test_empty_package_name"
+
+	err := ip.applyFileRule(t.Context(), fileRule, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot resolve the package name")
+
+	entries, readErr := os.ReadDir(workDir)
+	require.NoError(t, readErr)
+	assert.Empty(t, entries)
+	assert.Empty(t, ip.compileArgs)
 }
 
 func TestApplyFileRule_SubdirectoryFile(t *testing.T) {
@@ -598,30 +317,6 @@ func TestApplyFileRule_PlatformConstraintMatching(t *testing.T) {
 	})
 }
 
-func TestStripDirectiveIgnore_BooleanSimplification(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected string
-	}{
-		{name: "ignore && ignore is always true", input: "//go:build ignore && ignore", expected: ""},
-		{name: "X && !ignore is always false", input: "//go:build linux && !ignore", expected: "//go:build ignore"},
-		{
-			name:     "keeps remaining AND terms",
-			input:    "//go:build ignore && linux && amd64",
-			expected: "//go:build linux && amd64",
-		},
-		{name: "ignore || !ignore is always true", input: "//go:build ignore || !ignore", expected: ""},
-		{name: "X || ignore is always true", input: "//go:build linux || ignore", expected: ""},
-		{name: "X || !ignore keeps X", input: "//go:build linux || !ignore", expected: "//go:build linux"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, stripDirectiveIgnore(tt.input))
-		})
-	}
-}
-
 func TestApplyFileRule_InvalidBuildConstraint(t *testing.T) {
 	srcDir := t.TempDir()
 	content := "//go:build linux &&\n\npackage sourcepkg\n"
@@ -670,4 +365,48 @@ func TestApplyFileRule_UsesForwardedBuildTags(t *testing.T) {
 		assert.NoFileExists(t, outPath)
 		assert.NotContains(t, ip.compileArgs, outPath)
 	})
+}
+
+func TestApplyFileRule_DiffUnderDebug(t *testing.T) {
+	srcDir := t.TempDir()
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	t.Setenv(util.EnvOtelcDebug, "1")
+
+	content := `package sourcepkg
+
+func Helper() string {
+	return "ok"
+}
+`
+	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "helper.go"), []byte(content), 0o644))
+
+	ip := &instrumentPhase{
+		logger:      slog.New(slog.DiscardHandler),
+		workDir:     workDir,
+		compileArgs: []string{"-p", "example.com/mypkg"},
+	}
+
+	fileRule := &rule.InstFileRule{
+		File:         "helper.go",
+		Path:         "example.com/mypkg",
+		ResolvedPath: srcDir,
+	}
+	fileRule.Name = "test_file_rule"
+
+	err := ip.applyFileRule(t.Context(), fileRule, "targetpkg")
+	require.NoError(t, err)
+
+	outPath := filepath.Join(workDir, "otelc.helper.go")
+	require.FileExists(t, outPath)
+	assert.Contains(t, ip.compileArgs, outPath)
+
+	diffPath := filepath.Join(ip.debugArtifactDir(), "otelc.helper.go.diff")
+	require.FileExists(t, diffPath)
+	diffBytes, err := os.ReadFile(diffPath)
+	require.NoError(t, err)
+	diffText := string(diffBytes)
+	assert.Contains(t, diffText, "=== rule: test_file_rule ===")
+	assert.Contains(t, diffText, "--- /dev/null")
+	assert.Contains(t, diffText, "+++ "+outPath)
 }

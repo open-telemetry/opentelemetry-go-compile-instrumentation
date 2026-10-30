@@ -5,18 +5,18 @@
 
 package main
 
+//line /<generated>:1
 import _ "unsafe"
 
+//line /golden/work/main.go:8
 func SkippedFunc(p1 string) {}
 
 //otelc:instrument
 func ForcedFunc(p1 string) {
-	//line <generated>:1
-	if hookContext191951179, _ := OtelBeforeTrampoline_ForcedFunc191951179(&p1); false {
+	/*line /<generated>:1*/ if hookContext191951179, _ := OtelBeforeTrampoline_ForcedFunc191951179(&p1); false {
 	} else {
 		defer OtelAfterTrampoline_ForcedFunc191951179(hookContext191951179)
-	}
-	//line main.go:11:28
+	} /*line /golden/work/main.go:10*/
 }
 
 // BothFunc carries both directives; //otelc:ignore must win over
@@ -33,7 +33,7 @@ type T struct{}
 
 func main() {}
 
-//line <generated>:1
+//line /<generated>:1
 type HookContextImpl191951179 struct {
 	params      []interface{}
 	returnVals  []interface{}

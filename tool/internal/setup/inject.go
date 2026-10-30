@@ -6,19 +6,76 @@ package setup
 import (
 	"context"
 	"fmt"
+	"go/parser"
+	"go/token"
 	"os"
+	"path/filepath"
 	"slices"
+	"strconv"
 
 	"golang.org/x/tools/go/packages"
 
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
-// hookPackagePaths returns the packages otelc.runtime.go blank-imports for the
-// given rules, which is every hook package those rules name.
-func hookPackagePaths(matched []*rule.InstRuleSet) []string {
+// fileRuleSourceImports returns the import paths declared in the source file of an InstFileRule.
+// Only files matching the current build constraints are inspected; if a file does not match,
+// (nil, nil) is returned. Results are cached in sp.fileImportsCache to avoid redundant parsing.
+func (sp *setupPhase) fileRuleSourceImports(r *rule.InstFileRule) ([]string, error) {
+	if r == nil || r.ResolvedPath == "" || r.File == "" {
+		return nil, nil
+	}
+	filePath := filepath.Join(r.ResolvedPath, r.File)
+	if sp.fileImportsCache == nil {
+		sp.fileImportsCache = make(map[string][]string)
+	}
+	if cached, ok := sp.fileImportsCache[filePath]; ok {
+		return cached, nil
+	}
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, ex.Wrapf(err, "reading source file %s for rule %q", filePath, r.Name)
+	}
+
+	match, err := ast.MatchFileConstraints(sp.getBuildContext(), r.ResolvedPath, r.File, data)
+	if err != nil {
+		return nil, ex.Wrapf(err, "matching build constraints for rule %q source file %s", r.Name, filePath)
+	}
+	if !match {
+		sp.fileImportsCache[filePath] = nil
+		return nil, nil
+	}
+
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, filePath, data, parser.ImportsOnly)
+	if err != nil {
+		return nil, ex.Wrapf(err, "parsing imports for rule %q source file %s", r.Name, filePath)
+	}
+
+	paths := make([]string, 0, len(f.Imports))
+	for _, imp := range f.Imports {
+		unquoted, _ := strconv.Unquote(imp.Path.Value)
+		if unquoted == "" || unquoted == "C" || unquoted == "unsafe" {
+			continue
+		}
+		paths = append(paths, unquoted)
+	}
+
+	slices.Sort(paths)
+	paths = slices.Compact(paths)
+	sp.fileImportsCache[filePath] = paths
+	return paths, nil
+}
+
+// hookPackagePaths returns the packages that matched rules bring into the build.
+// For func rules and file rules, this includes the hook package (r.Path).
+// For file rules with source files, this also includes any packages imported
+// by the added source file that satisfy the current build constraints.
+func (sp *setupPhase) hookPackagePaths(matched []*rule.InstRuleSet) []string {
 	seen := make(map[string]bool)
 	paths := make([]string, 0)
 	add := func(path string) {
@@ -34,6 +91,21 @@ func hookPackagePaths(matched []*rule.InstRuleSet) []string {
 		}
 		for _, r := range m.FileRules {
 			add(r.Path)
+			srcImps, err := sp.fileRuleSourceImports(r)
+			if err != nil {
+				if sp.logger != nil {
+					sp.Warn(
+						"could not inspect file rule source imports",
+						"rule", r.Name,
+						"file", r.File,
+						"error", err,
+					)
+				}
+				continue
+			}
+			for _, imp := range srcImps {
+				add(imp)
+			}
 		}
 	}
 	return paths
@@ -103,16 +175,12 @@ func injectedDeps(
 // by the caller so the loop can be exercised without loading or matching real
 // packages.
 type injectionPass struct {
-	// prepare, when it is not nil, runs before each load with the rule sets
-	// whose hook packages the load uses. For example, it adds these hook
-	// packages to vendor/, so that load can find them.
-	prepare func(ctx context.Context, matched []*rule.InstRuleSet) error
-	load    func(ctx context.Context, hookPaths []string, known map[string]bool) ([]*Dependency, error)
-	match   func(ctx context.Context, deps []*Dependency) ([]*rule.InstRuleSet, error)
+	load  func(ctx context.Context, hookPaths []string, known map[string]bool) ([]*Dependency, error)
+	match func(ctx context.Context, deps []*Dependency) ([]*rule.InstRuleSet, error)
 }
 
 // runInjectionPasses repeats load-then-match until a pass turns up nothing new.
-func runInjectionPasses(
+func (sp *setupPhase) runInjectionPasses(
 	ctx context.Context,
 	matched []*rule.InstRuleSet,
 	known map[string]bool,
@@ -120,12 +188,7 @@ func runInjectionPasses(
 ) ([]*rule.InstRuleSet, error) {
 	extra := make([]*rule.InstRuleSet, 0)
 	for {
-		if pass.prepare != nil {
-			if err := pass.prepare(ctx, matched); err != nil {
-				return nil, err
-			}
-		}
-		injected, err := pass.load(ctx, hookPackagePaths(matched), known)
+		injected, err := pass.load(ctx, sp.hookPackagePaths(matched), known)
 		if err != nil {
 			return nil, err
 		}
@@ -157,8 +220,10 @@ func runInjectionPasses(
 // packages were never in the plan, so a rule targeting one of them has nothing
 // to match against.
 //
-// Before each load, matchInjectedDeps adds the hook packages to vendor/ when
-// this is necessary (see syncHooksBeforeLoad).
+// When it resolves the paths of the rules that a pass found (and thus before
+// the next pass loads their hook packages), matchInjectedDeps adds the
+// packages of these rules to vendor/ when this is necessary (see
+// resolveRuleSetPaths).
 //
 // Nothing reports this. The build succeeds, matched.json is a valid non-empty
 // list, and the rule is simply absent from it.
@@ -180,7 +245,6 @@ func (sp *setupPhase) matchInjectedDeps(
 	}
 
 	pass := injectionPass{
-		prepare: sp.syncHooksBeforeLoad(ctx, moduleDirs),
 		load: func(ctx context.Context, hookPaths []string, known map[string]bool) ([]*Dependency, error) {
 			injected, err := injectedDeps(ctx, hookPaths, known, buildFlags)
 			if err != nil {
@@ -206,11 +270,16 @@ func (sp *setupPhase) matchInjectedDeps(
 			if err != nil {
 				return nil, ex.Wrapf(err, "matching injected dependencies to hook rules")
 			}
+			if len(more) > 0 {
+				if err = sp.resolveRuleSetPaths(ctx, more, moduleDirs); err != nil {
+					return nil, ex.Wrapf(err, "resolving injected rule paths")
+				}
+			}
 			return more, nil
 		},
 	}
 
-	extra, err := runInjectionPasses(ctx, matched, known, pass)
+	extra, err := sp.runInjectionPasses(ctx, matched, known, pass)
 	if err != nil {
 		return nil, err
 	}

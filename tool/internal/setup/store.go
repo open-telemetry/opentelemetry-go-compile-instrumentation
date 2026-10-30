@@ -113,13 +113,10 @@ func rulePackageDir(pkg *packages.Package) string {
 	return pkg.Dir
 }
 
-// store stores the matched rules to the file
-// It's the pair of the InstrumentPhase.load
-func (sp *setupPhase) store(ctx context.Context, matched []*rule.InstRuleSet, moduleDirs []string) error {
-	if err := resolveRulePaths(ctx, matched, moduleDirs); err != nil {
-		return ex.Wrapf(err, "resolving rule paths")
-	}
-
+// store stores the matched rules to the file.
+// It's the pair of the InstrumentPhase.load.
+// Rule paths must already be resolved via resolveRulePaths.
+func (sp *setupPhase) store(matched []*rule.InstRuleSet) error {
 	bs, err := json.Marshal(matched)
 	if err != nil {
 		return ex.Wrapf(err, "failed to marshal rules to JSON")
@@ -132,7 +129,27 @@ func (sp *setupPhase) store(ctx context.Context, matched []*rule.InstRuleSet, mo
 	}
 	sp.Info("Stored matched sets", "path", f)
 
-	return sp.storeResolvedNames()
+	if err = sp.storeResolvedNames(); err != nil {
+		return err
+	}
+	return sp.storePGOProfile()
+}
+
+// storePGOProfile records the PGO profile the build applies, for the nested
+// builds toolexec runs. It always writes the file, empty when there is no
+// profile, so a profile recorded by an earlier setup never applies to a later
+// build.
+func (sp *setupPhase) storePGOProfile() error {
+	profile, ambiguous := pgoProfile(sp.pgo, sp.buildPackages)
+	if ambiguous {
+		sp.Warn("cannot pick a PGO profile for nested builds: main packages have different default.pgo files")
+	}
+	f := util.GetPGOProfileFile()
+	if err := util.WriteFileAtomic(f, []byte(profile)); err != nil {
+		return ex.Wrapf(err, "failed to write PGO profile to file %s", f)
+	}
+	sp.Info("Stored PGO profile", "path", f, "profile", profile)
+	return nil
 }
 
 // storeResolvedNames persists the import name table built during

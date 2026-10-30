@@ -301,6 +301,12 @@ func (t *callTemplate) compileExpression(
 		return nil, ex.Newf("expected expression statement, got %T", stmts[0])
 	}
 
+	if !placeholderRendered && len(renderData.renderedCallArgs) == 0 {
+		return nil, ex.Newf(
+			"template output did not use {{ . }} or {{ .CallArgument N }}\nGenerated code:\n%s", userResult,
+		)
+	}
+
 	replaceQualifierAliases(exprStmt.X, aliasOverrides)
 	stripDynamicIdents(exprStmt.X)
 
