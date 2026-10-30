@@ -634,6 +634,43 @@ func interceptLink(ctx context.Context, args []string) ([]string, error) {
 // resolves them: a nested go list -export that shares the build cache keys.
 // It reports whether the import config changed.
 func resolveRuleAddedImports(ctx context.Context, linkArgs []string, linkConfig *imports.ImportConfig) (bool, error) {
+	pgoFlags, err := pgoBuildFlagsFor(linkArgs)
+	if err != nil {
+		return false, err
+	}
+	buildFlags := append(util.GetBuildFlags(), pgoFlags...)
+	var updated bool
+	// One pass sees only the rule sets whose targets the importcfg lists
+	// already. A pass that adds a package makes another set reachable: an
+	// add_file on A imports B, and a matched rule on B imports C, which joins
+	// the link only after B does. Repeat until a pass adds nothing. Every
+	// adding pass grows the importcfg, so the rule-added candidates bound the
+	// loop; the chain bound matches the compile side, where each nested
+	// resolution closes one level of the same nesting and fails past the
+	// bound, so a link that walks past it follows a chain no compile accepted.
+	for range maxResolutionChain {
+		pass, err := resolveRuleAddedImportsPass(ctx, buildFlags, linkConfig)
+		if err != nil {
+			return updated, err
+		}
+		if !pass {
+			return updated, nil
+		}
+		updated = true
+	}
+	return updated, ex.Newf(
+		"rules add imports nested deeper than %d",
+		maxResolutionChain,
+	)
+}
+
+// resolveRuleAddedImportsPass resolves one round of rule-added imports the
+// link importcfg does not list yet and reports whether it added any.
+func resolveRuleAddedImportsPass(
+	ctx context.Context,
+	buildFlags []string,
+	linkConfig *imports.ImportConfig,
+) (bool, error) {
 	candidates := ruleAddedImports(ctx, linkConfig)
 	if len(candidates) == 0 {
 		return false, nil
@@ -656,11 +693,6 @@ func resolveRuleAddedImports(ctx context.Context, linkArgs []string, linkConfig 
 	// Sorting keeps the go list output and the importcfg edits stable.
 	slices.Sort(missing)
 
-	pgoFlags, err := pgoBuildFlagsFor(linkArgs)
-	if err != nil {
-		return false, err
-	}
-	buildFlags := append(util.GetBuildFlags(), pgoFlags...)
 	archives, failed, err := pkgload.ResolveExportFilesBatch(ctx, missing, buildFlags...)
 	if err != nil {
 		return false, err

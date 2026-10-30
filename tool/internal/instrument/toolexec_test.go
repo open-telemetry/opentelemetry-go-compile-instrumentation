@@ -1866,6 +1866,56 @@ func TestResolveRuleAddedImportsKeepsListedDependencies(t *testing.T) {
 		"a dependency the link already lists must keep its archive")
 }
 
+// TestResolveRuleAddedImportsFollowsChainedRuleSets covers recovery when a
+// rule-added import is itself the target of a matched rule set: a rule adds
+// fmt to dep, and a matched rule on fmt adds encoding/xml. The link starts
+// without fmt, so the first pass cannot even see fmt's rule set; the pass
+// after fmt joins the importcfg must resolve encoding/xml. encoding/xml is
+// not a dependency of fmt, so only the chain, not a transitive resolution,
+// can add it.
+func TestResolveRuleAddedImportsFollowsChainedRuleSets(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	writeMatchedRules(t, []*rule.InstRuleSet{
+		{
+			PackageName: "dep",
+			ModulePath:  "example.com/app/dep",
+			FuncRules: map[string][]*rule.InstFuncRule{
+				"dep.go": {{InstBaseRule: rule.InstBaseRule{
+					Name:    "dep-rule",
+					Target:  rule.NewTarget("example.com/app/dep"),
+					Imports: map[string]string{"fmt": "fmt"},
+				}}},
+			},
+		},
+		{
+			PackageName: "fmt",
+			ModulePath:  "fmt",
+			FuncRules: map[string][]*rule.InstFuncRule{
+				"print.go": {{InstBaseRule: rule.InstBaseRule{
+					Name:    "fmt-rule",
+					Target:  rule.NewTarget("fmt"),
+					Imports: map[string]string{"xml": "encoding/xml"},
+				}}},
+			},
+		},
+	})
+
+	// The link lists only the rule target itself; every rule-added import is
+	// missing and only the recovery can supply it.
+	linkConfig := imports.ImportConfig{PackageFile: map[string]string{
+		"example.com/app/dep": "/unused/dep.a",
+	}}
+	updated, err := resolveRuleAddedImports(t.Context(), nil, &linkConfig)
+	require.NoError(t, err)
+	assert.True(t, updated)
+	assert.Contains(t, linkConfig.PackageFile, "fmt",
+		"the first pass must resolve the rule-added import itself")
+	assert.Contains(t, linkConfig.PackageFile, "encoding/xml",
+		"the pass after fmt joins the importcfg must resolve the rule set fmt carries")
+}
+
 // TestInterceptLinkFailsWhenRecoveryFails checks that an error while
 // recovering rule-added imports stops the link: an unreadable recorded PGO
 // profile and a nested go list that cannot run both surface as errors.
