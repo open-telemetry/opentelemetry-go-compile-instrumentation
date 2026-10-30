@@ -30,9 +30,10 @@ jobs:
           filters: |
             code:
               - '**/*.go'
+              - '**/go.mod'
+              - '**/go.sum'
+              - 'Makefile'
               - '.tools/golangci.yml'
-              - '.tools/go.mod'
-              - '.tools/go.sum'
               - '.github/workflows/lint-golang.yaml'
 
   golangci-lint:
