@@ -154,6 +154,15 @@ hook_ellipsis:
         before: MyHookEllipsisBefore
         path: "go.opentelemetry.io/otelc/demo/app/basic/instrumentation"
 
+hook_before_only_retvals:
+  target: main
+  where:
+    func: ReturnsValue
+  do:
+    - inject_hooks:
+        before: MyHookRetValsBefore
+        path: "go.opentelemetry.io/otelc/demo/app/basic/instrumentation"
+
 hook_function_a:
   target: main
   where:
