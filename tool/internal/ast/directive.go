@@ -236,13 +236,13 @@ func HasLeadingDirective(stmt dst.Stmt, directive string) bool {
 
 // FuncDirectiveMatch pairs a function matched by FindFuncsByDirective with
 // the key:value arguments parsed from its matching directive comment. Exactly
-// one of Func and Lit is set. Enclosing is the top-level function declaration
-// that contains Lit, or nil if Lit is outside any function (e.g. in a
-// package-level var).
+// one of Func and Lit is set. Enclosing is the top-level declaration that
+// contains Lit: a *dst.FuncDecl, or a *dst.GenDecl if Lit is outside any
+// function (e.g. in a package-level var).
 type FuncDirectiveMatch struct {
 	Func      *dst.FuncDecl
 	Lit       *dst.FuncLit
-	Enclosing *dst.FuncDecl
+	Enclosing dst.Decl
 	Args      []DirectiveArg
 }
 
@@ -274,7 +274,7 @@ func FileHasLeadingDirective(file *dst.File, directive string) bool {
 func FindFuncsByDirective(file *dst.File, directive string) ([]FuncDirectiveMatch, error) {
 	var (
 		matches   []FuncDirectiveMatch
-		enclosing *dst.FuncDecl
+		enclosing dst.Decl
 		err       error
 	)
 	seen := make(map[*dst.FuncLit]bool)
@@ -316,7 +316,7 @@ func FindFuncsByDirective(file *dst.File, directive string) ([]FuncDirectiveMatc
 		return true
 	}
 	for _, decl := range file.Decls {
-		enclosing, _ = decl.(*dst.FuncDecl)
+		enclosing = decl
 		dst.Inspect(decl, visit)
 	}
 	if err != nil {
@@ -412,17 +412,30 @@ func annotatedFuncLiterals(n dst.Node) []*dst.FuncLit {
 
 // funcLitValues returns the function literals among exprs. A call of a
 // function literal counts as that literal. The arguments of a call do not.
+// Parentheses around a literal or around the called expression are ignored.
 func funcLitValues(exprs ...dst.Expr) []*dst.FuncLit {
 	var literals []*dst.FuncLit
 	for _, expr := range exprs {
+		expr = unparen(expr)
 		if call, isCall := expr.(*dst.CallExpr); isCall {
-			expr = call.Fun
+			expr = unparen(call.Fun)
 		}
 		if lit, isLit := expr.(*dst.FuncLit); isLit {
 			literals = append(literals, lit)
 		}
 	}
 	return literals
+}
+
+// unparen returns expr without the parentheses around it.
+func unparen(expr dst.Expr) dst.Expr {
+	for {
+		paren, isParen := expr.(*dst.ParenExpr)
+		if !isParen {
+			return expr
+		}
+		expr = paren.X
+	}
 }
 
 // tokenize splits input on whitespace, respecting double-quoted strings.

@@ -412,7 +412,11 @@ func main() {
 	ch := make(chan func(), 1)
 	//otelc:span tag:send
 	ch <- func() {}
-	_, _, _ = d, e, n
+	//otelc:span tag:paren
+	p := (func() {})
+	//otelc:span tag:paren-call
+	defer (func() {})()
+	_, _, _, _ = d, e, n, p
 }
 `
 	path := writeGoTempFile(t, src)
@@ -432,6 +436,7 @@ func main() {
 	assert.Equal(t, []string{
 		"var", "spec", "value", "return", "define", "local-var", "assign", "argument",
 		"go", "defer", "call", "call-result", "field", "element", "send",
+		"paren", "paren-call",
 	}, tags)
 	assert.Empty(t, FindStrayDirectives(tree, "otelc:span"))
 }
@@ -480,7 +485,7 @@ func outer() {
 	assert.NotSame(t, matches[1].Lit, matches[2].Lit)
 }
 
-func TestFindFuncsByDirective_PackageLevelFuncLitHasNoEnclosing(t *testing.T) {
+func TestFindFuncsByDirective_PackageLevelFuncLitEnclosingIsDecl(t *testing.T) {
 	src := `package p
 
 //otelc:span
@@ -494,7 +499,8 @@ var handler = func() {}
 	require.NoError(t, err)
 	require.Len(t, matches, 1)
 	require.NotNil(t, matches[0].Lit)
-	assert.Nil(t, matches[0].Enclosing)
+	assert.IsType(t, &dst.GenDecl{}, matches[0].Enclosing)
+	assert.Same(t, tree.Decls[0], matches[0].Enclosing)
 }
 
 func TestFindFuncsByDirective_FuncLitParseArgsError(t *testing.T) {

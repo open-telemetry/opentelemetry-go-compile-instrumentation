@@ -667,6 +667,37 @@ func foo() {
 }
 `,
 		},
+		{
+			name: "package-level enclosing func literal parameter",
+			src: `package main
+
+import f "fmt"
+
+var outer = func(f int) {
+	//otelc:test
+	inner := func() {
+		println("hello")
+	}
+	inner()
+}
+`,
+		},
+		{
+			name: "package-level enclosing func literal local",
+			src: `package main
+
+import f "fmt"
+
+var outer = func() {
+	f := 1
+	//otelc:test
+	inner := func() {
+		println(f)
+	}
+	inner()
+}
+`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
