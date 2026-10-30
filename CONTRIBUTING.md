@@ -265,9 +265,9 @@ Before enabling fork publication, an administrator must:
    repository or organization copy. Only the publisher uses this environment.
 
 The callers forward the secret by name. The `bundle-publisher` environment
-supplies the value. Only the publisher job reads the secret. A literal empty
-mapping does not work in a reusable workflow
-([actions/runner#4453](https://github.com/actions/runner/issues/4453)).
+supplies the value. Only the publisher job reads the secret. A caller can pass
+an environment secret by name even when the value lives only in that environment
+([Reuse workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows)).
 
 Use an expiring classic token from a dedicated identity with upstream write
 access. For this public repository, the token needs `public_repo` and

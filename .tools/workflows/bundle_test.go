@@ -476,8 +476,9 @@ func assertSingleCall(t *testing.T, step *actionlint.Step, subcommand string) {
 }
 
 // The publisher environment supplies the token. Each caller forwards the
-// secret by name. A literal empty mapping does not work in a reusable
-// workflow, so the value must be the secret expression (actions/runner#4453).
+// secret by name: an environment secret that the caller does not pass resolves
+// to an empty string in the reusable workflow, so a literal empty mapping is
+// not enough (GitHub docs, "Reuse workflows").
 func TestPublisherEnvironmentTokenRouting(t *testing.T) {
 	for _, caller := range []struct {
 		file  string
@@ -522,6 +523,13 @@ func TestPublisherEnvironmentTokenRouting(t *testing.T) {
 	}
 	if secret.Required != nil && secret.Required.Value {
 		t.Error("the caller declares the publisher token as required")
+	}
+
+	// The publisher job binds the environment that supplies the token.
+	publisher := loadWorkflow(t, "regenerate-bundle-worker.yaml").Jobs["push_update"]
+	if publisher == nil || publisher.Environment == nil || publisher.Environment.Name == nil ||
+		publisher.Environment.Name.Value != "bundle-publisher" {
+		t.Error("the publisher job must bind the bundle-publisher environment")
 	}
 }
 
