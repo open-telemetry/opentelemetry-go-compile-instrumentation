@@ -5,7 +5,6 @@ package server
 
 import (
 	"bufio"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -14,12 +13,13 @@ import (
 // Compile-time assertions that writerWrapper satisfies the optional interfaces
 // an http.ResponseWriter may implement.
 var (
-	_ http.ResponseWriter = (*writerWrapper)(nil)
-	_ http.Hijacker       = (*writerWrapper)(nil)
-	_ http.Flusher        = (*writerWrapper)(nil)
-	_ http.Pusher         = (*writerWrapper)(nil)
-	_ io.ReaderFrom       = (*writerWrapper)(nil)
-	_ io.StringWriter     = (*writerWrapper)(nil)
+	_ http.ResponseWriter                       = (*writerWrapper)(nil)
+	_ http.Hijacker                             = (*writerWrapper)(nil)
+	_ http.Flusher                              = (*writerWrapper)(nil)
+	_ http.Pusher                               = (*writerWrapper)(nil)
+	_ io.ReaderFrom                             = (*writerWrapper)(nil)
+	_ io.StringWriter                           = (*writerWrapper)(nil)
+	_ interface{ Unwrap() http.ResponseWriter } = (*writerWrapper)(nil)
 )
 
 // writerWrapper wraps http.ResponseWriter to capture the status code
@@ -110,14 +110,24 @@ func (w *writerWrapper) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	if h, ok := w.ResponseWriter.(http.Hijacker); ok {
 		return h.Hijack()
 	}
-	return nil, nil, fmt.Errorf("responseWriter does not implement http.Hijacker")
+	return nil, nil, http.ErrNotSupported
+}
+
+// FlushError is preferred by http.ResponseController over http.Flusher.
+func (w *writerWrapper) FlushError() error {
+	if fe, ok := w.ResponseWriter.(interface{ FlushError() error }); ok {
+		return fe.FlushError()
+	}
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+		return nil
+	}
+	return http.ErrNotSupported
 }
 
 // Flush implements the http.Flusher interface
 func (w *writerWrapper) Flush() {
-	if f, ok := w.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
+	_ = w.FlushError()
 }
 
 // Push implements the http.Pusher interface, forwarding to the underlying

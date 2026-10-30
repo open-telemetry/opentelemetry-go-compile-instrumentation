@@ -5,6 +5,7 @@ package server
 
 import (
 	"bufio"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -179,10 +180,9 @@ func TestWriterWrapper_Hijack_NotSupported(t *testing.T) {
 	}
 
 	conn, rw, err := wrapper.Hijack()
-	require.Error(t, err)
+	require.ErrorIs(t, err, http.ErrNotSupported)
 	assert.Nil(t, conn)
 	assert.Nil(t, rw)
-	assert.Contains(t, err.Error(), "does not implement http.Hijacker")
 }
 
 // mockFlusher is a mock ResponseWriter that implements the Flusher interface
@@ -564,3 +564,69 @@ func TestWriterWrapper_MultipleStatusCodes(t *testing.T) {
 		})
 	}
 }
+
+func TestWriterWrapper_FlushError_Supported(t *testing.T) {
+	expectedErr := errors.New("flush failed")
+	mock := &mockFlushErrorWriter{
+		ResponseWriter: httptest.NewRecorder(),
+		err:            expectedErr,
+	}
+	wrapper := &writerWrapper{
+		ResponseWriter: mock,
+		statusCode:     http.StatusOK,
+	}
+
+	err := wrapper.FlushError()
+	require.ErrorIs(t, err, expectedErr)
+	assert.True(t, mock.flushErrorCalled)
+}
+
+func TestWriterWrapper_FlushError_FlusherFallback(t *testing.T) {
+	mock := &mockFlusher{ResponseWriter: httptest.NewRecorder()}
+	wrapper := &writerWrapper{
+		ResponseWriter: mock,
+		statusCode:     http.StatusOK,
+	}
+
+	err := wrapper.FlushError()
+	require.NoError(t, err)
+	assert.True(t, mock.flushCalled)
+}
+
+func TestWriterWrapper_ResponseController_Flush(t *testing.T) {
+	mock := &mockFlushErrorWriter{ResponseWriter: httptest.NewRecorder()}
+	wrapper := &writerWrapper{ResponseWriter: mock}
+
+	rc := http.NewResponseController(wrapper)
+	require.NoError(t, rc.Flush())
+	assert.True(t, mock.flushErrorCalled)
+}
+
+func TestWriterWrapper_FlushError_NotSupported(t *testing.T) {
+	wrapper := &writerWrapper{
+		// A bare ResponseWriter with no Flush support.
+		ResponseWriter: nonFlusher{httptest.NewRecorder()},
+		statusCode:     http.StatusOK,
+	}
+
+	require.ErrorIs(t, wrapper.FlushError(), http.ErrNotSupported)
+}
+
+// mockFlushErrorWriter is a mock ResponseWriter that implements FlushError() error.
+type mockFlushErrorWriter struct {
+	http.ResponseWriter
+	flushErrorCalled bool
+	err              error
+}
+
+func (m *mockFlushErrorWriter) FlushError() error {
+	m.flushErrorCalled = true
+	return m.err
+}
+
+// nonFlusher hides the recorder's Flush method.
+type nonFlusher struct{ rec *httptest.ResponseRecorder }
+
+func (n nonFlusher) Header() http.Header         { return n.rec.Header() }
+func (n nonFlusher) Write(b []byte) (int, error) { return n.rec.Write(b) }
+func (n nonFlusher) WriteHeader(code int)        { n.rec.WriteHeader(code) }
