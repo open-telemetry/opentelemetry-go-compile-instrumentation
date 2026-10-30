@@ -1429,8 +1429,8 @@ func callRuleWithImports(imports map[string]string) *rule.InstCallRule {
 	}
 }
 
-// writeMatchedRules stores matched.json the way setup does, so the link
-// phase can read the rule-added imports back from it.
+// writeMatchedRules stores matched.json the way setup does, so the link phase
+// can read the rule-added imports back.
 func writeMatchedRules(t *testing.T, sets []*rule.InstRuleSet) {
 	t.Helper()
 	content, err := json.Marshal(sets)
