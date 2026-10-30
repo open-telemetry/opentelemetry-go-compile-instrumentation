@@ -25,6 +25,9 @@ on:
         required: false
         type: string
     secrets:
+      OTELC_BUNDLE_PUSH_TOKEN:
+        description: Publisher token. The bundle-publisher environment supplies the value.
+        required: false
       OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY:
         required: false
 
@@ -115,6 +118,6 @@ jobs:
       is_cross_repository: ${{ needs.prepare.outputs.is_cross_repository }}
       expires_at: ${{ inputs.expires_at }}
     secrets:
-      OTELC_BUNDLE_PUSH_TOKEN: ''
+      OTELC_BUNDLE_PUSH_TOKEN: ${{ secrets.OTELC_BUNDLE_PUSH_TOKEN }}
       OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY: >-
         ${{ secrets.OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY }}

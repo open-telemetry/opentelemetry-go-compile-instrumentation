@@ -108,5 +108,6 @@ jobs:
       expected_base_sha: ${{ matrix.request.base_sha }}
       expires_at: ${{ format('{0}', matrix.request.expires_at) }}
     secrets:
+      OTELC_BUNDLE_PUSH_TOKEN: ${{ secrets.OTELC_BUNDLE_PUSH_TOKEN }}
       OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY: >-
         ${{ secrets.OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY }}

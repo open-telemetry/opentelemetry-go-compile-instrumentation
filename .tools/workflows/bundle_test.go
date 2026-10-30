@@ -475,21 +475,53 @@ func assertSingleCall(t *testing.T, step *actionlint.Step, subcommand string) {
 	}
 }
 
+// The publisher environment supplies the token. Each caller forwards the
+// secret by name. A literal empty mapping does not work in a reusable
+// workflow, so the value must be the secret expression (actions/runner#4453).
 func TestPublisherEnvironmentTokenRouting(t *testing.T) {
+	for _, caller := range []struct {
+		file  string
+		jobID string
+	}{
+		{file: "regenerate-bundle.yaml", jobID: "repair"},
+		{file: "autofix-bundle-conflicts.yaml", jobID: "repair"},
+	} {
+		t.Run(caller.file, func(t *testing.T) {
+			job := loadWorkflow(t, caller.file).Jobs[caller.jobID]
+			if job == nil || job.WorkflowCall == nil {
+				t.Fatalf("missing worker call in job %s", caller.jobID)
+			}
+			if job.WorkflowCall.InheritSecrets {
+				t.Error("the worker must not inherit caller secrets")
+			}
+			token := job.WorkflowCall.Secrets["otelc_bundle_push_token"]
+			if token == nil || token.Value == nil {
+				t.Fatal("the caller must forward the publisher token by name")
+			}
+			if got := strings.TrimSpace(token.Value.Value); got != "${{ secrets.OTELC_BUNDLE_PUSH_TOKEN }}" {
+				t.Errorf("the caller forwards %q, want the secret expression", got)
+			}
+		})
+	}
+
+	// The caller contract must declare the secret, or the forwarding has no name.
 	workflow := loadWorkflow(t, "regenerate-bundle.yaml")
-	job := workflow.Jobs["repair"]
-	if job == nil || job.WorkflowCall == nil {
-		t.Fatal("missing worker call")
+	var call *actionlint.WorkflowCallEvent
+	for _, event := range workflow.On {
+		if event, ok := event.(*actionlint.WorkflowCallEvent); ok {
+			call = event
+			break
+		}
 	}
-	if job.WorkflowCall.InheritSecrets {
-		t.Error("the worker must not inherit caller secrets")
+	if call == nil || call.Secrets == nil {
+		t.Fatal("regenerate-bundle.yaml does not declare workflow_call secrets")
 	}
-	token := job.WorkflowCall.Secrets["otelc_bundle_push_token"]
-	if token == nil || token.Value == nil {
-		t.Fatal("the publisher environment token needs a named empty placeholder")
+	secret := call.Secrets["otelc_bundle_push_token"]
+	if secret == nil {
+		t.Fatal("the caller does not declare OTELC_BUNDLE_PUSH_TOKEN under on.workflow_call.secrets")
 	}
-	if token.Value.Value != "" {
-		t.Error("the caller must not forward the publisher token value")
+	if secret.Required != nil && secret.Required.Value {
+		t.Error("the caller declares the publisher token as required")
 	}
 }
 
