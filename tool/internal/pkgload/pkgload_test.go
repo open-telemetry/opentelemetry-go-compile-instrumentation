@@ -34,23 +34,33 @@ func TestCollectPackageNames(t *testing.T) {
 	}, names)
 }
 
-func TestCollectPackageNames_TestVariant(t *testing.T) {
-	// A test load returns the plain package before its test variant. Both
-	// have the same PkgPath, but only the variant has the imports of the
-	// _test.go files.
-	plain := &packages.Package{ID: "example.com/svc", PkgPath: "example.com/svc", Name: "svc"}
-	helper := &packages.Package{ID: "example.com/helper", PkgPath: "example.com/helper", Name: "helper"}
-	variant := &packages.Package{
-		ID:      "example.com/svc [example.com/svc.test]",
-		PkgPath: "example.com/svc",
-		Name:    "svc",
-		Imports: map[string]*packages.Package{"example.com/helper": helper},
+func TestCollectPackageNames_TestVariantImports(t *testing.T) {
+	// The in-package test variant shares PkgPath with the base package but has
+	// a distinct ID (e.g. "example.com/a [example.com/a.test]"). Imports used
+	// only by _test.go files must still be collected into the name table.
+	helper := &packages.Package{
+		ID:      "example.com/helper",
+		PkgPath: "example.com/helper",
+		Name:    "helper",
+	}
+	basePkg := &packages.Package{
+		ID:      "example.com/a",
+		PkgPath: "example.com/a",
+		Name:    "apkg",
+	}
+	testPkg := &packages.Package{
+		ID:      "example.com/a [example.com/a.test]",
+		PkgPath: "example.com/a",
+		Name:    "apkg",
+		Imports: map[string]*packages.Package{
+			"example.com/helper": helper,
+		},
 	}
 
-	names := CollectPackageNames([]*packages.Package{plain, variant})
+	names := CollectPackageNames([]*packages.Package{basePkg, testPkg})
 
 	assert.Equal(t, map[string]string{
-		"example.com/svc":    "svc",
+		"example.com/a":      "apkg",
 		"example.com/helper": "helper",
 	}, names)
 }

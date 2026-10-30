@@ -1154,7 +1154,8 @@ func TestPreciseMatching_WhereFileFilterBuildError(t *testing.T) {
 
 	_, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{badRule}, set)
 	require.Error(t, err)
-	require.ErrorContains(t, err, "where.file has multiple active predicates")
+	require.ErrorContains(t, err,
+		"where.file has multiple active predicates (has_func, has_struct); combine them with all-of")
 }
 
 // Helper functions for constructing test data
@@ -1521,6 +1522,16 @@ func TestRunMatch_EmptyRules(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, set)
 	assert.True(t, set.IsEmpty())
+}
+
+func TestRunMatch_RecordsTestBuild(t *testing.T) {
+	sp := newTestSetupPhase()
+	for _, isTest := range []bool{false, true} {
+		dep := &Dependency{ImportPath: "example.com/lib", CgoFiles: map[string]string{}, IsTest: isTest}
+		set, err := sp.runMatch(context.Background(), dep, map[string][]rule.InstRule{}, nil)
+		require.NoError(t, err)
+		assert.Equal(t, isTest, set.IsTest)
+	}
 }
 
 func TestRunMatch_FileRuleInvalidSource(t *testing.T) {
