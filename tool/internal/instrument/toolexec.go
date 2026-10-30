@@ -69,6 +69,13 @@ type instrumentPhase struct {
 	// whole package because HookContext declarations accumulate into one globals
 	// file across all instrumented source files.
 	appliedFuncIdentities map[string]struct{}
+	// Raw-rule applications already performed during this package's
+	// instrumentation, keyed by the target *dst.FuncDecl. The inner key is
+	// rawRuleDedupKey (Identity plus Pattern, Placement, and Imports).
+	// Scoped to the function, not the package, because inject_code inserts
+	// into a specific function body; a package may have several func init()
+	// declarations across files, each of which must receive the injection.
+	appliedRawIdentities map[*dst.FuncDecl]map[string]struct{}
 	// importNames maps an import path to a package name, resolved
 	// during setup instead of guessed from the import path. importNames
 	// has no entries when the table is unavailable, such as after an
