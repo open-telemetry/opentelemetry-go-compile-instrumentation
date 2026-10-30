@@ -21,6 +21,15 @@ func (s *server) serve(log *logger.Logger) {
 	s.log.Info("field")
 }
 
+type base struct{ *logger.Logger }
+
+// The receiver renders as written: the outer value of a promoted method, and
+// no implicit & for an addressable value.
+func promoted(b base, value logger.Logger) {
+	b.Info("promoted")
+	value.Info("addressable")
+}
+
 func handle(log *logger.Logger, fields []logger.Field) {
 	defer log.Info("done", logger.String("n", strings.Repeat("x", len(fields))))
 	go log.Info("async", fields...)
@@ -32,4 +41,5 @@ func handle(log *logger.Logger, fields []logger.Field) {
 func main() {
 	(&server{log: std}).serve(std)
 	handle(std, []logger.Field{logger.String("k", "v")})
+	promoted(base{std}, logger.Logger{})
 }

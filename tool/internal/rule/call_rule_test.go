@@ -98,6 +98,14 @@ replace: "tracedPrintln({{- .CallArguments -}})"
 			ruleName: "wrap_println",
 		},
 		{
+			name: "replace with CallArguments in a pipeline",
+			yaml: `
+function_call: fmt.Println
+replace: "tracedPrintln({{ .CallArguments | print }})"
+`,
+			ruleName: "wrap_println",
+		},
+		{
 			name: "replace with CallReceiver in range",
 			yaml: `
 method_call: go.uber.org/zap.*Logger.Info
@@ -215,6 +223,16 @@ replace: "wrapper({{ .CallReceiverName }})"
 			ruleName:    "bad",
 			wantErr:     true,
 			errContains: "replace must contain a {{ . }}, {{ .CallArgument N }}, {{ .CallArguments }} or {{ .CallReceiver }} placeholder",
+		},
+		{
+			name: "function_call with CallReceiver",
+			yaml: `
+function_call: fmt.Println
+replace: "{{ .CallReceiver }}.Println({{ .CallArguments }})"
+`,
+			ruleName:    "bad",
+			wantErr:     true,
+			errContains: "replace uses {{ .CallReceiver }}, which requires method_call, but the rule uses function_call",
 		},
 		{
 			name: "replace with only Receiver",

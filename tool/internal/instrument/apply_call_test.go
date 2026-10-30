@@ -2684,6 +2684,13 @@ func (s *server) serve(log *Logger) {
 	log.Info("serve")
 }
 
+type base struct{ *Logger }
+
+func promoted(b base, value Logger) {
+	b.Info("promoted")
+	value.Info("addressable")
+}
+
 func handle(log *Logger, fields []Field) {
 	log.Info("handle", field("a"), field("b"))
 	log.Info("spread", fields...)
@@ -2718,6 +2725,10 @@ func TestApplyCallRule_MethodCall_CallReceiverRebuildsCall(t *testing.T) {
 		`_ = flush(log)`,
 		`defer log.With(traceFields()...).Info("deferred", field("d"))`,
 		`go log.With(traceFields()...).Info("go", fields...)`,
+		// The receiver as written, with no implicit & and the outer value of
+		// a promoted method.
+		`b.With(traceFields()...).Info("promoted")`,
+		`value.With(traceFields()...).Info("addressable")`,
 	} {
 		assert.Contains(t, out, want)
 	}
@@ -2739,7 +2750,7 @@ func Handler() {
 
 	require.Error(t, err)
 	assert.False(t, modified)
-	assert.Contains(t, err.Error(), "CallReceiver requires a method call matched by method_call")
+	assert.Contains(t, err.Error(), "CallReceiver is only available for a call matched by method_call")
 }
 
 func TestApplyCallRule_MethodCall_CallReceiverRejectsUnsafeTemplates(t *testing.T) {
@@ -2824,6 +2835,97 @@ func run(log *Logger) {
 	assert.Contains(t, out, `log.Info("x")`)
 }
 
+func TestApplyCallRule_MethodCall_CallNestedInDeferredCallIsNotDeferred(t *testing.T) {
+	ip, root := setupMethodCallPhase(t, `package sample
+
+type Logger struct{}
+
+func (l *Logger) Info(msg string) error { return nil }
+
+func wrap(err error) {}
+
+func run(log *Logger) {
+	defer wrap(log.Info("x"))
+}
+`)
+	// The function literal is allowed: log.Info is an argument of the defer
+	// statement's call, not its call.
+	r := methodCallRule("*Logger", "Info",
+		"(func() error { return {{ .CallReceiver }}.Info({{ .CallArguments }}) })()")
+
+	modified, err := ip.applyCallRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	assert.True(t, modified)
+	assert.Contains(t, renderFile(t, root), `defer wrap((func() error { return log.Info("x") })())`)
+}
+
+func TestApplyCallRule_DeferOrGoCallReplacedWithNonCallErrors(t *testing.T) {
+	const source = `package sample
+
+type Logger struct{}
+
+func (l *Logger) Info(msg string) error { return nil }
+
+func run(log *Logger) {
+	%s log.Info("x")
+}
+`
+	for _, keyword := range []string{"defer", "go"} {
+		t.Run(keyword, func(t *testing.T) {
+			ip, root := setupMethodCallPhase(t, fmt.Sprintf(source, keyword))
+			r := methodCallRule("*Logger", "Info", "{{ . }} != nil")
+
+			modified, err := ip.applyCallRule(context.Background(), r, root)
+
+			require.Error(t, err)
+			assert.False(t, modified)
+			assert.Contains(t, err.Error(), "the template output is a *dst.BinaryExpr, but the matched call "+
+				"is the call of a defer or go statement, which must be replaced with a call expression")
+		})
+	}
+}
+
+func TestApplyCallRule_MethodCall_CallPartsKeepPositionsForLaterRules(t *testing.T) {
+	const source = `package sample
+
+type Logger struct{}
+
+func (l *Logger) With(k string) *Logger { return l }
+func (l *Logger) Info(msg string)        {}
+func (l *Logger) Keep(other *Logger)     {}
+
+func tracedWith(l *Logger) *Logger { return l }
+func keep(l *Logger)               {}
+
+func run(l *Logger) {
+	l.With("k").Info("x")
+	l.Keep(l.With("k"))
+}
+`
+	info := methodCallRule("*Logger", "Info", "{{ .CallReceiver }}.Info({{ .CallArguments }})")
+	keepRule := methodCallRule("*Logger", "Keep", "keep({{ .CallArgument 0 }})")
+	with := methodCallRule("*Logger", "With", "tracedWith({{ . }})")
+	orders := map[string][]*rule.InstCallRule{
+		"call parts first": {info, keepRule, with},
+		"call parts last":  {with, info, keepRule},
+	}
+	for name, rules := range orders {
+		t.Run(name, func(t *testing.T) {
+			ip, root := setupMethodCallPhase(t, source)
+
+			for _, r := range rules {
+				_, err := ip.applyCallRule(context.Background(), r, root)
+				require.NoError(t, err)
+			}
+
+			out := renderFile(t, root)
+			assert.Contains(t, out, `tracedWith(l.With("k")).Info("x")`)
+			assert.Contains(t, out, `keep(tracedWith(l.With("k")))`)
+		})
+	}
+}
+
 func TestApplyCallRule_MethodCall_CallReceiverInDeferredFuncLit(t *testing.T) {
 	const source = `package sample
 
@@ -2847,6 +2949,7 @@ func run(log *Logger) {
 			assert.False(t, modified)
 			assert.Contains(t, err.Error(), "uses the receiver log inside a function literal, "+
 				"but the matched call is the call of a defer or go statement")
+			assert.Contains(t, err.Error(), "rule wrap_method cannot wrap the call at sample.go:8:")
 		})
 	}
 	t.Run("plain statement is accepted", func(t *testing.T) {
