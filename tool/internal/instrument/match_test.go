@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -50,6 +51,29 @@ func TestMatchPicksRuleSetOfThisPackage(t *testing.T) {
 	// any package with the import path.
 	fileRulesOnly := rule.NewInstRuleSet("main")
 	assert.Same(t, fileRulesOnly, ip.match([]*rule.InstRuleSet{fileRulesOnly}, argsB))
+}
+
+func TestMatchPicksRuleSetOfSameCompileKind(t *testing.T) {
+	// go test compiles example.com/lib with lib_test.go for its own test
+	// binary, and without it for the test binaries of packages importing it.
+	normalArgs := []string{"compile", "-o", "_pkg_.a", "-p", "example.com/lib", "-buildid", "x", "lib.go"}
+	testArgs := append(slices.Clone(normalArgs), "lib_test.go")
+	ip := &instrumentPhase{logger: slog.Default()}
+
+	t.Run("a normal build set is not applied to the test build", func(t *testing.T) {
+		normal := rule.NewInstRuleSet("example.com/lib")
+		allSet := []*rule.InstRuleSet{normal}
+		assert.Same(t, normal, ip.match(allSet, normalArgs))
+		assert.Nil(t, ip.match(allSet, testArgs))
+	})
+	t.Run("each build gets its own set", func(t *testing.T) {
+		normal := rule.NewInstRuleSet("example.com/lib")
+		test := rule.NewInstRuleSet("example.com/lib")
+		test.IsTest = true
+		allSet := []*rule.InstRuleSet{test, normal}
+		assert.Same(t, normal, ip.match(allSet, normalArgs))
+		assert.Same(t, test, ip.match(allSet, testArgs))
+	})
 }
 
 func TestAnyRuleSetHasIgnoredCallFiles(t *testing.T) {

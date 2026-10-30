@@ -1528,6 +1528,16 @@ func TestRunMatch_EmptyRules(t *testing.T) {
 	assert.True(t, set.IsEmpty())
 }
 
+func TestRunMatch_RecordsTestBuild(t *testing.T) {
+	sp := newTestSetupPhase()
+	for _, isTest := range []bool{false, true} {
+		dep := &Dependency{ImportPath: "example.com/lib", CgoFiles: map[string]string{}, IsTest: isTest}
+		set, err := sp.runMatch(context.Background(), dep, map[string][]rule.InstRule{}, nil)
+		require.NoError(t, err)
+		assert.Equal(t, isTest, set.IsTest)
+	}
+}
+
 func TestRunMatch_FileRuleInvalidSource(t *testing.T) {
 	dir := t.TempDir()
 	srcFile := filepath.Join(dir, "bad.go")

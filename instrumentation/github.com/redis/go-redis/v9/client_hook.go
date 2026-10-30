@@ -42,3 +42,7 @@ func afterNewSentinelClientV9(call hook.HookContext, client *redis.SentinelClien
 func afterClientConnV9(call hook.HookContext, client *redis.Conn) {
 	client.AddHook(newOtelRedisHook(client.String()))
 }
+
+func afterClientWithTimeoutV9(ctx hook.HookContext, client *redis.Client) {
+	afterNewRedisClientV9(ctx, client)
+}
