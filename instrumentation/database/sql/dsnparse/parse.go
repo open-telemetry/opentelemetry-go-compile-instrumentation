@@ -631,7 +631,6 @@ func oracleServiceName(s string) string {
 		return s[:end]
 	}
 	return s
-
 }
 
 func oracleSplitHostPort(hp string) (host, port string) {
