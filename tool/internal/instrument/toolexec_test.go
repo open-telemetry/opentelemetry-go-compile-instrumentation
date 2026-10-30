@@ -1429,8 +1429,8 @@ func callRuleWithImports(imports map[string]string) *rule.InstCallRule {
 	}
 }
 
-// writeMatchedRules stores matched.json the way setup does, so the link phase
-// can read the rule-added imports back.
+// writeMatchedRules stores matched.json the way setup does, so the link
+// phase can read the rule-added imports back from it.
 func writeMatchedRules(t *testing.T, sets []*rule.InstRuleSet) {
 	t.Helper()
 	content, err := json.Marshal(sets)
@@ -1586,7 +1586,7 @@ func TestResolveRuleAddedImportsSkipsUnresolvableImports(t *testing.T) {
 
 	linkConfig := imports.ImportConfig{
 		PackageFile: map[string]string{
-			"context":           "/unused/context.a",
+			"context":             "/unused/context.a",
 			"example.com/app/dep": "/unused/dep.a",
 		},
 	}
@@ -1698,4 +1698,107 @@ func TestResolveRuleAddedImportsSkipsConstraintExcludedAddFileSource(t *testing.
 	assert.False(t, updated)
 	assert.NotContains(t, linkConfig.PackageFile, "os",
 		"the build constraints exclude the add_file source, so its imports must not be resolved")
+}
+
+// TestRuleAddedImportsCollectsStructLitDirectiveDeclRules covers the rule
+// kinds the other candidate tests leave out: struct, literal, directive, and
+// declaration rules. Every kind embeds InstBaseRule, whose imports the
+// collector must read the same way it reads them for func, call, and raw
+// rules.
+func TestRuleAddedImportsCollectsStructLitDirectiveDeclRules(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	writeMatchedRules(t, []*rule.InstRuleSet{
+		{
+			PackageName: "dep",
+			ModulePath:  "example.com/app/dep",
+			StructRules: map[string][]*rule.InstStructRule{
+				"dep.go": {{
+					InstBaseRule: rule.InstBaseRule{
+						Name: "struct-rule", Imports: map[string]string{"s": "example.com/s"},
+					},
+					Struct:   "Transport",
+					NewField: []*rule.InstStructField{{Name: "F", Type: "int"}},
+				}},
+			},
+			LitRules: map[string][]*rule.InstLitRule{
+				"dep.go": {{
+					InstBaseRule: rule.InstBaseRule{
+						Name: "lit-rule", Imports: map[string]string{"l": "example.com/l"},
+					},
+					StructLiteral: "net/http.Transport",
+					Field:         []*rule.InstLitField{{Name: "F", Value: "true"}},
+				}},
+			},
+			DirectiveRules: map[string][]*rule.InstDirectiveRule{
+				"dep.go": {{
+					InstBaseRule: rule.InstBaseRule{
+						Name: "directive-rule", Imports: map[string]string{"d": "example.com/d"},
+					},
+					Directive: "//otelc:span",
+					Template:  "otel.Span()",
+				}},
+			},
+			DeclRules: map[string][]*rule.InstDeclRule{
+				"dep.go": {{
+					InstBaseRule: rule.InstBaseRule{
+						Name: "decl-rule", Imports: map[string]string{"decl": "example.com/decl"},
+					},
+					Kind:       "var",
+					Identifier: "DefaultTransport",
+					Replace:    "http.DefaultTransport",
+				}},
+			},
+		},
+	})
+
+	paths := ruleAddedImports(t.Context(), &imports.ImportConfig{
+		PackageFile: map[string]string{"example.com/app/dep": "/unused/dep.a"},
+	})
+	assert.Equal(t, map[string]struct{}{
+		"example.com/s":    {},
+		"example.com/l":    {},
+		"example.com/d":    {},
+		"example.com/decl": {},
+	}, paths)
+}
+
+// TestResolveRuleAddedImportsSkipsBuiltinPseudoPackages checks that rules
+// declaring imports of unsafe or the cgo pseudo-package C contribute no
+// resolvable candidate: neither has an archive, and asking the nested build
+// for one would only log a warning.
+func TestResolveRuleAddedImportsSkipsBuiltinPseudoPackages(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	writeMatchedRules(t, []*rule.InstRuleSet{
+		{
+			PackageName: "dep",
+			ModulePath:  "example.com/app/dep",
+			FuncRules: map[string][]*rule.InstFuncRule{
+				"dep.go": {{InstBaseRule: rule.InstBaseRule{
+					Name: "rule",
+					Imports: map[string]string{
+						"fmt":    "fmt",
+						"unsafe": "unsafe",
+						"cgo":    "C",
+					},
+				}}},
+			},
+		},
+	})
+
+	linkConfig := imports.ImportConfig{
+		PackageFile: map[string]string{
+			"context":             "/unused/context.a",
+			"example.com/app/dep": "/unused/dep.a",
+		},
+	}
+	updated, err := resolveRuleAddedImports(t.Context(), nil, &linkConfig)
+	require.NoError(t, err)
+	assert.True(t, updated)
+	assert.Contains(t, linkConfig.PackageFile, "fmt")
+	assert.NotContains(t, linkConfig.PackageFile, "unsafe")
+	assert.NotContains(t, linkConfig.PackageFile, "C")
 }
