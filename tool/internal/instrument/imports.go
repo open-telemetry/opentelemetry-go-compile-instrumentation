@@ -21,7 +21,7 @@ import (
 // This is used when adding a new file (e.g., via file rules) that has its own imports which may
 // not be in the target package's importcfg.
 func (ip *instrumentPhase) updateImportConfigForFile(ctx context.Context, root *dst.File, ruleName string) error {
-	paths := imports.CollectPaths(ctx, root)
+	paths := imports.CollectImportPaths(root)
 
 	if len(paths) == 0 {
 		return nil
@@ -255,6 +255,18 @@ func checkAliasOverrideShadowingAt(overrides map[string]string, enclosing *dst.F
 		"a local declared between the function's top level and the injection point")
 }
 
+// checkAliasOverrideShadowingInDecl reports an error when an override's file
+// alias would resolve to a local instead of the import at target, a node in
+// the initializer of the package-level declaration decl. The locals are the
+// parameters and body names of the function literals that enclose target.
+func checkAliasOverrideShadowingInDecl(overrides map[string]string, decl *dst.GenDecl, target dst.Node) error {
+	if len(overrides) == 0 {
+		return nil
+	}
+	return reportAliasOverrideConflict(overrides, "a package-level declaration", scopeNamesBetween(decl, target),
+		"a parameter or local of an enclosing function literal")
+}
+
 // reportAliasOverrideConflict returns an error when any of overrides' file
 // aliases names a local in localNames. description names what the alias would
 // resolve to.
@@ -277,9 +289,9 @@ func reportAliasOverrideConflict(
 }
 
 // scopeNamesBetween returns every name bound by a scope on the path from
-// enclosing's body to target. Since the path starts at the function, the
-// result includes the signature and top-level body names.
-func scopeNamesBetween(enclosing *dst.FuncDecl, target dst.Node) map[string]bool {
+// enclosing to target. When enclosing is a function, the path starts at the
+// function, so the result includes the signature and top-level body names.
+func scopeNamesBetween(enclosing, target dst.Node) map[string]bool {
 	names := make(map[string]bool)
 	var stack []map[string]bool
 	found := false
@@ -306,7 +318,7 @@ func scopeNamesBetween(enclosing *dst.FuncDecl, target dst.Node) map[string]bool
 		return true
 	})
 	if !found {
-		panic("scopeNamesBetween: target is not within enclosing function")
+		panic("scopeNamesBetween: target is not within enclosing node")
 	}
 	return names
 }

@@ -97,11 +97,62 @@ func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDi
 	return nil
 }
 
-// store stores the matched rules to the file
-// It's the pair of the InstrumentPhase.load
-func (sp *setupPhase) store(ctx context.Context, matched []*rule.InstRuleSet, moduleDirs []string) error {
-	if err := resolveRulePaths(ctx, matched, moduleDirs); err != nil {
-		return ex.Wrapf(err, "resolving rule paths")
+// ignoreDirectiveSupportModule is the hook package that provides the
+// suppression functions (SuppressHooks/UnsuppressHooks/HooksSuppressed)
+// every trampoline in the build calls into once any package uses
+// //otelc:ignore. See ensureIgnoreDirectiveSupport.
+const ignoreDirectiveSupportModule = util.OtelcInstRoot + "/runtime"
+
+// ensureIgnoreDirectiveSupport fails fast, before any compiling starts, when
+// the build uses //otelc:ignore but does not load instrumentation/runtime.
+//
+// A rule set's ModulePath is the target package the rules apply to (e.g.
+// "runtime" for the standard library package instrumentation/runtime
+// rewrites), not the module that supplies the rule's hook code, so it can't
+// be used to tell whether instrumentation/runtime itself is part of this
+// build. What can is the Path on the matched rules: any func or file rule
+// contributed by instrumentation/runtime carries its import path there,
+// since that's where the compiler looks up the hook or injected file it
+// names. See #1550.
+func ensureIgnoreDirectiveSupport(matched []*rule.InstRuleSet) error {
+	usesIgnoreDirective := false
+	for _, ruleset := range matched {
+		if len(ruleset.IgnoredCallFiles) > 0 {
+			usesIgnoreDirective = true
+			break
+		}
+	}
+	if !usesIgnoreDirective {
+		return nil
+	}
+
+	for _, ruleset := range matched {
+		for _, fileRule := range ruleset.FileRules {
+			if fileRule.Path == ignoreDirectiveSupportModule {
+				return nil
+			}
+		}
+		for _, funcRule := range ruleset.AllFuncRules() {
+			if funcRule.Path == ignoreDirectiveSupportModule {
+				return nil
+			}
+		}
+	}
+
+	return ex.Newf(
+		"//otelc:ignore is used in this build, but %s is not part of it; "+
+			"add `_ %q` to otel.instrumentation.go so the trampolines %s guards "+
+			"have the suppression support they need",
+		ignoreDirectiveSupportModule, ignoreDirectiveSupportModule, util.DirectiveIgnore,
+	)
+}
+
+// store stores the matched rules to the file.
+// It's the pair of the InstrumentPhase.load.
+// Rule paths must already be resolved via resolveRulePaths.
+func (sp *setupPhase) store(matched []*rule.InstRuleSet) error {
+	if err := ensureIgnoreDirectiveSupport(matched); err != nil {
+		return err
 	}
 
 	bs, err := json.Marshal(matched)

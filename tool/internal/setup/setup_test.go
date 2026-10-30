@@ -508,27 +508,78 @@ func TestGetBuildPackages_TestSubcommandIncludesTestOnlyImports(t *testing.T) {
 		[]byte("package main\n\nfunc main() {}\n"),
 		0o644,
 	))
+	// Only main_test.go imports helper. A standard library package does not
+	// test this, because "testing" imports most of them.
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "helper"), 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "helper", "helper.go"),
+		[]byte("package helper\n\nfunc Name() string { return \"helper\" }\n"),
+		0o644,
+	))
 	require.NoError(t, os.WriteFile(
 		filepath.Join(tmpDir, "main_test.go"),
-		[]byte("package main\n\nimport (\n\t\"testing\"\n\t\"unicode\"\n)\n\n"+
-			"func TestUsesUnicode(t *testing.T) { _ = unicode.IsUpper('A') }\n"),
+		[]byte("package main\n\nimport (\n\t\"testing\"\n\n\t\"testmodule/helper\"\n)\n\n"+
+			"func TestUsesHelper(t *testing.T) { _ = helper.Name() }\n"),
 		0o644,
 	))
 	t.Chdir(tmpDir)
 
 	buildPkgs, _, err := getBuildPackages(t.Context(), subcmdBuild, nil)
 	require.NoError(t, err)
-	assert.NotContains(t, pkgload.CollectPackageNames(buildPkgs), "unicode",
+	assert.NotContains(t, pkgload.CollectPackageNames(buildPkgs), "testmodule/helper",
 		"a build must not resolve names for imports that only appear in _test.go files")
 
 	testBuildPkgs, testAllPkgs, err := getBuildPackages(t.Context(), subcmdTest, nil)
 	require.NoError(t, err)
-	assert.Contains(t, pkgload.CollectPackageNames(testAllPkgs), "unicode",
+	assert.Contains(t, pkgload.CollectPackageNames(testAllPkgs), "testmodule/helper",
 		"otelc go test must resolve real names for imports that only appear in _test.go files")
 	for _, pkg := range testBuildPkgs {
 		assert.Empty(t, pkg.ForTest,
 			"the build packages of a test run must not contain test packages: %s", pkg.ID)
 	}
+}
+
+func TestGetBuildPackages_TestSubcommandResolvesSubpackageTestOnlyImports(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "go.mod"),
+		[]byte("module testmodule\n\ngo 1.21\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "main.go"),
+		[]byte("package main\n\nimport _ \"testmodule/svc\"\n\nfunc main() {}\n"),
+		0o644,
+	))
+	svcDir := filepath.Join(tmpDir, "svc")
+	require.NoError(t, os.MkdirAll(svcDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(svcDir, "svc.go"),
+		[]byte("package svc\n\nfunc Hello() string { return \"hello\" }\n"),
+		0o644,
+	))
+	// Only svc_test.go imports helper. A standard library package does not
+	// test this, because "testing" imports most of them.
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "helper"), 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "helper", "helper.go"),
+		[]byte("package helper\n\nfunc Name() string { return \"helper\" }\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(svcDir, "svc_test.go"),
+		[]byte("package svc\n\nimport (\n\t\"testing\"\n\n\t\"testmodule/helper\"\n)\n\n"+
+			"func TestUsesHelper(t *testing.T) { _ = helper.Name() }\n"),
+		0o644,
+	))
+	t.Chdir(tmpDir)
+
+	// "./..." would select helper itself, so its name would be found without
+	// the test variant of svc.
+	_, testAllPkgs, err := getBuildPackages(t.Context(), subcmdTest, []string{".", "./svc"})
+	require.NoError(t, err)
+	assert.Contains(t, pkgload.CollectPackageNames(testAllPkgs), "testmodule/helper",
+		"otelc go test must resolve names for imports that only appear in a subpackage's _test.go files")
 }
 
 // TestGetBuildPackages_TestSubcommandExcludesExternalTestPackage guards the
@@ -1683,6 +1734,30 @@ func TestSetup_MatchDepsError(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestSetup_ResolveRulePathsError(t *testing.T) {
+	setupTestModule(t, []string{"cmd"})
+	_ = os.RemoveAll(util.GetBuildTempDir())
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	dir := t.TempDir()
+	ruleFile := filepath.Join(dir, "rules.yaml")
+	mustWriteFile(t, ruleFile, `brokenRule:
+  target: main
+  func: main
+  path: example.com/nonexistent/package
+  after: SomeHook
+`)
+
+	cmd := &cli.Command{
+		Name:   "setup",
+		Flags:  []cli.Flag{&cli.StringFlag{Name: "rules"}},
+		Action: Setup,
+	}
+	err := cmd.Run(t.Context(), []string{"setup", "--rules", ruleFile, "."})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "resolving rule paths")
+}
+
 func TestSetupLocked_FindModuleDirsError(t *testing.T) {
 	// A standalone .go file outside any Go module causes FindModuleDirs to fail in setupLocked (line 377)
 	tmp := t.TempDir()
@@ -1835,4 +1910,23 @@ func TestRuntime(t *testing.T) {
 			assert.Contains(t, string(output), "ok")
 		})
 	}
+}
+
+func TestSetupPhase_GetBuildContext(t *testing.T) {
+	t.Run("from GOFLAGS", func(t *testing.T) {
+		t.Setenv("GOFLAGS", "-tags=envtag")
+		sp := &setupPhase{}
+		bctx := sp.getBuildContext()
+		require.NotNil(t, bctx)
+		assert.Contains(t, bctx.BuildTags, "envtag")
+	})
+
+	t.Run("from buildFlags overriding GOFLAGS", func(t *testing.T) {
+		t.Setenv("GOFLAGS", "-tags=envtag")
+		sp := &setupPhase{buildFlags: []string{"-tags", "clitag"}}
+		bctx := sp.getBuildContext()
+		require.NotNil(t, bctx)
+		assert.Contains(t, bctx.BuildTags, "clitag")
+		assert.NotContains(t, bctx.BuildTags, "envtag")
+	})
 }

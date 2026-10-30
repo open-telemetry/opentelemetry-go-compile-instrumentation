@@ -26,4 +26,4 @@ import _ "go.opentelemetry.io/otel/sdk/trace"
 
 That's enough to put it in the build graph — you don't need to actually construct or use a `TracerProvider` yourself. Without it, spans are still created and exported correctly, but `zap` output will not carry `trace_id`/`span_id`.
 
-If `go.opentelemetry.io/otel/sdk/trace` instrumentation was not applied (for example because the package was not present in the application's build graph), or if there is no active span in GLS, the log fields are left unchanged — see [`instrumentation/go.opentelemetry.io/otel`'s README](../../../go.opentelemetry.io/otel/README.md) for how GLS is populated.
+If `go.opentelemetry.io/otel/sdk/trace` instrumentation was not applied (for example because the package was not present in the application's build graph), or if there is no active span in GLS, the log fields are left unchanged — see [`instrumentation/go.opentelemetry.io/otel`'s README](../../go.opentelemetry.io/otel/README.md) for how GLS is populated.

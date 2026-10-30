@@ -944,6 +944,28 @@ func TestFindModVersion(t *testing.T) {
 	}
 }
 
+func TestFindGoSources_RecordsTestBuild(t *testing.T) {
+	dir := t.TempDir()
+	lib := filepath.Join(dir, "lib.go")
+	libTest := filepath.Join(dir, "lib_test.go")
+	require.NoError(t, os.WriteFile(lib, []byte("package lib\n"), 0o644))
+	require.NoError(t, os.WriteFile(libTest, []byte("package lib\n"), 0o644))
+
+	for _, tc := range []struct {
+		args   []string
+		isTest bool
+	}{
+		{[]string{"-p", "example.com/lib", lib}, false},
+		{[]string{"-p", "example.com/lib", lib, libTest}, true},
+		// The test main is generated later, so the file is not there yet.
+		{[]string{"-p", "main", "$WORK/b001/_testmain.go"}, true},
+	} {
+		dep, err := findGoSources(t.Context(), tc.args, map[string]string{})
+		require.NoError(t, err)
+		assert.Equal(t, tc.isTest, dep.IsTest, "args %v", tc.args)
+	}
+}
+
 func TestFindGoSources(t *testing.T) {
 	dir := t.TempDir()
 	srcA := filepath.Join(dir, "a.go")

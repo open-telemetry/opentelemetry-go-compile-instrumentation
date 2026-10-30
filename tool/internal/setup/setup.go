@@ -6,6 +6,7 @@ package setup
 import (
 	"context"
 	"fmt"
+	gobuild "go/build"
 	"log/slog"
 	"maps"
 	"os"
@@ -35,6 +36,17 @@ type setupPhase struct {
 	// resolvedNames maps an import path to a package name, built from
 	// buildPackages' dependency graph.
 	resolvedNames map[string]string
+
+	// fileImportsCache caches discovered source imports for add_file rules during setup.
+	fileImportsCache map[string][]string
+}
+
+func (sp *setupPhase) getBuildContext() *gobuild.Context {
+	bctx := gobuild.Default
+	bctx.BuildTags = append(
+		slices.Clone(gobuild.Default.BuildTags),
+		util.UserBuildTags(util.SplitGoflags(os.Getenv("GOFLAGS")), sp.buildFlags)...)
+	return &bctx
 }
 
 func (sp *setupPhase) Info(msg string, args ...any)  { sp.logger.Info(msg, args...) }
@@ -373,6 +385,38 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 	})
 }
 
+func (sp *setupPhase) matchAllDeps(
+	ctx context.Context,
+	deps []*Dependency,
+	moduleDirs []string,
+	buildFlags []string,
+) ([]*rule.InstRuleSet, error) {
+	matched, err := sp.matchDeps(ctx, deps, moduleDirs)
+	if err != nil {
+		return nil, ex.Wrapf(err, "matching dependencies to hook rules")
+	}
+
+	// Resolve rule import paths before matching injected dependencies so add_file
+	// sources can be located and parsed for dependencies that must enter the build graph.
+	if err = resolveRulePaths(ctx, matched, moduleDirs); err != nil {
+		return nil, ex.Wrapf(err, "resolving rule paths")
+	}
+
+	// The hook packages the pass above selected get blank-imported into the
+	// application below, which compiles their dependencies too. The build plan
+	// never saw those, so match them now.
+	injected, err := sp.matchInjectedDeps(ctx, matched, deps, moduleDirs, buildFlags)
+	if err != nil {
+		return nil, err
+	}
+	matched = append(matched, injected...)
+	err = sortMatchedRuleSets(matched)
+	if err != nil {
+		return nil, ex.Wrapf(err, "sorting matched rules")
+	}
+	return matched, nil
+}
+
 func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	// Since Setup can be invoked in different contexts (i.e, via `otelc setup` or as part of `otelc go build`),
 	// we need to handle the arguments accordingly. If the command is `go build` or `go install`, we should trim the first argument
@@ -381,14 +425,12 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	if cmd.Name == "go" {
 		subcommand = cmd.Args().First() // build / install / test
 		args = cmd.Args().Tail()        // trim the subcommand
-	} else {
+	} else if err := cleanupDebugArtifacts(); err != nil {
 		// Clean up debug artifacts from previous runs for standalone `otelc setup`,
 		// as it prepares the environment for a subsequent toolexec build.
 		// For `otelc go ...`, runGoBuild already performed this cleanup at its
 		// lifecycle boundary before invoking Setup.
-		if err := cleanupDebugArtifacts(); err != nil {
-			return ex.Wrapf(err, "cleaning debug artifacts")
-		}
+		return ex.Wrapf(err, "cleaning debug artifacts")
 	}
 
 	logger := util.LoggerFromContext(ctx)
@@ -402,8 +444,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	// GOFLAGS for the later buildWithToolexec, and before the findDeps dry run
 	// further down. Computed here rather than threaded in because Setup is also
 	// a standalone command action (otelc setup).
-	vendored := vendoringActive(ctx, util.GetOtelcWorkDir())
-	if vendored {
+	if vendoringActive(ctx, util.GetOtelcWorkDir()) {
 		logger.InfoContext(ctx, "vendored project detected; building with -mod=mod")
 		// Mutates GOFLAGS process-wide with no restore. Fine for the one-shot
 		// CLI; a second in-process GoBuild would inherit this -mod=mod.
@@ -449,8 +490,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Ensure a state manager is available in the context
-	stateManager, found := stateManagerFromContext(ctx)
-	if !found {
+	if stateManager, found := stateManagerFromContext(ctx); !found {
 		// save this state manager in the context
 		ctx = contextWithStateManager(ctx, stateManager)
 	}
@@ -473,30 +513,18 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		}
 	}
 
-	// Match the hook code with these dependencies
-	matched, err := sp.matchDeps(ctx, deps, moduleDirs)
-	if err != nil {
-		return ex.Wrapf(err, "matching dependencies to hook rules")
-	}
-
-	// The hook packages the pass above selected get blank-imported into the
-	// application below, which compiles their dependencies too. The build plan
-	// never saw those, so match them now.
-	injected, err := sp.matchInjectedDeps(
-		ctx, matched, deps, moduleDirs, sp.buildFlags,
-	)
+	// Match the hook code with these dependencies, including dependencies
+	// introduced by the generated runtime imports.
+	matched, err := sp.matchAllDeps(ctx, deps, moduleDirs, sp.buildFlags)
 	if err != nil {
 		return err
 	}
-	matched = append(matched, injected...)
 
-	// Reported here rather than per matching pass: an individual pass matching
-	// nothing is normal, it is the combined result that tells the user whether
-	// anything will be instrumented.
-	if len(matched) == 0 {
-		_, _ = fmt.Fprintf(os.Stderr, "Warning: no instrumentation will be applied\n")
-		sp.Warn("no instrumentation rules matched any dependencies")
+	if err = sp.validateSelectedConfigurationMetadata(matched); err != nil {
+		return ex.Wrapf(err, "validating selected instrumentation configuration metadata")
 	}
+
+	sp.warnIfNoInstrumentationMatched(matched)
 
 	// Generate otelc.runtime.go for all packages
 	if err = sp.generateRuntimePerPackage(ctx, buildPkgs, matched); err != nil {
@@ -504,7 +532,16 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Write the matched ruleset to matched.json for further instrument phase
-	return sp.store(ctx, matched, moduleDirs)
+	return sp.store(matched)
+}
+
+// warnIfNoInstrumentationMatched reports the combined result. An individual
+// matching pass may legitimately find no instrumentation rules.
+func (sp *setupPhase) warnIfNoInstrumentationMatched(matched []*rule.InstRuleSet) {
+	if len(matched) == 0 {
+		_, _ = fmt.Fprintf(os.Stderr, "Warning: no instrumentation will be applied\n")
+		sp.Warn("no instrumentation rules matched any dependencies")
+	}
 }
 
 // setupGoCache creates a persistent GOCACHE in .otelc-build/gocache if one isn't already set.

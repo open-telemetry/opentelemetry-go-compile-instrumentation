@@ -7,9 +7,11 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
@@ -365,6 +367,43 @@ func TestRedisV9AppendArg_InvalidUTF8Bytes(t *testing.T) {
 	assert.Equal(t, "<byte>", result)
 }
 
+func TestRedisV9AppendArg_TruncatesLongArg(t *testing.T) {
+	// Exactly at the limit: not truncated.
+	atLimit := strings.Repeat("a", redisMaxArgBytes)
+	got := string(redisV9AppendArg(nil, atLimit))
+	assert.Equal(t, atLimit, got)
+
+	// One byte over the limit: truncated with suffix.
+	overLimit := strings.Repeat("a", redisMaxArgBytes+100)
+	got = string(redisV9AppendArg(nil, overLimit))
+	assert.Equal(t, atLimit+redisArgTruncatedSuffix, got)
+
+	// []byte argument over the limit is also truncated.
+	gotBytes := string(redisV9AppendArg(nil, []byte(overLimit)))
+	assert.Equal(t, atLimit+redisArgTruncatedSuffix, gotBytes)
+}
+
+func TestRedisV9AppendArg_TruncatesPreservingUTF8(t *testing.T) {
+	// Place a 3-byte rune ('€', 0xE2 0x82 0xAC) straddling the 256-byte boundary
+	// (starting at index 255). Truncation must step back to index 255 so the
+	// result remains valid UTF-8.
+	prefix := strings.Repeat("a", redisMaxArgBytes-1)
+	s := prefix + "€" + strings.Repeat("b", 50)
+	got := string(redisV9AppendArg(nil, s))
+
+	assert.True(t, utf8.ValidString(got), "truncated argument must be valid UTF-8")
+	assert.Equal(t, prefix+redisArgTruncatedSuffix, got)
+}
+
+func TestGetRedisV9Statement_BoundsLargeKey(t *testing.T) {
+	largeKey := strings.Repeat("k", 10*1024)
+	cmd := redis.NewCmd(context.Background(), "get", largeKey)
+	stmt := getRedisV9Statement(cmd)
+
+	wantKey := strings.Repeat("k", redisMaxArgBytes) + redisArgTruncatedSuffix
+	assert.Equal(t, "get "+wantKey, stmt)
+}
+
 func TestNewOtelRedisHook(t *testing.T) {
 	hook := newOtelRedisHook("localhost:6379")
 	assert.NotNil(t, hook)
@@ -482,6 +521,74 @@ func TestProcessHook_RecordsError(t *testing.T) {
 	events := span.Events()
 	require.Len(t, events, 1)
 	assert.Equal(t, "exception", events[0].Name)
+}
+
+func TestProcessHook_SanitizesEchoedArgsInError(t *testing.T) {
+	initOnce = sync.Once{}
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "redis")
+
+	sr := setupTestTracer(t)
+
+	hook := newOtelRedisHook("localhost:6379")
+	echoedErr := errors.New("ERR unknown command 'auth', with args beginning with: 'default' 's3cret-password'")
+	processHook := hook.ProcessHook(func(ctx context.Context, cmd redis.Cmder) error {
+		return echoedErr
+	})
+
+	cmd := redis.NewCmd(context.Background(), "auth", "default", "s3cret-password")
+	err := processHook(context.Background(), cmd)
+	// Caller must still receive the original error unmodified.
+	require.Equal(t, echoedErr, err)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	span := spans[0]
+	assert.Equal(t, codes.Error, span.Status().Code)
+	assert.Equal(t, "ERR unknown command 'auth', with args beginning with: ?", span.Status().Description)
+	assert.NotContains(t, span.Status().Description, "s3cret-password")
+
+	events := span.Events()
+	require.Len(t, events, 1)
+	assert.Equal(t, "exception", events[0].Name)
+	for _, attr := range events[0].Attributes {
+		assert.NotContains(t, attr.Value.AsString(), "s3cret-password")
+	}
+}
+
+func TestGetRedisV9Statement_DoesNotAppendCmdError(t *testing.T) {
+	cmd := redis.NewCmd(context.Background(), "auth", "s3cret-password")
+	cmd.SetErr(errors.New("ERR unknown command 'auth', with args beginning with: 's3cret-password'"))
+
+	stmt := getRedisV9Statement(cmd)
+	assert.Equal(t, "auth ?", stmt)
+	assert.NotContains(t, stmt, "s3cret-password")
+}
+
+func TestProcessPipelineHook_SanitizesEchoedArgsInError(t *testing.T) {
+	initOnce = sync.Once{}
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "redis")
+
+	sr := setupTestTracer(t)
+
+	hook := newOtelRedisHook("localhost:6379")
+	echoedErr := errors.New("ERR unknown subcommand or wrong number of arguments for 'set'. Try SET HELP., with args beginning with: 'k' 's3cret-token'")
+	pipelineHook := hook.ProcessPipelineHook(func(ctx context.Context, cmds []redis.Cmder) error {
+		return echoedErr
+	})
+
+	cmds := []redis.Cmder{
+		redis.NewCmd(context.Background(), "set", "k", "s3cret-token"),
+	}
+	err := pipelineHook(context.Background(), cmds)
+	require.Equal(t, echoedErr, err)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	span := spans[0]
+	assert.Equal(t, codes.Error, span.Status().Code)
+	assert.NotContains(t, span.Status().Description, "s3cret-token")
 }
 
 func TestProcessHook_RedisNilNotError(t *testing.T) {

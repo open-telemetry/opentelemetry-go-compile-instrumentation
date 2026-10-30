@@ -1,0 +1,21 @@
+# A wrap_call replace can rebuild a method call around its receiver with
+# {{ .CallReceiver }} and forward its arguments, including a spread, with
+# {{ .CallArguments }}, without the original call {{ . }}.
+wrap_info:
+  target: main
+  where:
+    method_call: go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/call-rule-call-receiver/helpers/logger.*Logger.Info
+  do:
+    - wrap_call:
+        replace: '{{ .CallReceiver }}.With(logger.String("traced", "yes")).Info({{ .CallArguments }})'
+  imports:
+    logger: go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/call-rule-call-receiver/helpers/logger
+wrap_sync:
+  target: main
+  where:
+    method_call: go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/call-rule-call-receiver/helpers/logger.*Logger.Sync
+  do:
+    - wrap_call:
+        replace: "logger.Flush({{ .CallReceiver }})"
+  imports:
+    logger: go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/call-rule-call-receiver/helpers/logger

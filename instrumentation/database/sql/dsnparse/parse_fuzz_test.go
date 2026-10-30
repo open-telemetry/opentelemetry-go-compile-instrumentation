@@ -33,9 +33,11 @@ func fuzzSeeds() []string {
 		"file:test.db?cache=shared&mode=memory",
 		":memory:",
 		"server=host,1433;database=mydb;user id=sa",
+		"server=tcp:host,1433;database=mydb;user id=sa",
 		"sqlserver://user:pass@host:1433?database=mydb",
 		"clickhouse://host:9000/mydb",
 		"user/pass@//host:1521/service",
+		"user/pass@tcps://host:2484/service",
 		// IPv6 forms, which must survive the Addr round trip.
 		"user:pass@tcp([::1]:3306)/mydb",
 		"postgres://user:pass@[2001:db8::1]:5432/mydb",

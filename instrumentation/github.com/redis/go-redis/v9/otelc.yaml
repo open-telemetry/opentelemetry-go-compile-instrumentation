@@ -37,3 +37,16 @@ redis_client_hook:
     - inject_hooks:
         after: afterClientConnV9
         path: "go.opentelemetry.io/otelc/instrumentation/github.com/redis/go-redis/v9"
+
+redis_hook_withtimeout:
+  target: github.com/redis/go-redis/v9
+  # v9.15.0 and v9.15.1 are retracted due to Windows build bugs.
+  # Hook copying is restored in v9.23.1: https://github.com/redis/go-redis/pull/4095
+  version: v9.16.0,v9.23.1
+  where:
+    func: WithTimeout
+    recv: "*Client"
+  do:
+    - inject_hooks:
+        after: afterClientWithTimeoutV9
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/redis/go-redis/v9"

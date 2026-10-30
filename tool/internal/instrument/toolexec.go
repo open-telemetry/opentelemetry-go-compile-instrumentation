@@ -69,6 +69,18 @@ type instrumentPhase struct {
 	// whole package because HookContext declarations accumulate into one globals
 	// file across all instrumented source files.
 	appliedFuncIdentities map[string]struct{}
+	// Local //go:linkname stub names already emitted in this package. Hook
+	// stubs are named from the hook path and function (see hookLinkName), so
+	// the same hook used in two files is declared once and both trampolines
+	// call that name.
+	emittedHookDecls map[string]struct{}
+	// Raw-rule applications already performed during this package's
+	// instrumentation, keyed by the target *dst.FuncDecl. The inner key is
+	// rawRuleDedupKey (Identity plus Pattern, Placement, and Imports).
+	// Scoped to the function, not the package, because inject_code inserts
+	// into a specific function body; a package may have several func init()
+	// declarations across files, each of which must receive the injection.
+	appliedRawIdentities map[*dst.FuncDecl]map[string]struct{}
 	// importNames maps an import path to a package name, resolved
 	// during setup instead of guessed from the import path. importNames
 	// has no entries when the table is unavailable, such as after an
@@ -102,49 +114,9 @@ func (ip *instrumentPhase) getBuildContext() *build.Context {
 	// The go command does not forward -tags to the compiler, so start from
 	// build.Default and apply the tags the user passed to the build.
 	bctx := build.Default
-	bctx.BuildTags = activeBuildTags()
+	bctx.BuildTags = util.ActiveBuildTags()
 	ip.buildContext = &bctx
 	return ip.buildContext
-}
-
-// activeBuildTags returns the build tags of the current go build.
-func activeBuildTags() []string {
-	return userBuildTags(util.SplitGoflags(os.Getenv("GOFLAGS")), util.GetBuildFlags())
-}
-
-// userBuildTags returns the build tags of the effective -tags flag. Flags from
-// buildFlags (the command line) override GOFLAGS, as they do in the go command.
-func userBuildTags(goflags, buildFlags []string) []string {
-	value, found := lastTagsValue(goflags)
-	if v, ok := lastTagsValue(buildFlags); ok {
-		value, found = v, true
-	}
-	if !found {
-		return nil
-	}
-	return strings.FieldsFunc(strings.Trim(value, `"'`), func(r rune) bool {
-		return r == ',' || r == ' '
-	})
-}
-
-// lastTagsValue returns the value of the last -tags flag in flags, accepting
-// the "-tags value", "-tags=value" and double-dash forms.
-func lastTagsValue(flags []string) (string, bool) {
-	value, found := "", false
-	for i := 0; i < len(flags); i++ {
-		flag := flags[i]
-		if strings.HasPrefix(flag, "--") {
-			flag = flag[1:]
-		}
-		switch {
-		case flag == "-tags" && i+1 < len(flags):
-			value, found = flags[i+1], true
-			i++
-		case strings.HasPrefix(flag, "-tags="):
-			value, found = strings.TrimPrefix(flag, "-tags="), true
-		}
-	}
-	return value, found
 }
 
 // debugArtifactDir returns the directory under .otelc-build holding this
@@ -660,8 +632,16 @@ func interceptVet(ctx context.Context, args []string) ([]string, error) {
 		return nil, ex.Wrapf(err, "parsing vet config")
 	}
 
+	// A config without GoFiles has no source list to rewrite, so leave the
+	// command alone rather than failing the build. Indexing a missing key
+	// yields a nil RawMessage, which Unmarshal reports as malformed JSON.
+	raw, ok := config["GoFiles"]
+	if !ok {
+		return args, nil
+	}
+
 	var goFiles []string
-	if err = json.Unmarshal(config["GoFiles"], &goFiles); err != nil {
+	if err = json.Unmarshal(raw, &goFiles); err != nil {
 		return nil, ex.Wrapf(err, "parsing GoFiles from vet config")
 	}
 
@@ -732,7 +712,7 @@ func markedToolVersion(rawOutput string) string {
 	if content, err := os.ReadFile(util.GetMatchedRuleFile()); err == nil {
 		// Build tags decide which add_file rule files apply, so a tagged build
 		// must not reuse artifacts compiled without those tags.
-		if tags := activeBuildTags(); len(tags) > 0 {
+		if tags := util.ActiveBuildTags(); len(tags) > 0 {
 			content = append(content, "\ntags="+strings.Join(tags, ",")...)
 		}
 		sum := sha256.Sum256(content)

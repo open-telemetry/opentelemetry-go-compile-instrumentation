@@ -5,7 +5,9 @@ package rule
 
 import (
 	"fmt"
+	"maps"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"go.opentelemetry.io/otelc/tool/util"
@@ -101,6 +103,9 @@ type InstRuleSet struct {
 	// IgnoredCallFiles lists source files that hold a //otelc:ignore comment
 	// above a call.
 	IgnoredCallFiles []string `json:"ignored_call_files,omitempty"`
+	// IsTest reports whether the set was matched against a test build of the
+	// package. A go test run can compile the same import path both ways.
+	IsTest bool `json:"is_test,omitempty"`
 }
 
 func NewInstRuleSet(importPath string) *InstRuleSet {
@@ -202,28 +207,28 @@ func (irs *InstRuleSet) SetCgoFileMap(cgoFiles map[string]string) {
 	irs.CgoFileMap = cgoFiles
 }
 
-// AllFuncRules returns all function rules from the rule set as a flat slice.
-func (irs *InstRuleSet) AllFuncRules() []*InstFuncRule {
+// allRules flattens a per-file rule map into one slice, visiting files in
+// sorted order so the result does not depend on map iteration order.
+func allRules[T InstRule](rulesByFile map[string][]T) []T {
 	n := 0
-	for _, rs := range irs.FuncRules {
-		n += len(rs)
+	for _, rules := range rulesByFile {
+		n += len(rules)
 	}
-	rules := make([]*InstFuncRule, 0, n)
-	for _, rs := range irs.FuncRules {
-		rules = append(rules, rs...)
+	rules := make([]T, 0, n)
+	for _, file := range slices.Sorted(maps.Keys(rulesByFile)) {
+		rules = append(rules, rulesByFile[file]...)
 	}
 	return rules
 }
 
-// AllStructRules returns all struct rules from the rule set as a flat slice.
+// AllFuncRules returns all function rules from the rule set as a flat slice,
+// ordered by the source file each rule matched.
+func (irs *InstRuleSet) AllFuncRules() []*InstFuncRule {
+	return allRules(irs.FuncRules)
+}
+
+// AllStructRules returns all struct rules from the rule set as a flat slice,
+// ordered by the source file each rule matched.
 func (irs *InstRuleSet) AllStructRules() []*InstStructRule {
-	n := 0
-	for _, rs := range irs.StructRules {
-		n += len(rs)
-	}
-	rules := make([]*InstStructRule, 0, n)
-	for _, rs := range irs.StructRules {
-		rules = append(rules, rs...)
-	}
-	return rules
+	return allRules(irs.StructRules)
 }
