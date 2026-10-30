@@ -23,7 +23,10 @@ import (
 // target's own package. pkga has no non-test Go files (its only non-test file
 // is excluded by a build constraint that is never satisfied, like a CI-tagged
 // suite on a foreign platform), so its runtime file must be generated even
-// though the package load reports no Go files.
+// though the package load reports no Go files. Each test sets the hook
+// package's Label to its own package before calling the instrumented
+// dependency, so the hook output proves that each binary executed its hook,
+// not just one of the two.
 func TestMultiPackageTestBinariesLinkHooks(t *testing.T) {
 	otelcPath, err := testutil.OtelcPath()
 	require.NoError(t, err)
@@ -62,9 +65,14 @@ import (
 	"go.opentelemetry.io/otelc/pkg/hook"
 )
 
+// Label names the test binary that runs the hook. Each test sets it before
+// it calls the instrumented dependency, so the hook output marks the binary
+// it ran in.
+var Label string
+
 func Before(ctx hook.HookContext) {
 	_ = ctx
-	fmt.Println("hook ran")
+	fmt.Println("hook ran:", Label)
 }
 `)
 	// The build constraint is never satisfied, so pkga has no non-test Go
@@ -85,10 +93,12 @@ import (
 	"fmt"
 	"testing"
 
+	"example.com/otelc-multi-package/hooks"
 	"example.com/otelc-multi-package/lib"
 )
 
 func TestA(t *testing.T) {
+	hooks.Label = "pkga"
 	if got := lib.Do(); got != 1 {
 		t.Fatalf("lib.Do() = %d, want 1", got)
 	}
@@ -111,10 +121,12 @@ import (
 	"fmt"
 	"testing"
 
+	"example.com/otelc-multi-package/hooks"
 	"example.com/otelc-multi-package/lib"
 )
 
 func TestB(t *testing.T) {
+	hooks.Label = "pkgb"
 	if got := lib.Do(); got != 1 {
 		t.Fatalf("lib.Do() = %d, want 1", got)
 	}
@@ -136,7 +148,8 @@ func TestB(t *testing.T) {
 		"go", "test", "-count=1", "-v", "./pkga", "./pkgb")
 	require.Contains(t, output, "pkgA ran")
 	require.Contains(t, output, "pkgB ran")
-	require.Contains(t, output, "hook ran")
+	require.Contains(t, output, "hook ran: pkga")
+	require.Contains(t, output, "hook ran: pkgb")
 }
 
 // TestBuildSkipsTestOnlyCommandPackage runs `otelc go build ./...` on a
