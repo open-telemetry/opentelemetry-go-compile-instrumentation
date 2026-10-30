@@ -484,6 +484,74 @@ func TestProcessHook_RecordsError(t *testing.T) {
 	assert.Equal(t, "exception", events[0].Name)
 }
 
+func TestProcessHook_SanitizesEchoedArgsInError(t *testing.T) {
+	initOnce = sync.Once{}
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "redis")
+
+	sr := setupTestTracer(t)
+
+	hook := newOtelRedisHook("localhost:6379")
+	echoedErr := errors.New("ERR unknown command 'auth', with args beginning with: 'default' 's3cret-password'")
+	processHook := hook.ProcessHook(func(ctx context.Context, cmd redis.Cmder) error {
+		return echoedErr
+	})
+
+	cmd := redis.NewCmd(context.Background(), "auth", "default", "s3cret-password")
+	err := processHook(context.Background(), cmd)
+	// Caller must still receive the original error unmodified.
+	require.Equal(t, echoedErr, err)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	span := spans[0]
+	assert.Equal(t, codes.Error, span.Status().Code)
+	assert.Equal(t, "ERR unknown command 'auth', with args beginning with: ?", span.Status().Description)
+	assert.NotContains(t, span.Status().Description, "s3cret-password")
+
+	events := span.Events()
+	require.Len(t, events, 1)
+	assert.Equal(t, "exception", events[0].Name)
+	for _, attr := range events[0].Attributes {
+		assert.NotContains(t, attr.Value.AsString(), "s3cret-password")
+	}
+}
+
+func TestGetRedisV9Statement_DoesNotAppendCmdError(t *testing.T) {
+	cmd := redis.NewCmd(context.Background(), "auth", "s3cret-password")
+	cmd.SetErr(errors.New("ERR unknown command 'auth', with args beginning with: 's3cret-password'"))
+
+	stmt := getRedisV9Statement(cmd)
+	assert.Equal(t, "auth ?", stmt)
+	assert.NotContains(t, stmt, "s3cret-password")
+}
+
+func TestProcessPipelineHook_SanitizesEchoedArgsInError(t *testing.T) {
+	initOnce = sync.Once{}
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "redis")
+
+	sr := setupTestTracer(t)
+
+	hook := newOtelRedisHook("localhost:6379")
+	echoedErr := errors.New("ERR unknown subcommand or wrong number of arguments for 'set'. Try SET HELP., with args beginning with: 'k' 's3cret-token'")
+	pipelineHook := hook.ProcessPipelineHook(func(ctx context.Context, cmds []redis.Cmder) error {
+		return echoedErr
+	})
+
+	cmds := []redis.Cmder{
+		redis.NewCmd(context.Background(), "set", "k", "s3cret-token"),
+	}
+	err := pipelineHook(context.Background(), cmds)
+	require.Equal(t, echoedErr, err)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+
+	span := spans[0]
+	assert.Equal(t, codes.Error, span.Status().Code)
+	assert.NotContains(t, span.Status().Description, "s3cret-token")
+}
+
 func TestProcessHook_RedisNilNotError(t *testing.T) {
 	initOnce = *new(sync.Once)
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "redis")
