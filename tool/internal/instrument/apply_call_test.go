@@ -6,6 +6,7 @@ package instrument
 import (
 	"bytes"
 	"context"
+	"fmt"
 	goast "go/ast"
 	"go/parser"
 	"go/token"
@@ -2658,4 +2659,306 @@ func Run() {
 	assert.Equal(t, "redis", ident.Name, "override must use the resolved real name, not the path-derived guess")
 	assert.Equal(t, "Wrap", sel.Sel.Name)
 	assert.Equal(t, 1, countImportSpecs(root), "must not add a redundant import for an alias the rewrite eliminated")
+}
+
+// callReceiverSource is a sample package for the {{ .CallReceiver }} tests.
+// Logger stands in for a logger such as zap.Logger.
+const callReceiverSource = `package sample
+
+type Field struct{}
+
+type Logger struct{}
+
+func (l *Logger) With(fields ...Field) *Logger { return l }
+func (l *Logger) Info(msg string, fields ...Field) {}
+func (l *Logger) Sync() error { return nil }
+
+func traceFields() []Field { return nil }
+func flush(l *Logger) error { return l.Sync() }
+func getLogger() *Logger { return &Logger{} }
+func field(s string) Field { return Field{} }
+
+type server struct{}
+
+func (s *server) serve(log *Logger) {
+	log.Info("serve")
+}
+
+type base struct{ *Logger }
+
+func promoted(b base, value Logger) {
+	b.Info("promoted")
+	value.Info("addressable")
+}
+
+func handle(log *Logger, fields []Field) {
+	log.Info("handle", field("a"), field("b"))
+	log.Info("spread", fields...)
+	log.Info("none")
+	getLogger().Info("side effect")
+	_ = log.Sync()
+	defer log.Info("deferred", field("d"))
+	go log.Info("go", fields...)
+}
+`
+
+const callReceiverRebuild = "{{ .CallReceiver }}.With(traceFields()...).Info({{ .CallArguments }})"
+
+func TestApplyCallRule_MethodCall_CallReceiverRebuildsCall(t *testing.T) {
+	ip, root := setupMethodCallPhase(t, callReceiverSource)
+	info := methodCallRule("*Logger", "Info", callReceiverRebuild)
+	sync := methodCallRule("*Logger", "Sync", "flush({{ .CallReceiver }})")
+
+	_, err := ip.applyCallRule(context.Background(), info, root)
+	require.NoError(t, err)
+	_, err = ip.applyCallRule(context.Background(), sync, root)
+	require.NoError(t, err)
+
+	out := renderFile(t, root)
+	for _, want := range []string{
+		// The receiver of the matched call, not the enclosing method's s.
+		`log.With(traceFields()...).Info("serve")`,
+		`log.With(traceFields()...).Info("handle", field("a"), field("b"))`,
+		`log.With(traceFields()...).Info("spread", fields...)`,
+		`log.With(traceFields()...).Info("none")`,
+		`getLogger().With(traceFields()...).Info("side effect")`,
+		`_ = flush(log)`,
+		`defer log.With(traceFields()...).Info("deferred", field("d"))`,
+		`go log.With(traceFields()...).Info("go", fields...)`,
+		// The receiver as written, with no implicit & and the outer value of
+		// a promoted method.
+		`b.With(traceFields()...).Info("promoted")`,
+		`value.With(traceFields()...).Info("addressable")`,
+	} {
+		assert.Contains(t, out, want)
+	}
+	requireTypeChecks(t, strings.Replace(out, "package sample", "package main", 1))
+}
+
+func TestApplyCallRule_FunctionCall_CallReceiverErrors(t *testing.T) {
+	root := parseFile(t, `package main
+
+import "net/http"
+
+func Handler() {
+	http.Get("url")
+}
+`)
+	r := httpGetRule("traced({{ .CallReceiver }}).Get({{ .CallArguments }})")
+
+	modified, err := newTestPhase().applyCallRule(context.Background(), r, root)
+
+	require.Error(t, err)
+	assert.False(t, modified)
+	assert.Contains(t, err.Error(), "CallReceiver is only available for a call matched by method_call")
+}
+
+func TestApplyCallRule_MethodCall_CallReceiverRejectsUnsafeTemplates(t *testing.T) {
+	tests := []struct {
+		name    string
+		replace string
+		wantErr string
+	}{
+		{
+			name:    "side effect receiver used twice",
+			replace: "(func() { use({{ .CallReceiver }}); {{ .CallReceiver }}.Info({{ .CallArguments }}) })()",
+			wantErr: "evaluates the receiver getLogger() 2 times",
+		},
+		{
+			name:    "side effect receiver with the original call",
+			replace: "(func() { use({{ .CallReceiver }}); {{ . }} })()",
+			wantErr: "evaluates the receiver getLogger() 2 times",
+		},
+		{
+			name:    "side effect receiver dropped",
+			replace: "getLogger2().Info({{ .CallArguments }})",
+			wantErr: "evaluates the receiver getLogger() 0 times",
+		},
+		{
+			name:    "arguments before the receiver",
+			replace: "infoArgs({{ .CallArguments }}, {{ .CallReceiver }})",
+			wantErr: "evaluates the argument 1 (field(\"a\")) before the receiver getLogger()",
+		},
+		{
+			name:    "side effect argument used twice",
+			replace: "{{ .CallReceiver }}.Info({{ .CallArguments }}, {{ .CallArgument 1 }})",
+			wantErr: "evaluates the argument 1 (field(\"a\")) 2 times",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ip, root := setupMethodCallPhase(t, `package sample
+
+type Field struct{}
+type Logger struct{}
+
+func (l *Logger) Info(msg string, fields ...Field) {}
+
+func getLogger() *Logger { return &Logger{} }
+func field(s string) Field { return Field{} }
+
+func run() {
+	getLogger().Info("x", field("a"))
+}
+`)
+			r := methodCallRule("*Logger", "Info", tt.replace)
+
+			modified, err := ip.applyCallRule(context.Background(), r, root)
+
+			require.Error(t, err)
+			assert.False(t, modified)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
+func TestApplyCallRule_MethodCall_CallReceiverAllowsRepeatedPlainReceiver(t *testing.T) {
+	ip, root := setupMethodCallPhase(t, `package sample
+
+type Logger struct{}
+
+func (l *Logger) Info(msg string) {}
+
+func record(l *Logger) {}
+
+func run(log *Logger) {
+	log.Info("x")
+}
+`)
+	r := methodCallRule("*Logger", "Info", "(func() { record({{ .CallReceiver }}); {{ . }} })()")
+
+	_, err := ip.applyCallRule(context.Background(), r, root)
+	require.NoError(t, err)
+
+	out := renderFile(t, root)
+	assert.Contains(t, out, "record(log)")
+	assert.Contains(t, out, `log.Info("x")`)
+}
+
+func TestApplyCallRule_MethodCall_CallNestedInDeferredCallIsNotDeferred(t *testing.T) {
+	ip, root := setupMethodCallPhase(t, `package sample
+
+type Logger struct{}
+
+func (l *Logger) Info(msg string) error { return nil }
+
+func wrap(err error) {}
+
+func run(log *Logger) {
+	defer wrap(log.Info("x"))
+}
+`)
+	// The function literal is allowed: log.Info is an argument of the defer
+	// statement's call, not its call.
+	r := methodCallRule("*Logger", "Info",
+		"(func() error { return {{ .CallReceiver }}.Info({{ .CallArguments }}) })()")
+
+	modified, err := ip.applyCallRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	assert.True(t, modified)
+	assert.Contains(t, renderFile(t, root), `defer wrap((func() error { return log.Info("x") })())`)
+}
+
+func TestApplyCallRule_DeferOrGoCallReplacedWithNonCallErrors(t *testing.T) {
+	const source = `package sample
+
+type Logger struct{}
+
+func (l *Logger) Info(msg string) error { return nil }
+
+func run(log *Logger) {
+	%s log.Info("x")
+}
+`
+	for _, keyword := range []string{"defer", "go"} {
+		t.Run(keyword, func(t *testing.T) {
+			ip, root := setupMethodCallPhase(t, fmt.Sprintf(source, keyword))
+			r := methodCallRule("*Logger", "Info", "{{ . }} != nil")
+
+			modified, err := ip.applyCallRule(context.Background(), r, root)
+
+			require.Error(t, err)
+			assert.False(t, modified)
+			assert.Contains(t, err.Error(), "the template output is a *dst.BinaryExpr, but the matched call "+
+				"is the call of a defer or go statement, which must be replaced with a call expression")
+		})
+	}
+}
+
+func TestApplyCallRule_MethodCall_CallPartsKeepPositionsForLaterRules(t *testing.T) {
+	const source = `package sample
+
+type Logger struct{}
+
+func (l *Logger) With(k string) *Logger { return l }
+func (l *Logger) Info(msg string)        {}
+func (l *Logger) Keep(other *Logger)     {}
+
+func tracedWith(l *Logger) *Logger { return l }
+func keep(l *Logger)               {}
+
+func run(l *Logger) {
+	l.With("k").Info("x")
+	l.Keep(l.With("k"))
+}
+`
+	info := methodCallRule("*Logger", "Info", "{{ .CallReceiver }}.Info({{ .CallArguments }})")
+	keepRule := methodCallRule("*Logger", "Keep", "keep({{ .CallArgument 0 }})")
+	with := methodCallRule("*Logger", "With", "tracedWith({{ . }})")
+	orders := map[string][]*rule.InstCallRule{
+		"call parts first": {info, keepRule, with},
+		"call parts last":  {with, info, keepRule},
+	}
+	for name, rules := range orders {
+		t.Run(name, func(t *testing.T) {
+			ip, root := setupMethodCallPhase(t, source)
+
+			for _, r := range rules {
+				_, err := ip.applyCallRule(context.Background(), r, root)
+				require.NoError(t, err)
+			}
+
+			out := renderFile(t, root)
+			assert.Contains(t, out, `tracedWith(l.With("k")).Info("x")`)
+			assert.Contains(t, out, `keep(tracedWith(l.With("k")))`)
+		})
+	}
+}
+
+func TestApplyCallRule_MethodCall_CallReceiverInDeferredFuncLit(t *testing.T) {
+	const source = `package sample
+
+type Logger struct{}
+
+func (l *Logger) Info(msg string) {}
+
+func run(log *Logger) {
+	%s log.Info("x")
+}
+`
+	const replace = "(func() { {{ .CallReceiver }}.Info({{ .CallArguments }}) })()"
+	for _, keyword := range []string{"defer", "go"} {
+		t.Run(keyword+" is rejected", func(t *testing.T) {
+			ip, root := setupMethodCallPhase(t, fmt.Sprintf(source, keyword))
+			r := methodCallRule("*Logger", "Info", replace)
+
+			modified, err := ip.applyCallRule(context.Background(), r, root)
+
+			require.Error(t, err)
+			assert.False(t, modified)
+			assert.Contains(t, err.Error(), "uses the receiver log inside a function literal, "+
+				"but the matched call is the call of a defer or go statement")
+			assert.Contains(t, err.Error(), "rule wrap_method cannot wrap the call at sample.go:8:")
+		})
+	}
+	t.Run("plain statement is accepted", func(t *testing.T) {
+		ip, root := setupMethodCallPhase(t, fmt.Sprintf(source, ""))
+		r := methodCallRule("*Logger", "Info", replace)
+
+		_, err := ip.applyCallRule(context.Background(), r, root)
+		require.NoError(t, err)
+
+		assert.Contains(t, renderFile(t, root), `log.Info("x")`)
+	})
 }
