@@ -17,6 +17,42 @@ import (
 	"go.opentelemetry.io/otelc/test/testutil"
 )
 
+// statsLog returns what the run's toolexec processes logged. OTELC_STATS
+// makes every tool run the build executes log a "toolexec stats" line, so
+// the debug log records exactly which compiles ran and which the cache
+// answered.
+func statsLog(t *testing.T, appDir string) string {
+	t.Helper()
+	content, err := os.ReadFile(filepath.Join(appDir, ".otelc-build", "debug.log"))
+	require.NoError(t, err)
+	return string(content)
+}
+
+// assertStatsCompiledPackage asserts from a stats log that a compile of pkg
+// ran.
+func assertStatsCompiledPackage(t *testing.T, log, pkg string) {
+	t.Helper()
+	assert.Contains(t, log, "package="+pkg)
+}
+
+// assertStatsCacheHitPackage asserts from a stats log that no compile of
+// pkg ran: the build cache answered it, so a link that still works proves
+// the warm-cache recovery, not the compile-side tracking.
+func assertStatsCacheHitPackage(t *testing.T, log, pkg string) {
+	t.Helper()
+	assert.NotContains(t, log, "package="+pkg,
+		"the build recompiled "+pkg+", so the run exercised cold recovery, not the cache-hit shape")
+}
+
+// assertStatsLinkRecovered asserts from a stats log that the link updated
+// its importcfg: the run holds no compile tracking file, so only the
+// matched.json recovery in the link can have supplied the imports.
+func assertStatsLinkRecovered(t *testing.T, log string) {
+	t.Helper()
+	assert.Contains(t, log, "Updated link importcfg",
+		"the link ran no importcfg update; the rule-added import was never recovered")
+}
+
 // TestWarmCacheKeepsRuleAddedImports covers the link step of a build whose
 // compile actions all hit the build cache. A rule adds an import of extra to
 // dep, and nothing else in the application imports extra, so go's own build
@@ -114,9 +150,7 @@ replace example.com/warmcache/extra => ./extra
 
 	// One GOCACHE for the cold and the warm build: the warm build must reuse
 	// the archives the cold build stored, which is what a restored CI cache
-	// provides. OTELC_STATS makes every tool run the build executes log a
-	// "toolexec stats" line, so the debug log records exactly which compiles
-	// ran and which the cache answered.
+	// provides.
 	goCache := filepath.Join(t.TempDir(), "gocache")
 	baseEnv := append(
 		preparedBuildBaseEnvironment(),
@@ -136,21 +170,12 @@ replace example.com/warmcache/extra => ./extra
 		return string(out)
 	}
 
-	// debugLog returns what the run's toolexec processes logged. The dep
-	// import path appears in a stats line exactly when a compile of dep ran.
-	debugLog := func(t *testing.T) string {
-		t.Helper()
-		content, err := os.ReadFile(filepath.Join(appDir, ".otelc-build", "debug.log"))
-		require.NoError(t, err)
-		return string(content)
-	}
-
 	t.Run("cold build compiles and instruments", func(t *testing.T) {
 		out := runOtelcTest()
 		assert.Contains(t, out, "extra: note called")
 		// The cold build must compile dep through toolexec, or the warm run
 		// below cannot demonstrate a cache hit for it.
-		assert.Contains(t, debugLog(t), "package=example.com/warmcache/dep")
+		assertStatsCompiledPackage(t, statsLog(t, appDir), "example.com/warmcache/dep")
 	})
 
 	t.Run("warm build after cache hit keeps the link working", func(t *testing.T) {
@@ -160,16 +185,14 @@ replace example.com/warmcache/extra => ./extra
 		out := runOtelcTest()
 		assert.Contains(t, out, "extra: note called")
 
-		log := debugLog(t)
+		log := statsLog(t, appDir)
 		// The warm run must not recompile dep: the restored cache answers
 		// its instrumented compile, so no toolexec compile of it runs.
-		assert.NotContains(t, log, "package=example.com/warmcache/dep",
-			"the warm build recompiled example.com/warmcache/dep, so the run exercised cold recovery, not the cache-hit shape")
+		assertStatsCacheHitPackage(t, log, "example.com/warmcache/dep")
 		// The fresh .otelc-build starts with no tracking files, so the only
 		// way the link importcfg gained the rule-added import is the
 		// matched.json recovery in the link phase.
-		assert.Contains(t, log, "Updated link importcfg",
-			"the warm link ran no importcfg update; the rule-added import was never recovered")
+		assertStatsLinkRecovered(t, log)
 	})
 }
 
@@ -351,6 +374,7 @@ func main() {
 		"GOWORK=off",
 		"GOCACHE="+filepath.Join(t.TempDir(), "gocache"),
 		"OTELC_RULES=rules.yml",
+		"OTELC_STATS=1",
 	)
 
 	runOtelcTest := func() string {
@@ -366,6 +390,9 @@ func main() {
 
 	t.Run("cold profiled build links", func(t *testing.T) {
 		assert.Contains(t, runOtelcTest(), "PASS")
+		// The cold build must compile dep through toolexec, or the warm run
+		// below cannot demonstrate a cache hit for it.
+		assertStatsCompiledPackage(t, statsLog(t, appDir), "example.com/warmcache/dep")
 	})
 
 	t.Run("warm build resolves the added import with the recorded profile", func(t *testing.T) {
@@ -373,5 +400,14 @@ func main() {
 		// from scratch while the restored GOCACHE answers every compile.
 		require.NoError(t, os.RemoveAll(filepath.Join(appDir, ".otelc-build")))
 		assert.Contains(t, runOtelcTest(), "PASS")
+
+		log := statsLog(t, appDir)
+		// The warm run must not recompile dep: with a compile of dep the
+		// tracking files would supply the profiled archive and the run would
+		// not prove the link-side profile.
+		assertStatsCacheHitPackage(t, log, "example.com/warmcache/dep")
+		// The fresh .otelc-build holds no tracking files, so only the link
+		// recovery, run with the recorded profile, can have resolved extra.
+		assertStatsLinkRecovered(t, log)
 	})
 }
