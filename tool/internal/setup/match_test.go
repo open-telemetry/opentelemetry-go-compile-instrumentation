@@ -2659,3 +2659,73 @@ func TestLoadRules_NoRulesAvailable(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, rules)
 }
+
+// benchMatchedRuleSets builds a synthetic matched slice of total rule sets:
+// five of every twenty-five consecutive sets share one ModulePath, mimicking
+// separate source variants of one package, and the rest have unique ones.
+// Each set carries several rules so the JSON encoding it would need as a sort
+// key is representative of a real build.
+func benchMatchedRuleSets(total int) []*rule.InstRuleSet {
+	src := filepath.Join(os.TempDir(), "bench_source.go")
+	sets := make([]*rule.InstRuleSet, 0, total)
+	for i := 0; len(sets) < total; i++ {
+		module := fmt.Sprintf("example.com/bench/pkg%05d", i)
+		if i%25 < 5 {
+			module = fmt.Sprintf("example.com/bench/shared%05d", i/25)
+		}
+		set := rule.NewInstRuleSet(module)
+		for j := range 3 {
+			set.AddFileRule(&rule.InstFileRule{
+				InstBaseRule: rule.InstBaseRule{
+					Name:   fmt.Sprintf("file-rule-%d-%d", i, j),
+					Target: rule.NewTarget(module),
+				},
+				File: fmt.Sprintf("added_%d_%d.go", i, j),
+				Path: "example.com/bench/hooks",
+			})
+		}
+		for j := range 2 {
+			set.AddFuncRule(src, &rule.InstFuncRule{
+				InstBaseRule: rule.InstBaseRule{
+					Name:   fmt.Sprintf("func-rule-%d-%d", i, j),
+					Target: rule.NewTarget(module),
+				},
+				Func:   fmt.Sprintf("Fn%d_%d", i, j),
+				Before: "BeforeFn",
+				Path:   "example.com/bench/hooks",
+			})
+		}
+		sets = append(sets, set)
+	}
+	return sets
+}
+
+// BenchmarkSortMatchedRuleSets measures the cost of the stable-order sort on
+// a large matched slice, the shape a big build produces.
+func BenchmarkSortMatchedRuleSets(b *testing.B) {
+	sets := benchMatchedRuleSets(5000)
+
+	// Sanity-check the helper: sorted output is grouped by ModulePath, and
+	// the shared-module groups land in a stable, fully-ordered position.
+	sorted := make([]*rule.InstRuleSet, len(sets))
+	copy(sorted, sets)
+	if err := sortMatchedRuleSets(sorted); err != nil {
+		b.Fatal(err)
+	}
+	for i := 1; i < len(sorted); i++ {
+		if sorted[i-1].ModulePath > sorted[i].ModulePath {
+			b.Fatalf("sets %d and %d out of order: %s > %s",
+				i-1, i, sorted[i-1].ModulePath, sorted[i].ModulePath)
+		}
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		in := make([]*rule.InstRuleSet, len(sets))
+		copy(in, sets)
+		if err := sortMatchedRuleSets(in); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

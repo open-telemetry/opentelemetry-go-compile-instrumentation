@@ -5,6 +5,7 @@ package setup
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -1929,4 +1930,210 @@ func TestSetupPhase_GetBuildContext(t *testing.T) {
 		assert.Contains(t, bctx.BuildTags, "clitag")
 		assert.NotContains(t, bctx.BuildTags, "envtag")
 	})
+}
+
+// matchAllDepsFixture is the module that matchAllDepsTestModule writes.
+type matchAllDepsFixture struct {
+	dir      string
+	ruleFile string
+	deps     []*Dependency
+}
+
+// matchAllDepsTestModule writes a module whose original packages (aaa, zzz)
+// and hook-injected packages (mmm, and nnn through a second hook only mmm's
+// own rule names) interleave alphabetically, so the merge boundary in
+// matchAllDeps is the only thing standing between a deterministic matched.json
+// and worker-completion order. It returns the module directory, the rule file
+// path, and the original dependencies.
+func matchAllDepsTestModule(t *testing.T) matchAllDepsFixture {
+	t.Helper()
+
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "go.mod"), "module example.com/maddeps\n\ngo 1.25.0\n")
+	mustWriteFile(t, filepath.Join(dir, "aaa", "aaa.go"), "package aaa\n\nfunc AAA() {}\n")
+	mustWriteFile(t, filepath.Join(dir, "zzz", "zzz.go"), "package zzz\n\nfunc ZZZ() {}\n")
+	mustWriteFile(t, filepath.Join(dir, "hook", "hook.go"),
+		"package hook\n\nimport _ \"example.com/maddeps/mmm\"\n\nfunc Hook() {}\n")
+	mustWriteFile(t, filepath.Join(dir, "mmm", "mmm.go"), "package mmm\n\nfunc MMM() {}\n")
+	mustWriteFile(t, filepath.Join(dir, "hook2", "hook2.go"),
+		"package hook2\n\nimport _ \"example.com/maddeps/nnn\"\n\nfunc Hook2() {}\n")
+	mustWriteFile(t, filepath.Join(dir, "nnn", "nnn.go"), "package nnn\n\nfunc NNN() {}\n")
+
+	ruleFile := filepath.Join(dir, "rules.yaml")
+	mustWriteFile(t, ruleFile, `aaaRule:
+  target: example.com/maddeps/aaa
+  func: AAA
+  before: OtelBeforeAAA
+  path: example.com/maddeps/hook
+zzzRule:
+  target: example.com/maddeps/zzz
+  func: ZZZ
+  before: OtelBeforeZZZ
+  path: example.com/maddeps/hook
+mmmRule:
+  target: example.com/maddeps/mmm
+  func: MMM
+  before: OtelBeforeMMM
+  path: example.com/maddeps/hook2
+nnnRule:
+  target: example.com/maddeps/nnn
+  func: NNN
+  before: OtelBeforeNNN
+  path: example.com/maddeps/hook2
+`)
+
+	deps := []*Dependency{
+		{
+			ImportPath: "example.com/maddeps/zzz",
+			Sources:    []string{filepath.Join(dir, "zzz", "zzz.go")},
+			CgoFiles:   map[string]string{},
+		},
+		{
+			ImportPath: "example.com/maddeps/aaa",
+			Sources:    []string{filepath.Join(dir, "aaa", "aaa.go")},
+			CgoFiles:   map[string]string{},
+		},
+	}
+	return matchAllDepsFixture{dir: dir, ruleFile: ruleFile, deps: deps}
+}
+
+// TestMatchAllDeps_DeterministicOrder drives the full matchAllDeps flow —
+// original matching, rule-path resolution, injected matching over two
+// rounds (mmm enters through the first hook, nnn only through the hook that
+// mmm's own rule names), and the final merge — and asserts the encoded result
+// does not change across repeated runs while the input dependency order
+// rotates. The injected packages mmm and nnn sort between the original
+// packages aaa and zzz, so an unstable merge boundary cannot hide behind
+// already-sorted batches, and the multi-round chain proves the round order
+// stays fixed.
+func TestMatchAllDeps_DeterministicOrder(t *testing.T) {
+	t.Setenv(util.EnvOtelcRules, "")
+	fixture := matchAllDepsTestModule(t)
+	dir, ruleFile, deps := fixture.dir, fixture.ruleFile, fixture.deps
+
+	sp := newTestSetupPhase()
+	sp.ruleConfig = ruleFile
+
+	wantModules := []string{
+		"example.com/maddeps/aaa",
+		"example.com/maddeps/mmm",
+		"example.com/maddeps/nnn",
+		"example.com/maddeps/zzz",
+	}
+
+	var baseline []byte
+	for range 5 {
+		matched, err := sp.matchAllDeps(t.Context(), deps, []string{dir}, []string{"-C", dir})
+		require.NoError(t, err)
+		require.Len(t, matched, len(wantModules))
+		modules := make([]string, 0, len(matched))
+		for _, set := range matched {
+			require.Empty(t, set.FileRules)
+			require.NotEmpty(t, set.FuncRules, "every matched package has a func rule")
+			modules = append(modules, set.ModulePath)
+		}
+		assert.ElementsMatch(t, wantModules, modules)
+
+		encoded, err := json.Marshal(matched)
+		require.NoError(t, err)
+		if baseline == nil {
+			baseline = encoded
+		} else {
+			assert.Equal(t, string(baseline), string(encoded))
+		}
+		deps = append(deps[1:], deps[0])
+	}
+}
+
+// TestMatchAllDeps_MatchDepsError covers the first error boundary of
+// matchAllDeps: a rule file that cannot be parsed must surface the matchDeps
+// failure, not a silently empty result.
+func TestMatchAllDeps_MatchDepsError(t *testing.T) {
+	t.Setenv(util.EnvOtelcRules, "")
+
+	dir := t.TempDir()
+	ruleFile := filepath.Join(dir, "rules.yaml")
+	mustWriteFile(t, ruleFile, "invalid: yaml: syntax: [\n")
+
+	sp := newTestSetupPhase()
+	sp.ruleConfig = ruleFile
+
+	deps := []*Dependency{{ImportPath: "example.com/maddeps/aaa"}}
+	_, err := sp.matchAllDeps(t.Context(), deps, []string{dir}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "matching dependencies to hook rules")
+}
+
+// TestMatchAllDeps_ResolveRulePathsError covers the second error boundary of
+// matchAllDeps: a matched rule whose hook package cannot be resolved must
+// fail setup before anything is stored.
+func TestMatchAllDeps_ResolveRulePathsError(t *testing.T) {
+	t.Setenv(util.EnvOtelcRules, "")
+
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "go.mod"), "module example.com/maddeps\n\ngo 1.25.0\n")
+	mustWriteFile(t, filepath.Join(dir, "aaa", "aaa.go"), "package aaa\n\nfunc AAA() {}\n")
+	ruleFile := filepath.Join(dir, "rules.yaml")
+	mustWriteFile(t, ruleFile, `aaaRule:
+  target: example.com/maddeps/aaa
+  func: AAA
+  before: OtelBeforeAAA
+  path: example.com/unresolvable/nonexistent
+`)
+
+	sp := newTestSetupPhase()
+	sp.ruleConfig = ruleFile
+
+	deps := []*Dependency{
+		{
+			ImportPath: "example.com/maddeps/aaa",
+			Sources:    []string{filepath.Join(dir, "aaa", "aaa.go")},
+			CgoFiles:   map[string]string{},
+		},
+	}
+	_, err := sp.matchAllDeps(t.Context(), deps, []string{dir}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "resolving rule paths")
+}
+
+// TestMatchAllDeps_ResolveInjectedRulePathsError covers the third error
+// boundary of matchAllDeps: the initial rule paths resolve, but a rule that
+// only matches an injected package names a hook package that cannot be
+// resolved, so the injected pass must fail setup too.
+func TestMatchAllDeps_ResolveInjectedRulePathsError(t *testing.T) {
+	t.Setenv(util.EnvOtelcRules, "")
+
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "go.mod"), "module example.com/maddeps2\n\ngo 1.25.0\n")
+	mustWriteFile(t, filepath.Join(dir, "orig", "aaa.go"), "package orig\n\nfunc AAA() {}\n")
+	mustWriteFile(t, filepath.Join(dir, "hook", "hook.go"),
+		"package hook\n\nimport _ \"example.com/maddeps2/mmm\"\n\nfunc Hook() {}\n")
+	mustWriteFile(t, filepath.Join(dir, "mmm", "mmm.go"), "package mmm\n\nfunc MMM() {}\n")
+
+	ruleFile := filepath.Join(dir, "rules.yaml")
+	mustWriteFile(t, ruleFile, `aaaRule:
+  target: example.com/maddeps2/orig
+  func: AAA
+  before: OtelBeforeAAA
+  path: example.com/maddeps2/hook
+mmmRule:
+  target: example.com/maddeps2/mmm
+  func: MMM
+  before: OtelBeforeMMM
+  path: example.com/unresolvable/nonexistent
+`)
+
+	sp := newTestSetupPhase()
+	sp.ruleConfig = ruleFile
+
+	deps := []*Dependency{
+		{
+			ImportPath: "example.com/maddeps2/orig",
+			Sources:    []string{filepath.Join(dir, "orig", "aaa.go")},
+			CgoFiles:   map[string]string{},
+		},
+	}
+	_, err := sp.matchAllDeps(t.Context(), deps, []string{dir}, []string{"-C", dir})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "resolving injected rule paths")
 }

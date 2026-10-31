@@ -409,11 +409,11 @@ func (sp *setupPhase) matchAllDeps(
 	if err != nil {
 		return nil, err
 	}
+	// matchDeps already gives every batch a stable order, and the batches
+	// are concatenated in a fixed sequence, so the combined slice is
+	// deterministic without re-sorting it here. Re-sorting would re-encode
+	// every set that shares a ModulePath a second time.
 	matched = append(matched, injected...)
-	err = sortMatchedRuleSets(matched)
-	if err != nil {
-		return nil, ex.Wrapf(err, "sorting matched rules")
-	}
 	return matched, nil
 }
 
