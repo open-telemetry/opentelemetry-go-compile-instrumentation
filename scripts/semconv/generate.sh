@@ -50,7 +50,7 @@ out=$($OCI_BIN run --rm \
     --diagnostic-stdout \
     go /otelc-output 2>"$stderr") || rc=$?
 
-if [ "$rc" -ne 0 ] && ! printf '%s' "$out" | jq empty >/dev/null 2>&1; then
+if [ "$rc" -ne 0 ] && ! printf '%s' "$out" | jq -e 'type == "array"' >/dev/null 2>&1; then
   echo "weaver registry generate failed to run (exit $rc):" >&2
   cat "$stderr" >&2
   printf '%s\n' "$out" >&2
