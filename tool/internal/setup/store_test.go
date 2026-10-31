@@ -6,6 +6,7 @@ package setup
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -342,4 +343,90 @@ func TestResolveRulePaths_DuplicateAndUnsortedModuleDirs(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, hooksDir, rs.AllFuncRules()[0].ResolvedPath)
 	assert.Equal(t, callerOrig, callerDirs, "caller slice must not be mutated")
+}
+
+func TestSetupPhaseInjectedHash(t *testing.T) {
+	modDir := t.TempDir()
+	writeFile := func(name, content string) {
+		t.Helper()
+		path := filepath.Join(modDir, name)
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+	}
+	writeFile("go.mod", "module example.com/m\n\ngo 1.25.0\n")
+	writeFile("extra/extra.go",
+		"package extra\n\nimport \"example.com/m/extra2\"\n\nfunc Marker() string { return extra2.Tag }\n")
+	writeFile("extra2/extra2.go", "package extra2\n\nconst Tag = \"v1\"\n")
+	writeFile("hooks/added.go", "//go:build ignore\n\npackage hooks\n")
+	t.Chdir(modDir)
+
+	set := rule.NewInstRuleSet("example.com/m/dep")
+	set.AddCallRule(fakeSrcFile("dep.go"), &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Imports: map[string]string{"extra": "example.com/m/extra"}},
+	})
+	set.AddFileRule(&rule.InstFileRule{File: "added.go", ResolvedPath: filepath.Join(modDir, "hooks")})
+	matched := []*rule.InstRuleSet{set}
+
+	sp := newTestSetupPhase()
+	hash := func() string {
+		t.Helper()
+		h, err := sp.injectedHash(t.Context(), matched)
+		require.NoError(t, err)
+		return h
+	}
+
+	first := hash()
+	assert.Equal(t, first, hash(), "an unchanged build must keep its hash")
+
+	// extra2 is only a dependency of the package the rule imports.
+	writeFile("extra2/extra2.go", "package extra2\n\nconst Tag = \"v2\"\n")
+	second := hash()
+	assert.NotEqual(t, first, second)
+
+	writeFile("hooks/added.go", "//go:build ignore\n\npackage hooks\n\nvar _ = 1\n")
+	assert.NotEqual(t, second, hash())
+}
+
+func TestHashPackages(t *testing.T) {
+	hashOf := func(pkgs ...*packages.Package) string {
+		t.Helper()
+		var b strings.Builder
+		require.NoError(t, hashPackages(&b, pkgs))
+		return b.String()
+	}
+
+	// A versioned module is identified by its version, so its files are not read.
+	versioned := &packages.Package{
+		PkgPath: "example.com/v/p",
+		Module:  &packages.Module{Path: "example.com/v", Version: "v1.2.3"},
+		GoFiles: []string{filepath.Join(t.TempDir(), "missing.go")},
+	}
+	assert.Equal(t, "example.com/v/p example.com/v@v1.2.3\n", hashOf(versioned))
+
+	replaced := &packages.Package{
+		PkgPath: "example.com/v/p",
+		Module: &packages.Module{
+			Path: "example.com/v", Version: "v1.2.3",
+			Replace: &packages.Module{Path: "example.com/fork", Version: "v1.2.4"},
+		},
+	}
+	assert.Equal(t, "example.com/v/p example.com/fork@v1.2.4\n", hashOf(replaced))
+
+	std := &packages.Package{PkgPath: "fmt", GoFiles: []string{filepath.Join(t.TempDir(), "missing.go")}}
+	assert.Empty(t, hashOf(std))
+
+	// A local replace has no version, so its file content is what counts.
+	file := filepath.Join(t.TempDir(), "local.go")
+	require.NoError(t, os.WriteFile(file, []byte("package local\n"), 0o644))
+	local := &packages.Package{
+		PkgPath: "example.com/local",
+		Module: &packages.Module{
+			Path: "example.com/local", Version: "v0.0.0",
+			Replace: &packages.Module{Path: filepath.Dir(file)},
+		},
+		GoFiles: []string{file},
+	}
+	before := hashOf(local)
+	require.NoError(t, os.WriteFile(file, []byte("package local\n\nconst X = 1\n"), 0o644))
+	assert.NotEqual(t, before, hashOf(local))
 }

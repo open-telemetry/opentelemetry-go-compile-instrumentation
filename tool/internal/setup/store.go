@@ -5,10 +5,19 @@ package setup
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io"
+	"maps"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 	"golang.org/x/tools/go/packages"
@@ -187,6 +196,131 @@ func (sp *setupPhase) storePGOProfile() error {
 		return ex.Wrapf(err, "failed to write PGO profile to file %s", f)
 	}
 	sp.Info("Stored PGO profile", "path", f, "profile", profile)
+	return nil
+}
+
+// storeInjectedHash records a hash of the packages that rules add to the build.
+// go computes the action ID of a compile from the package as written, so a
+// package that only a rule's imports or add_file source bring in never reaches
+// it. markedToolVersion folds this hash into the tool ID, so a change in one of
+// those packages still invalidates the cached compiles. It always writes the
+// file, so a hash recorded by an earlier setup never applies to a later build.
+func (sp *setupPhase) storeInjectedHash(ctx context.Context, matched []*rule.InstRuleSet) error {
+	hash, err := sp.injectedHash(ctx, matched)
+	if err != nil {
+		// Like matchInjectedDeps, the build still runs, but a warm build can
+		// then reuse a compile made against an older injected package.
+		_, _ = fmt.Fprintf(os.Stderr,
+			"Warning: could not hash the packages otelc injects into the build; "+
+				"a warm build may not pick up changes to them: %v\n", err)
+		sp.Warn("could not hash the packages otelc injects into the build", "error", err)
+		hash = ""
+	}
+	f := util.GetInjectedHashFile()
+	if err = util.WriteFileAtomic(f, []byte(hash)); err != nil {
+		return ex.Wrapf(err, "failed to write injected package hash to file %s", f)
+	}
+	sp.Info("Stored injected package hash", "path", f, "hash", hash)
+	return nil
+}
+
+// injectedHash returns a hash of the imports the matched rules declare, the
+// source files of their add_file rules, and the dependencies of both.
+func (sp *setupPhase) injectedHash(ctx context.Context, matched []*rule.InstRuleSet) (string, error) {
+	h := sha256.New()
+	var paths []string
+	for _, set := range matched {
+		paths = appendRuleImports(paths, set.RawRules)
+		paths = appendRuleImports(paths, set.FuncRules)
+		paths = appendRuleImports(paths, set.StructRules)
+		paths = appendRuleImports(paths, set.CallRules)
+		paths = appendRuleImports(paths, set.LitRules)
+		paths = appendRuleImports(paths, set.DirectiveRules)
+		paths = appendRuleImports(paths, set.DeclRules)
+		for _, r := range set.FileRules {
+			paths = slices.AppendSeq(paths, maps.Values(r.Imports))
+			srcImports, err := sp.fileRuleSourceImports(r)
+			if err != nil {
+				return "", err
+			}
+			paths = append(paths, srcImports...)
+			// An add_file source is often excluded from its own package with
+			// //go:build ignore, so the package hash below does not cover it.
+			if r.ResolvedPath != "" && r.File != "" {
+				if err = hashFile(h, filepath.Join(r.ResolvedPath, r.File)); err != nil {
+					return "", err
+				}
+			}
+		}
+	}
+	slices.Sort(paths)
+	paths = slices.Compact(paths)
+	if len(paths) > 0 {
+		pkgs, err := pkgload.LoadPackages(ctx,
+			packages.NeedName|packages.NeedFiles|packages.NeedEmbedFiles|
+				packages.NeedImports|packages.NeedDeps|packages.NeedModule,
+			sp.buildFlags, false, paths...)
+		if err != nil {
+			return "", err
+		}
+		if err = hashPackages(h, pkgs); err != nil {
+			return "", err
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil)[:8]), nil
+}
+
+func appendRuleImports[T interface{ Base() *rule.InstBaseRule }](
+	paths []string, rulesByFile map[string][]T,
+) []string {
+	for _, rules := range rulesByFile {
+		for _, r := range rules {
+			paths = slices.AppendSeq(paths, maps.Values(r.Base().Imports))
+		}
+	}
+	return paths
+}
+
+// hashPackages writes pkgs and their dependencies to w in import path order.
+// A package from a versioned module is written as its module version, since
+// the module cache never changes under a version. Any other package, from the
+// main module or a local replace, is written as the content of its files. The
+// standard library is skipped: the toolchain version in the tool ID covers it.
+func hashPackages(w io.Writer, pkgs []*packages.Package) error {
+	var all []*packages.Package
+	packages.Visit(pkgs, nil, func(pkg *packages.Package) {
+		if pkg.Module != nil {
+			all = append(all, pkg)
+		}
+	})
+	slices.SortFunc(all, func(a, b *packages.Package) int { return strings.Compare(a.PkgPath, b.PkgPath) })
+	for _, pkg := range all {
+		mod := pkg.Module
+		if mod.Replace != nil {
+			mod = mod.Replace
+		}
+		if mod.Version != "" {
+			_, _ = fmt.Fprintf(w, "%s %s@%s\n", pkg.PkgPath, mod.Path, mod.Version)
+			continue
+		}
+		_, _ = fmt.Fprintf(w, "%s\n", pkg.PkgPath)
+		for _, file := range slices.Sorted(slices.Values(slices.Concat(pkg.GoFiles, pkg.OtherFiles, pkg.EmbedFiles))) {
+			if err := hashFile(w, file); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// hashFile writes the path and the content hash of a file to w.
+func hashFile(w io.Writer, path string) error {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return ex.Wrapf(err, "reading %s", path)
+	}
+	sum := sha256.Sum256(content)
+	_, _ = fmt.Fprintf(w, "%s %x\n", path, sum)
 	return nil
 }
 
