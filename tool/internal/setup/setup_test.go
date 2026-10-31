@@ -1318,6 +1318,11 @@ func TestExtractBuildFlags(t *testing.T) {
 			args:       []string{"-gcflags=all=-N -l", "./pkg"},
 			expected:   []string{"-gcflags=all=-N -l"},
 		},
+		{
+			name:     "covermode and coverpkg are forwarded",
+			args:     []string{"-cover", "-covermode", "atomic", "-coverpkg=./...", "./cmd"},
+			expected: []string{"-covermode", "atomic", "-coverpkg=./...", "-cover"},
+		},
 		// go test tail preservation tests
 		{
 			name:       "test delimiter dash-dash ignores tags in tail",
@@ -2024,5 +2029,38 @@ func TestHookImportsErrorOnBrokenHookPackage(t *testing.T) {
 	_, err := sp.hookImports(context.Background(), matched)
 	if err == nil {
 		t.Fatal("expected error for a hook package that fails to load, got nil")
+	}
+}
+
+func TestNestedCoverFlags(t *testing.T) {
+	tests := []struct {
+		name      string
+		goflags   []string
+		forwarded []string
+		expected  []string
+	}{
+		{name: "no coverage", forwarded: []string{"-tags=foo"}},
+		{name: "cover flag", forwarded: []string{"-cover"}, expected: []string{coverPkgWork}},
+		{name: "cover from GOFLAGS", goflags: []string{"-cover"}, expected: []string{coverPkgWork}},
+		{name: "quoted cover from GOFLAGS", goflags: []string{"'-cover=true'"}, expected: []string{coverPkgWork}},
+		{name: "double dash cover", forwarded: []string{"--cover"}, expected: []string{coverPkgWork}},
+		{name: "cover disabled", forwarded: []string{"-cover=false"}},
+		{name: "command line disables GOFLAGS cover", goflags: []string{"-cover"}, forwarded: []string{"-cover=false"}},
+		{
+			name:      "command line enables cover",
+			goflags:   []string{"-cover=false"},
+			forwarded: []string{"-cover"},
+			expected:  []string{coverPkgWork},
+		},
+		{name: "joined coverpkg", forwarded: []string{"-coverpkg=./...", "-cover"}},
+		{name: "separated coverpkg", forwarded: []string{"-coverpkg", "./...", "-cover"}},
+		{name: "coverpkg from GOFLAGS", goflags: []string{"-coverpkg=all"}, forwarded: []string{"-cover"}},
+		{name: "invalid cover value", forwarded: []string{"-cover=maybe"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, nestedCoverFlags(tt.goflags, tt.forwarded))
+		})
 	}
 }
