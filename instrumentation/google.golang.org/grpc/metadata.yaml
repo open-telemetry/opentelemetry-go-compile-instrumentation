@@ -1,0 +1,17 @@
+name: "instrumentation-google-golang-org-grpc"
+display_name: "gRPC"
+source_path: "instrumentation/google.golang.org/grpc"
+scope:
+  name: "go.opentelemetry.io/otelc/instrumentation/google.golang.org/grpc"
+modules:
+  - path: "go.opentelemetry.io/otelc/instrumentation/google.golang.org/grpc/client"
+  - path: "go.opentelemetry.io/otelc/instrumentation/google.golang.org/grpc/server"
+target_module: "google.golang.org/grpc"
+go_min_version: "1.26.0"
+otelc_min_version: "v1.0.1"
+stability: "experimental"
+library_link: "https://pkg.go.dev/go.opentelemetry.io/otelc/instrumentation/google.golang.org/grpc"
+instrumentation_type: wrapper
+installation:
+  methods:
+    - automatic

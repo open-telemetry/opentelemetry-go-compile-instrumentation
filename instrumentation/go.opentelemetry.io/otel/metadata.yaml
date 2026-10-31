@@ -1,0 +1,17 @@
+name: "instrumentation-go-opentelemetry-io-otel"
+display_name: "OpenTelemetry API"
+source_path: "instrumentation/go.opentelemetry.io/otel"
+scope:
+  name: "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel"
+modules:
+  - path: "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel"
+target_module: "go.opentelemetry.io/otel"
+go_min_version: "1.26.0"
+otelc_min_version: "v1.0.1"
+stability: "experimental"
+library_link: "https://pkg.go.dev/go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel"
+instrumentation_type: wrapper
+installation:
+  methods:
+    - automatic
+hidden: true

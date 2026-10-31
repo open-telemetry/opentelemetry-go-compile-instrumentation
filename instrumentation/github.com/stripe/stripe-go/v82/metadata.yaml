@@ -1,0 +1,16 @@
+name: "instrumentation-github-com-stripe-stripe-go-v82"
+display_name: "Stripe SDK v82"
+source_path: "instrumentation/github.com/stripe/stripe-go/v82"
+scope:
+  name: "go.opentelemetry.io/otelc/instrumentation/github.com/stripe/stripe-go/v82"
+modules:
+  - path: "go.opentelemetry.io/otelc/instrumentation/github.com/stripe/stripe-go/v82"
+target_module: "github.com/stripe/stripe-go/v82"
+go_min_version: "1.26.0"
+otelc_min_version: "v1.0.1"
+stability: "experimental"
+library_link: "https://pkg.go.dev/go.opentelemetry.io/otelc/instrumentation/github.com/stripe/stripe-go/v82"
+instrumentation_type: wrapper
+installation:
+  methods:
+    - automatic

@@ -1,0 +1,16 @@
+name: "instrumentation-log-slog"
+display_name: "log/slog"
+source_path: "instrumentation/log/slog"
+scope:
+  name: "go.opentelemetry.io/otelc/instrumentation/log/slog"
+modules:
+  - path: "go.opentelemetry.io/otelc/instrumentation/log/slog"
+target_module: "log/slog"
+go_min_version: "1.26.0"
+otelc_min_version: "v1.0.1"
+stability: "experimental"
+library_link: "https://pkg.go.dev/go.opentelemetry.io/otelc/instrumentation/log/slog"
+instrumentation_type: wrapper
+installation:
+  methods:
+    - automatic
