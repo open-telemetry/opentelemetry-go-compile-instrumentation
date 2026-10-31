@@ -1451,6 +1451,10 @@ This rule adds a new Go source file to the target package.
 - Introducing new functionalities or APIs to an existing package.
 
 **Selectors:** none. File rules apply to the target package as a whole and have no point selector.
+`where.file` predicates are checked against the package as a whole: `has_func: X` holds if any
+file declares `X`, `not` negates that, and the branches of `all-of` can be satisfied by different
+files. Units the toolchain generates, such as the test main, have no source files, so `is_test`
+still applies there but no file-content predicate matches.
 
 A rule targeting `main` also applies to the `main` package that `go test` generates, so the added file — including any `func init()` in it — is compiled into test binaries built by `otelc go test` as well as into the application binary.
 
