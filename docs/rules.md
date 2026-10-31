@@ -303,6 +303,7 @@ Rules:
 | `expand_directive`  | `InstDirectiveRule` |
 | `assign_value`      | `InstDeclRule`      |
 | `set_fields`        | `InstLitRule`       |
+| `wrap_literal`      | `InstLitRule`       |
 
 **Planned:** rule type will be derived from the modifier key in `do`. The current implementation still infers from field presence and ignores the modifier name; see #546 for the planned migration.
 
@@ -1568,7 +1569,7 @@ This rule wraps the existing `http.DefaultTransport` value with `otelhttp.NewTra
 
 ### 8. Composite Literal Rule
 
-This rule sets fields on composite (struct) literals of a given type, wherever those literals are written in the target package. It reaches values that are constructed inline, which the Function Hook Rule and Call Wrapping Rule cannot see because there is no function to hook.
+This rule sets fields on composite (struct) literals of a given type, or wraps the whole literal, wherever those literals are written in the target package. It reaches values that are constructed inline, which the Function Hook Rule and Call Wrapping Rule cannot see because there is no function to hook.
 
 **Use Cases:**
 
@@ -1649,6 +1650,44 @@ instrument_clients:
 // → &http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport)}
 ```
 
+**Modifier (`do: - wrap_literal:`):**
+
+`set_fields` changes one field at a time, so it cannot pass several fields of the same literal to one function. `wrap_literal` wraps the literal as a whole, so the wrapping function receives every field.
+
+- `pointer` (string, optional): A Go expression template applied to `&T{...}`. `{{ . }}` is substituted with the whole `&T{...}` expression.
+- `value` (string, optional): A Go expression template applied to `T{...}`. `{{ . }}` is substituted with the `T{...}` expression.
+
+At least one of `pointer` or `value` must be set, and each must contain `{{ . }}`. `&T{...}` and `T{...}` have different types, so each form has its own template. A form without a template is left alone.
+
+**Example with `wrap_literal`:**
+
+```yaml
+observe_cluster:
+  target:
+    - "**"
+    - not: github.com/gocql/gocql/**
+  where:
+    struct_literal: github.com/gocql/gocql.ClusterConfig
+  do:
+    - wrap_literal:
+        pointer: "gocqltrace.Observe({{ . }})"
+        value: "*gocqltrace.Observe(&{{ . }})"
+  imports:
+    gocqltrace: example.com/gocqltrace
+```
+
+```go
+&gocql.ClusterConfig{Hosts: []string{"10.0.0.1"}, Keyspace: "app"}
+// → gocqltrace.Observe(&gocql.ClusterConfig{Hosts: []string{"10.0.0.1"}, Keyspace: "app"})
+
+gocql.ClusterConfig{Hosts: hosts}
+// → *gocqltrace.Observe(&gocql.ClusterConfig{Hosts: hosts})
+```
+
+The rewritten package imports `gocqltrace`, so `gocqltrace`'s `init` runs before any literal in that package is built, including one in a package-level variable.
+
+`set_fields` and `wrap_literal` can appear in the same rule. They run in `do` order, so with `set_fields` first, the wrapped literal already has its fields set.
+
 **Matching:**
 
 `struct_literal` uses the same qualified form as `function_call`. It matches both the `T{...}` and `&T{...}` spellings, which share one composite-literal node, and resolves the package qualifier through the file's imports, so an aliased import (`import nethttp "net/http"`) matches on the import path rather than the alias.
@@ -1660,5 +1699,7 @@ instrument_clients:
 - Go rejects a literal that mixes keyed and positional elements, so a positional literal (`image.Point{1, 2}`) cannot take these fields. Such literals are skipped with a warning rather than producing code that does not compile.
 - `value` must be a valid Go expression and `wrap` must produce one. Neither is type-checked against the field at rule-definition time, so a mismatch surfaces as a compile error in the instrumented build.
 - `wrap` must contain `{{ . }}`; a template without it is rejected at load time.
-- This rule sets named fields, so it cannot restructure a literal as a whole: no reordering or removing elements, and one field's expression cannot read another's.
+- `set_fields` sets named fields, so it cannot restructure a literal: no reordering or removing elements, and one field's expression cannot read another's. Use `wrap_literal` when the instrumentation needs several fields of the literal.
+- `wrap_literal` treats `&T{...}` and `&(T{...})` as the pointer form, and every other `T{...}` as the value form. It wraps positional literals too, since it adds no elements. Nested literals of the type are wrapped innermost first.
+- The `pointer` and `value` templates are not type-checked at load time. A template whose result has the wrong type surfaces as a compile error in the instrumented build.
 - Setting the same field twice in one rule is rejected at load time.
