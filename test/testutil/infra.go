@@ -4,7 +4,6 @@
 package testutil
 
 import (
-	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -147,7 +146,9 @@ func Run(t *testing.T, appsDir, app string, env []string, args ...string) string
 // Start starts the application but does not wait for it to complete. If env
 // is nil, the parent process env is used. Stdout and stderr are captured and
 // logged when the test fails, so that app crashes are visible in CI output.
-func Start(t *testing.T, appsDir, app string, env []string, args ...string) *exec.Cmd {
+// The returned AppOutput also lets a test block until the app logs a given
+// string, so tests can synchronise on the app reaching a known point.
+func Start(t *testing.T, appsDir, app string, env []string, args ...string) (*exec.Cmd, *AppOutput) {
 	t.Helper()
 	appName := "./" + appBinName
 	if util.IsWindows() {
@@ -161,9 +162,9 @@ func Start(t *testing.T, appsDir, app string, env []string, args ...string) *exe
 	appDir := filepath.Join(appsDir, app)
 	cmd := newCmd(t.Context(), appDir, env, append([]string{appName}, args...)...)
 
-	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
+	out := &AppOutput{}
+	cmd.Stdout = out
+	cmd.Stderr = out
 
 	require.NoError(t, cmd.Start())
 	t.Cleanup(func() {
@@ -171,10 +172,10 @@ func Start(t *testing.T, appsDir, app string, env []string, args ...string) *exe
 			_ = cmd.Process.Kill()
 			_ = cmd.Wait() // ensure all output is flushed
 		}
-		if t.Failed() && buf.Len() > 0 {
-			t.Logf("app output:\n%s", buf.String())
+		if t.Failed() && out.Len() > 0 {
+			t.Logf("app output:\n%s", out)
 		}
 	})
 
-	return cmd
+	return cmd, out
 }

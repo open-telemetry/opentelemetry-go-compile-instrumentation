@@ -26,3 +26,5 @@ exclude:
   # Pre-fetched upstream semantic-conventions registry (generated, git-ignored).
   # Upstream k8s/registry.yaml is not always valid YAML; never format/lint it.
   - "**/schemas/otelc/.deps/**"
+  # Byte-for-byte upstream release snapshot; verified by its SHA-256 in tests.
+  - "**/tool/internal/configuration/upstream-instrumentation.yaml"

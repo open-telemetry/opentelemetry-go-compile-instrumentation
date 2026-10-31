@@ -5,7 +5,6 @@ package v9
 
 import (
 	"context"
-	"net"
 	"sync"
 	"testing"
 	"time"
@@ -19,13 +18,12 @@ import (
 	"go.opentelemetry.io/otelc/pkg/hook/hooktest"
 )
 
-// Nothing listens on these, so commands fail at dial time but still produce
-// spans. Distinct hosts let a ring test tell its shards apart.
+// Nothing listens on this address, so commands fail at dial time but still
+// produce spans.
 const (
-	unreachableAddr  = "127.0.0.1:1"
-	unreachableAddr2 = "127.0.0.2:1"
-	unreachableHost  = "127.0.0.1"
-	unreachableHost2 = "127.0.0.2"
+	unreachableAddr = "127.0.0.1:1"
+	unreachableHost = "127.0.0.1"
+	unreachablePort = 1
 )
 
 func failFastOptions() *redis.Options {
@@ -36,29 +34,12 @@ func failFastOptions() *redis.Options {
 	}
 }
 
-// ringOptions pushes the heartbeat out so background pings do not add spans.
-func ringOptions(addrs map[string]string) *redis.RingOptions {
-	return &redis.RingOptions{
-		Addrs:              addrs,
-		DialTimeout:        50 * time.Millisecond,
-		MaxRetries:         -1,
-		HeartbeatFrequency: time.Hour,
-	}
-}
-
 // newRecordingClient resets global tracer state, so its callers must not run
 // in parallel.
 func newRecordingClient(t *testing.T) *tracetest.SpanRecorder {
 	t.Helper()
 	initOnce = sync.Once{}
 	return setupTestTracer(t)
-}
-
-func hostOf(addr string) string {
-	if host, _, err := net.SplitHostPort(addr); err == nil {
-		return host
-	}
-	return addr
 }
 
 func pingAndCollect(t *testing.T, ping func(context.Context) error, sr *tracetest.SpanRecorder) []tracetest.SpanStub {
@@ -71,49 +52,28 @@ func pingAndCollect(t *testing.T, ping func(context.Context) error, sr *tracetes
 	return tracetest.SpanStubsFromReadOnlySpans(sr.Ended())
 }
 
-// collectRingSpans pings every shard directly; ring.Ping would reach only one.
-func collectRingSpans(t *testing.T, ring *redis.Ring, sr *tracetest.SpanRecorder) []tracetest.SpanStub {
+func assertRedisSpan(t *testing.T, spans []tracetest.SpanStub, wantHost string, wantPort int) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	_ = ring.ForEachShard(ctx, func(c context.Context, rdb *redis.Client) error {
-		_ = rdb.Ping(c).Err()
-		return nil
-	})
-
-	return tracetest.SpanStubsFromReadOnlySpans(sr.Ended())
-}
-
-// assertRedisSpan matches on server.address rather than the span name, since
-// the first command differs by client type.
-func assertRedisSpan(t *testing.T, spans []tracetest.SpanStub, wantHost string) {
-	t.Helper()
-	require.NotEmpty(t, spans, "expected the hook to record a span for the command")
-
-	var names []string
+	var clientSpans int
 	for _, span := range spans {
-		names = append(names, span.Name)
 		if span.SpanKind != trace.SpanKindClient {
 			continue
 		}
+		clientSpans++
+		attrs := make(map[string]interface{}, len(span.Attributes))
 		for _, attr := range span.Attributes {
-			if attr.Key == semconv.ServerAddressKey && attr.Value.AsString() == wantHost {
-				assert.Contains(t, attrValues(span), "redis",
-					"expected the span to be marked as a redis client span")
-				return
-			}
+			attrs[string(attr.Key)] = attr.Value.AsInterface()
 		}
+		assert.Equal(t, "redis", attrs[string(semconv.DBSystemNameKey)])
+		if wantHost == "" {
+			assert.NotContains(t, attrs, string(semconv.ServerAddressKey))
+			assert.NotContains(t, attrs, string(semconv.ServerPortKey))
+			continue
+		}
+		assert.Equal(t, wantHost, attrs[string(semconv.ServerAddressKey)])
+		assert.Equal(t, int64(wantPort), attrs[string(semconv.ServerPortKey)])
 	}
-	t.Fatalf("no client span carried server.address=%q; recorded spans: %v", wantHost, names)
-}
-
-func attrValues(span tracetest.SpanStub) []string {
-	values := make([]string, 0, len(span.Attributes))
-	for _, attr := range span.Attributes {
-		values = append(values, attr.Value.String())
-	}
-	return values
+	require.Positive(t, clientSpans, "expected a Redis client span")
 }
 
 func TestAfterNewRedisClientV9_AttachesHook(t *testing.T) {
@@ -127,10 +87,38 @@ func TestAfterNewRedisClientV9_AttachesHook(t *testing.T) {
 	spans := pingAndCollect(t, func(ctx context.Context) error {
 		return client.Ping(ctx).Err()
 	}, sr)
-	assertRedisSpan(t, spans, unreachableHost)
+	assertRedisSpan(t, spans, unreachableHost, unreachablePort)
 }
 
-func TestAfterNewFailOverRedisClientV9_AttachesHook(t *testing.T) {
+func TestAfterNewSentinelClientV9_AttachesHook(t *testing.T) {
+	sr := newRecordingClient(t)
+	opt := failFastOptions()
+	sentinel := redis.NewSentinelClient(opt)
+	t.Cleanup(func() { _ = sentinel.Close() })
+
+	afterNewSentinelClientV9(hooktest.NewMockHookContext(opt), sentinel)
+	spans := pingAndCollect(t, func(ctx context.Context) error {
+		return sentinel.Ping(ctx).Err()
+	}, sr)
+	assertRedisSpan(t, spans, unreachableHost, unreachablePort)
+}
+
+func TestAfterClientConnV9_AttachesHook(t *testing.T) {
+	sr := newRecordingClient(t)
+	client := redis.NewClient(failFastOptions())
+	t.Cleanup(func() { _ = client.Close() })
+	conn := client.Conn()
+	t.Cleanup(func() { _ = conn.Close() })
+
+	afterClientConnV9(hooktest.NewMockHookContext(client), conn)
+	spans := pingAndCollect(t, func(ctx context.Context) error {
+		return conn.Ping(ctx).Err()
+	}, sr)
+	require.Len(t, spans, 1, "Conn should produce exactly one span")
+	assertRedisSpan(t, spans, unreachableHost, unreachablePort)
+}
+
+func TestAfterNewFailOverRedisClientV9_Unresolved(t *testing.T) {
 	sr := newRecordingClient(t)
 
 	client := redis.NewFailoverClient(&redis.FailoverOptions{
@@ -141,93 +129,32 @@ func TestAfterNewFailOverRedisClientV9_AttachesHook(t *testing.T) {
 	})
 	t.Cleanup(func() { _ = client.Close() })
 
-	// An unresolved failover client reports a placeholder addr.
-	wantHost := hostOf(client.Options().Addr)
 	afterNewFailOverRedisClientV9(hooktest.NewMockHookContext(), client)
 
 	spans := pingAndCollect(t, func(ctx context.Context) error {
 		return client.Ping(ctx).Err()
 	}, sr)
-	assertRedisSpan(t, spans, wantHost)
+	assertRedisSpan(t, spans, "", 0)
 }
 
-func TestAfterNewRingClientV9_AttachesHookToEachNode(t *testing.T) {
-	sr := newRecordingClient(t)
-
-	// Both shards exist before the hook runs, so only ForEachShard reaches them.
-	ring := redis.NewRing(ringOptions(map[string]string{"shard0": unreachableAddr, "shard1": unreachableAddr2}))
-	t.Cleanup(func() { _ = ring.Close() })
-
-	afterNewRingClientV9(hooktest.NewMockHookContext(), ring)
-
-	spans := collectRingSpans(t, ring, sr)
-	assertRedisSpan(t, spans, unreachableHost)
-	assertRedisSpan(t, spans, unreachableHost2)
-}
-
-func TestAfterNewRingClientV9_InstrumentsShardAddedViaSetAddrs(t *testing.T) {
-	sr := newRecordingClient(t)
-
-	// A shard added after the hook runs must still go through OnNewNode.
-	ring := redis.NewRing(ringOptions(map[string]string{"shard0": unreachableAddr}))
-	t.Cleanup(func() { _ = ring.Close() })
-
-	afterNewRingClientV9(hooktest.NewMockHookContext(), ring)
-	ring.SetAddrs(map[string]string{"shard0": unreachableAddr, "shard1": unreachableAddr2})
-
-	spans := collectRingSpans(t, ring, sr)
-	assertRedisSpan(t, spans, unreachableHost2)
-}
-
-func TestAfterNewClusterClientV9_RegistersNodeCallback(t *testing.T) {
-	sr := newRecordingClient(t)
-
-	cluster := redis.NewClusterClient(&redis.ClusterOptions{
-		Addrs:       []string{unreachableAddr},
-		DialTimeout: 50 * time.Millisecond,
-		MaxRetries:  -1,
-	})
-	t.Cleanup(func() { _ = cluster.Close() })
-
-	afterNewClusterClientV9(hooktest.NewMockHookContext(), cluster)
-
-	spans := pingAndCollect(t, func(ctx context.Context) error {
-		return cluster.Ping(ctx).Err()
-	}, sr)
-	assertRedisSpan(t, spans, unreachableHost)
-}
-
-func TestAfterNewSentinelClientV9_AttachesHook(t *testing.T) {
-	sr := newRecordingClient(t)
-
-	sentinel := redis.NewSentinelClient(failFastOptions())
-	t.Cleanup(func() { _ = sentinel.Close() })
-
-	wantAddr := sentinel.String()
-	afterNewSentinelClientV9(hooktest.NewMockHookContext(), sentinel)
-
-	spans := pingAndCollect(t, func(ctx context.Context) error {
-		return sentinel.Ping(ctx).Err()
-	}, sr)
-	assertRedisSpan(t, spans, wantAddr)
-}
-
-func TestAfterClientConnV9_AttachesHook(t *testing.T) {
+func TestAfterClientWithTimeoutV9_AttachesHook(t *testing.T) {
 	sr := newRecordingClient(t)
 
 	client := redis.NewClient(failFastOptions())
 	t.Cleanup(func() { _ = client.Close() })
 
-	conn := client.Conn()
-	t.Cleanup(func() { _ = conn.Close() })
+	afterNewRedisClientV9(hooktest.NewMockHookContext(), client)
 
-	wantAddr := conn.String()
-	afterClientConnV9(hooktest.NewMockHookContext(), conn)
+	clone := client.WithTimeout(time.Minute)
+	t.Cleanup(func() { _ = clone.Close() })
+
+	afterClientWithTimeoutV9(hooktest.NewMockHookContext(), clone)
 
 	spans := pingAndCollect(t, func(ctx context.Context) error {
-		return conn.Ping(ctx).Err()
+		return clone.Ping(ctx).Err()
 	}, sr)
-	assertRedisSpan(t, spans, wantAddr)
+	require.Len(t, spans, 1, "expected exactly one client span")
+	assertRedisSpan(t, spans, unreachableHost, unreachablePort)
 }
 
 func TestRedisClientEnabler(t *testing.T) {

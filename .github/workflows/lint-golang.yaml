@@ -30,9 +30,10 @@ jobs:
           filters: |
             code:
               - '**/*.go'
+              - '**/go.mod'
+              - '**/go.sum'
+              - 'Makefile'
               - '.tools/golangci.yml'
-              - '.tools/go.mod'
-              - '.tools/go.sum'
               - '.github/workflows/lint-golang.yaml'
 
   golangci-lint:
@@ -63,11 +64,47 @@ jobs:
         with:
           version: ${{ steps.golangci.outputs.version }}
           args: --config .tools/golangci.yml
+      - uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20  # v9.2.0
+        with:
+          version: ${{ steps.golangci.outputs.version }}
+          working-directory: .tools/bundlerepair
+          args: --config ../golangci.yml
+
+  golangci-lint-instrumentation:
+    name: Lint Go Code (instrumentation modules)
+    runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+        with:
+          persist-credentials: false
+          # --new-from-rev needs the base commit's history available locally.
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Build golangci-lint
+        run: make golangci-lint
+      - name: Resolve lint base revision
+        id: base-rev
+        run: echo "sha=${BASE_SHA:-$FALLBACK_SHA}" >> "$GITHUB_OUTPUT"
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          FALLBACK_SHA: ${{ github.event.before }}
+      # Instrumentation modules are separate Go modules, invisible to the
+      # root module's `./...` in the job above, and carry substantial
+      # pre-existing lint debt; only new issues introduced by this change
+      # are enforced here.
+      - name: Lint instrumentation modules (new issues only)
+        run: make lint/go/instrumentation
+        env:
+          LINT_BASE_REV: ${{ steps.base-rev.outputs.sha }}
 
   done:
     name: Done (Check Go Code)
     runs-on: ubuntu-latest
-    needs: [changes, golangci-lint]
+    needs: [changes, golangci-lint, golangci-lint-instrumentation]
     if: always()
     steps:
       - name: Check result
@@ -75,9 +112,11 @@ jobs:
           changes_result="${{ needs.changes.result }}"
           code_changed="${NEEDS_CHANGES_OUTPUTS_CODE}"
           lint_result="${{ needs.golangci-lint.result }}"
+          lint_instrumentation_result="${{ needs.golangci-lint-instrumentation.result }}"
           echo "Changes result: $changes_result"
           echo "Code changed: $code_changed"
           echo "Lint result: $lint_result"
+          echo "Lint (instrumentation) result: $lint_instrumentation_result"
           if [[ "$changes_result" != "success" ]]; then
             echo "❌ Change detection failed"
             exit 1
@@ -90,7 +129,7 @@ jobs:
             echo "❌ Unexpected change detection output: $code_changed"
             exit 1
           fi
-          if [[ "$lint_result" == "success" ]]; then
+          if [[ "$lint_result" == "success" && "$lint_instrumentation_result" == "success" ]]; then
             echo "✅ Lint passed"
             exit 0
           fi

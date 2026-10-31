@@ -1,0 +1,10 @@
+fiber_router_next_hook:
+  target: github.com/gofiber/fiber/v2
+  where:
+    func: next
+    recv: "*App"
+  do:
+    - inject_hooks:
+        before: BeforeNext
+        after: AfterNext
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/gofiber/fiber/v2"

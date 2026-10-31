@@ -9,6 +9,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"syscall"
@@ -87,6 +88,41 @@ func TestHandleShutdownSignalLogsFlushError(t *testing.T) {
 		"flush errors should be logged during shutdown")
 }
 
+func TestLoggerOutput(t *testing.T) {
+	const probe = "otelc-logger-probe"
+	if os.Getenv("OTELC_LOGGER_PROBE") == "1" {
+		Logger().Error(probe)
+		return
+	}
+
+	tests := []struct {
+		level      string
+		wantStderr bool
+	}{
+		{"", false},
+		{"none", false},
+		{"error", true},
+	}
+	for _, tt := range tests {
+		t.Run("level="+tt.level, func(t *testing.T) {
+			// Re-run this test in a child process so the logger built by init()
+			// is the one under test, with stdout and stderr captured separately.
+			cmd := exec.Command(os.Args[0], "-test.run=^TestLoggerOutput$")
+			cmd.Env = append(os.Environ(), "OTELC_LOGGER_PROBE=1", "OTEL_LOG_LEVEL="+tt.level)
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout, cmd.Stderr = &stdout, &stderr
+			require.NoError(t, cmd.Run())
+
+			assert.NotContains(t, stdout.String(), probe, "SDK logs must not be written to stdout")
+			if tt.wantStderr {
+				assert.Contains(t, stderr.String(), probe, "SDK logs should be written to stderr")
+			} else {
+				assert.NotContains(t, stderr.String(), probe, "SDK logs should be off by default")
+			}
+		})
+	}
+}
+
 func TestLogLevel(t *testing.T) {
 	tests := []struct {
 		envValue string
@@ -101,8 +137,10 @@ func TestLogLevel(t *testing.T) {
 		{" WARN ", slog.LevelWarn},
 		{"error", slog.LevelError},
 		{"ERROR", slog.LevelError},
-		{"", slog.LevelInfo},        // unset defaults to info
-		{"unknown", slog.LevelInfo}, // unrecognized value defaults to info
+		{"none", levelNone},
+		{"NONE", levelNone},
+		{"", levelNone},        // unset turns logging off
+		{"unknown", levelNone}, // unrecognized value turns logging off
 	}
 
 	for _, tt := range tests {

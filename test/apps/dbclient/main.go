@@ -19,7 +19,7 @@ import (
 var (
 	driverName = flag.String("driver", "testdb", "The database driver name")
 	dsn        = flag.String("dsn", "user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8", "The data source name")
-	op         = flag.String("op", "all", "The operation to perform: ping, exec, query, tx, tx-rollback, tx-fail, prepare, tx-stmt, opendb, all")
+	op         = flag.String("op", "all", "The operation to perform: ping, exec, query, tx, tx-rollback, tx-fail, prepare, tx-stmt, conn, opendb, all")
 )
 
 func main() {
@@ -70,6 +70,8 @@ func main() {
 		doPrepare(ctx, db)
 	case "tx-stmt":
 		doTxStmt(ctx, db)
+	case "conn":
+		doConn(ctx, db)
 	case "all":
 		doPing(ctx, db)
 		doExec(ctx, db)
@@ -129,6 +131,37 @@ func doPrepare(ctx context.Context, db *sql.DB) {
 	}
 	defer rows.Close()
 	slog.Info("prepare and stmt query succeeded")
+}
+
+// doConn runs a query and a prepared statement on a single *sql.Conn taken
+// from the pool, rather than on the *sql.DB. That path goes through its own
+// set of hooks: db.Conn copies the pool's endpoint, driver and database name
+// onto the Conn, and conn.PrepareContext copies them onto the statement.
+func doConn(ctx context.Context, db *sql.DB) {
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		log.Fatalf("failed to get conn: %v", err)
+	}
+	defer conn.Close()
+
+	rows, err := conn.QueryContext(ctx, "SELECT id, name FROM users WHERE name = ?", "alice")
+	if err != nil {
+		log.Fatalf("failed to query on conn: %v", err)
+	}
+	rows.Close()
+
+	stmt, err := conn.PrepareContext(ctx, "SELECT id FROM users WHERE name = ?")
+	if err != nil {
+		log.Fatalf("failed to prepare on conn: %v", err)
+	}
+	defer stmt.Close()
+
+	stmtRows, err := stmt.QueryContext(ctx, "alice")
+	if err != nil {
+		log.Fatalf("failed to query with conn stmt: %v", err)
+	}
+	stmtRows.Close()
+	slog.Info("conn query and conn prepared statement query succeeded")
 }
 
 // doTxStmt exercises reusing a connection-level prepared statement inside a

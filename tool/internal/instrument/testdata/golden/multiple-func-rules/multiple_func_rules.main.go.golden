@@ -134,8 +134,8 @@ func OtelBeforeTrampoline_Func13592294264(param0 *string, param1 *int) (hookCont
 	hookContext.params = []interface{}{param0, param1}
 	hookContext.funcName = "Func1"
 	hookContext.packageName = "main"
-	if H1Before != nil {
-		H1Before(hookContext, *param0, *param1)
+	if otelc_hook_2956707965_H1Before != nil {
+		otelc_hook_2956707965_H1Before(hookContext, *param0, *param1)
 	}
 	return hookContext, hookContext.skipCall
 }
@@ -154,16 +154,16 @@ func OtelAfterTrampoline_Func13592294264(hookContext HookContext, arg0 *float32,
 		}
 	}()
 	hookContext.(*HookContextImpl3592294264).returnVals = []interface{}{arg0, arg1}
-	if H1After != nil {
-		H1After(hookContext, *arg0, *arg1)
+	if otelc_hook_2956707965_H1After != nil {
+		otelc_hook_2956707965_H1After(hookContext, *arg0, *arg1)
 	}
 }
 
-//go:linkname H1Before testdata/golden/multiple-func-rules.H1Before
-func H1Before(hookContext HookContext, param0 string, param1 int)
+//go:linkname otelc_hook_2956707965_H1Before testdata/golden/multiple-func-rules.H1Before
+func otelc_hook_2956707965_H1Before(hookContext HookContext, param0 string, param1 int)
 
-//go:linkname H1After testdata/golden/multiple-func-rules.H1After
-func H1After(hookContext HookContext, arg0 float32, arg1 error)
+//go:linkname otelc_hook_2956707965_H1After testdata/golden/multiple-func-rules.H1After
+func otelc_hook_2956707965_H1After(hookContext HookContext, arg0 float32, arg1 error)
 
 type HookContextImpl1830170046 struct {
 	params      []interface{}
@@ -278,8 +278,8 @@ func OtelBeforeTrampoline_Func11830170046(param0 *string, param1 *int) (hookCont
 	hookContext.params = []interface{}{param0, param1}
 	hookContext.funcName = "Func1"
 	hookContext.packageName = "main"
-	if H2Before != nil {
-		H2Before(hookContext, *param0, *param1)
+	if otelc_hook_2956707965_H2Before != nil {
+		otelc_hook_2956707965_H2Before(hookContext, *param0, *param1)
 	}
 	return hookContext, hookContext.skipCall
 }
@@ -298,13 +298,13 @@ func OtelAfterTrampoline_Func11830170046(hookContext HookContext, arg0 *float32,
 		}
 	}()
 	hookContext.(*HookContextImpl1830170046).returnVals = []interface{}{arg0, arg1}
-	if H2After != nil {
-		H2After(hookContext, *arg0, *arg1)
+	if otelc_hook_2956707965_H2After != nil {
+		otelc_hook_2956707965_H2After(hookContext, *arg0, *arg1)
 	}
 }
 
-//go:linkname H2Before testdata/golden/multiple-func-rules.H2Before
-func H2Before(hookContext HookContext, param0 string, param1 int)
+//go:linkname otelc_hook_2956707965_H2Before testdata/golden/multiple-func-rules.H2Before
+func otelc_hook_2956707965_H2Before(hookContext HookContext, param0 string, param1 int)
 
-//go:linkname H2After testdata/golden/multiple-func-rules.H2After
-func H2After(hookContext HookContext, arg0 float32, arg1 error)
+//go:linkname otelc_hook_2956707965_H2After testdata/golden/multiple-func-rules.H2After
+func otelc_hook_2956707965_H2After(hookContext HookContext, arg0 float32, arg1 error)
