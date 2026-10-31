@@ -6,6 +6,7 @@ package instrument
 import (
 	"bytes"
 	"encoding/json"
+	"go/build"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -62,6 +63,53 @@ func TestPGOBuildFlags(t *testing.T) {
 			flags, err := ip.pgoBuildFlags()
 			if tt.readError && len(tt.compileArgs) > 0 {
 				require.ErrorContains(t, err, "failed to read PGO profile")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, flags)
+		})
+	}
+}
+
+// TestPGOBuildFlagsForLinkCommand covers the link-side decision. A link
+// command never carries -pgoprofile, because the profile shapes compile
+// actions only, so the decision must follow the profile setup recorded; the
+// compile-side table above cannot express that shape.
+func TestPGOBuildFlagsForLinkCommand(t *testing.T) {
+	const profile = "warm profile.pgo"
+	linkTool := linkToolPath()
+	args := []string{linkTool, "-o", "app.test", "-buildid=x", "-importcfg", "importcfg.link"}
+
+	tests := []struct {
+		name      string
+		profile   string
+		missing   bool
+		readError bool
+		want      []string
+		wantErr   string
+	}{
+		{
+			name: "recorded profile applies to the link", profile: profile,
+			want: []string{"-pgo=" + profile},
+		},
+		{name: "empty recorded profile"},
+		{name: "missing profile file", missing: true},
+		{name: "read error", readError: true, wantErr: "failed to read PGO profile"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+			require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+			if tt.readError {
+				require.NoError(t, os.Mkdir(util.GetPGOProfileFile(), 0o755))
+			} else if !tt.missing {
+				require.NoError(t, os.WriteFile(util.GetPGOProfileFile(), []byte(tt.profile), 0o644))
+			}
+
+			flags, err := pgoBuildFlagsFor(args)
+
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
 				return
 			}
 			require.NoError(t, err)
@@ -804,10 +852,14 @@ func TestInterceptLinkLoadError(t *testing.T) {
 	workDir := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, workDir)
 	// A regular file where the build temp directory is expected makes
-	// loadAddedImports fail; the link command is then passed through unchanged.
+	// loadAddedImports fail. That failure is not fatal: the link still
+	// recovers rule-added imports from matched.json. With no matched rules
+	// and nothing to add, the link command is passed through unchanged.
 	require.NoError(t, os.WriteFile(util.GetBuildTempDir(), []byte("not a directory"), 0o644))
 
-	args := []string{"link", "-o", "exe", "-buildid", "id", "-importcfg", "importcfg.link"}
+	cfgPath := filepath.Join(workDir, "importcfg.link")
+	require.NoError(t, os.WriteFile(cfgPath, []byte("packagefile fmt=/unused/fmt.a\n"), 0o644))
+	args := []string{"link", "-o", "exe", "-buildid", "id", "-importcfg", cfgPath}
 	result, err := interceptLink(ctx, args)
 	require.NoError(t, err)
 	assert.Equal(t, args, result)
@@ -1359,4 +1411,630 @@ func TestToolexecEmptyArgs(t *testing.T) {
 	err := Toolexec(t.Context(), []string{}, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no tool command specified")
+}
+
+// callRuleWithImports returns a call rule whose JSON unmarshals cleanly; the
+// selector must parse, so it names a real package function shape.
+func callRuleWithImports(imports map[string]string) *rule.InstCallRule {
+	return &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name: "call-rule", Imports: imports,
+		},
+		FunctionCall: "example.com/b.New",
+	}
+}
+
+// writeMatchedRules stores matched.json the way setup does, so the link phase
+// can read the rule-added imports back.
+func writeMatchedRules(t *testing.T, sets []*rule.InstRuleSet) {
+	t.Helper()
+	content, err := json.Marshal(sets)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), content, 0o600))
+}
+
+// linkArgs returns a minimal link command with importcfg at cfgPath.
+func linkArgs(cfgPath string) []string {
+	return []string{"link", "-o", "out.test", "-buildid=test", "-importcfg", cfgPath}
+}
+
+// TestInterceptLinkRecoversRuleAddedImport covers the warm-GOCACHE shape: no
+// compile ran, so no per-process tracking file exists, and the link must
+// still receive the import a rule adds, recovered from matched.json.
+func TestInterceptLinkRecoversRuleAddedImportFromMatchedRules(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	writeMatchedRules(t, []*rule.InstRuleSet{
+		{
+			PackageName: "dep",
+			ModulePath:  "example.com/app/dep",
+			FuncRules: map[string][]*rule.InstFuncRule{
+				"dep.go": {{
+					InstBaseRule: rule.InstBaseRule{
+						Name:    "rule",
+						Target:  rule.NewTarget("example.com/app/dep"),
+						Imports: map[string]string{"extra": "fmt"},
+					},
+				}},
+			},
+		},
+	})
+
+	cfgPath := filepath.Join(workDir, "importcfg.link")
+	// The link lists the rule set's target package, the shape a real link
+	// importcfg always has: the target's compile is part of the binary.
+	require.NoError(t, os.WriteFile(cfgPath,
+		[]byte("packagefile context=/unused/context.a\npackagefile example.com/app/dep=/unused/dep.a\n"), 0o644))
+
+	_, err := interceptLink(t.Context(), linkArgs(cfgPath))
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(cfgPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "packagefile fmt=")
+}
+
+// TestInterceptLinkSkipsImportsTheLinkAlreadyHas checks that a link importcfg
+// listing every rule-added import is left untouched, and that a build with no
+// matched rules changes nothing.
+func TestInterceptLinkLeavesCompleteImportcfgUnchanged(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	writeMatchedRules(t, []*rule.InstRuleSet{
+		{
+			PackageName: "dep",
+			ModulePath:  "example.com/app/dep",
+			FuncRules: map[string][]*rule.InstFuncRule{
+				"dep.go": {{
+					InstBaseRule: rule.InstBaseRule{
+						Name:    "rule",
+						Target:  rule.NewTarget("example.com/app/dep"),
+						Imports: map[string]string{"extra": "fmt"},
+					},
+				}},
+			},
+		},
+	})
+
+	cfgPath := filepath.Join(workDir, "importcfg.link")
+	original := "packagefile fmt=/unused/fmt.a\npackagefile context=/unused/context.a\npackagefile example.com/app/dep=/unused/dep.a\n"
+	require.NoError(t, os.WriteFile(cfgPath, []byte(original), 0o644))
+
+	_, err := interceptLink(t.Context(), linkArgs(cfgPath))
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(cfgPath)
+	require.NoError(t, err)
+	assert.Equal(t, original, string(content))
+
+	// Without matched.json there is nothing to recover either.
+	require.NoError(t, os.Remove(util.GetMatchedRuleFile()))
+	_, err = interceptLink(t.Context(), linkArgs(cfgPath))
+	require.NoError(t, err)
+	content, err = os.ReadFile(cfgPath)
+	require.NoError(t, err)
+	assert.Equal(t, original, string(content))
+}
+
+// TestRuleAddedImportsCollectsEveryRuleKind checks that the link-side
+// candidate set covers the imports of every rule kind and of add_file rule
+// sources, and skips the built-in pseudo-packages.
+func TestRuleAddedImportsCollectsEveryRuleKind(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	sourceDir := filepath.Join(workDir, "hooksrc")
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	sourceFile := filepath.Join(sourceDir, "added.go")
+	require.NoError(t, os.WriteFile(sourceFile, []byte(
+		"//go:build ignore\n\npackage hooks\n\nimport (\n\t\"fmt\"\n\t\"example.com/hooks\"\n)\n",
+	), 0o644))
+
+	writeMatchedRules(t, []*rule.InstRuleSet{
+		{
+			PackageName: "dep",
+			ModulePath:  "example.com/app/dep",
+			FuncRules: map[string][]*rule.InstFuncRule{
+				"dep.go": {{InstBaseRule: rule.InstBaseRule{
+					Name: "func-rule", Imports: map[string]string{"a": "example.com/a"},
+				}}},
+			},
+			CallRules: map[string][]*rule.InstCallRule{
+				"dep.go": {callRuleWithImports(map[string]string{"b": "example.com/b"})},
+			},
+			RawRules: map[string][]*rule.InstRawRule{
+				"dep.go": {{InstBaseRule: rule.InstBaseRule{
+					Name: "raw-rule", Imports: map[string]string{"c": "unsafe"},
+				}}},
+			},
+			FileRules: []*rule.InstFileRule{{
+				InstBaseRule: rule.InstBaseRule{Name: "file-rule"},
+				File:         "added.go",
+				Path:         "example.com/app/hooks",
+				ResolvedPath: sourceDir,
+			}},
+		},
+	})
+
+	paths := ruleAddedImports(t.Context(), nil, &imports.ImportConfig{
+		PackageFile: map[string]string{"example.com/app/dep": "/unused/dep.a"},
+	})
+	assert.Equal(t, map[string]struct{}{
+		"example.com/a":     {},
+		"example.com/b":     {},
+		"unsafe":            {},
+		"fmt":               {},
+		"example.com/hooks": {},
+	}, paths)
+}
+
+// TestResolveRuleAddedImportsSkipsUnresolvableImports checks that a candidate
+// the rules declare but that cannot load does not fail the link, while a
+// resolvable one still lands in the import config.
+func TestResolveRuleAddedImportsSkipsUnresolvableImports(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	linkConfig := imports.ImportConfig{
+		PackageFile: map[string]string{
+			"context":             "/unused/context.a",
+			"example.com/app/dep": "/unused/dep.a",
+		},
+	}
+	updated, err := resolveRuleAddedImports(t.Context(), nil, &linkConfig)
+	require.NoError(t, err)
+	assert.False(t, updated)
+
+	writeMatchedRules(t, []*rule.InstRuleSet{
+		{
+			PackageName: "dep",
+			ModulePath:  "example.com/app/dep",
+			FuncRules: map[string][]*rule.InstFuncRule{
+				"dep.go": {{InstBaseRule: rule.InstBaseRule{
+					Name: "rule",
+					Imports: map[string]string{
+						"std":          "fmt",
+						"unresolvable": "example.invalid/nonexistent/pkg",
+					},
+				}}},
+			},
+		},
+	})
+
+	updated, err = resolveRuleAddedImports(t.Context(), nil, &linkConfig)
+	require.NoError(t, err)
+	assert.True(t, updated)
+	assert.Contains(t, linkConfig.PackageFile, "fmt")
+	assert.NotContains(t, linkConfig.PackageFile, "example.invalid/nonexistent/pkg")
+}
+
+// TestResolveRuleAddedImportsRestrictedToLinkPackages checks that rule sets
+// whose target package is not part of the link contribute no candidates: a
+// multi-binary build must not resolve the imports of another binary's rules.
+func TestResolveRuleAddedImportsRestrictedToLinkPackages(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	writeMatchedRules(t, []*rule.InstRuleSet{
+		{
+			PackageName: "a",
+			ModulePath:  "example.com/app/a",
+			FuncRules: map[string][]*rule.InstFuncRule{
+				"a.go": {{InstBaseRule: rule.InstBaseRule{
+					Name: "rule-a", Imports: map[string]string{"fmt": "fmt"},
+				}}},
+			},
+		},
+		{
+			PackageName: "b",
+			ModulePath:  "example.com/app/b",
+			FuncRules: map[string][]*rule.InstFuncRule{
+				"b.go": {{InstBaseRule: rule.InstBaseRule{
+					Name: "rule-b", Imports: map[string]string{"strings": "strings"},
+				}}},
+			},
+		},
+	})
+
+	// The link lists target a but not target b, so only a's imports may be
+	// recovered. Both imports resolve, so only the filter can keep b's out.
+	linkConfig := imports.ImportConfig{
+		PackageFile: map[string]string{
+			"context":           "/unused/context.a",
+			"example.com/app/a": "/unused/a.a",
+		},
+	}
+	updated, err := resolveRuleAddedImports(t.Context(), nil, &linkConfig)
+	require.NoError(t, err)
+	assert.True(t, updated)
+	assert.Contains(t, linkConfig.PackageFile, "fmt")
+	assert.NotContains(t, linkConfig.PackageFile, "strings",
+		"the link does not list example.com/app/b, so its rule imports must not be resolved")
+}
+
+// TestResolveRuleAddedImportsSkipsConstraintExcludedAddFileSource checks that
+// an add_file source the active build constraints exclude contributes no
+// candidates. Its import resolves on this platform, so only the constraint
+// check can keep it out of the link.
+func TestResolveRuleAddedImportsSkipsConstraintExcludedAddFileSource(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	sourceDir := filepath.Join(workDir, "hooksrc")
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "excluded.go"),
+		[]byte("//go:build otelc_never_active\n\npackage hooks\n\nimport \"os\"\n"), 0o644))
+
+	writeMatchedRules(t, []*rule.InstRuleSet{
+		{
+			PackageName: "dep",
+			ModulePath:  "example.com/app/dep",
+			FileRules: []*rule.InstFileRule{{
+				InstBaseRule: rule.InstBaseRule{Name: "file-rule"},
+				File:         "excluded.go",
+				Path:         "example.com/app/hooks",
+				ResolvedPath: sourceDir,
+			}},
+		},
+	})
+
+	linkConfig := imports.ImportConfig{
+		PackageFile: map[string]string{
+			"context":             "/unused/context.a",
+			"example.com/app/dep": "/unused/dep.a",
+		},
+	}
+	updated, err := resolveRuleAddedImports(t.Context(), nil, &linkConfig)
+	require.NoError(t, err)
+	assert.False(t, updated)
+	assert.NotContains(t, linkConfig.PackageFile, "os",
+		"the build constraints exclude the add_file source, so its imports must not be resolved")
+}
+
+// TestRuleAddedImportsCollectsStructLitDirectiveDeclRules covers the rule
+// kinds the other candidate tests leave out: struct, literal, directive, and
+// declaration rules. Every kind embeds InstBaseRule, whose imports the
+// collector must read the same way it reads them for func, call, and raw
+// rules.
+func TestRuleAddedImportsCollectsStructLitDirectiveDeclRules(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	writeMatchedRules(t, []*rule.InstRuleSet{
+		{
+			PackageName: "dep",
+			ModulePath:  "example.com/app/dep",
+			StructRules: map[string][]*rule.InstStructRule{
+				"dep.go": {{
+					InstBaseRule: rule.InstBaseRule{
+						Name: "struct-rule", Imports: map[string]string{"s": "example.com/s"},
+					},
+					Struct:   "Transport",
+					NewField: []*rule.InstStructField{{Name: "F", Type: "int"}},
+				}},
+			},
+			LitRules: map[string][]*rule.InstLitRule{
+				"dep.go": {{
+					InstBaseRule: rule.InstBaseRule{
+						Name: "lit-rule", Imports: map[string]string{"l": "example.com/l"},
+					},
+					StructLiteral: "net/http.Transport",
+					Field:         []*rule.InstLitField{{Name: "F", Value: "true"}},
+				}},
+			},
+			DirectiveRules: map[string][]*rule.InstDirectiveRule{
+				"dep.go": {{
+					InstBaseRule: rule.InstBaseRule{
+						Name: "directive-rule", Imports: map[string]string{"d": "example.com/d"},
+					},
+					Directive: "//otelc:span",
+					Template:  "otel.Span()",
+				}},
+			},
+			DeclRules: map[string][]*rule.InstDeclRule{
+				"dep.go": {{
+					InstBaseRule: rule.InstBaseRule{
+						Name: "decl-rule", Imports: map[string]string{"decl": "example.com/decl"},
+					},
+					Kind:       "var",
+					Identifier: "DefaultTransport",
+					Replace:    "http.DefaultTransport",
+				}},
+			},
+		},
+	})
+
+	paths := ruleAddedImports(t.Context(), nil, &imports.ImportConfig{
+		PackageFile: map[string]string{"example.com/app/dep": "/unused/dep.a"},
+	})
+	assert.Equal(t, map[string]struct{}{
+		"example.com/s":    {},
+		"example.com/l":    {},
+		"example.com/d":    {},
+		"example.com/decl": {},
+	}, paths)
+}
+
+// TestResolveRuleAddedImportsSkipsBuiltinPseudoPackages checks that rules
+// declaring imports of unsafe or the cgo pseudo-package C contribute no
+// resolvable candidate: neither has an archive, and asking the nested build
+// for one would only log a warning.
+func TestResolveRuleAddedImportsSkipsBuiltinPseudoPackages(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	writeMatchedRules(t, []*rule.InstRuleSet{
+		{
+			PackageName: "dep",
+			ModulePath:  "example.com/app/dep",
+			FuncRules: map[string][]*rule.InstFuncRule{
+				"dep.go": {{InstBaseRule: rule.InstBaseRule{
+					Name: "rule",
+					Imports: map[string]string{
+						"fmt":    "fmt",
+						"unsafe": "unsafe",
+						"cgo":    "C",
+					},
+				}}},
+			},
+		},
+	})
+
+	linkConfig := imports.ImportConfig{
+		PackageFile: map[string]string{
+			"context":             "/unused/context.a",
+			"example.com/app/dep": "/unused/dep.a",
+		},
+	}
+	updated, err := resolveRuleAddedImports(t.Context(), nil, &linkConfig)
+	require.NoError(t, err)
+	assert.True(t, updated)
+	assert.Contains(t, linkConfig.PackageFile, "fmt")
+	assert.NotContains(t, linkConfig.PackageFile, "unsafe")
+	assert.NotContains(t, linkConfig.PackageFile, "C")
+}
+
+// TestRuleAddedImportsIgnoresMalformedMatchedRules checks that a matched.json
+// the link cannot parse yields no candidates instead of failing the link.
+func TestRuleAddedImportsIgnoresMalformedMatchedRules(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), []byte("{not json"), 0o600))
+
+	linkConfig := imports.ImportConfig{PackageFile: map[string]string{"example.com/app/dep": "/unused/dep.a"}}
+	assert.Empty(t, ruleAddedImports(t.Context(), nil, &linkConfig))
+}
+
+// TestFileRuleImportsSkipsUnusableSources checks every add_file source the
+// link cannot use: no resolved path, a missing file, a malformed build
+// constraint, and a file without a valid package clause.
+func TestFileRuleImportsSkipsUnusableSources(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "badconstraint.go"),
+		[]byte("//go:build (\n\npackage hooks\n\nimport \"os\"\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "notgo.go"),
+		[]byte("this is not Go\n"), 0o644))
+
+	bctx := build.Default
+	for _, tt := range []struct {
+		name string
+		rule *rule.InstFileRule
+	}{
+		{name: "no resolved path", rule: &rule.InstFileRule{File: "hooks.go"}},
+		{name: "missing file", rule: &rule.InstFileRule{File: "missing.go", ResolvedPath: dir}},
+		{name: "malformed build constraint", rule: &rule.InstFileRule{File: "badconstraint.go", ResolvedPath: dir}},
+		{name: "no package clause", rule: &rule.InstFileRule{File: "notgo.go", ResolvedPath: dir}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Empty(t, fileRuleImports(t.Context(), &bctx, tt.rule))
+		})
+	}
+}
+
+// TestResolveRuleAddedImportsKeepsListedDependencies checks that a resolved
+// transitive dependency the link already lists keeps its archive: only the
+// missing packages are added.
+func TestResolveRuleAddedImportsKeepsListedDependencies(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	writeMatchedRules(t, []*rule.InstRuleSet{{
+		PackageName: "dep",
+		ModulePath:  "example.com/app/dep",
+		FuncRules: map[string][]*rule.InstFuncRule{
+			"dep.go": {{InstBaseRule: rule.InstBaseRule{
+				Name:    "rule",
+				Target:  rule.NewTarget("example.com/app/dep"),
+				Imports: map[string]string{"std": "fmt"},
+			}}},
+		},
+	}})
+
+	linkConfig := imports.ImportConfig{PackageFile: map[string]string{
+		"example.com/app/dep": "/unused/dep.a",
+		"errors":              "/listed/errors.a",
+	}}
+	updated, err := resolveRuleAddedImports(t.Context(), nil, &linkConfig)
+	require.NoError(t, err)
+	assert.True(t, updated)
+	assert.Contains(t, linkConfig.PackageFile, "fmt")
+	assert.Equal(t, "/listed/errors.a", linkConfig.PackageFile["errors"],
+		"a dependency the link already lists must keep its archive")
+}
+
+// TestResolveRuleAddedImportsFollowsChainedRuleSets covers recovery when a
+// rule-added import is itself the target of a matched rule set: a rule adds
+// fmt to dep, and a matched rule on fmt adds encoding/xml. The link starts
+// without fmt, so the first pass cannot even see fmt's rule set; the pass
+// after fmt joins the importcfg must resolve encoding/xml. encoding/xml is
+// not a dependency of fmt, so only the chain, not a transitive resolution,
+// can add it.
+func TestResolveRuleAddedImportsFollowsChainedRuleSets(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	writeMatchedRules(t, []*rule.InstRuleSet{
+		{
+			PackageName: "dep",
+			ModulePath:  "example.com/app/dep",
+			FuncRules: map[string][]*rule.InstFuncRule{
+				"dep.go": {{InstBaseRule: rule.InstBaseRule{
+					Name:    "dep-rule",
+					Target:  rule.NewTarget("example.com/app/dep"),
+					Imports: map[string]string{"fmt": "fmt"},
+				}}},
+			},
+		},
+		{
+			PackageName: "fmt",
+			ModulePath:  "fmt",
+			FuncRules: map[string][]*rule.InstFuncRule{
+				"print.go": {{InstBaseRule: rule.InstBaseRule{
+					Name:    "fmt-rule",
+					Target:  rule.NewTarget("fmt"),
+					Imports: map[string]string{"xml": "encoding/xml"},
+				}}},
+			},
+		},
+	})
+
+	// The link lists only the rule target itself; every rule-added import is
+	// missing and only the recovery can supply it.
+	linkConfig := imports.ImportConfig{PackageFile: map[string]string{
+		"example.com/app/dep": "/unused/dep.a",
+	}}
+	updated, err := resolveRuleAddedImports(t.Context(), nil, &linkConfig)
+	require.NoError(t, err)
+	assert.True(t, updated)
+	assert.Contains(t, linkConfig.PackageFile, "fmt",
+		"the first pass must resolve the rule-added import itself")
+	assert.Contains(t, linkConfig.PackageFile, "encoding/xml",
+		"the pass after fmt joins the importcfg must resolve the rule set fmt carries")
+}
+
+// TestResolveRuleAddedImportsKeepsLinkedBinarysMainSets covers a
+// multi-binary build: every main package compiles with -p main, so every
+// executable's rule set carries ModulePath "main" and no link importcfg can
+// name the package a set instrumented. The link -o output name can: go
+// names a binary after the last element of its main package's import path,
+// which is also the directory the set's matched rules name. A custom -o
+// name matches no set, so every main set stays and recovery never drops an
+// import the link needs.
+func TestResolveRuleAddedImportsKeepsLinkedBinarysMainSets(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	mainSet := func(name, dir string, imports map[string]string) *rule.InstRuleSet {
+		set := rule.NewInstRuleSet("main")
+		set.SetPackageName("main")
+		set.AddFuncRule(filepath.Join(workDir, dir, "main.go"), &rule.InstFuncRule{
+			InstBaseRule: rule.InstBaseRule{
+				Name:    name,
+				Target:  rule.NewTarget("main"),
+				Imports: imports,
+			},
+			Func: "main",
+		})
+		return set
+	}
+	writeMatchedRules(t, []*rule.InstRuleSet{
+		mainSet("rule-a", "a", map[string]string{"fmt": "fmt"}),
+		mainSet("rule-b", "b", map[string]string{"strings": "strings"}),
+	})
+
+	// The link importcfg names no main package by path, the shape a warm
+	// multi-binary build gives every link.
+	newLinkConfig := func() *imports.ImportConfig {
+		return &imports.ImportConfig{PackageFile: map[string]string{
+			"runtime": "/unused/runtime.a",
+		}}
+	}
+	linkCmd := func(binary string) []string {
+		return []string{"link", "-o", filepath.Join(workDir, binary), "-buildid=test", "-importcfg", "unused"}
+	}
+
+	// fmt resolves no strings in its dependency closure, so only the kept
+	// main set can add strings.
+	t.Run("keeps only the linked binary's main set", func(t *testing.T) {
+		linkConfig := newLinkConfig()
+		updated, err := resolveRuleAddedImports(t.Context(), linkCmd("a"), linkConfig)
+		require.NoError(t, err)
+		assert.True(t, updated)
+		assert.Contains(t, linkConfig.PackageFile, "fmt")
+		assert.NotContains(t, linkConfig.PackageFile, "strings",
+			"the link builds the a binary, so the b binary's main rule set must not contribute")
+	})
+
+	t.Run("custom -o name keeps every main set", func(t *testing.T) {
+		linkConfig := newLinkConfig()
+		updated, err := resolveRuleAddedImports(t.Context(), linkCmd("custom-name"), linkConfig)
+		require.NoError(t, err)
+		assert.True(t, updated)
+		assert.Contains(t, linkConfig.PackageFile, "fmt")
+		assert.Contains(t, linkConfig.PackageFile, "strings",
+			"a custom -o name matches no main set, so no set may be dropped")
+	})
+}
+
+// TestInterceptLinkFailsWhenRecoveryFails checks that an error while
+// recovering rule-added imports stops the link: an unreadable recorded PGO
+// profile and a nested go list that cannot run both surface as errors.
+func TestInterceptLinkFailsWhenRecoveryFails(t *testing.T) {
+	sets := []*rule.InstRuleSet{{
+		PackageName: "dep",
+		ModulePath:  "example.com/app/dep",
+		FuncRules: map[string][]*rule.InstFuncRule{
+			"dep.go": {{InstBaseRule: rule.InstBaseRule{
+				Name:    "rule",
+				Target:  rule.NewTarget("example.com/app/dep"),
+				Imports: map[string]string{"std": "fmt"},
+			}}},
+		},
+	}}
+	writeLinkConfig := func(t *testing.T, workDir string) string {
+		t.Helper()
+		cfgPath := filepath.Join(workDir, "importcfg.link")
+		require.NoError(t, os.WriteFile(cfgPath, []byte("packagefile example.com/app/dep=/unused/dep.a\n"), 0o644))
+		return cfgPath
+	}
+
+	t.Run("unreadable recorded PGO profile", func(t *testing.T) {
+		workDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, workDir)
+		writeMatchedRules(t, sets)
+		// A directory where the profile record belongs makes the read fail.
+		require.NoError(t, os.MkdirAll(util.GetPGOProfileFile(), 0o755))
+
+		// pgoBuildFlagsFor reads the recorded profile only for a real link
+		// tool path, so this case uses one.
+		args := linkArgs(writeLinkConfig(t, workDir))
+		args[0] = linkToolPath()
+		_, err := interceptLink(t.Context(), args)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "PGO profile")
+	})
+
+	t.Run("nested go list cannot run", func(t *testing.T) {
+		workDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, workDir)
+		t.Setenv(util.EnvOtelcBuildFlags, `["-otelc-not-a-go-flag"]`)
+		writeMatchedRules(t, sets)
+
+		_, err := interceptLink(t.Context(), linkArgs(writeLinkConfig(t, workDir)))
+		require.Error(t, err)
+	})
+}
+
+// linkToolPath returns a path that util.IsLinkCommandWithArgs accepts as the
+// link tool.
+func linkToolPath() string {
+	name := "link"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	return filepath.Join(string(filepath.Separator)+"go", "pkg", "tool", name)
 }

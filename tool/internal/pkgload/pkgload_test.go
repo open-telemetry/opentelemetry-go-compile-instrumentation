@@ -584,3 +584,104 @@ func TestFindModuleDirs(t *testing.T) {
 		})
 	}
 }
+
+// writeBatchFixture writes a module whose packages a and c both import b,
+// the shared transitive dependency the batch resolver must walk once.
+func writeBatchFixture(t *testing.T) {
+	t.Helper()
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"),
+		[]byte("module example.com/batch\n\ngo 1.25.0\n"), 0o644))
+	packages := map[string]string{
+		"b": "package b\n\nfunc B() int { return 1 }\n",
+		"a": "package a\n\nimport \"example.com/batch/b\"\n\nfunc A() int { return b.B() }\n",
+		"c": "package c\n\nimport \"example.com/batch/b\"\n\nfunc C() int { return b.B() }\n",
+	}
+	for name, content := range packages {
+		require.NoError(t, os.MkdirAll(filepath.Join(root, name), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(root, name, name+".go"), []byte(content), 0o644))
+	}
+	t.Chdir(root)
+}
+
+func TestResolveExportFilesBatch_EmptyInput(t *testing.T) {
+	resolved, failed, err := ResolveExportFilesBatch(t.Context(), nil)
+
+	require.NoError(t, err)
+	assert.Empty(t, resolved)
+	assert.Empty(t, failed)
+}
+
+func TestResolveExportFilesBatch_ResolvesRootsAndSharedDependencies(t *testing.T) {
+	writeBatchFixture(t)
+
+	resolved, failed, err := ResolveExportFilesBatch(t.Context(),
+		[]string{"example.com/batch/a", "example.com/batch/c"})
+
+	require.NoError(t, err)
+	assert.Empty(t, failed)
+	// Both roots and the shared dependency b must resolve to a real export
+	// file; b is reachable only as a transitive dependency, so its presence
+	// proves the walk covered both roots' closures in one batch.
+	for _, path := range []string{"example.com/batch/a", "example.com/batch/b", "example.com/batch/c"} {
+		require.Contains(t, resolved, path)
+		assert.FileExists(t, resolved[path])
+	}
+}
+
+func TestResolveExportFilesBatch_MixedSuccessAndFailure(t *testing.T) {
+	writeBatchFixture(t)
+
+	resolved, failed, err := ResolveExportFilesBatch(t.Context(),
+		[]string{"example.com/batch/a", "example.invalid/nonexistent"})
+
+	// One unresolvable root must not fail the batch: the resolvable root
+	// still returns its archives, and the failure is reported per path.
+	require.NoError(t, err)
+	assert.Contains(t, resolved, "example.com/batch/a")
+	assert.FileExists(t, resolved["example.com/batch/a"])
+	assert.NotContains(t, resolved, "example.invalid/nonexistent")
+	require.Contains(t, failed, "example.invalid/nonexistent")
+	assert.Error(t, failed["example.invalid/nonexistent"])
+}
+
+func TestResolveExportFilesBatch_NoExportFile(t *testing.T) {
+	// unsafe is a real package but has no export archive.
+	resolved, failed, err := ResolveExportFilesBatch(t.Context(), []string{"unsafe"})
+
+	require.NoError(t, err)
+	assert.NotContains(t, resolved, "unsafe")
+	require.Contains(t, failed, "unsafe")
+	assert.Contains(t, failed["unsafe"].Error(), "no export file")
+}
+
+func TestResolveExportFilesBatch_LoadError(t *testing.T) {
+	_, _, err := ResolveExportFilesBatch(t.Context(), []string{"fmt"}, "-otelc-not-a-go-flag")
+
+	require.Error(t, err)
+}
+
+func TestResolveExportFilesBatch_PatternRoots(t *testing.T) {
+	writeBatchFixture(t)
+
+	// A pattern is not an import path: the packages it expands to are roots
+	// that were not requested by path, so they resolve but never count as
+	// failures of the pattern.
+	resolved, failed, err := ResolveExportFilesBatch(t.Context(), []string{"./..."})
+
+	require.NoError(t, err)
+	assert.Empty(t, failed)
+	for _, path := range []string{"example.com/batch/a", "example.com/batch/b", "example.com/batch/c"} {
+		assert.Contains(t, resolved, path)
+	}
+}
+
+func TestResolveExportFilesBatch_NoPackages(t *testing.T) {
+	writeBatchFixture(t)
+	require.NoError(t, os.MkdirAll("empty", 0o755))
+
+	_, _, err := ResolveExportFilesBatch(t.Context(), []string{"./empty/..."})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no packages found")
+}
