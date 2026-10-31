@@ -28,7 +28,7 @@ on:
       OTELC_BUNDLE_PUSH_TOKEN:
         description: Publisher token. The bundle-publisher environment supplies the value.
         required: false
-      OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY:
+      OTELBOT_GO_COMPILE_INSTRUMENTATION_PRIVATE_KEY:
         required: false
 
 permissions: {}
@@ -119,5 +119,5 @@ jobs:
       expires_at: ${{ inputs.expires_at }}
     secrets:
       OTELC_BUNDLE_PUSH_TOKEN: ${{ secrets.OTELC_BUNDLE_PUSH_TOKEN }}
-      OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY: >-
-        ${{ secrets.OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY }}
+      OTELBOT_GO_COMPILE_INSTRUMENTATION_PRIVATE_KEY: >-
+        ${{ secrets.OTELBOT_GO_COMPILE_INSTRUMENTATION_PRIVATE_KEY }}

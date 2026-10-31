@@ -31,7 +31,7 @@ on:
       OTELC_BUNDLE_PUSH_TOKEN:
         description: Callers forward this secret by name. The bundle-publisher environment supplies the value.
         required: false
-      OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY:
+      OTELBOT_GO_COMPILE_INSTRUMENTATION_PRIVATE_KEY:
         required: false
 
 permissions: {}
@@ -155,9 +155,9 @@ jobs:
       - name: Select publisher credentials
         id: credentials
         env:
-          CLIENT_ID: ${{ vars.OTELBOT_COMPILE_INSTRUMENTATION_CLIENT_ID }}
+          CLIENT_ID: ${{ vars.OTELBOT_GO_COMPILE_INSTRUMENTATION_CLIENT_ID }}
           PRIVATE_KEY: >-
-            ${{ secrets.OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY }}
+            ${{ secrets.OTELBOT_GO_COMPILE_INSTRUMENTATION_PRIVATE_KEY }}
         run: |
           "${RUNNER_TEMP}/bundlerepair" credentials
 
@@ -165,9 +165,9 @@ jobs:
         id: app-token
         if: steps.credentials.outputs.use_app == 'true'
         with:
-          client-id: ${{ vars.OTELBOT_COMPILE_INSTRUMENTATION_CLIENT_ID }}
+          client-id: ${{ vars.OTELBOT_GO_COMPILE_INSTRUMENTATION_CLIENT_ID }}
           private-key: >-
-            ${{ secrets.OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY }}
+            ${{ secrets.OTELBOT_GO_COMPILE_INSTRUMENTATION_PRIVATE_KEY }}
           permission-contents: write
           permission-pull-requests: read
           permission-workflows: write

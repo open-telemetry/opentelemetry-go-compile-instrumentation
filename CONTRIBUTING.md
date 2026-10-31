@@ -257,8 +257,8 @@ base, head, branch, and fork permission before pushing a descendant commit.
 An expected-head lease rejects concurrent branch updates.
 
 The publisher uses the repository App for repository and fork branches when
-`OTELBOT_COMPILE_INSTRUMENTATION_CLIENT_ID` and
-`OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY` are configured. A fork author
+`OTELBOT_GO_COMPILE_INSTRUMENTATION_CLIENT_ID` and
+`OTELBOT_GO_COMPILE_INSTRUMENTATION_PRIVATE_KEY` are configured. A fork author
 must allow edits from maintainers.
 
 The `OTELC_BUNDLE_PUSH_TOKEN` environment token is the fallback when the App
