@@ -1,0 +1,82 @@
+name: Assign Issue
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions: {}
+
+jobs:
+  assign:
+    name: Assign Issue
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    # Issues only: claiming a pull request is not a thing, and
+    # regenerate-bundle.yaml already owns the pull-request comment commands.
+    if: >-
+      !github.event.issue.pull_request && (github.event.comment.body == '/assign' || github.event.comment.body == '/unassign')
+    steps:
+      # GITHUB_TOKEN rather than the otelbot App token the bundle workflows
+      # use: otelbot is there so pushed commits still trigger pull_request
+      # workflows, and this job pushes nothing. Taking it on would also mean
+      # taking its "skip when the App is not configured" guard, which would
+      # make /assign silently do nothing -- the failure this command exists to
+      # remove.
+      #
+      # The comment body and author reach the script through the environment,
+      # never through ${{ }} interpolation, so a crafted comment cannot inject
+      # shell.
+      - name: Apply the claim
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          ACTOR: ${{ github.event.comment.user.login }}
+          COMMAND: ${{ github.event.comment.body }}
+        run: |
+          set -euo pipefail
+
+          react() {
+            gh api --silent "repos/$REPO/issues/comments/$COMMENT_ID/reactions" -f "content=$1"
+          }
+
+          say() {
+            gh api --silent "repos/$REPO/issues/$ISSUE/comments" -f "body=$1"
+          }
+
+          assigned_to_actor() {
+            gh api "repos/$REPO/issues/$ISSUE" --jq '[.assignees[].login]' \
+              | jq -e --arg actor "$ACTOR" 'index($actor) != null' >/dev/null
+          }
+
+          holders=$(gh api "repos/$REPO/issues/$ISSUE" --jq '[.assignees[].login] | join(", ")')
+
+          if [ "$COMMAND" = '/unassign' ]; then
+            gh api --silent -X DELETE "repos/$REPO/issues/$ISSUE/assignees" \
+              -f "assignees[]=$ACTOR"
+            react '+1'
+            exit 0
+          fi
+
+          # Someone else holds it. Say so rather than adding a second assignee,
+          # so the claim keeps meaning "one owner".
+          if [ -n "$holders" ] && ! assigned_to_actor; then
+            react 'eyes'
+            say "@$ACTOR this issue is already assigned to $holders. Comment on it to coordinate, or ask a maintainer to reassign."
+            exit 0
+          fi
+
+          gh api --silent "repos/$REPO/issues/$ISSUE/assignees" -f "assignees[]=$ACTOR"
+
+          # GitHub drops an assignee it will not accept and still returns 201,
+          # so read back rather than trusting the write. Without this check the
+          # command would fail exactly as silently as having no command at all,
+          # which is the problem it exists to fix.
+          if assigned_to_actor; then
+            react '+1'
+          else
+            react 'confused'
+            say "@$ACTOR GitHub would not accept you as an assignee here, so the claim did not stick. A maintainer needs to assign you."
+          fi
