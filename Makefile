@@ -290,6 +290,20 @@ lint/go/fix: $(GOLANGCI_LINT)
 	$(GOLANGCI_LINT) run --config .tools/golangci.yml --fix
 	cd $(TOOLS_DIR)/bundlerepair && GOWORK=off $(GOLANGCI_LINT) run --config ../golangci.yml --fix
 
+.ONESHELL:
+lint/go/instrumentation: ## Lint new issues in instrumentation modules (golangci-lint only sees the root module via ./...)
+lint/go/instrumentation: $(GOLANGCI_LINT)
+	@echo "Linting instrumentation modules (new issues only)..."
+	@set -euo pipefail
+	@BASE_REV=$${LINT_BASE_REV:-origin/main}
+	@CONFIG=$(CURDIR)/.tools/golangci.yml
+	@INSTR_MODULES=$$(find instrumentation -name "go.mod" -type f -exec dirname {} \; | grep -v "instrumentation/runtime" | grep -v "instrumentation/database/sql"); \
+	for moddir in $$INSTR_MODULES; do \
+		echo "Linting $$moddir..."; \
+		(cd $$moddir && $(GOLANGCI_LINT) run --config $$CONFIG --new-from-rev="$$BASE_REV" ./...); \
+	done
+	@echo "All instrumentation modules linted successfully"
+
 lint/yaml: ## Lint YAML formatting
 lint/yaml: $(YAMLFMT)
 	@echo "Linting YAML files..."
