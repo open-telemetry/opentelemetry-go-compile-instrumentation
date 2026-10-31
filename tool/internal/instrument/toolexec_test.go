@@ -1560,7 +1560,7 @@ func TestRuleAddedImportsCollectsEveryRuleKind(t *testing.T) {
 		},
 	})
 
-	paths := ruleAddedImports(t.Context(), &imports.ImportConfig{
+	paths := ruleAddedImports(t.Context(), nil, &imports.ImportConfig{
 		PackageFile: map[string]string{"example.com/app/dep": "/unused/dep.a"},
 	})
 	assert.Equal(t, map[string]struct{}{
@@ -1748,7 +1748,7 @@ func TestRuleAddedImportsCollectsStructLitDirectiveDeclRules(t *testing.T) {
 		},
 	})
 
-	paths := ruleAddedImports(t.Context(), &imports.ImportConfig{
+	paths := ruleAddedImports(t.Context(), nil, &imports.ImportConfig{
 		PackageFile: map[string]string{"example.com/app/dep": "/unused/dep.a"},
 	})
 	assert.Equal(t, map[string]struct{}{
@@ -1807,7 +1807,7 @@ func TestRuleAddedImportsIgnoresMalformedMatchedRules(t *testing.T) {
 	require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), []byte("{not json"), 0o600))
 
 	linkConfig := imports.ImportConfig{PackageFile: map[string]string{"example.com/app/dep": "/unused/dep.a"}}
-	assert.Empty(t, ruleAddedImports(t.Context(), &linkConfig))
+	assert.Empty(t, ruleAddedImports(t.Context(), nil, &linkConfig))
 }
 
 // TestFileRuleImportsSkipsUnusableSources checks every add_file source the
@@ -1914,6 +1914,70 @@ func TestResolveRuleAddedImportsFollowsChainedRuleSets(t *testing.T) {
 		"the first pass must resolve the rule-added import itself")
 	assert.Contains(t, linkConfig.PackageFile, "encoding/xml",
 		"the pass after fmt joins the importcfg must resolve the rule set fmt carries")
+}
+
+// TestResolveRuleAddedImportsKeepsLinkedBinarysMainSets covers a
+// multi-binary build: every main package compiles with -p main, so every
+// executable's rule set carries ModulePath "main" and no link importcfg can
+// name the package a set instrumented. The link -o output name can: go
+// names a binary after the last element of its main package's import path,
+// which is also the directory the set's matched rules name. A custom -o
+// name matches no set, so every main set stays and recovery never drops an
+// import the link needs.
+func TestResolveRuleAddedImportsKeepsLinkedBinarysMainSets(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	mainSet := func(name, dir string, imports map[string]string) *rule.InstRuleSet {
+		set := rule.NewInstRuleSet("main")
+		set.SetPackageName("main")
+		set.AddFuncRule(filepath.Join(workDir, dir, "main.go"), &rule.InstFuncRule{
+			InstBaseRule: rule.InstBaseRule{
+				Name:    name,
+				Target:  rule.NewTarget("main"),
+				Imports: imports,
+			},
+			Func: "main",
+		})
+		return set
+	}
+	writeMatchedRules(t, []*rule.InstRuleSet{
+		mainSet("rule-a", "a", map[string]string{"fmt": "fmt"}),
+		mainSet("rule-b", "b", map[string]string{"strings": "strings"}),
+	})
+
+	// The link importcfg names no main package by path, the shape a warm
+	// multi-binary build gives every link.
+	newLinkConfig := func() *imports.ImportConfig {
+		return &imports.ImportConfig{PackageFile: map[string]string{
+			"runtime": "/unused/runtime.a",
+		}}
+	}
+	linkCmd := func(binary string) []string {
+		return []string{"link", "-o", filepath.Join(workDir, binary), "-buildid=test", "-importcfg", "unused"}
+	}
+
+	// fmt resolves no strings in its dependency closure, so only the kept
+	// main set can add strings.
+	t.Run("keeps only the linked binary's main set", func(t *testing.T) {
+		linkConfig := newLinkConfig()
+		updated, err := resolveRuleAddedImports(t.Context(), linkCmd("a"), linkConfig)
+		require.NoError(t, err)
+		assert.True(t, updated)
+		assert.Contains(t, linkConfig.PackageFile, "fmt")
+		assert.NotContains(t, linkConfig.PackageFile, "strings",
+			"the link builds the a binary, so the b binary's main rule set must not contribute")
+	})
+
+	t.Run("custom -o name keeps every main set", func(t *testing.T) {
+		linkConfig := newLinkConfig()
+		updated, err := resolveRuleAddedImports(t.Context(), linkCmd("custom-name"), linkConfig)
+		require.NoError(t, err)
+		assert.True(t, updated)
+		assert.Contains(t, linkConfig.PackageFile, "fmt")
+		assert.Contains(t, linkConfig.PackageFile, "strings",
+			"a custom -o name matches no main set, so no set may be dropped")
+	})
 }
 
 // TestInterceptLinkFailsWhenRecoveryFails checks that an error while

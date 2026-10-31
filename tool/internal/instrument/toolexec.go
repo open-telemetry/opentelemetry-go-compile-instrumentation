@@ -649,9 +649,9 @@ func resolveRuleAddedImports(ctx context.Context, linkArgs []string, linkConfig 
 	// resolution closes one level of the same nesting and fails past the
 	// bound, so a link that walks past it follows a chain no compile accepted.
 	for range maxResolutionChain {
-		pass, err := resolveRuleAddedImportsPass(ctx, buildFlags, linkConfig)
-		if err != nil {
-			return updated, err
+		pass, passErr := resolveRuleAddedImportsPass(ctx, linkArgs, buildFlags, linkConfig)
+		if passErr != nil {
+			return updated, passErr
 		}
 		if !pass {
 			return updated, nil
@@ -668,10 +668,11 @@ func resolveRuleAddedImports(ctx context.Context, linkArgs []string, linkConfig 
 // link importcfg does not list yet and reports whether it added any.
 func resolveRuleAddedImportsPass(
 	ctx context.Context,
+	linkArgs []string,
 	buildFlags []string,
 	linkConfig *imports.ImportConfig,
 ) (bool, error) {
-	candidates := ruleAddedImports(ctx, linkConfig)
+	candidates := ruleAddedImports(ctx, linkArgs, linkConfig)
 	if len(candidates) == 0 {
 		return false, nil
 	}
@@ -724,13 +725,14 @@ func resolveRuleAddedImportsPass(
 // wrote before the build, so the answer never depends on a compile running.
 // Only rule sets whose target package takes part in the link described by
 // linkConfig contribute: a link importcfg lists every package the binary
-// links, including the linked root itself, so the imports of another
-// binary's rules are never resolved for this one. The generated test main
-// is the one root a link importcfg never lists, so a set for it is always
+// links, so the imports of another binary's rules are never resolved for
+// this one. Main packages are the exception: every one of them compiles
+// with -p main, so every executable's rule set carries the path "main",
+// which no link importcfg lists. Only the sets of the linked binary are
 // kept. The result stays a superset of what the link needs: a rule can
 // declare an import the build never uses, and resolveRuleAddedImports skips
 // unresolvable candidates.
-func ruleAddedImports(ctx context.Context, linkConfig *imports.ImportConfig) map[string]struct{} {
+func ruleAddedImports(ctx context.Context, linkArgs []string, linkConfig *imports.ImportConfig) map[string]struct{} {
 	logger := util.LoggerFromContext(ctx)
 
 	content, err := os.ReadFile(util.GetMatchedRuleFile())
@@ -753,28 +755,106 @@ func ruleAddedImports(ctx context.Context, linkConfig *imports.ImportConfig) map
 	bctx := build.Default
 	bctx.BuildTags = util.ActiveBuildTags()
 
+	binary := linkedBinaryName(linkArgs)
 	paths := make(map[string]struct{})
+	var mainSets []*rule.InstRuleSet
 	for _, set := range sets {
-		if _, linked := linkConfig.PackageFile[set.ModulePath]; !linked && set.ModulePath != "main" {
-			// The target package takes no part in this link: another binary's
-			// rules, or a package this build never compiled. The generated
-			// test main has import path "main", which no importcfg lists.
+		if _, linked := linkConfig.PackageFile[set.ModulePath]; !linked {
+			if set.ModulePath != "main" {
+				// The target package takes no part in this link: another binary's
+				// rules, or a package this build never compiled.
+				continue
+			}
+			// Every main package compiles with -p main, so its rule set carries
+			// the path "main", which no link importcfg lists; the importcfg
+			// names the linked root by its import path instead.
+			mainSets = append(mainSets, set)
 			continue
 		}
-		addImportsOf(paths, set.RawRules)
-		addImportsOf(paths, set.FuncRules)
-		addImportsOf(paths, set.StructRules)
-		addImportsOf(paths, set.CallRules)
-		addImportsOf(paths, set.LitRules)
-		addImportsOf(paths, set.DirectiveRules)
-		addImportsOf(paths, set.DeclRules)
-		for _, fileRule := range set.FileRules {
-			for _, path := range fileRuleImports(ctx, &bctx, fileRule) {
-				paths[path] = struct{}{}
+		collectRuleSetImports(ctx, &bctx, paths, set)
+	}
+
+	// The link -o output name closes that gap: go names a binary after the
+	// last element of its main package's import path, with a ".test" suffix
+	// for test binaries, and that element is also the directory the set's
+	// matched rules name. Keep only the sets of the linked binary. A set that
+	// names no source, such as one with only file rules or the generated test
+	// main's, applies to every main package, so it stays. When no set names
+	// the binary, the -o name is custom or names a package whose directory
+	// differs from the last element of its import path, and every main set
+	// stays so recovery never drops an import the link needs.
+	namedBinary := slices.ContainsFunc(mainSets, func(set *rule.InstRuleSet) bool {
+		_, named := mainSetPackageDirs(set)[binary]
+		return named
+	})
+	for _, set := range mainSets {
+		dirs := mainSetPackageDirs(set)
+		if namedBinary && len(dirs) > 0 {
+			if _, named := dirs[binary]; !named {
+				continue
 			}
 		}
+		collectRuleSetImports(ctx, &bctx, paths, set)
 	}
 	return paths
+}
+
+// collectRuleSetImports adds to paths every import a rule set can add to
+// its target package's compile: the imports each rule declares, plus the
+// imports of the source files the set's add_file rules insert.
+func collectRuleSetImports(ctx context.Context, bctx *build.Context, paths map[string]struct{}, set *rule.InstRuleSet) {
+	addImportsOf(paths, set.RawRules)
+	addImportsOf(paths, set.FuncRules)
+	addImportsOf(paths, set.StructRules)
+	addImportsOf(paths, set.CallRules)
+	addImportsOf(paths, set.LitRules)
+	addImportsOf(paths, set.DirectiveRules)
+	addImportsOf(paths, set.DeclRules)
+	for _, fileRule := range set.FileRules {
+		for _, path := range fileRuleImports(ctx, bctx, fileRule) {
+			paths[path] = struct{}{}
+		}
+	}
+}
+
+// linkedBinaryName returns the name go gives the binary a link builds: the
+// base of the link -o value with the ".exe" suffix Windows adds and the
+// ".test" suffix go appends to test binaries removed. go derives the name
+// from the last element of the linked main package's import path. An empty
+// result means the command names no output.
+func linkedBinaryName(linkArgs []string) string {
+	out := util.FindFlagValue(linkArgs, "-o")
+	if out == "" {
+		return ""
+	}
+	name := strings.TrimSuffix(filepath.Base(out), ".exe")
+	return strings.TrimSuffix(name, ".test")
+}
+
+// mainSetPackageDirs returns the names of the directories a main rule set's
+// rules name as their target's source files. Setup keys every precisely
+// matched rule by its target package's source file, so the directory of
+// those files is the main package the set instrumented. A set that names no
+// source, such as one with only file rules, applies to every main package
+// and yields no name.
+func mainSetPackageDirs(set *rule.InstRuleSet) map[string]struct{} {
+	dirs := make(map[string]struct{})
+	addSourceDirs(dirs, set.RawRules)
+	addSourceDirs(dirs, set.FuncRules)
+	addSourceDirs(dirs, set.StructRules)
+	addSourceDirs(dirs, set.CallRules)
+	addSourceDirs(dirs, set.LitRules)
+	addSourceDirs(dirs, set.DirectiveRules)
+	addSourceDirs(dirs, set.DeclRules)
+	return dirs
+}
+
+// addSourceDirs adds to dirs the directory name of every file a file-keyed
+// rule map keys its rules by.
+func addSourceDirs[T any](dirs map[string]struct{}, rules map[string][]T) {
+	for file := range rules {
+		dirs[filepath.Base(filepath.Dir(file))] = struct{}{}
+	}
 }
 
 // addImportsOf adds the declared imports of every rule in a file-keyed rule
