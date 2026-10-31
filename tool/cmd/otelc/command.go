@@ -20,6 +20,7 @@ import (
 //nolint:gochecknoglobals // Implementation of a CLI command
 var commandCleanup = cli.Command{
 	Name:        "cleanup",
+	Usage:       "Remove all artifacts created by the setup and build phases",
 	Description: "Remove all artifacts created by the setup and build phases",
 	Before:      addLoggerPhaseAttribute,
 	Action: func(ctx context.Context, _ *cli.Command) error {
@@ -30,6 +31,7 @@ var commandCleanup = cli.Command{
 //nolint:gochecknoglobals // Implementation of a CLI command
 var commandGo = cli.Command{
 	Name:            "go",
+	Usage:           "Invoke the go toolchain with toolexec mode",
 	Description:     "Invoke the go toolchain with toolexec mode",
 	ArgsUsage:       "[go toolchain flags]",
 	SkipFlagParsing: true,
@@ -40,6 +42,7 @@ var commandGo = cli.Command{
 //nolint:gochecknoglobals // Implementation of a CLI command
 var commandPin = cli.Command{
 	Name:        "pin",
+	Usage:       "Pin instrumentation packages for the current module",
 	Description: "Generate or update otel.instrumentation.go to pin instrumentation packages for the current module.",
 	Flags: []cli.Flag{
 		&cli.BoolFlag{
@@ -78,6 +81,7 @@ var commandPin = cli.Command{
 //nolint:gochecknoglobals // Implementation of a CLI command
 var commandSetup = cli.Command{
 	Name:        "setup",
+	Usage:       "Set up the environment for instrumentation",
 	Description: "Set up the environment for instrumentation",
 	Before:      addLoggerPhaseAttribute,
 	Action:      setup.Setup,
@@ -86,6 +90,7 @@ var commandSetup = cli.Command{
 //nolint:gochecknoglobals // Implementation of a CLI command
 var commandToolexec = cli.Command{
 	Name:            "toolexec",
+	Usage:           "Wrap a command run by the go toolchain",
 	Description:     "Wrap a command run by the go toolchain",
 	SkipFlagParsing: true,
 	Hidden:          true,
@@ -106,6 +111,7 @@ var commandToolexec = cli.Command{
 //nolint:gochecknoglobals // Implementation of a CLI command
 var commandVersion = cli.Command{
 	Name:        "version",
+	Usage:       "Print the version of the tool",
 	Description: "Print the version of the tool",
 	Flags: []cli.Flag{
 		&cli.BoolFlag{
