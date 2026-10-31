@@ -1,5 +1,3 @@
-version: "v1.0.0"
-
 fiber_router_next_hook:
   target: github.com/gofiber/fiber/v2
   where:
