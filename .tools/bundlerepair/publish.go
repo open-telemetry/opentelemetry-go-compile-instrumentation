@@ -341,28 +341,21 @@ func (a app) reportMissingToken(files ghaction.Files) error {
 }
 
 // credentials chooses between the App token and the environment token. It
-// reads CLIENT_ID, PRIVATE_KEY and IS_CROSS_REPOSITORY and never prints the key.
-// A variable that the decision needs must be set, even if empty. The variables
-// are read in this order and the decision stops at the first one that rules
-// out the App: IS_CROSS_REPOSITORY, CLIENT_ID, PRIVATE_KEY.
+// reads CLIENT_ID and PRIVATE_KEY and never prints the key. A variable that
+// the decision needs must be set, even if empty. The variables are read in
+// this order and the decision stops at the first one that rules out the App:
+// CLIENT_ID, PRIVATE_KEY. The App serves repository and fork branches.
 func (a app) credentials(args []string) error {
 	if len(args) != 0 {
 		return errors.New("credentials takes no arguments")
 	}
 	useApp := true
-	for _, rule := range []struct {
-		name string
-		ok   func(string) bool
-	}{
-		{"IS_CROSS_REPOSITORY", func(v string) bool { return v == "false" }},
-		{"CLIENT_ID", func(v string) bool { return v != "" }},
-		{"PRIVATE_KEY", func(v string) bool { return v != "" }},
-	} {
-		value, set := a.lookup(rule.name)
+	for _, name := range []string{"CLIENT_ID", "PRIVATE_KEY"} {
+		value, set := a.lookup(name)
 		if !set {
-			return errors.New(rule.name + " must be set")
+			return errors.New(name + " must be set")
 		}
-		if !rule.ok(value) {
+		if value == "" {
 			useApp = false
 			break
 		}
