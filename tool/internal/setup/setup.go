@@ -18,6 +18,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/instrument"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
@@ -30,6 +31,10 @@ type setupPhase struct {
 	ruleConfig    string
 	buildPackages []*packages.Package
 	buildFlags    []string
+	// subcommand is the wrapped go subcommand: "build", "install", or "test".
+	// A standalone `otelc setup` does not know the command that follows it,
+	// so it keeps the conservative "build" value.
+	subcommand string
 	// pgo is the build's effective -pgo value; see pgoValue.
 	pgo             string
 	rootModulePaths []string
@@ -318,9 +323,37 @@ func (sp *setupPhase) generateRuntimePerPackage(
 ) error {
 	for _, pkg := range pkgs {
 		pkgDir := pkgload.PackageDir(pkg)
+		name := pkg.Name
 		if pkgDir == "" {
-			sp.Warn("skipping package without Go files", "package", pkg.PkgPath)
-			continue
+			if sp.subcommand != subcmdTest {
+				// The fallback below is a test-target mechanism: it relies on the
+				// _test.go files of the directory to compile the generated file
+				// into the test binary. Under `go build` or `go install` the same
+				// generated file would instead change what gets built: a
+				// test-only `package main` directory becomes a command without
+				// main(). Keep the previous skip for those invocations.
+				sp.Warn("skipping package without Go files", "package", pkg.PkgPath)
+				continue
+			}
+			// The package's non-test Go files are all excluded by build
+			// constraints (for example a suite whose files are linux-only built
+			// with -tags=githubci on darwin). Its test binary still compiles the
+			// directory through its _test.go files, so the hook imports must be
+			// generated there: instrumented dependencies reference hook functions
+			// only through //go:linkname, and without the blank imports no package
+			// in the test binary's closure defines those symbols, so the link fails.
+			pkgDir = pkgload.ModuleRelativeDir(pkg)
+			if pkgDir == "" {
+				sp.Warn("skipping package without Go files", "package", pkg.PkgPath)
+				continue
+			}
+			if name == "" {
+				name = sp.runtimePackageName(pkgDir)
+			}
+			if name == "" {
+				sp.Warn("skipping package without a resolvable package name", "package", pkg.PkgPath)
+				continue
+			}
 		}
 
 		// Introduce additional hook code by generating otelc.runtime.go
@@ -328,13 +361,56 @@ func (sp *setupPhase) generateRuntimePerPackage(
 			dir:        pkgDir,
 			importPath: sp.runtimeImportPath(ctx, pkg, pkgDir),
 			debugPath:  pkg.PkgPath,
-			name:       pkg.Name,
+			name:       name,
 		}); err != nil {
 			return ex.Wrapf(err, "adding deps for package at %s", pkgDir)
 		}
 	}
 
 	return nil
+}
+
+// runtimePackageName resolves the package name for a package whose Go files
+// are all excluded by build constraints, so pkg.Name can be empty. The
+// package clause of a Go file the effective build context selects (the
+// _test.go files that the test binary compiles) is the fallback: a generator
+// excluded by //go:build ignore never compiles into the test binary, so its
+// clause must not name the generated file. ast.MatchFileConstraints is not
+// used here because it drops the ignore tag, which otelc wants only when it
+// compiles ignored add_file rule sources itself. An external test clause
+// (package x_test) must not name the generated non-test file, so an
+// in-package clause wins, and a directory with only external test files uses
+// the name without the _test suffix.
+func (sp *setupPhase) runtimePackageName(pkgDir string) string {
+	bctx := sp.getBuildContext()
+	// os.ReadDir returns entries sorted by filename, so the first matching
+	// clause is deterministic.
+	entries, err := os.ReadDir(pkgDir)
+	if err != nil {
+		return ""
+	}
+	external := ""
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != goSuffix {
+			continue
+		}
+		match, matchErr := bctx.MatchFile(pkgDir, entry.Name())
+		if matchErr != nil || !match {
+			continue
+		}
+		name, parseErr := ast.ParsePackageName(filepath.Join(pkgDir, entry.Name()))
+		if parseErr != nil || name == "" {
+			continue
+		}
+		if pkgName, isExternal := strings.CutSuffix(name, "_test"); isExternal {
+			if external == "" {
+				external = pkgName
+			}
+			continue
+		}
+		return name
+	}
+	return external
 }
 
 // runtimeImportPath returns the import path of the package that receives a
@@ -469,6 +545,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		logger:     logger,
 		ruleConfig: cmd.String("rules"),
 		buildFlags: extractBuildFlags(subcommand, args),
+		subcommand: subcommand,
 		pgo:        pgoValue(subcommand, args),
 	}
 

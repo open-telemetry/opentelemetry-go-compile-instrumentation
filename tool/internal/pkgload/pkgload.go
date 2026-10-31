@@ -237,6 +237,36 @@ func resolveModuleDir(ctx context.Context, pkgDir string) (string, error) {
 	return mod.Dir, nil
 }
 
+// ModuleRelativeDir returns the package directory derived from the module root
+// and the import path, for a package of a main module only. PackageDir returns
+// "" when every non-test Go file of the package is excluded by build
+// constraints, but the directory is still known: the module root plus the
+// import path relative to the module path. A test target in that state still
+// compiles the directory through its _test.go files, so a generated source
+// file placed there joins the test binary.
+//
+// Packages of any other module are dependencies: a replace target or a module
+// cache entry. Their directories are not owned by the caller and can be
+// read-only, so they keep the skip. In a workspace, every go.work module
+// reports itself as a main module, so its packages stay included.
+func ModuleRelativeDir(pkg *packages.Package) string {
+	if pkg.Module == nil || !pkg.Module.Main || pkg.Module.Dir == "" || pkg.Module.Path == "" {
+		return ""
+	}
+	if pkg.PkgPath == "" || pkg.PkgPath == CommandLineArgumentsPackage {
+		return ""
+	}
+	rest := strings.TrimPrefix(pkg.PkgPath, pkg.Module.Path)
+	if rest != "" && !strings.HasPrefix(rest, "/") {
+		return ""
+	}
+	dir := filepath.Join(pkg.Module.Dir, filepath.FromSlash(strings.TrimPrefix(rest, "/")))
+	if !util.PathExists(dir) {
+		return ""
+	}
+	return dir
+}
+
 func FindModuleDirs(ctx context.Context, pkgs []*packages.Package) ([]string, error) {
 	logger := util.LoggerFromContext(ctx)
 
