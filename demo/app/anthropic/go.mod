@@ -2,7 +2,10 @@ module go.opentelemetry.io/otelc/demo/app/anthropic
 
 go 1.25.0
 
-require github.com/anthropics/anthropic-sdk-go v1.84.0
+require (
+	github.com/anthropics/anthropic-sdk-go v1.84.0
+	github.com/anthropics/anthropic-sdk-go/v2 v2.3.0
+)
 
 require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
