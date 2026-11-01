@@ -184,30 +184,17 @@ func ResolveExportFiles(ctx context.Context, importPath string, buildFlags ...st
 // each import path to its declared package name. Load pkgs with
 // packages.NeedImports and packages.NeedDeps, or the walk finds no
 // imports to collect.
+//
+// The walk visits each package once, not each import path once. A test
+// variant such as "p [p.test]" has the same PkgPath as p, but it also has
+// the imports of p's _test.go files.
 func CollectPackageNames(pkgs []*packages.Package) map[string]string {
 	result := make(map[string]string)
-	visited := make(map[string]bool)
-
-	var walk func(pkg *packages.Package)
-	walk = func(pkg *packages.Package) {
-		if visited[pkg.PkgPath] {
-			return
-		}
-		visited[pkg.PkgPath] = true
-
+	packages.Visit(pkgs, nil, func(pkg *packages.Package) {
 		if pkg.Name != "" {
 			result[pkg.PkgPath] = pkg.Name
 		}
-
-		for _, dep := range pkg.Imports {
-			walk(dep)
-		}
-	}
-
-	for _, pkg := range pkgs {
-		walk(pkg)
-	}
-
+	})
 	return result
 }
 

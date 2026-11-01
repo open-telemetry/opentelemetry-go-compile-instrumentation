@@ -4,6 +4,14 @@
 # Use bash for all shell commands (required for pipefail and other bash features)
 SHELL := /bin/bash
 
+# Many recipes use .ONESHELL, so that "set -euo pipefail" applies to all the
+# lines of the recipe. GNU Make 3.81 (the default on macOS) does not support
+# .ONESHELL: it runs each line in a different shell, and failures can be
+# hidden. Thus GNU Make 3.82 or later is required.
+ifeq ($(filter oneshell,$(.FEATURES)),)
+$(error GNU Make 3.82 or later is required (found $(MAKE_VERSION)). On macOS, run "brew install make", then use "gmake")
+endif
+
 .PHONY: all test test-unit test-integration test-e2e format lint build build-all build/pkg install manifest verify-manifest clean \
         build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
         lint/action lint/makefile lint/license-header lint/license-header/fix lint/dockerfile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
@@ -38,10 +46,7 @@ export OTELC_SOURCE_ROOT := $(CURDIR)
 # Instrumentation is scanned separately via instrumented integration-test binaries
 # (see govulncheck/instrumentation): source scans skip //go:build ignore files and
 # cannot typecheck modules that need compile-time field injection (e.g. database/sql).
-# Known gap: that makes instrumentation coverage only as good as the test apps.
-# An instrumentation module that no app under test/apps builds against is scanned
-# by neither job, so adding a module without an app leaves it uncovered (currently
-# instrumentation/github.com/openai/openai-go/v3).
+# This coverage is only as complete as the top-level apps under test/apps.
 # Demos are intentionally excluded (pinned example deps).
 GOVULNCHECK_CORE_MODULES := . $(shell find pkg -type f -name 'go.mod' -exec dirname {} \; | sort)
 # Top-level integration apps only (skip nested modules such as
@@ -245,6 +250,20 @@ lint/go/fix: ## Run golangci-lint on Go code and fix the issues
 lint/go/fix: $(GOLANGCI_LINT)
 	@echo "Linting Go code..."
 	$(GOLANGCI_LINT) run --config .tools/golangci.yml --fix
+
+.ONESHELL:
+lint/go/instrumentation: ## Lint new issues in instrumentation modules (golangci-lint only sees the root module via ./...)
+lint/go/instrumentation: $(GOLANGCI_LINT)
+	@echo "Linting instrumentation modules (new issues only)..."
+	@set -euo pipefail
+	@BASE_REV=$${LINT_BASE_REV:-origin/main}
+	@CONFIG=$(CURDIR)/.tools/golangci.yml
+	@INSTR_MODULES=$$(find instrumentation -name "go.mod" -type f -exec dirname {} \; | grep -v "instrumentation/runtime" | grep -v "instrumentation/database/sql"); \
+	for moddir in $$INSTR_MODULES; do \
+		echo "Linting $$moddir..."; \
+		(cd $$moddir && $(GOLANGCI_LINT) run --config $$CONFIG --new-from-rev="$$BASE_REV" ./...); \
+	done
+	@echo "All instrumentation modules linted successfully"
 
 lint/yaml: ## Lint YAML formatting
 lint/yaml: $(YAMLFMT)

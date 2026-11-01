@@ -4,6 +4,7 @@
 package instrument
 
 import (
+	"go/build"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -13,87 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
-
-func TestStripBuildIgnoreTag(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected string
-	}{
-		{
-			name: "strips go:build ignore comment",
-			input: `//go:build ignore
-
-package main
-
-func main() {}
-`,
-			expected: `
-
-package main
-
-func main() {}
-`,
-		},
-		{
-			name: "no go:build ignore comment - content unchanged",
-			input: `package main
-
-func main() {}
-`,
-			expected: `package main
-
-func main() {}
-`,
-		},
-		{
-			name: "multiple go:build ignore comments",
-			input: `//go:build ignore
-package main
-//go:build ignore
-func main() {}
-`,
-			expected: `
-package main
-
-func main() {}
-`,
-		},
-		{
-			name:     "empty file",
-			input:    "",
-			expected: "",
-		},
-		{
-			// Regression test for #1069: a whole-file substring replace
-			// deleted this text from the string literal and the comment,
-			// since both happen to contain "//go:build ignore" without being
-			// a build-constraint line themselves.
-			name: "preserves the tag text inside a string literal and comment prose",
-			input: `//go:build ignore
-
-package hooks
-
-// Every file rule source must carry //go:build ignore at the top.
-const marker = "//go:build ignore"
-`,
-			expected: `
-
-package hooks
-
-// Every file rule source must carry //go:build ignore at the top.
-const marker = "//go:build ignore"
-`,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, stripBuildIgnoreTag(tt.input))
-		})
-	}
-}
 
 func TestApplyFileRule_Success(t *testing.T) {
 	srcDir := t.TempDir()
@@ -193,6 +115,37 @@ func TestApplyFileRule_FileNotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "file nonexistent.go not found in")
 }
 
+func TestApplyFileRule_EmptyPackageName(t *testing.T) {
+	srcDir := t.TempDir()
+	workDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(srcDir, "added.go"),
+		[]byte("package myrules\n\nfunc init() {}\n"),
+		0o644,
+	))
+
+	ip := &instrumentPhase{
+		logger:  slog.New(slog.DiscardHandler),
+		workDir: workDir,
+	}
+
+	fileRule := &rule.InstFileRule{
+		File:         "added.go",
+		Path:         "example.com/myrules",
+		ResolvedPath: srcDir,
+	}
+	fileRule.Name = "test_empty_package_name"
+
+	err := ip.applyFileRule(t.Context(), fileRule, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot resolve the package name")
+
+	entries, readErr := os.ReadDir(workDir)
+	require.NoError(t, readErr)
+	assert.Empty(t, entries)
+	assert.Empty(t, ip.compileArgs)
+}
+
 func TestApplyFileRule_SubdirectoryFile(t *testing.T) {
 	srcDir := t.TempDir()
 	workDir := t.TempDir()
@@ -227,4 +180,233 @@ func SubHelper() {}
 	require.NoError(t, err)
 	assert.Contains(t, string(outData), "package targetpkg")
 	assert.Contains(t, string(outData), "func SubHelper()")
+}
+
+// TestApplyFileRule_CombinedIgnoreAndPlatformTag verifies that a file rule source
+// carrying the combined constraint //go:build ignore && linux has the "ignore" tag
+// stripped while preserving //go:build linux in the output file, and that it is
+// included in compileArgs when compiling for linux.
+func TestApplyFileRule_CombinedIgnoreAndPlatformTag(t *testing.T) {
+	srcDir := t.TempDir()
+	workDir := t.TempDir()
+
+	content := "//go:build ignore && linux\n\npackage sourcepkg\n\nfunc LinuxHelper() string {\n\treturn \"linux\"\n}\n"
+	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "helper.go"), []byte(content), 0o644))
+
+	ip := &instrumentPhase{
+		logger:       slog.New(slog.DiscardHandler),
+		workDir:      workDir,
+		buildContext: &build.Context{GOOS: "linux", GOARCH: "amd64"},
+	}
+
+	fileRule := &rule.InstFileRule{
+		File:         "helper.go",
+		Path:         "example.com/mypkg",
+		ResolvedPath: srcDir,
+	}
+	fileRule.Name = "test_linux_combined_rule"
+
+	err := ip.applyFileRule(t.Context(), fileRule, "targetpkg")
+	require.NoError(t, err)
+
+	outPath := filepath.Join(workDir, "otelc.helper.go")
+	require.FileExists(t, outPath)
+
+	outData, err := os.ReadFile(outPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(outData), "//go:build linux")
+	assert.NotContains(t, string(outData), "ignore")
+	assert.Contains(t, ip.compileArgs, outPath)
+	assert.Contains(t, string(outData), "package targetpkg")
+	assert.Contains(t, string(outData), "func LinuxHelper()")
+}
+
+// TestApplyFileRule_PlatformConstraintMatching verifies that applyFileRule respects
+// build constraints at compile time:
+// - A file matching the target platform is generated and added to compileArgs.
+// - A file for a non-matching platform is skipped and NOT added to compileArgs.
+// - Filename conventions (e.g. helper_linux.go) are also honored.
+func TestApplyFileRule_PlatformConstraintMatching(t *testing.T) {
+	t.Run("skips file when platform constraint does not match target GOOS", func(t *testing.T) {
+		srcDir := t.TempDir()
+		workDir := t.TempDir()
+
+		content := "//go:build ignore && linux\n\npackage sourcepkg\n\nfunc LinuxOnly() {}\n"
+		require.NoError(t, os.WriteFile(filepath.Join(srcDir, "helper.go"), []byte(content), 0o644))
+
+		ip := &instrumentPhase{
+			logger:       slog.New(slog.DiscardHandler),
+			workDir:      workDir,
+			buildContext: &build.Context{GOOS: "windows", GOARCH: "amd64"},
+		}
+
+		fileRule := &rule.InstFileRule{
+			File:         "helper.go",
+			Path:         "example.com/mypkg",
+			ResolvedPath: srcDir,
+		}
+		fileRule.Name = "test_linux_on_windows"
+
+		err := ip.applyFileRule(t.Context(), fileRule, "targetpkg")
+		require.NoError(t, err)
+
+		outPath := filepath.Join(workDir, "otelc.helper.go")
+		assert.NoFileExists(t, outPath)
+		assert.NotContains(t, ip.compileArgs, outPath)
+	})
+
+	t.Run("includes file when platform constraint matches target GOOS", func(t *testing.T) {
+		srcDir := t.TempDir()
+		workDir := t.TempDir()
+
+		content := "//go:build ignore && (darwin || linux)\n\npackage sourcepkg\n\nfunc UnixHelper() {}\n"
+		require.NoError(t, os.WriteFile(filepath.Join(srcDir, "helper.go"), []byte(content), 0o644))
+
+		ip := &instrumentPhase{
+			logger:       slog.New(slog.DiscardHandler),
+			workDir:      workDir,
+			buildContext: &build.Context{GOOS: "darwin", GOARCH: "arm64"},
+		}
+
+		fileRule := &rule.InstFileRule{
+			File:         "helper.go",
+			Path:         "example.com/mypkg",
+			ResolvedPath: srcDir,
+		}
+		fileRule.Name = "test_unix_on_darwin"
+
+		err := ip.applyFileRule(t.Context(), fileRule, "targetpkg")
+		require.NoError(t, err)
+
+		outPath := filepath.Join(workDir, "otelc.helper.go")
+		require.FileExists(t, outPath)
+		assert.Contains(t, ip.compileArgs, outPath)
+
+		outData, err := os.ReadFile(outPath)
+		require.NoError(t, err)
+		assert.Contains(t, string(outData), "//go:build darwin || linux")
+		assert.NotContains(t, string(outData), "ignore")
+	})
+
+	t.Run("skips file when filename suffix does not match target GOOS", func(t *testing.T) {
+		srcDir := t.TempDir()
+		workDir := t.TempDir()
+
+		content := "//go:build ignore\n\npackage sourcepkg\n\nfunc LinuxSuffix() {}\n"
+		require.NoError(t, os.WriteFile(filepath.Join(srcDir, "helper_linux.go"), []byte(content), 0o644))
+
+		ip := &instrumentPhase{
+			logger:       slog.New(slog.DiscardHandler),
+			workDir:      workDir,
+			buildContext: &build.Context{GOOS: "windows", GOARCH: "amd64"},
+		}
+
+		fileRule := &rule.InstFileRule{
+			File:         "helper_linux.go",
+			Path:         "example.com/mypkg",
+			ResolvedPath: srcDir,
+		}
+		fileRule.Name = "test_linux_suffix_on_windows"
+
+		err := ip.applyFileRule(t.Context(), fileRule, "targetpkg")
+		require.NoError(t, err)
+
+		outPath := filepath.Join(workDir, "otelc.helper_linux.go")
+		assert.NoFileExists(t, outPath)
+		assert.NotContains(t, ip.compileArgs, outPath)
+	})
+}
+
+func TestApplyFileRule_InvalidBuildConstraint(t *testing.T) {
+	srcDir := t.TempDir()
+	content := "//go:build linux &&\n\npackage sourcepkg\n"
+	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "helper.go"), []byte(content), 0o644))
+
+	ip := &instrumentPhase{
+		logger:       slog.New(slog.DiscardHandler),
+		workDir:      t.TempDir(),
+		buildContext: &build.Context{GOOS: "linux", GOARCH: "amd64"},
+	}
+	fileRule := &rule.InstFileRule{File: "helper.go", Path: "example.com/mypkg", ResolvedPath: srcDir}
+	fileRule.Name = "test_invalid_constraint"
+
+	err := ip.applyFileRule(t.Context(), fileRule, "targetpkg")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "matching build constraints")
+}
+
+func TestApplyFileRule_UsesForwardedBuildTags(t *testing.T) {
+	content := "//go:build ignore && enterprise\n\npackage sourcepkg\n\nfunc EnterpriseOnly() {}\n"
+
+	run := func(t *testing.T, buildFlags []string) (string, *instrumentPhase) {
+		t.Helper()
+		t.Setenv("GOFLAGS", "")
+		t.Setenv(util.EnvOtelcBuildFlags, util.EncodeBuildFlags(buildFlags))
+
+		srcDir := t.TempDir()
+		workDir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(srcDir, "helper.go"), []byte(content), 0o644))
+
+		ip := &instrumentPhase{logger: slog.New(slog.DiscardHandler), workDir: workDir}
+		fileRule := &rule.InstFileRule{File: "helper.go", Path: "example.com/mypkg", ResolvedPath: srcDir}
+		fileRule.Name = "test_enterprise_tag"
+		require.NoError(t, ip.applyFileRule(t.Context(), fileRule, "targetpkg"))
+		return filepath.Join(workDir, "otelc.helper.go"), ip
+	}
+
+	t.Run("includes file when the build passes the tag", func(t *testing.T) {
+		outPath, ip := run(t, []string{"-tags=enterprise"})
+		assert.FileExists(t, outPath)
+		assert.Contains(t, ip.compileArgs, outPath)
+	})
+
+	t.Run("skips file when the build does not pass the tag", func(t *testing.T) {
+		outPath, ip := run(t, nil)
+		assert.NoFileExists(t, outPath)
+		assert.NotContains(t, ip.compileArgs, outPath)
+	})
+}
+
+func TestApplyFileRule_DiffUnderDebug(t *testing.T) {
+	srcDir := t.TempDir()
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	t.Setenv(util.EnvOtelcDebug, "1")
+
+	content := `package sourcepkg
+
+func Helper() string {
+	return "ok"
+}
+`
+	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "helper.go"), []byte(content), 0o644))
+
+	ip := &instrumentPhase{
+		logger:      slog.New(slog.DiscardHandler),
+		workDir:     workDir,
+		compileArgs: []string{"-p", "example.com/mypkg"},
+	}
+
+	fileRule := &rule.InstFileRule{
+		File:         "helper.go",
+		Path:         "example.com/mypkg",
+		ResolvedPath: srcDir,
+	}
+	fileRule.Name = "test_file_rule"
+
+	err := ip.applyFileRule(t.Context(), fileRule, "targetpkg")
+	require.NoError(t, err)
+
+	outPath := filepath.Join(workDir, "otelc.helper.go")
+	require.FileExists(t, outPath)
+	assert.Contains(t, ip.compileArgs, outPath)
+
+	diffPath := filepath.Join(ip.debugArtifactDir(), "otelc.helper.go.diff")
+	require.FileExists(t, diffPath)
+	diffBytes, err := os.ReadFile(diffPath)
+	require.NoError(t, err)
+	diffText := string(diffBytes)
+	assert.Contains(t, diffText, "=== rule: test_file_rule ===")
+	assert.Contains(t, diffText, "--- /dev/null")
+	assert.Contains(t, diffText, "+++ "+outPath)
 }

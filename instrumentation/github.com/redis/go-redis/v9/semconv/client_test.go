@@ -90,9 +90,68 @@ func TestRedisClientRequestTraceAttrs(t *testing.T) {
 			expected: map[string]interface{}{
 				"db.system.name":    "redis",
 				"db.operation.name": "",
-				"server.address":    "",
 				"network.transport": "tcp",
 				"db.query.text":     "",
+			},
+		},
+		{
+			name: "placeholder endpoint",
+			req: RedisRequest{
+				Endpoint:  "FailoverClient",
+				FullName:  "get",
+				Statement: "get key",
+			},
+			expected: map[string]interface{}{
+				"db.system.name":    "redis",
+				"db.operation.name": "get",
+				"network.transport": "tcp",
+				"db.query.text":     "get key",
+			},
+		},
+		{
+			name: "ipv6 with port",
+			req: RedisRequest{
+				Endpoint:  "[::1]:6379",
+				FullName:  "get",
+				Statement: "get key",
+			},
+			expected: map[string]interface{}{
+				"db.system.name":    "redis",
+				"db.operation.name": "get",
+				"server.address":    "::1",
+				"server.port":       int64(6379),
+				"network.transport": "tcp",
+				"db.query.text":     "get key",
+			},
+		},
+		{
+			name: "ipv6 without port",
+			req: RedisRequest{
+				Endpoint:  "::1",
+				FullName:  "get",
+				Statement: "get key",
+			},
+			expected: map[string]interface{}{
+				"db.system.name":    "redis",
+				"db.operation.name": "get",
+				"server.address":    "::1",
+				"network.transport": "tcp",
+				"db.query.text":     "get key",
+			},
+		},
+		{
+			name: "bracketed ipv6 without port",
+			req: RedisRequest{
+				Endpoint:  "[::1]",
+				FullName:  "get",
+				Statement: "get key",
+			},
+			expected: map[string]interface{}{
+				"db.system.name":    "redis",
+				"db.operation.name": "get",
+				"server.address":    "::1",
+				"network.transport": "tcp",
+				"db.query.text":     "get key",
 			},
 		},
 		{
@@ -149,6 +208,18 @@ func TestRedisClientRequestTraceAttrs_ContainsDBSystemRedis(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "should contain db.system.name=redis attribute")
+}
+
+func TestRedisClientRequestTraceAttrs_DoesNotGrowWhenPortPresent(t *testing.T) {
+	attrs := RedisClientRequestTraceAttrs(RedisRequest{
+		Endpoint:  "localhost:6379",
+		FullName:  "get",
+		Statement: "get key",
+	})
+
+	require.Len(t, attrs, 6)
+	assert.Equal(t, redisClientRequestAttrCap, cap(attrs),
+		"a 5-element literal that then appends server.port grows the slice")
 }
 
 func TestRedisClientRequestTraceAttrs_ContainsNetworkTransportTCP(t *testing.T) {

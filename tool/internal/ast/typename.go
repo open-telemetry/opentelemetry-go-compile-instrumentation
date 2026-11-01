@@ -58,13 +58,17 @@ func (t parsedTypeName) matches(node dst.Expr, imports map[string]string) bool {
 			// Populated by a resolving decorator; already the real import path.
 			return t.importPath == ident.Path && t.name == n.Sel.Name
 		}
-		if resolved, importOk := imports[ident.Name]; importOk {
-			return t.importPath == resolved && t.name == n.Sel.Name
+		if imports != nil {
+			// The file's imports are known, so the identifier either resolves
+			// through them or it is not the package we are looking for. Falling
+			// back to the path tail here would match a name the file never
+			// imported, which is what #1271 reported.
+			resolved, importOk := imports[ident.Name]
+			return importOk && t.importPath == resolved && t.name == n.Sel.Name
 		}
 		// No import context at all (imports == nil, e.g. hand-built AST nodes in
 		// tests with no backing *dst.File): compare against importPath's last
-		// segment. Note this cannot rescue a miskeyed map — a tail match here
-		// would imply ident.Name is a key, so the lookup above would have hit.
+		// segment.
 		return defaultImportAlias(t.importPath) == ident.Name && t.name == n.Sel.Name
 
 	case *dst.StarExpr:

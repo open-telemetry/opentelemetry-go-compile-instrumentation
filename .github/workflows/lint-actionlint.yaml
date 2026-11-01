@@ -9,6 +9,7 @@ on:
       - ".github/actions/**/action.yaml"
       - ".tools/go.mod"
       - ".tools/go.sum"
+      - "Makefile"
   push:
     branches: [main]
     paths:
@@ -18,6 +19,7 @@ on:
       - ".github/actions/**/action.yaml"
       - ".tools/go.mod"
       - ".tools/go.sum"
+      - "Makefile"
 
 permissions:
   contents: read

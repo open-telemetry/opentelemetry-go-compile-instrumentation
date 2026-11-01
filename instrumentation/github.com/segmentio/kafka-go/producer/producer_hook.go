@@ -175,8 +175,13 @@ func ensureAsyncFailureLogging(w *kafka.Writer) {
 		original := w.Completion
 		w.Completion = func(msgs []kafka.Message, err error) {
 			if err != nil {
-				logger.Error("kafka async write failed after WriteMessages returned; the producer span(s) for the affected message(s) were already ended without this outcome",
-					"error", err, "messageCount", len(msgs))
+				logger.Error(
+					"kafka async write failed after WriteMessages returned; the producer span(s) for the affected message(s) were already ended without this outcome",
+					"error",
+					err,
+					"messageCount",
+					len(msgs),
+				)
 			}
 			if original != nil {
 				original(msgs, err)

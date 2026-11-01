@@ -135,6 +135,11 @@ func TestFileRules(t *testing.T) {
 			wantType: &InstCallRule{},
 		},
 		{
+			name:     "method call",
+			content:  "rule:\n  target: example.com/pkg\n  method_call: go.uber.org/zap.Logger.Info\n  replace: tracedInfo({{ . }})\n",
+			wantType: &InstCallRule{},
+		},
+		{
 			name:     "struct literal",
 			content:  "rule:\n  target: example.com/pkg\n  struct_literal: example.com/pkg.Client\n  field:\n    - name: Transport\n      value: tracedTransport\n",
 			wantType: &InstLitRule{},

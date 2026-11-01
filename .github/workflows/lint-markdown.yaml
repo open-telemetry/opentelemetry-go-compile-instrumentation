@@ -3,10 +3,14 @@ on:
   pull_request:
     paths:
       - '**/*.md'
+      - '.tools/markdownlint.yaml'
+      - '.github/workflows/lint-markdown.yaml'
   push:
     branches: [main]
     paths:
       - '**/*.md'
+      - '.tools/markdownlint.yaml'
+      - '.github/workflows/lint-markdown.yaml'
 
 permissions:
   contents: read

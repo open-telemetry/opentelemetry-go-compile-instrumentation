@@ -259,6 +259,68 @@ func TestTypeNameMatches_ImportAliasResolution(t *testing.T) {
 	})
 }
 
+// TestTypeNameMatches_StrictImportContext covers the case where the file's
+// imports are known but the qualifying identifier isn't one of them. The
+// path-tail fallback must not run there: it would match an identifier the file
+// never imported under that path (#1271).
+func TestTypeNameMatches_StrictImportContext(t *testing.T) {
+	t.Run("same-tail import of a different path does not match", func(t *testing.T) {
+		// ResolvedImportAliasMap drops this unaliased import because nothing
+		// resolves its package name, so "http" is absent from the map even
+		// though the file does import a package whose tail is "http".
+		p := NewAstParser()
+		file, err := p.ParseSource(`package main
+
+import "example.com/legacy/http"
+
+func f(r *http.Request) {}
+`)
+		require.NoError(t, err)
+
+		imports := ResolvedImportAliasMap(file, nil)
+		require.NotNil(t, imports)
+		require.Empty(t, imports)
+
+		matched, err := MatchesTypeName(firstParamType(t, file), "*net/http.Request", imports)
+		require.NoError(t, err)
+		assert.False(t, matched, "net/http.Request must not match example.com/legacy/http.Request")
+	})
+
+	t.Run("identifier absent from a known import map does not match", func(t *testing.T) {
+		node := &dst.SelectorExpr{X: &dst.Ident{Name: "http"}, Sel: &dst.Ident{Name: "Request"}}
+		tn, err := parseTypeName("net/http.Request")
+		require.NoError(t, err)
+
+		// Non-nil but without "http": the file's imports are known, and "http"
+		// isn't one of them.
+		assert.False(t, tn.matches(node, map[string]string{"fmt": "fmt"}))
+		assert.False(t, tn.matches(node, map[string]string{}))
+	})
+
+	t.Run("nil import map still falls back to the path tail", func(t *testing.T) {
+		node := &dst.SelectorExpr{X: &dst.Ident{Name: "http"}, Sel: &dst.Ident{Name: "Request"}}
+		tn, err := parseTypeName("net/http.Request")
+		require.NoError(t, err)
+
+		assert.True(t, tn.matches(node, nil))
+	})
+}
+
+// firstParamType returns the type expression of the first parameter of the
+// first function declared in file.
+func firstParamType(t *testing.T, file *dst.File) dst.Expr {
+	t.Helper()
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*dst.FuncDecl)
+		if !ok || fn.Type.Params == nil || len(fn.Type.Params.List) == 0 {
+			continue
+		}
+		return fn.Type.Params.List[0].Type
+	}
+	t.Fatal("no function with parameters in file")
+	return nil
+}
+
 func TestImportAliasMap(t *testing.T) {
 	t.Run("nil file returns nil", func(t *testing.T) {
 		assert.Nil(t, ImportAliasMap(nil, nil))

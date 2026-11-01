@@ -701,3 +701,158 @@ func TestCheckAliasOverrideShadowing_NoOverridesOrNilEnclosingReportsNoError(t *
 	assert.NoError(t, checkAliasOverrideShadowing(nil, fn))
 	assert.NoError(t, checkAliasOverrideShadowing(map[string]string{"traced": "f"}, nil))
 }
+
+func TestCheckAliasOverrideShadowingAt_ScopeOnInjectionPathReportsConflict(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "nested block",
+			body: "if true {\n\t\tf := sink{}\n\t\t_ = f\n\t\thttp.Get(\"url\")\n\t}",
+		},
+		{
+			name: "if init statement",
+			body: "if f := newSink(); true {\n\t\t_ = f\n\t\thttp.Get(\"url\")\n\t}",
+		},
+		{
+			name: "for init statement",
+			body: "for f := 0; f < 1; f++ {\n\t\thttp.Get(\"url\")\n\t}",
+		},
+		{
+			name: "range variables",
+			body: "for _, f := range []string{\"a\"} {\n\t\t_ = f\n\t\thttp.Get(\"url\")\n\t}",
+		},
+		{
+			name: "switch init statement",
+			body: "switch f := 1; f {\n\tcase 1:\n\t\thttp.Get(\"url\")\n\t}",
+		},
+		{
+			name: "type switch init statement",
+			body: "switch f := x.(type) {\n\tcase int:\n\t\t_ = f\n\t\thttp.Get(\"url\")\n\t}",
+		},
+		{
+			name: "case clause",
+			body: "switch {\n\tcase true:\n\t\tf := sink{}\n\t\t_ = f\n\t\thttp.Get(\"url\")\n\t}",
+		},
+		{
+			name: "select comm clause",
+			body: "select {\n\tcase f := <-ch:\n\t\t_ = f\n\t\thttp.Get(\"url\")\n\t}",
+		},
+		{
+			name: "closure parameter",
+			body: "g := func(f sink) {\n\t\thttp.Get(\"url\")\n\t}\n\t_ = g",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := parseFile(t, "package main\n\nfunc Run() {\n\t"+tt.body+"\n}\n")
+			fn := findFuncDeclInFile(t, root, "Run")
+			call := findCallInFunc(t, fn)
+
+			err := checkAliasOverrideShadowingAt(map[string]string{"traced": "f"}, fn, call)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "alias override conflict")
+			assert.Contains(t, err.Error(), "injection point")
+		})
+	}
+}
+
+func TestCheckAliasOverrideShadowingAt_ScopeOutsideInjectionPathReportsNoError(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "sibling block",
+			body: "if true {\n\t\tf := sink{}\n\t\t_ = f\n\t}\n\thttp.Get(\"url\")",
+		},
+		{
+			name: "else block",
+			body: "if true {\n\t\tf := sink{}\n\t\t_ = f\n\t} else {\n\t\thttp.Get(\"url\")\n\t}",
+		},
+		{
+			name: "unrelated closure",
+			body: "g := func() {\n\t\tf := sink{}\n\t\t_ = f\n\t}\n\t_ = g\n\thttp.Get(\"url\")",
+		},
+		{
+			name: "unrelated loop",
+			body: "for {\n\t\tf := sink{}\n\t\t_ = f\n\t\tbreak\n\t}\n\thttp.Get(\"url\")",
+		},
+		{
+			name: "later sibling case clause",
+			body: "switch {\n\tcase true:\n\t\tf := sink{}\n\t\t_ = f\n\tcase false:\n\t\thttp.Get(\"url\")\n\t}",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := parseFile(t, "package main\n\nfunc Run() {\n\t"+tt.body+"\n}\n")
+			fn := findFuncDeclInFile(t, root, "Run")
+			call := findCallInFunc(t, fn)
+
+			err := checkAliasOverrideShadowingAt(map[string]string{"traced": "f"}, fn, call)
+
+			assert.NoError(t, err)
+		})
+	}
+}
+
+func TestCheckAliasOverrideShadowingAt_NoOverridesOrNilEnclosingReportsNoError(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run() {
+	if true {
+		f := sink{}
+		_ = f
+		http.Get("url")
+	}
+}
+`)
+	fn := findFuncDeclInFile(t, root, "Run")
+	call := findCallInFunc(t, fn)
+
+	assert.NoError(t, checkAliasOverrideShadowingAt(nil, fn, call))
+	assert.NoError(t, checkAliasOverrideShadowingAt(map[string]string{"traced": "f"}, nil, call))
+}
+
+func TestScopeNamesBetween_TargetOutsideEnclosingPanics(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run() {}
+
+func Other() {
+	http.Get("url")
+}
+`)
+	run := findFuncDeclInFile(t, root, "Run")
+	other := findFuncDeclInFile(t, root, "Other")
+	call := findCallInFunc(t, other)
+
+	assert.Panics(t, func() {
+		scopeNamesBetween(run, call)
+	})
+}
+
+// findCallInFunc returns the first Get selector call in fn.
+func findCallInFunc(t *testing.T, fn *dst.FuncDecl) *dst.CallExpr {
+	t.Helper()
+	var found *dst.CallExpr
+	dst.Inspect(fn, func(node dst.Node) bool {
+		if found != nil {
+			return false
+		}
+		call, ok := node.(*dst.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*dst.SelectorExpr)
+		if ok && sel.Sel.Name == "Get" {
+			found = call
+			return false
+		}
+		return true
+	})
+	require.NotNil(t, found, "no Get call in %s", fn.Name.Name)
+	return found
+}

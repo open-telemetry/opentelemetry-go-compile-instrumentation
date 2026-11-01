@@ -20,8 +20,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
-
-	semconv "go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go/v3/semconv"
+	otelsemconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -300,7 +299,9 @@ func TestParseChatRequest_ContentCapture(t *testing.T) {
 }
 
 func TestParseChatRequest_MultimodalContentCapture(t *testing.T) {
-	body := []byte(`{"model":"gpt-4-vision-preview","messages":[{"role":"user","content":[{"type":"text","text":"describe this"},{"type":"image_url","image_url":{"url":"https://example.com/image.png"}}]}]}`)
+	body := []byte(
+		`{"model":"gpt-4-vision-preview","messages":[{"role":"user","content":[{"type":"text","text":"describe this"},{"type":"image_url","image_url":{"url":"https://example.com/image.png"}}]}]}`,
+	)
 	model, _, prompts := parseChatRequest(body, true)
 
 	assert.Equal(t, "gpt-4-vision-preview", model)
@@ -322,7 +323,11 @@ func TestParseChatRequest_MaxCompletionTokens(t *testing.T) {
 		body    string
 		wantMax int64
 	}{
-		{"max_completion_tokens preferred over max_tokens", `{"model":"gpt-4.1","max_tokens":100,"max_completion_tokens":200}`, 200},
+		{
+			"max_completion_tokens preferred over max_tokens",
+			`{"model":"gpt-4.1","max_tokens":100,"max_completion_tokens":200}`,
+			200,
+		},
 		{"max_completion_tokens only", `{"model":"gpt-4.1","max_completion_tokens":200}`, 200},
 		{"max_tokens fallback", `{"model":"gpt-4","max_tokens":100}`, 100},
 	}
@@ -356,7 +361,11 @@ func TestParseCompletionRequest_ContentCapture(t *testing.T) {
 		expected []string
 	}{
 		{"string", []byte(`{"model":"gpt-3.5-turbo-instruct","prompt":"hello"}`), []string{"hello"}},
-		{"array", []byte(`{"model":"gpt-3.5-turbo-instruct","prompt":["first","second"]}`), []string{"first", "second"}},
+		{
+			"array",
+			[]byte(`{"model":"gpt-3.5-turbo-instruct","prompt":["first","second"]}`),
+			[]string{"first", "second"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -421,11 +430,11 @@ func TestParseCompletionRequest_Penalties(t *testing.T) {
 		got[a.Key] = a.Value
 	}
 
-	require.Contains(t, got, semconv.GenAIRequestFrequencyPenaltyKey)
-	assert.InDelta(t, 0.5, got[semconv.GenAIRequestFrequencyPenaltyKey].AsFloat64(), 1e-9)
+	require.Contains(t, got, otelsemconv.GenAIRequestFrequencyPenaltyKey)
+	assert.InDelta(t, 0.5, got[otelsemconv.GenAIRequestFrequencyPenaltyKey].AsFloat64(), 1e-9)
 
-	require.Contains(t, got, semconv.GenAIRequestPresencePenaltyKey)
-	assert.InDelta(t, -0.25, got[semconv.GenAIRequestPresencePenaltyKey].AsFloat64(), 1e-9)
+	require.Contains(t, got, otelsemconv.GenAIRequestPresencePenaltyKey)
+	assert.InDelta(t, -0.25, got[otelsemconv.GenAIRequestPresencePenaltyKey].AsFloat64(), 1e-9)
 }
 
 // Absent penalties must stay absent rather than being reported as zero, since
@@ -435,8 +444,8 @@ func TestParseCompletionRequest_PenaltiesOmitted(t *testing.T) {
 
 	_, attrs, _ := parseCompletionRequest(body, false)
 	for _, a := range attrs {
-		assert.NotEqual(t, semconv.GenAIRequestFrequencyPenaltyKey, a.Key)
-		assert.NotEqual(t, semconv.GenAIRequestPresencePenaltyKey, a.Key)
+		assert.NotEqual(t, otelsemconv.GenAIRequestFrequencyPenaltyKey, a.Key)
+		assert.NotEqual(t, otelsemconv.GenAIRequestPresencePenaltyKey, a.Key)
 	}
 }
 
@@ -499,7 +508,11 @@ func TestParseCompletionResponse_ContentCapture(t *testing.T) {
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
 	_, span := tp.Tracer("test").Start(t.Context(), "completion-content")
 
-	parseCompletionResponse([]byte(`{"choices":[{"text":"first","finish_reason":"stop"},{"text":"second","finish_reason":"stop"}]}`), span, true)
+	parseCompletionResponse(
+		[]byte(`{"choices":[{"text":"first","finish_reason":"stop"},{"text":"second","finish_reason":"stop"}]}`),
+		span,
+		true,
+	)
 	span.End()
 
 	spans := sr.Ended()
@@ -566,7 +579,12 @@ func TestOtelMiddleware_ContentCapture_Enabled(t *testing.T) {
 	sr := setupTestTracer(t)
 
 	reqBody := `{"model":"gpt-4","messages":[{"role":"user","content":"hello"}]}`
-	req, err := http.NewRequestWithContext(context.Background(), "POST", "https://api.openai.com/v1/chat/completions", bytes.NewBufferString(reqBody))
+	req, err := http.NewRequestWithContext(
+		context.Background(),
+		"POST",
+		"https://api.openai.com/v1/chat/completions",
+		bytes.NewBufferString(reqBody),
+	)
 	require.NoError(t, err)
 
 	resp := &http.Response{
@@ -590,7 +608,12 @@ func TestOtelMiddleware_ContentCapture_Enabled(t *testing.T) {
 }
 
 func TestOtelMiddleware_ErrorResponse(t *testing.T) {
-	req, err := http.NewRequestWithContext(context.Background(), "POST", "https://api.openai.com/v1/chat/completions", bytes.NewBufferString(`{}`))
+	req, err := http.NewRequestWithContext(
+		context.Background(),
+		"POST",
+		"https://api.openai.com/v1/chat/completions",
+		bytes.NewBufferString(`{}`),
+	)
 	require.NoError(t, err)
 
 	resp := &http.Response{
@@ -703,4 +726,36 @@ func TestContentCaptureFromEnv(t *testing.T) {
 	assert.False(t, contentCaptureFromEnv(""))
 	assert.False(t, contentCaptureFromEnv("1"))
 	assert.False(t, contentCaptureFromEnv("TRUE"))
+}
+
+func TestReadBoundedBoundary(t *testing.T) {
+	const limit = 10
+	tests := []struct {
+		name          string
+		bodyLen       int
+		wantTruncated bool
+	}{
+		{name: "well under the cap", bodyLen: 9, wantTruncated: false},
+		{name: "exactly at the cap", bodyLen: limit, wantTruncated: false},
+		{name: "one byte over the cap", bodyLen: limit + 1, wantTruncated: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			full := strings.Repeat("a", tt.bodyLen)
+			bodyBytes, truncated, reassembled, err := readBounded(io.NopCloser(strings.NewReader(full)), limit)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantTruncated, truncated)
+
+			if tt.wantTruncated {
+				assert.Nil(t, bodyBytes, "a truncated body must not expose a prefix to parsers")
+			} else {
+				assert.Equal(t, full, string(bodyBytes))
+			}
+
+			got, err := io.ReadAll(reassembled)
+			require.NoError(t, err)
+			assert.Equal(t, full, string(got), "the caller must always receive the full body")
+		})
+	}
 }

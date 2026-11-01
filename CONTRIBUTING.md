@@ -3,7 +3,7 @@
 The go compile instrumentation SIG meets regularly. See the
 OpenTelemetry
 [community](https://github.com/open-telemetry/community?tab=readme-ov-file#implementation-sigs)
-repo for information on this and other SIGs.
+repository for information on this and other special interest groups.
 
 See the [public meeting
 notes](https://docs.google.com/document/d/1XkVahJfhf482d3WVHsvUUDaGzHc8TO3sqQlSS80mpGY/edit)
@@ -18,7 +18,10 @@ This project uses several tools for development. Most tools will be automaticall
 
 - [Go](https://golang.org/dl/) 1.26 or later
 - [Git](https://git-scm.com/)
-- Make (usually pre-installed on macOS and Linux)
+- [GNU Make](https://www.gnu.org/software/make/) 3.82 or later. macOS has GNU Make
+  3.81, which is too old: install a newer version with `brew install make`, then use
+  `gmake` (or add `$(brew --prefix make)/libexec/gnubin` to your `PATH` to use it as
+  `make`)
 
 ### Getting Started
 
@@ -73,12 +76,12 @@ make help
 
 - `make format` - Format all code (Go + YAML + License Headers)
   - `make format/go` - Format Go code only using golangci-lint
-  - `make format/yaml` - Format YAML files only using yamlfmt
-- `make lint` - Run all linters (Go, YAML, GitHub Actions, Makefile)
+  - `make format/yaml` - Format YAML files only using `yamlfmt`
+- `make lint` - Run all linters (Go, YAML, GitHub Actions, `Makefile`)
   - `make lint/go` - Run golangci-lint on Go code
   - `make lint/yaml` - Lint YAML formatting
   - `make lint/action` - Lint GitHub Actions workflows
-  - `make lint/makefile` - Lint Makefile
+  - `make lint/makefile` - Lint `Makefile`
   - `make lint/license-header` - Check license headers (has dedicated CI workflow)
   - `make lint/license-header/fix` - Apply license headers to Go and shell files
 
@@ -119,7 +122,7 @@ For detailed information on managing semantic conventions, see [docs/semantic-co
 
 #### GitHub Actions Security
 
-- `make ratchet/pin` - Pin GitHub Actions to specific commit SHAs for security
+- `make ratchet/pin` - Pin GitHub Actions to specific commit hashes for security
 - `make ratchet/update` - Update pinned GitHub Actions to latest versions
 - `make ratchet/check` - Verify all GitHub Actions are properly pinned
 
@@ -137,7 +140,7 @@ A typical development workflow looks like:
 4. Run tests: `make test`
 5. Commit your changes
 
-For a complete check before submitting a PR, run:
+For a complete check before submitting a pull request, run:
 
 ```sh
 make all
@@ -150,11 +153,11 @@ This will run: `build`, `format`, `lint`, and `test` in sequence.
 The following development tools are used and will be automatically installed on first use:
 
 - **[golangci-lint](https://golangci-lint.run/)** - Go linter aggregator
-- **[gotestfmt](https://github.com/gotesttools/gotestfmt)** - Prettier test output
-- **[yamlfmt](https://github.com/google/yamlfmt)** - YAML formatter
-- **[actionlint](https://github.com/rhysd/actionlint)** - GitHub Actions linter
+- **[`gotestfmt`](https://github.com/gotesttools/gotestfmt)** - Prettier test output
+- **[`yamlfmt`](https://github.com/google/yamlfmt)** - YAML formatter
+- **[`actionlint`](https://github.com/rhysd/actionlint)** - GitHub Actions linter
 - **[ratchet](https://github.com/sethvargo/ratchet)** - GitHub Actions security pinning
-- **[embedmd](https://github.com/campoy/embedmd)** - Embed code in markdown files
+- **[`embedmd`](https://github.com/campoy/embedmd)** - Embed code in markdown files
 
 ### Architecture Decision Records
 
@@ -184,7 +187,6 @@ make adr-list
 This project welcomes the use of AI tools. Please read the [AI Usage Policy](docs/AI_POLICY.md) before
 contributing. The critical rule is: **you must understand every line of code you submit.**
 Contributors using AI tools are held to the same quality standards as any other contribution.
-
 
 ## Pull Requests
 
@@ -222,7 +224,7 @@ looking at the title.
 Here are some examples for the various supported commit types:
 
 - `chore`:
-  - :information_source: What's changing in this PR? This should provide enough information from a
+  - :information_source: What's changing in this pull request? This should provide enough information from a
     maintainer to make sense of what's going on.
   - :white_check_mark: `chore(ci): add OSSF Scorecard automation`
   - :x: `chore: new CI step`
@@ -260,9 +262,9 @@ Here are some examples for the various supported commit types:
 ### How to Send Pull Requests
 
 Everyone is welcome to contribute code to `opentelemetry-go-compile-instrumentation` via
-GitHub pull requests (PRs).
+GitHub pull requests.
 
-To create a new PR, fork the project in GitHub and clone the upstream
+To create a new pull request, fork the project in GitHub and clone the upstream
 repo:
 
 ```sh
@@ -297,14 +299,16 @@ All pull requests are squashed to a single commit upon merge to `main`.
 
 ### How to Receive Comments
 
-- If the PR is not ready for review, please put `[WIP]` in the title,
+- If the pull request is not ready for review, please put `[WIP]` in the title,
   tag it as `work-in-progress`, or mark it as
   [`draft`](https://github.blog/2019-02-14-introducing-draft-pull-requests/).
 - Make sure CLA is signed and CI is clear.
 
-### How to Get PRs Merged
+<a name="how-to-get-prs-merged"></a>
 
-A PR is considered **ready to merge** when:
+### How to Get Pull Requests Merged
+
+A pull request is considered **ready to merge** when:
 
 - It has received two qualified approvals[^1].
 
@@ -314,31 +318,31 @@ A PR is considered **ready to merge** when:
     affiliated with different companies. Two qualified approvals from
     [Approver]s or [Maintainer]s affiliated with the same company counts as a
     single qualified approval.
-  - PRs introducing changes that have already been discussed and consensus
+  - Pull requests introducing changes that have already been discussed and consensus
     reached only need one qualified approval. The discussion and resolution
-    needs to be linked to the PR.
+    needs to be linked to the pull request.
   - Trivial changes[^2] only need one qualified approval.
 
 - All feedback has been addressed.
-  - All PR comments and suggestions are resolved.
+  - All pull request comments and suggestions are resolved.
   - All GitHub Pull Request reviews with a status of "Request changes" have
     been addressed. Another review by the objecting reviewer with a different
     status can be submitted to clear the original review, or the review can be
     dismissed by a [Maintainer] when the issues from the original review have
     been addressed.
-  - Any comments or reviews that cannot be resolved between the PR author and
+  - Any comments or reviews that cannot be resolved between the pull request author and
     reviewers can be submitted to the community [Approver]s and [Maintainer]s
     during the weekly SIG meeting. If consensus is reached among the
     [Approver]s and [Maintainer]s during the SIG meeting the objections to the
-    PR may be dismissed or resolved or the PR closed by a [Maintainer].
-  - Any substantive changes to the PR require existing Approval reviews be
+    pull request may be dismissed or resolved or the pull request closed by a [Maintainer].
+  - Any substantive changes to the pull request require existing Approval reviews be
     cleared unless the approver explicitly states that their approval persists
     across changes. This includes changes resulting from other feedback.
     [Approver]s and [Maintainer]s can help in clearing reviews and they should
     be consulted if there are any questions.
 
-- The PR branch is up to date with the base branch it is merging into.
-  - To ensure this does not block the PR, it should be configured to allow
+- The pull request branch is up to date with the base branch it is merging into.
+  - To ensure this does not block the pull request, it should be configured to allow
     maintainers to update it.
 
 - It has been open for review for at least one working day. This gives people
@@ -350,7 +354,7 @@ A PR is considered **ready to merge** when:
 - Urgent fix can take exception as long as it has been actively communicated
   among [Maintainer]s.
 
-Any [Maintainer] can merge the PR once the above criteria have been met.
+Any [Maintainer] can merge the pull request once the above criteria have been met.
 
 [^1]: A qualified approval is a GitHub Pull Request review with "Approve"
   status from an OpenTelemetry Go Compile Instrumentation [Approver] or [Maintainer].

@@ -35,6 +35,11 @@ func TestIsRuleFile(t *testing.T) {
 	}
 }
 
+func TestEscapePackagePathKeepsPackagesWithSameBasenameSeparate(t *testing.T) {
+	assert.Equal(t, "example_com_app_cmd_client", EscapePackagePath("example.com/app/cmd/client"))
+	assert.Equal(t, "example_com_app_internal_client", EscapePackagePath("example.com/app/internal/client"))
+}
+
 func TestVersionInRange(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -215,7 +220,7 @@ func TestGetBuildTempPaths(t *testing.T) {
 	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "foo.txt"), GetBuildTemp("foo.txt"))
 	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "matched.json"), GetMatchedRuleFile())
 	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "import_names.json"), GetImportNamesFile())
-	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "added_imports.*.json"), GetAddedImportsPattern())
+	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "pgo_profile"), GetPGOProfileFile())
 
 	// The per-process import file embeds the current PID.
 	want := filepath.Join(workDir, BuildTempDir, fmt.Sprintf("added_imports.%d.json", os.Getpid()))

@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"net/http/httptest"
-	"os"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -269,8 +268,7 @@ func TestAfterNext_UsesBeforeNextGateDecision(t *testing.T) {
 	// still honor the decision BeforeNext made for this call, not re-read the
 	// environment, or the depth counter and the enrichment it gates would
 	// desync mid-request.
-	require.NoError(t, os.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "gin"))
-	t.Cleanup(func() { _ = os.Unsetenv("OTEL_GO_DISABLED_INSTRUMENTATIONS") })
+	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "gin")
 
 	_ = c.Error(errors.New("db connection lost"))
 	AfterNext(ictx)

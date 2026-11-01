@@ -10,6 +10,7 @@ import (
 //go:embed instrumentation-manifest.json
 var manifestJSON []byte
 
+// GetManifestJSON returns a copy of the embedded instrumentation-manifest.json.
 func GetManifestJSON() []byte {
 	return bytes.Clone(manifestJSON)
 }
