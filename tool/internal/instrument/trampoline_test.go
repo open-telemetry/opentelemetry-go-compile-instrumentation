@@ -121,6 +121,15 @@ func TestFindHookFileOnlyReadsPackageDir(t *testing.T) {
 			assert.Equal(t, filepath.Join(dir, "zz_hook.go"), file)
 		})
 	}
+
+	t.Run("missing directory", func(t *testing.T) {
+		missing := filepath.Join(t.TempDir(), "missing")
+		ip := &instrumentPhase{}
+		r := &rule.InstFuncRule{Before: "BeforeA", ResolvedPath: missing}
+		_, _, err := ip.findHookFile(r)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "reading hook directory")
+	})
 }
 
 func TestMaterializeTemplateClonesIndependently(t *testing.T) {
