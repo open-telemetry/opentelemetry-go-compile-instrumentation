@@ -14,7 +14,7 @@ func TestRedisClientRequestTraceAttrs(t *testing.T) {
 	tests := []struct {
 		name     string
 		req      RedisRequest
-		expected map[string]interface{}
+		expected map[string]any
 	}{
 		{
 			name: "basic GET command",
@@ -23,7 +23,7 @@ func TestRedisClientRequestTraceAttrs(t *testing.T) {
 				FullName:  "get",
 				Statement: "get mykey",
 			},
-			expected: map[string]interface{}{
+			expected: map[string]any{
 				"db.system.name":    "redis",
 				"db.operation.name": "get",
 				"server.address":    "localhost",
@@ -39,7 +39,7 @@ func TestRedisClientRequestTraceAttrs(t *testing.T) {
 				FullName:  "set",
 				Statement: "set mykey myvalue",
 			},
-			expected: map[string]interface{}{
+			expected: map[string]any{
 				"db.system.name":    "redis",
 				"db.operation.name": "set",
 				"server.address":    "redis.example.com",
@@ -55,7 +55,7 @@ func TestRedisClientRequestTraceAttrs(t *testing.T) {
 				FullName:  "hset",
 				Statement: "hset myhash field1 value1",
 			},
-			expected: map[string]interface{}{
+			expected: map[string]any{
 				"db.system.name":    "redis",
 				"db.operation.name": "hset",
 				"server.address":    "127.0.0.1",
@@ -71,7 +71,7 @@ func TestRedisClientRequestTraceAttrs(t *testing.T) {
 				FullName:  "pipeline",
 				Statement: "pipeline get/set/del/...",
 			},
-			expected: map[string]interface{}{
+			expected: map[string]any{
 				"db.system.name":    "redis",
 				"db.operation.name": "pipeline",
 				"server.address":    "localhost",
@@ -87,7 +87,7 @@ func TestRedisClientRequestTraceAttrs(t *testing.T) {
 				FullName:  "",
 				Statement: "",
 			},
-			expected: map[string]interface{}{
+			expected: map[string]any{
 				"db.system.name":    "redis",
 				"db.operation.name": "",
 				"network.transport": "tcp",
@@ -101,7 +101,7 @@ func TestRedisClientRequestTraceAttrs(t *testing.T) {
 				FullName:  "get",
 				Statement: "get key",
 			},
-			expected: map[string]interface{}{
+			expected: map[string]any{
 				"db.system.name":    "redis",
 				"db.operation.name": "get",
 				"network.transport": "tcp",
@@ -115,7 +115,7 @@ func TestRedisClientRequestTraceAttrs(t *testing.T) {
 				FullName:  "get",
 				Statement: "get key",
 			},
-			expected: map[string]interface{}{
+			expected: map[string]any{
 				"db.system.name":    "redis",
 				"db.operation.name": "get",
 				"server.address":    "::1",
@@ -131,7 +131,7 @@ func TestRedisClientRequestTraceAttrs(t *testing.T) {
 				FullName:  "get",
 				Statement: "get key",
 			},
-			expected: map[string]interface{}{
+			expected: map[string]any{
 				"db.system.name":    "redis",
 				"db.operation.name": "get",
 				"server.address":    "::1",
@@ -146,7 +146,7 @@ func TestRedisClientRequestTraceAttrs(t *testing.T) {
 				FullName:  "get",
 				Statement: "get key",
 			},
-			expected: map[string]interface{}{
+			expected: map[string]any{
 				"db.system.name":    "redis",
 				"db.operation.name": "get",
 				"server.address":    "::1",
@@ -161,7 +161,7 @@ func TestRedisClientRequestTraceAttrs(t *testing.T) {
 				FullName:  "ping",
 				Statement: "ping",
 			},
-			expected: map[string]interface{}{
+			expected: map[string]any{
 				"db.system.name":    "redis",
 				"db.operation.name": "ping",
 				"server.address":    "redis.local",
@@ -175,7 +175,7 @@ func TestRedisClientRequestTraceAttrs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			attrs := RedisClientRequestTraceAttrs(tt.req)
 
-			attrMap := make(map[string]interface{})
+			attrMap := make(map[string]any)
 			for _, attr := range attrs {
 				attrMap[string(attr.Key)] = attr.Value.AsInterface()
 			}
