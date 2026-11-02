@@ -519,7 +519,7 @@ The tool automatically reads the hook source file and ensures all of its imports
 
 #### Signature Sub-Filters
 
-By default the rule matches any function with the given name (and optional receiver). Five optional sub-filters, placed under `where` alongside `func`, can narrow the match further by inspecting the function's parameter and result types. All specified sub-filters must match (AND logic); omitting a sub-filter places no constraint on that aspect of the signature.
+By default the rule matches any function with the given name (and optional receiver). Five optional sub-filters, placed under `where` alongside `func`, can narrow the match further by inspecting the function's parameter and result types. All specified sub-filters must match (AND logic); omitting a sub-filter places no constraint on that aspect of the signature. The same sub-filters apply to `inject_code` rules.
 
 | Field | Type | Semantics |
 | --- | --- | --- |
@@ -659,6 +659,7 @@ This rule injects a string of raw Go code at the beginning of a target function.
 
 - `func` (string, required): The name of the target function.
 - `recv` (string, optional): The receiver type for a method.
+- `signature`, `signature_contains`, `param`, `result`, `last_result` (optional): The same signature sub-filters as [Function Hook Rule](#signature-sub-filters). They narrow the match to functions whose parameter and result types satisfy the filter. A filter that does not match leaves the function uninstrumented.
 - `pattern` (string, optional): The position within the function where the raw code should be injected. By default, the code is injected at the start of the function body. If provided, the value must be a valid regular expression.
 
   The pattern is matched against the canonical gofmt representation for each statement in the function body (not always the exact original source formatting). The injected code is placed immediately before/after the first statement that matches the pattern.
