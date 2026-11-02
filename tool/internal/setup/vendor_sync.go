@@ -1086,9 +1086,11 @@ func localModuleDirs(user *modulesTxt, moduleDir string) map[string]string {
 }
 
 // isDirReplacement reports whether the replacement text of vendor/modules.txt
-// is a local directory. A module replacement has a version after the path.
+// is a local directory. The text of a directory is the path alone, and it can
+// have spaces; the text of a module replacement has a version after the path,
+// and a module path never starts like a directory path.
 func isDirReplacement(replacement string) bool {
-	return replacement != "" && !strings.Contains(replacement, " ") && modfile.IsDirectoryPath(replacement)
+	return replacement != "" && modfile.IsDirectoryPath(replacement)
 }
 
 // embeddedSourceDir returns the directory of the package importPath in the
@@ -1167,6 +1169,9 @@ type vendorScratchInput struct {
 type vendorScratch struct {
 	// dir is the directory of the scratch module.
 	dir string
+	// user is the vendor/modules.txt of the user, without the modules that
+	// are replaced by the bundle (see vendorScratchInput.user).
+	user *modulesTxt
 	// userMods are the vendored modules of the user that the scratch module
 	// requires.
 	userMods map[string]bool
@@ -1248,6 +1253,7 @@ func buildVendorScratch(ctx context.Context, in vendorScratchInput) (*vendorScra
 	}
 	s := &vendorScratch{
 		dir:      dir,
+		user:     in.user,
 		userMods: userMods,
 		versions: make(map[string]string, len(userMods)),
 		copies:   copies,
@@ -1464,7 +1470,6 @@ func (s *vendorScratch) update(conflicts []*vendorConflictError, user *modulesTx
 // needs. It first downloads the module (or finds it in the module cache), so
 // that a failure tells which module and packages are the cause.
 func (s *vendorScratch) pin(ctx context.Context, path string, failed []string) error {
-	version := s.versions[path]
 	var pkgs []string
 	for _, p := range failed {
 		if p == path || strings.HasPrefix(p, path+"/") {
@@ -1473,14 +1478,59 @@ func (s *vendorScratch) pin(ctx context.Context, path string, failed []string) e
 	}
 	slices.Sort(pkgs)
 	pkgs = slices.Compact(pkgs)
+	// A module that go.mod replaces with a directory has no version to
+	// download, and the module that it replaces has other code: never mix
+	// both.
+	if mod := s.userModule(path); mod != nil && isDirReplacement(mod.Replacement) {
+		return ex.Newf(
+			"the otelc hook code needs the packages %s of module %s, but vendor/ does not have them, "+
+				"and go.mod replaces this module with the directory %s. To fix it, add the packages to vendor/ "+
+				"(import them in your module, then run \"go mod vendor\"), and build again",
+			strings.Join(pkgs, ", "), path, mod.Replacement)
+	}
+	target := s.fetchTarget(path, s.versions[path])
 	util.LoggerFromContext(ctx).InfoContext(ctx,
 		"the hook code needs packages of a vendored module that vendor/ does not have; "+
-			"getting the module at its vendored version", "module", path, "version", version, "packages", pkgs)
-	if _, err := scratchGo(ctx, s.dir, "mod", "download", path+"@"+version); err != nil {
-		return &vendorFetchError{Module: path, Version: version, Packages: pkgs, Err: err}
+			"getting the module at its vendored version", "module", target.Path, "version", target.Version, "packages", pkgs)
+	if _, err := scratchGo(ctx, s.dir, "mod", "download", target.Path+"@"+target.Version); err != nil {
+		return &vendorFetchError{Module: target.Path, Version: target.Version, Packages: pkgs, Err: err}
 	}
 	s.pinned[path] = true
 	return nil
+}
+
+// fetchTarget returns the module that the scratch module gets for the
+// vendored module path, when its copy does not have all the packages. When
+// go.mod replaces the module with another module (for example "replace
+// example.com/dep v1.0.0 => example.com/fork v1.2.0"), the vendored files
+// come from the replacement, so the scratch module must get the replacement:
+// the module itself, at the vendored version, can have other code. Else, the
+// target is the module path at version.
+func (s *vendorScratch) fetchTarget(path, version string) module.Version {
+	if mod := s.userModule(path); mod != nil && !isDirReplacement(mod.Replacement) {
+		if repl, ok := moduleReplacement(mod.Replacement); ok {
+			return repl
+		}
+	}
+	return module.Version{Path: path, Version: version}
+}
+
+// userModule returns the vendored module path of the user, or nil.
+func (s *vendorScratch) userModule(path string) *vendorModule {
+	if s.user == nil {
+		return nil
+	}
+	return s.user.find(path)
+}
+
+// moduleReplacement parses the replacement text of vendor/modules.txt when it
+// is a module (a path and a version).
+func moduleReplacement(replacement string) (module.Version, bool) {
+	newPath, newVersion, ok := strings.Cut(replacement, " ")
+	if !ok || newPath == "" || newVersion == "" {
+		return module.Version{}, false
+	}
+	return module.Version{Path: newPath, Version: newVersion}, true
 }
 
 // vendorFetchError tells that the hook code needs packages of a vendored
@@ -1558,7 +1608,9 @@ func writeScratchGoMod(s *vendorScratch, in vendorScratchInput) error {
 		case s.updated[mod.Path]:
 			// The go command gets the higher version.
 		case s.pinned[mod.Path]:
-			err = mf.AddReplace(mod.Path, "", mod.Path, mod.Version)
+			// The target is the replacement of go.mod, when it exists.
+			target := s.fetchTarget(mod.Path, mod.Version)
+			err = mf.AddReplace(mod.Path, "", target.Path, target.Version)
 		case in.localDirs[mod.Path] != "":
 			err = mf.AddReplace(mod.Path, "", in.localDirs[mod.Path], "")
 		case s.copies[mod.Path] != "":
@@ -1568,12 +1620,73 @@ func writeScratchGoMod(s *vendorScratch, in vendorScratchInput) error {
 			return ex.Wrap(err)
 		}
 	}
+	if err = addUnusedModuleReplaces(mf, in); err != nil {
+		return err
+	}
 	for _, oldPath := range slices.Sorted(maps.Keys(in.replaces)) {
 		if err = mf.AddReplace(oldPath, "", in.replaces[oldPath], ""); err != nil {
 			return ex.Wrap(err)
 		}
 	}
 	return writeGoMod(filepath.Join(s.dir, goModFileName), mf)
+}
+
+// addUnusedModuleReplaces adds to mf the replacements of go.mod for modules
+// that the scratch module can need, and that the vendored module blocks do not
+// cover: the replacement-only entries of vendor/modules.txt (for example
+// "# example.com/extra => example.com/fork v1.2.0") for a module that vendor/
+// does not use yet, or for a version that is not the vendored one. When the
+// hook code needs such a module, the scratch module must get the replacement,
+// like the build of the user does: else it would get the replaced module, and
+// the final manifest would claim a replacement for files that come from
+// another module. A replacement by a directory is carried with its absolute
+// path. The replacements of otelc modules are not carried.
+func addUnusedModuleReplaces(mf *modfile.File, in vendorScratchInput) error {
+	all := in.original
+	if all == nil {
+		all = in.user
+	}
+	moduleDir := filepath.Dir(in.userVendorDir)
+	var wildcards, versioned []*vendorModule
+	for _, mod := range all.modules {
+		if !mod.trailing() || mod.Replacement == "" || isOtelcModule(mod.Path) {
+			continue
+		}
+		if _, isOtelc := in.replaces[mod.Path]; isOtelc {
+			continue
+		}
+		if mod.Version == "" {
+			// The vendored module blocks have the replacement of the vendored
+			// version of a used module: this is the same replacement.
+			if in.user.find(mod.Path) != nil {
+				continue
+			}
+			wildcards = append(wildcards, mod)
+		} else {
+			versioned = append(versioned, mod)
+		}
+	}
+	// AddReplace without an old version drops the replacements of the module
+	// with a version: add the replacements for all versions first.
+	for _, mod := range append(wildcards, versioned...) {
+		var target module.Version
+		if isDirReplacement(mod.Replacement) {
+			target.Path = filepath.FromSlash(mod.Replacement)
+			if !filepath.IsAbs(target.Path) {
+				target.Path = filepath.Join(moduleDir, target.Path)
+			}
+		} else {
+			repl, ok := moduleReplacement(mod.Replacement)
+			if !ok {
+				continue
+			}
+			target = repl
+		}
+		if err := mf.AddReplace(mod.Path, mod.Version, target.Path, target.Version); err != nil {
+			return ex.Wrap(err)
+		}
+	}
+	return nil
 }
 
 // missingPackageRegexp finds the packages that the go command cannot find in

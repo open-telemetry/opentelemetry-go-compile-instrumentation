@@ -705,6 +705,8 @@ func newTestProxy(t *testing.T, mods ...proxyModule) string {
 // testProxyModules are the modules of the test proxy:
 //   - example.com/dep v1.0.0 and v1.2.0 (packages dep and dep/sub; v1.2.0
 //     also has dep/newpkg).
+//   - example.com/fork v1.2.0 is a fork of dep (same packages, other code).
+//   - example.com/extrafork v1.0.0 and example.com/extrafork2 v1.0.0 are forks of extra.
 //   - example.com/hook imports dep and requires dep v1.2.0.
 //   - example.com/hooksub imports dep/sub and requires dep v1.0.0.
 //   - example.com/extra has no dependencies.
@@ -741,6 +743,23 @@ func testProxyModules() []proxyModule {
 			"sub/sub.go":    "package sub\n\nconst V = \"v1.2.0\"\n",
 			"newpkg/new.go": "package newpkg\n",
 			"LICENSE":       "license",
+		}},
+		{path: "example.com/fork", version: "v1.2.0", files: map[string]string{
+			// A fork of dep: its go.mod keeps the path of the replaced module.
+			goModFileName: goMod("example.com/dep"),
+			"dep.go":      "package dep\n\nconst V = \"fork\"\n",
+			"sub/sub.go":  "package sub\n\nconst V = \"fork\"\n",
+			"LICENSE":     "license",
+		}},
+		{path: "example.com/extrafork", version: "v1.0.0", files: map[string]string{
+			// A fork of extra: its go.mod keeps the path of the replaced module.
+			goModFileName: goMod("example.com/extra"),
+			"extra.go":    "package extra\n\nconst V = \"fork\"\n",
+		}},
+		{path: "example.com/extrafork2", version: "v1.0.0", files: map[string]string{
+			// Another fork of extra, for all the versions.
+			goModFileName: goMod("example.com/extra"),
+			"extra.go":    "package extra\n\nconst V = \"fork2\"\n",
 		}},
 		{path: "example.com/hook", version: "v1.0.0", files: map[string]string{
 			goModFileName: goMod("example.com/hook", "example.com/dep v1.2.0"),
@@ -1011,6 +1030,222 @@ func TestVendorSyncMissingPackage(t *testing.T) {
 	assert.Equal(t, patchedDep, readAppFile(t, appDir, "vendor/example.com/dep/dep.go"),
 		"a vendored file is never replaced")
 	requireVendorBuild(t, appDir, "example.com/hooksub")
+}
+
+// TestVendorSyncMissingPackageOfReplacedModule: go.mod replaces the vendored
+// module dep with a fork. The hook code needs a package that vendor/ does not
+// have. The missing package must come from the fork (the replacement), not
+// from dep at the vendored version. The proxy has no dep v1.0.0: any download
+// of the replaced module fails.
+func TestVendorSyncMissingPackageOfReplacedModule(t *testing.T) {
+	forms := []struct {
+		name string
+		// goModReplace is the replace directive of go.mod.
+		goModReplace string
+		// modulesTxtTrailer is what "go mod vendor" adds to vendor/modules.txt
+		// for a replacement that is valid for all the versions.
+		modulesTxtTrailer string
+	}{
+		{"version-specific", "replace example.com/dep v1.0.0 => example.com/fork v1.2.0\n", ""},
+		{
+			"all-versions",
+			"replace example.com/dep => example.com/fork v1.2.0\n",
+			"# example.com/dep => example.com/fork v1.2.0\n",
+		},
+	}
+	for _, form := range forms {
+		t.Run(form.name, func(t *testing.T) {
+			appDir := newVendorSyncApp(t)
+			var mods []proxyModule
+			for _, m := range testProxyModules() {
+				if m.path != "example.com/dep" || m.version != "v1.0.0" {
+					mods = append(mods, m)
+				}
+			}
+			t.Setenv("GOPROXY", newTestProxy(t, mods...))
+			goMod := readAppFile(t, appDir, goModFileName)
+			mustWriteFile(t, filepath.Join(appDir, goModFileName), goMod+"\n"+form.goModReplace)
+			modulesTxt := readAppFile(t, appDir, "vendor/modules.txt")
+			mustWriteFile(t, filepath.Join(appDir, "vendor", modulesTxtFileName),
+				strings.Replace(
+					modulesTxt,
+					"# example.com/dep v1.0.0\n",
+					"# example.com/dep v1.0.0 => example.com/fork v1.2.0\n",
+					1,
+				)+form.modulesTxtTrailer)
+
+			require.NoError(t, vendorSync(t.Context(), map[string]bool{"example.com/hooksub": true}, appDir))
+
+			assert.Contains(
+				t,
+				readAppFile(t, appDir, "vendor/modules.txt"),
+				"# example.com/dep v1.0.0 => example.com/fork v1.2.0\n## explicit; go 1.21\n"+
+					"example.com/dep\nexample.com/dep/sub\n",
+				"the missing package is added, and the replacement stays",
+			)
+			assert.Equal(
+				t,
+				"package sub\n\nconst V = \"fork\"\n",
+				readAppFile(t, appDir, "vendor/example.com/dep/sub/sub.go"),
+				"the missing package comes from the replacement, not from the replaced module",
+			)
+			assert.Equal(t, patchedDep, readAppFile(t, appDir, "vendor/example.com/dep/dep.go"),
+				"a vendored file is never replaced")
+			requireVendorBuild(t, appDir, "example.com/hooksub")
+		})
+	}
+}
+
+// TestVendorSyncUnusedReplacedModule: go.mod replaces example.com/extra with a
+// fork, but the application does not use extra yet (vendor/modules.txt has
+// only a replacement-only entry). When the hook code needs extra, the files
+// that otelc adds to vendor/ come from the fork, as the go command would do.
+func TestVendorSyncUnusedReplacedModule(t *testing.T) {
+	appDir := newVendorSyncApp(t)
+	goMod := readAppFile(t, appDir, goModFileName)
+	mustWriteFile(t, filepath.Join(appDir, goModFileName),
+		goMod+"\nreplace example.com/extra => example.com/extrafork v1.0.0\n")
+	modulesTxt := readAppFile(t, appDir, "vendor/modules.txt")
+	mustWriteFile(t, filepath.Join(appDir, "vendor", modulesTxtFileName),
+		modulesTxt+"# example.com/extra => example.com/extrafork v1.0.0\n")
+
+	require.NoError(t, vendorSync(t.Context(), map[string]bool{"example.com/extra": true}, appDir))
+
+	assert.Equal(
+		t,
+		"package extra\n\nconst V = \"fork\"\n",
+		readAppFile(t, appDir, "vendor/example.com/extra/extra.go"),
+		"the files of a replaced module come from the replacement",
+	)
+	assert.Contains(t, readAppFile(t, appDir, "vendor/modules.txt"),
+		"# example.com/extra v0.0.0-00010101000000-000000000000 => example.com/extrafork v1.0.0\n",
+		"the replacement stays, with the version that the go command gives to a module without a requirement")
+	requireVendorBuild(t, appDir, "example.com/extra")
+}
+
+// TestVendorSyncUnusedReplacedModuleKeepsAllReplacements: go.mod has a
+// replacement for all the versions and a replacement for one version of a
+// module that the application does not use yet. The version-specific
+// replacement wins for its version, whatever the order in vendor/modules.txt.
+func TestVendorSyncUnusedReplacedModuleKeepsAllReplacements(t *testing.T) {
+	const specific = "# example.com/extra v1.0.0 => example.com/extrafork v1.0.0\n"
+	const wildcard = "# example.com/extra => example.com/extrafork2 v1.0.0\n"
+	for name, trailer := range map[string]string{
+		"specific-first": specific + wildcard,
+		"wildcard-first": wildcard + specific,
+	} {
+		t.Run(name, func(t *testing.T) {
+			appDir := newVendorSyncApp(t)
+			goMod := readAppFile(t, appDir, goModFileName)
+			mustWriteFile(t, filepath.Join(appDir, goModFileName), goMod+
+				"\nreplace example.com/extra v1.0.0 => example.com/extrafork v1.0.0\n"+
+				"replace example.com/extra => example.com/extrafork2 v1.0.0\n")
+			modulesTxt := readAppFile(t, appDir, "vendor/modules.txt")
+			mustWriteFile(t, filepath.Join(appDir, "vendor", modulesTxtFileName), modulesTxt+trailer)
+
+			require.NoError(t, vendorSync(t.Context(), map[string]bool{"example.com/extra": true}, appDir))
+
+			assert.Equal(
+				t,
+				"package extra\n\nconst V = \"fork\"\n",
+				readAppFile(t, appDir, "vendor/example.com/extra/extra.go"),
+				"the replacement of the version wins over the replacement of all versions",
+			)
+			requireVendorBuild(t, appDir, "example.com/extra")
+		})
+	}
+}
+
+// TestVendorSyncUnusedModuleReplacedByDirectory: go.mod replaces a module that
+// the application does not use yet with a local directory. When the hook code
+// needs the module, the files come from the directory, not from the
+// published module.
+func TestVendorSyncUnusedModuleReplacedByDirectory(t *testing.T) {
+	appDir := newVendorSyncApp(t)
+	mustWriteFile(t, filepath.Join(appDir, "extradir", goModFileName), "module example.com/extra\n\ngo 1.21\n")
+	mustWriteFile(t, filepath.Join(appDir, "extradir", "extra.go"), "package extra\n\nconst V = \"local\"\n")
+	goMod := readAppFile(t, appDir, goModFileName)
+	mustWriteFile(t, filepath.Join(appDir, goModFileName), goMod+"\nreplace example.com/extra => ./extradir\n")
+	modulesTxt := readAppFile(t, appDir, "vendor/modules.txt")
+	mustWriteFile(t, filepath.Join(appDir, "vendor", modulesTxtFileName),
+		modulesTxt+"# example.com/extra => ./extradir\n")
+
+	require.NoError(t, vendorSync(t.Context(), map[string]bool{"example.com/extra": true}, appDir))
+
+	assert.Equal(
+		t,
+		"package extra\n\nconst V = \"local\"\n",
+		readAppFile(t, appDir, "vendor/example.com/extra/extra.go"),
+		"the files of a module replaced by a directory come from the directory",
+	)
+	requireVendorBuild(t, appDir, "example.com/extra")
+}
+
+// TestVendorSyncUnusedModuleReplacedByDirectoryWithSpace: the replacement of
+// an unused module by a directory whose path has a space is a directory, not a
+// module with a version: it does not break the resolution of another module.
+// (The go command itself cannot read this line of vendor/modules.txt, so the
+// test does not build with -mod=vendor.)
+func TestVendorSyncUnusedModuleReplacedByDirectoryWithSpace(t *testing.T) {
+	appDir := newVendorSyncApp(t)
+	mustWriteFile(t, filepath.Join(appDir, "local fork", goModFileName), "module example.com/unused\n\ngo 1.21\n")
+	goMod := readAppFile(t, appDir, goModFileName)
+	mustWriteFile(t, filepath.Join(appDir, goModFileName), goMod+"\nreplace example.com/unused => \"./local fork\"\n")
+	modulesTxt := readAppFile(t, appDir, "vendor/modules.txt")
+	mustWriteFile(t, filepath.Join(appDir, "vendor", modulesTxtFileName),
+		modulesTxt+"# example.com/unused => ./local fork\n")
+
+	require.NoError(t, vendorSync(t.Context(), map[string]bool{"example.com/extra": true}, appDir))
+
+	assert.Equal(t, "package extra\n", readAppFile(t, appDir, "vendor/example.com/extra/extra.go"))
+	assert.True(t, isDirReplacement("./local fork"))
+	assert.False(t, isDirReplacement("example.com/fork v1.2.0"))
+}
+
+// TestVendorSyncUpdateModuleWithReplacementOfNewVersion: dep is vendored at
+// v1.0.0, without a replacement, and go.mod replaces dep v1.2.0 with a fork.
+// The hook code needs dep v1.2.0: the update takes the files from the fork.
+func TestVendorSyncUpdateModuleWithReplacementOfNewVersion(t *testing.T) {
+	appDir := newVendorSyncApp(t)
+	goMod := readAppFile(t, appDir, goModFileName)
+	mustWriteFile(t, filepath.Join(appDir, goModFileName),
+		goMod+"\nreplace example.com/dep v1.2.0 => example.com/fork v1.2.0\n")
+	modulesTxt := readAppFile(t, appDir, "vendor/modules.txt")
+	mustWriteFile(t, filepath.Join(appDir, "vendor", modulesTxtFileName),
+		modulesTxt+"# example.com/dep v1.2.0 => example.com/fork v1.2.0\n")
+
+	require.NoError(t, vendorSync(contextWithVendorUpdate(t.Context()),
+		map[string]bool{"example.com/hook": true}, appDir))
+
+	assert.Equal(
+		t,
+		"package dep\n\nconst V = \"fork\"\n",
+		readAppFile(t, appDir, "vendor/example.com/dep/dep.go"),
+		"the files of the updated module come from the replacement of the new version",
+	)
+	requireVendorBuild(t, appDir, "example.com/hook")
+}
+
+// TestVendorSyncMissingPackageOfModuleReplacedByDirectory: go.mod replaces
+// the vendored module dep with a local directory that otelc cannot use as the
+// module (its go.mod has another path). The hook code needs a package that
+// vendor/ does not have. otelc must not take it from dep upstream: it tells
+// the fix.
+func TestVendorSyncMissingPackageOfModuleReplacedByDirectory(t *testing.T) {
+	appDir := newVendorSyncApp(t)
+	mustWriteFile(t, filepath.Join(appDir, "depfork", goModFileName), "module example.com/depfork\n\ngo 1.21\n")
+	goMod := readAppFile(t, appDir, goModFileName)
+	mustWriteFile(t, filepath.Join(appDir, goModFileName), goMod+"\nreplace example.com/dep => ./depfork\n")
+	modulesTxt := readAppFile(t, appDir, "vendor/modules.txt")
+	mustWriteFile(t, filepath.Join(appDir, "vendor", modulesTxtFileName),
+		strings.Replace(modulesTxt, "# example.com/dep v1.0.0\n", "# example.com/dep v1.0.0 => ./depfork\n", 1))
+	before := appTree(t, appDir)
+
+	err := vendorSync(t.Context(), map[string]bool{"example.com/hooksub": true}, appDir)
+
+	require.ErrorContains(t, err, "replaces this module with the directory ./depfork")
+	require.ErrorContains(t, err, "example.com/dep/sub")
+	assert.Equal(t, before, appTree(t, appDir), "nothing changes")
 }
 
 // TestVendorSyncMissingPackageCannotBeFetched: the hook code needs a package

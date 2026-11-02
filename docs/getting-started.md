@@ -128,6 +128,12 @@ module and run `go mod vendor`, or run `otelc vendor` with network access.
 The download uses your Go settings: set `GOPRIVATE` (or `GOPROXY=off`) if the
 path of a private module must not go to a public proxy.
 
+If `go.mod` replaces the module with another module (`replace old => new
+v1.2.0`), `otelc` gets the replacement at its version, not the replaced
+module. If `go.mod` replaces the module with a local directory, `otelc` never
+downloads it: the build stops, and you must add the missing package to
+`vendor/` (import it in your module and run `go mod vendor`).
+
 To build with no network and no module cache (for example in an air-gapped
 CI), add the modules of the hook code to `vendor/` for all time:
 

@@ -280,7 +280,11 @@ When the hook code needs a package of a vendored module that `vendor/` does
 not have, `otelc` gets the module at the vendored version. If it cannot (for
 example a private module, or no network), the build stops and names the
 package and the module version. Import the package in your module and run
-`go mod vendor`, or run `otelc vendor` with network access.
+`go mod vendor`, or run `otelc vendor` with network access. If `go.mod`
+replaces the module with another module, `otelc` gets the replacement. If
+`go.mod` replaces it with a local directory, `otelc` does not download
+anything: the build stops, and the only fix is to import the package in your
+module and run `go mod vendor`.
 
 ### Package-resolution failures
 
