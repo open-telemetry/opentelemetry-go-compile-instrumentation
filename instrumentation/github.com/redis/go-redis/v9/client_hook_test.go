@@ -60,7 +60,7 @@ func assertRedisSpan(t *testing.T, spans []tracetest.SpanStub, wantHost string, 
 			continue
 		}
 		clientSpans++
-		attrs := make(map[string]interface{}, len(span.Attributes))
+		attrs := make(map[string]any, len(span.Attributes))
 		for _, attr := range span.Attributes {
 			attrs[string(attr.Key)] = attr.Value.AsInterface()
 		}
