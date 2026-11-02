@@ -20,8 +20,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
-
-	semconv "go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go/semconv"
+	otelsemconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -422,11 +421,11 @@ func TestParseCompletionRequest_Penalties(t *testing.T) {
 		got[a.Key] = a.Value
 	}
 
-	require.Contains(t, got, semconv.GenAIRequestFrequencyPenaltyKey)
-	assert.InDelta(t, 0.5, got[semconv.GenAIRequestFrequencyPenaltyKey].AsFloat64(), 1e-9)
+	require.Contains(t, got, otelsemconv.GenAIRequestFrequencyPenaltyKey)
+	assert.InDelta(t, 0.5, got[otelsemconv.GenAIRequestFrequencyPenaltyKey].AsFloat64(), 1e-9)
 
-	require.Contains(t, got, semconv.GenAIRequestPresencePenaltyKey)
-	assert.InDelta(t, -0.25, got[semconv.GenAIRequestPresencePenaltyKey].AsFloat64(), 1e-9)
+	require.Contains(t, got, otelsemconv.GenAIRequestPresencePenaltyKey)
+	assert.InDelta(t, -0.25, got[otelsemconv.GenAIRequestPresencePenaltyKey].AsFloat64(), 1e-9)
 }
 
 // Absent penalties must stay absent rather than being reported as zero, since
@@ -436,8 +435,8 @@ func TestParseCompletionRequest_PenaltiesOmitted(t *testing.T) {
 
 	_, attrs, _ := parseCompletionRequest(body, false)
 	for _, a := range attrs {
-		assert.NotEqual(t, semconv.GenAIRequestFrequencyPenaltyKey, a.Key)
-		assert.NotEqual(t, semconv.GenAIRequestPresencePenaltyKey, a.Key)
+		assert.NotEqual(t, otelsemconv.GenAIRequestFrequencyPenaltyKey, a.Key)
+		assert.NotEqual(t, otelsemconv.GenAIRequestPresencePenaltyKey, a.Key)
 	}
 }
 

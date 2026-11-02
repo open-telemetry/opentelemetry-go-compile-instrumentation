@@ -5,7 +5,9 @@ package main
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -65,6 +67,22 @@ func TestInitProfiling(t *testing.T) {
 		err := runInitProfiling(t, "--profile", "cpu", "--profile-path", inside)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "build temp")
+	})
+
+	t.Run("unresolvable profile-path reports a distinct error", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("a regular file standing in for a directory component resolves as not-exist on Windows, not ENOTDIR")
+		}
+		activeSession = nil
+		workDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, workDir)
+		notADir := filepath.Join(workDir, "not-a-dir")
+		require.NoError(t, os.WriteFile(notADir, []byte("x"), 0o644))
+		unresolvable := filepath.Join(notADir, "profiles")
+		err := runInitProfiling(t, "--profile", "cpu", "--profile-path", unresolvable)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "verify profile-path")
+		assert.NotContains(t, err.Error(), "must not be inside")
 	})
 
 	t.Run("profile-path equal to build temp errors", func(t *testing.T) {
@@ -200,17 +218,94 @@ func TestIsSubPath(t *testing.T) {
 			base:     base,
 			expected: false,
 		},
-		{
-			name:     "incompatible relative path error path",
-			target:   "relative/path",
-			base:     base,
-			expected: false,
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, isSubPath(tt.target, tt.base))
+			got, err := isSubPath(tt.target, tt.base)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, got)
 		})
 	}
+}
+
+func TestIsSubPath_IncompatiblePathsError(t *testing.T) {
+	base := filepath.Join(string(filepath.Separator), "path", "to", ".otelc-build")
+
+	_, err := isSubPath("relative/path", base)
+	require.Error(t, err)
+}
+
+func TestIsSubPath_ResolutionErrorFailsClosed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a regular file standing in for a directory component resolves as not-exist on Windows, not ENOTDIR")
+	}
+	dir := t.TempDir()
+	// A regular file where a directory component is expected: EvalSymlinks on
+	// anything beneath it fails with ENOTDIR, not ErrNotExist.
+	notADir := filepath.Join(dir, "not-a-dir")
+	require.NoError(t, os.WriteFile(notADir, []byte("x"), 0o644))
+	target := filepath.Join(notADir, "profiles")
+
+	_, err := isSubPath(target, dir)
+	require.Error(t, err)
+}
+
+func TestIsSubPath_BaseResolutionErrorFailsClosed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a regular file standing in for a directory component resolves as not-exist on Windows, not ENOTDIR")
+	}
+	dir := t.TempDir()
+	notADir := filepath.Join(dir, "not-a-dir")
+	require.NoError(t, os.WriteFile(notADir, []byte("x"), 0o644))
+	base := filepath.Join(notADir, "build-temp")
+	target := filepath.Join(dir, "profiles")
+
+	_, err := isSubPath(target, base)
+	require.Error(t, err)
+}
+
+// TestIsSubPath_ResolvesSymlinkedAncestor covers a real symbolic link
+// standing in for macOS's /var -> /private/var firmlink: os.Getwd() (which
+// feeds base through GetBuildTempDir) can return the unresolved form, while
+// an absolute --profile-path the user passes spells the same real directory
+// through the resolved form, or vice versa. filepath.Rel alone (what
+// isSubPath used before) treats these as unrelated siblings and misses the
+// containment, which is exactly the case this guard exists to catch.
+func TestIsSubPath_ResolvesSymlinkedAncestor(t *testing.T) {
+	root := t.TempDir()
+	realBuildTemp := filepath.Join(root, "real", ".otelc-build")
+	require.NoError(t, os.MkdirAll(realBuildTemp, 0o755))
+	linkedRoot := filepath.Join(root, "linked")
+	require.NoError(t, os.Symlink(filepath.Join(root, "real"), linkedRoot))
+	linkedBuildTemp := filepath.Join(linkedRoot, ".otelc-build")
+
+	t.Run("base through the link, target through the real path, target not yet created", func(t *testing.T) {
+		target := filepath.Join(realBuildTemp, "profiles")
+		assert.True(t, mustIsSubPath(t, target, linkedBuildTemp))
+	})
+
+	t.Run("base through the real path, target through the link, target not yet created", func(t *testing.T) {
+		target := filepath.Join(linkedBuildTemp, "profiles")
+		assert.True(t, mustIsSubPath(t, target, realBuildTemp))
+	})
+
+	t.Run("target through the link, fully existing", func(t *testing.T) {
+		assert.True(t, mustIsSubPath(t, linkedBuildTemp, realBuildTemp))
+	})
+
+	t.Run("sibling reached through the same link is still rejected", func(t *testing.T) {
+		sibling := filepath.Join(root, "real", ".otelc-build-profiles", "x")
+		assert.False(t, mustIsSubPath(t, sibling, linkedBuildTemp))
+	})
+}
+
+// mustIsSubPath calls isSubPath and fails the test if it returns an error,
+// so callers that only care about the containment result can assert on it
+// directly.
+func mustIsSubPath(t *testing.T, target, base string) bool {
+	t.Helper()
+	got, err := isSubPath(target, base)
+	require.NoError(t, err)
+	return got
 }

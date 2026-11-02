@@ -3,23 +3,24 @@
 
 package main
 
+//line /golden/work/main.go:6
 import "io"
 
 func counting(r io.Reader) io.Reader { return r }
 
 // Both fields are set, so both are wrapped.
 func Wrapped(r io.Reader) *io.LimitedReader {
-	return &io.LimitedReader{R: counting(r), N: (10) * 2}
+	return &io.LimitedReader{R: counting(r), N: (10) * 2} /*line /golden/work/main.go:12*/
 }
 
 // R is absent and takes its value; N is wrap-only and stays absent.
 func Absent() *io.LimitedReader {
-	return &io.LimitedReader{R: counting(nil)}
+	return &io.LimitedReader{R: counting(nil)} /*line /golden/work/main.go:17*/
 }
 
 // A literal of the same type inside the wrapped field is instrumented too.
 func Nested(r io.Reader) *io.LimitedReader {
-	return &io.LimitedReader{R: counting(&io.LimitedReader{R: counting(r), N: (5) * 2}), N: (10) * 2}
+	return &io.LimitedReader{R: counting(&io.LimitedReader{R: counting(r), N: (5) * 2}), N: (10) * 2} /*line /golden/work/main.go:22*/
 }
 
 func main() {

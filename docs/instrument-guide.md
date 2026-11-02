@@ -241,11 +241,10 @@ is recognized as ended by any other goroutine holding a GLS clone of it), bounde
 
 ##### 3) Hook integration points
 
-Configured in `instrumentation/go.opentelemetry.io/otel/hook/hooks.yaml` and implemented in `instrumentation/go.opentelemetry.io/otel/hook/`:
+Configured in the `otelc.yaml` next to each hook file under `instrumentation/go.opentelemetry.io/otel/`:
 
-- `tracer_setup.go`: add span to GLS after span creation
-- `span_setup.go`: remove span from GLS before span end
-- `span_context.go`: fallback to GLS in `trace.SpanFromContext`
+- `sdk/trace/gls.go`: add the span to GLS after span creation, and remove it from GLS before span end
+- `trace/hook.go`: fall back to GLS in `trace.SpanFromContext`
 
 #### Why GLS is Needed
 
