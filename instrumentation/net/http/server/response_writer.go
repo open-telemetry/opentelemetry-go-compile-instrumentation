@@ -115,14 +115,23 @@ func (w *writerWrapper) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 
 // FlushError is preferred by http.ResponseController over http.Flusher.
 func (w *writerWrapper) FlushError() error {
-	if fe, ok := w.ResponseWriter.(interface{ FlushError() error }); ok {
+	fe, hasFlushError := w.ResponseWriter.(interface{ FlushError() error })
+	f, isFlusher := w.ResponseWriter.(http.Flusher)
+	if !hasFlushError && !isFlusher {
+		return http.ErrNotSupported
+	}
+
+	// Flushing commits the response, and net/http sends a 200 when no status
+	// was set. Record it, or a later WriteHeader would replace it on the span.
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+
+	if hasFlushError {
 		return fe.FlushError()
 	}
-	if f, ok := w.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-		return nil
-	}
-	return http.ErrNotSupported
+	f.Flush()
+	return nil
 }
 
 // Flush implements the http.Flusher interface

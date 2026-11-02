@@ -602,6 +602,46 @@ func TestWriterWrapper_ResponseController_Flush(t *testing.T) {
 	assert.True(t, mock.flushErrorCalled)
 }
 
+func TestWriterWrapper_FlushCommitsStatusOK(t *testing.T) {
+	rec := httptest.NewRecorder()
+	wrapper := &writerWrapper{ResponseWriter: rec, statusCode: http.StatusOK}
+
+	wrapper.Flush()
+	wrapper.WriteHeader(http.StatusInternalServerError)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, http.StatusOK, wrapper.statusCode)
+	assert.True(t, wrapper.wroteHeader)
+}
+
+func TestWriterWrapper_FlushKeepsExplicitStatus(t *testing.T) {
+	wrapper := &writerWrapper{ResponseWriter: httptest.NewRecorder(), statusCode: http.StatusOK}
+
+	wrapper.WriteHeader(http.StatusAccepted)
+	wrapper.Flush()
+
+	assert.Equal(t, http.StatusAccepted, wrapper.statusCode)
+}
+
+func TestWriterWrapper_FlushOverRealServer(t *testing.T) {
+	statusCode := make(chan int, 1)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		wrapper := &writerWrapper{ResponseWriter: w, statusCode: http.StatusOK}
+		wrapper.Flush()
+		// Too late: the flush already sent a 200.
+		wrapper.WriteHeader(http.StatusInternalServerError)
+		statusCode <- wrapper.statusCode
+	}))
+	defer ts.Close()
+
+	resp, err := ts.Client().Get(ts.URL)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, http.StatusOK, <-statusCode)
+}
+
 func TestWriterWrapper_FlushError_NotSupported(t *testing.T) {
 	wrapper := &writerWrapper{
 		// A bare ResponseWriter with no Flush support.
@@ -610,6 +650,7 @@ func TestWriterWrapper_FlushError_NotSupported(t *testing.T) {
 	}
 
 	require.ErrorIs(t, wrapper.FlushError(), http.ErrNotSupported)
+	assert.False(t, wrapper.wroteHeader, "a flush that did nothing must not commit a status")
 }
 
 // mockFlushErrorWriter is a mock ResponseWriter that implements FlushError() error.
