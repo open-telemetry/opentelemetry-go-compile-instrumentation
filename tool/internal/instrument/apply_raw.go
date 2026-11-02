@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/dave/dst"
@@ -228,6 +230,19 @@ func (ip *instrumentPhase) applyRawRule(ctx context.Context, rule *rule.InstRawR
 		return ex.Newf("can not find function %s", rule.Func)
 	}
 
+	// De-duplicate injection for the same application on this *dst.FuncDecl.
+	// Identity() omits Pattern, Placement, and Imports (those do not change
+	// template names), so the key includes them. The map is keyed by the
+	// target function so a package with several func init() declarations
+	// still injects into each one.
+	key := rawRuleDedupKey(rule)
+	if seen := ip.appliedRawIdentities[funcDecl]; seen != nil {
+		if _, dup := seen[key]; dup {
+			ip.Debug("Skipping duplicate raw rule", "rule", rule.Name, "func", rule.Func)
+			return nil
+		}
+	}
+
 	importAliases, aliasOverrides := ip.resolveImportOverrides(root, rule.Imports)
 	if err = checkAliasOverrideShadowing(aliasOverrides, funcDecl); err != nil {
 		return err
@@ -242,6 +257,44 @@ func (ip *instrumentPhase) applyRawRule(ctx context.Context, rule *rule.InstRawR
 	if err = ip.addRuleImports(ctx, root, usedRuleImports(root, rule.Imports, aliasOverrides), rule.Name); err != nil {
 		return err
 	}
+	if ip.appliedRawIdentities == nil {
+		ip.appliedRawIdentities = make(map[*dst.FuncDecl]map[string]struct{})
+	}
+	if ip.appliedRawIdentities[funcDecl] == nil {
+		ip.appliedRawIdentities[funcDecl] = make(map[string]struct{})
+	}
+	ip.appliedRawIdentities[funcDecl][key] = struct{}{}
 	ip.Info("Apply raw rule", "rule", rule)
 	return nil
+}
+
+// rawRuleDedupKey identifies one inject_code application. Identity() covers
+// target, version, func, recv, and raw; Pattern, Placement, and Imports are
+// appended so the same snippet can be applied at different match sites.
+func rawRuleDedupKey(r *rule.InstRawRule) string {
+	placement := r.Placement
+	if placement == "" {
+		placement = "before"
+	}
+	return enc(r.Identity()) + enc(r.Pattern) + enc(placement) + enc(rawRuleImportsKey(r.Imports))
+}
+
+func rawRuleImportsKey(imports map[string]string) string {
+	if len(imports) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(imports))
+	for k := range imports {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys)+len(keys))
+	for _, k := range keys {
+		parts = append(parts, enc(k), enc(imports[k]))
+	}
+	return strings.Join(parts, "")
+}
+
+func enc(s string) string {
+	return strconv.Itoa(len(s)) + ":" + s
 }

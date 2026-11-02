@@ -11,7 +11,8 @@ var allowlist = []string{ //nolint:gochecknoglobals // private lookup table
 	"tool/internal/instrument/line_directives_windows_test.go", // windows-only tests for line_directives.go
 	"tool/internal/instrument/render_raw_code_test.go",         // pending fold into apply_raw_test.go (#1189)
 	"tool/internal/instrument/instrument_delegate_test.go",
-	"tool/util/assert_fatal_test.go", // pending fold into assert_test.go (#1189)
+	"tool/util/assert_fatal_test.go",                    // pending fold into assert_test.go (#1189)
+	"tool/internal/configuration/configuration_test.go", // package-wide tests cover several configuration source files
 
 	"instrumentation/database/sql/dsnparse/parse_addr_test.go",
 	"instrumentation/database/sql/dsnparse/parse_dialects_test.go",

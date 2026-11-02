@@ -5,19 +5,15 @@ on:
     branches:
       - main
   schedule:
-    # Hourly backstop; the push trigger covers the common case immediately.
-    # PRs whose "mergeable" flag was still UNKNOWN right after a push are
-    # picked up here on the next run.
     - cron: "23 * * * *"
   workflow_dispatch:
     inputs:
       dry_run:
-        description: Log planned actions without pushing or commenting
+        description: Probe conflicts without requesting repairs
         type: boolean
         default: false
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: ${{ github.workflow }}
@@ -25,50 +21,93 @@ concurrency:
 
 jobs:
   autofix:
-    name: Auto-fix bundle conflicts
+    name: Select bundle repairs
     runs-on: ubuntu-latest
-    # Only act on the upstream repository, never on forks of it.
-    # Skip instead of failing until the otelbot App credentials are configured.
-    if: >-
-      github.repository == 'open-telemetry/opentelemetry-go-compile-instrumentation' && vars.OTELBOT_COMPILE_INSTRUMENTATION_CLIENT_ID
-      != ''
-    # Security: `make package` is executed only on same-repository PR branches.
-    # A same-repository branch can only be created by someone with push access
-    # to this repository, which matches the trust level of the existing
-    # regenerate-bundle workflow. Fork PR branches are never checked out or
-    # built; the script only posts a help comment for them.
-    #
-    # The workflow's own GITHUB_TOKEN is fully de-privileged; every privileged
-    # operation (git push, PR comments) uses the otelbot GitHub App token so
-    # that pushes trigger the normal pull_request workflows.
-    permissions: {}
+    timeout-minutes: 10
+    outputs:
+      prs: ${{ steps.scan.outputs.prs || '[]' }}
+    if: |-
+      github.repository ==
+      'open-telemetry/opentelemetry-go-compile-instrumentation' &&
+      github.ref == 'refs/heads/main'
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
     steps:
-      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510  # v3.3.0
-        id: app-token
-        with:
-          client-id: ${{ vars.OTELBOT_COMPILE_INSTRUMENTATION_CLIENT_ID }}
-          private-key: ${{ secrets.OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY }}
-          permission-contents: write
-          permission-pull-requests: write
-          # Pushes that carry workflow-file changes (merged from main) are
-          # rejected without this permission.
-          permission-workflows: write
-
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           fetch-depth: 0
-          # zizmor: ignore[artipacked]: credentials are required by the git push later in this job
-          persist-credentials: true
-          token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
+          cache: false
           go-version-file: go.mod
 
-      - name: Auto-fix conflicted pull request branches
+      - name: Build bundle repair tool
         env:
-          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GOFLAGS: -mod=readonly
+          GOPROXY: 'off'
+          GOTOOLCHAIN: local
+        run: go -C .tools/bundlerepair build -trimpath -o "${RUNNER_TEMP}/bundlerepair" .
+
+      - name: Check manual scanner permission
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          CALLER_WORKFLOW_REF: ''
+          COMMENTER: ${{ github.triggering_actor }}
+          GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+        run: |
+          "${RUNNER_TEMP}/bundlerepair" authorize
+
+      - name: Check automatic repair budget
+        id: budget
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          "${RUNNER_TEMP}/bundlerepair" select --budget
+
+      - name: Select bounded bundle repairs
+        id: scan
+        if: steps.budget.outputs.remaining != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
           DRY_RUN: ${{ inputs.dry_run }}
-        run: ./.github/scripts/autofix-bundle-conflicts.sh
+          AUTO_DEADLINE: ${{ steps.budget.outputs.expires_at }}
+          RECENT_REQUESTS: ${{ steps.budget.outputs.requests }}
+        run: |
+          "${RUNNER_TEMP}/bundlerepair" select
+
+      - name: 'Bundle repair selection: ${{ steps.scan.outputs.rate_record }}'
+        if: steps.scan.conclusion == 'success'
+        run: ':'
+
+  repair:
+    name: 'Bundle repair #${{ matrix.request.pr_number }}'
+    needs: autofix
+    if: |-
+      needs.autofix.outputs.prs != '[]' &&
+      needs.autofix.outputs.prs != ''
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        request: ${{ fromJSON(needs.autofix.outputs.prs) }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/regenerate-bundle.yaml
+    with:
+      pr_number: ${{ format('{0}', matrix.request.pr_number) }}
+      expected_head_sha: ${{ matrix.request.head_sha }}
+      expected_base_sha: ${{ matrix.request.base_sha }}
+      expires_at: ${{ format('{0}', matrix.request.expires_at) }}
+    secrets:
+      OTELC_BUNDLE_PUSH_TOKEN: ${{ secrets.OTELC_BUNDLE_PUSH_TOKEN }}
+      OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY: >-
+        ${{ secrets.OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY }}

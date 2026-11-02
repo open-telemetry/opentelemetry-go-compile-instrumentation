@@ -1,0 +1,65 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+//line /golden/work/main.go:6
+import (
+	"context"
+
+	"fmt"
+)
+
+//line /golden/work/main.go:8
+type failedError struct{}
+
+func (failedError) Error() string { return "failed" }
+
+var errFailed error = failedError{}
+
+func main() {
+	//otelc:span span.name:"unnamed-results"
+	divide := func(ctx context.Context, a int, b int) (_unnamedRetVal_1282064364_0 int, _unnamedRetVal_1282064364_1 error) {
+		/*line /<generated>:1*/ fmt.Println("span start:", "", "unnamed-results")
+		println("arg0:", ctx)
+		println("ctx arg:", ctx != nil)
+		defer func() {
+			fmt.Println("span end, error:", _unnamedRetVal_1282064364_1)
+		}()
+		/*line /golden/work/main.go:17*/ if b == 0 {
+			return 0, errFailed
+		}
+		return a / b, nil
+	}
+	/*line /golden/work/main.go:22*/ _, _ = divide(context.Background(), 4, 0)
+
+	//otelc:span span.name:"named-results"
+	named := func(n int) (out int, err error) {
+		/*line /<generated>:1*/ fmt.Println("span start:", "", "named-results")
+		println("arg0:", n)
+		defer func() {
+			fmt.Println("span end, error:", err)
+		}()
+		/*line /golden/work/main.go:26*/ return n, nil
+	}
+	_, _ = named(1)
+
+	//otelc:span span.name:"unnamed-params"
+	unnamed := func(_ignoredParam_1282064364_0 context.Context, _ignoredParam_1282064364_1 int) (_unnamedRetVal_1282064364_0 error) {
+		/*line /<generated>:1*/ fmt.Println("span start:", "", "unnamed-params")
+		println("arg0:", _ignoredParam_1282064364_0)
+		println("ctx arg:", _ignoredParam_1282064364_0 != nil)
+		defer func() {
+			fmt.Println("span end, error:", _unnamedRetVal_1282064364_0)
+		}()
+		/*line /golden/work/main.go:32*/ return nil
+	}
+	/*line /golden/work/main.go:34*/ _ = unnamed(context.Background(), 1)
+
+	//otelc:span
+	noArgs := func() {
+		/*line /<generated>:1*/ fmt.Println("span start:", "", "")
+		defer println("span end") /*line /golden/work/main.go:36*/
+	}
+	noArgs()
+}

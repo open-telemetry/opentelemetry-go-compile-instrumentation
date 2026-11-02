@@ -184,6 +184,23 @@ Keep in mind:
   whole statement, so a statement with more than one call, such as `combine(a(), b())`, would
   suppress hooks for every call in it. Give each other call its own statement first, then use
   its result in the annotated statement.
+- Using `//otelc:ignore` on a call site anywhere in the build requires
+  `instrumentation/runtime` to be loaded, since that is where the suppression functions the
+  directive relies on at runtime live:
+
+  ```go
+  //go:build tools
+
+  package tools
+
+  import (
+      _ "your/rule/package"
+      _ "go.opentelemetry.io/otelc/instrumentation/runtime"
+  )
+  ```
+
+  Without it, `otelc setup` fails with a clear error naming the missing import, rather than
+  letting the build fail later on an unrelated-looking compiler error.
 
 ## Runtime Tuning
 

@@ -123,8 +123,8 @@ func OtelBeforeTrampoline_Connect671999535(param0 *string) (hookContext *HookCon
 	hookContext.params = []interface{}{param0}
 	hookContext.funcName = "Connect"
 	hookContext.packageName = "main"
-	if BeforeConnect != nil {
-		BeforeConnect(hookContext, *param0)
+	if otelc_hook_833968721_BeforeConnect != nil {
+		otelc_hook_833968721_BeforeConnect(hookContext, *param0)
 	}
 	return hookContext, hookContext.skipCall
 }
@@ -143,13 +143,13 @@ func OtelAfterTrampoline_Connect671999535(hookContext HookContext, arg0 *error) 
 		}
 	}()
 	hookContext.(*HookContextImpl671999535).returnVals = []interface{}{arg0}
-	if AfterConnect != nil {
-		AfterConnect(hookContext, *arg0)
+	if otelc_hook_833968721_AfterConnect != nil {
+		otelc_hook_833968721_AfterConnect(hookContext, *arg0)
 	}
 }
 
-//go:linkname BeforeConnect testdata/golden/all-of-filter-match.BeforeConnect
-func BeforeConnect(hookContext HookContext, param0 string)
+//go:linkname otelc_hook_833968721_BeforeConnect testdata/golden/all-of-filter-match.BeforeConnect
+func otelc_hook_833968721_BeforeConnect(hookContext HookContext, param0 string)
 
-//go:linkname AfterConnect testdata/golden/all-of-filter-match.AfterConnect
-func AfterConnect(hookContext HookContext, arg0 error)
+//go:linkname otelc_hook_833968721_AfterConnect testdata/golden/all-of-filter-match.AfterConnect
+func otelc_hook_833968721_AfterConnect(hookContext HookContext, arg0 error)

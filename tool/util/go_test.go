@@ -964,3 +964,48 @@ func TestActiveBuildTags(t *testing.T) {
 	tags := ActiveBuildTags()
 	assert.Equal(t, []string{"integration", "test"}, tags)
 }
+
+func TestIsTestBuild(t *testing.T) {
+	tests := []struct {
+		name     string
+		sources  []string
+		expected bool
+	}{
+		{
+			name:     "normal package",
+			sources:  []string{"/src/lib/lib.go", "/src/lib/util.go"},
+			expected: false,
+		},
+		{
+			name:     "package with in-package tests",
+			sources:  []string{"/src/lib/lib.go", "/src/lib/lib_test.go"},
+			expected: true,
+		},
+		{
+			name:     "external test package",
+			sources:  []string{"/src/lib/export_test.go"},
+			expected: true,
+		},
+		{
+			name:     "generated test main",
+			sources:  []string{"/tmp/b001/_testmain.go"},
+			expected: true,
+		},
+		{
+			name:     "test suffix only in the directory name",
+			sources:  []string{"/src/lib_test/lib.go"},
+			expected: false,
+		},
+		{
+			name:     "no sources",
+			sources:  nil,
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, IsTestBuild(tt.sources))
+		})
+	}
+}

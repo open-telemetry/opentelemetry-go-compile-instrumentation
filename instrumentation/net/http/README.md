@@ -73,7 +73,7 @@ That's it! All HTTP traffic is now instrumented.
 
 ### Configuration
 
-The instrumentation is configured at compile-time via `instrumentation/net/http/client/client.yaml` and `instrumentation/net/http/server/server.yaml`:
+The instrumentation is configured at compile-time via `instrumentation/net/http/client/otelc.yaml` and `instrumentation/net/http/server/otelc.yaml`:
 
 ```yaml
 client_hook:
@@ -473,7 +473,6 @@ If you see infinite loops, check the exporter's user-agent string.
 ## Related Documentation
 
 - [Implementation Details](../../../docs/implementation.md)
-- [Upstream otelhttp Analysis](../../../docs/upstream-otelhttp-analysis.md)
 - [Getting Started](../../../docs/getting-started.md)
 
 ## Contributing

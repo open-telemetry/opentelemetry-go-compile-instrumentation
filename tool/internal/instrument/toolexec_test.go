@@ -929,6 +929,8 @@ func TestInterceptCompileFileRuleWithoutPackageName(t *testing.T) {
 		fileRule := &rule.InstFileRule{File: "added.go", Path: rulesDir, ResolvedPath: rulesDir}
 		fileRule.Name = "add_to_main"
 		set.AddFileRule(fileRule)
+		// Setup records whether the compile belongs to a test binary.
+		set.IsTest = util.IsTestBuild(sources)
 		data, err := json.Marshal([]*rule.InstRuleSet{set})
 		require.NoError(t, err)
 		matched := util.GetMatchedRuleFile()
