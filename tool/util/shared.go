@@ -74,6 +74,13 @@ func GetImportNamesFile() string {
 	return GetBuildTemp(importNamesFile)
 }
 
+// GetPGOProfileFile returns the path to the file that records the build's PGO
+// profile for the nested builds toolexec runs.
+func GetPGOProfileFile() string {
+	const pgoProfileFile = "pgo_profile"
+	return GetBuildTemp(pgoProfileFile)
+}
+
 // GetAddedImportsFileForProcess returns the per-process import tracking file.
 // Each compile process writes to its own file to avoid inter-process race conditions.
 func GetAddedImportsFileForProcess() string {

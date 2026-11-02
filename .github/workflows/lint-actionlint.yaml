@@ -9,6 +9,9 @@ on:
       - ".github/actions/**/action.yaml"
       - ".tools/go.mod"
       - ".tools/go.sum"
+      - ".tools/bundlerepair/**"
+      - ".tools/workflows/**"
+      - "Makefile"
   push:
     branches: [main]
     paths:
@@ -18,6 +21,9 @@ on:
       - ".github/actions/**/action.yaml"
       - ".tools/go.mod"
       - ".tools/go.sum"
+      - ".tools/bundlerepair/**"
+      - ".tools/workflows/**"
+      - "Makefile"
 
 permissions:
   contents: read
@@ -34,4 +40,4 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - run: make lint/action
+      - run: make lint/action test-bundle-workflows

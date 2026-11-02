@@ -119,8 +119,8 @@ func OtelBeforeTrampoline_Open3522809524(param0 *string) (hookContext *HookConte
 	hookContext.params = []interface{}{param0}
 	hookContext.funcName = "Open"
 	hookContext.packageName = "main"
-	if BeforeOpen != nil {
-		BeforeOpen(hookContext, *param0)
+	if otelc_hook_589931152_BeforeOpen != nil {
+		otelc_hook_589931152_BeforeOpen(hookContext, *param0)
 	}
 	return hookContext, hookContext.skipCall
 }
@@ -139,13 +139,13 @@ func OtelAfterTrampoline_Open3522809524(hookContext HookContext, arg0 *error) {
 		}
 	}()
 	hookContext.(*HookContextImpl3522809524).returnVals = []interface{}{arg0}
-	if AfterOpen != nil {
-		AfterOpen(hookContext, *arg0)
+	if otelc_hook_589931152_AfterOpen != nil {
+		otelc_hook_589931152_AfterOpen(hookContext, *arg0)
 	}
 }
 
-//go:linkname BeforeOpen testdata/golden/all-of-filter-empty.BeforeOpen
-func BeforeOpen(hookContext HookContext, param0 string)
+//go:linkname otelc_hook_589931152_BeforeOpen testdata/golden/all-of-filter-empty.BeforeOpen
+func otelc_hook_589931152_BeforeOpen(hookContext HookContext, param0 string)
 
-//go:linkname AfterOpen testdata/golden/all-of-filter-empty.AfterOpen
-func AfterOpen(hookContext HookContext, arg0 error)
+//go:linkname otelc_hook_589931152_AfterOpen testdata/golden/all-of-filter-empty.AfterOpen
+func otelc_hook_589931152_AfterOpen(hookContext HookContext, arg0 error)

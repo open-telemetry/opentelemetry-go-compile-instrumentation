@@ -478,3 +478,235 @@ func TestAddDeps_RuntimeDiffCollision(t *testing.T) {
 	assert.FileExists(t, cmdRetainedPath)
 	assert.FileExists(t, internalRetainedPath)
 }
+
+// TestAddDepsRuntimeFileIsStable renders otelc.runtime.go repeatedly from one
+// rule set and requires identical bytes. Several hook packages, each matched in
+// a different source file, is the shape that exposes the order addDeps gets
+// from AllFuncRules; the existing cases above share a single file key.
+func TestAddDepsRuntimeFileIsStable(t *testing.T) {
+	sourceDir := t.TempDir()
+	hookPathByFile := map[string]string{
+		"d.go": "example.com/hooks/delta",
+		"b.go": "example.com/hooks/bravo",
+		"a.go": "example.com/hooks/alpha",
+		"c.go": "example.com/hooks/charlie",
+	}
+
+	render := func(t *testing.T) string {
+		t.Helper()
+		ruleSet := rule.NewInstRuleSet("example.com/app")
+		for file, hookPath := range hookPathByFile {
+			ruleSet.AddFuncRule(filepath.Join(sourceDir, file), newTestFuncRule(hookPath, "main"))
+		}
+
+		outDir := t.TempDir()
+		err := newTestSetupPhase().addDeps(
+			t.Context(),
+			[]*rule.InstRuleSet{ruleSet},
+			runtimePackage{dir: outDir, name: "main"},
+		)
+		require.NoError(t, err)
+
+		content, err := os.ReadFile(filepath.Join(outDir, otelcRuntimeFile))
+		require.NoError(t, err)
+		return strings.ReplaceAll(string(content), "\r\n", "\n")
+	}
+
+	want := render(t)
+	const iterations = 50
+	for range iterations {
+		require.Equal(t, want, render(t),
+			"otelc.runtime.go must not change between setups of identical input")
+	}
+}
+
+func TestAddDeps_FileRuleDoesNotBlankImportSourceImports(t *testing.T) {
+	fileRule := &rule.InstFileRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "add-hook",
+			Target: rule.NewTarget("main"),
+		},
+		File: "injected.go",
+		Path: "example.com/hooks",
+	}
+
+	matched := []*rule.InstRuleSet{
+		newTestRuleSet("main", nil, []*rule.InstFileRule{fileRule}),
+	}
+
+	outDir := t.TempDir()
+	sp := newTestSetupPhase()
+	ctx := contextWithStateManager(t.Context(), newStateManager())
+
+	err := sp.addDeps(ctx, matched, runtimePackage{
+		dir:        outDir,
+		importPath: "main",
+		name:       "main",
+	})
+	require.NoError(t, err)
+
+	runtimePath := filepath.Join(outDir, otelcRuntimeFile)
+	require.FileExists(t, runtimePath)
+
+	data, err := os.ReadFile(runtimePath)
+	require.NoError(t, err)
+	content := string(data)
+
+	// fileRule.Path must be imported
+	assert.Contains(t, content, `_ "example.com/hooks"`)
+	// Source imports from injected files must NOT be blank-imported into otelc.runtime.go
+	assert.NotContains(t, content, `example.com/extra`)
+	assert.NotContains(t, content, `example.com/dot`)
+	assert.NotContains(t, content, `example.com/blank`)
+	assert.NotContains(t, content, `"context"`)
+	assert.NotContains(t, content, `_ "unsafe"`)
+	assert.NotContains(t, content, `_ "C"`)
+}
+
+func TestAddDeps_FileRuleSelfImportAvoidance(t *testing.T) {
+	fileRule := &rule.InstFileRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "self-import-rule",
+			Target: rule.NewTarget("example.com/targetpkg"),
+		},
+		File: "hook.go",
+		Path: "example.com/targetpkg",
+	}
+
+	matched := []*rule.InstRuleSet{
+		newTestRuleSet("example.com/targetpkg", nil, []*rule.InstFileRule{fileRule}),
+	}
+
+	outDir := t.TempDir()
+	sp := newTestSetupPhase()
+	ctx := contextWithStateManager(t.Context(), newStateManager())
+
+	err := sp.addDeps(ctx, matched, runtimePackage{
+		dir:        outDir,
+		importPath: "example.com/targetpkg",
+		name:       "targetpkg",
+	})
+	require.NoError(t, err)
+
+	runtimePath := filepath.Join(outDir, otelcRuntimeFile)
+	// When all rules in matched are self-imports, no runtime file is generated
+	assert.NoFileExists(t, runtimePath)
+}
+
+func TestAddDeps_FileRuleDoesNotCreateImportCycle(t *testing.T) {
+	// The application dependency graph is main -> server -> config.
+	// An add_file rule targets main, and the added source imports server.
+	// Generating runtime files for config and server must not blank-import
+	// server into config, which would create a reverse import cycle:
+	// server -> config -> server.
+	mainFileRule := &rule.InstFileRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "main-add-file",
+			Target: rule.NewTarget("example.com/app/main"),
+		},
+		File: "added.go",
+		Path: "example.com/app/hooks",
+	}
+
+	mainFileRule.ResolvedPath = t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(mainFileRule.ResolvedPath, mainFileRule.File),
+		[]byte("package main\n\nimport _ \"example.com/app/server\"\n"),
+		0o600,
+	))
+
+	matched := []*rule.InstRuleSet{
+		newTestRuleSet("example.com/app/main", nil, []*rule.InstFileRule{mainFileRule}),
+	}
+
+	configDir := t.TempDir()
+	serverDir := t.TempDir()
+	sp := newTestSetupPhase()
+	ctx := contextWithStateManager(t.Context(), newStateManager())
+
+	// Generating runtime for config (imported by server)
+	err := sp.addDeps(ctx, matched, runtimePackage{
+		dir:        configDir,
+		importPath: "example.com/app/config",
+		name:       "config",
+	})
+	require.NoError(t, err)
+
+	configRuntime := filepath.Join(configDir, otelcRuntimeFile)
+	require.FileExists(t, configRuntime)
+	configData, err := os.ReadFile(configRuntime)
+	require.NoError(t, err)
+	configContent := string(configData)
+
+	// config imports the hook package, but must NOT import server (which imports config),
+	// avoiding a cycle: server -> config -> server.
+	assert.Contains(t, configContent, `_ "example.com/app/hooks"`)
+	assert.NotContains(t, configContent, `"example.com/app/server"`)
+
+	// Generating runtime for server
+	err = sp.addDeps(ctx, matched, runtimePackage{
+		dir:        serverDir,
+		importPath: "example.com/app/server",
+		name:       "server",
+	})
+	require.NoError(t, err)
+
+	serverRuntime := filepath.Join(serverDir, otelcRuntimeFile)
+	require.FileExists(t, serverRuntime)
+	data, err := os.ReadFile(serverRuntime)
+	require.NoError(t, err)
+	serverContent := string(data)
+
+	// server imports hooks, but must not import itself or config
+	assert.Contains(t, serverContent, `_ "example.com/app/hooks"`)
+	assert.NotContains(t, serverContent, `"example.com/app/server"`)
+	assert.NotContains(t, serverContent, `"example.com/app/config"`)
+}
+
+func TestAddDeps_FileRuleDoesNotViolateInternalPackageVisibility(t *testing.T) {
+	// An add_file rule targets an external library (example.com/lib), and the injected
+	// source file legally imports an internal package within that library
+	// (example.com/lib/internal/secret). When generating otelc.runtime.go for the
+	// application (example.com/app), that internal package must not be blank-imported,
+	// which would violate Go's internal package visibility rules.
+	fileRule := &rule.InstFileRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "lib-file-rule",
+			Target: rule.NewTarget("example.com/lib"),
+		},
+		File: "hook.go",
+		Path: "example.com/lib/hook",
+	}
+
+	fileRule.ResolvedPath = t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(fileRule.ResolvedPath, fileRule.File),
+		[]byte("package lib\n\nimport _ \"example.com/lib/internal/secret\"\n"),
+		0o600,
+	))
+
+	matched := []*rule.InstRuleSet{
+		newTestRuleSet("example.com/lib", nil, []*rule.InstFileRule{fileRule}),
+	}
+
+	appDir := t.TempDir()
+	sp := newTestSetupPhase()
+	ctx := contextWithStateManager(t.Context(), newStateManager())
+
+	err := sp.addDeps(ctx, matched, runtimePackage{
+		dir:        appDir,
+		importPath: "example.com/app",
+		name:       "app",
+	})
+	require.NoError(t, err)
+
+	runtimePath := filepath.Join(appDir, otelcRuntimeFile)
+	require.FileExists(t, runtimePath)
+
+	data, err := os.ReadFile(runtimePath)
+	require.NoError(t, err)
+	content := string(data)
+
+	assert.Contains(t, content, `_ "example.com/lib/hook"`)
+	assert.NotContains(t, content, `example.com/lib/internal`)
+}
