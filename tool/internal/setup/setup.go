@@ -39,6 +39,7 @@ type setupPhase struct {
 
 	// fileImportsCache caches discovered source imports for add_file rules during setup.
 	fileImportsCache map[string][]string
+	testMode         bool
 }
 
 func (sp *setupPhase) getBuildContext() *gobuild.Context {
@@ -47,9 +48,7 @@ func (sp *setupPhase) getBuildContext() *gobuild.Context {
 		slices.Clone(gobuild.Default.BuildTags),
 		util.UserBuildTags(util.SplitGoflags(os.Getenv("GOFLAGS")), sp.buildFlags)...)
 	return &bctx
-	testMode      bool
 }
-
 func (sp *setupPhase) Info(msg string, args ...any)  { sp.logger.Info(msg, args...) }
 func (sp *setupPhase) Error(msg string, args ...any) { sp.logger.Error(msg, args...) }
 func (sp *setupPhase) Warn(msg string, args ...any)  { sp.logger.Warn(msg, args...) }
@@ -347,7 +346,7 @@ func (sp *setupPhase) generateRuntimePerPackage(
 ) error {
 	// What each hook package imports. A package a hook imports must not
 	// import that hook back, or the build has an import cycle.
-	imports, err := hookImports(ctx, sp.buildFlags, matched)
+	imports, err := sp.hookImports(ctx, matched)
 	if err != nil {
 		return err
 	}
@@ -956,12 +955,11 @@ func runGoBuild(ctx context.Context, cmd *cli.Command) (err error) {
 
 // hookImports maps each hook package to every package it imports, directly or
 // through a chain. A package on a hook's list cannot import that hook back.
-func hookImports(
+func (sp *setupPhase) hookImports(
 	ctx context.Context,
-	buildFlags []string,
 	matched []*rule.InstRuleSet,
 ) (map[string]map[string]bool, error) {
-	hookPaths := hookPackagePaths(matched)
+	hookPaths := sp.hookPackagePaths(matched)
 	if len(hookPaths) == 0 {
 		return map[string]map[string]bool{}, nil
 	}
@@ -969,7 +967,7 @@ func hookImports(
 	pkgs, err := pkgload.LoadPackages(
 		ctx,
 		packages.NeedName|packages.NeedImports|packages.NeedDeps,
-		buildFlags,
+		sp.buildFlags,
 		false,
 		hookPaths...,
 	)

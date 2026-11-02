@@ -34,7 +34,6 @@ func TestAddDeps(t *testing.T) {
 		wantErr           bool
 		importedByHooks   map[string]bool
 		testMode          bool
-		testHooks         []string
 	}{
 		{
 			name:        "empty_matched_rules",
@@ -151,7 +150,6 @@ func TestAddDeps(t *testing.T) {
 			importedByHooks:   map[string]bool{"example.com/app/hooks": true},
 			goldenFile:        "",
 			testMode:          true,
-			testHooks:         []string{"example.com/app/hooks"},
 		},
 		{
 			// Only the hook that imports this package is dropped. Other hooks stay.
@@ -171,7 +169,6 @@ func TestAddDeps(t *testing.T) {
 			importedByHooks:   map[string]bool{"example.com/app/hooks": true},
 			goldenFile:        "hook_imports_package_and_external_hook.otelc.runtime.go.golden",
 			testMode:          true,
-			testHooks:         []string{"example.com/app/hooks"},
 		},
 		{
 			// The rule targets the very package its hook imports. The cycle is

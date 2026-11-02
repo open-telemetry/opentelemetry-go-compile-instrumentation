@@ -378,10 +378,9 @@ func collectFileRules(
 // addDeps generates and writes otelc.runtime.go with required imports and variable
 // declarations for OpenTelemetry instrumentation based on matched rules.
 //
-// Rules that keep their hook code in pkg itself are dropped, since a generated
-// file cannot import the package it belongs to. `otelc go test ./...` selects
-// such a package when the hooks live in the application module.
-
+// Hooks whose packages import pkg cannot be imported by pkg's generated
+// runtime file without creating an import cycle. During `otelc go test ./...`,
+// those hooks are linked through a generated external test package instead.
 func (sp *setupPhase) addDeps(
 	ctx context.Context,
 	matched []*rule.InstRuleSet,

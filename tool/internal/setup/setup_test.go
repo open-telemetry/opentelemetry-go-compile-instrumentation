@@ -2138,7 +2138,9 @@ func TestHookImportsError(t *testing.T) {
 			FileRules: []*rule.InstFileRule{{Path: "example.com/app/hooks"}},
 		},
 	}
-	_, err := hookImports(context.Background(), []string{"-C"}, matched)
+	sp := newTestSetupPhase()
+	sp.buildFlags = []string{"-C"}
+	_, err := sp.hookImports(context.Background(), matched)
 	if err == nil {
 		t.Fatal("expected error for malformed build flags, got nil")
 	}
@@ -2150,7 +2152,8 @@ func TestHookImportsErrorOnBrokenHookPackage(t *testing.T) {
 			FileRules: []*rule.InstFileRule{{Path: "example.com/this-package-does-not-exist"}},
 		},
 	}
-	_, err := hookImports(context.Background(), nil, matched)
+	sp := newTestSetupPhase()
+	_, err := sp.hookImports(context.Background(), matched)
 	if err == nil {
 		t.Fatal("expected error for a hook package that fails to load, got nil")
 	}
