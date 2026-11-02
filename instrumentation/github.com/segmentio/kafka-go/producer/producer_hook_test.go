@@ -67,16 +67,15 @@ func TestBeforeWriteMessages_InjectsHeadersAndStartsSpans(t *testing.T) {
 	ictx := hooktest.NewMockHookContext(w, context.Background(), msgs)
 	BeforeWriteMessages(ictx, w, context.Background(), msgs...)
 
-	// Each message must carry the propagated trace context.
-	for i := range msgs {
-		hc := kafkaprop.NewHeaderCarrier(&msgs[i].Headers)
-		assert.NotEmpty(t, hc.Get("traceparent"), "message %d missing traceparent", i)
-	}
-
-	// The (header-injected) slice must be written back for the real call.
+	// The header-injected slice must be written back for the real call, and
+	// each message in it must carry the propagated trace context.
 	written, ok := ictx.GetParam(2).([]kafka.Message)
 	require.True(t, ok)
 	require.Len(t, written, 2)
+	for i := range written {
+		hc := kafkaprop.NewHeaderCarrier(&written[i].Headers)
+		assert.NotEmpty(t, hc.Get("traceparent"), "message %d missing traceparent", i)
+	}
 
 	AfterWriteMessages(ictx, nil)
 
@@ -95,6 +94,81 @@ func TestBeforeWriteMessages_InjectsHeadersAndStartsSpans(t *testing.T) {
 	assert.Equal(t, "localhost", m["server.address"])
 	assert.Equal(t, int64(9092), m["server.port"])
 	assert.Equal(t, "k1", m["messaging.kafka.message.key"])
+}
+
+func TestBeforeWriteMessages_DoesNotModifyCallerMessages(t *testing.T) {
+	setupTest(t)
+
+	w := &kafka.Writer{Addr: kafka.TCP("localhost:9092"), Topic: "orders"}
+	msgs := []kafka.Message{
+		{Value: []byte("a"), Headers: []kafka.Header{{Key: "app", Value: []byte("x")}}},
+		{Value: []byte("b")},
+	}
+
+	ictx := hooktest.NewMockHookContext(w, context.Background(), msgs)
+	BeforeWriteMessages(ictx, w, context.Background(), msgs...)
+	AfterWriteMessages(ictx, nil)
+
+	assert.Equal(t, []kafka.Header{{Key: "app", Value: []byte("x")}}, msgs[0].Headers)
+	assert.Nil(t, msgs[1].Headers)
+
+	written, ok := ictx.GetParam(2).([]kafka.Message)
+	require.True(t, ok)
+	hc := kafkaprop.NewHeaderCarrier(&written[0].Headers)
+	assert.Equal(t, "x", hc.Get("app"), "existing headers must be kept")
+	assert.NotEmpty(t, hc.Get("traceparent"))
+}
+
+// Messages built from one base header slice share its backing array. Each
+// message must still get the trace context of its own span.
+func TestBeforeWriteMessages_SharedHeaderBackingArray(t *testing.T) {
+	sr := setupTest(t)
+
+	base := make([]kafka.Header, 0, 4)
+	base = append(base, kafka.Header{Key: "app", Value: []byte("x")})
+	w := &kafka.Writer{Addr: kafka.TCP("localhost:9092"), Topic: "orders"}
+	msgs := []kafka.Message{
+		{Value: []byte("a"), Headers: base},
+		{Value: []byte("b"), Headers: base},
+	}
+
+	ictx := hooktest.NewMockHookContext(w, context.Background(), msgs)
+	BeforeWriteMessages(ictx, w, context.Background(), msgs...)
+	AfterWriteMessages(ictx, nil)
+
+	written, ok := ictx.GetParam(2).([]kafka.Message)
+	require.True(t, ok)
+	spans := sr.Ended()
+	require.Len(t, spans, 2)
+	for i := range written {
+		ctx := propagation.TraceContext{}.Extract(context.Background(),
+			kafkaprop.NewHeaderCarrier(&written[i].Headers))
+		assert.Equal(t, spans[i].SpanContext().SpanID(), trace.SpanContextFromContext(ctx).SpanID(),
+			"message %d carries another message's span", i)
+	}
+}
+
+// Run with -race: writing the same messages through two writers concurrently
+// must not race on their headers.
+func TestBeforeWriteMessages_ConcurrentCallsShareMessages(t *testing.T) {
+	setupTest(t)
+
+	msgs := []kafka.Message{
+		{Value: []byte("a"), Headers: []kafka.Header{{Key: "app", Value: []byte("x")}}},
+	}
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			w := &kafka.Writer{Addr: kafka.TCP("localhost:9092"), Topic: "orders"}
+			ictx := hooktest.NewMockHookContext(w, context.Background(), msgs)
+			BeforeWriteMessages(ictx, w, context.Background(), msgs...)
+			AfterWriteMessages(ictx, nil)
+		})
+	}
+	wg.Wait()
+
+	assert.Equal(t, []kafka.Header{{Key: "app", Value: []byte("x")}}, msgs[0].Headers)
 }
 
 func TestBeforeWriteMessages_InvalidUTF8MessageKey(t *testing.T) {
