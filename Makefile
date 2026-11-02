@@ -99,7 +99,7 @@ $(BUNDLE): $(wildcard $(TOOLS_DIR)/bundle/*.go) $(TOOLS_DIR)/bundle/go.mod | $(T
 	cd $(TOOLS_DIR)/bundle && GOWORK=off go build -o $@
 
 EMBEDMD = $(TOOLS)/embedmd
-$(EMBEDMD): PACKAGE=github.com/campoy/embedmd
+$(EMBEDMD): PACKAGE=github.com/campoy/embedmd/v2
 
 CHECKMAKE = $(TOOLS)/checkmake
 $(CHECKMAKE): PACKAGE=github.com/checkmake/checkmake/cmd/checkmake
