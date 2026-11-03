@@ -224,8 +224,8 @@ func TestApplyDeclRule_WrapExpression_InvalidTemplateSkipsImports(t *testing.T) 
 }
 
 func TestApplyDeclRule_ReplaceSuccess_AddsImports(t *testing.T) {
-	// The replacement expression must reference the declared alias, since
-	// addRuleImports now adds only the aliases the rewrite actually uses.
+	// The replacement expression uses the alias configured by the rule,
+	// which addRuleImports adds to the target file.
 	file := makeVarFile("X", &dst.BasicLit{Kind: token.INT, Value: "1"})
 	r := &rule.InstDeclRule{
 		InstBaseRule: rule.InstBaseRule{
@@ -397,7 +397,7 @@ func TestDeclRuleReplaceHandlesConstIotaImplicitRepeat(t *testing.T) {
 	assert.Contains(t, renderFile(t, file), "B = 99")
 }
 
-func TestApplyDeclRule_ReplaceAliasMismatchUsesFileExistingAlias(t *testing.T) {
+func TestApplyDeclRule_ReplaceAddsRuleAliasAlongsideExistingAlias(t *testing.T) {
 	// The rule's replacement value is written against the alias "traced" for
 	// "fmt". The file already imports "fmt" under its own alias "f". The
 	// injected value must use "f", not fail the build.
@@ -424,7 +424,7 @@ var X = 1
 	assert.Equal(t, 2, countImportSpecs(file), "both import aliases should be present")
 }
 
-func TestApplyDeclRule_WrapAliasMismatchUsesFileExistingAlias(t *testing.T) {
+func TestApplyDeclRule_WrapAddsRuleAliasAlongsideExistingAlias(t *testing.T) {
 	// Same mismatch as above, exercised through wrap instead of replace,
 	// since the two are rewritten at different points.
 	file := parseTestFile(t, `package main

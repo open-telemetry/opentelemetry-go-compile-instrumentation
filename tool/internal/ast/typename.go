@@ -159,20 +159,19 @@ func importAliasMap(file *dst.File, resolvedNames map[string]string, allowGuess 
 		return nil
 	}
 	var specs []*dst.ImportSpec
-	if len(file.Imports) > 0 {
-		specs = file.Imports
-	} else {
-		for _, decl := range file.Decls {
-			genDecl, ok := decl.(*dst.GenDecl)
-			if !ok || genDecl.Tok != token.IMPORT {
-				continue
-			}
-			for _, spec := range genDecl.Specs {
-				if importSpec, isImport := spec.(*dst.ImportSpec); isImport {
-					specs = append(specs, importSpec)
-				}
+	for _, decl := range file.Decls {
+		genDecl, ok := decl.(*dst.GenDecl)
+		if !ok || genDecl.Tok != token.IMPORT {
+			continue
+		}
+		for _, spec := range genDecl.Specs {
+			if importSpec, isImport := spec.(*dst.ImportSpec); isImport {
+				specs = append(specs, importSpec)
 			}
 		}
+	}
+	if len(specs) == 0 {
+		specs = file.Imports
 	}
 
 	aliases := make(map[string]string, len(specs))

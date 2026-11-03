@@ -593,6 +593,23 @@ func TestFindNew_MultiAliasSets(t *testing.T) {
 	assert.Empty(t, result.NewImports, "alias a already names fmt in the file")
 }
 
+func TestAddToFile_RejectsFileScopeAliasCollision(t *testing.T) {
+	root := &dst.File{
+		Decls: []dst.Decl{
+			&dst.GenDecl{
+				Tok: token.VAR,
+				Specs: []dst.Spec{
+					&dst.ValueSpec{Names: []*dst.Ident{dst.NewIdent("traced")}},
+				},
+			},
+		},
+	}
+
+	err := AddToFile(t.Context(), root, map[string]string{"traced": "fmt"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "file-scope declaration")
+}
+
 func TestCollectImportPaths(t *testing.T) {
 	tests := []struct {
 		name     string

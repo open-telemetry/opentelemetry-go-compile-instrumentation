@@ -100,14 +100,9 @@ type callTemplateData struct {
 
 // callSite describes where the wrapped call sits.
 type callSite struct {
-	// methodCall is true when the call was matched by method_call, so the X
-	// of its selector is the receiver expression.
 	methodCall bool
-	// deferred is true when the call is the call of a defer or go statement.
-	deferred bool
-	// clone copies the receiver or an argument of the call into the template
-	// output. Nil means dst.Clone.
-	clone func(dst.Expr) dst.Expr
+	deferred   bool
+	clone      func(dst.Expr) dst.Expr
 }
 
 // String implements fmt.Stringer so "{{ . }}" renders as placeholderIdent.
@@ -194,63 +189,24 @@ func (d *callTemplateData) FuncReturnOfType(typeStr string) (string, error) {
 	return d.enclosing.FuncReturnOfType(typeStr)
 }
 
-// renderingCallTemplateData wraps callTemplateData for use as text/template
-// render data. Use callTemplateData directly when the real name is needed
-// instead of the marked one, such as in tests.
+// renderingCallTemplateData wraps callTemplateData for template rendering.
+// It tracks which parts of the wrapped call are rendered.
 type renderingCallTemplateData struct {
 	*callTemplateData
 
-	// rendered records which parts of the wrapped call the template
-	// rendered, so compileExpression can verify every placeholder was
-	// swapped for the real AST and check the evaluation of those parts.
 	rendered *renderedCallParts
 }
 
-// renderedCallParts records the call parts rendered by a template.
 type renderedCallParts struct {
-	// args holds each index rendered by {{ .CallArgument N }}.
-	args map[int]bool
-	// receiver is true when {{ .CallReceiver }} was rendered.
-	receiver bool
-	// argumentList is true when {{ .CallArguments }} was rendered.
+	args         map[int]bool
+	receiver     bool
 	argumentList bool
-}
-
-func (d renderingCallTemplateData) FuncName() (string, error) {
-	name, err := d.callTemplateData.FuncName()
-	return markDynamicIdent(name), err
-}
-
-func (d renderingCallTemplateData) FuncArgument(idx int) (string, error) {
-	name, err := d.callTemplateData.FuncArgument(idx)
-	return markDynamicIdent(name), err
-}
-
-func (d renderingCallTemplateData) FuncReturn(idx int) (string, error) {
-	name, err := d.callTemplateData.FuncReturn(idx)
-	return markDynamicIdent(name), err
-}
-
-func (d renderingCallTemplateData) Receiver() (string, error) {
-	name, err := d.callTemplateData.Receiver()
-	return markDynamicIdent(name), err
-}
-
-func (d renderingCallTemplateData) FuncArgumentOfType(typeStr string) (string, error) {
-	name, err := d.callTemplateData.FuncArgumentOfType(typeStr)
-	return markDynamicIdent(name), err
-}
-
-func (d renderingCallTemplateData) FuncReturnOfType(typeStr string) (string, error) {
-	name, err := d.callTemplateData.FuncReturnOfType(typeStr)
-	return markDynamicIdent(name), err
 }
 
 // CallArgument renders the idx-th (0-indexed) argument of the wrapped call
 // expression as a fixed placeholder (see callArgPlaceholderIdent) instead of
-// the argument's source text, so replaceQualifierAliases cannot rewrite the
-// argument's own code. compileExpression swaps the placeholder for a copy of
-// the argument AST after the rewrite. Validation and error messages match
+// the argument's source text, so placeholder restoration can preserve the
+// argument's own AST. Validation and error messages match
 // callTemplateData.CallArgument. Template usage: {{.CallArgument N}}
 func (d renderingCallTemplateData) CallArgument(idx int) (string, error) {
 	if err := d.checkCallArgument(idx); err != nil {
@@ -389,18 +345,18 @@ func (d *callTemplateData) checkCallReceiver() error {
 // FuncArgumentOfType / FuncReturnOfType need it to resolve aliased imports
 // and packages that share a default name. Pass nil when no import context
 // is available.
-// aliasOverrides maps each rule alias to the file's alias.
 //
 // The process:
 //  1. Execute the template with fixed placeholder strings (_.PLACEHOLDER_0 for
 //     "{{ . }}", _.CALLARG_<N> for "{{ .CallArgument N }}" and
 //     "{{ .CallArguments }}", _.CALLRECV for "{{ .CallReceiver }}")
 //  2. Parse the result as a Go statement snippet
-//  3. Rewrite the rule's own qualifiers in that parsed result
-//  4. Replace the placeholders with the actual AST nodes, which keeps the
-//     target's own code untouched by the rewrite in step 3
+//  3. Replace the placeholders with the actual AST nodes.
 func (t *callTemplate) compileExpression(
-	node dst.Expr, site callSite, enclosing *dst.FuncDecl, imports, aliasOverrides map[string]string,
+	node dst.Expr,
+	site callSite,
+	enclosing *dst.FuncDecl,
+	imports map[string]string,
 ) (dst.Expr, error) {
 	data := &callTemplateData{clone: site.clone}
 	if data.clone == nil {
@@ -450,9 +406,6 @@ func (t *callTemplate) compileExpression(
 				"or {{ .CallArgument N }}\nGenerated code:\n%s", userResult,
 		)
 	}
-
-	replaceQualifierAliases(exprStmt.X, aliasOverrides)
-	stripDynamicIdents(exprStmt.X)
 
 	if rendered.receiver || rendered.argumentList || len(rendered.args) > 0 {
 		if err = checkCallPartsEvaluation(exprStmt.X, data, site.deferred); err != nil {

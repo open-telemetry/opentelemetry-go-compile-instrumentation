@@ -163,6 +163,7 @@ func AddToFile(ctx context.Context, root *dst.File, newImports map[string]string
 	}
 
 	existingImports := getExisting(ctx, root, buildFlags...)
+	fileNames := collectFileScopeNames(root)
 
 	// Check for conflicts: same alias but different path
 	for alias, newPath := range newImports {
@@ -175,6 +176,10 @@ func AddToFile(ctx context.Context, root *dst.File, newImports map[string]string
 					alias, existingPath, newPath)
 			}
 			delete(newImports, alias)
+			continue
+		}
+		if fileNames[alias] {
+			return ex.Newf("import conflict: alias %q conflicts with a file-scope declaration", alias)
 		}
 	}
 
@@ -212,6 +217,41 @@ func AddToFile(ctx context.Context, root *dst.File, newImports map[string]string
 	}
 
 	return nil
+}
+
+func collectFileScopeNames(root *dst.File) map[string]bool {
+	names := make(map[string]bool)
+	for _, decl := range root.Decls {
+		switch d := decl.(type) {
+		case *dst.FuncDecl:
+			if d.Recv == nil && d.Name != nil {
+				names[d.Name.Name] = true
+			}
+		case *dst.GenDecl:
+			collectGenDeclNames(names, d)
+		}
+	}
+	return names
+}
+
+func collectGenDeclNames(names map[string]bool, decl *dst.GenDecl) {
+	if decl.Tok == token.IMPORT {
+		return
+	}
+	for _, spec := range decl.Specs {
+		switch s := spec.(type) {
+		case *dst.TypeSpec:
+			if s.Name != nil {
+				names[s.Name.Name] = true
+			}
+		case *dst.ValueSpec:
+			for _, name := range s.Names {
+				if name != nil {
+					names[name.Name] = true
+				}
+			}
+		}
+	}
 }
 
 // CollectImportPaths returns a map of all unique import paths declared in root

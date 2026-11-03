@@ -41,31 +41,17 @@ func (ip *instrumentPhase) applyDirectiveRule(
 		return false, ex.Wrap(err)
 	}
 
-	imports, aliasOverrides := ip.resolveImportOverrides(root, r.Imports)
+	importAliases := ast.ImportAliasMap(root, ip.importNames)
 
 	for _, match := range matches {
 		funcDecl, name := ip.directiveTarget(match)
 		util.Assert(funcDecl.Body != nil, "function must have a body")
-		if err = checkAliasOverrideShadowing(aliasOverrides, funcDecl); err != nil {
-			return false, ex.Wrapf(err, "checking import aliases for func %s", name)
-		}
-		// A literal's body can also be shadowed by the names in scope around it.
-		if match.Lit != nil {
-			switch enclosing := match.Enclosing.(type) {
-			case *dst.FuncDecl:
-				err = checkAliasOverrideShadowingAt(aliasOverrides, enclosing, match.Lit)
-			case *dst.GenDecl:
-				err = checkAliasOverrideShadowingInDecl(aliasOverrides, enclosing, match.Lit)
-			}
-			if err != nil {
-				return false, ex.Wrapf(err, "checking import aliases for func %s", name)
-			}
-		}
+
 		var (
 			snippet string
 			stmts   []dst.Stmt //nolint:prealloc // Slice allocated by `p.ParseSnippet`
 		)
-		snippet, err = renderDirective(tmpl, newFuncTemplateData(funcDecl, match.Args, imports, r.Identity()))
+		snippet, err = renderDirective(tmpl, newFuncTemplateData(funcDecl, match.Args, importAliases, r.Identity()))
 		if err != nil {
 			return false, ex.Wrapf(err, "rendering template for func %s", name)
 		}
@@ -73,10 +59,6 @@ func (ip *instrumentPhase) applyDirectiveRule(
 		stmts, err = p.ParseSnippet(snippet)
 		if err != nil {
 			return false, ex.Wrapf(err, "parsing rendered template for func %s", name)
-		}
-		for _, stmt := range stmts {
-			replaceQualifierAliases(stmt, aliasOverrides)
-			stripDynamicIdents(stmt)
 		}
 		funcDecl.Body.List = append(stmts, funcDecl.Body.List...)
 		ip.Info("Apply directive rule", "rule", r, "func", name)
@@ -87,7 +69,7 @@ func (ip *instrumentPhase) applyDirectiveRule(
 	if importErr := ip.addRuleImports(
 		ctx,
 		root,
-		usedRuleImports(root, r.Imports, aliasOverrides),
+		usedRuleImports(root, r.Imports),
 		r.Name,
 	); importErr != nil {
 		return false, importErr
@@ -137,5 +119,5 @@ func (ip *instrumentPhase) position(node dst.Node) string {
 // renderDirective executes the template with the given data and returns the
 // resulting Go source snippet.
 func renderDirective(tmpl *rule.FuncTemplate, data *funcTemplateData) (string, error) {
-	return tmpl.Execute(renderingFuncTemplateData{data})
+	return tmpl.Execute(data)
 }
