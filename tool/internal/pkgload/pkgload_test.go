@@ -34,6 +34,37 @@ func TestCollectPackageNames(t *testing.T) {
 	}, names)
 }
 
+func TestCollectPackageNames_TestVariantImports(t *testing.T) {
+	// The in-package test variant shares PkgPath with the base package but has
+	// a distinct ID (e.g. "example.com/a [example.com/a.test]"). Imports used
+	// only by _test.go files must still be collected into the name table.
+	helper := &packages.Package{
+		ID:      "example.com/helper",
+		PkgPath: "example.com/helper",
+		Name:    "helper",
+	}
+	basePkg := &packages.Package{
+		ID:      "example.com/a",
+		PkgPath: "example.com/a",
+		Name:    "apkg",
+	}
+	testPkg := &packages.Package{
+		ID:      "example.com/a [example.com/a.test]",
+		PkgPath: "example.com/a",
+		Name:    "apkg",
+		Imports: map[string]*packages.Package{
+			"example.com/helper": helper,
+		},
+	}
+
+	names := CollectPackageNames([]*packages.Package{basePkg, testPkg})
+
+	assert.Equal(t, map[string]string{
+		"example.com/a":      "apkg",
+		"example.com/helper": "helper",
+	}, names)
+}
+
 func TestCollectPackageNames_SkipsEmptyName(t *testing.T) {
 	pkg := &packages.Package{PkgPath: "example.com/broken", Name: ""}
 
@@ -72,13 +103,23 @@ func TestLoadPackagesWithChangeDirectoryFlag(t *testing.T) {
 	))
 	t.Chdir(tmpDir)
 
-	for _, buildFlags := range [][]string{{"-C", "app"}, {"-C=app"}} {
+	// The go command accepts the flag with one or two dashes.
+	for _, buildFlags := range [][]string{{"-C", "app"}, {"-C=app"}, {"--C", "app"}, {"--C=app"}} {
 		pkgs, err := LoadPackages(t.Context(), packages.NeedName|packages.NeedModule, buildFlags, false, ".")
-		require.NoError(t, err)
+		require.NoError(t, err, "%v", buildFlags)
 		require.Len(t, pkgs, 1)
 		require.NotNil(t, pkgs[0].Module)
 		assert.Equal(t, "example.com/app", pkgs[0].Module.Path)
+
+		dir, err := BuildDir(buildFlags)
+		require.NoError(t, err)
+		assert.Equal(t, appDir, dir, "%v", buildFlags)
+		_, filtered, err := loadDirFromBuildFlags(append(slices.Clone(buildFlags), "-trimpath"))
+		require.NoError(t, err)
+		assert.Equal(t, []string{"-trimpath"}, filtered, "the -C flag is removed: %v", buildFlags)
 	}
+	_, err := BuildDir([]string{"--C"})
+	require.Error(t, err, "--C without a value")
 }
 
 func TestResolvePackageName(t *testing.T) {

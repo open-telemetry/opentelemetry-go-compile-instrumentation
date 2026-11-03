@@ -6,6 +6,7 @@ package semconv
 import (
 	"net"
 	"strconv"
+	"strings"
 
 	"go.opentelemetry.io/otel/attribute"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
@@ -21,27 +22,29 @@ type RedisRequest struct {
 // can return: five required fields plus server.port.
 const redisClientRequestAttrCap = 6
 
+const failoverClientPlaceholder = "FailoverClient"
+
 // RedisClientRequestTraceAttrs returns trace attributes for a Redis client request.
 func RedisClientRequestTraceAttrs(req RedisRequest) []attribute.KeyValue {
-	host, portStr, err := net.SplitHostPort(req.Endpoint)
-	if err != nil {
-		host = req.Endpoint
-	}
-
 	attrs := make([]attribute.KeyValue, 0, redisClientRequestAttrCap)
 	attrs = append(attrs,
 		semconv.DBSystemNameRedis,
 		semconv.DBOperationName(req.FullName),
-		semconv.ServerAddress(host),
-		semconv.NetworkTransportTCP,
-		semconv.DBQueryText(req.Statement),
 	)
-
-	if err == nil {
-		if port, convErr := strconv.Atoi(portStr); convErr == nil && port > 0 {
-			attrs = append(attrs, semconv.ServerPort(port))
+	host, portStr, err := net.SplitHostPort(req.Endpoint)
+	if err != nil {
+		host = req.Endpoint
+	}
+	host = strings.TrimPrefix(host, "[")
+	host = strings.TrimSuffix(host, "]")
+	if host != "" && host != failoverClientPlaceholder {
+		attrs = append(attrs, semconv.ServerAddress(host))
+		if err == nil {
+			if port, convErr := strconv.Atoi(portStr); convErr == nil && port > 0 {
+				attrs = append(attrs, semconv.ServerPort(port))
+			}
 		}
 	}
-
+	attrs = append(attrs, semconv.NetworkTransportTCP, semconv.DBQueryText(req.Statement))
 	return attrs
 }

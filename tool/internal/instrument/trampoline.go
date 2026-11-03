@@ -182,6 +182,14 @@ func getHookFuncName(t *rule.InstFuncRule, before bool) string {
 	return t.After
 }
 
+// hookLinkName is the local //go:linkname stub for a hook. The path hash
+// keeps two hooks with the same short name from different packages distinct,
+// and keeps the stub from colliding with a function of that name in the
+// target file.
+func hookLinkName(path, fnName string) string {
+	return "otelc_hook_" + util.CRC32(path) + "_" + fnName
+}
+
 func isHookDefined(root *dst.File, rule *rule.InstFuncRule) bool {
 	if rule.Before != "" {
 		decl := ast.FindFuncDeclWithoutRecv(root, rule.Before)
@@ -513,7 +521,7 @@ func (ip *instrumentPhase) callBeforeHook(t *rule.InstFuncRule) {
 			}
 		}
 	}
-	fnName := getHookFuncName(t, trampolineBefore)
+	fnName := hookLinkName(t.Path, getHookFuncName(t, trampolineBefore))
 	call := ast.ExprStmt(ast.CallTo(fnName, nil, args))
 	iff := &dst.IfStmt{Cond: ip.hookGuardCond(fnName), Body: ast.Block(call)}
 	insertAt(ip.beforeTrampFunc, iff, len(ip.beforeTrampFunc.Body.List)-1)
@@ -534,7 +542,7 @@ func (ip *instrumentPhase) callAfterHook(t *rule.InstFuncRule) {
 			args = append(args, ast.DereferenceOf(ast.Ident(name.Name)))
 		}
 	}
-	fnName := getHookFuncName(t, trampolineAfter)
+	fnName := hookLinkName(t.Path, getHookFuncName(t, trampolineAfter))
 	call := ast.ExprStmt(ast.CallTo(fnName, nil, args))
 	iff := &dst.IfStmt{Cond: ip.hookGuardCond(fnName), Body: ast.Block(call)}
 	insertAtEnd(ip.afterTrampFunc, iff)
@@ -570,7 +578,18 @@ func suppressHooksCall(funcName string, selfPackage bool) *dst.CallExpr {
 }
 
 func (ip *instrumentPhase) addHookDecl(t *rule.InstFuncRule, paramTypes *dst.FieldList, before bool) error {
-	fnName := getHookFuncName(t, before)
+	origName := getHookFuncName(t, before)
+	fnName := hookLinkName(t.Path, origName)
+	if ip.emittedHookDecls == nil {
+		ip.emittedHookDecls = make(map[string]struct{})
+	}
+	if _, seen := ip.emittedHookDecls[fnName]; seen {
+		return nil
+	}
+	if ast.FindFuncDeclWithoutRecv(ip.target, fnName) != nil {
+		ip.emittedHookDecls[fnName] = struct{}{}
+		return nil
+	}
 	funcDecl := &dst.FuncDecl{
 		Name: ast.Ident(fnName),
 		Type: &dst.FuncType{
@@ -579,15 +598,12 @@ func (ip *instrumentPhase) addHookDecl(t *rule.InstFuncRule, paramTypes *dst.Fie
 		},
 		Decs: dst.FuncDeclDecorations{
 			NodeDecs: ast.LineComments(
-				fmt.Sprintf("//go:linkname %s %s.%s", fnName, t.Path, fnName),
+				fmt.Sprintf("//go:linkname %s %s.%s", fnName, t.Path, origName),
 			),
 		},
 	}
-
-	exist := ast.FindFuncDeclWithoutRecv(ip.target, fnName)
-	if exist == nil {
-		ip.addDecl(funcDecl)
-	}
+	ip.addDecl(funcDecl)
+	ip.emittedHookDecls[fnName] = struct{}{}
 	return nil
 }
 
@@ -1165,37 +1181,56 @@ func desugarType(param *dst.Field) dst.Expr {
 	return param.Type
 }
 
-func rewriteParamMethods(targetFunc *dst.FuncDecl, methodSetParam, methodGetParam *dst.BlockStmt) {
+func rewriteParamMethods(
+	targetFunc *dst.FuncDecl,
+	genericTypes *dst.FieldList,
+	methodSetParam, methodGetParam *dst.BlockStmt,
+) {
 	idx := 0
-	if ast.HasReceiver(targetFunc) {
-		recvType := targetFunc.Recv.List[0].Type
-		clause := setParamClause(idx, recvType)
-		methodSetParam.List = append(methodSetParam.List, clause)
-		clause = getParamClause(idx, recvType)
-		methodGetParam.List = append(methodGetParam.List, clause)
+	addClause := func(t dst.Expr) {
+		if referencesTypeParameter(t, genericTypes) {
+			methodSetParam.List = append(methodSetParam.List,
+				panicClause(idx, fmt.Sprintf("SetParam is unsupported for generic parameter at index %d", idx)))
+			methodGetParam.List = append(methodGetParam.List,
+				panicClause(idx, fmt.Sprintf("GetParam is unsupported for generic parameter at index %d", idx)))
+			idx++
+			return
+		}
+		methodSetParam.List = append(methodSetParam.List, setParamClause(idx, t))
+		methodGetParam.List = append(methodGetParam.List, getParamClause(idx, t))
 		idx++
+	}
+
+	if ast.HasReceiver(targetFunc) {
+		addClause(targetFunc.Recv.List[0].Type)
 	}
 	for _, param := range targetFunc.Type.Params.List {
 		paramType := desugarType(param)
 		for range param.Names {
-			clause := setParamClause(idx, paramType)
-			methodSetParam.List = append(methodSetParam.List, clause)
-			clause = getParamClause(idx, paramType)
-			methodGetParam.List = append(methodGetParam.List, clause)
-			idx++
+			addClause(paramType)
 		}
 	}
 }
 
-func rewriteReturnValMethods(targetFunc *dst.FuncDecl, methodSetRetVal, methodGetRetVal *dst.BlockStmt) {
+func rewriteReturnValMethods(
+	targetFunc *dst.FuncDecl,
+	genericTypes *dst.FieldList,
+	methodSetRetVal, methodGetRetVal *dst.BlockStmt,
+) {
 	idx := 0
 	for _, retval := range targetFunc.Type.Results.List {
 		retType := desugarType(retval)
 		for range retval.Names {
-			clause := getReturnValClause(idx, retType)
-			methodGetRetVal.List = append(methodGetRetVal.List, clause)
-			clause = setReturnValClause(idx, retType)
-			methodSetRetVal.List = append(methodSetRetVal.List, clause)
+			if referencesTypeParameter(retType, genericTypes) {
+				getMsg := fmt.Sprintf("GetReturnVal is unsupported for generic return value at index %d", idx)
+				setMsg := fmt.Sprintf("SetReturnVal is unsupported for generic return value at index %d", idx)
+				methodGetRetVal.List = append(methodGetRetVal.List, panicClause(idx, getMsg))
+				methodSetRetVal.List = append(methodSetRetVal.List, panicClause(idx, setMsg))
+				idx++
+				continue
+			}
+			methodGetRetVal.List = append(methodGetRetVal.List, getReturnValClause(idx, retType))
+			methodSetRetVal.List = append(methodSetRetVal.List, setReturnValClause(idx, retType))
 			idx++
 		}
 	}
@@ -1217,14 +1252,9 @@ func (ip *instrumentPhase) rewriteHookContextMethods() {
 		}
 	}
 
-	// For generic functions, we need to panic the methods that are not supported
-	if findTargetGenericType(ip.target, ip.targetFunc) != nil {
-		makeMethodPanic(methodGetParam, "GetParam is unsupported for generic functions")
-		makeMethodPanic(methodGetRetVal, "GetReturnVal is unsupported for generic functions")
-		makeMethodPanic(methodSetParam, "SetParam is unsupported for generic functions")
-		makeMethodPanic(methodSetRetVal, "SetReturnVal is unsupported for generic functions")
-		return
-	}
+	// Type parameters aren't in scope in the non-generic HookContextImpl methods.
+	// Only slots that reference them must panic.
+	genericTypes := findTargetGenericType(ip.target, ip.targetFunc)
 
 	// nil handling now lives inside each case, so the type switch is always the
 	// first statement of every Get/Set method.
@@ -1236,18 +1266,18 @@ func (ip *instrumentPhase) rewriteHookContextMethods() {
 	}
 	methodSetParamBody := findSwitchBlock(methodSetParam)
 	methodGetParamBody := findSwitchBlock(methodGetParam)
-	rewriteParamMethods(ip.targetFunc, methodSetParamBody, methodGetParamBody)
+	rewriteParamMethods(ip.targetFunc, genericTypes, methodSetParamBody, methodGetParamBody)
 
 	// Rewrite SetReturnVal and GetReturnVal methods
 	if ip.targetFunc.Type.Results != nil {
 		methodSetRetValBody := findSwitchBlock(methodSetRetVal)
 		methodGetRetValBody := findSwitchBlock(methodGetRetVal)
-		rewriteReturnValMethods(ip.targetFunc, methodSetRetValBody, methodGetRetValBody)
+		rewriteReturnValMethods(ip.targetFunc, genericTypes, methodSetRetValBody, methodGetRetValBody)
 	}
 }
 
-// makeMethodPanic replaces a method's body with a panic statement
-func makeMethodPanic(method *dst.FuncDecl, message string) {
+// panicClause returns a switch case that panics with message.
+func panicClause(idx int, message string) *dst.CaseClause {
 	panicStmt := ast.ExprStmt(
 		ast.CallTo("panic", nil, []dst.Expr{
 			&dst.BasicLit{
@@ -1256,7 +1286,7 @@ func makeMethodPanic(method *dst.FuncDecl, message string) {
 			},
 		}),
 	)
-	method.Body.List = []dst.Stmt{panicStmt}
+	return ast.SwitchCase(ast.Exprs(ast.IntLit(idx)), ast.Stmts(panicStmt))
 }
 
 // containsTypeParameterInExprs checks if any expression in exprs contains a type parameter
@@ -1284,7 +1314,7 @@ func containsTypeParameterInFields(fields, typeParams *dst.FieldList) bool {
 
 // containsTypeParameter checks if a type expression contains any type parameters
 func containsTypeParameter(t dst.Expr, typeParams *dst.FieldList) bool {
-	if typeParams == nil {
+	if typeParams == nil || t == nil {
 		return false
 	}
 	if isTypeParameter(t, typeParams) {
@@ -1324,7 +1354,7 @@ func containsTypeParameter(t dst.Expr, typeParams *dst.FieldList) bool {
 
 // isTypeParameter checks if a type expression is a bare type parameter identifier
 func isTypeParameter(t dst.Expr, typeParams *dst.FieldList) bool {
-	if typeParams == nil {
+	if typeParams == nil || t == nil {
 		return false
 	}
 	ident, ok := t.(*dst.Ident)
@@ -1340,6 +1370,12 @@ func isTypeParameter(t dst.Expr, typeParams *dst.FieldList) bool {
 		}
 	}
 	return false
+}
+
+// referencesTypeParameter checks if a type expression references a type parameter.
+// Parameter and field names that match a type-parameter name do not count as type references.
+func referencesTypeParameter(t dst.Expr, typeParams *dst.FieldList) bool {
+	return containsTypeParameter(t, typeParams)
 }
 
 // replaceTypeParamsWithAny widens any type expression containing type parameters to interface{}.

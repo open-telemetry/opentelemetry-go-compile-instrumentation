@@ -898,6 +898,21 @@ func TestFindModVersion(t *testing.T) {
 			want: "v2.2.0+incompatible",
 		},
 		{
+			name: "module cache path with escaped uppercase prerelease",
+			path: "/go/pkg/mod/github.com/foo/bar@v1.2.0-!r!c1/pkg/foo.go",
+			want: "v1.2.0-RC1",
+		},
+		{
+			name: "module cache path with escaped mixed-case prerelease",
+			path: "/go/pkg/mod/github.com/foo/bar@v2.0.0-!beta.1/pkg/foo.go",
+			want: "v2.0.0-Beta.1",
+		},
+		{
+			name: "module cache path with invalid escape falls back to raw",
+			path: "/go/pkg/mod/github.com/foo/bar@v1.2.0-!/pkg/foo.go",
+			want: "v1.2.0-!",
+		},
+		{
 			name: "windows-style module cache path",
 			// Use /-separated form so this exercises the same path shape
 			// filepath.ToSlash produces on Windows, without depending on GOOS
@@ -926,6 +941,28 @@ func TestFindModVersion(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, findModVersion(tt.path))
 		})
+	}
+}
+
+func TestFindGoSources_RecordsTestBuild(t *testing.T) {
+	dir := t.TempDir()
+	lib := filepath.Join(dir, "lib.go")
+	libTest := filepath.Join(dir, "lib_test.go")
+	require.NoError(t, os.WriteFile(lib, []byte("package lib\n"), 0o644))
+	require.NoError(t, os.WriteFile(libTest, []byte("package lib\n"), 0o644))
+
+	for _, tc := range []struct {
+		args   []string
+		isTest bool
+	}{
+		{[]string{"-p", "example.com/lib", lib}, false},
+		{[]string{"-p", "example.com/lib", lib, libTest}, true},
+		// The test main is generated later, so the file is not there yet.
+		{[]string{"-p", "main", "$WORK/b001/_testmain.go"}, true},
+	} {
+		dep, err := findGoSources(t.Context(), tc.args, map[string]string{})
+		require.NoError(t, err)
+		assert.Equal(t, tc.isTest, dep.IsTest, "args %v", tc.args)
 	}
 }
 

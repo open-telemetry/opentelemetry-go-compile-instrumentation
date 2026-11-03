@@ -11,6 +11,9 @@ groups:
   # standard upstream OpenTelemetry database telemetry, referenced with `ref:`.
   # `db.system.name` is always `redis`. `server.port` is emitted only when the
   # endpoint carries a parseable port.
+  # db.query.text keeps the command name and the first key; all later arguments
+  # are redacted to "?" by default (EVAL scripts and arguments fully redacted).
+  # Each unredacted argument is capped at 256 bytes.
   # ---------------------------------------------------------------------------
 
   - id: span.otelc.db.redis.client

@@ -27,11 +27,6 @@ import (
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
-// discardLogger returns a logger that drops all output, keeping test logs quiet.
-func discardLogger() *slog.Logger {
-	return slog.New(slog.DiscardHandler)
-}
-
 func TestRemoveImports(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
@@ -1410,57 +1405,6 @@ func main() {
 	require.Contains(t, string(goMod), "go.opentelemetry.io/otelc")
 }
 
-func TestPrepareVendoredBuild_NotVendored(t *testing.T) {
-	// A plain module with no vendor/ directory must be left untouched: the
-	// args come back verbatim and GOFLAGS is not forced to module mode.
-	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(
-		filepath.Join(dir, "go.mod"),
-		[]byte("module example.com/test\n\ngo 1.25\n"),
-		0o644,
-	))
-	t.Setenv(util.EnvOtelcWorkDir, dir)
-	t.Setenv("GOFLAGS", "")
-
-	args := []string{"build", "-mod=vendor", "./..."}
-	got, err := prepareVendoredBuild(t.Context(), discardLogger(), subcmdBuild, args)
-	require.NoError(t, err)
-
-	// Unchanged: not a vendored project, so no rewriting happens.
-	assert.Equal(t, args, got)
-	assert.Empty(t, os.Getenv("GOFLAGS"))
-}
-
-func TestPrepareVendoredBuild_Vendored(t *testing.T) {
-	// A module that vendors its dependencies must be switched to module mode:
-	// GOFLAGS gains -mod=mod and an explicit -mod=vendor on the command line
-	// is rewritten so it cannot re-select vendoring.
-	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(
-		filepath.Join(dir, "go.mod"),
-		[]byte("module example.com/test\n\ngo 1.25\n"),
-		0o644,
-	))
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "vendor"), 0o755))
-	require.NoError(t, os.WriteFile(
-		filepath.Join(dir, "vendor", "modules.txt"),
-		[]byte(""),
-		0o644,
-	))
-	t.Setenv(util.EnvOtelcWorkDir, dir)
-	t.Setenv("GOFLAGS", "")
-	// Force non-workspace mode; -mod=mod is forbidden in a workspace, so a
-	// stray ambient go.work would otherwise suppress vendoring detection.
-	t.Setenv("GOWORK", "off")
-
-	args := []string{"build", "-mod=vendor", "./..."}
-	got, err := prepareVendoredBuild(t.Context(), discardLogger(), subcmdBuild, args)
-	require.NoError(t, err)
-
-	assert.Equal(t, []string{"build", "-mod=mod", "./..."}, got)
-	assert.Contains(t, os.Getenv("GOFLAGS"), "-mod=mod")
-}
-
 func TestPinLocked_UpdatesExistingToolFile(t *testing.T) {
 	// With ModuleDirs supplied, pinLocked skips dependency discovery and goes
 	// straight to updating the existing tool file. A dependency that turns out
@@ -1580,6 +1524,103 @@ func TestPinLocked_DiscoversModuleDirs(t *testing.T) {
 	require.FileExists(t, filepath.Join(dir, toolFileCanonical))
 }
 
+// newPinRoot is newBuildRoot for a standalone pin, which keeps its work files
+// in the build root.
+func newPinRoot(t *testing.T, files map[string]string) string {
+	t.Helper()
+	root := newBuildRoot(t, files)
+	t.Setenv(util.EnvOtelcWorkDir, root)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	return root
+}
+
+func TestPinLocked_StandaloneToolFile(t *testing.T) {
+	// The golden path is relative to the working directory, which the
+	// subtests change, so make it absolute first.
+	goldenFile, absErr := filepath.Abs(filepath.Join("testdata", "standalone.otel.instrumentation.go.golden"))
+	require.NoError(t, absErr)
+
+	tests := []struct {
+		name  string
+		files map[string]string
+		args  []string
+		want  []string // dirs with a tool file, relative to the build root
+	}{
+		{
+			name:  "-C flag",
+			files: changeDirFiles(),
+			args:  []string{"-C", "app", "."},
+			want:  []string{"app"},
+		},
+		{
+			name:  "go.work with two modules",
+			files: workspaceFiles(),
+			args:  []string{"./a", "./b"},
+			want:  []string{"a", "b"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := newPinRoot(t, tt.files)
+
+			_, err := pinLocked(t.Context(), PinOptions{Prune: true, Args: tt.args})
+			require.NoError(t, err)
+
+			for _, dir := range tt.want {
+				actual, readErr := os.ReadFile(filepath.Join(root, dir, toolFileCanonical))
+				require.NoError(t, readErr)
+
+				actualNorm := strings.ReplaceAll(string(actual), "\r\n", "\n")
+				golden.Assert(t, actualNorm, goldenFile)
+			}
+		})
+	}
+}
+
+func TestPinLocked_ImportCycleRoot(t *testing.T) {
+	// Finding the module dirs does not resolve imports, so a root package in
+	// an import cycle is not skipped there. A fresh pin fails later, with the
+	// error of the go command; an already pinned module is updated as usual.
+	tests := []struct {
+		name        string
+		pinnedFirst bool
+		wantErr     string
+	}{
+		{name: "fresh pin", wantErr: "import cycle not allowed"},
+		{name: "already pinned", pinnedFirst: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := newPinRoot(t, plainModuleFiles())
+			toolFile := filepath.Join(root, toolFileCanonical)
+
+			var pinned []byte
+			if tt.pinnedFirst {
+				_, err := pinLocked(t.Context(), PinOptions{Prune: true})
+				require.NoError(t, err)
+				pinned, err = os.ReadFile(toolFile)
+				require.NoError(t, err)
+			}
+
+			mustWriteFile(t, filepath.Join(root, "a", "a.go"), "package a\n\nimport _ \"example.com/app/b\"\n")
+			mustWriteFile(t, filepath.Join(root, "b", "b.go"), "package b\n\nimport _ \"example.com/app/a\"\n")
+
+			_, err := pinLocked(t.Context(), PinOptions{Prune: true, Args: []string{"./a"}})
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				assert.NoFileExists(t, toolFile)
+				return
+			}
+			require.NoError(t, err)
+			actual, err := os.ReadFile(toolFile)
+			require.NoError(t, err)
+			assert.Equal(t, string(pinned), string(actual), "tool file must not change")
+		})
+	}
+}
+
 func TestPin_UpdatesExistingToolFile(t *testing.T) {
 	// Pin wraps pinLocked under the build lock. Point the work dir at the
 	// module so the lock is taken in the sandbox rather than an ambient path.
@@ -1653,36 +1694,6 @@ func TestAutoPin_TracksAndPins(t *testing.T) {
 	data, err := os.ReadFile(toolFile)
 	require.NoError(t, err)
 	assert.NotContains(t, string(data), "example.com/notinstrumentation")
-}
-
-// newModuleDir creates a minimal Go module in a fresh temp directory and
-// returns its path.
-func newModuleDir(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(
-		filepath.Join(dir, "go.mod"),
-		[]byte("module example.com/vend\n\ngo 1.25\n"),
-		0o644,
-	))
-	return dir
-}
-
-func TestPrepareVendoredBuild(t *testing.T) {
-	// With no vendored module active, prepareVendoredBuild returns the args
-	// unchanged and does not force module mode.
-	dir := newModuleDir(t)
-	t.Setenv(util.EnvOtelcWorkDir, dir)
-
-	args := []string{"build", "./..."}
-	got, err := prepareVendoredBuild(
-		context.Background(),
-		util.LoggerFromContext(context.Background()),
-		subcmdBuild,
-		args,
-	)
-	require.NoError(t, err)
-	assert.Equal(t, args, got)
 }
 
 func TestPinLocked_GetBuildPackagesError(t *testing.T) {
@@ -1857,4 +1868,32 @@ func TestUpdateToolFile_RemoveImportsError(t *testing.T) {
 
 	err := updateToolFile(t.Context(), toolFile, map[string]bool{"foo": true}, PinOptions{})
 	require.Error(t, err)
+}
+
+// TestPinVendorGoVersionTooOld: a -mod=vendor pin of a module with a go
+// version below 1.14 fails before it changes the module.
+func TestPinVendorGoVersionTooOld(t *testing.T) {
+	t.Setenv("GOWORK", "off")
+	t.Setenv("GOFLAGS", "")
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+	writeVendoredGoMod(t, tmp, "1.13")
+
+	_, err := Pin(t.Context(), PinOptions{Args: []string{"-mod=vendor"}, ModuleDirs: []string{tmp}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "otelc needs go 1.14 or higher")
+	assert.NoFileExists(t, filepath.Join(tmp, toolFileCanonical))
+}
+
+// TestUpdatePinnedProjectsVendorSyncFails: in vendor mode, a tool file that
+// is not valid Go stops the pin before the walk.
+func TestUpdatePinnedProjectsVendorSyncFails(t *testing.T) {
+	toolFile := filepath.Join(t.TempDir(), toolFileCanonical)
+	mustWriteFile(t, toolFile, "not Go")
+	ctx := contextWithVendorMode(t.Context(), true)
+	result, err := updatePinnedProjects(ctx, []string{toolFile}, PinOptions{})
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), toolFileCanonical)
 }

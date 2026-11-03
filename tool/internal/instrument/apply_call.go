@@ -112,22 +112,27 @@ func (ip *instrumentPhase) applyCallReplace(
 			ip.Debug("Skip call site due to //otelc:ignore", "rule", r.Name)
 			return true
 		}
-		if shadowErr := checkAliasOverrideShadowing(aliasOverrides, enclosing); shadowErr != nil {
+		if shadowErr := checkAliasOverrideShadowingAt(aliasOverrides, enclosing, call); shadowErr != nil {
 			wrapError = shadowErr
 			return false
 		}
-		wrapped, wrapErr := tmpl.compileExpression(call, enclosing, importAliases, aliasOverrides)
+		site := callSite{
+			methodCall: r.MethodCall != "",
+			deferred:   isGoOrDeferCall(stmts[call], call),
+			clone:      ip.cloneWithPositions,
+		}
+		wrapped, wrapErr := tmpl.compileExpression(call, site, enclosing, importAliases, aliasOverrides)
+		if wrapErr == nil && site.deferred {
+			if _, isCall := wrapped.(*dst.CallExpr); !isCall {
+				wrapErr = ex.Newf("the template output is a %T, but the matched call is the call of a defer "+
+					"or go statement, which must be replaced with a call expression", wrapped)
+			}
+		}
 		if wrapErr != nil {
-			wrapError = wrapErr
+			wrapError = ip.withCallPosition(wrapErr, r, call)
 			return false
 		}
-		cloned := util.AssertType[dst.Expr](dst.Clone(wrapped))
-		// dst.Clone gives the wrapped call's nodes fresh pointers absent from the
-		// parser's position map
-		if ip.parser != nil {
-			ip.parser.PropagatePositions(wrapped, cloned)
-		}
-		replacements[call] = cloned
+		replacements[call] = ip.cloneWithPositions(wrapped)
 		return true
 	})
 
@@ -156,6 +161,44 @@ func (ip *instrumentPhase) applyCallReplace(
 	return true, nil
 }
 
+// cloneWithPositions returns a dst.Clone copy of expr. dst.Clone gives the
+// nodes fresh pointers absent from the parser's position map, so it maps the
+// copy to the source positions of expr. Later method_call rules then still
+// match calls inside the copy.
+func (ip *instrumentPhase) cloneWithPositions(expr dst.Expr) dst.Expr {
+	cloned := util.AssertType[dst.Expr](dst.Clone(expr))
+	if ip.parser != nil {
+		ip.parser.PropagatePositions(expr, cloned)
+	}
+	return cloned
+}
+
+// withCallPosition adds the source position of call to err, when call has
+// one.
+func (ip *instrumentPhase) withCallPosition(err error, r *rule.InstCallRule, call *dst.CallExpr) error {
+	if ip.parser == nil {
+		return err
+	}
+	pos, ok := ip.parser.OriginalPosition(call)
+	if !ok {
+		return err
+	}
+	return ex.Wrapf(err, "rule %s cannot wrap the call at %s", r.Name, pos)
+}
+
+// isGoOrDeferCall reports whether call is the call of stmt, a defer or go
+// statement.
+func isGoOrDeferCall(stmt dst.Stmt, call *dst.CallExpr) bool {
+	switch s := stmt.(type) {
+	case *dst.DeferStmt:
+		return s.Call == call
+	case *dst.GoStmt:
+		return s.Call == call
+	default:
+		return false
+	}
+}
+
 // applyCallAppendArgs appends r's extra arguments to every call site that
 // matches r. A //otelc:ignore comment above a matching call's enclosing
 // statement opts that one call site out and leaves every other matching call
@@ -177,11 +220,8 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 
 	stmts := ast.CallEnclosingStmts(root)
 	var matchingCalls []*dst.CallExpr
-	dst.Inspect(root, func(node dst.Node) bool {
-		call, ok := node.(*dst.CallExpr)
-		if !ok {
-			return true
-		}
+	var shadowErr error
+	walkCallsWithEnclosingFunc(root, func(call *dst.CallExpr, enclosing *dst.FuncDecl) bool {
 		if !ip.matchesRule(call, r, importAliases) {
 			return true
 		}
@@ -189,9 +229,15 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 			ip.Debug("Skip call site due to //otelc:ignore", "rule", r.Name)
 			return true
 		}
+		if shadowErr = checkAliasOverrideShadowingAt(aliasOverrides, enclosing, call); shadowErr != nil {
+			return false
+		}
 		matchingCalls = append(matchingCalls, call)
 		return true
 	})
+	if shadowErr != nil {
+		return false, shadowErr
+	}
 	modified := false
 	for _, call := range matchingCalls {
 		callArgs := make([]dst.Expr, len(newArgs))
