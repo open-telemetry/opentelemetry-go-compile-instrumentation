@@ -5,6 +5,7 @@ package rule
 
 import (
 	"fmt"
+	"go/version"
 	"maps"
 	"path/filepath"
 	"slices"
@@ -149,6 +150,25 @@ func (irs *InstRuleSet) IsEmpty() bool {
 			len(irs.DeclRules) == 0 &&
 			len(irs.FileRules) == 0 &&
 			len(irs.IgnoredCallFiles) == 0)
+}
+
+// MaxRequiredLang returns the highest Go language version required across all
+// rules in the set, or an empty string if no rule specifies a language version.
+func (irs *InstRuleSet) MaxRequiredLang() string {
+	if irs == nil {
+		return ""
+	}
+	var maxLang string
+	for _, rules := range irs.RawRules {
+		for _, r := range rules {
+			if r.Lang != "" {
+				if maxLang == "" || version.Compare(r.Lang, maxLang) > 0 {
+					maxLang = r.Lang
+				}
+			}
+		}
+	}
+	return maxLang
 }
 
 // AddRule is a generic method that adds any type of rule to the appropriate map.

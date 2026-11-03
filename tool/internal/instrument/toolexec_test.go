@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -134,6 +135,67 @@ func TestStripCompleteFlag(t *testing.T) {
 			result := stripCompleteFlag(tt.args)
 			assert.Equal(t, tt.expected, result)
 			assert.Equal(t, origArgs, tt.args, "original slice should not be mutated")
+		})
+	}
+}
+
+func TestRaiseLangFlag(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		targetLang string
+		expected   []string
+	}{
+		{
+			name:       "empty target leaves args unchanged",
+			args:       []string{"compile", "-lang=go1.7", "file.go"},
+			targetLang: "",
+			expected:   []string{"compile", "-lang=go1.7", "file.go"},
+		},
+		{
+			name:       "empty args returns empty",
+			args:       []string{},
+			targetLang: "go1.18",
+			expected:   []string{},
+		},
+		{
+			name:       "raises separated -lang flag",
+			args:       []string{"compile", "-o", "out.a", "-lang", "go1.7", "file.go"},
+			targetLang: "go1.18",
+			expected:   []string{"compile", "-o", "out.a", "-lang", "go1.18", "file.go"},
+		},
+		{
+			name:       "raises equals -lang flag",
+			args:       []string{"compile", "-o", "out.a", "-lang=go1.7", "file.go"},
+			targetLang: "go1.18",
+			expected:   []string{"compile", "-o", "out.a", "-lang=go1.18", "file.go"},
+		},
+		{
+			name:       "does not lower higher existing -lang",
+			args:       []string{"compile", "-o", "out.a", "-lang=go1.22", "file.go"},
+			targetLang: "go1.18",
+			expected:   []string{"compile", "-o", "out.a", "-lang=go1.22", "file.go"},
+		},
+		{
+			name:       "leaves equal existing -lang unchanged",
+			args:       []string{"compile", "-o", "out.a", "-lang", "go1.18", "file.go"},
+			targetLang: "go1.18",
+			expected:   []string{"compile", "-o", "out.a", "-lang", "go1.18", "file.go"},
+		},
+		{
+			name:       "inserts -lang when absent",
+			args:       []string{"compile", "-o", "out.a", "file.go"},
+			targetLang: "go1.18",
+			expected:   []string{"compile", "-lang", "go1.18", "-o", "out.a", "file.go"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			orig := slices.Clone(tt.args)
+			res := raiseLangFlag(tt.args, tt.targetLang)
+			assert.Equal(t, tt.expected, res)
+			assert.Equal(t, orig, tt.args, "original slice must not be mutated")
 		})
 	}
 }
@@ -983,6 +1045,47 @@ func TestInterceptCompileFileRuleWithoutPackageName(t *testing.T) {
 		assert.Contains(t, err.Error(), "parsing package clause")
 		assert.NoFileExists(t, filepath.Join(buildDir, "otelc.added.go"))
 	})
+}
+
+func TestInterceptCompile_RaisesLang(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	buildDir := t.TempDir()
+	sourcePath := filepath.Join(buildDir, "lib.go")
+	require.NoError(t, os.WriteFile(sourcePath, []byte("package oldlib\n\nfunc Run() {}\n"), 0o644))
+
+	set := rule.NewInstRuleSet("example.com/oldlib")
+	set.PackageName = "oldlib"
+	rawRule := &rule.InstRawRule{
+		Func: "Run",
+		Raw:  "var x any = 1\n_ = x",
+		Lang: "go1.18",
+	}
+	rawRule.Name = "inject_any"
+	set.AddRawRule(sourcePath, rawRule)
+
+	data, err := json.Marshal([]*rule.InstRuleSet{set})
+	require.NoError(t, err)
+	matched := util.GetMatchedRuleFile()
+	require.NoError(t, os.MkdirAll(filepath.Dir(matched), 0o755))
+	require.NoError(t, os.WriteFile(matched, data, 0o644))
+
+	ctx := util.ContextWithLogger(t.Context(), slog.New(slog.DiscardHandler))
+	args := []string{
+		"compile",
+		"-o", filepath.Join(buildDir, "_pkg_.a"),
+		"-p", "example.com/oldlib",
+		"-lang=go1.7",
+		"-complete",
+		sourcePath,
+	}
+
+	newArgs, err := interceptCompile(ctx, args)
+	require.NoError(t, err)
+
+	assert.Equal(t, "go1.18", util.FindFlagValue(newArgs, "-lang"))
+	assert.False(t, slices.Contains(newArgs, "-complete"))
 }
 
 func TestInterceptLinkWriteError(t *testing.T) {
