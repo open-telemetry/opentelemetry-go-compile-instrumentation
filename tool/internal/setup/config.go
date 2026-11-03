@@ -94,10 +94,13 @@ func resolveInstrumentationConfigs(
 	ctx, cancel := context.WithTimeout(ctx, packagesLoadTimeout)
 	defer cancel()
 
+	// otelc can have changed go.mod before this load, so the load uses the
+	// -mod flag of the build (see modBuildFlags).
 	pkgs, loadErr := packages.Load(&packages.Config{
-		Mode:    packages.NeedFiles | packages.NeedModule | packages.NeedName,
-		Context: ctx,
-		Dir:     dir,
+		Mode:       packages.NeedFiles | packages.NeedModule | packages.NeedName,
+		Context:    ctx,
+		Dir:        dir,
+		BuildFlags: modBuildFlags(ctx),
 	}, importPaths...)
 	if loadErr != nil {
 		return nil, ex.Wrapf(loadErr, "failed to load instrumentation packages")
@@ -112,6 +115,15 @@ func resolveInstrumentationConfigs(
 
 		cfgs[importPath] = &instrumentationConfig{
 			ImportPath: importPath,
+		}
+
+		// In vendor mode, the go command gives no module directory, and the
+		// package directory is in vendor/.
+		if pkg.Module != nil && pkg.Module.Dir == "" {
+			if modDir, pkgDir, ok := vendoredInstrumentationDirs(pkg); ok {
+				fillInstrumentationConfig(cfgs[importPath], pkg, modDir, pkgDir)
+				continue
+			}
 		}
 
 		if pkg.Module == nil || pkg.Module.Dir == "" {
@@ -131,45 +143,7 @@ func resolveInstrumentationConfigs(
 			pkgDir = filepath.Join(modDir, filepath.FromSlash(strings.TrimPrefix(importPath, pkg.Module.Path)))
 		}
 
-		// Always look for tool file in the module directory
-		toolFile, findErr := findToolFile(modDir)
-		if findErr != nil {
-			cfgs[importPath].Error = ex.Wrapf(
-				findErr,
-				"checking for tool file in instrumentation package %s",
-				importPath,
-			)
-			continue
-		}
-
-		ruleFiles, walkErr := rulesFromDir(pkgDir, true)
-		if walkErr != nil {
-			cfgs[importPath].Error = ex.Wrapf(walkErr, "walking instrumentation package %s", importPath)
-			continue
-		}
-
-		if toolFile == "" && len(ruleFiles) == 0 {
-			err := ex.Wrapf(
-				errNotInstrumentation,
-				"instrumentation package %s contains neither %s nor any rule files",
-				importPath,
-				toolFileCanonical,
-			)
-
-			if len(pkg.Errors) > 0 {
-				var msgs []string
-				for _, e := range pkg.Errors {
-					msgs = append(msgs, e.Error())
-				}
-				err = ex.Wrapf(err, "package load errors: %s", strings.Join(msgs, "; "))
-			}
-
-			cfgs[importPath].Error = err
-			continue
-		}
-
-		cfgs[importPath].ToolFile = toolFile
-		cfgs[importPath].RuleFiles = ruleFiles
+		fillInstrumentationConfig(cfgs[importPath], pkg, modDir, pkgDir)
 	}
 
 	return cfgs, nil
@@ -279,4 +253,89 @@ func walkInstrumentation(ctx context.Context, toolFiles []string, visit instrume
 	}
 
 	return nil
+}
+
+// fillInstrumentationConfig sets the tool file and the rule files of cfg, or
+// its error. modDir and pkgDir are the module and the package directories of
+// pkg.
+func fillInstrumentationConfig(cfg *instrumentationConfig, pkg *packages.Package, modDir, pkgDir string) {
+	// Always look for tool file in the module directory
+	toolFile, findErr := findToolFile(modDir)
+	if findErr != nil {
+		cfg.Error = ex.Wrapf(
+			findErr,
+			"checking for tool file in instrumentation package %s",
+			cfg.ImportPath,
+		)
+		return
+	}
+
+	ruleFiles, walkErr := rulesFromDir(pkgDir, true)
+	if walkErr != nil {
+		cfg.Error = ex.Wrapf(walkErr, "walking instrumentation package %s", cfg.ImportPath)
+		return
+	}
+
+	if toolFile == "" && len(ruleFiles) == 0 {
+		err := ex.Wrapf(
+			errNotInstrumentation,
+			"instrumentation package %s contains neither %s nor any rule files",
+			cfg.ImportPath,
+			toolFileCanonical,
+		)
+
+		if len(pkg.Errors) > 0 {
+			var msgs []string
+			for _, e := range pkg.Errors {
+				msgs = append(msgs, e.Error())
+			}
+			err = ex.Wrapf(err, "package load errors: %s", strings.Join(msgs, "; "))
+		}
+
+		cfg.Error = err
+		return
+	}
+
+	cfg.ToolFile = toolFile
+	cfg.RuleFiles = ruleFiles
+}
+
+// vendoredInstrumentationDirs returns the module and the package directories
+// of pkg in vendor mode. For an otelc package, they are the directories in the
+// extracted bundle: they have all the files, also the files that "go mod
+// vendor" does not copy (such as //go:build ignore files). For a different
+// package, they are the directories in vendor/.
+//
+//nolint:revive // needed to balance confusing-results and nonamedreturns linters
+func vendoredInstrumentationDirs(pkg *packages.Package) (string, string, bool) {
+	if pkgDir, ok := embeddedSourceDir(pkg.PkgPath); ok {
+		if modDir, found := enclosingModuleDir(pkgDir); found {
+			return modDir, pkgDir, true
+		}
+	}
+	pkgDir := pkgload.PackageDir(pkg)
+	if pkgDir == "" || !isInVendorDir(pkgDir) {
+		return "", "", false
+	}
+	suffix := filepath.FromSlash(strings.TrimPrefix(pkg.PkgPath, pkg.Module.Path))
+	modDir, ok := strings.CutSuffix(filepath.Clean(pkgDir), filepath.Clean(suffix))
+	if !ok || suffix == "" {
+		modDir = pkgDir
+	}
+	return filepath.Clean(modDir), pkgDir, true
+}
+
+// enclosingModuleDir returns the nearest directory at or above dir that has a
+// go.mod file.
+func enclosingModuleDir(dir string) (string, bool) {
+	for d := filepath.Clean(dir); ; {
+		if util.PathExists(filepath.Join(d, goModFileName)) {
+			return d, true
+		}
+		parent := filepath.Dir(d)
+		if parent == d {
+			return "", false
+		}
+		d = parent
+	}
 }

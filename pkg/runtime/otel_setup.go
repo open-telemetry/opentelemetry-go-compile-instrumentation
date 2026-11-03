@@ -58,7 +58,7 @@ var instConfigCache atomic.Pointer[configCache]
 // Other Configuration:
 //   - OTEL_PROPAGATORS: Comma-separated propagators (tracecontext, baggage, b3,
 //     b3multi, jaeger, xray, ottrace, none). Default: "tracecontext,baggage"
-//   - OTEL_LOG_LEVEL: Log level (debug, info, warn, error)
+//   - OTEL_LOG_LEVEL: Log level (none, debug, info, warn, error). Default: "none"
 func SetupOTelSDK() {
 	if strings.EqualFold(os.Getenv("OTEL_SDK_DISABLED"), "true") {
 		Logger().Info("OpenTelemetry SDK disabled via OTEL_SDK_DISABLED=true, skipping initialization")

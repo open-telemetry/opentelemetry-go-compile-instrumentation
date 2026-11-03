@@ -112,8 +112,8 @@ func OtelBeforeTrampoline_ExternalHelper2215449730() (hookContext *HookContextIm
 	hookContext.params = []interface{}{}
 	hookContext.funcName = "ExternalHelper"
 	hookContext.packageName = "main_test"
-	if BeforeExternalHelper != nil {
-		BeforeExternalHelper(hookContext)
+	if otelc_hook_3504338147_BeforeExternalHelper != nil {
+		otelc_hook_3504338147_BeforeExternalHelper(hookContext)
 	}
 	return hookContext, hookContext.skipCall
 }
@@ -132,13 +132,13 @@ func OtelAfterTrampoline_ExternalHelper2215449730(hookContext HookContext, arg0 
 		}
 	}()
 	hookContext.(*HookContextImpl2215449730).returnVals = []interface{}{arg0}
-	if AfterExternalHelper != nil {
-		AfterExternalHelper(hookContext, *arg0)
+	if otelc_hook_3504338147_AfterExternalHelper != nil {
+		otelc_hook_3504338147_AfterExternalHelper(hookContext, *arg0)
 	}
 }
 
-//go:linkname BeforeExternalHelper testdata/golden/has-package-combo-match.BeforeExternalHelper
-func BeforeExternalHelper(hookContext HookContext)
+//go:linkname otelc_hook_3504338147_BeforeExternalHelper testdata/golden/has-package-combo-match.BeforeExternalHelper
+func otelc_hook_3504338147_BeforeExternalHelper(hookContext HookContext)
 
-//go:linkname AfterExternalHelper testdata/golden/has-package-combo-match.AfterExternalHelper
-func AfterExternalHelper(hookContext HookContext, arg0 error)
+//go:linkname otelc_hook_3504338147_AfterExternalHelper testdata/golden/has-package-combo-match.AfterExternalHelper
+func otelc_hook_3504338147_AfterExternalHelper(hookContext HookContext, arg0 error)

@@ -5,6 +5,7 @@ package rule
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -143,4 +144,42 @@ func TestInstRuleSetString(t *testing.T) {
 	assert.Contains(t, s, "directive=")
 	assert.Contains(t, s, "decl=")
 	assert.Contains(t, s, "file=")
+}
+
+// TestInstRuleSetAllRulesStableOrder checks that both flatteners order their
+// output by source file rather than by map iteration. Files are registered out
+// of name order so insertion order cannot pass by accident.
+func TestInstRuleSetAllRulesStableOrder(t *testing.T) {
+	dir := t.TempDir()
+	// Added out of order; expected results below are sorted by file path.
+	files := []string{
+		filepath.Join(dir, "d.go"),
+		filepath.Join(dir, "b.go"),
+		filepath.Join(dir, "a.go"),
+		filepath.Join(dir, "c.go"),
+	}
+	wantFuncs := []string{"a", "b", "c", "d"}
+	wantStructs := []string{"A", "B", "C", "D"}
+
+	const iterations = 100
+	for range iterations {
+		irs := NewInstRuleSet("example.com/mod")
+		for _, file := range files {
+			name := strings.TrimSuffix(filepath.Base(file), ".go")
+			irs.AddFuncRule(file, &InstFuncRule{Func: name})
+			irs.AddStructRule(file, &InstStructRule{Struct: strings.ToUpper(name)})
+		}
+
+		gotFuncs := make([]string, 0, len(files))
+		for _, r := range irs.AllFuncRules() {
+			gotFuncs = append(gotFuncs, r.Func)
+		}
+		gotStructs := make([]string, 0, len(files))
+		for _, r := range irs.AllStructRules() {
+			gotStructs = append(gotStructs, r.Struct)
+		}
+
+		require.Equal(t, wantFuncs, gotFuncs, "AllFuncRules order must not depend on map iteration")
+		require.Equal(t, wantStructs, gotStructs, "AllStructRules order must not depend on map iteration")
+	}
 }
