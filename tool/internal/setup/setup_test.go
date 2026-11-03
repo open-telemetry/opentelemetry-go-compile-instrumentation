@@ -578,6 +578,32 @@ func TestGetBuildPackages_TestSubcommandExcludesExternalTestPackage(t *testing.T
 		"unexpected all-packages list: %v", extractPackageIDs(allPkgs))
 }
 
+// TestGetBuildPackages_TestOnlyPackage covers a package with only _test.go
+// files. Only go test builds it, so only a test load keeps it in the build
+// packages. A build that selects only that package still loads, and the go
+// command reports the error.
+func TestGetBuildPackages_TestOnlyPackage(t *testing.T) {
+	tmpDir := t.TempDir()
+	mustWriteFile(t, filepath.Join(tmpDir, "go.mod"), "module testmodule\n\ngo 1.21\n")
+	mustWriteFile(t, filepath.Join(tmpDir, "app", "main.go"), "package main\n\nfunc main() {}\n")
+	mustWriteFile(t, filepath.Join(tmpDir, "onlytest", "main_test.go"),
+		"package main_test\n\nimport \"testing\"\n\nfunc TestX(t *testing.T) {}\n")
+	t.Chdir(tmpDir)
+
+	buildPkgs, allPkgs, err := getBuildPackages(t.Context(), subcmdBuild, []string{"./..."})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"testmodule/app"}, extractPackageIDs(buildPkgs))
+	assert.ElementsMatch(t, []string{"testmodule/app", "testmodule/onlytest"}, extractPackageIDs(allPkgs))
+
+	buildPkgs, _, err = getBuildPackages(t.Context(), subcmdBuild, []string{"./onlytest"})
+	require.NoError(t, err)
+	assert.Empty(t, buildPkgs)
+
+	testBuildPkgs, _, err := getBuildPackages(t.Context(), subcmdTest, []string{"./..."})
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"testmodule/app", "testmodule/onlytest"}, extractPackageIDs(testBuildPkgs))
+}
+
 func TestSplitBuildTargets(t *testing.T) {
 	tests := []struct {
 		name        string
