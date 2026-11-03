@@ -610,6 +610,68 @@ func TestAddToFile_RejectsFileScopeAliasCollision(t *testing.T) {
 	assert.Contains(t, err.Error(), "file-scope declaration")
 }
 
+func TestAddToFile_FileScopeDeclarations(t *testing.T) {
+	tests := []struct {
+		name    string
+		decls   []dst.Decl
+		wantErr bool
+	}{
+		{
+			name: "package function collision",
+			decls: []dst.Decl{
+				&dst.FuncDecl{Name: dst.NewIdent("traced")},
+			},
+			wantErr: true,
+		},
+		{
+			name: "type declaration collision",
+			decls: []dst.Decl{
+				&dst.GenDecl{
+					Tok: token.TYPE,
+					Specs: []dst.Spec{
+						&dst.TypeSpec{Name: dst.NewIdent("traced")},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "method name does not collide",
+			decls: []dst.Decl{
+				&dst.GenDecl{
+					Tok: token.TYPE,
+					Specs: []dst.Spec{
+						&dst.TypeSpec{Name: dst.NewIdent("T")},
+					},
+				},
+				&dst.FuncDecl{
+					Recv: &dst.FieldList{
+						List: []*dst.Field{{Type: dst.NewIdent("T")}},
+					},
+					Name: dst.NewIdent("traced"),
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := &dst.File{Decls: tt.decls}
+			err := AddToFile(t.Context(), root, map[string]string{
+				"traced": "fmt",
+			})
+
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "file-scope declaration")
+				return
+			}
+
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestCollectImportPaths(t *testing.T) {
 	tests := []struct {
 		name     string
