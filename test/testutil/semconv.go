@@ -221,6 +221,44 @@ func RequireAWSClientSemconv(
 	RequireAttribute(t, span, "aws.request_id", requestID)
 }
 
+// RequireSaramaProducerSemconv verifies that an IBM/sarama producer span
+// follows the messaging semantic conventions. Producer spans end on the broker
+// result for both sync and async producers, so messaging.kafka.async must be
+// absent.
+// Reference: https://opentelemetry.io/docs/specs/semconv/messaging/kafka/
+func RequireSaramaProducerSemconv(
+	t *testing.T,
+	span ptrace.Span,
+	topic, endpoint string,
+) {
+	RequireAttribute(t, span, string(semconv.MessagingSystemKey), "kafka")
+	RequireAttribute(t, span, string(semconv.MessagingOperationNameKey), "send")
+	RequireAttribute(t, span, string(semconv.MessagingDestinationNameKey), topic)
+	RequireAttributeAbsent(t, span, "messaging.kafka.async")
+	if host, portText, err := net.SplitHostPort(endpoint); err == nil {
+		RequireAttribute(t, span, string(semconv.ServerAddressKey), host)
+		if port, convErr := strconv.Atoi(portText); convErr == nil && port > 0 {
+			RequireAttribute(t, span, string(semconv.ServerPortKey), int64(port))
+		}
+	}
+}
+
+// RequireSaramaConsumerSemconv verifies that an IBM/sarama consumer span
+// follows the messaging semantic conventions.
+// Reference: https://opentelemetry.io/docs/specs/semconv/messaging/kafka/
+func RequireSaramaConsumerSemconv(
+	t *testing.T,
+	span ptrace.Span,
+	topic, partition string,
+	offset int64,
+) {
+	RequireAttribute(t, span, string(semconv.MessagingSystemKey), "kafka")
+	RequireAttribute(t, span, string(semconv.MessagingOperationNameKey), "receive")
+	RequireAttribute(t, span, string(semconv.MessagingDestinationNameKey), topic)
+	RequireAttribute(t, span, string(semconv.MessagingDestinationPartitionIDKey), partition)
+	RequireAttribute(t, span, "messaging.kafka.offset", offset)
+}
+
 // RequireOpenSearchClientSemconv verifies that an OpenSearch client span
 // follows semantic conventions. The database span conventions do not define a
 // separate OpenSearch page, so the generic database client attributes apply

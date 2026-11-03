@@ -4,6 +4,10 @@
     "target": "database/sql"
   },
   {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/IBM/sarama",
+    "target": "github.com/IBM/sarama"
+  },
+  {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/anthropics/anthropic-sdk-go",
     "target": "github.com/anthropics/anthropic-sdk-go",
     "versionRange": "v1.0.0"
