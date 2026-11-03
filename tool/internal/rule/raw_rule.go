@@ -81,16 +81,12 @@ func (r *InstRawRule) validate() error {
 // normalizeLang normalizes a Go language version string (such as "go1.18" or "1.18")
 // to canonical "go1.X" form.
 func normalizeLang(v string) (string, error) {
-	v = strings.TrimSpace(v)
-	if v == "" {
-		return "", nil
-	}
-	candidate := v
+	candidate := strings.TrimSpace(v)
 	if !strings.HasPrefix(candidate, "go") {
 		candidate = "go" + candidate
 	}
 	lang := version.Lang(candidate)
-	if lang == "" || !version.IsValid(candidate) {
+	if lang == "" {
 		return "", ex.Newf("invalid lang %q for raw rule", v)
 	}
 	return lang, nil

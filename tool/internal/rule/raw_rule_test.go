@@ -147,6 +147,12 @@ raw: "println({{ .FuncArgument 0 }})"
 			yaml:    "target: main\nfunc: Bar\nraw: println()\nlang: invalid-version",
 			wantErr: true,
 		},
+		{
+			name:    "whitespace lang rejected",
+			ruleID:  "raw-lang-whitespace",
+			yaml:    "target: main\nfunc: Bar\nraw: println()\nlang: \"   \"",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {

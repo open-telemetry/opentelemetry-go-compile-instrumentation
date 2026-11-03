@@ -150,7 +150,10 @@ func stripCompleteFlag(args []string) []string {
 // raiseLangFlag updates or inserts the -lang flag on the compile command so it
 // is at least targetLang. It never lowers an existing -lang setting.
 func raiseLangFlag(args []string, targetLang string) []string {
-	if targetLang == "" || len(args) == 0 {
+	if targetLang == "" {
+		return args
+	}
+	if len(args) == 0 {
 		return args
 	}
 	currentLang := util.FindFlagValue(args, "-lang")
@@ -159,18 +162,18 @@ func raiseLangFlag(args []string, targetLang string) []string {
 		if !strings.HasPrefix(currentNorm, "go") {
 			currentNorm = "go" + currentNorm
 		}
-		if version.IsValid(currentNorm) && version.Compare(currentNorm, targetLang) >= 0 {
+		if version.Compare(currentNorm, targetLang) >= 0 {
 			return args
 		}
 		res := slices.Clone(args)
 		for i, arg := range res {
 			if arg == "-lang" && i+1 < len(res) {
 				res[i+1] = targetLang
-				return res
+				break
 			}
 			if strings.HasPrefix(arg, "-lang=") {
 				res[i] = "-lang=" + targetLang
-				return res
+				break
 			}
 		}
 		return res

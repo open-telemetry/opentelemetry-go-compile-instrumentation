@@ -177,6 +177,24 @@ func TestRaiseLangFlag(t *testing.T) {
 			expected:   []string{"compile", "-o", "out.a", "-lang=go1.22", "file.go"},
 		},
 		{
+			name:       "raises equals -lang flag without go prefix",
+			args:       []string{"compile", "-o", "out.a", "-lang=1.7", "file.go"},
+			targetLang: "go1.18",
+			expected:   []string{"compile", "-o", "out.a", "-lang=go1.18", "file.go"},
+		},
+		{
+			name:       "raises separated -lang flag without go prefix",
+			args:       []string{"compile", "-o", "out.a", "-lang", "1.7", "file.go"},
+			targetLang: "go1.18",
+			expected:   []string{"compile", "-o", "out.a", "-lang", "go1.18", "file.go"},
+		},
+		{
+			name:       "does not lower higher existing -lang without go prefix",
+			args:       []string{"compile", "-o", "out.a", "-lang=1.22", "file.go"},
+			targetLang: "go1.18",
+			expected:   []string{"compile", "-o", "out.a", "-lang=1.22", "file.go"},
+		},
+		{
 			name:       "leaves equal existing -lang unchanged",
 			args:       []string{"compile", "-o", "out.a", "-lang", "go1.18", "file.go"},
 			targetLang: "go1.18",
