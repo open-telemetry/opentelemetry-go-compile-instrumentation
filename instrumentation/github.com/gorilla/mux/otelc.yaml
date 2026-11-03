@@ -1,0 +1,16 @@
+version: "v1.0.0"
+
+# Mux has no Context.Next. ServeHTTP matches with Router.Match, then runs
+# the handler. After Match, RouteMatch.Route is the matched route, or
+# MatchErr is set for 404/405 — including when the app replaced
+# NotFoundHandler / MethodNotAllowedHandler (Match still returns true).
+mux_router_match_hook:
+  target: github.com/gorilla/mux
+  version: v1.8.1
+  where:
+    func: Match
+    recv: "*Router"
+  do:
+    - inject_hooks:
+        after: AfterMatch
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/gorilla/mux"
