@@ -39,6 +39,9 @@ type setupPhase struct {
 
 	// fileImportsCache caches discovered source imports for add_file rules during setup.
 	fileImportsCache map[string][]string
+	// configurationMetadata is the setup-time handoff to application config
+	// validation, including selected modules that have no metadata file.
+	configurationMetadata selectedConfigurationMetadata
 }
 
 func (sp *setupPhase) getBuildContext() *gobuild.Context {
@@ -528,7 +531,8 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	if err = sp.validateSelectedConfigurationMetadata(matched); err != nil {
+	sp.configurationMetadata, err = sp.validateSelectedConfigurationMetadata(matched)
+	if err != nil {
 		return ex.Wrapf(err, "validating selected instrumentation configuration metadata")
 	}
 
