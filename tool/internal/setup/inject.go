@@ -167,6 +167,7 @@ func injectedDeps(
 	if loadErr != nil {
 		return nil, loadErr
 	}
+	fillVendoredVersions(ctx, deps)
 	return deps, nil
 }
 
@@ -219,6 +220,11 @@ func (sp *setupPhase) runInjectionPasses(
 // packages were never in the plan, so a rule targeting one of them has nothing
 // to match against.
 //
+// When it resolves the paths of the rules that a pass found (and thus before
+// the next pass loads their hook packages), matchInjectedDeps adds the
+// packages of these rules to vendor/ when this is necessary (see
+// resolveRuleSetPaths).
+//
 // Nothing reports this. The build succeeds, matched.json is a valid non-empty
 // list, and the rule is simply absent from it.
 //
@@ -265,7 +271,7 @@ func (sp *setupPhase) matchInjectedDeps(
 				return nil, ex.Wrapf(err, "matching injected dependencies to hook rules")
 			}
 			if len(more) > 0 {
-				if err = resolveRulePaths(ctx, more, moduleDirs); err != nil {
+				if err = sp.resolveRuleSetPaths(ctx, more, moduleDirs); err != nil {
 					return nil, ex.Wrapf(err, "resolving injected rule paths")
 				}
 			}
