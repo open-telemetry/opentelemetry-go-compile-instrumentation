@@ -5,6 +5,7 @@ package setup
 
 import (
 	"bytes"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.opentelemetry.io/otelc/tool/internal/configuration"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
@@ -79,6 +81,20 @@ func TestValidateSelectedConfigurationMetadataReportsParseErrors(t *testing.T) {
 	require.ErrorContains(t, err, "parse")
 }
 
+func TestValidateSelectedConfigurationMetadataReportsCatalogLoadErrors(t *testing.T) {
+	module := makeConfigurationModule(t, "example.com/instrumentation", "configurations: []\n")
+	matched := matchedConfigurationRules(module)
+	sp := newTestSetupPhase()
+	loadCatalog := func() (map[string]configuration.Entry, error) {
+		return nil, errors.New("catalog unavailable")
+	}
+
+	_, err := sp.validateSelectedConfigurationMetadataWithCatalog(matched, loadCatalog)
+
+	require.ErrorContains(t, err, "load pinned configuration catalog")
+	require.ErrorContains(t, err, "catalog unavailable")
+}
+
 func TestValidateSelectedConfigurationMetadataFileDisappearsAfterDiscovery(t *testing.T) {
 	module := makeConfigurationModule(t, "example.com/instrumentation", "configurations: []\n")
 	matched := matchedConfigurationRules(module)
@@ -94,11 +110,22 @@ func TestValidateSelectedConfigurationMetadataFileDisappearsAfterDiscovery(t *te
 func TestValidateSelectedConfigurationMetadataWithNoMatchedHooks(t *testing.T) {
 	sp := newTestSetupPhase()
 
-	result, err := sp.validateSelectedConfigurationMetadata(nil)
+	result, err := sp.validateSelectedConfigurationMetadata([]*rule.InstRuleSet{nil})
 
 	require.NoError(t, err)
 	assert.Empty(t, result.Definitions)
 	assert.Empty(t, result.ModulesWithoutMetadata)
+}
+
+func TestValidateAndStoreSelectedConfigurationMetadataReturnsValidationError(t *testing.T) {
+	module := makeConfigurationModule(t, "example.com/instrumentation", "configurations: [\n")
+	sp := newTestSetupPhase()
+
+	err := sp.validateAndStoreSelectedConfigurationMetadata(matchedConfigurationRules(module))
+
+	require.ErrorContains(t, err, "validating selected instrumentation configuration metadata")
+	require.ErrorContains(t, err, "parse")
+	assert.Empty(t, sp.configurationMetadata.Definitions)
 }
 
 func TestModuleRootForPackage(t *testing.T) {
@@ -181,13 +208,16 @@ func TestFindInstrumentationMetadataOutsideRoot(t *testing.T) {
 	_, err := findInstrumentationMetadata(outside, root)
 
 	require.ErrorContains(t, err, "outside metadata search root")
+
+	_, err = findInstrumentationMetadata(filepath.Dir(root), root)
+	require.ErrorContains(t, err, "outside metadata search root")
 }
 
 func TestFindInstrumentationMetadataStatError(t *testing.T) {
 	root := t.TempDir()
-	notDirectory := filepath.Join(root, "not-a-directory")
-	require.NoError(t, os.WriteFile(notDirectory, []byte("file"), 0o644))
-	module := filepath.Join(notDirectory, "module")
+	// A NUL byte gives a portable non-NotExist stat error; Windows may treat
+	// traversing through a regular file as a missing path instead.
+	module := filepath.Join(root, "module\x00")
 
 	_, err := findInstrumentationMetadata(module, root)
 

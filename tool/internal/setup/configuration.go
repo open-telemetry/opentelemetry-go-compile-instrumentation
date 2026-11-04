@@ -30,6 +30,13 @@ type selectedConfigurationMetadata struct {
 func (sp *setupPhase) validateSelectedConfigurationMetadata(
 	matched []*rule.InstRuleSet,
 ) (selectedConfigurationMetadata, error) {
+	return sp.validateSelectedConfigurationMetadataWithCatalog(matched, configuration.CatalogDefinitions)
+}
+
+func (sp *setupPhase) validateSelectedConfigurationMetadataWithCatalog(
+	matched []*rule.InstRuleSet,
+	loadCatalog func() (map[string]configuration.Entry, error),
+) (selectedConfigurationMetadata, error) {
 	moduleMetadata := make(map[string]string)
 	for _, ruleset := range matched {
 		if ruleset == nil {
@@ -91,7 +98,7 @@ func (sp *setupPhase) validateSelectedConfigurationMetadata(
 		return result, nil
 	}
 
-	definitions, err := configuration.CatalogDefinitions()
+	definitions, err := loadCatalog()
 	if err != nil {
 		return selectedConfigurationMetadata{}, ex.Wrapf(err, "load pinned configuration catalog")
 	}

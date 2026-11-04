@@ -106,10 +106,6 @@ func findInstrumentationMetadata(moduleDir, instrumentationRoot string) (string,
 		if dir == instrumentationRoot {
 			return "", nil
 		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", nil
-		}
 	}
 }
 

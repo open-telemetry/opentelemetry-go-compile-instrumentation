@@ -448,6 +448,15 @@ func (sp *setupPhase) matchAllDeps(
 	return matched, nil
 }
 
+func (sp *setupPhase) validateAndStoreSelectedConfigurationMetadata(matched []*rule.InstRuleSet) error {
+	metadata, err := sp.validateSelectedConfigurationMetadata(matched)
+	if err != nil {
+		return ex.Wrapf(err, "validating selected instrumentation configuration metadata")
+	}
+	sp.configurationMetadata = metadata
+	return nil
+}
+
 func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	// Since Setup can be invoked in different contexts (i.e, via `otelc setup` or as part of `otelc go build`),
 	// we need to handle the arguments accordingly. If the command is `go build` or `go install`, we should trim the first argument
@@ -531,9 +540,8 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	sp.configurationMetadata, err = sp.validateSelectedConfigurationMetadata(matched)
-	if err != nil {
-		return ex.Wrapf(err, "validating selected instrumentation configuration metadata")
+	if err = sp.validateAndStoreSelectedConfigurationMetadata(matched); err != nil {
+		return err
 	}
 
 	sp.warnIfNoInstrumentationMatched(matched)

@@ -51,6 +51,10 @@ func TestConfigurationModuleMetadataReturnsIndependentMap(t *testing.T) {
 	withoutMetadata := NewInstRuleSet("example.com/other")
 	withoutMetadata.AddRawRule(file, &InstRawRule{})
 	assert.Empty(t, withoutMetadata.ConfigurationModuleMetadata())
+
+	withoutRule := NewInstRuleSet("example.com/nil-rule")
+	withoutRule.recordConfigurationModule(nil)
+	assert.Empty(t, withoutRule.ConfigurationModuleMetadata())
 }
 
 func TestNewInstRuleSet(t *testing.T) {
