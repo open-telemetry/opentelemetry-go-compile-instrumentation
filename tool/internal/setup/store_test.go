@@ -388,10 +388,11 @@ func TestSetupPhaseInjectedHash(t *testing.T) {
 }
 
 func TestHashPackages(t *testing.T) {
+	goroot := t.TempDir()
 	hashOf := func(pkgs ...*packages.Package) string {
 		t.Helper()
 		var b strings.Builder
-		require.NoError(t, hashPackages(&b, pkgs))
+		require.NoError(t, hashPackages(&b, goroot, pkgs))
 		return b.String()
 	}
 
@@ -412,8 +413,27 @@ func TestHashPackages(t *testing.T) {
 	}
 	assert.Equal(t, "example.com/v/p example.com/fork@v1.2.4\n", hashOf(replaced))
 
-	std := &packages.Package{PkgPath: "fmt", GoFiles: []string{filepath.Join(t.TempDir(), "missing.go")}}
+	// The standard library is covered by the toolchain version, so its files are not read.
+	std := &packages.Package{PkgPath: "fmt", GoFiles: []string{filepath.Join(goroot, "src", "fmt", "missing.go")}}
 	assert.Empty(t, hashOf(std))
+
+	// A package with no module outside GOROOT, as from GOPATH, is hashed by content.
+	gopathFile := filepath.Join(t.TempDir(), "src", "fmtx", "fmtx.go")
+	require.NoError(t, os.MkdirAll(filepath.Dir(gopathFile), 0o755))
+	require.NoError(t, os.WriteFile(gopathFile, []byte("package fmtx\n"), 0o644))
+	gopath := &packages.Package{PkgPath: "fmtx", GoFiles: []string{gopathFile}}
+	gopathBefore := hashOf(gopath)
+	assert.Contains(t, gopathBefore, gopathFile)
+	assert.Equal(t, gopathBefore, hashOf(std, gopath), "the standard library must stay skipped beside it")
+	require.NoError(t, os.WriteFile(gopathFile, []byte("package fmtx\n\nconst X = 1\n"), 0o644))
+	assert.NotEqual(t, gopathBefore, hashOf(gopath))
+
+	// A GOROOT that is only a prefix of the directory name does not make a package standard.
+	lookalike := filepath.Join(goroot+"x", "src", "fmt", "print.go")
+	require.NoError(t, os.MkdirAll(filepath.Dir(lookalike), 0o755))
+	require.NoError(t, os.WriteFile(lookalike, []byte("package fmt\n"), 0o644))
+	t.Cleanup(func() { _ = os.RemoveAll(goroot + "x") })
+	assert.Contains(t, hashOf(&packages.Package{PkgPath: "fmt", GoFiles: []string{lookalike}}), lookalike)
 
 	// A local replace has no version, so its file content is what counts.
 	file := filepath.Join(t.TempDir(), "local.go")

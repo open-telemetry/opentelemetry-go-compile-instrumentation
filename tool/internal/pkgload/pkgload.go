@@ -76,6 +76,27 @@ func ModuleAndWorkspace(ctx context.Context, dir string) (string, bool, error) {
 	return moduleDir, workspace, nil
 }
 
+// GOROOT returns the GOROOT of the go command that LoadPackages runs with the
+// same buildFlags. It asks that command rather than using runtime.GOROOT, as
+// GOTOOLCHAIN may select a toolchain other than the one that built this tool.
+func GOROOT(ctx context.Context, buildFlags []string) (string, error) {
+	dir, _, err := loadDirFromBuildFlags(buildFlags)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, "go", "env", "GOROOT")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", ex.Wrapf(err, "running go env GOROOT in %s", dir)
+	}
+	goroot := strings.TrimSpace(string(out))
+	if goroot == "" {
+		return "", ex.Newf("go env GOROOT in %s printed nothing", dir)
+	}
+	return goroot, nil
+}
+
 func loadDirFromBuildFlags(buildFlags []string) (string, []string, error) {
 	var dir string
 	filtered := make([]string, 0, len(buildFlags))

@@ -265,7 +265,11 @@ func (sp *setupPhase) injectedHash(ctx context.Context, matched []*rule.InstRule
 		if err != nil {
 			return "", err
 		}
-		if err = hashPackages(h, pkgs); err != nil {
+		goroot, err := pkgload.GOROOT(loadCtx, sp.buildFlags)
+		if err != nil {
+			return "", err
+		}
+		if err = hashPackages(h, goroot, pkgs); err != nil {
 			return "", err
 		}
 	}
@@ -286,33 +290,57 @@ func appendRuleImports[T interface{ Base() *rule.InstBaseRule }](
 // hashPackages writes pkgs and their dependencies to w in import path order.
 // A package from a versioned module is written as its module version, since
 // the module cache never changes under a version. Any other package, from the
-// main module or a local replace, is written as the content of its files. The
-// standard library is skipped: the toolchain version in the tool ID covers it.
-func hashPackages(w io.Writer, pkgs []*packages.Package) error {
+// main module, a local replace, GOPATH or a vendor directory, is written as
+// the content of its files. A standard library package, one with no module
+// whose files all lie under goroot/src, is skipped: the toolchain version in
+// the tool ID covers it.
+func hashPackages(w io.Writer, goroot string, pkgs []*packages.Package) error {
 	var all []*packages.Package
 	packages.Visit(pkgs, nil, func(pkg *packages.Package) {
-		if pkg.Module != nil {
+		if !isStdPackage(pkg, goroot) {
 			all = append(all, pkg)
 		}
 	})
 	slices.SortFunc(all, func(a, b *packages.Package) int { return strings.Compare(a.PkgPath, b.PkgPath) })
 	for _, pkg := range all {
-		mod := pkg.Module
-		if mod.Replace != nil {
-			mod = mod.Replace
-		}
-		if mod.Version != "" {
-			_, _ = fmt.Fprintf(w, "%s %s@%s\n", pkg.PkgPath, mod.Path, mod.Version)
-			continue
+		if mod := pkg.Module; mod != nil {
+			if mod.Replace != nil {
+				mod = mod.Replace
+			}
+			if mod.Version != "" {
+				_, _ = fmt.Fprintf(w, "%s %s@%s\n", pkg.PkgPath, mod.Path, mod.Version)
+				continue
+			}
 		}
 		_, _ = fmt.Fprintf(w, "%s\n", pkg.PkgPath)
-		for _, file := range slices.Sorted(slices.Values(slices.Concat(pkg.GoFiles, pkg.OtherFiles, pkg.EmbedFiles))) {
+		for _, file := range slices.Sorted(slices.Values(packageFiles(pkg))) {
 			if err := hashFile(w, file); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+func packageFiles(pkg *packages.Package) []string {
+	return slices.Concat(pkg.GoFiles, pkg.OtherFiles, pkg.EmbedFiles)
+}
+
+// isStdPackage reports whether pkg belongs to the standard library. go/packages
+// does not expose go list's Standard field, so a package counts as standard
+// when it has no module and every file lies under goroot/src. An empty goroot
+// matches nothing, which hashes more packages rather than fewer.
+func isStdPackage(pkg *packages.Package, goroot string) bool {
+	if pkg.Module != nil || goroot == "" {
+		return false
+	}
+	src := filepath.Join(goroot, "src") + string(filepath.Separator)
+	for _, file := range packageFiles(pkg) {
+		if !strings.HasPrefix(filepath.Clean(file), src) {
+			return false
+		}
+	}
+	return true
 }
 
 // hashFile writes the path and the content hash of a file to w.
