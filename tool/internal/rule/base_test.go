@@ -26,9 +26,31 @@ func TestInstBaseRuleAccessors(t *testing.T) {
 	assert.Equal(t, "example.com/pkg", base.GetTarget().String())
 	assert.Equal(t, "v1.0.0,v2.0.0", base.GetVersion())
 	assert.Same(t, where, base.GetWhere())
+	base.SetModuleRoot("/module")
+	base.SetMetadataPath("/module/metadata.yaml")
+	assert.Equal(t, "/module", base.GetModuleRoot())
+	assert.Equal(t, "/module/metadata.yaml", base.GetMetadataPath())
 
 	// InstBaseRule satisfies the InstRule interface.
 	var _ InstRule = base
+}
+
+func TestConfigurationModuleMetadataReturnsIndependentMap(t *testing.T) {
+	set := NewInstRuleSet("example.com/app")
+	file := filepath.Join(t.TempDir(), "app.go")
+	var base InstBaseRule
+	base.SetModuleRoot("/module")
+	base.SetMetadataPath("/module/metadata.yaml")
+	set.AddRawRule(file, &InstRawRule{InstBaseRule: base})
+
+	metadata := set.ConfigurationModuleMetadata()
+	assert.Equal(t, map[string]string{"/module": "/module/metadata.yaml"}, metadata)
+	metadata["/other"] = "/other/metadata.yaml"
+	assert.NotContains(t, set.ConfigurationModuleMetadata(), "/other")
+
+	withoutMetadata := NewInstRuleSet("example.com/other")
+	withoutMetadata.AddRawRule(file, &InstRawRule{})
+	assert.Empty(t, withoutMetadata.ConfigurationModuleMetadata())
 }
 
 func TestNewInstRuleSet(t *testing.T) {

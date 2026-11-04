@@ -79,6 +79,18 @@ func TestValidateSelectedConfigurationMetadataReportsParseErrors(t *testing.T) {
 	require.ErrorContains(t, err, "parse")
 }
 
+func TestValidateSelectedConfigurationMetadataFileDisappearsAfterDiscovery(t *testing.T) {
+	module := makeConfigurationModule(t, "example.com/instrumentation", "configurations: []\n")
+	matched := matchedConfigurationRules(module)
+	require.NoError(t, os.Remove(filepath.Join(module.dir, instrumentationMetadataFilename)))
+
+	result, err := newTestSetupPhase().validateSelectedConfigurationMetadata(matched)
+
+	require.NoError(t, err)
+	assert.Empty(t, result.Definitions)
+	assert.Equal(t, []string{module.dir}, result.ModulesWithoutMetadata)
+}
+
 func TestValidateSelectedConfigurationMetadataWithNoMatchedHooks(t *testing.T) {
 	sp := newTestSetupPhase()
 
@@ -162,6 +174,26 @@ func TestFindInstrumentationMetadataDoesNotEscapeRoot(t *testing.T) {
 	assert.Empty(t, metadataPath, "an unrelated ancestor's metadata must not be used")
 }
 
+func TestFindInstrumentationMetadataOutsideRoot(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+
+	_, err := findInstrumentationMetadata(outside, root)
+
+	require.ErrorContains(t, err, "outside metadata search root")
+}
+
+func TestFindInstrumentationMetadataStatError(t *testing.T) {
+	root := t.TempDir()
+	notDirectory := filepath.Join(root, "not-a-directory")
+	require.NoError(t, os.WriteFile(notDirectory, []byte("file"), 0o644))
+	module := filepath.Join(notDirectory, "module")
+
+	_, err := findInstrumentationMetadata(module, root)
+
+	require.ErrorContains(t, err, "checking instrumentation metadata")
+}
+
 func TestFindInstrumentationMetadataInExternalModuleRoot(t *testing.T) {
 	module := makeConfigurationModule(t, "example.com/external", "configurations: []\n")
 	metadataPath, err := findInstrumentationMetadata(module.dir, module.dir)
@@ -199,18 +231,21 @@ func TestSelectedHookPackageDirsDeduplicatesAndSorts(t *testing.T) {
 
 func TestMatchedRuleTypesRetainConfigurationModuleMetadata(t *testing.T) {
 	moduleRoot := filepath.Join(t.TempDir(), "module")
+	sourceFile := filepath.Join(t.TempDir(), "app.go")
 	metadataPath := filepath.Join(moduleRoot, instrumentationMetadataFilename)
 	var base rule.InstBaseRule
 	base.SetModuleRoot(moduleRoot)
 	base.SetMetadataPath(metadataPath)
+	assert.Equal(t, moduleRoot, base.GetModuleRoot())
+	assert.Equal(t, metadataPath, base.GetMetadataPath())
 	set := rule.NewInstRuleSet("example.com/app")
-	set.AddRawRule("/app.go", &rule.InstRawRule{InstBaseRule: base})
-	set.AddFuncRule("/app.go", &rule.InstFuncRule{InstBaseRule: base})
-	set.AddStructRule("/app.go", &rule.InstStructRule{InstBaseRule: base})
-	set.AddCallRule("/app.go", &rule.InstCallRule{InstBaseRule: base})
-	set.AddLitRule("/app.go", &rule.InstLitRule{InstBaseRule: base})
-	set.AddDirectiveRule("/app.go", &rule.InstDirectiveRule{InstBaseRule: base})
-	set.AddDeclRule("/app.go", &rule.InstDeclRule{InstBaseRule: base})
+	set.AddRawRule(sourceFile, &rule.InstRawRule{InstBaseRule: base})
+	set.AddFuncRule(sourceFile, &rule.InstFuncRule{InstBaseRule: base})
+	set.AddStructRule(sourceFile, &rule.InstStructRule{InstBaseRule: base})
+	set.AddCallRule(sourceFile, &rule.InstCallRule{InstBaseRule: base})
+	set.AddLitRule(sourceFile, &rule.InstLitRule{InstBaseRule: base})
+	set.AddDirectiveRule(sourceFile, &rule.InstDirectiveRule{InstBaseRule: base})
+	set.AddDeclRule(sourceFile, &rule.InstDeclRule{InstBaseRule: base})
 	set.AddFileRule(&rule.InstFileRule{InstBaseRule: base})
 
 	assert.Equal(t, map[string]string{moduleRoot: metadataPath}, set.ConfigurationModuleMetadata())
