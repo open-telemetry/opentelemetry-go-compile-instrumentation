@@ -364,13 +364,13 @@ func TestCallTemplate_ThatImplementsHelpers(t *testing.T) {
 	tmpl.typeInfo = ip.fileTypes()
 
 	call := &dst.CallExpr{Fun: &dst.Ident{Name: "f"}}
-	expr, err := tmpl.compileExpression(call, findFuncDeclInFile(t, root, "both"), importAliases, nil)
+	expr, err := tmpl.compileExpression(call, callSite{}, findFuncDeclInFile(t, root, "both"), importAliases, nil)
 	require.NoError(t, err)
 	got, err := ast.RenderExpr(expr)
 	require.NoError(t, err)
 	assert.Equal(t, `wrap(c, err, f())`, got)
 
-	_, err = tmpl.compileExpression(call, nil, importAliases, nil)
+	_, err = tmpl.compileExpression(call, callSite{}, nil, importAliases, nil)
 	require.Error(t, err, "the helpers need an enclosing function")
 }
 

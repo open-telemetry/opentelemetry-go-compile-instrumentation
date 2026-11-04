@@ -1,0 +1,8 @@
+span_directive:
+  target: main
+  where:
+    directive: "otelc:span"
+  do:
+    - expand_directive:
+        template: |-
+          println("span start: name={{ .FuncName }} args={{ .FuncArgumentCount }} tag={{ .DirectiveArg "tag" }}")

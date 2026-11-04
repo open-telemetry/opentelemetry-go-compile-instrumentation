@@ -56,6 +56,7 @@ schemas/otelc/
 │   ├── elasticsearch.yaml   # olivere/elastic (v7) client spans
 │   ├── gin.yaml             # gin-gonic/gin server-span enrichment
 │   ├── fiber.yaml           # gofiber/fiber (v2) server spans
+│   ├── echo.yaml            # labstack/echo/v4 server-span enrichment
 │   ├── otel-sdk.yaml        # go.opentelemetry.io/otel* — Go runtime metrics
 │   ├── logs.yaml            # log, log/slog, logrus, zap — no telemetry (correlation only)
 │   └── runtime.yaml         # runtime — no telemetry (GLS context propagation)
@@ -78,6 +79,31 @@ Use `groups/http.yaml` as the template:
 5. Run `make lint-schema` and fix any diagnostics.
 
 > **Note on re-declaring upstream metrics.** Most instrumentations emit standard upstream metrics (e.g. `http.client.request.duration`). Weaver has no way to *reference* a metric defined in a dependency, so we re-declare it locally to pin the emission contract. Weaver then reports a `DuplicateMetricName` between our registry and the upstream dependency; this specific, expected duplicate is allowlisted in [`scripts/semconv/lint-schema-filter.jq`](../scripts/semconv/lint-schema-filter.jq). Any *other* diagnostic — including a metric declared twice within our own registry, or an unresolved `ref:` — still fails the lint.
+
+### When a local attribute becomes official upstream
+
+Bumping `.semconv-version` can turn an attribute we declare with `id:` into one
+that upstream now defines too. `make lint-schema` then fails with
+`DuplicateAttributeId`, naming both the upstream file and ours. See
+[ADR 0006](adr/0006-semconv-telemetry-contract-organization.md) for how local
+declarations are organized.
+
+To fix it, replace the local declaration with a reference:
+
+1. Compare the upstream definition with ours before switching. Check the
+   `type`, and for an enum, check that every value we emit is one of its
+   members.
+2. If they match, delete the `id:` entry and add `- ref: <attribute.id>` to
+   every group that used it. Remove the `attribute_group` if it is now empty.
+3. Switch the Go code to the upstream semconv package's key or helper, and
+   delete the hand-written constant.
+4. Run `make lint-schema`.
+
+If the upstream type or values differ, switching changes what users see, so
+raise it in an issue before changing anything. `rpc.system.name` in
+`groups/aws.yaml` is a current example: we declare it as a `string` and emit
+`aws-api`, while upstream (from v1.39.0) defines it as an enum whose members do
+not include `aws-api`.
 
 ## Prerequisites
 
