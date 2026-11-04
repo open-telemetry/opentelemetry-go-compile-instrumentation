@@ -65,10 +65,13 @@ func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDi
 			break
 		}
 
+		// otelc changed go.mod before this load, so the load uses the -mod
+		// flag of the build (see modBuildFlags).
 		pkgs, loadErr := packages.Load(&packages.Config{
-			Mode:    packages.NeedName | packages.NeedFiles,
-			Context: ctx,
-			Dir:     moduleDir,
+			Mode:       packages.NeedName | packages.NeedFiles,
+			Context:    ctx,
+			Dir:        moduleDir,
+			BuildFlags: modBuildFlags(ctx),
 		}, pending...)
 		if loadErr != nil {
 			lastErr = loadErr
@@ -84,7 +87,7 @@ func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDi
 			case pkg == nil:
 				next = append(next, p)
 			default:
-				resolved[p] = pkg.Dir
+				resolved[p] = rulePackageDir(pkg)
 			}
 		}
 		pending = next
@@ -104,6 +107,19 @@ func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDi
 	}
 
 	return nil
+}
+
+// rulePackageDir returns the directory of the hook package pkg. In vendor
+// mode, the go command gives the directory in vendor/. "go mod vendor" does not
+// copy all the files (for example the //go:build ignore files that file rules
+// add), so for an otelc package the directory of the extracted bundle is used.
+func rulePackageDir(pkg *packages.Package) string {
+	if isInVendorDir(pkg.Dir) {
+		if dir, ok := embeddedSourceDir(pkg.PkgPath); ok {
+			return dir
+		}
+	}
+	return pkg.Dir
 }
 
 // ignoreDirectiveSupportModule is the hook package that provides the
@@ -313,7 +329,7 @@ func hashPackages(w io.Writer, goroot string, pkgs []*packages.Package) error {
 			}
 		}
 		_, _ = fmt.Fprintf(w, "%s\n", pkg.PkgPath)
-		for _, file := range slices.Sorted(slices.Values(packageFiles(pkg))) {
+		for _, file := range slices.Sorted(slices.Values(loadedPackageFiles(pkg))) {
 			if err := hashFile(w, file); err != nil {
 				return err
 			}
@@ -322,7 +338,7 @@ func hashPackages(w io.Writer, goroot string, pkgs []*packages.Package) error {
 	return nil
 }
 
-func packageFiles(pkg *packages.Package) []string {
+func loadedPackageFiles(pkg *packages.Package) []string {
 	return slices.Concat(pkg.GoFiles, pkg.OtherFiles, pkg.EmbedFiles)
 }
 
@@ -335,7 +351,7 @@ func isStdPackage(pkg *packages.Package, goroot string) bool {
 		return false
 	}
 	src := filepath.Join(goroot, "src") + string(filepath.Separator)
-	for _, file := range packageFiles(pkg) {
+	for _, file := range loadedPackageFiles(pkg) {
 		if !strings.HasPrefix(filepath.Clean(file), src) {
 			return false
 		}
