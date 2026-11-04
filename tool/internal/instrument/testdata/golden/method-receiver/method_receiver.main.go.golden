@@ -146,8 +146,8 @@ func OtelBeforeTrampoline_Func13482884715(recv0 **T, param0 *string, param1 *int
 	hookContext.params = []interface{}{recv0, param0, param1}
 	hookContext.funcName = "Func1"
 	hookContext.packageName = "main"
-	if H3Before != nil {
-		H3Before(hookContext, *recv0, *param0, *param1)
+	if otelc_hook_532392343_H3Before != nil {
+		otelc_hook_532392343_H3Before(hookContext, *recv0, *param0, *param1)
 	}
 	return hookContext, hookContext.skipCall
 }
@@ -166,16 +166,16 @@ func OtelAfterTrampoline_Func13482884715(hookContext HookContext, arg0 *float32,
 		}
 	}()
 	hookContext.(*HookContextImpl3482884715).returnVals = []interface{}{arg0, arg1}
-	if H3After != nil {
-		H3After(hookContext, *arg0, *arg1)
+	if otelc_hook_532392343_H3After != nil {
+		otelc_hook_532392343_H3After(hookContext, *arg0, *arg1)
 	}
 }
 
-//go:linkname H3Before testdata/golden/method-receiver.H3Before
-func H3Before(hookContext HookContext, recv0 interface{}, param0 string, param1 int)
+//go:linkname otelc_hook_532392343_H3Before testdata/golden/method-receiver.H3Before
+func otelc_hook_532392343_H3Before(hookContext HookContext, recv0 interface{}, param0 string, param1 int)
 
-//go:linkname H3After testdata/golden/method-receiver.H3After
-func H3After(hookContext HookContext, arg0 float32, arg1 error)
+//go:linkname otelc_hook_532392343_H3After testdata/golden/method-receiver.H3After
+func otelc_hook_532392343_H3After(hookContext HookContext, arg0 float32, arg1 error)
 
 type HookContextImpl1380706877 struct {
 	params      []interface{}
@@ -266,11 +266,11 @@ func OtelBeforeTrampoline_Func31380706877(recv0 *T) (hookContext *HookContextImp
 	hookContext.params = []interface{}{recv0}
 	hookContext.funcName = "Func3"
 	hookContext.packageName = "main"
-	if H11Before != nil {
-		H11Before(hookContext, *recv0)
+	if otelc_hook_532392343_H11Before != nil {
+		otelc_hook_532392343_H11Before(hookContext, *recv0)
 	}
 	return hookContext, hookContext.skipCall
 }
 
-//go:linkname H11Before testdata/golden/method-receiver.H11Before
-func H11Before(hookContext HookContext, recv0 interface{})
+//go:linkname otelc_hook_532392343_H11Before testdata/golden/method-receiver.H11Before
+func otelc_hook_532392343_H11Before(hookContext HookContext, recv0 interface{})

@@ -12,11 +12,12 @@ import (
 
 func TestNewInstStructRule(t *testing.T) {
 	tests := []struct {
-		name    string
-		yaml    string
-		ruleID  string
-		wantErr bool
-		check   func(*testing.T, *InstStructRule)
+		name        string
+		yaml        string
+		ruleID      string
+		wantErr     bool
+		errContains string
+		check       func(*testing.T, *InstStructRule)
 	}{
 		{
 			name:   "minimal valid rule",
@@ -85,6 +86,59 @@ new_field:
 			yaml:    "target: main\n  bad: [unterminated",
 			wantErr: true,
 		},
+		{
+			name:   "null new_field entry is rejected",
+			ruleID: "struct_null",
+			yaml: `
+target: main
+struct: MyStruct
+new_field:
+  - null
+`,
+			wantErr:     true,
+			errContains: "new_field[0] cannot be empty",
+		},
+		{
+			name:   "empty new_field name is rejected",
+			ruleID: "struct_empty_name",
+			yaml: `
+target: main
+struct: MyStruct
+new_field:
+  - name: ""
+    type: string
+`,
+			wantErr:     true,
+			errContains: "new_field[0].name cannot be empty",
+		},
+		{
+			name:   "empty new_field type is rejected",
+			ruleID: "struct_empty_type",
+			yaml: `
+target: main
+struct: MyStruct
+new_field:
+  - name: Valid
+    type: ""
+`,
+			wantErr:     true,
+			errContains: "new_field[0].type cannot be empty",
+		},
+		{
+			name:   "duplicate new_field is rejected",
+			ruleID: "struct_dup",
+			yaml: `
+target: main
+struct: MyStruct
+new_field:
+  - name: A
+    type: string
+  - name: A
+    type: int
+`,
+			wantErr:     true,
+			errContains: `new_field "A" is declared more than once`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -92,6 +146,9 @@ new_field:
 			r, err := NewInstStructRule([]byte(tt.yaml), tt.ruleID)
 			if tt.wantErr {
 				require.Error(t, err)
+				if tt.errContains != "" {
+					assert.Contains(t, err.Error(), tt.errContains)
+				}
 				return
 			}
 			require.NoError(t, err)

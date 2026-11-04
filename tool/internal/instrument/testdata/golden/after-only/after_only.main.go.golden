@@ -137,13 +137,13 @@ func OtelAfterTrampoline_Func11681024588(hookContext HookContext, arg0 *float32,
 		}
 	}()
 	hookContext.(*HookContextImpl1681024588).returnVals = []interface{}{arg0, arg1}
-	if H1After != nil {
-		H1After(hookContext, *arg0, *arg1)
+	if otelc_hook_1405514857_H1After != nil {
+		otelc_hook_1405514857_H1After(hookContext, *arg0, *arg1)
 	}
 }
 
-//go:linkname H1After testdata/golden/after-only.H1After
-func H1After(hookContext HookContext, arg0 float32, arg1 error)
+//go:linkname otelc_hook_1405514857_H1After testdata/golden/after-only.H1After
+func otelc_hook_1405514857_H1After(hookContext HookContext, arg0 float32, arg1 error)
 
 type HookContextImpl3865747808 struct {
 	params      []interface{}
@@ -262,10 +262,10 @@ func OtelAfterTrampoline_Func13865747808(hookContext HookContext, arg0 *float32,
 		}
 	}()
 	hookContext.(*HookContextImpl3865747808).returnVals = []interface{}{arg0, arg1}
-	if H8After != nil {
-		H8After(hookContext, *arg0, *arg1)
+	if otelc_hook_1405514857_H8After != nil {
+		otelc_hook_1405514857_H8After(hookContext, *arg0, *arg1)
 	}
 }
 
-//go:linkname H8After testdata/golden/after-only.H8After
-func H8After(hookContext HookContext, arg0 float32, arg1 error)
+//go:linkname otelc_hook_1405514857_H8After testdata/golden/after-only.H8After
+func otelc_hook_1405514857_H8After(hookContext HookContext, arg0 float32, arg1 error)

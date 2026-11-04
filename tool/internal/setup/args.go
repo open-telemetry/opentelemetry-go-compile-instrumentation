@@ -51,7 +51,7 @@ type ClassifiedArg struct {
 func isBuildFlagWithValue(name string) bool {
 	switch name {
 	case "-C", "-o", "-p", "-covermode", "-coverpkg",
-		"-asmflags", "-buildmode", "-buildvcs", "-compiler",
+		"-asmflags", "-buildmode", "-compiler",
 		"-gccgoflags", flagGcflags, "-installsuffix", "-ldflags",
 		"-mod", "-modfile", "-overlay", "-pgo", "-pkgdir",
 		"-tags", "-toolexec":
@@ -61,11 +61,14 @@ func isBuildFlagWithValue(name string) bool {
 	}
 }
 
-// isBuildBoolFlag reports whether name is a Go build boolean flag.
+// isBuildBoolFlag reports whether name is a Go build boolean flag. -buildvcs
+// also accepts "auto", but only in the joined -buildvcs=auto form: cmd/go
+// marks it as a boolean flag, so a separate next token is a package.
 func isBuildBoolFlag(name string) bool {
 	switch name {
 	case "-a", "-n", "-v", "-x", "-race", "-msan",
-		"-asan", "-cover", "-trimpath", "-work", "-linkshared", "-json":
+		"-asan", "-cover", "-trimpath", "-work", "-linkshared", "-json",
+		"-buildvcs", "-modcacherw":
 		return true
 	default:
 		return false

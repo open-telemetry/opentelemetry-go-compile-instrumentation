@@ -816,11 +816,11 @@ This rule wraps function calls at call sites with instrumentation code. Unlike t
 
 **Modifier (`do: - wrap_call:`):**
 
-| Field           | Type       | Required                                      | Notes                                                                                                                  |
-| --------------- | ---------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `replace`       | string     | No (one of `replace`/`append_args` required)  | Replace string with `{{ . }}` placeholder for the original call. Must produce a Go call expression.                    |
-| `append_args`   | `[]string` | No (one of `replace`/`append_args` required)  | Go expression strings appended as additional arguments to the matched call                                             |
-| `variadic_type` | string     | No                                            | Element type for the ellipsis IIFE wrapper (e.g. `grpc.DialOption`). Required when any matched call uses `...` spread. |
+| Field           | Type       | Required                                     | Notes                                                                                                                                                                                                                                                   |
+| --------------- | ---------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `replace`       | string     | No (one of `replace`/`append_args` required) | Uses `{{ . }}` for the original call, or `{{ .CallReceiver }}`, `{{ .CallArguments }}` and `{{ .CallArgument N }}` for its parts. Must produce a Go expression, and a call expression when the matched call is the call of a `defer` or `go` statement. |
+| `append_args`   | `[]string` | No (one of `replace`/`append_args` required) | Go expression strings appended as additional arguments to the matched call                                                                                                                                                                              |
+| `variadic_type` | string     | No                                           | Element type for the ellipsis IIFE wrapper (e.g. `grpc.DialOption`). Required when any matched call uses `...` spread.                                                                                                                                  |
 
 Top-level `imports` (map[string]string, optional): Additional imports needed for injected code (alias: path). Packages must be in the target module's `go.mod`.
 
@@ -831,33 +831,40 @@ Top-level `imports` (map[string]string, optional): Additional imports needed for
 The `replace` field uses Go's standard [text/template](https://pkg.go.dev/text/template) package for code generation. This provides:
 
 - **Placeholder Substitution**: `{{ . }}` is replaced with the original function call's AST node
+- **Placeholder Requirement**: The replace string must contain `{{ . }}`, `{{ .CallReceiver }}`, `{{ .CallArguments }}` or `{{ .CallArgument N }}`. Without `{{ . }}`, the original call is dropped and the new expression is built from its parts
 - **Type Safety**: The replace string is compiled at rule creation time and validated
-- **Expression Output**: The replace string must produce a valid Go expression; the result may be any expression type (not limited to call expressions)
+- **Expression Output**: The replace string must produce a valid Go expression; the result may be any expression type (not limited to call expressions). The exception is the call of a `defer` or `go` statement, which Go requires to be a call: there the result must be a call expression, or the build fails
 
 Currently supported replace string features:
 
 - Simple wrapping: `wrapper({{ . }})`
 - IIFE (Immediately-Invoked Function Expression): `(func() T { return {{ . }} })()`
 - Complex expressions with multiple statements using IIFE
+- Replacing the call with another call that takes the same arguments: `tracedConnect({{ .CallArgument 0 }}, {{ .CallArgument 1 }})`
+- Rebuilding a method call around a wrapped receiver: `{{ .CallReceiver }}.With(fields()...).Info({{ .CallArguments }})`
 
 **Template Placeholders:**
 
-| Placeholder                    | Replaced with                                                                                          |
-| ------------------------------ | -----------------------------------------------------------------------------------------------------  |
-| `{{.FuncName}}`                | The name of the annotated function                                                                     |
-| `{{.FuncArgument N}}`          | The identifier of the N-th (0-indexed) parameter of the enclosing function, excluding the receiver     |
-| `{{.FuncReturn N}}`            | The identifier of the N-th (0-indexed) return value of the enclosing function                          |
-| `{{.FuncArgumentCount}}`       | The number of parameters of the enclosing function, excluding the receiver                             |
-| `{{.FuncReturnCount}}`         | The number of return values of the enclosing function                                                  |
-| `{{.Receiver}}`                | The identifier of the enclosing method's receiver                                                      |
-| `{{.FuncArgumentOfType type}}` | The first parameter of the enclosing function, excluding the receiver, matching the given type         |
-| `{{.FuncReturnOfType type}}`   | The first return value of the enclosing function matching the given type                               |
-| `{{.CallArgument N}}`          | The source text of the N-th (0-indexed) argument of the wrapped call expression itself                 |
-| `{{.CallArgumentCount}}`       | The number of arguments in the wrapped call expression itself                                          |
+| Placeholder                    | Replaced with                                                                                               |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `{{.FuncName}}`                | The name of the annotated function                                                                          |
+| `{{.FuncArgument N}}`          | The identifier of the N-th (0-indexed) parameter of the enclosing function, excluding the receiver          |
+| `{{.FuncReturn N}}`            | The identifier of the N-th (0-indexed) return value of the enclosing function                               |
+| `{{.FuncArgumentCount}}`       | The number of parameters of the enclosing function, excluding the receiver                                  |
+| `{{.FuncReturnCount}}`         | The number of return values of the enclosing function                                                       |
+| `{{.Receiver}}`                | The identifier of the enclosing method's receiver                                                           |
+| `{{.FuncArgumentOfType type}}` | The first parameter of the enclosing function, excluding the receiver, matching the given type              |
+| `{{.FuncReturnOfType type}}`   | The first return value of the enclosing function matching the given type                                    |
+| `{{.CallReceiver}}`            | The source text of the receiver expression of the wrapped method call itself (`log` in `log.Info(msg)`)     |
+| `{{.CallArgument N}}`          | The source text of the N-th (0-indexed) argument of the wrapped call expression itself                      |
+| `{{.CallArgumentCount}}`       | The number of arguments in the wrapped call expression itself                                               |
+| `{{.CallArguments}}`           | The source text of all arguments of the wrapped call expression itself, as written, including a final `...` |
 
-These resolve against two different things: `Func*`/`Receiver` placeholders describe the **enclosing function** (the named top-level function whose body contains the matched call site), while `Call*` placeholders describe **the matched call expression itself** — e.g. for `fmt.Println("hello", name)`, `{{.CallArgument 0}}` is the literal `"hello"`, not one of the enclosing function's parameters.
+These resolve against two different things: `Func*`/`Receiver` placeholders describe the **enclosing function** (the named top-level function whose body contains the matched call site), while `Call*` placeholders describe **the matched call expression itself** — e.g. for `fmt.Println("hello", name)`, `{{.CallArgument 0}}` is the literal `"hello"`, not one of the enclosing function's parameters. In the same way, in `func (s *Server) Handle(log *Logger) { log.Info("x") }`, `{{.Receiver}}` is `s` and `{{.CallReceiver}}` is `log`.
 
-A call site with no enclosing function (e.g. a package-level variable initializer) has none of the `Func*`/`Receiver` placeholders available, so using one there fails the build with a descriptive error. `{{.Receiver}}` additionally fails the build if the enclosing function is not a method (has no receiver). `Call*` placeholders don't need an enclosing function, but only work when the wrapped expression is itself a function call — using one on a non-call expression (e.g. a decl rule's `wrap` applied to `var x = 5`) also fails the build with a descriptive error.
+A call site with no enclosing function (e.g. a package-level variable initializer) has none of the `Func*`/`Receiver` placeholders available, so using one there fails the build with a descriptive error. `{{.Receiver}}` additionally fails the build if the enclosing function is not a method (has no receiver). `Call*` placeholders don't need an enclosing function, but only work when the wrapped expression is itself a function call — using one on a non-call expression (e.g. a decl rule's `wrap` applied to `var x = 5`) also fails the build with a descriptive error. `{{.CallReceiver}}` additionally requires a call matched by `method_call`: a `function_call` rule that uses it fails to load, and a decl or literal `wrap`, which has no `method_call`, fails the build.
+
+`{{.CallReceiver}}` renders the receiver as written at the call site. It does not add the `&` or `*` that Go adds for a method call, and it names the outer value for a method promoted from an embedded field. `{{.CallArguments}}` renders an empty string for a call without arguments, so a template that puts another argument after it breaks on such calls (`info({{.CallArguments}}, extra)` becomes `info(, extra)`). Guard it with `{{ if .CallArgumentCount }}`…`{{ end }}`. When the call spreads its last argument (`log.Info(msg, fields...)`), the rendered list ends with `...`, so it must be the last argument of the call in the template.
 
 Whitespace and `-` trim markers around the placeholder are honored per normal `text/template` rules, so `{{.FuncName}}`, `{{ .FuncName }}`, and `{{- .FuncName -}}` are equivalent. Unnamed parameters and return values and blank (`_`) names, are assigned a synthetic name the first time a template references them.
 
@@ -963,6 +970,46 @@ func Handler(r io.Reader, name string) {
         println("call arg0:", "hello", "nargs:", 2, "reader ok:", r != nil)
         return fmt.Println("hello", name)
     })()
+}
+```
+
+**Evaluation of the receiver and arguments:**
+
+A template that uses `{{.CallReceiver}}`, `{{.CallArguments}}` or `{{.CallArgument N}}` must evaluate the receiver and the arguments as the original call does. In such a template, every placeholder that stands for code of the original call counts, including `{{ . }}`. The build fails with a descriptive error when the template output uses a receiver or argument the wrong number of times, out of order, or inside a function literal under `defer`/`go`. The check counts the uses in the output text, so it does not see loops, conditions, or `&&` and `||`.
+
+- A receiver or argument that is a name or a literal, wrapped in any mix of selectors and parentheses (`s.log`, `a.b.c`, `(log)`), can be used any number of times, or not at all.
+- Any other receiver or argument, such as a call (`getLogger()`), must be used exactly once, in the order of the original call: the receiver first, then the arguments from left to right.
+- When the matched call is the call of a `defer` or `go` statement, the template must not use the receiver or an argument inside a function literal. The statement evaluates them when it runs, and a function literal would evaluate them later.
+
+**Example: `CallReceiver` and `CallArguments`**
+
+```yaml
+wrap_info:
+  target: main
+  where:
+    method_call: go.uber.org/zap.*Logger.Info
+  do:
+    - wrap_call:
+        replace: '{{ .CallReceiver }}.With(tracefields.From({{ .FuncArgumentOfType "context.Context" }})...).Info({{ .CallArguments }})'
+  imports:
+    tracefields: example.com/tracefields
+```
+
+Given:
+
+```go
+func handle(ctx context.Context, log *zap.Logger, fields []zap.Field) {
+    log.Info("handled", fields...)
+    defer getLogger().Info("done")
+}
+```
+
+The call is rebuilt around its receiver, and the arguments are forwarded as written:
+
+```go
+func handle(ctx context.Context, log *zap.Logger, fields []zap.Field) {
+    log.With(tracefields.From(ctx)...).Info("handled", fields...)
+    defer getLogger().With(tracefields.From(ctx)...).Info("done")
 }
 ```
 
@@ -1216,8 +1263,8 @@ func fetch(db *sql.DB, ctx context.Context) {
 
 **Important Notes:**
 
-- The `{{ . }}` placeholder in the `replace` string represents the original function or method call.
-- The `replace` string must be a valid Go expression that includes the placeholder and produces a call expression (current limitation).
+- The `{{ . }}` placeholder in the `replace` string represents the original function or method call. Use `{{ .CallReceiver }}`, `{{ .CallArguments }}` or `{{ .CallArgument N }}` instead to build the new expression from the call's parts.
+- The `replace` string must be a valid Go expression that includes `{{ . }}`, `{{ .CallReceiver }}`, `{{ .CallArguments }}` or `{{ .CallArgument N }}`. For the call of a `defer` or `go` statement, it must produce a call expression.
 - The `replace` string can only reference packages and functions that are already imported or defined in the target file.
 - Call rules only affect call sites in the target package, not the function or method definition itself.
 - Multiple calls to the same function or method will all be wrapped independently.
@@ -1228,7 +1275,7 @@ func fetch(db *sql.DB, ctx context.Context) {
 
 ### 5. Directive Rule
 
-This rule instruments functions annotated with a magic comment (a "directive") by prepending templated Go code into their bodies. The template is rendered once per annotated function, and the resulting statements are inserted at the top of the function body.
+This rule instruments functions and function literals annotated with a magic comment (a "directive") by prepending templated Go code into their bodies. The template is rendered once per annotated function, and the resulting statements are inserted at the top of the function body.
 
 **Use Cases:**
 
@@ -1252,7 +1299,7 @@ Top-level `imports` (map[string]string, optional): Additional imports needed by 
 
 | Placeholder                     | Replaced with                                                               |
 | ------------------------------- | --------------------------------------------------------------------------- |
-| `{{.FuncName}}`                 | The name of the annotated function                                          |
+| `{{.FuncName}}`                 | The name of the annotated function, or "" for a function literal            |
 | `{{.FuncArgument N}}`           | The identifier of the N-th (0-indexed) parameter, excluding the receiver    |
 | `{{.FuncReturn N}}`             | The identifier of the N-th (0-indexed) return value                         |
 | `{{.FuncArgumentCount}}`        | The number of parameters, excluding the receiver                            |
@@ -1338,9 +1385,56 @@ func divide(ctx context.Context, a int, b int) (_unnamedRetVal0 int, _unnamedRet
 }
 ```
 
+**Function literals:**
+
+A directive also annotates function literals. The directive comment is placed on its own line, immediately before one of these:
+
+| Placement                                                      | Annotated literals                       |
+| -------------------------------------------------------------- | ---------------------------------------- |
+| The literal itself (e.g. a call argument or a slice element)   | The literal                              |
+| A `var` declaration or spec, at package level or in a function | Each literal among the values            |
+| An assignment (`x := func() {...}` or `x = func() {...}`)      | Each literal on the right side           |
+| A `return` statement                                           | Each literal among the results           |
+| A `go`, `defer`, or expression statement                       | The called literal (`go func() {...}()`) |
+| A send statement (`ch <- func() {...}`)                        | The sent literal                         |
+| A key:value element (`Field: func() {...}`)                    | The value literal                        |
+
+A call of a literal counts as that literal, so `x := func() int {...}()` annotates the literal. The arguments of a call do not: a directive before `run(func() {...})` annotates nothing, but a directive on its own line before the argument annotates it.
+
+The template placeholders work the same way as for a declaration, with these differences:
+
+- `{{.FuncName}}` is "" because a literal has no name. A template can test it with `{{ if .FuncName }}`, or take a name from a directive argument with `{{ .DirectiveArg "span.name" }}`.
+- Unnamed parameters and results of the literal get synthetic names, so a deferred statement can read a returned `error` through `{{.FuncReturnOfType "error"}}`.
+
+A directive applies only to the function it annotates. In an annotated function, a nested literal is instrumented only if it carries its own directive. A literal that two directives annotate (for example, the statement and the literal itself) is instrumented once, with the arguments of the first directive.
+
+Example:
+
+```go
+func main() {
+    //otelc:span span.name:"load"
+    load := func(ctx context.Context) error {
+        return nil
+    }
+    _ = load(context.Background())
+}
+```
+
+With the first example rule above, the literal becomes:
+
+```go
+    //otelc:span span.name:"load"
+    load := func(ctx context.Context) error {
+        println("span start: , arg0=ctx")
+        defer println("span end: ")
+        return nil
+    }
+```
+
 **Important Notes:**
 
-- The directive comment must be placed immediately before the function declaration.
+- The directive comment must be placed immediately before the function declaration, or before a function literal or a statement that holds one (see **Function literals** above).
+- A directive comment that annotates no function (for example, before a statement without a function literal, or at the end of a line) is ignored, and the tool logs a warning with its position.
 - The `//` must not be followed by a space (i.e., `//otelc:span`, not `// otelc:span`).
 - The `directive` field must not include the leading `//`.
 - Functions without the directive comment are not affected.

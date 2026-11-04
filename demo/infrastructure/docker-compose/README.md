@@ -742,7 +742,7 @@ The observability stack includes several validation tools to check configuration
 #### Validate All Configurations
 
 ```bash
-make validate-all
+make validate
 ```
 
 This runs validation for:
@@ -802,7 +802,7 @@ Always validate configurations before deploying:
 
 ```bash
 # Before starting services
-make validate-all
+make validate
 
 # If validation passes, then start
 make start

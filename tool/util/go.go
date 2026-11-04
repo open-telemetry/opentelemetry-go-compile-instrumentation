@@ -6,6 +6,7 @@ package util
 import (
 	"bufio"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"go.opentelemetry.io/otelc/tool/ex"
@@ -132,7 +133,8 @@ func SplitGoflags(goflags string) []string {
 // instrumentation.
 func StripToolexecFromGoflags(goflags string) string {
 	return filterGoflags(goflags, func(unquoted string) bool {
-		return unquoted == "-toolexec" || strings.HasPrefix(unquoted, "-toolexec=")
+		return unquoted == "-toolexec" || strings.HasPrefix(unquoted, "-toolexec=") ||
+			unquoted == "--toolexec" || strings.HasPrefix(unquoted, "--toolexec=")
 	})
 }
 
@@ -344,6 +346,31 @@ func IsGoFile(path string) bool {
 	return strings.HasSuffix(strings.ToLower(path), ".go")
 }
 
+// IsTestBuild reports whether a compile invocation is part of a `go test` run.
+// The Go toolchain only ever feeds these inputs to the compiler while building
+// a test binary: a package augmented with its in-package _test.go files, the
+// external xxx_test package (whose sources are also _test.go files), and the
+// generated _testmain.go runner. None of them appear in a normal `go build`,
+// so their presence in the source set is the signal. There is no dedicated
+// "is test" compiler flag (verified against the toolchain), so the source set
+// is the only thing to key on.
+//
+// ponytail: known gap, no fix possible at compile granularity. A package whose
+// tests live only in an external xxx_test package (no in-package _test.go) is
+// compiled once and shared between normal and test builds (the toolchain emits
+// no test-only variant of it), so is_test cannot gate that package's production
+// code. The external xxx_test package and any in-package _test.go files are
+// still detected.
+func IsTestBuild(sources []string) bool {
+	for _, src := range sources {
+		base := filepath.Base(src)
+		if base == "_testmain.go" || strings.HasSuffix(base, "_test.go") {
+			return true
+		}
+	}
+	return false
+}
+
 func NewFileScanner(file *os.File, size int) (*bufio.Scanner, error) {
 	if _, err := file.Seek(0, 0); err != nil {
 		return nil, ex.Wrapf(err, "failed to seek file")
@@ -351,4 +378,42 @@ func NewFileScanner(file *os.File, size int) (*bufio.Scanner, error) {
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 0, size), size)
 	return scanner, nil
+}
+
+// ActiveBuildTags returns the build tags of the current go build.
+func ActiveBuildTags() []string {
+	return UserBuildTags(SplitGoflags(os.Getenv("GOFLAGS")), GetBuildFlags())
+}
+
+// UserBuildTags returns the build tags of the effective -tags flag. Flags from
+// buildFlags (the command line) override GOFLAGS, as they do in the go command.
+func UserBuildTags(goflags, buildFlags []string) []string {
+	value, found := lastTagsValue(goflags)
+	if v, ok := lastTagsValue(buildFlags); ok {
+		value, found = v, true
+	}
+	if !found {
+		return nil
+	}
+	return strings.FieldsFunc(strings.Trim(value, `"'`), func(r rune) bool {
+		return r == ',' || r == ' '
+	})
+}
+
+func lastTagsValue(flags []string) (string, bool) {
+	value, found := "", false
+	for i := 0; i < len(flags); i++ {
+		flag := flags[i]
+		if strings.HasPrefix(flag, "--") {
+			flag = flag[1:]
+		}
+		switch {
+		case flag == "-tags" && i+1 < len(flags):
+			value, found = flags[i+1], true
+			i++
+		case strings.HasPrefix(flag, "-tags="):
+			value, found = strings.TrimPrefix(flag, "-tags="), true
+		}
+	}
+	return value, found
 }

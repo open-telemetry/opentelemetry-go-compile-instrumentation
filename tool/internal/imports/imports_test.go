@@ -547,76 +547,6 @@ func TestFindNew(t *testing.T) {
 	}
 }
 
-func TestCollectPaths(t *testing.T) {
-	tests := []struct {
-		name     string
-		root     *dst.File
-		expected map[string]string
-	}{
-		{
-			name:     "empty file",
-			root:     &dst.File{},
-			expected: map[string]string{},
-		},
-		{
-			name: "standard imports",
-			root: &dst.File{
-				Decls: []dst.Decl{
-					&dst.GenDecl{
-						Tok: token.IMPORT,
-						Specs: []dst.Spec{
-							&dst.ImportSpec{Path: &dst.BasicLit{Value: `"fmt"`}},
-							&dst.ImportSpec{Path: &dst.BasicLit{Value: `"log"`}},
-						},
-					},
-				},
-			},
-			expected: map[string]string{
-				"fmt": "fmt",
-				"log": "log",
-			},
-		},
-		{
-			name: "mixed imports - blank, dot, and normal",
-			root: &dst.File{
-				Decls: []dst.Decl{
-					&dst.GenDecl{
-						Tok: token.IMPORT,
-						Specs: []dst.Spec{
-							&dst.ImportSpec{Path: &dst.BasicLit{Value: `"fmt"`}},
-							&dst.ImportSpec{
-								Name: dst.NewIdent("_"),
-								Path: &dst.BasicLit{Value: `"net/http/pprof"`},
-							},
-							&dst.ImportSpec{
-								Name: dst.NewIdent("."),
-								Path: &dst.BasicLit{Value: `"testing"`},
-							},
-							&dst.ImportSpec{
-								Name: dst.NewIdent("ctx"),
-								Path: &dst.BasicLit{Value: `"context"`},
-							},
-						},
-					},
-				},
-			},
-			expected: map[string]string{
-				"fmt":            "fmt",
-				"net/http/pprof": "net/http/pprof",
-				"testing":        "testing",
-				"context":        "context",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := CollectPaths(t.Context(), tt.root)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
 func TestFindNew_MultiAliasSets(t *testing.T) {
 	// A file may import one path under several aliases. ExistingAliasSets
 	// keeps every alias, sorted. ExistingAliases keeps one alias, and the
@@ -638,4 +568,73 @@ func TestFindNew_MultiAliasSets(t *testing.T) {
 	assert.Equal(t, map[string][]string{"fmt": {"a", "b"}}, result.ExistingAliasSets)
 	assert.Equal(t, "b", result.ExistingAliases["fmt"], "the last spec wins in the single-alias view")
 	assert.Empty(t, result.NewImports, "alias a already names fmt in the file")
+}
+
+func TestCollectImportPaths(t *testing.T) {
+	tests := []struct {
+		name     string
+		root     *dst.File
+		expected map[string]string
+	}{
+		{
+			name:     "nil file",
+			root:     nil,
+			expected: nil,
+		},
+		{
+			name:     "empty file",
+			root:     &dst.File{},
+			expected: map[string]string{},
+		},
+		{
+			name: "various import styles",
+			root: &dst.File{
+				Decls: []dst.Decl{
+					&dst.GenDecl{
+						Tok: token.IMPORT,
+						Specs: []dst.Spec{
+							&dst.ImportSpec{Path: &dst.BasicLit{Value: `"fmt"`}},
+							&dst.ImportSpec{Name: dst.NewIdent("ctx"), Path: &dst.BasicLit{Value: `"context"`}},
+							&dst.ImportSpec{Name: dst.NewIdent("_"), Path: &dst.BasicLit{Value: `"net/http/pprof"`}},
+							&dst.ImportSpec{Name: dst.NewIdent("."), Path: &dst.BasicLit{Value: `"testing"`}},
+						},
+					},
+				},
+			},
+			expected: map[string]string{
+				"fmt":            "fmt",
+				"context":        "context",
+				"net/http/pprof": "net/http/pprof",
+				"testing":        "testing",
+			},
+		},
+		{
+			name: "non-import decls and edge-case specs",
+			root: &dst.File{
+				Decls: []dst.Decl{
+					&dst.FuncDecl{Name: dst.NewIdent("main")},
+					&dst.GenDecl{Tok: token.VAR, Specs: []dst.Spec{&dst.ValueSpec{}}},
+					&dst.GenDecl{
+						Tok: token.IMPORT,
+						Specs: []dst.Spec{
+							&dst.ValueSpec{},
+							&dst.ImportSpec{Path: nil},
+							&dst.ImportSpec{Path: &dst.BasicLit{Value: "invalid_unquoted"}},
+							&dst.ImportSpec{Path: &dst.BasicLit{Value: `""`}},
+						},
+					},
+				},
+			},
+			expected: map[string]string{
+				"invalid_unquoted": "invalid_unquoted",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := CollectImportPaths(tt.root)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
 }

@@ -890,6 +890,36 @@ func TestStripToolexecFromGoflags(t *testing.T) {
 			goflags:  "  -mod=mod   -toolexec=otelc  ",
 			expected: "-mod=mod",
 		},
+		{
+			name:     "bare toolexec boolean flag",
+			goflags:  "-toolexec",
+			expected: "",
+		},
+		{
+			name:     "bare double-dash toolexec flag",
+			goflags:  "--toolexec=otelc",
+			expected: "",
+		},
+		{
+			name:     "bare double-dash toolexec boolean flag",
+			goflags:  "--toolexec",
+			expected: "",
+		},
+		{
+			name:     "single-quoted double-dash toolexec flag with space",
+			goflags:  "'--toolexec=otelc toolexec'",
+			expected: "",
+		},
+		{
+			name:     "double-quoted double-dash toolexec flag with space",
+			goflags:  `"--toolexec=otelc toolexec"`,
+			expected: "",
+		},
+		{
+			name:     "double-dash toolexec flag between other flags",
+			goflags:  "-mod=mod '--toolexec=otelc toolexec' -race",
+			expected: "-mod=mod -race",
+		},
 	}
 
 	for _, tt := range tests {
@@ -897,6 +927,85 @@ func TestStripToolexecFromGoflags(t *testing.T) {
 			if got := StripToolexecFromGoflags(tt.goflags); got != tt.expected {
 				t.Errorf("StripToolexecFromGoflags(%q) = %q, want %q", tt.goflags, got, tt.expected)
 			}
+		})
+	}
+}
+
+func TestUserBuildTags(t *testing.T) {
+	tests := []struct {
+		name       string
+		goflags    []string
+		buildFlags []string
+		expected   []string
+	}{
+		{name: "empty flags", expected: nil},
+		{name: "tags in goflags with equals", goflags: []string{"-tags=a,b"}, expected: []string{"a", "b"}},
+		{name: "tags in goflags with space", goflags: []string{"-tags", "a,b"}, expected: []string{"a", "b"}},
+		{name: "tags in goflags with double dash", goflags: []string{"--tags=a,b"}, expected: []string{"a", "b"}},
+		{name: "space-separated tags", goflags: []string{"-tags=a b"}, expected: []string{"a", "b"}},
+		{name: "quoted tags value", goflags: []string{`-tags="a,b"`}, expected: []string{"a", "b"}},
+		{
+			name:       "buildFlags overrides goflags",
+			goflags:    []string{"-tags=a"},
+			buildFlags: []string{"-tags=b,c"},
+			expected:   []string{"b", "c"},
+		},
+		{name: "last value wins", goflags: []string{"-tags=a", "-tags=b"}, expected: []string{"b"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, UserBuildTags(tt.goflags, tt.buildFlags))
+		})
+	}
+}
+
+func TestActiveBuildTags(t *testing.T) {
+	t.Setenv("GOFLAGS", "-tags=integration,test")
+	tags := ActiveBuildTags()
+	assert.Equal(t, []string{"integration", "test"}, tags)
+}
+
+func TestIsTestBuild(t *testing.T) {
+	tests := []struct {
+		name     string
+		sources  []string
+		expected bool
+	}{
+		{
+			name:     "normal package",
+			sources:  []string{"/src/lib/lib.go", "/src/lib/util.go"},
+			expected: false,
+		},
+		{
+			name:     "package with in-package tests",
+			sources:  []string{"/src/lib/lib.go", "/src/lib/lib_test.go"},
+			expected: true,
+		},
+		{
+			name:     "external test package",
+			sources:  []string{"/src/lib/export_test.go"},
+			expected: true,
+		},
+		{
+			name:     "generated test main",
+			sources:  []string{"/tmp/b001/_testmain.go"},
+			expected: true,
+		},
+		{
+			name:     "test suffix only in the directory name",
+			sources:  []string{"/src/lib_test/lib.go"},
+			expected: false,
+		},
+		{
+			name:     "no sources",
+			sources:  nil,
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, IsTestBuild(tt.sources))
 		})
 	}
 }
