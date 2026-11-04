@@ -184,6 +184,23 @@ Keep in mind:
   whole statement, so a statement with more than one call, such as `combine(a(), b())`, would
   suppress hooks for every call in it. Give each other call its own statement first, then use
   its result in the annotated statement.
+- Using `//otelc:ignore` on a call site anywhere in the build requires
+  `instrumentation/runtime` to be loaded, since that is where the suppression functions the
+  directive relies on at runtime live:
+
+  ```go
+  //go:build tools
+
+  package tools
+
+  import (
+      _ "your/rule/package"
+      _ "go.opentelemetry.io/otelc/instrumentation/runtime"
+  )
+  ```
+
+  Without it, `otelc setup` fails with a clear error naming the missing import, rather than
+  letting the build fail later on an unrelated-looking compiler error.
 
 ## Runtime Tuning
 
@@ -211,9 +228,10 @@ to propagate trace context:
   ended, so a span still in flight loses implicit propagation and spans started under it are no
   longer linked to it as parent. Raise the limit if a workload keeps more spans concurrently in
   flight than the default allows.
-- `OTEL_LOG_LEVEL` (values: `debug`, `info`, `warn`, `error`; default `info`) controls the
-  verbosity of `otelc`'s own runtime logging, including the GLS eviction and per-goroutine cap
-  messages above. Set it to `debug` to surface them.
+- `OTEL_LOG_LEVEL` (values: `none`, `debug`, `info`, `warn`, `error`; default `none`) controls
+  `otelc`'s own runtime logging, including the GLS eviction and per-goroutine cap messages
+  above. Logging is off unless you set a level; unknown values also turn it off. Logs go to
+  stderr. Set it to `debug` to surface the messages above.
 - **`OTEL_GO_SIMPLE_SPAN_PROCESSOR`** — set to `true` to use `SimpleSpanProcessor` instead of
   the default `BatchSpanProcessor` for the trace exporter, exporting each span immediately
   rather than in batches. Useful for debugging when you need spans to appear without waiting

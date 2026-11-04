@@ -4,10 +4,12 @@
 package instrument
 
 import (
+	"context"
 	"errors"
 	"go/token"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dave/dst"
@@ -1276,4 +1278,174 @@ func TestTypeParamDeclNames(t *testing.T) {
 	}
 
 	assert.Equal(t, []string{"K", "V", "", "T"}, typeParamDeclNames(params))
+}
+
+func TestHookLinkName(t *testing.T) {
+	a := hookLinkName("example.com/app/hooks", "Before")
+	b := hookLinkName("example.com/app/hooks2", "Before")
+	c := hookLinkName("example.com/app/hooks", "After")
+	assert.True(t, strings.HasPrefix(a, "otelc_hook_"))
+	assert.True(t, strings.HasSuffix(a, "_Before"))
+	assert.NotEqual(t, a, b, "different hook paths must not share a local name")
+	assert.NotEqual(t, a, c, "Before and After from the same path must differ")
+	assert.Equal(t, a, hookLinkName("example.com/app/hooks", "Before"))
+}
+
+// Regression for #1606: hook //go:linkname stubs were named after the hook's
+// short name and only skipped when that name was already in the current file.
+
+func writeHookPkg(t *testing.T, dir, pkg, fnName string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "hook.go"),
+		[]byte("package "+pkg+"\n\nfunc "+fnName+"(ctx HookContext) {}\n"),
+		0o600,
+	))
+}
+
+func applyHookRule(t *testing.T, ip *instrumentPhase, root *dst.File, funcName string, r *rule.InstFuncRule) {
+	t.Helper()
+	fn := findFuncDeclInFile(t, root, funcName)
+	ip.target = root
+	if ip.parser == nil {
+		ip.parser = ast.NewAstParser()
+	}
+	_, err := ip.applyFuncRule(context.Background(), r, root, fn, true)
+	require.NoError(t, err)
+}
+
+func linknameStubs(root *dst.File) [][2]string {
+	var stubs [][2]string
+	for _, decl := range root.Decls {
+		fn, ok := decl.(*dst.FuncDecl)
+		if !ok {
+			continue
+		}
+		for _, c := range fn.Decs.Start {
+			rest, found := strings.CutPrefix(c, "//go:linkname ")
+			if !found {
+				continue
+			}
+			fields := strings.Fields(rest)
+			if len(fields) == 2 {
+				stubs = append(stubs, [2]string{fields[0], fields[1]})
+			}
+		}
+	}
+	return stubs
+}
+
+func TestAddHookDecl_CrossFileSameHookDoesNotRedeclare(t *testing.T) {
+	// Same hook used by rules on A and C in two files of one package. The stub
+	// must be declared once and both trampolines must call that local name.
+	hookDir := t.TempDir()
+	writeHookPkg(t, hookDir, "hooks", "Before")
+
+	ruleA := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "hook_a"},
+		Func:         "A",
+		Before:       "Before",
+		Path:         "example.com/app/hooks",
+		ResolvedPath: hookDir,
+	}
+	ruleC := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "hook_c"},
+		Func:         "C",
+		Before:       "Before",
+		Path:         "example.com/app/hooks",
+		ResolvedPath: hookDir,
+	}
+
+	ip := newTestPhase()
+	fileA := parseFile(t, "package lib\n\nfunc A() int { return 1 }\n")
+	fileC := parseFile(t, "package lib\n\nfunc C() int { return 3 }\n")
+	applyHookRule(t, ip, fileA, "A", ruleA)
+	applyHookRule(t, ip, fileC, "C", ruleC)
+
+	stubs := append(linknameStubs(fileA), linknameStubs(fileC)...)
+	require.Len(t, stubs, 1, "one hook stub for the package, not one per file")
+	assert.Equal(t, "example.com/app/hooks.Before", stubs[0][1])
+	assert.NotEqual(t, "Before", stubs[0][0], "local stub must not reuse the hook's short name")
+
+	local := stubs[0][0]
+	srcA := renderFile(t, fileA)
+	srcC := renderFile(t, fileC)
+	assert.Contains(t, srcA, "if "+local+" != nil")
+	assert.Contains(t, srcC, "if "+local+" != nil")
+	assert.NotContains(t, srcA, "if Before != nil")
+	assert.NotContains(t, srcC, "if Before != nil")
+}
+
+func TestAddHookDecl_SameNameDifferentPathsStayDistinct(t *testing.T) {
+	// Two Before hooks from different packages in one file must each get a
+	// stub linked to their own path. Sharing one Before stub drops the second.
+	hooksDir := t.TempDir()
+	hooks2Dir := t.TempDir()
+	writeHookPkg(t, hooksDir, "hooks", "Before")
+	writeHookPkg(t, hooks2Dir, "hooks2", "Before")
+
+	ruleA := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "hook_a"},
+		Func:         "A",
+		Before:       "Before",
+		Path:         "example.com/app/hooks",
+		ResolvedPath: hooksDir,
+	}
+	ruleB := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "hook_b"},
+		Func:         "B",
+		Before:       "Before",
+		Path:         "example.com/app/hooks2",
+		ResolvedPath: hooks2Dir,
+	}
+
+	ip := newTestPhase()
+	root := parseFile(t, "package lib\n\nfunc A() int { return 1 }\n\nfunc B() int { return 2 }\n")
+	applyHookRule(t, ip, root, "A", ruleA)
+	applyHookRule(t, ip, root, "B", ruleB)
+
+	stubs := linknameStubs(root)
+	require.Len(t, stubs, 2)
+	remotes := []string{stubs[0][1], stubs[1][1]}
+	assert.ElementsMatch(t, []string{
+		"example.com/app/hooks.Before",
+		"example.com/app/hooks2.Before",
+	}, remotes)
+	assert.NotEqual(t, stubs[0][0], stubs[1][0])
+	assert.NotEqual(t, "Before", stubs[0][0])
+	assert.NotEqual(t, "Before", stubs[1][0])
+
+	src := renderFile(t, root)
+	assert.Contains(t, src, "if "+stubs[0][0]+" != nil")
+	assert.Contains(t, src, "if "+stubs[1][0]+" != nil")
+	assert.NotContains(t, src, "if Before != nil")
+}
+
+func TestAddHookDecl_HookNameMatchingTargetFuncDoesNotCallTarget(t *testing.T) {
+	// A hook named B must not bind to the target file's own func B.
+	hookDir := t.TempDir()
+	writeHookPkg(t, hookDir, "hooks", "B")
+
+	r := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "hook_a"},
+		Func:         "A",
+		Before:       "B",
+		Path:         "example.com/app/hooks",
+		ResolvedPath: hookDir,
+	}
+
+	ip := newTestPhase()
+	root := parseFile(t, "package lib\n\nfunc A() int { return 1 }\n\nfunc B() int { return 2 }\n")
+	applyHookRule(t, ip, root, "A", r)
+
+	stubs := linknameStubs(root)
+	require.Len(t, stubs, 1, "hook named B must still get a linkname stub")
+	assert.Equal(t, "example.com/app/hooks.B", stubs[0][1])
+	assert.NotEqual(t, "B", stubs[0][0])
+
+	src := renderFile(t, root)
+	assert.Contains(t, src, "func B() int")
+	assert.Contains(t, src, "if "+stubs[0][0]+" != nil")
+	assert.NotContains(t, src, "if B != nil")
 }

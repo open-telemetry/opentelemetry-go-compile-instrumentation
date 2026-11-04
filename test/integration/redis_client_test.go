@@ -12,9 +12,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/alicebob/miniredis/v2/server"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 
@@ -26,21 +28,18 @@ const redisGoRedisModule = "github.com/redis/go-redis/v9"
 func TestRedisClient(t *testing.T) {
 	t.Parallel()
 
-	// Copy before either build. otelc setup mutates test/apps/redisclient/go.mod,
+	// Copy before any build. otelc setup mutates test/apps/redisclient/go.mod,
 	// and a parallel copy would pick up the instrumentation require and MVS
 	// to v9.22.0.
-	legacyAppsDir := pinnedRedisClient(t, "v9.8.0")
+	v980AppsDir := pinnedRedisClient(t, "v9.8.0")
 
-	// Both cases go through otelc. Equal GET counts fail if the Conn version
-	// gate is wrong: missing the pre-v9.9 hook drops a span, injecting the
-	// hook after v9.9.0 adds a duplicate.
 	for _, tc := range []struct {
 		name    string
 		appsDir string
 		version string
 	}{
-		{name: "conn_after_v9.9"},
-		{name: "conn_v9.8.0", appsDir: legacyAppsDir, version: "v9.8.0"},
+		{name: "current_supported"},
+		{name: "v9.8.0", appsDir: v980AppsDir, version: "v9.8.0"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -51,10 +50,83 @@ func TestRedisClient(t *testing.T) {
 			}
 
 			assertRedisClientSpans(t, tc.appsDir)
+			assertRedisSentinelSpans(t, tc.appsDir)
+			assertRedisFailoverSpans(t, tc.appsDir)
 			assertRedisRingSpans(t, tc.appsDir)
 			assertRedisClusterSpans(t, tc.appsDir)
 		})
 	}
+}
+
+func assertRedisFailoverSpans(t *testing.T, appsDir string) {
+	t.Helper()
+	f := testutil.NewTestFixture(t, fixtureOpts(appsDir)...)
+	first := StartRedisServer(t)
+	second := StartRedisServer(t)
+	sentinel := StartRedisServer(t)
+	require.NoError(t, first.Set("before", "first"))
+	require.NoError(t, second.Set("after", "second"))
+	firstHost, firstPort, err := net.SplitHostPort(first.Addr())
+	require.NoError(t, err)
+	secondHost, secondPort, err := net.SplitHostPort(second.Addr())
+	require.NoError(t, err)
+	var switched atomic.Bool
+	require.NoError(t, sentinel.Server().Register("SENTINEL", func(peer *server.Peer, _ string, args []string) {
+		if len(args) == 0 {
+			peer.WriteError("ERR missing subcommand")
+			return
+		}
+		switch strings.ToLower(args[0]) {
+		case "get-master-addr-by-name":
+			host, port := firstHost, firstPort
+			if switched.Load() {
+				host, port = secondHost, secondPort
+			}
+			peer.WriteLen(2)
+			peer.WriteBulk(host)
+			peer.WriteBulk(port)
+		case "sentinels":
+			peer.WriteLen(0)
+		default:
+			peer.WriteError("ERR unknown sentinel subcommand")
+		}
+	}))
+	require.NoError(t, sentinel.Server().Register("SWITCH", func(peer *server.Peer, _ string, _ []string) {
+		switched.Store(true)
+		first.Close()
+		peer.WriteOK()
+	}))
+	output := f.Run("redisclient", "-mode=failover", "-addr="+sentinel.Addr())
+	require.Contains(t, output, "first")
+	require.Contains(t, output, "second")
+
+	for _, query := range []string{"get before", "get after", "ping", "pipeline ping/"} {
+		var matches []ptrace.Span
+		for _, span := range testutil.AllSpans(f.Traces()) {
+			if testutil.IsClient(span) && testutil.HasAttribute("db.query.text", query)(span) {
+				matches = append(matches, span)
+			}
+		}
+		require.Len(t, matches, 1, "expected one span for %s", query)
+		attrs := testutil.Attrs(matches[0])
+		require.NotContains(t, attrs, "server.address")
+		require.NotContains(t, attrs, "server.port")
+	}
+}
+
+func assertRedisSentinelSpans(t *testing.T, appsDir string) {
+	t.Helper()
+	f := testutil.NewTestFixture(t, fixtureOpts(appsDir)...)
+	server := StartRedisServer(t)
+	f.Run("redisclient", "-mode=sentinel", "-addr="+server.Addr())
+	var pingSpans []ptrace.Span
+	for _, span := range testutil.AllSpans(f.Traces()) {
+		if testutil.IsClient(span) && testutil.HasAttribute("db.operation.name", "ping")(span) {
+			pingSpans = append(pingSpans, span)
+		}
+	}
+	require.Len(t, pingSpans, 1)
+	testutil.RequireRedisClientSemconv(t, pingSpans[0], "ping", server.Addr(), "ping")
 }
 
 // assertRedisRingSpans checks that shards created by NewRing and Ring.SetAddrs
@@ -124,54 +196,48 @@ func assertRedisClientSpans(t *testing.T, appsDir string) {
 	output := f.Run("redisclient", "-addr="+server.Addr())
 	require.Contains(t, output, "testvalue")
 
-	spans := testutil.AllSpans(f.Traces())
-	require.GreaterOrEqual(t, len(spans), 4, "expected at least 4 spans (SET, GET, CONN GET, DEL)")
-
-	setSpan := testutil.RequireSpan(t, f.Traces(),
-		testutil.IsClient,
-		testutil.HasAttribute("db.operation.name", "set"),
-	)
-	testutil.RequireRedisClientSemconv(
-		t,
-		setSpan,
-		"set",
-		server.Addr(),
-		"set testkey testvalue",
-	)
-
-	host, _, err := net.SplitHostPort(server.Addr())
-	require.NoError(t, err)
-
-	getCount := 0
-	clientGet := false
-	for _, span := range spans {
-		if !testutil.IsClient(span) || !testutil.HasAttribute("db.operation.name", "get")(span) {
+	var setSpans, getSpans, delSpans []ptrace.Span
+	for _, span := range testutil.AllSpans(f.Traces()) {
+		if !testutil.IsClient(span) {
 			continue
 		}
-		getCount++
-		// Pre-v9.9 Conn hooks store Conn.String() as the endpoint, so only the
-		// NewClient GET is guaranteed to have server.address == host.
-		if testutil.HasAttribute("server.address", host)(span) {
-			clientGet = true
-			testutil.RequireRedisClientSemconv(
-				t,
-				span,
-				"get",
-				server.Addr(),
-				"get testkey",
-			)
+		attrs := testutil.Attrs(span)
+		switch attrs["db.operation.name"] {
+		case "set":
+			setSpans = append(setSpans, span)
+		case "get":
+			getSpans = append(getSpans, span)
+		case "del":
+			delSpans = append(delSpans, span)
 		}
 	}
-	require.Equal(t, 2, getCount, "client GET and Conn GET should each produce one span")
-	require.True(t, clientGet, "NewClient GET span is missing")
 
-	delSpan := testutil.RequireSpan(t, f.Traces(),
-		testutil.IsClient,
-		testutil.HasAttribute("db.operation.name", "del"),
-	)
+	require.Len(t, setSpans, 1, "expected exactly one SET span")
 	testutil.RequireRedisClientSemconv(
 		t,
-		delSpan,
+		setSpans[0],
+		"set",
+		server.Addr(),
+		"set testkey ?",
+	)
+
+	require.Len(t, getSpans, 2, "client GET and Conn GET should each produce one span")
+
+	for _, query := range []string{"get testkey", "get connkey"} {
+		var matched []ptrace.Span
+		for _, span := range getSpans {
+			if testutil.HasAttribute("db.query.text", query)(span) {
+				matched = append(matched, span)
+			}
+		}
+		require.Len(t, matched, 1, "expected one span for %s", query)
+		testutil.RequireRedisClientSemconv(t, matched[0], "get", server.Addr(), query)
+	}
+
+	require.Len(t, delSpans, 1, "expected exactly one DEL span")
+	testutil.RequireRedisClientSemconv(
+		t,
+		delSpans[0],
 		"del",
 		server.Addr(),
 		"del testkey",

@@ -109,14 +109,14 @@ func OtelBeforeTrampoline_OptBad2498065262() (hookContext *HookContextImpl249806
 	hookContext.params = []interface{}{}
 	hookContext.funcName = "OptBad"
 	hookContext.packageName = "main"
-	if H6Before != nil {
-		H6Before(hookContext)
+	if otelc_hook_3733315718_H6Before != nil {
+		otelc_hook_3733315718_H6Before(hookContext)
 	}
 	return hookContext, hookContext.skipCall
 }
 
-//go:linkname H6Before testdata/golden/opt-multiple-funcs.H6Before
-func H6Before(hookContext HookContext)
+//go:linkname otelc_hook_3733315718_H6Before testdata/golden/opt-multiple-funcs.H6Before
+func otelc_hook_3733315718_H6Before(hookContext HookContext)
 
 type HookContextImpl619637533 struct {
 	params      []interface{}
@@ -199,8 +199,8 @@ func OtelBeforeTrampoline_OptBad2619637533() (hookContext *HookContextImpl619637
 	hookContext.params = []interface{}{}
 	hookContext.funcName = "OptBad2"
 	hookContext.packageName = "main"
-	if H7Before != nil {
-		H7Before(hookContext)
+	if otelc_hook_3733315718_H7Before != nil {
+		otelc_hook_3733315718_H7Before(hookContext)
 	}
 	return hookContext, hookContext.skipCall
 }
@@ -219,16 +219,16 @@ func OtelAfterTrampoline_OptBad2619637533(hookContext HookContext) {
 		}
 	}()
 	hookContext.(*HookContextImpl619637533).returnVals = []interface{}{}
-	if H7After != nil {
-		H7After(hookContext)
+	if otelc_hook_3733315718_H7After != nil {
+		otelc_hook_3733315718_H7After(hookContext)
 	}
 }
 
-//go:linkname H7Before testdata/golden/opt-multiple-funcs.H7Before
-func H7Before(hookContext HookContext)
+//go:linkname otelc_hook_3733315718_H7Before testdata/golden/opt-multiple-funcs.H7Before
+func otelc_hook_3733315718_H7Before(hookContext HookContext)
 
-//go:linkname H7After testdata/golden/opt-multiple-funcs.H7After
-func H7After(hookContext HookContext)
+//go:linkname otelc_hook_3733315718_H7After testdata/golden/opt-multiple-funcs.H7After
+func otelc_hook_3733315718_H7After(hookContext HookContext)
 
 type HookContextImpl2195172342 struct {
 	params      []interface{}
@@ -311,11 +311,11 @@ func OtelBeforeTrampoline_OptGood2195172342() (hookContext *HookContextImpl21951
 	hookContext.params = []interface{}{}
 	hookContext.funcName = "OptGood"
 	hookContext.packageName = "main"
-	if H5Before != nil {
-		H5Before(hookContext)
+	if otelc_hook_3733315718_H5Before != nil {
+		otelc_hook_3733315718_H5Before(hookContext)
 	}
 	return hookContext, hookContext.skipCall
 }
 
-//go:linkname H5Before testdata/golden/opt-multiple-funcs.H5Before
-func H5Before(hookContext HookContext)
+//go:linkname otelc_hook_3733315718_H5Before testdata/golden/opt-multiple-funcs.H5Before
+func otelc_hook_3733315718_H5Before(hookContext HookContext)
