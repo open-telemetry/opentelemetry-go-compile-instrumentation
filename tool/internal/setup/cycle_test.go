@@ -4,9 +4,13 @@
 package setup
 
 import (
+	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -19,18 +23,57 @@ func baseRule(name string, imports map[string]string) rule.InstBaseRule {
 	return rule.InstBaseRule{Name: name, Target: rule.NewTarget("**"), Imports: imports}
 }
 
-func structRuleWithImports(name string, imports map[string]string) *rule.InstStructRule {
-	return &rule.InstStructRule{InstBaseRule: baseRule(name, imports), Struct: "T"}
+// selectAll returns code that selects T from each named import in imports.
+func selectAll(imports map[string]string) []string {
+	code := make([]string, 0, len(imports))
+	for _, alias := range slices.Sorted(maps.Keys(imports)) {
+		if alias != "_" && alias != "." {
+			code = append(code, alias+".T")
+		}
+	}
+	return code
 }
 
-// callRuleWithImports returns a rule that wraps the calls of example.com/lib.New.
+// structRuleWithImports returns a struct rule whose new fields use each named
+// import in imports.
+func structRuleWithImports(name string, imports map[string]string) *rule.InstStructRule {
+	r := &rule.InstStructRule{InstBaseRule: baseRule(name, imports), Struct: "T"}
+	for i, typ := range selectAll(imports) {
+		r.NewField = append(r.NewField, &rule.InstStructField{Name: fmt.Sprintf("F%d", i), Type: typ})
+	}
+	return r
+}
+
+// callRuleWithImports returns a rule that wraps the calls of example.com/lib.New
+// with code that uses each named import in imports.
 func callRuleWithImports(name string, imports map[string]string) *rule.InstCallRule {
+	r := callRuleWithReplace(name, imports, "{{ . }}")
+	for _, sel := range selectAll(imports) {
+		r.Replace = strings.TrimSuffix(sel, ".T") + ".Wrap(" + r.Replace + ")"
+	}
+	return r
+}
+
+// callRuleWithReplace returns a rule that replaces the calls of
+// example.com/lib.New with replace.
+func callRuleWithReplace(name string, imports map[string]string, replace string) *rule.InstCallRule {
 	return &rule.InstCallRule{
 		InstBaseRule: baseRule(name, imports),
 		FunctionCall: "example.com/lib.New",
 		ImportPath:   "example.com/lib",
 		FuncName:     "New",
-		Replace:      "w.Wrap({{ . }})",
+		Replace:      replace,
+	}
+}
+
+// litRule returns a rule that sets fields of example.com/lib.Config literals.
+func litRule(name string, imports map[string]string, fields ...*rule.InstLitField) *rule.InstLitRule {
+	return &rule.InstLitRule{
+		InstBaseRule:  baseRule(name, imports),
+		StructLiteral: "example.com/lib.Config",
+		ImportPath:    "example.com/lib",
+		TypeName:      "Config",
+		Field:         fields,
 	}
 }
 
@@ -66,7 +109,8 @@ func TestCollectRuleImports(t *testing.T) {
 		InstBaseRule: baseRule("method", map[string]string{"m": "example.com/m"}),
 		MethodCall:   "example.com/lib.*T.Do",
 	})
-	set.AddLitRule(file, &rule.InstLitRule{InstBaseRule: baseRule("lit", map[string]string{"l": "example.com/l"})})
+	set.AddLitRule(file, litRule("lit", map[string]string{"l": "example.com/l"},
+		&rule.InstLitField{Name: "A", Value: "l.Default"}))
 
 	got := collectRuleImports([]*rule.InstRuleSet{set})
 
@@ -74,12 +118,12 @@ func TestCollectRuleImports(t *testing.T) {
 	imports := got["example.com/p"]
 	type summary struct {
 		rule, path string
-		call       bool
+		match      bool
 		files      []string
 	}
 	summaries := make([]summary, 0, len(imports))
 	for _, ri := range imports {
-		summaries = append(summaries, summary{rule: ri.rule, path: ri.path, call: ri.call != nil, files: ri.files})
+		summaries = append(summaries, summary{rule: ri.rule, path: ri.path, match: ri.match != nil, files: ri.files})
 	}
 	files := []string{file, other}
 	if other < file {
@@ -88,11 +132,74 @@ func TestCollectRuleImports(t *testing.T) {
 	assert.Equal(t, []summary{
 		{rule: "func", path: "example.com/blank"},
 		{rule: "func", path: "example.com/dot"},
-		{rule: "call", path: "example.com/h", call: true, files: files},
+		{rule: "call", path: "example.com/h", match: true, files: files},
+		{rule: "lit", path: "example.com/l", match: true, files: []string{file}},
 		{rule: "struct", path: "example.com/x"},
 	}, summaries,
-		"func rules keep only blank and dot imports, call rules group their files, "+
-			"and method call rules, literal rules and unsafe are left out")
+		"func rules keep only blank and dot imports, call and literal rules group their files, "+
+			"and method call rules and unsafe are left out")
+}
+
+// TestCollectRuleImports_UnusedImports covers the imports that a rule lists
+// but that its code does not use. The instrumentation does not add them.
+func TestCollectRuleImports_UnusedImports(t *testing.T) {
+	imports := map[string]string{
+		"used":   "example.com/used",
+		"unused": "example.com/unused",
+		"_":      "example.com/blank",
+		".":      "example.com/dot",
+	}
+	tests := []struct {
+		name string
+		add  func(set *rule.InstRuleSet, file string)
+	}{
+		{"struct", func(set *rule.InstRuleSet, file string) {
+			set.AddStructRule(file, &rule.InstStructRule{
+				InstBaseRule: baseRule("r", imports),
+				NewField:     []*rule.InstStructField{{Name: "F", Type: "*used.T"}},
+			})
+		}},
+		{"raw", func(set *rule.InstRuleSet, file string) {
+			set.AddRawRule(file, &rule.InstRawRule{
+				InstBaseRule: baseRule("r", imports),
+				Raw:          "used.Do() // unused.Do()\n_ = \"unused.Do()\"",
+			})
+		}},
+		{"directive", func(set *rule.InstRuleSet, file string) {
+			set.AddDirectiveRule(file, &rule.InstDirectiveRule{
+				InstBaseRule: baseRule("r", imports),
+				Template:     "used.Wrap({{ . }})",
+			})
+		}},
+		{"decl", func(set *rule.InstRuleSet, file string) {
+			set.AddDeclRule(file, &rule.InstDeclRule{
+				InstBaseRule: baseRule("r", imports),
+				Wrap:         "used.Wrap({{ . }})",
+			})
+		}},
+		{"call", func(set *rule.InstRuleSet, file string) {
+			r := callRuleWithReplace("r", imports, "({{ . }})")
+			r.AppendArgs = []string{"used.Option()"}
+			set.AddCallRule(file, r)
+		}},
+		{"literal", func(set *rule.InstRuleSet, file string) {
+			set.AddLitRule(file, litRule("r", imports, &rule.InstLitField{Name: "A", Wrap: "used.Wrap({{ . }})"}))
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			set := rule.NewInstRuleSet("example.com/p")
+			tt.add(set, fakeSrcFile("p.go"))
+
+			got := collectRuleImports([]*rule.InstRuleSet{set})
+
+			paths := make([]string, 0, len(got["example.com/p"]))
+			for _, ri := range got["example.com/p"] {
+				paths = append(paths, ri.path)
+			}
+			assert.Equal(t, []string{"example.com/blank", "example.com/dot", "example.com/used"}, paths)
+		})
+	}
 }
 
 func TestFindRuleImportCycle(t *testing.T) {
@@ -101,6 +208,10 @@ func TestFindRuleImportCycle(t *testing.T) {
 	ignoresNew := writeGoFile(t, "package a\n\nimport \"example.com/lib\"\n\n"+
 		"func x() int {\n\t//otelc:ignore\n\tv := lib.New()\n\treturn v\n}\n")
 	aliasesNew := writeGoFile(t, "package a\n\nimport l \"example.com/lib\"\n\nvar X = l.New()\n")
+	keyedConfig := writeGoFile(t, "package a\n\nimport \"example.com/lib\"\n\nvar X = &lib.Config{A: 1}\n")
+	emptyConfig := writeGoFile(t, "package a\n\nimport l \"example.com/lib\"\n\nvar X = l.Config {}\n")
+	positionalConfig := writeGoFile(t, "package a\n\nimport \"example.com/lib\"\n\nvar X = lib.Config{1}\n")
+	otherType := writeGoFile(t, "package a\n\nimport \"example.com/lib\"\n\nvar X = lib.Options{A: 1}\n")
 
 	withStruct := func(pkg, name, imported string) *rule.InstRuleSet {
 		set := rule.NewInstRuleSet(pkg)
@@ -113,6 +224,21 @@ func TestFindRuleImportCycle(t *testing.T) {
 			map[string]string{"helper": "example.com/helper"}))
 		return set
 	}
+
+	withLit := func(file string, field *rule.InstLitField) *rule.InstRuleSet {
+		set := rule.NewInstRuleSet("example.com/a")
+		set.AddLitRule(file, litRule("set_config", map[string]string{"helper": "example.com/helper"}, field))
+		return set
+	}
+	setsA := &rule.InstLitField{Name: "A", Wrap: "helper.Wrap({{ . }})"}
+	setsB := &rule.InstLitField{Name: "B", Wrap: "helper.Wrap({{ . }})"}
+	defaultsB := &rule.InstLitField{Name: "B", Value: "helper.Default"}
+	litCycle := map[string][]string{
+		"example.com/a":      {"example.com/lib"},
+		"example.com/helper": {"example.com/a"},
+	}
+	litErr := `rule "set_config" adds import "example.com/helper" to "example.com/a", ` +
+		`but example.com/helper imports example.com/a`
 
 	tests := []struct {
 		name    string
@@ -211,6 +337,54 @@ func TestFindRuleImportCycle(t *testing.T) {
 				"example.com/helper": {"example.com/a"},
 			},
 			matched: []*rule.InstRuleSet{withCall(ignoresNew)},
+		},
+		{
+			name: "call rule with a matching call and an unused import",
+			graph: map[string][]string{
+				"example.com/a":      {"example.com/lib"},
+				"example.com/helper": {"example.com/a"},
+			},
+			matched: func() []*rule.InstRuleSet {
+				set := rule.NewInstRuleSet("example.com/a")
+				set.AddCallRule(callsNew, callRuleWithReplace("wrap_new",
+					map[string]string{"helper": "example.com/helper"}, "({{ . }})"))
+				return []*rule.InstRuleSet{set}
+			}(),
+		},
+		{
+			name:    "literal rule that wraps a field the literal sets",
+			graph:   litCycle,
+			matched: []*rule.InstRuleSet{withLit(keyedConfig, setsA)},
+			wantErr: litErr,
+		},
+		{
+			name:    "literal rule that sets a value in an empty literal",
+			graph:   litCycle,
+			matched: []*rule.InstRuleSet{withLit(emptyConfig, defaultsB)},
+			wantErr: litErr,
+		},
+		{
+			name:    "literal rule that wraps a field the literal does not set",
+			graph:   litCycle,
+			matched: []*rule.InstRuleSet{withLit(keyedConfig, setsB)},
+		},
+		{
+			name:    "literal rule and a positional literal",
+			graph:   litCycle,
+			matched: []*rule.InstRuleSet{withLit(positionalConfig, defaultsB)},
+		},
+		{
+			name:    "literal rule and a literal of another type",
+			graph:   litCycle,
+			matched: []*rule.InstRuleSet{withLit(otherType, defaultsB)},
+		},
+		{
+			name: "literal rule in a package that does not import the type's package",
+			graph: map[string][]string{
+				"example.com/a":      {"fmt"},
+				"example.com/helper": {"example.com/a"},
+			},
+			matched: []*rule.InstRuleSet{withLit(keyedConfig, setsA)},
 		},
 	}
 	for _, tt := range tests {

@@ -7,6 +7,8 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"go/scanner"
+	"go/token"
 	"maps"
 	"os"
 	"regexp"
@@ -23,55 +25,78 @@ import (
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
+// unsafePackageName is the import path of package unsafe.
+const unsafePackageName = "unsafe"
+
 // ruleImport is an import that a rule adds to the package it instruments.
 type ruleImport struct {
 	rule string
 	path string
-	// call is set when the rule is a function_call rule. Such a rule is listed
-	// for every file of the packages its target matches, but it adds its
-	// imports only to a file that calls the function. files are the files to
-	// check for a call.
-	call  *rule.InstCallRule
+	// match is set when the rule is listed for every file of the packages its
+	// target matches, but changes only some of these files. The rule adds its
+	// imports only to the files that it changes. files are the files to check.
+	match *fileMatch
 	files []string
+}
+
+// fileMatch finds the files that a function_call rule or a literal rule
+// changes.
+type fileMatch struct {
+	// importPath is the package that a changed file imports.
+	importPath string
+	// text matches the source text of each file that the rule can change. A
+	// text search skips most files faster than a parse.
+	text *regexp.Regexp
+	// changes reports whether the rule changes tree. aliases maps the import
+	// names of tree to import paths.
+	changes func(tree *dst.File, aliases map[string]string) bool
+}
+
+// ruleImports are the imports that a rule adds, and the files it adds them to.
+type ruleImports struct {
+	imports map[string]string
+	match   *fileMatch
 }
 
 // collectRuleImports returns, for each instrumented package, the imports that
 // its matched rules add to it.
-// unsafePackageName is the import path of package unsafe.
-const unsafePackageName = "unsafe"
-
 func collectRuleImports(matched []*rule.InstRuleSet) map[string][]*ruleImport {
 	result := make(map[string][]*ruleImport)
 	seen := make(map[[3]string]*ruleImport)
+	// A rule is listed once for each file it applies to.
+	byRule := make(map[rule.InstRule]ruleImports)
 	for _, set := range matched {
 		pkg := set.ModulePath
 		add := func(file string, r rule.InstRule) {
-			imports, call := addedImports(r)
-			for _, path := range imports {
+			ris, ok := byRule[r]
+			if !ok {
+				ris = addedImports(r)
+				byRule[r] = ris
+			}
+			for _, path := range ris.imports {
 				// Neither has dependencies.
 				if path == "C" || path == unsafePackageName {
 					continue
 				}
 				key := [3]string{pkg, r.GetName(), path}
-				ri, ok := seen[key]
-				if !ok {
-					ri = &ruleImport{rule: r.GetName(), path: path, call: call}
+				ri, found := seen[key]
+				if !found {
+					ri = &ruleImport{rule: r.GetName(), path: path, match: ris.match}
 					seen[key] = ri
 					result[pkg] = append(result[pkg], ri)
 				}
-				if call != nil {
+				if ris.match != nil {
 					ri.files = append(ri.files, file)
 				}
 			}
 		}
-		// Literal rules are not checked: whether one changes a literal is only
-		// known when the rule is applied.
 		forEachRule(set.FuncRules, add)
 		forEachRule(set.StructRules, add)
 		forEachRule(set.RawRules, add)
 		forEachRule(set.DirectiveRules, add)
 		forEachRule(set.DeclRules, add)
 		forEachRule(set.CallRules, add)
+		forEachRule(set.LitRules, add)
 	}
 
 	for _, imports := range result {
@@ -94,34 +119,179 @@ func forEachRule[T rule.InstRule](rules map[string][]T, fn func(file string, r r
 	}
 }
 
-// addedImports returns the imports that r adds to the files it applies to. It
-// also returns r when r is a function_call rule.
-func addedImports(r rule.InstRule) (map[string]string, *rule.InstCallRule) {
+// addedImports returns the imports that r adds to the files it applies to,
+// and how to find these files when r does not change all of them.
+func addedImports(r rule.InstRule) ruleImports {
 	switch rt := r.(type) {
 	case *rule.InstFuncRule:
 		// The hook code of a func rule is not in the target file, so only its
 		// blank and dot imports are added there.
 		imports := maps.Clone(rt.Imports)
 		maps.DeleteFunc(imports, func(alias, _ string) bool { return alias != "_" && alias != "." })
-		return imports, nil
+		return ruleImports{imports: imports}
 	case *rule.InstStructRule:
-		return rt.Imports, nil
-	case *rule.InstRawRule:
-		return rt.Imports, nil
-	case *rule.InstDirectiveRule:
-		return rt.Imports, nil
-	case *rule.InstDeclRule:
-		return rt.Imports, nil
-	case *rule.InstCallRule:
-		// A method call is only resolved when the rule is applied, with type
-		// information that setup does not have.
-		if rt.MethodCall != "" {
-			return nil, nil
+		types := make([]string, 0, len(rt.NewField))
+		for _, f := range rt.NewField {
+			types = append(types, f.Type)
 		}
-		return rt.Imports, rt
+		return ruleImports{imports: referencedImports(rt.Imports, types...)}
+	case *rule.InstRawRule:
+		return ruleImports{imports: referencedImports(rt.Imports, rt.Raw)}
+	case *rule.InstDirectiveRule:
+		return ruleImports{imports: referencedImports(rt.Imports, rt.Template)}
+	case *rule.InstDeclRule:
+		return ruleImports{imports: referencedImports(rt.Imports, rt.Replace, rt.Wrap)}
+	case *rule.InstCallRule:
+		// TODO: check method_call rules. To know if a call matches the method,
+		// setup must know the type of the receiver, and setup does not
+		// type-check packages. A match by the method name only would fail
+		// builds that do not have a cycle.
+		if rt.MethodCall != "" {
+			return ruleImports{}
+		}
+		code := append([]string{rt.Replace, rt.VariadicType}, rt.AppendArgs...)
+		return ruleImports{imports: referencedImports(rt.Imports, code...), match: callMatch(rt)}
+	case *rule.InstLitRule:
+		code := make([]string, 0, len(rt.Field))
+		for _, f := range rt.Field {
+			code = append(code, f.Value, f.Wrap)
+		}
+		return ruleImports{imports: referencedImports(rt.Imports, code...), match: litMatch(rt)}
 	default:
-		return nil, nil
+		return ruleImports{}
 	}
+}
+
+// referencedImports returns the blank and dot imports in imports, and the
+// imports whose name code selects from. The instrumentation does not add an
+// import that the rewritten file does not use.
+func referencedImports(imports map[string]string, code ...string) map[string]string {
+	selected := make(map[string]bool)
+	for _, src := range code {
+		addSelectedNames(src, selected)
+	}
+	used := maps.Clone(imports)
+	maps.DeleteFunc(used, func(alias, _ string) bool {
+		return alias != "_" && alias != "." && !selected[alias]
+	})
+	return used
+}
+
+// addSelectedNames adds to names each identifier that src selects from, as in
+// name.X. src can contain template actions, so it is scanned and not parsed.
+// The scanner skips strings and comments.
+func addSelectedNames(src string, names map[string]bool) {
+	if src == "" {
+		return
+	}
+	var s scanner.Scanner
+	file := token.NewFileSet().AddFile("", -1, len(src))
+	s.Init(file, []byte(src), nil, 0)
+	prev := ""
+	for {
+		_, tok, lit := s.Scan()
+		if tok == token.EOF {
+			return
+		}
+		if tok == token.PERIOD && prev != "" {
+			names[prev] = true
+		}
+		prev = ""
+		if tok == token.IDENT {
+			prev = lit
+		}
+	}
+}
+
+// callMatch returns how to find the files that the function_call rule r
+// changes: the files with a call of the function, at a call site without
+// //otelc:ignore.
+func callMatch(r *rule.InstCallRule) *fileMatch {
+	return &fileMatch{
+		importPath: r.ImportPath,
+		text:       regexp.MustCompile(`\.\s*` + regexp.QuoteMeta(r.FuncName) + `\b`),
+		changes: func(tree *dst.File, aliases map[string]string) bool {
+			stmts := ast.CallEnclosingStmts(tree)
+			return containsNode(tree, func(node dst.Node) bool {
+				call, ok := node.(*dst.CallExpr)
+				if !ok {
+					return false
+				}
+				sel, ok := call.Fun.(*dst.SelectorExpr)
+				if !ok || sel.Sel.Name != r.FuncName {
+					return false
+				}
+				ident, ok := sel.X.(*dst.Ident)
+				return ok && aliases[ident.Name] == r.ImportPath &&
+					!ast.HasLeadingDirective(stmts[call], util.DirectiveIgnore)
+			})
+		},
+	}
+}
+
+// litMatch returns how to find the files that the literal rule r changes: the
+// files with a keyed or empty literal of the rule's type that one of the
+// rule's fields changes.
+func litMatch(r *rule.InstLitRule) *fileMatch {
+	return &fileMatch{
+		importPath: r.ImportPath,
+		text:       regexp.MustCompile(`\.\s*` + regexp.QuoteMeta(r.TypeName) + `\s*\{`),
+		changes: func(tree *dst.File, aliases map[string]string) bool {
+			return containsNode(tree, func(node dst.Node) bool {
+				lit, ok := node.(*dst.CompositeLit)
+				return ok && isRuleLiteral(lit, r, aliases) && changesLiteral(lit, r)
+			})
+		},
+	}
+}
+
+// isRuleLiteral reports whether lit builds the type of the literal rule r.
+// Only a literal with a qualified type, as in pkg.Type{}, matches.
+func isRuleLiteral(lit *dst.CompositeLit, r *rule.InstLitRule, aliases map[string]string) bool {
+	sel, ok := lit.Type.(*dst.SelectorExpr)
+	if !ok || sel.Sel.Name != r.TypeName {
+		return false
+	}
+	ident, ok := sel.X.(*dst.Ident)
+	if !ok {
+		return false
+	}
+	if ident.Path != "" {
+		return ident.Path == r.ImportPath
+	}
+	return aliases[ident.Name] == r.ImportPath
+}
+
+// changesLiteral reports whether the literal rule r changes lit. The rule
+// skips a literal with positional elements. A field with a value always
+// changes the literal, and a field with only a wrap changes it when the
+// literal sets that field.
+func changesLiteral(lit *dst.CompositeLit, r *rule.InstLitRule) bool {
+	keys := make(map[string]bool, len(lit.Elts))
+	for _, elt := range lit.Elts {
+		kv, ok := elt.(*dst.KeyValueExpr)
+		if !ok {
+			return false
+		}
+		if key, isIdent := kv.Key.(*dst.Ident); isIdent {
+			keys[key.Name] = true
+		}
+	}
+	return slices.ContainsFunc(r.Field, func(f *rule.InstLitField) bool {
+		return f.Value != "" || keys[f.Name]
+	})
+}
+
+// containsNode reports whether a node in tree satisfies match.
+func containsNode(tree *dst.File, match func(dst.Node) bool) bool {
+	found := false
+	dst.Inspect(tree, func(node dst.Node) bool {
+		if !found && match(node) {
+			found = true
+		}
+		return !found
+	})
+	return found
 }
 
 // addImportGraph adds the imports of pkgs and of their dependencies to graph,
@@ -222,61 +392,38 @@ func (sp *setupPhase) findRuleImportCycle(graph map[string][]string, added map[s
 
 // addsImport reports whether ri is added to pkg.
 func (sp *setupPhase) addsImport(graph map[string][]string, pkg string, ri *ruleImport) (bool, error) {
-	if ri.call == nil {
+	if ri.match == nil {
 		return true, nil
 	}
-	// A file calls the function through an import of its package.
-	if _, ok := slices.BinarySearch(graph[pkg], ri.call.ImportPath); !ok {
+	// A changed file refers to the package of the function or the type
+	// through an import of it.
+	if _, ok := slices.BinarySearch(graph[pkg], ri.match.importPath); !ok {
 		return false, nil
 	}
-	// Most files never select the function's name, and a text search skips
-	// them faster than a parse.
-	selector := regexp.MustCompile(`\.\s*` + regexp.QuoteMeta(ri.call.FuncName) + `\b`)
 	for _, file := range ri.files {
-		calls, err := callsFunction(file, ri.call, selector, sp.resolvedNames)
-		if err != nil || calls {
-			return calls, err
+		changes, err := ri.match.changesFile(file, sp.resolvedNames)
+		if err != nil || changes {
+			return changes, err
 		}
 	}
 	return false, nil
 }
 
-// callsFunction reports whether file calls the function of the function_call
-// rule r at a call site without //otelc:ignore. selector matches the
-// selection of the function's name in the source text.
-func callsFunction(file string, r *rule.InstCallRule, selector *regexp.Regexp, names map[string]string) (bool, error) {
+// changesFile reports whether the rule of m changes file. names maps import
+// paths to package names.
+func (m *fileMatch) changesFile(file string, names map[string]string) (bool, error) {
 	content, err := os.ReadFile(file)
 	if err != nil {
 		return false, ex.Wrapf(err, "reading %s", file)
 	}
-	if !selector.Match(content) {
+	if !m.text.Match(content) {
 		return false, nil
 	}
 	tree, err := ast.ParseFileFast(file)
 	if err != nil {
 		return false, err
 	}
-	aliases := ast.ImportAliasMap(tree, names)
-	stmts := ast.CallEnclosingStmts(tree)
-	found := false
-	dst.Inspect(tree, func(node dst.Node) bool {
-		if found {
-			return false
-		}
-		call, ok := node.(*dst.CallExpr)
-		if !ok {
-			return true
-		}
-		sel, ok := call.Fun.(*dst.SelectorExpr)
-		if !ok || sel.Sel.Name != r.FuncName {
-			return true
-		}
-		ident, ok := sel.X.(*dst.Ident)
-		found = ok && aliases[ident.Name] == r.ImportPath &&
-			!ast.HasLeadingDirective(stmts[call], util.DirectiveIgnore)
-		return !found
-	})
-	return found, nil
+	return m.changes(tree, ast.ImportAliasMap(tree, names)), nil
 }
 
 // importEdge is an import of one package by another. rule names the rule that
