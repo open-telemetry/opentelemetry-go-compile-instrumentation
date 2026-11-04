@@ -87,7 +87,7 @@ func detectTransport(t mcp.Transport) string {
 // the detected transport type in the hook context so AfterConnect can associate
 // it with the returned *ClientSession.
 //
-//nolint:revive // context.Context position dictated by SDK hook signature (ictx first)
+//nolint:revive // hook signature requires ictx before ctx
 func BeforeConnect(ictx hook.HookContext, _ *mcp.Client, _ context.Context, t mcp.Transport, opts *mcp.ClientSessionOptions) {
 	if !mcpEnabled() || t == nil {
 		return
@@ -211,8 +211,7 @@ func BeforeCallTool(
 	ictx.SetParam(callToolParamParams, &injected)
 
 	ictx.SetData(span)
-	//nolint:spancheck // ended by AfterCallTool after hook
-}
+} //nolint:spancheck // span ended by AfterCallTool after hook
 
 // sessionID returns the MCP session identifier for the client session, or ""
 // when the connection has no session id yet (e.g. before the initialize
