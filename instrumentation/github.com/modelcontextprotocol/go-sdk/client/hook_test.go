@@ -365,9 +365,10 @@ func TestNetworkTransport_InMemoryEndToEnd(t *testing.T) {
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
 
 	srv := mcp.NewServer(&mcp.Implementation{Name: "test-server", Version: "1.0.0"}, nil)
-	mcp.AddTool(srv, &mcp.Tool{Name: "ping"}, func(_ context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
+	pingHandler := func(_ context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "pong"}}}, nil, nil
-	})
+	}
+	mcp.AddTool(srv, &mcp.Tool{Name: "ping"}, pingHandler)
 
 	ctx := context.Background()
 	serverSession, err := srv.Connect(ctx, serverTransport, nil)

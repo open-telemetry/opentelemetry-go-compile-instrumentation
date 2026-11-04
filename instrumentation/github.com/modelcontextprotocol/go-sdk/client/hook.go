@@ -86,7 +86,7 @@ func detectTransport(t mcp.Transport) string {
 // BeforeConnect runs before (*Client).Connect(ctx, transport, opts). It stashes
 // the detected transport type in the hook context so AfterConnect can associate
 // it with the returned *ClientSession.
-func BeforeConnect(ictx hook.HookContext, _ *mcp.Client, ctx context.Context, t mcp.Transport, opts *mcp.ClientSessionOptions) {
+func BeforeConnect(ictx hook.HookContext, _ *mcp.Client, _ context.Context, t mcp.Transport, opts *mcp.ClientSessionOptions) {
 	if !mcpEnabled() || t == nil {
 		return
 	}
@@ -167,6 +167,7 @@ func spanName(toolName string) string {
 // those framework-level indices, not the hook function's own argument list.
 //
 //nolint:revive // context.Context follows hook receiver parameters per SDK hook signature
+//nolint:spancheck // span is stored in hook context and ended by AfterCallTool
 func BeforeCallTool(
 	ictx hook.HookContext,
 	cs *mcp.ClientSession,
@@ -181,7 +182,6 @@ func BeforeCallTool(
 	}
 	initInstrumentation()
 
-	//nolint:spancheck // span is stored in hook context and ended by AfterCallTool
 	spanCtx, span := tracer.Start(
 		ctx,
 		spanName(params.Name),
@@ -334,7 +334,7 @@ func AfterCallTool(
 	switch {
 	case err != nil:
 		span.RecordError(err)
-		if rpcErr, ok := errors.AsType[*jsonrpc.Error](err); ok {
+		if rpcErr, isRPCErr := errors.AsType[*jsonrpc.Error](err); isRPCErr {
 			// JSON-RPC semconv: error.type carries the bare wire code string,
 			// and rpc.response.status_code records the error.code as a string.
 			code := strconv.FormatInt(rpcErr.Code, 10)
