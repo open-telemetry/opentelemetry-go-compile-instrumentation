@@ -51,6 +51,7 @@ func (natsEnabler) Enable() bool {
 	return runtime.Instrumented(instrumentationKey)
 }
 
+//nolint:gochecknoglobals // package-level hook singletons mirror the established instrumentation pattern
 var (
 	enabler    = natsEnabler{}
 	logger     = runtime.Logger()
@@ -66,7 +67,8 @@ func initInstrumentation() {
 			trace.WithInstrumentationVersion(runtime.ModuleVersion()),
 		)
 		propagator = otel.GetTextMapPropagator()
-		logger.Info("nats-io/nats.go instrumentation initialized")
+		//nolint:sloglint // package-level logger singleton; context passed explicitly via InfoContext
+		logger.InfoContext(context.Background(), "nats-io/nats.go instrumentation initialized")
 	})
 }
 
@@ -86,11 +88,13 @@ func parentContext() context.Context {
 	return ctx
 }
 
+//nolint:spancheck // span ownership transferred to caller (ended in AfterPublish/AfterNextMsg)
 func startSpan(ctx context.Context, req semconv.Request, kind trace.SpanKind) (context.Context, trace.Span) {
-	return tracer.Start(ctx, semconv.SpanName(req),
+	ctx, span := tracer.Start(ctx, semconv.SpanName(req),
 		trace.WithSpanKind(kind),
 		trace.WithAttributes(semconv.TraceAttrs(req)...),
 	)
+	return ctx, span
 }
 
 // mapCarrier is a minimal propagation.TextMapCarrier over a string map, used
@@ -144,6 +148,8 @@ func (h headerCarrier) Keys() []string {
 // publish path funnels through — means a plain Publish is upgraded to a header
 // publish (HPUB) exactly like the community otelnats wrapper does by calling
 // PublishMsg internally, so every publish path carries the trace.
+//
+//nolint:revive // fixed hook trampoline signature, cannot reduce parameter count
 func BeforePublish(
 	ictx hook.HookContext,
 	nc *nats.Conn,
