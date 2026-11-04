@@ -100,6 +100,24 @@ func TestAddDeps(t *testing.T) {
 			goldenFile:  "non_main_package_name.otelc.runtime.go.golden",
 		},
 		{
+			// The import keeps the real path; the linkname targets use the
+			// symbol prefix the compiler emits, with the dot in the last path
+			// element escaped.
+			name: "dotted_last_path_element",
+			matched: []*rule.InstRuleSet{
+				newTestRuleSet(
+					"github.com/nats-io/nats.go",
+					[]*rule.InstFuncRule{newTestFuncRule(
+						"go.opentelemetry.io/otelc/instrumentation/github.com/nats-io/nats.go",
+						"github.com/nats-io/nats.go",
+					)},
+					nil,
+				),
+			},
+			packageName: "nats",
+			goldenFile:  "dotted_last_path_element.otelc.runtime.go.golden",
+		},
+		{
 			name: "self_only_rules",
 			matched: []*rule.InstRuleSet{
 				newTestRuleSet(

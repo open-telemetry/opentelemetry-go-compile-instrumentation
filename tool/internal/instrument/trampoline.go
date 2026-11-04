@@ -598,7 +598,7 @@ func (ip *instrumentPhase) addHookDecl(t *rule.InstFuncRule, paramTypes *dst.Fie
 		},
 		Decs: dst.FuncDeclDecorations{
 			NodeDecs: ast.LineComments(
-				fmt.Sprintf("//go:linkname %s %s.%s", fnName, t.Path, origName),
+				fmt.Sprintf("//go:linkname %s %s.%s", fnName, util.LinknameSymbolPrefix(t.Path), origName),
 			),
 		},
 	}

@@ -80,6 +80,7 @@ func genVarDecl(matched []*rule.InstFuncRule) []dst.Decl {
 			continue
 		}
 		uniquePath[m.Path] = true
+		symbolPrefix := util.LinknameSymbolPrefix(m.Path)
 		// First variable declaration
 		// //go:linkname _getstack%d %s.OtelGetStackImpl
 		// var _getstack%d func() []byte
@@ -93,7 +94,7 @@ func genVarDecl(matched []*rule.InstFuncRule) []dst.Decl {
 		getStackVar := typedVarDecl(getStackName, getStackType)
 		getStackVar.Decs = dst.GenDeclDecorations{
 			NodeDecs: ast.LineComments(
-				fmt.Sprintf("//go:linkname %s %s.OtelGetStackImpl", getStackName, m.Path)),
+				fmt.Sprintf("//go:linkname %s %s.OtelGetStackImpl", getStackName, symbolPrefix)),
 		}
 		// Second variable declaration
 		// //go:linkname _printstack%d %s.OtelPrintStackImpl
@@ -107,7 +108,7 @@ func genVarDecl(matched []*rule.InstFuncRule) []dst.Decl {
 		printStackVar := typedVarDecl(printStackName, printStackType)
 		printStackVar.Decs = dst.GenDeclDecorations{
 			NodeDecs: ast.LineComments(
-				fmt.Sprintf("//go:linkname %s %s.OtelPrintStackImpl", printStackName, m.Path)),
+				fmt.Sprintf("//go:linkname %s %s.OtelPrintStackImpl", printStackName, symbolPrefix)),
 		}
 		decls = append(decls, getStackVar, printStackVar)
 

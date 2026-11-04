@@ -63,6 +63,28 @@ func IsRuleFile(name string) bool {
 		strings.HasSuffix(name, ".otelc.yaml")
 }
 
+// LinknameSymbolPrefix returns the symbol prefix the Go toolchain uses for the
+// package at importPath, i.e. the part before the final "." of a //go:linkname
+// target. It mirrors cmd/internal/objabi.PathToPrefix: control characters,
+// space, '%', '"', DEL and non-ASCII bytes become %xx, and '.' becomes %2e only in
+// the last path element. A linkname target built from the raw import path of a
+// package such as ".../nats.go" names a symbol the compiler never emits (it
+// emits ".../nats%2ego.F"), so the link fails with "relocation target not
+// defined".
+func LinknameSymbolPrefix(importPath string) string {
+	lastSlash := strings.LastIndex(importPath, "/")
+	var sb strings.Builder
+	for i := range len(importPath) {
+		c := importPath[i]
+		if c <= ' ' || c >= 0x7f || c == '%' || c == '"' || (c == '.' && i > lastSlash) {
+			_, _ = fmt.Fprintf(&sb, "%%%02x", c)
+			continue
+		}
+		_ = sb.WriteByte(c)
+	}
+	return sb.String()
+}
+
 func GetMatchedRuleFile() string {
 	const matchedRuleFile = "matched.json"
 	return GetBuildTemp(matchedRuleFile)

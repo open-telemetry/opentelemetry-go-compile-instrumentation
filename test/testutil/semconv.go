@@ -242,3 +242,41 @@ func RequireOpenSearchClientSemconv(
 	RequireAttribute(t, span, string(semconv.URLPathKey), urlPath)
 	RequireAttribute(t, span, string(semconv.DBResponseStatusCodeKey), strconv.FormatInt(statusCode, 10))
 }
+
+// RequireNATSProducerSemconv verifies that a nats.go producer span follows the
+// messaging semantic conventions.
+// Reference: https://opentelemetry.io/docs/specs/semconv/messaging/nats/
+func RequireNATSProducerSemconv(
+	t *testing.T,
+	span ptrace.Span,
+	subject, endpoint string,
+) {
+	RequireAttribute(t, span, string(semconv.MessagingSystemKey), "nats")
+	RequireAttribute(t, span, string(semconv.MessagingOperationNameKey), "send")
+	RequireAttribute(t, span, string(semconv.MessagingDestinationNameKey), subject)
+	if host, portText, err := net.SplitHostPort(endpoint); err == nil {
+		RequireAttribute(t, span, string(semconv.ServerAddressKey), host)
+		if port, convErr := strconv.Atoi(portText); convErr == nil && port > 0 {
+			RequireAttribute(t, span, string(semconv.ServerPortKey), int64(port))
+		}
+	}
+}
+
+// RequireNATSConsumerSemconv verifies that a nats.go consumer span follows the
+// messaging semantic conventions.
+// Reference: https://opentelemetry.io/docs/specs/semconv/messaging/nats/
+func RequireNATSConsumerSemconv(
+	t *testing.T,
+	span ptrace.Span,
+	subject, operation, endpoint string,
+) {
+	RequireAttribute(t, span, string(semconv.MessagingSystemKey), "nats")
+	RequireAttribute(t, span, string(semconv.MessagingOperationNameKey), operation)
+	RequireAttribute(t, span, string(semconv.MessagingDestinationNameKey), subject)
+	if host, portText, err := net.SplitHostPort(endpoint); err == nil {
+		RequireAttribute(t, span, string(semconv.ServerAddressKey), host)
+		if port, convErr := strconv.Atoi(portText); convErr == nil && port > 0 {
+			RequireAttribute(t, span, string(semconv.ServerPortKey), int64(port))
+		}
+	}
+}

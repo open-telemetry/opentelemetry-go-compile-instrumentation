@@ -35,6 +35,44 @@ func TestIsRuleFile(t *testing.T) {
 	}
 }
 
+// TestLinknameSymbolPrefix uses the cases of the toolchain's own
+// cmd/internal/objabi escapeTests, plus the instrumentation paths that
+// motivated the escaping.
+func TestLinknameSymbolPrefix(t *testing.T) {
+	tests := []struct {
+		path string
+		want string
+	}{
+		// Unchanged: no dot in the last element and nothing else to escape.
+		{"", ""},
+		{"runtime", "runtime"},
+		{"foo/bar/v1", "foo/bar/v1"},
+		{"f.o.o/b.a.r/v1", "f.o.o/b.a.r/v1"},
+		{"golang.org/x/tools/godoc", "golang.org/x/tools/godoc"},
+		{
+			"go.opentelemetry.io/otelc/instrumentation/github.com/IBM/sarama",
+			"go.opentelemetry.io/otelc/instrumentation/github.com/IBM/sarama",
+		},
+		// '.' is escaped only in the last element.
+		{"foo/bar/v.1", "foo/bar/v%2e1"},
+		{"f.o.o/b.a.r/v..1.", "f.o.o/b.a.r/v%2e%2e1%2e"},
+		{"foo.bar/baz.quux", "foo.bar/baz%2equux"},
+		{
+			"go.opentelemetry.io/otelc/instrumentation/github.com/nats-io/nats.go",
+			"go.opentelemetry.io/otelc/instrumentation/github.com/nats-io/nats%2ego",
+		},
+		// '%', control and non-ASCII bytes are escaped in every element.
+		{"f.o.o/b.a.r/v%1", "f.o.o/b.a.r/v%251"},
+		{"%foo%bar", "%25foo%25bar"},
+		{"\x01\x00\x7F\u263a", "%01%00%7f%e2%98%ba"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			assert.Equal(t, tt.want, LinknameSymbolPrefix(tt.path))
+		})
+	}
+}
+
 func TestEscapePackagePathKeepsPackagesWithSameBasenameSeparate(t *testing.T) {
 	assert.Equal(t, "example_com_app_cmd_client", EscapePackagePath("example.com/app/cmd/client"))
 	assert.Equal(t, "example_com_app_internal_client", EscapePackagePath("example.com/app/internal/client"))

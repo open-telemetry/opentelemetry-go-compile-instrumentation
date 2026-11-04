@@ -237,8 +237,6 @@ The following libraries are automatically instrumented:
 | `google.golang.org/grpc` (client & server) | gRPC/RPC spans |
 | `database/sql` | DB client spans |
 | `github.com/gin-gonic/gin` | HTTP server spans |
-| `github.com/gofiber/fiber/v2` | HTTP server spans |
-| `github.com/labstack/echo/v4` | HTTP server spans |
 | `github.com/redis/go-redis/v9` | Redis DB spans |
 | `go.mongodb.org/mongo-driver` | MongoDB DB spans |
 | `k8s.io/client-go` | K8s resource spans |
@@ -246,6 +244,7 @@ The following libraries are automatically instrumented:
 | `github.com/anthropics/anthropic-sdk-go` | GenAI spans |
 | `github.com/segmentio/kafka-go` | Kafka messaging spans |
 | `github.com/rabbitmq/amqp091-go` | RabbitMQ messaging spans |
+| `github.com/nats-io/nats.go` | NATS messaging spans |
 | `github.com/aws/aws-sdk-go-v2` | AWS SDK client spans |
 | `github.com/linode/linodego/v2` | HTTP client spans and metrics |
 | `github.com/stripe/stripe-go` (v81/v82) | Stripe API client spans and metrics (net/http RoundTrip spans become children when both are enabled) |
