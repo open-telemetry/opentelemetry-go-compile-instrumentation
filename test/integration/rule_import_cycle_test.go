@@ -34,6 +34,18 @@ func wrapNewRule(replace string) string {
 `
 }
 
+// wrapDoRule wraps the calls of (*lib.Client).Do with helper.Wrap.
+const wrapDoRule = `wrap_do:
+  target: "**"
+  where:
+    method_call: example.com/app/lib.*Client.Do
+  do:
+    - wrap_call:
+        replace: "helper.Wrap({{ . }})"
+  imports:
+    helper: example.com/app/helper
+`
+
 // TestRuleImportCycle builds an application where a rule adds an import of
 // helper to package a, and helper imports a. Each compile only sees its own
 // imports, so without a check in setup the link failed with "inittask ... is
@@ -94,6 +106,20 @@ func TestRuleImportCycle(t *testing.T) {
 			wantErr: `rule "set_config" adds import "example.com/app/helper" to "example.com/app/a", ` +
 				`but example.com/app/helper imports example.com/app/a`,
 		},
+		{
+			name:    "a calls the wrapped method",
+			aSource: "(&lib.Client{}).Do()",
+			rule:    wrapDoRule,
+			wantErr: `rule "wrap_do" adds import "example.com/app/helper" to "example.com/app/a", ` +
+				`but example.com/app/helper imports example.com/app/a`,
+		},
+		{
+			// Only the types of a tell that this Do is not (*lib.Client).Do.
+			name:    "a calls a method with the same name on another type",
+			aSource: "(&lib.Server{}).Do()",
+			rule:    wrapDoRule,
+			wantOut: "2 3",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -101,7 +127,9 @@ func TestRuleImportCycle(t *testing.T) {
 			writeTestFile(t, appDir, "go.mod", "module example.com/app\n\ngo 1.25.0\n")
 			writeTestFile(t, appDir, "lib/lib.go",
 				"package lib\n\nfunc New() int { return 1 }\n\nfunc Other() int { return 2 }\n\n"+
-					"type Config struct{ A int }\n")
+					"type Config struct{ A int }\n\n"+
+					"type Client struct{}\n\nfunc (*Client) Do() int { return 1 }\n\n"+
+					"type Server struct{}\n\nfunc (*Server) Do() int { return 2 }\n")
 			writeTestFile(t, appDir, "a/a.go",
 				"package a\n\nimport \"example.com/app/lib\"\n\nvar X = "+tt.aSource+"\n")
 			writeTestFile(t, appDir, "helper/helper.go",

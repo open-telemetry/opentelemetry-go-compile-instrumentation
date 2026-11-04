@@ -538,7 +538,16 @@ func (pi *methodCallPackageInfo) methodReceiver(file string, line, col int) (str
 	if !found {
 		return "", "", false
 	}
+	return MethodReceiver(selection)
+}
 
+// MethodReceiver returns the receiver of the method that selection calls: its
+// import path, its type name, and whether selection is a call of a method of
+// a named type that is not an interface. A leading "*" on the type name marks
+// a pointer receiver.
+//
+//nolint:revive // confusing-results conflicts with nonamedreturns
+func MethodReceiver(selection *types.Selection) (string, string, bool) {
 	// Only bound method calls (recv.Method(...)) should match
 	// Exclude method expressions (Type.Method(recv, ...))
 	if selection.Kind() != types.MethodVal {

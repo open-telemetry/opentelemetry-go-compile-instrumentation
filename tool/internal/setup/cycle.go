@@ -32,11 +32,13 @@ const unsafePackageName = "unsafe"
 type ruleImport struct {
 	rule string
 	path string
-	// match is set when the rule is listed for every file of the packages its
-	// target matches, but changes only some of these files. The rule adds its
-	// imports only to the files that it changes. files are the files to check.
-	match *fileMatch
-	files []string
+	// match or method is set when the rule is listed for every file of the
+	// packages its target matches, but changes only some of these files. The
+	// rule adds its imports only to the files that it changes. files are the
+	// files to check.
+	match  *fileMatch
+	method *methodMatch
+	files  []string
 }
 
 // fileMatch finds the files that a function_call rule or a literal rule
@@ -56,6 +58,7 @@ type fileMatch struct {
 type ruleImports struct {
 	imports map[string]string
 	match   *fileMatch
+	method  *methodMatch
 }
 
 // collectRuleImports returns, for each instrumented package, the imports that
@@ -81,11 +84,11 @@ func collectRuleImports(matched []*rule.InstRuleSet) map[string][]*ruleImport {
 				key := [3]string{pkg, r.GetName(), path}
 				ri, found := seen[key]
 				if !found {
-					ri = &ruleImport{rule: r.GetName(), path: path, match: ris.match}
+					ri = &ruleImport{rule: r.GetName(), path: path, match: ris.match, method: ris.method}
 					seen[key] = ri
 					result[pkg] = append(result[pkg], ri)
 				}
-				if ris.match != nil {
+				if ris.match != nil || ris.method != nil {
 					ri.files = append(ri.files, file)
 				}
 			}
@@ -142,15 +145,12 @@ func addedImports(r rule.InstRule) ruleImports {
 	case *rule.InstDeclRule:
 		return ruleImports{imports: referencedImports(rt.Imports, rt.Replace, rt.Wrap)}
 	case *rule.InstCallRule:
-		// TODO: check method_call rules. To know if a call matches the method,
-		// setup must know the type of the receiver, and setup does not
-		// type-check packages. A match by the method name only would fail
-		// builds that do not have a cycle.
-		if rt.MethodCall != "" {
-			return ruleImports{}
-		}
 		code := append([]string{rt.Replace, rt.VariadicType}, rt.AppendArgs...)
-		return ruleImports{imports: referencedImports(rt.Imports, code...), match: callMatch(rt)}
+		imports := referencedImports(rt.Imports, code...)
+		if rt.MethodCall != "" {
+			return ruleImports{imports: imports, method: newMethodMatch(rt)}
+		}
+		return ruleImports{imports: imports, match: callMatch(rt)}
 	case *rule.InstLitRule:
 		code := make([]string, 0, len(rt.Field))
 		for _, f := range rt.Field {
@@ -352,16 +352,26 @@ func (sp *setupPhase) checkRuleImportCycles(
 		addImportGraph(graph, pkgs)
 	}
 
-	return sp.findRuleImportCycle(graph, added)
+	return sp.findRuleImportCycle(ctx, graph, added)
 }
 
 // findRuleImportCycle returns an error that describes the first cycle that the
 // rule imports in added form with the imports in graph.
-func (sp *setupPhase) findRuleImportCycle(graph map[string][]string, added map[string][]*ruleImport) error {
+func (sp *setupPhase) findRuleImportCycle(
+	ctx context.Context,
+	graph map[string][]string,
+	added map[string][]*ruleImport,
+) error {
+	methods := newMethodCheck(sp, graph, added)
 	s := &cycleSearch{
-		graph:  graph,
-		added:  added,
-		adds:   func(pkg string, ri *ruleImport) (bool, error) { return sp.addsImport(graph, pkg, ri) },
+		graph: graph,
+		added: added,
+		adds: func(pkg string, ri *ruleImport) (bool, error) {
+			if ri.method != nil {
+				return methods.adds(ctx, pkg, ri)
+			}
+			return sp.addsImport(graph, pkg, ri)
+		},
 		done:   make(map[string]bool),
 		onPath: make(map[string]int),
 	}

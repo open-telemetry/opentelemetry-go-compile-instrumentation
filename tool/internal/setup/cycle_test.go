@@ -108,6 +108,7 @@ func TestCollectRuleImports(t *testing.T) {
 	set.AddCallRule(file, &rule.InstCallRule{
 		InstBaseRule: baseRule("method", map[string]string{"m": "example.com/m"}),
 		MethodCall:   "example.com/lib.*T.Do",
+		Replace:      "m.Wrap({{ . }})",
 	})
 	set.AddLitRule(file, litRule("lit", map[string]string{"l": "example.com/l"},
 		&rule.InstLitField{Name: "A", Value: "l.Default"}))
@@ -119,11 +120,14 @@ func TestCollectRuleImports(t *testing.T) {
 	type summary struct {
 		rule, path string
 		match      bool
+		method     bool
 		files      []string
 	}
 	summaries := make([]summary, 0, len(imports))
 	for _, ri := range imports {
-		summaries = append(summaries, summary{rule: ri.rule, path: ri.path, match: ri.match != nil, files: ri.files})
+		summaries = append(summaries, summary{
+			rule: ri.rule, path: ri.path, match: ri.match != nil, method: ri.method != nil, files: ri.files,
+		})
 	}
 	files := []string{file, other}
 	if other < file {
@@ -134,10 +138,11 @@ func TestCollectRuleImports(t *testing.T) {
 		{rule: "func", path: "example.com/dot"},
 		{rule: "call", path: "example.com/h", match: true, files: files},
 		{rule: "lit", path: "example.com/l", match: true, files: []string{file}},
+		{rule: "method", path: "example.com/m", method: true, files: []string{file}},
 		{rule: "struct", path: "example.com/x"},
 	}, summaries,
-		"func rules keep only blank and dot imports, call and literal rules group their files, "+
-			"and method call rules and unsafe are left out")
+		"func rules keep only blank and dot imports, call, literal and method call rules group their files, "+
+			"and unsafe is left out")
 }
 
 // TestCollectRuleImports_UnusedImports covers the imports that a rule lists
@@ -390,7 +395,7 @@ func TestFindRuleImportCycle(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			sp := &setupPhase{logger: slog.New(slog.DiscardHandler)}
-			err := sp.findRuleImportCycle(tt.graph, collectRuleImports(tt.matched))
+			err := sp.findRuleImportCycle(t.Context(), tt.graph, collectRuleImports(tt.matched))
 			if tt.wantErr == "" {
 				require.NoError(t, err)
 				return
@@ -411,7 +416,7 @@ func TestFindRuleImportCycle_UnreadableCallFile(t *testing.T) {
 	}
 
 	sp := &setupPhase{logger: slog.New(slog.DiscardHandler)}
-	err := sp.findRuleImportCycle(graph, collectRuleImports([]*rule.InstRuleSet{set}))
+	err := sp.findRuleImportCycle(t.Context(), graph, collectRuleImports([]*rule.InstRuleSet{set}))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing.go")
 }
@@ -462,4 +467,125 @@ func TestCheckRuleImportCycles_LoadsRuleImports(t *testing.T) {
 
 	require.NoError(t, sp.checkRuleImportCycles(t.Context(), matchedWith("example.com/app/other"), allPkgs))
 	require.NoError(t, sp.checkRuleImportCycles(t.Context(), nil, allPkgs))
+}
+
+// TestCheckRuleImportCycles_MethodCall covers method_call rules, which need
+// the types of a package to know which method a call calls.
+func TestCheckRuleImportCycles_MethodCall(t *testing.T) {
+	const typeCheckLog = "type-checking a package"
+	tests := []struct {
+		name string
+		// aSource is the source of package a after its package clause.
+		aSource string
+		// helperImportsA makes helper import a, so the rule import closes a
+		// cycle.
+		helperImportsA bool
+		// reachA adds a rule import of a package that imports a, so the
+		// search visits a.
+		reachA        bool
+		wantErr       string
+		wantTypeCheck bool
+	}{
+		{
+			name:           "call of the method",
+			aSource:        "import \"example.com/app/lib\"\n\nvar X = (&lib.Client{}).Do()\n",
+			helperImportsA: true,
+			wantErr: `rule "wrap_do" adds import "example.com/app/helper" to "example.com/app/a", ` +
+				`but example.com/app/helper imports example.com/app/a`,
+			wantTypeCheck: true,
+		},
+		{
+			name: "call of the method on a value of a function result",
+			aSource: "import \"example.com/app/lib\"\n\n" +
+				"func get() *lib.Client { return &lib.Client{} }\n\nvar X = get().Do()\n",
+			helperImportsA: true,
+			wantErr:        `rule "wrap_do" adds import "example.com/app/helper" to "example.com/app/a"`,
+			wantTypeCheck:  true,
+		},
+		{
+			name:           "call of a method with the same name on another type",
+			aSource:        "import \"example.com/app/lib\"\n\nvar X = (&lib.Server{}).Do()\n",
+			helperImportsA: true,
+			wantTypeCheck:  true,
+		},
+		{
+			name: "ignored call of the method",
+			aSource: "import \"example.com/app/lib\"\n\nvar X = get()\n\n" +
+				"func get() int {\n\t//otelc:ignore\n\tv := (&lib.Client{}).Do()\n\treturn v\n}\n",
+			helperImportsA: true,
+		},
+		{
+			name:           "package that does not depend on the type's package",
+			aSource:        "type T struct{}\n\nfunc (T) Do() int { return 1 }\n\nvar X = T{}.Do()\n",
+			helperImportsA: true,
+		},
+		{
+			name:    "rule import that cannot close a cycle",
+			aSource: "import \"example.com/app/lib\"\n\nvar X = (&lib.Client{}).Do()\n",
+			reachA:  true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			helper := "package helper\n\nfunc Wrap(v int) int { return v }\n"
+			if tt.helperImportsA {
+				helper = "package helper\n\nimport \"example.com/app/a\"\n\nfunc Wrap(v int) int { return v + a.X }\n"
+			}
+			files := map[string]string{
+				"go.mod": "module example.com/app\n\ngo 1.21\n",
+				"main.go": "package main\n\nimport (\n\t\"example.com/app/a\"\n\t\"example.com/app/helper\"\n)\n\n" +
+					"func main() { println(a.X, helper.Wrap(1)) }\n",
+				"lib/lib.go": "package lib\n\ntype Client struct{}\n\nfunc (*Client) Do() int { return 1 }\n\n" +
+					"type Server struct{}\n\nfunc (*Server) Do() int { return 2 }\n",
+				"a/a.go":           "package a\n\n" + tt.aSource,
+				"helper/helper.go": helper,
+				"user/user.go":     "package user\n\nimport \"example.com/app/a\"\n\nvar Y = a.X\n",
+				"other/other.go":   "package other\n",
+			}
+			for name, content := range files {
+				path := filepath.Join(tmpDir, name)
+				require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+				require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+			}
+			t.Chdir(tmpDir)
+
+			_, allPkgs, err := getBuildPackages(t.Context(), subcmdBuild, nil)
+			require.NoError(t, err)
+
+			set := rule.NewInstRuleSet("example.com/app/a")
+			set.AddCallRule(filepath.Join(tmpDir, "a", "a.go"), &rule.InstCallRule{
+				InstBaseRule: baseRule("wrap_do", map[string]string{"helper": "example.com/app/helper"}),
+				MethodCall:   "example.com/app/lib.*Client.Do",
+				ImportPath:   "example.com/app/lib",
+				FuncName:     "Do",
+				RecvType:     "*Client",
+				Replace:      "helper.Wrap({{ . }})",
+			})
+			matched := []*rule.InstRuleSet{set}
+			if tt.reachA {
+				other := rule.NewInstRuleSet("example.com/app/other")
+				other.AddStructRule(filepath.Join(tmpDir, "other", "other.go"),
+					structRuleWithImports("add_user", map[string]string{"user": "example.com/app/user"}))
+				matched = append(matched, other)
+			}
+			var logs strings.Builder
+			sp := &setupPhase{logger: slog.New(slog.NewTextHandler(&logs, nil))}
+
+			err = sp.checkRuleImportCycles(t.Context(), matched, allPkgs)
+
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+			}
+			if tt.wantTypeCheck {
+				assert.Contains(t, logs.String(), typeCheckLog)
+			} else {
+				assert.NotContains(t, logs.String(), typeCheckLog, "the cheap checks must skip the type check")
+			}
+			assert.NotContains(t, logs.String(), "skipping", "the type check must succeed")
+		})
+	}
 }

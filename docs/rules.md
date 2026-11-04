@@ -111,7 +111,7 @@ An added import must also not depend on the package it is added to. Each compile
 rule "wrap_new" adds import "example.com/app/helper" to "example.com/app/a", but example.com/app/helper imports example.com/app/a
 ```
 
-To fix it, exclude the package from the rule's target (see [Target lists](#target-lists)). A `wrap_call` rule with `function_call` is checked only for the packages where it wraps a call, and a `set_fields` rule only for the packages where it changes a literal. An import that the rule's code does not use is not checked. Rules that use `method_call` are not checked.
+To fix it, exclude the package from the rule's target (see [Target lists](#target-lists)). A `wrap_call` rule is checked only for the packages where it wraps a call, and a `set_fields` rule only for the packages where it changes a literal. An import that the rule's code does not use is not checked. For a `method_call` rule, otelc type-checks a package only when the import that the rule adds to it could close a cycle.
 
 ### Quick demo
 
