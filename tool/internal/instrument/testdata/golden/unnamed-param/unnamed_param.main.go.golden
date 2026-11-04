@@ -111,11 +111,11 @@ func OtelBeforeTrampoline_Unnamed604682800(param0 *int, param1 *float32) (hookCo
 	hookContext.params = []interface{}{param0, param1}
 	hookContext.funcName = "Unnamed"
 	hookContext.packageName = "main"
-	if H13Before != nil {
-		H13Before(hookContext, *param0, *param1)
+	if otelc_hook_2633298448_H13Before != nil {
+		otelc_hook_2633298448_H13Before(hookContext, *param0, *param1)
 	}
 	return hookContext, hookContext.skipCall
 }
 
-//go:linkname H13Before testdata/golden/unnamed-param.H13Before
-func H13Before(hookContext HookContext, param0 int, param1 float32)
+//go:linkname otelc_hook_2633298448_H13Before testdata/golden/unnamed-param.H13Before
+func otelc_hook_2633298448_H13Before(hookContext HookContext, param0 int, param1 float32)

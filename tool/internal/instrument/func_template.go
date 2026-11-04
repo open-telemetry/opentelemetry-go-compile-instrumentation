@@ -44,7 +44,17 @@ func newFuncTemplateData(
 	return &funcTemplateData{funcDecl: funcDecl, directiveArgs: directiveArgs, imports: imports, hash: hash}
 }
 
-// FuncName returns the matched function's name. Template usage: {{.FuncName}}
+// funcLitDecl returns a FuncDecl view of lit, so that funcTemplateData and
+// the helpers that take a FuncDecl also work for a function literal. The view
+// has an empty name and no receiver. It shares lit's Type and Body, so names
+// given to unnamed parameters and results, and statements prepended to the
+// body, change lit.
+func funcLitDecl(lit *dst.FuncLit) *dst.FuncDecl {
+	return &dst.FuncDecl{Name: dst.NewIdent(""), Type: lit.Type, Body: lit.Body}
+}
+
+// FuncName returns the matched function's name, or "" for a function literal
+// (see funcLitDecl). Template usage: {{.FuncName}}
 func (d *funcTemplateData) FuncName() string {
 	return d.funcDecl.Name.Name
 }

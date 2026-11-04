@@ -133,8 +133,8 @@ func OtelBeforeTrampoline_Func1953758814(param0 *string, param1 *int) (hookConte
 	hookContext.params = []interface{}{param0, param1}
 	hookContext.funcName = "Func1"
 	hookContext.packageName = "main"
-	if H1Before != nil {
-		H1Before(hookContext, *param0, *param1)
+	if otelc_hook_2581935710_H1Before != nil {
+		otelc_hook_2581935710_H1Before(hookContext, *param0, *param1)
 	}
 	return hookContext, hookContext.skipCall
 }
@@ -153,13 +153,13 @@ func OtelAfterTrampoline_Func1953758814(hookContext HookContext, arg0 *float32, 
 		}
 	}()
 	hookContext.(*HookContextImpl953758814).returnVals = []interface{}{arg0, arg1}
-	if H1After != nil {
-		H1After(hookContext, *arg0, *arg1)
+	if otelc_hook_2581935710_H1After != nil {
+		otelc_hook_2581935710_H1After(hookContext, *arg0, *arg1)
 	}
 }
 
-//go:linkname H1Before testdata.H1Before
-func H1Before(hookContext HookContext, param0 string, param1 int)
+//go:linkname otelc_hook_2581935710_H1Before testdata.H1Before
+func otelc_hook_2581935710_H1Before(hookContext HookContext, param0 string, param1 int)
 
-//go:linkname H1After testdata.H1After
-func H1After(hookContext HookContext, arg0 float32, arg1 error)
+//go:linkname otelc_hook_2581935710_H1After testdata.H1After
+func otelc_hook_2581935710_H1After(hookContext HookContext, arg0 float32, arg1 error)

@@ -29,7 +29,7 @@ on:
         type: string
     secrets:
       OTELC_BUNDLE_PUSH_TOKEN:
-        description: Callers pass an empty placeholder.
+        description: Callers forward this secret by name. The bundle-publisher environment supplies the value.
         required: false
       OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY:
         required: false
