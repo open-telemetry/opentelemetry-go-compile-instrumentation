@@ -307,14 +307,10 @@ func OtelBeforeTrampoline_OptGood2195172342() (hookContext *HookContextImpl21951
 			}
 		}
 	}()
-	hookContext = &HookContextImpl2195172342{}
-	hookContext.params = []interface{}{}
-	hookContext.funcName = "OptGood"
-	hookContext.packageName = "main"
 	if otelc_hook_3733315718_H5Before != nil {
-		otelc_hook_3733315718_H5Before(hookContext)
+		otelc_hook_3733315718_H5Before(nil)
 	}
-	return hookContext, hookContext.skipCall
+	return nil, false
 }
 
 //go:linkname otelc_hook_3733315718_H5Before testdata/golden/opt-multiple-funcs.H5Before

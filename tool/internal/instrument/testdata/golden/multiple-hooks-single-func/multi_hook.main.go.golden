@@ -12,7 +12,7 @@ func Func1(p1 string, p2 int) (_unnamedRetVal_155800511_0 float32, _unnamedRetVa
 	} else {
 		if false {
 		} else {
-			defer OtelAfterTrampoline_Func11412092233(&HookContextImpl1412092233{params: []interface{}{&p1, &p2}, returnVals: []interface{}{&_unnamedRetVal_155800511_0, &_unnamedRetVal_155800511_1}}, &_unnamedRetVal_155800511_0, &_unnamedRetVal_155800511_1)
+			defer OtelAfterTrampoline_Func11412092233(nil, &_unnamedRetVal_155800511_0, &_unnamedRetVal_155800511_1)
 		}
 	}
 	/*line /golden/work/main.go:7*/ println("Hello, World!")
@@ -129,14 +129,10 @@ func OtelBeforeTrampoline_Func1155800511(param0 *string, param1 *int) (hookConte
 			}
 		}
 	}()
-	hookContext = &HookContextImpl155800511{}
-	hookContext.params = []interface{}{param0, param1}
-	hookContext.funcName = "Func1"
-	hookContext.packageName = "main"
 	if otelc_hook_2022634862_H1Before != nil {
-		otelc_hook_2022634862_H1Before(hookContext, *param0, *param1)
+		otelc_hook_2022634862_H1Before(nil, *param0, *param1)
 	}
-	return hookContext, hookContext.skipCall
+	return nil, false
 }
 
 //go:linkname otelc_hook_2022634862_H1Before testdata/golden/multiple-hooks-single-func.H1Before
@@ -250,9 +246,8 @@ func OtelAfterTrampoline_Func11412092233(hookContext HookContext, arg0 *float32,
 			}
 		}
 	}()
-	hookContext.(*HookContextImpl1412092233).returnVals = []interface{}{arg0, arg1}
 	if otelc_hook_2022634862_H2After != nil {
-		otelc_hook_2022634862_H2After(hookContext, *arg0, *arg1)
+		otelc_hook_2022634862_H2After(nil, *arg0, *arg1)
 	}
 }
 
