@@ -29,19 +29,18 @@ const (
 	instrumentationKey = "MCP"
 )
 
-// mcpEnablerImpl controls whether the MCP client instrumentation is enabled.
-type mcpEnablerImpl struct{}
-
-func (mcpEnablerImpl) Enable() bool {
+// mcpEnabled reports whether the MCP client instrumentation is enabled.
+func mcpEnabled() bool {
 	return runtime.Instrumented(instrumentationKey)
 }
 
-var mcpEnabler = mcpEnablerImpl{}
-
 var (
-	tracer     trace.Tracer
+	//nolint:gochecknoglobals // tracer/propagator initialized once by initInstrumentation
+	tracer trace.Tracer
+	//nolint:gochecknoglobals // propagator initialized once with tracer
 	propagator propagation.TextMapPropagator
-	initOnce   sync.Once
+	//nolint:gochecknoglobals // guards one-time provider/propagator lookup
+	initOnce sync.Once
 )
 
 func initInstrumentation() {
@@ -59,6 +58,8 @@ func initInstrumentation() {
 // client establishes a session over a concrete Transport, and read by
 // BeforeCallTool to annotate the tool-call span. Entries are removed by
 // BeforeClose when the session is closed, so the map tracks only live sessions.
+//
+//nolint:gochecknoglobals // maps live client sessions to detected transport
 var sessionTransports sync.Map // *mcp.ClientSession -> string
 
 // detectTransport maps a concrete mcp.Transport to the network.transport enum
@@ -85,8 +86,8 @@ func detectTransport(t mcp.Transport) string {
 // BeforeConnect runs before (*Client).Connect(ctx, transport, opts). It stashes
 // the detected transport type in the hook context so AfterConnect can associate
 // it with the returned *ClientSession.
-func BeforeConnect(ictx hook.HookContext, c *mcp.Client, ctx context.Context, t mcp.Transport, opts *mcp.ClientSessionOptions) {
-	if !mcpEnabler.Enable() || t == nil {
+func BeforeConnect(ictx hook.HookContext, _ *mcp.Client, ctx context.Context, t mcp.Transport, opts *mcp.ClientSessionOptions) {
+	if !mcpEnabled() || t == nil {
 		return
 	}
 	ictx.SetData(detectTransport(t))
@@ -108,7 +109,7 @@ func AfterConnect(ictx hook.HookContext, cs *mcp.ClientSession, err error) {
 // after hook cannot be used: Close() returns only error, so an after hook only
 // receives (HookContext, error) and has no receiver, whereas a before hook
 // receives HookContext plus the receiver.
-func BeforeClose(ictx hook.HookContext, cs *mcp.ClientSession) {
+func BeforeClose(_ hook.HookContext, cs *mcp.ClientSession) {
 	if cs != nil {
 		sessionTransports.Delete(cs)
 	}
@@ -164,13 +165,15 @@ func spanName(toolName string) string {
 // (*mcp.CallToolResult, error), so the parameter list seen by the hook framework
 // is: receiver cs = param 0, ctx = param 1, params = param 2. SetParam targets
 // those framework-level indices, not the hook function's own argument list.
+//
+//nolint:revive // context.Context follows hook receiver parameters per SDK hook signature
 func BeforeCallTool(
 	ictx hook.HookContext,
 	cs *mcp.ClientSession,
 	ctx context.Context,
 	params *mcp.CallToolParams,
 ) {
-	if !mcpEnabler.Enable() {
+	if !mcpEnabled() {
 		return
 	}
 	if params == nil {
@@ -178,6 +181,7 @@ func BeforeCallTool(
 	}
 	initInstrumentation()
 
+	//nolint:spancheck // span is stored in hook context and ended by AfterCallTool
 	spanCtx, span := tracer.Start(
 		ctx,
 		spanName(params.Name),
@@ -330,8 +334,7 @@ func AfterCallTool(
 	switch {
 	case err != nil:
 		span.RecordError(err)
-		var rpcErr *jsonrpc.Error
-		if errors.As(err, &rpcErr) {
+		if rpcErr, ok := errors.AsType[*jsonrpc.Error](err); ok {
 			// JSON-RPC semconv: error.type carries the bare wire code string,
 			// and rpc.response.status_code records the error.code as a string.
 			code := strconv.FormatInt(rpcErr.Code, 10)

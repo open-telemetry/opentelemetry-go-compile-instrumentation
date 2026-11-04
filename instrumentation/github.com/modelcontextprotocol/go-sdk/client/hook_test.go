@@ -323,7 +323,9 @@ func TestNetworkTransport_EmittedAfterConnect(t *testing.T) {
 	sr := setupTest(t)
 
 	cs := &mcp.ClientSession{}
-	connectCtx := hooktest.NewMockHookContext(&mcp.Client{}, context.Background(), &mcp.StdioTransport{}, (*mcp.ClientSessionOptions)(nil))
+	connectCtx := hooktest.NewMockHookContext(
+		&mcp.Client{}, context.Background(), &mcp.StdioTransport{}, (*mcp.ClientSessionOptions)(nil),
+	)
 	BeforeConnect(connectCtx, &mcp.Client{}, context.Background(), &mcp.StdioTransport{}, nil)
 	AfterConnect(connectCtx, cs, nil)
 
