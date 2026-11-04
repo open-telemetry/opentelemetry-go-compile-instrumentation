@@ -88,7 +88,13 @@ func detectTransport(t mcp.Transport) string {
 // it with the returned *ClientSession.
 //
 //nolint:revive // hook signature requires ictx before ctx
-func BeforeConnect(ictx hook.HookContext, _ *mcp.Client, _ context.Context, t mcp.Transport, opts *mcp.ClientSessionOptions) {
+func BeforeConnect(
+	ictx hook.HookContext,
+	_ *mcp.Client,
+	_ context.Context,
+	t mcp.Transport,
+	opts *mcp.ClientSessionOptions,
+) {
 	if !mcpEnabled() || t == nil {
 		return
 	}
