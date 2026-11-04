@@ -42,8 +42,10 @@ func (ft *funcTypes) signature(decl *dst.FuncDecl) *types.Signature {
 	if ft == nil || ft.info == nil || ft.parser == nil {
 		return nil
 	}
-	pos := ft.parser.FindPosition(decl.Name)
-	fn, found := ft.info.funcByPos[methodCallPosition{file: pos.Filename, line: pos.Line, col: pos.Column}]
+	// The position of the func keyword finds a function literal too: the
+	// FuncDecl view of a literal (see funcLitDecl) shares its Type.
+	pos := ft.parser.FindPosition(decl.Type)
+	sig, found := ft.info.sigByPos[methodCallPosition{file: pos.Filename, line: pos.Line, col: pos.Column}]
 	if !found {
 		if ft.logger != nil {
 			args := []any{"func", decl.Name.Name}
@@ -54,7 +56,6 @@ func (ft *funcTypes) signature(decl *dst.FuncDecl) *types.Signature {
 		}
 		return nil
 	}
-	sig, _ := fn.Type().(*types.Signature)
 	return sig
 }
 
@@ -243,7 +244,10 @@ func rsetUsesImplements(rset *rule.InstRuleSet) bool {
 			rset.DirectiveRules,
 			func(r *rule.InstDirectiveRule) bool { return usesImplementsHelper(r.Template) },
 		) ||
-		anyRule(rset.CallRules, func(r *rule.InstCallRule) bool { return usesImplementsHelper(r.Replace) })
+		anyRule(rset.CallRules, func(r *rule.InstCallRule) bool { return usesImplementsHelper(r.Replace) }) ||
+		anyRule(rset.LitRules, func(r *rule.InstLitRule) bool {
+			return slices.ContainsFunc(r.Field, func(f *rule.InstLitField) bool { return usesImplementsHelper(f.Wrap) })
+		})
 }
 
 func anyRule[T any](rules map[string][]T, pred func(T) bool) bool {

@@ -467,7 +467,7 @@ type methodCallPosition struct {
 // ThatImplements template helpers.
 type methodCallPackageInfo struct {
 	selByPos       map[methodCallPosition]*types.Selection
-	funcByPos      map[methodCallPosition]*types.Func // keyed by the position of the declared name
+	sigByPos       map[methodCallPosition]*types.Signature // keyed by the position of the func keyword
 	pkg            *types.Package
 	importer       *exportImporter
 	firstTypeError error
@@ -492,6 +492,7 @@ func checkPackageForMethodCalls(
 	info := &types.Info{
 		Selections: make(map[*goast.SelectorExpr]*types.Selection),
 		Defs:       make(map[*goast.Ident]types.Object),
+		Types:      make(map[goast.Expr]types.TypeAndValue),
 	}
 	var firstTypeError error
 	// Sizes is nil, so go/types uses SizesFor("gc", "amd64") — unsafe sizing
@@ -512,7 +513,7 @@ func checkPackageForMethodCalls(
 
 	pi := &methodCallPackageInfo{
 		selByPos:       make(map[methodCallPosition]*types.Selection, len(info.Selections)),
-		funcByPos:      make(map[methodCallPosition]*types.Func),
+		sigByPos:       make(map[methodCallPosition]*types.Signature),
 		pkg:            pkg,
 		importer:       importer,
 		firstTypeError: firstTypeError,
@@ -522,18 +523,34 @@ func checkPackageForMethodCalls(
 		pi.selByPos[methodCallPosition{file: pos.Filename, line: pos.Line, col: pos.Column}] = selection
 	}
 	for _, astFile := range astFiles {
-		for _, decl := range astFile.Decls {
-			funcDecl, isFunc := decl.(*goast.FuncDecl)
-			if !isFunc {
-				continue
+		goast.Inspect(astFile, func(node goast.Node) bool {
+			if typ, sig := funcSignature(node, info); sig != nil {
+				pos := fset.Position(typ.Pos())
+				pi.sigByPos[methodCallPosition{file: pos.Filename, line: pos.Line, col: pos.Column}] = sig
 			}
-			if fn, isTypesFunc := info.Defs[funcDecl.Name].(*types.Func); isTypesFunc {
-				pos := fset.Position(funcDecl.Name.Pos())
-				pi.funcByPos[methodCallPosition{file: pos.Filename, line: pos.Line, col: pos.Column}] = fn
-			}
-		}
+			return true
+		})
 	}
 	return pi, nil
+}
+
+// funcSignature returns the type of node and its signature when node is a
+// function declaration or a function literal.
+func funcSignature(node goast.Node, info *types.Info) (*goast.FuncType, *types.Signature) {
+	switch n := node.(type) {
+	case *goast.FuncDecl:
+		fn, _ := info.Defs[n.Name].(*types.Func)
+		if fn == nil {
+			return nil, nil
+		}
+		sig, _ := fn.Type().(*types.Signature)
+		return n.Type, sig
+	case *goast.FuncLit:
+		sig, _ := info.TypeOf(n).(*types.Signature)
+		return n.Type, sig
+	default:
+		return nil, nil
+	}
 }
 
 // parseForTypeCheck records position filenames as filepath.Base(path)

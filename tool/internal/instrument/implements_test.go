@@ -478,4 +478,81 @@ func TestRsetUsesImplements(t *testing.T) {
 		&rule.InstCallRule{Replace: `w({{ .FuncArgumentThatImplements "context.Context" }}, {{ . }})`},
 	)
 	assert.True(t, rsetUsesImplements(rset))
+
+	rset = newSet()
+	rset.AddLitRule(file, &rule.InstLitRule{Field: []*rule.InstLitField{
+		{Name: "A", Value: "1"},
+		{Name: "B", Wrap: `w({{ .FuncReturnThatImplements "error" }}, {{ . }})`},
+	}})
+	assert.True(t, rsetUsesImplements(rset))
+}
+
+// literalSource has a literal inside a function whose parameter implements
+// context.Context, and a function literal with such a parameter.
+const literalSource = `package sample
+
+import (
+	"context"
+	"net/http"
+)
+
+type ReqCtx struct{ context.Context }
+
+func handle(c *ReqCtx) *http.Client {
+	return &http.Client{Timeout: 0}
+}
+
+var handler = func(c *ReqCtx) {}
+`
+
+func TestLitRule_ThatImplementsHelpers(t *testing.T) {
+	ip, root := setupImplementsPhase(t, literalSource)
+	require.NotNil(t, ip.ensureMethodCallInfo())
+	require.NoError(t, ip.methodCallInfo.firstTypeError)
+
+	r := &rule.InstLitRule{
+		InstBaseRule:  rule.InstBaseRule{Name: "wrap_timeout"},
+		StructLiteral: "net/http.Client",
+		ImportPath:    "net/http",
+		TypeName:      "Client",
+		Field: []*rule.InstLitField{
+			{Name: "Timeout", Wrap: `wrap({{ .FuncArgumentThatImplements "context.Context" }}, {{ . }})`},
+		},
+	}
+	changed, err := ip.applyLitRule(t.Context(), r, root)
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	var timeout dst.Expr
+	dst.Inspect(root, func(node dst.Node) bool {
+		if kv, ok := node.(*dst.KeyValueExpr); ok {
+			timeout = kv.Value
+		}
+		return timeout == nil
+	})
+	require.NotNil(t, timeout)
+	got, err := ast.RenderExpr(timeout)
+	require.NoError(t, err)
+	assert.Equal(t, "wrap(c, 0)", got, "*ReqCtx implements context.Context")
+}
+
+func TestThatImplementsHelpers_FuncLit(t *testing.T) {
+	ip, root := setupImplementsPhase(t, literalSource)
+	require.NotNil(t, ip.ensureMethodCallInfo())
+	require.NoError(t, ip.methodCallInfo.firstTypeError)
+
+	var lit *dst.FuncLit
+	dst.Inspect(root, func(node dst.Node) bool {
+		if l, ok := node.(*dst.FuncLit); ok {
+			lit = l
+		}
+		return lit == nil
+	})
+	require.NotNil(t, lit)
+
+	data := newFuncTemplateData(funcLitDecl(lit), nil, ast.ImportAliasMap(root, nil), "h1")
+	data.typeInfo = ip.fileTypes()
+	got, err := data.FuncArgumentThatImplements("context.Context")
+	require.NoError(t, err)
+	assert.Equal(t, "c", got, "*ReqCtx implements context.Context")
 }
