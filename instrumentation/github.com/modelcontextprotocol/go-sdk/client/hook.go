@@ -86,6 +86,7 @@ func detectTransport(t mcp.Transport) string {
 // BeforeConnect runs before (*Client).Connect(ctx, transport, opts). It stashes
 // the detected transport type in the hook context so AfterConnect can associate
 // it with the returned *ClientSession.
+//nolint:revive // context.Context position dictated by SDK hook signature (ictx first)
 func BeforeConnect(ictx hook.HookContext, _ *mcp.Client, _ context.Context, t mcp.Transport, opts *mcp.ClientSessionOptions) {
 	if !mcpEnabled() || t == nil {
 		return
@@ -167,7 +168,6 @@ func spanName(toolName string) string {
 // those framework-level indices, not the hook function's own argument list.
 //
 //nolint:revive // context.Context follows hook receiver parameters per SDK hook signature
-//nolint:spancheck // span is stored in hook context and ended by AfterCallTool
 func BeforeCallTool(
 	ictx hook.HookContext,
 	cs *mcp.ClientSession,
@@ -182,6 +182,7 @@ func BeforeCallTool(
 	}
 	initInstrumentation()
 
+	//nolint:spancheck // span is stored in hook context and ended by AfterCallTool
 	spanCtx, span := tracer.Start(
 		ctx,
 		spanName(params.Name),
