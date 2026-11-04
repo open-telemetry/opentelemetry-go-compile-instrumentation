@@ -52,6 +52,7 @@ schemas/otelc/
 │   ├── k8s.yaml             # k8s.io/client-go informer spans
 │   ├── openai.yaml          # openai/openai-go GenAI client spans
 │   ├── anthropic.yaml       # anthropics/anthropic-sdk-go GenAI client spans
+│   ├── mcp.yaml             # modelcontextprotocol/go-sdk GenAI client spans
 │   ├── mongo.yaml           # go.mongodb.org/mongo-driver client spans
 │   ├── elasticsearch.yaml   # olivere/elastic (v7) client spans
 │   ├── gin.yaml             # gin-gonic/gin server-span enrichment

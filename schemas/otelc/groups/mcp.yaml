@@ -1,0 +1,79 @@
+groups:
+  # ---------------------------------------------------------------------------
+  # modelcontextprotocol/go-sdk instrumentation emission contract.
+  #
+  # Source of truth for this file:
+  #   instrumentation/github.com/modelcontextprotocol/go-sdk/client/hook.go  (span + attrs)
+  #   instrumentation/github.com/modelcontextprotocol/go-sdk/semconv/mcp.go  (attribute keys)
+  #
+  # The go-sdk instrumentation is trace-only: it creates one client span per
+  # MCP request issued through an mcp.ClientSession (`tools/call` is the only
+  # request instrumented today, `gen_ai.operation.name` = `execute_tool`). It
+  # records no metrics.
+  #
+  # Upstream OpenTelemetry GenAI attributes (`gen_ai.operation.name`,
+  # `gen_ai.tool.name`, `error.type`) are referenced with `ref:`. The MCP and
+  # JSON-RPC attributes below are not covered by the pinned upstream semconv
+  # v1.37.0 (`mcp.*` and `jsonrpc.request.id`; #1542 plans to generate them
+  # later), so they are declared locally with `id:`.
+  #
+  # Notes on conditional attributes:
+  #   - `mcp.session.id` is recorded only once the initialize handshake has
+  #     completed (ClientSession.ID() is empty before that).
+  #   - `jsonrpc.request.id` is recorded only when the span context survives
+  #     into internal/jsonrpc2.(*Connection).Call, i.e. for requests started
+  #     from an instrumented session call (tools/call, ...).
+  #   - `network.transport` is recorded on the client span once a transport is
+  #     detected. `*mcp.InMemoryTransport` emits the custom value `inproc`, which
+  #     is outside the standard `tcp`/`udp`/`pipe`/`unix`/`quic` enum.
+  #   - Call arguments and results are intentionally not emitted: the GenAI
+  #     convention marks `gen_ai.tool.call.arguments` /
+  #     `gen_ai.tool.call.result` as Opt-In to avoid leaking user data.
+  # ---------------------------------------------------------------------------
+
+  - id: registry.otelc.gen_ai.mcp
+    type: attribute_group
+    display_name: otelc MCP client attributes
+    brief: >
+      Attributes emitted by the modelcontextprotocol/go-sdk instrumentation that are not covered by the released OpenTelemetry
+      semantic conventions.
+    attributes:
+      - id: mcp.method.name
+        type: string
+        stability: development
+        brief: The JSON-RPC request method of the MCP call.
+        examples: ["tools/call"]
+      - id: mcp.session.id
+        type: string
+        stability: development
+        brief: The MCP session identifier negotiated at initialize time (ClientSession.ID()).
+        examples: ["session-42"]
+      - id: jsonrpc.request.id
+        type: string
+        stability: development
+        brief: >
+          The JSON-RPC request identifier, rendered the way it travels on the wire (an integer id is rendered as its decimal
+          string, a string id passes through).
+        examples: ["42", "req-7"]
+      - id: rpc.response.status_code
+        type: string
+        stability: development
+        brief: >
+          The JSON-RPC error code of a failed tools/call, rendered as its decimal wire code string. Absent on success and
+          on logical tool failures (IsError), which carry no JSON-RPC error.
+        examples: ["-32601", "-32602"]
+
+  - id: span.otelc.gen_ai.mcp.client
+    type: span
+    span_kind: client
+    stability: development
+    brief: MCP client span, one per tools/call issued through an instrumented ClientSession.
+    attributes:
+      - ref: gen_ai.operation.name
+      - ref: gen_ai.tool.name
+      - ref: mcp.method.name
+      - ref: mcp.session.id
+      - ref: jsonrpc.request.id
+      - ref: rpc.response.status_code
+      - ref: error.type
+      - ref: network.transport
