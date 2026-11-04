@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"strings"
 
+	"golang.org/x/mod/module"
+
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -26,6 +28,10 @@ type Dependency struct {
 	Version    string
 	Sources    []string
 	CgoFiles   map[string]string
+	// IsTest reports whether the compile is part of a test binary. It is read
+	// from the compile command, because the generated _testmain.go does not
+	// exist yet when the build plan is listed and so is not in Sources.
+	IsTest bool
 }
 
 func (d *Dependency) String() string {
@@ -172,7 +178,11 @@ func findModVersion(path string) string {
 	if version == "" {
 		return ""
 	}
-	return version[1 : len(version)-1]
+	raw := version[1 : len(version)-1]
+	if unescaped, err := module.UnescapeVersion(raw); err == nil {
+		return unescaped
+	}
+	return raw
 }
 
 // findGoSources extracts Go source files from compile command arguments,
@@ -184,6 +194,7 @@ func findGoSources(ctx context.Context, args []string, cgoObjDirs map[string]str
 		ImportPath: util.FindFlagValue(args, "-p"),
 		Sources:    make([]string, 0),
 		CgoFiles:   make(map[string]string),
+		IsTest:     util.IsTestBuild(args),
 	}
 	util.Assert(dep.ImportPath != "", "import path is empty")
 
@@ -270,5 +281,6 @@ func findDeps(ctx context.Context, subcommand string, cmdArgs []string) ([]*Depe
 			logger.DebugContext(ctx, "Found CGO objdir mapping", "objDir", objDir, "sourceDir", currentDir)
 		}
 	}
+	fillVendoredVersions(ctx, deps)
 	return deps, nil
 }

@@ -6,6 +6,7 @@ package setup
 import (
 	"context"
 	"fmt"
+	"go/token"
 	"maps"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/instrument"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -29,6 +31,7 @@ const (
 type runtimePackage struct {
 	dir        string
 	importPath string
+	debugPath  string
 	name       string
 }
 
@@ -60,8 +63,17 @@ func genImportDecl(funcRules []*rule.InstFuncRule, fileRules []*rule.InstFileRul
 	return importDecls
 }
 
+// genVarDecl declares the stack helper variables for each hook package and an
+// init function that assigns them.
+//
+// The variables have no initializer, so each one is a BSS symbol. The linker
+// accepts several BSS definitions of the same symbol, so two packages of one
+// binary can both declare them. A variable with an initializer is a data
+// symbol, and two data definitions fail the link with "duplicated definition
+// of symbol".
 func genVarDecl(matched []*rule.InstFuncRule) []dst.Decl {
-	decls := make([]dst.Decl, 0, len(matched))
+	decls := make([]dst.Decl, 0, 2*len(matched)+1)
+	var assigns []dst.Stmt
 	uniquePath := map[string]bool{}
 	for i, m := range matched {
 		if _, ok := uniquePath[m.Path]; ok {
@@ -70,16 +82,40 @@ func genVarDecl(matched []*rule.InstFuncRule) []dst.Decl {
 		uniquePath[m.Path] = true
 		// First variable declaration
 		// //go:linkname _getstack%d %s.OtelGetStackImpl
-		// var _getstack%d = _otel_debug.Stack
-		value := ast.SelectorExpr(ast.Ident("_otel_debug"), "Stack")
-		getStackVar := ast.VarDecl(fmt.Sprintf("_getstack%d", i), value)
+		// var _getstack%d func() []byte
+		getStackName := fmt.Sprintf("_getstack%d", i)
+		getStackType := &dst.FuncType{
+			Params: &dst.FieldList{},
+			Results: &dst.FieldList{
+				List: []*dst.Field{{Type: ast.ArrayType(ast.Ident("byte"))}},
+			},
+		}
+		getStackVar := typedVarDecl(getStackName, getStackType)
 		getStackVar.Decs = dst.GenDeclDecorations{
 			NodeDecs: ast.LineComments(
-				fmt.Sprintf("//go:linkname _getstack%d %s.OtelGetStackImpl", i, m.Path)),
+				fmt.Sprintf("//go:linkname %s %s.OtelGetStackImpl", getStackName, m.Path)),
 		}
 		// Second variable declaration
 		// //go:linkname _printstack%d %s.OtelPrintStackImpl
-		// var _printstack%d = func (bt []byte){ _otel_log.Print(string(bt)) }
+		// var _printstack%d func([]byte)
+		printStackName := fmt.Sprintf("_printstack%d", i)
+		printStackType := &dst.FuncType{
+			Params: &dst.FieldList{
+				List: []*dst.Field{{Type: ast.ArrayType(ast.Ident("byte"))}},
+			},
+		}
+		printStackVar := typedVarDecl(printStackName, printStackType)
+		printStackVar.Decs = dst.GenDeclDecorations{
+			NodeDecs: ast.LineComments(
+				fmt.Sprintf("//go:linkname %s %s.OtelPrintStackImpl", printStackName, m.Path)),
+		}
+		decls = append(decls, getStackVar, printStackVar)
+
+		// build: _getstack%d = _otel_debug.Stack
+		assigns = append(assigns, ast.AssignStmt(
+			ast.Ident(getStackName),
+			ast.SelectorExpr(ast.Ident("_otel_debug"), "Stack"),
+		))
 		// build: string(bt)
 		stringCall := &dst.CallExpr{
 			Fun:  ast.Ident("string"),
@@ -101,14 +137,30 @@ func genVarDecl(matched []*rule.InstFuncRule) []dst.Decl {
 			},
 			Body: ast.BlockStmts(ast.ExprStmt(printCall)),
 		}
-		printStackVar := ast.VarDecl(fmt.Sprintf("_printstack%d", i), printStackFunc)
-		printStackVar.Decs = dst.GenDeclDecorations{
-			NodeDecs: ast.LineComments(
-				fmt.Sprintf("//go:linkname _printstack%d %s.OtelPrintStackImpl", i, m.Path)),
-		}
-		decls = append(decls, getStackVar, printStackVar)
+		// build: _printstack%d = func (bt []byte) { _otel_log.Print(string(bt)) }
+		assigns = append(assigns, ast.AssignStmt(ast.Ident(printStackName), printStackFunc))
 	}
-	return decls
+	if len(assigns) == 0 {
+		return decls
+	}
+	initFunc := &dst.FuncDecl{
+		Name: ast.Ident("init"),
+		Type: &dst.FuncType{Params: &dst.FieldList{}},
+		Body: ast.BlockStmts(assigns...),
+	}
+	return append(decls, initFunc)
+}
+
+func typedVarDecl(name string, typ dst.Expr) *dst.GenDecl {
+	return &dst.GenDecl{
+		Tok: token.VAR,
+		Specs: []dst.Spec{
+			&dst.ValueSpec{
+				Names: []*dst.Ident{ast.Ident(name)},
+				Type:  typ,
+			},
+		},
+	}
 }
 
 func buildOtelcRuntimeAst(decls []dst.Decl, packageName string) *dst.File {
@@ -120,6 +172,62 @@ func buildOtelcRuntimeAst(decls []dst.Decl, packageName string) *dst.File {
 		},
 		Decls: decls,
 	}
+}
+
+type runtimeContributorID struct {
+	kind, name, path, file, identity string
+}
+
+// runtimeContributors returns a sorted, deduplicated list of contributing rule names.
+func runtimeContributors(funcRules []*rule.InstFuncRule, fileRules []*rule.InstFileRule) []string {
+	var contributors []string
+	seen := make(map[runtimeContributorID]bool)
+
+	for _, r := range funcRules {
+		// Distinct func rules are identified by their name and content identity.
+		id := runtimeContributorID{kind: "func", name: r.GetName(), identity: r.Identity()}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		contributors = append(contributors, firstNonEmpty(r.GetName(), r.Func, r.Path))
+	}
+
+	for _, r := range fileRules {
+		// Distinct file rules are identified by their name, path, and file.
+		id := runtimeContributorID{kind: "file", name: r.GetName(), path: r.Path, file: r.File}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		contributors = append(contributors, firstNonEmpty(r.GetName(), r.File, r.Path))
+	}
+
+	slices.Sort(contributors)
+	return contributors
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+// writeRuntimeDiffForDebug writes the generated runtime file diff when debug output is enabled.
+func (sp *setupPhase) writeRuntimeDiffForDebug(
+	srcPath, pkgPath string,
+	funcRules []*rule.InstFuncRule,
+	fileRules []*rule.InstFileRule,
+) {
+	if !instrument.DiffDebugEnabled() {
+		return
+	}
+	dest := filepath.Join(setupDebugDir(pkgPath), filepath.Base(srcPath)+".diff")
+	header := instrument.FormatGeneratedFileHeader(otelcRuntimeFile, runtimeContributors(funcRules, fileRules))
+	instrument.WriteAddedSourceDiff(dest, srcPath, header, sp.logger)
 }
 
 // removeRuntimeFile deletes the runtime file in pkgDir that an earlier setup
@@ -152,8 +260,9 @@ func (sp *setupPhase) removeRuntimeFile(ctx context.Context, pkgDir string) erro
 // file cannot import the package it belongs to. `otelc go test ./...` selects
 // such a package when the hooks live in the application module.
 func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, pkg runtimePackage) error {
-	funcRules := []*rule.InstFuncRule{}
-	fileRules := []*rule.InstFileRule{}
+	var funcRules []*rule.InstFuncRule
+	var fileRules []*rule.InstFileRule
+
 	for _, m := range matched {
 		for _, funcRule := range m.AllFuncRules() {
 			if funcRule.Path != pkg.importPath {
@@ -187,7 +296,12 @@ func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, 
 	if err := ast.WriteFileAtomic(otelcRuntimeFilePath, root); err != nil {
 		return ex.Wrapf(err, "writing otelc runtime file %s", otelcRuntimeFilePath)
 	}
-	keepForDebug(ctx, otelcRuntimeFilePath)
+	debugPath := pkg.debugPath
+	if debugPath == "" {
+		debugPath = pkg.importPath
+	}
+	keepForDebug(ctx, otelcRuntimeFilePath, debugPath)
+	sp.writeRuntimeDiffForDebug(otelcRuntimeFilePath, debugPath, funcRules, fileRules)
 	sp.Info("Created otelc.runtime.go", "path", otelcRuntimeFilePath)
 	return nil
 }

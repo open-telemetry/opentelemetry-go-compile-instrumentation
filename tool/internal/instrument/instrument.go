@@ -152,53 +152,38 @@ func rsetHasMethodCallRule(rset *rule.InstRuleSet) bool {
 }
 
 // instrumentFile applies rules to a single file and reports whether any of
-// them is a function rule (i.e. whether a globals file is needed).
+// them requires a globals file.
 func (ip *instrumentPhase) instrumentFile(ctx context.Context, file string, rules []rule.InstRule) (bool, error) {
 	// Group rules by file, then parse the target file once
 	root, err := ip.parseFile(file)
 	if err != nil {
 		return false, ex.Wrapf(err, "parsing file %s", file)
 	}
-	fileIgnored := ast.FileHasLeadingDirective(root, util.DirectiveIgnore)
-	if fileIgnored {
+	if ast.FileHasLeadingDirective(root, util.DirectiveIgnore) {
 		ip.Debug("File-level //otelc:ignore found, only //otelc:instrument functions will be instrumented",
 			"file", file)
 	}
 
-	hasFuncRule := false
-	modified := false
-	for _, r := range rules {
-		var funcDecl *dst.FuncDecl
-		var found bool
-		if fr, ok := r.(*rule.InstFuncRule); ok {
-			funcDecl, found, err = ast.FindFuncDecl(root, fr, ip.importNames)
-			if err != nil {
-				return false, ex.Wrapf(err, "finding function %s", fr.Func)
-			}
-		}
-		if fileIgnored && ip.skipRuleForFileIgnore(r, funcDecl, found) {
-			continue
-		}
-		res, err1 := ip.applyOneRule(ctx, r, root, funcDecl, found)
-		if err1 != nil {
-			return false, ex.Wrapf(err1, "applying rule %s", r.GetName())
-		}
-		hasFuncRule = hasFuncRule || res.needsGlobals
-		modified = modified || res.modified
+	result, changes, err := ip.applyRulesCapturingDiffs(ctx, rules, root)
+	if err != nil {
+		return false, err
 	}
 
 	ignoredSitesModified, err := ip.applyIgnoredCallSites(ctx, root)
 	if err != nil {
 		return false, ex.Wrapf(err, "applying //otelc:ignore call sites in %s", file)
 	}
-	modified = modified || ignoredSitesModified
+	modified := result.modified || ignoredSitesModified
 
 	// Leave a file no rule changed out of the compile command. A glob
 	// target attaches call and literal rules to every file of every
 	// package it matches, and rewriting those would needlessly reprint
 	// them, including cgo and standard library files.
 	if !modified {
-		return hasFuncRule, nil
+		if DiffDebugEnabled() {
+			ip.removeStaleDiff(filepath.Join(ip.debugArtifactDir(), filepath.Base(file)+".diff"))
+		}
+		return result.needsGlobals, nil
 	}
 
 	// Since trampoline-jump-if is performance-critical, perform AST level
@@ -206,16 +191,22 @@ func (ip *instrumentPhase) instrumentFile(ctx context.Context, file string, rule
 	if err = ip.optimizeTJumps(); err != nil {
 		return false, ex.Wrapf(err, "optimizing trampoline jumps for %s", file)
 	}
+	// Mark the injected code, so stack traces and debuggers do not show it
+	// as lines of the original file, and restore the original positions
+	// after it.
+	if markLineDirectives(ip.parser, root, file) == lineStale {
+		ip.Debug("Line directives: the end of the file can have wrong positions", "file", file)
+	}
 	// Once all func rules targeting this file are applied, write instrumented
 	// AST to new file and replace the original file in the compile command
-	if err = ip.writeInstrumented(root, file); err != nil {
+	if err = ip.writeInstrumented(root, file, changes); err != nil {
 		return false, ex.Wrapf(err, "writing instrumented file %s", file)
 	}
-	return hasFuncRule, nil
+	return result.needsGlobals, nil
 }
 
 func (ip *instrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSet) error {
-	hasFuncRule := false
+	needsGlobals := false
 	// Apply file rules first because they can introduce new files that used
 	// by other rules such as raw rules
 	for _, rule := range rset.FileRules {
@@ -232,16 +223,16 @@ func (ip *instrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSe
 
 	file2rules, files := groupRules(ip.workDir, rset)
 	for _, file := range files {
-		fileHasFuncRule, err := ip.instrumentFile(ctx, file, file2rules[file])
+		fileNeedsGlobals, err := ip.instrumentFile(ctx, file, file2rules[file])
 		if err != nil {
 			return err
 		}
-		hasFuncRule = hasFuncRule || fileHasFuncRule
+		needsGlobals = needsGlobals || fileNeedsGlobals
 	}
 
-	// Write globals file if any function is instrumented because injected code
+	// Write globals file if any rule requires it because injected code
 	// always requires some global variables and auxiliary declarations
-	if hasFuncRule {
+	if needsGlobals {
 		return ip.writeGlobals(rset.PackageName)
 	}
 	return nil

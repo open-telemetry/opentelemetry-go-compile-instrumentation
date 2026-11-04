@@ -3,8 +3,8 @@
 
 package main
 
-// The directive is not a leading comment on a top-level func, so the rule
-// matches no function and must not inject anything -- including its imports.
+// The directive annotates a statement that holds no function literal, so the
+// rule matches no function and must not inject anything -- including its imports.
 func main() {
 	//otelc:span
 	value := 1
