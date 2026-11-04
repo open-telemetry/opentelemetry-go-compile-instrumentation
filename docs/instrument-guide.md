@@ -324,3 +324,23 @@ Check that your instrumentation package has the following elements:
 - Unit tests alongside the hooks for logic-level behavior.
 - Integration tests in `test/integration/` that execute an instrumented binary and validate spans/attributes.
 - If applicable, a PR has been opened to add the instrumentation to the OpenTelemetry registry in the `opentelemetry.io` repository.
+
+### Hooks called during package initialization
+
+A function can be called before the package containing its instrumentation hooks
+has initialized. Hook linknames do not create Go import dependencies. The generated
+blank import in the application orders hooks before the application, but does not
+order them before every other imported package.
+
+The tool guards hook entry points until all variables and init functions in the
+hook package have initialized. Calls made earlier skip the hook body and emit
+one message per hook package to standard error:
+
+```text
+otelc: skipping hooks in <package> before package initialization completes
+```
+
+The original function still runs. Skipped hooks are not queued or replayed, so
+initialization-time operations may have no instrumentation. This also applies to
+calls made by the hook package's own initializers. Hooks that need to observe
+startup registration should arrange to discover that state after initialization.

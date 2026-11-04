@@ -241,6 +241,10 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 		ip.Info("Run instrumented command", "args", ip.compileArgs)
 	}
 
+	if err = ip.guardHookInitializers(ctx, allSet); err != nil {
+		return nil, ex.Wrapf(err, "guarding hook package initialization")
+	}
+
 	return ip.compileArgs, nil
 }
 
