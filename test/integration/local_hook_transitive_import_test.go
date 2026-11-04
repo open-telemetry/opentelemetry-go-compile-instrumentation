@@ -8,6 +8,7 @@ package test
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -201,8 +202,32 @@ func Before(ctx hook.HookContext) {
 `)
 
 	env := append(os.Environ(), "OTELC_RULES=rules.yml")
-	// A normal build must not require the test-only file used to keep hooks
-	// linked in test binaries.
+
+	// Ordinary setup must generate the external test file for a later go test.
+	runOtelcCommand(t, moduleDir, env, otelcPath, "setup", "./internal/log")
+
+	require.FileExists(
+		t,
+		filepath.Join(moduleDir, "internal", "log", "otelc.runtime_test.go"),
+	)
+
+	cmd := exec.CommandContext(
+		t.Context(),
+		"go",
+		"test",
+		"-count=1",
+		"-v",
+		"-toolexec="+otelcPath+" toolexec",
+		"./internal/log",
+	)
+	cmd.Dir = moduleDir
+	cmd.Env = env
+
+	directOutput, directErr := cmd.CombinedOutput()
+	require.NoError(t, directErr, "go test after otelc setup failed:\n%s", directOutput)
+	require.Contains(t, string(directOutput), "transitive hook ran")
+
+	// The generated _test.go file must not affect ordinary builds.
 	runOtelcCommand(t, moduleDir, env, otelcPath, "go", "build", "./cmd/app", "./internal/log")
 
 	output := runOtelcCommand(

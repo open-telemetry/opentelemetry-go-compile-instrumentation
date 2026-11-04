@@ -171,8 +171,6 @@ func TestAddDeps(t *testing.T) {
 			testMode:          true,
 		},
 		{
-			// The rule targets the very package its hook imports. The cycle is
-			// unavoidable, so addDeps must error instead of silently dropping the hook.
 			name: "hook_imports_its_own_target",
 			matched: []*rule.InstRuleSet{
 				newTestRuleSet(
@@ -185,7 +183,6 @@ func TestAddDeps(t *testing.T) {
 			packageName:       "log",
 			importedByHooks:   map[string]bool{"example.com/app/hooks": true},
 			goldenFile:        "",
-			wantErr:           true,
 		},
 		{
 			name: "hook_file_rule_imports_its_own_target",
@@ -206,7 +203,6 @@ func TestAddDeps(t *testing.T) {
 			importedByHooks: map[string]bool{
 				"example.com/app/hooks": true,
 			},
-			wantErr: true,
 		},
 	}
 
@@ -820,13 +816,24 @@ func TestAddRuntimeTestDeps(t *testing.T) {
 			wantErr:  "use a package pattern instead",
 		},
 		{
-			name:      "non-test mode removes stale file",
+			name:      "non-test mode generates external test package",
 			hookPaths: hookPaths,
 			pkg: runtimePackage{
 				name:       "log",
 				importPath: "example.com/app/internal/log",
 			},
 			seedFile: true,
+			wantFile: true,
+		},
+		{
+			name:      "named files in non-test mode generate external test package",
+			hookPaths: hookPaths,
+			pkg: runtimePackage{
+				name:       "log",
+				importPath: "example.com/app/internal/log",
+				fileTarget: true,
+			},
+			wantFile: true,
 		},
 		{
 			name:      "test mode generates external test package",
@@ -901,8 +908,9 @@ func TestAddRuntimeTestDeps_WriteError(t *testing.T) {
 
 func TestAddRuntimeTestDeps_RemoveError(t *testing.T) {
 	tests := []struct {
-		name string
-		pkg  runtimePackage
+		name    string
+		pkg     runtimePackage
+		wantErr string
 	}{
 		{
 			name: "named files",
@@ -910,10 +918,12 @@ func TestAddRuntimeTestDeps_RemoveError(t *testing.T) {
 				testMode:   true,
 				fileTarget: true,
 			},
+			wantErr: "removing stale generated runtime file",
 		},
 		{
-			name: "non-test mode",
-			pkg:  runtimePackage{},
+			name:    "non-test mode",
+			pkg:     runtimePackage{},
+			wantErr: "writing otelc runtime test file",
 		},
 	}
 
@@ -938,7 +948,7 @@ func TestAddRuntimeTestDeps_RemoveError(t *testing.T) {
 				[]string{"example.com/app/hooks"},
 			)
 
-			require.ErrorContains(t, err, "removing stale generated runtime file")
+			require.ErrorContains(t, err, tt.wantErr)
 		})
 	}
 }

@@ -244,11 +244,11 @@ func (sp *setupPhase) addRuntimeTestDeps(
 	pkg runtimePackage,
 	hookPaths []string,
 ) error {
-	if !pkg.testMode || len(hookPaths) == 0 {
+	if len(hookPaths) == 0 {
 		return sp.removeRuntimeTestFile(ctx, pkg.dir)
 	}
 
-	if pkg.fileTarget {
+	if pkg.testMode && pkg.fileTarget {
 		if err := sp.removeRuntimeTestFile(ctx, pkg.dir); err != nil {
 			return err
 		}
@@ -330,17 +330,13 @@ func recordSkippedHook(
 func collectFunctionRules(
 	matched []*rule.InstRuleSet,
 	pkg runtimePackage,
-) ([]*rule.InstFuncRule, map[string]bool, error) {
+) ([]*rule.InstFuncRule, map[string]bool) {
 	funcRules := []*rule.InstFuncRule{}
 	skippedHooks := make(map[string]bool)
 
 	for _, m := range matched {
 		for _, funcRule := range m.AllFuncRules() {
-			skip, err := skipHook(m, funcRule.Path, pkg)
-			if err != nil {
-				return nil, nil, err
-			}
-			if skip {
+			if skipHook(funcRule.Path, pkg) {
 				recordSkippedHook(skippedHooks, funcRule.Path, pkg)
 				continue
 			}
@@ -348,23 +344,19 @@ func collectFunctionRules(
 		}
 	}
 
-	return funcRules, skippedHooks, nil
+	return funcRules, skippedHooks
 }
 
 func collectFileRules(
 	matched []*rule.InstRuleSet,
 	pkg runtimePackage,
 	skippedHooks map[string]bool,
-) ([]*rule.InstFileRule, error) {
+) []*rule.InstFileRule {
 	fileRules := []*rule.InstFileRule{}
 
 	for _, m := range matched {
 		for _, fileRule := range m.FileRules {
-			skip, err := skipHook(m, fileRule.Path, pkg)
-			if err != nil {
-				return nil, err
-			}
-			if skip {
+			if skipHook(fileRule.Path, pkg) {
 				recordSkippedHook(skippedHooks, fileRule.Path, pkg)
 				continue
 			}
@@ -372,7 +364,7 @@ func collectFileRules(
 		}
 	}
 
-	return fileRules, nil
+	return fileRules
 }
 
 // addDeps generates and writes otelc.runtime.go with required imports and variable
@@ -386,20 +378,13 @@ func (sp *setupPhase) addDeps(
 	matched []*rule.InstRuleSet,
 	pkg runtimePackage,
 ) error {
-	funcRules, skippedHooks, err := collectFunctionRules(matched, pkg)
-	if err != nil {
-		return err
-	}
-
-	fileRules, err := collectFileRules(matched, pkg, skippedHooks)
-	if err != nil {
-		return err
-	}
+	funcRules, skippedHooks := collectFunctionRules(matched, pkg)
+	fileRules := collectFileRules(matched, pkg, skippedHooks)
 
 	// Keep hooks that cannot be imported by the runtime file linked into
 	// test binaries through a generated external test package.
 	hookPaths := slices.Sorted(maps.Keys(skippedHooks))
-	if err = sp.addRuntimeTestDeps(ctx, pkg, hookPaths); err != nil {
+	if err := sp.addRuntimeTestDeps(ctx, pkg, hookPaths); err != nil {
 		return err
 	}
 
@@ -418,12 +403,12 @@ func (sp *setupPhase) addDeps(
 
 	// Track the file in the state manager.
 	if stateManager, found := stateManagerFromContext(ctx); found {
-		if err = stateManager.Track(otelcRuntimeFilePath); err != nil {
+		if err := stateManager.Track(otelcRuntimeFilePath); err != nil {
 			return err
 		}
 	}
 
-	if err = ast.WriteFileAtomic(otelcRuntimeFilePath, root); err != nil {
+	if err := ast.WriteFileAtomic(otelcRuntimeFilePath, root); err != nil {
 		return ex.Wrapf(err, "writing otelc runtime file %s", otelcRuntimeFilePath)
 	}
 	debugPath := pkg.debugPath
@@ -437,20 +422,7 @@ func (sp *setupPhase) addDeps(
 }
 
 // skipHook reports whether the hook at hookPath must be left out of pkg's
-// runtime file. It returns an error when the cycle cannot be avoided, because
-// the rule targets pkg itself while the hook imports pkg back.
-func skipHook(m *rule.InstRuleSet, hookPath string, pkg runtimePackage) (bool, error) {
-	if hookPath == pkg.importPath {
-		return true, nil
-	}
-	if !pkg.importedByHooks[hookPath] {
-		return false, nil
-	}
-	if m.ModulePath == pkg.importPath {
-		return false, ex.Newf(
-			"cannot instrument %s: its hook package %s imports it, which would create an import cycle",
-			pkg.importPath, hookPath,
-		)
-	}
-	return true, nil
+// runtime file to avoid an import cycle.
+func skipHook(hookPath string, pkg runtimePackage) bool {
+	return hookPath == pkg.importPath || pkg.importedByHooks[hookPath]
 }
