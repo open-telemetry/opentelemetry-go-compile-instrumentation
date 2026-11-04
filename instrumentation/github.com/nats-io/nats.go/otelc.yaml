@@ -1,0 +1,56 @@
+version: "v1.0.0"
+
+# Publish, PublishMsg, PublishRequest, Request, RequestWithContext,
+# RespondMsg (via PublishMsg), and JetStream publishes all funnel through the
+# internal (*Conn).publish. Hook that one path so a publish is one span and
+# every publish path carries the trace context. The validateReply parameter
+# exists since nats.go v1.48.0; older versions have a different publish
+# signature and are not instrumented.
+nats_hook_publish:
+  target: github.com/nats-io/nats.go
+  version: v1.48.0
+  where:
+    func: publish
+    recv: "*Conn"
+  do:
+    - inject_hooks:
+        before: BeforePublish
+        after: AfterPublish
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/nats-io/nats.go"
+
+# Async callback subscriptions: wrapping the callback in the hook turns every
+# delivered message into a process span.
+nats_hook_subscribe:
+  target: github.com/nats-io/nats.go
+  version: v1.48.0
+  where:
+    func: Subscribe
+    recv: "*Conn"
+  do:
+    - inject_hooks:
+        before: BeforeSubscribe
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/nats-io/nats.go"
+
+nats_hook_queue_subscribe:
+  target: github.com/nats-io/nats.go
+  version: v1.48.0
+  where:
+    func: QueueSubscribe
+    recv: "*Conn"
+  do:
+    - inject_hooks:
+        before: BeforeQueueSubscribe
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/nats-io/nats.go"
+
+# Sync pull subscriptions: the after hook turns each successfully fetched
+# message into a receive span.
+nats_hook_next_msg:
+  target: github.com/nats-io/nats.go
+  version: v1.48.0
+  where:
+    func: NextMsg
+    recv: "*Subscription"
+  do:
+    - inject_hooks:
+        after: AfterNextMsg
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/nats-io/nats.go"
