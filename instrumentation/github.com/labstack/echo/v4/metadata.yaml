@@ -1,0 +1,16 @@
+name: "instrumentation-github-com-labstack-echo-v4"
+display_name: "Echo v4"
+source_path: "instrumentation/github.com/labstack/echo/v4"
+scope:
+  name: "go.opentelemetry.io/otelc/instrumentation/github.com/labstack/echo/v4"
+modules:
+  - path: "go.opentelemetry.io/otelc/instrumentation/github.com/labstack/echo/v4"
+target_module: "github.com/labstack/echo/v4"
+go_min_version: "1.26.0"
+otelc_min_version: "v1.2.0"
+stability: "experimental"
+library_link: "https://pkg.go.dev/go.opentelemetry.io/otelc/instrumentation/github.com/labstack/echo/v4"
+instrumentation_type: wrapper
+installation:
+  methods:
+    - automatic

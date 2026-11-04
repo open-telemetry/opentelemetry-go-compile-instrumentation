@@ -1,4 +1,4 @@
-version: "v1.0.0"
+version: "v1.2.0"
 
 add_new_field_db:
   target: database/sql
