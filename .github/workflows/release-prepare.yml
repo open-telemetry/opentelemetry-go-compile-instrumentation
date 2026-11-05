@@ -12,6 +12,15 @@ on:
         required: false
         type: string
         default: 'main'
+      release_pkg:
+        description: 'Also release go.opentelemetry.io/otelc/pkg'
+        required: false
+        type: boolean
+        default: false
+      pkg_version:
+        description: 'The pkg/ version to release (required if release_pkg is true), e.g. v0.1.0'
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -25,10 +34,18 @@ jobs:
       - name: Validate version format
         env:
           VERSION: ${{ inputs.version }}
+          RELEASE_PKG: ${{ inputs.release_pkg }}
+          PKG_VERSION: ${{ inputs.pkg_version }}
         run: |
           if [[ ! "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
             echo "::error::Invalid version format: '${VERSION}'. Version must match '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$' (e.g. v1.3.0 or v1.3.0-rc.1)"
             exit 1
+          fi
+          if [ "${RELEASE_PKG}" = "true" ]; then
+            if [[ -z "${PKG_VERSION}" || ! "${PKG_VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+              echo "::error::pkg_version must be non-empty and match '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$' when release_pkg is true (e.g. v0.1.0)"
+              exit 1
+            fi
           fi
 
       - name: Checkout target branch
@@ -79,12 +96,18 @@ jobs:
       - name: Create release branch, commit, and push
         env:
           VERSION: ${{ inputs.version }}
+          RELEASE_PKG: ${{ inputs.release_pkg }}
+          PKG_VERSION: ${{ inputs.pkg_version }}
         run: |
           git checkout -b "release/${VERSION}"
           git add .github/release-notes.md
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "release: ${VERSION}"
+          if [ "${RELEASE_PKG}" = "true" ]; then
+            git commit -m "release: ${VERSION}/${PKG_VERSION}"
+          else
+            git commit -m "release: ${VERSION}"
+          fi
           git push origin "release/${VERSION}"
 
       - name: Open draft PR
@@ -92,11 +115,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
           TARGET_BRANCH: ${{ inputs.target_branch }}
+          RELEASE_PKG: ${{ inputs.release_pkg }}
+          PKG_VERSION: ${{ inputs.pkg_version }}
         run: |
+          if [ "${RELEASE_PKG}" = "true" ]; then
+            PR_TITLE="release: ${VERSION}/${PKG_VERSION}"
+            PR_BODY="This is a release PR for **${VERSION}** and **pkg/${PKG_VERSION}**. Review and edit the release notes in \`.github/release-notes.md\`.\n\n<!-- release-pkg: ${PKG_VERSION} -->"
+          else
+            PR_TITLE="release: ${VERSION}"
+            PR_BODY="This is a release PR for **${VERSION}**. Review and edit the release notes in \`.github/release-notes.md\`."
+          fi
           gh pr create \
             --base "${TARGET_BRANCH}" \
             --head "release/${VERSION}" \
-            --title "release: ${VERSION}" \
-            --body "This is a release PR for **${VERSION}**. Review and edit the release notes in \`.github/release-notes.md\`." \
+            --title "${PR_TITLE}" \
+            --body "${PR_BODY}" \
             --draft \
             --label "scope:chore"
