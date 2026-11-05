@@ -1,0 +1,7 @@
+wrap_sizeof_call:
+  target: main
+  where:
+    function_call: unsafe.Sizeof
+  do:
+    - wrap_call:
+        replace: "Wrapper({{ . }})"

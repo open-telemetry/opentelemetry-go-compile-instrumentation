@@ -5,6 +5,7 @@ package ast
 
 import (
 	"bytes"
+	goast "go/ast"
 	"go/parser"
 	"go/token"
 	"io"
@@ -22,13 +23,18 @@ import (
 type AstParser struct {
 	fset *token.FileSet
 	dec  *decorator.Decorator
+	// parsed holds the files that Parse read from disk. A node whose position
+	// is inside one of them comes from user source. Snippets that
+	// ParseSnippet parses get their own token.File, so they are not in it.
+	parsed map[*token.File]struct{}
 }
 
 func NewAstParser() *AstParser {
 	fset := token.NewFileSet()
 	return &AstParser{
-		fset: fset,
-		dec:  decorator.NewDecorator(fset),
+		fset:   fset,
+		dec:    decorator.NewDecorator(fset),
+		parsed: make(map[*token.File]struct{}),
 	}
 }
 
@@ -46,6 +52,7 @@ func (ap *AstParser) Parse(filePath string, mode parser.Mode) (*dst.File, error)
 	if err != nil {
 		return nil, ex.Wrapf(err, "failed to parse file %s", filePath)
 	}
+	ap.parsed[ap.fset.File(astFile.Package)] = struct{}{}
 	// Skip DST decoration when only the package clause is needed; decoration
 	// is expensive and unnecessary when the caller only reads astFile.Name.
 	if mode == parser.PackageClauseOnly {
@@ -94,6 +101,81 @@ func (ap *AstParser) FindPosition(node dst.Node) token.Position {
 	return ap.fset.Position(astNode.Pos())
 }
 
+// OriginalPosition returns the position that node has in the source file that
+// Parse read. The second result is false when node is not from that source:
+// code that was generated, cloned, or parsed from a snippet.
+//
+// The position is adjusted. It follows any "//line" directive of the source
+// file, as the Go compiler does. The file name is relative to the directory of
+// the source file when the directive gives a relative name; otherwise it is
+// the base name of the parsed file.
+func (ap *AstParser) OriginalPosition(node dst.Node) (token.Position, bool) {
+	astNode := ap.dec.Ast.Nodes[node]
+	if astNode == nil {
+		return token.Position{}, false
+	}
+	return ap.originalPosition(astNode.Pos())
+}
+
+// Rbrace returns the position of the closing brace that block has in
+// the source file that Parse read. The second result is false when block is
+// not from that source. See OriginalPosition for the position rules.
+func (ap *AstParser) Rbrace(block *dst.BlockStmt) (token.Position, bool) {
+	astBlock, ok := ap.dec.Ast.Nodes[block].(*goast.BlockStmt)
+	if !ok {
+		return token.Position{}, false
+	}
+	return ap.originalPosition(astBlock.Rbrace)
+}
+
+// Parsed reports whether root is a file that Parse read with this parser. It
+// is false for a file that ParseSource parsed, for a file that another parser
+// read, and for a file that Parse read with the mode parser.PackageClauseOnly.
+func (ap *AstParser) Parsed(root *dst.File) bool {
+	astFile, ok := ap.dec.Ast.Nodes[root].(*goast.File)
+	if !ok {
+		return false
+	}
+	_, ok = ap.parsed[ap.fset.File(astFile.Package)]
+	return ok
+}
+
+func (ap *AstParser) originalPosition(pos token.Pos) (token.Position, bool) {
+	if !pos.IsValid() {
+		return token.Position{}, false
+	}
+	if _, ok := ap.parsed[ap.fset.File(pos)]; !ok {
+		return token.Position{}, false
+	}
+	return ap.fset.Position(pos), true
+}
+
+// PropagatePositions copies source positions from orig onto the matching
+// nodes in cloned. It reports whether the two subtrees have the same
+// shape, so positions could be propagated.
+//
+// orig and cloned must have the same shape.
+func (ap *AstParser) PropagatePositions(orig, cloned dst.Node) bool {
+	var origNodes, clonedNodes []dst.Node
+	dst.Inspect(orig, func(n dst.Node) bool {
+		origNodes = append(origNodes, n)
+		return true
+	})
+	dst.Inspect(cloned, func(n dst.Node) bool {
+		clonedNodes = append(clonedNodes, n)
+		return true
+	})
+	if len(origNodes) != len(clonedNodes) {
+		return false
+	}
+	for i, on := range origNodes {
+		if astNode, ok := ap.dec.Ast.Nodes[on]; ok {
+			ap.dec.Ast.Nodes[clonedNodes[i]] = astNode
+		}
+	}
+	return true
+}
+
 // WriteFile writes the AST to a file.
 func WriteFile(filePath string, root *dst.File) error {
 	file, err := os.Create(filePath)
@@ -119,26 +201,26 @@ func writeFile(w io.WriteCloser, filePath string, root *dst.File) (retErr error)
 	return nil
 }
 
-// PrintFile renders the AST to source bytes without writing it anywhere.
-func PrintFile(root *dst.File) ([]byte, error) {
-	var buf bytes.Buffer
+// WriteFileAtomic writes the AST to a file atomically.
+func WriteFileAtomic(filePath string, root *dst.File) error {
+	buf, err := RenderFile(root)
+	if err != nil {
+		return ex.Wrapf(err, "writing file %s", filePath)
+	}
 
+	return util.WriteFileAtomic(filePath, buf)
+}
+
+// RenderFile restores root's AST back into Go source text, without writing
+// it anywhere. Safe to call repeatedly against the same *dst.File as it is
+// mutated, e.g. to snapshot it between successive rule applications.
+func RenderFile(root *dst.File) ([]byte, error) {
+	var buf bytes.Buffer
 	r := decorator.NewRestorer()
 	if err := r.Fprint(&buf, root); err != nil {
 		return nil, ex.Wrapf(err, "failed to restore AST")
 	}
-
 	return buf.Bytes(), nil
-}
-
-// WriteFileAtomic writes the AST to a file atomically.
-func WriteFileAtomic(filePath string, root *dst.File) error {
-	data, err := PrintFile(root)
-	if err != nil {
-		return ex.Wrapf(err, "for file %s", filePath)
-	}
-
-	return util.WriteFileAtomic(filePath, data)
 }
 
 // ParsePackageName parses only the package name from a file, skipping

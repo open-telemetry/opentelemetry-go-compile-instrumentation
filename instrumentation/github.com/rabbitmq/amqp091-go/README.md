@@ -10,7 +10,8 @@ points at this file.
 | --- | --- | --- |
 | `(*Channel).PublishWithDeferredConfirm` | `{exchange} send` | Also covers `Publish`, `PublishWithContext`, and `PublishWithDeferredConfirmWithContext`. |
 | `(*Channel).Consume` / `ConsumeWithContext` | `{queue} process` or `{queue} receive` | The after hook replaces the delivery channel. Manual-ack spans end on `Delivery` or `Channel` Ack, Nack, or Reject, including `multiple=true`. Auto-ack spans end when the Delivery is read. |
-| `(*Channel).Get` | same as Consume | One delivery. If Get is never acked, the process span stays open until the process exits. Consume leftover spans end when the delivery channel closes. |
+| `(*Channel).Get` | same as Consume | One delivery. If Get is never acked, the process span stays open until the channel is torn down. |
+| `(*Channel).shutdown` | n/a | Hooked instead of `Close`: `Close` and a lost/server-closed connection both funnel through `shutdown`, so it's the only point that catches every teardown path. Cleanup runs in the after hook, not before: `shutdown` closes every consumer's delivery channel and marks the channel closed as part of its own body, so an in-flight `Get` or delivery that could still register a span has already failed or drained by the time the after hook fires. Doing this before left a window where such a call could recreate the entry right after it was deleted, leaking it again. |
 
 The hook injects W3C `traceparent` into a copy of `Publishing.Headers` and
 extracts it from `Delivery.Headers`. It does not change the caller's header

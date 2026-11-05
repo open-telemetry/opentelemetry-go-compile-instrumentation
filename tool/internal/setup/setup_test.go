@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -41,6 +42,40 @@ func TestGoBuild_RejectsUnsupportedSubcommand(t *testing.T) {
 	}
 }
 
+// TestGoBuild_RestoresLeftoverState: a build that was killed left a manifest
+// and a changed go.mod. The next build must restore the original go.mod
+// first, so that it does not snapshot the changed go.mod as the original one.
+func TestGoBuild_RestoresLeftoverState(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv(util.EnvOtelcWorkDir, dir)
+	t.Setenv("GOFLAGS", "")
+	t.Setenv("GOWORK", "off")
+
+	goMod := filepath.Join(dir, "go.mod")
+	original := "module example.com/app\n\ngo 1.25.0\n"
+	require.NoError(t, os.WriteFile(goMod, []byte(original), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644))
+
+	killed := newStateManager()
+	require.NoError(t, killed.Track(goMod))
+	changed := original + "\nreplace example.com/x => ./.otelc-build/x\n"
+	require.NoError(t, os.WriteFile(goMod, []byte(changed), 0o644))
+
+	originalCmd := runBuildCmd
+	t.Cleanup(func() { runBuildCmd = originalCmd })
+	runBuildCmd = func(context.Context, []string, ...string) error { return nil }
+
+	cmd := &cli.Command{Name: "go", SkipFlagParsing: true, Action: GoBuild}
+	// The build result does not matter here: only the restore does.
+	_ = cmd.Run(t.Context(), []string{"go", "build", "."})
+
+	content, err := os.ReadFile(goMod)
+	require.NoError(t, err)
+	assert.Equal(t, original, string(content), "the go.mod before the killed build must be restored")
+	assert.NoFileExists(t, util.GetBuildTemp(stateFileName), "no manifest may stay after the build")
+}
+
 func TestToolexecInsertArg(t *testing.T) {
 	t.Run("builds the -toolexec flag for a normal path", func(t *testing.T) {
 		insert, err := toolexecInsertArg("/usr/local/bin/otelc")
@@ -58,20 +93,57 @@ func TestToolexecInsertArg(t *testing.T) {
 }
 
 func TestToolexecBuildArgs(t *testing.T) {
-	t.Run("inserts -work and the quoted -toolexec ahead of the caller's args", func(t *testing.T) {
-		got, err := toolexecBuildArgs([]string{"build", "-o", "app", "./cmd"}, "/opt/my tools/otelc", false)
+	t.Run("inserts the quoted -toolexec ahead of the caller's args", func(t *testing.T) {
+		got, err := toolexecBuildArgs([]string{"build", "-o", "app", "./cmd"}, "/opt/my tools/otelc")
 		require.NoError(t, err)
 		assert.Equal(t, []string{
-			"go", "build", "-work",
+			"go", "build",
 			`-toolexec='/opt/my tools/otelc' toolexec`,
 			"-o", "app", "./cmd",
 		}, got)
 	})
 
-	t.Run("neutralizes -mod=vendor when vendored", func(t *testing.T) {
-		got, err := toolexecBuildArgs([]string{"build", "-mod=vendor", "."}, "/usr/bin/otelc", true)
+	for _, tt := range []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{
+			name: "inserts requested -work before -toolexec",
+			args: []string{"build", "."},
+			want: []string{"go", "build", "-work", "-toolexec=/usr/bin/otelc toolexec", "."},
+		},
+		{
+			name: "inserts requested -work after leading -C",
+			args: []string{"build", "-C", "app", "."},
+			want: []string{"go", "build", "-C", "app", "-work", "-toolexec=/usr/bin/otelc toolexec", "."},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := toolexecBuildArgs(tt.args, "/usr/bin/otelc", "-work")
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+
+	// otelc keeps vendor mode: the vendored build uses vendor/ (merged with the
+	// modules of the hook code), so -mod=vendor stays and -mod=mod is not added.
+	t.Run("keeps -mod=vendor", func(t *testing.T) {
+		enterVendoredModule(t, t.TempDir())
+		got, err := toolexecBuildArgs([]string{"build", "-mod=vendor", "."}, "/usr/bin/otelc")
 		require.NoError(t, err)
-		assert.NotContains(t, got, "-mod=vendor")
+		assert.Contains(t, got, "-mod=vendor")
+		assert.NotContains(t, got, "-mod=mod")
+	})
+
+	t.Run("keeps the two-token -mod vendor", func(t *testing.T) {
+		enterVendoredModule(t, t.TempDir())
+		got, err := toolexecBuildArgs([]string{"build", "-mod", "vendor", "."}, "/usr/bin/otelc")
+		require.NoError(t, err)
+		modIdx := slices.Index(got, "-mod")
+		require.Positive(t, modIdx)
+		assert.Equal(t, "vendor", got[modIdx+1])
+		assert.NotContains(t, got, "mod")
 	})
 
 	t.Run("adds the generated runtime file for file targets", func(t *testing.T) {
@@ -82,7 +154,7 @@ func TestToolexecBuildArgs(t *testing.T) {
 		require.NoError(t, os.WriteFile(
 			filepath.Join(dir, otelcRuntimeFile), []byte("package main\n"), 0o644))
 
-		got, err := toolexecBuildArgs([]string{"build", "main.go"}, "/usr/bin/otelc", false)
+		got, err := toolexecBuildArgs([]string{"build", "main.go"}, "/usr/bin/otelc")
 		require.NoError(t, err)
 		assert.Contains(t, got, otelcRuntimeFile)
 	})
@@ -100,7 +172,6 @@ func TestToolexecBuildArgs(t *testing.T) {
 		got, err := toolexecBuildArgs(
 			[]string{"test", "main.go", "main_test.go", "--", "custom.go"},
 			"/usr/bin/otelc",
-			false,
 		)
 		require.NoError(t, err)
 		delimIdx := slices.Index(got, "--")
@@ -118,7 +189,7 @@ func TestToolexecBuildArgs(t *testing.T) {
 		require.NoError(t, os.WriteFile(
 			filepath.Join(dir, otelcRuntimeFile), []byte("package main\n"), 0o644))
 
-		got, err := toolexecBuildArgs([]string{"test", "main.go", "-args", "custom.go"}, "/usr/bin/otelc", false)
+		got, err := toolexecBuildArgs([]string{"test", "main.go", "-args", "custom.go"}, "/usr/bin/otelc")
 		require.NoError(t, err)
 		delimIdx := slices.Index(got, "-args")
 		require.Positive(t, delimIdx)
@@ -135,7 +206,7 @@ func TestToolexecBuildArgs(t *testing.T) {
 		require.NoError(t, os.WriteFile(
 			filepath.Join(dir, otelcRuntimeFile), []byte("package main\n"), 0o644))
 
-		got, err := toolexecBuildArgs([]string{"test", "main.go", "--args", "custom.go"}, "/usr/bin/otelc", false)
+		got, err := toolexecBuildArgs([]string{"test", "main.go", "--args", "custom.go"}, "/usr/bin/otelc")
 		require.NoError(t, err)
 		delimIdx := slices.Index(got, "--args")
 		require.Positive(t, delimIdx)
@@ -153,7 +224,7 @@ func TestToolexecBuildArgs(t *testing.T) {
 			filepath.Join(dir, otelcRuntimeFile), []byte("package main\n"), 0o644))
 
 		for _, delim := range []string{"--", "-args", "--args"} {
-			got, err := toolexecBuildArgs([]string{"test", delim, "custom.go"}, "/usr/bin/otelc", false)
+			got, err := toolexecBuildArgs([]string{"test", delim, "custom.go"}, "/usr/bin/otelc")
 			require.NoError(t, err)
 			assert.NotContains(
 				t,
@@ -173,7 +244,7 @@ func TestToolexecBuildArgs(t *testing.T) {
 		require.NoError(t, os.WriteFile(
 			filepath.Join(dir, otelcRuntimeFile), []byte("package main\n"), 0o644))
 
-		got, err := toolexecBuildArgs([]string{"build", "--", "main.go"}, "/usr/bin/otelc", false)
+		got, err := toolexecBuildArgs([]string{"build", "--", "main.go"}, "/usr/bin/otelc")
 		require.NoError(t, err)
 		delimIdx := slices.Index(got, "--")
 		require.Positive(t, delimIdx)
@@ -196,7 +267,6 @@ func TestToolexecBuildArgs(t *testing.T) {
 			got, err := toolexecBuildArgs(
 				[]string{"test", "main.go", "main_test.go", "-test.run", val},
 				"/usr/bin/otelc",
-				false,
 			)
 			require.NoError(t, err)
 			runIdx := slices.Index(got, "-test.run")
@@ -206,7 +276,6 @@ func TestToolexecBuildArgs(t *testing.T) {
 			gotWithDelim, err := toolexecBuildArgs(
 				[]string{"test", "main.go", "main_test.go", "-test.run", val, "--", "custom.go"},
 				"/usr/bin/otelc",
-				false,
 			)
 			require.NoError(t, err)
 			runIdx = slices.Index(gotWithDelim, "-test.run")
@@ -220,7 +289,7 @@ func TestToolexecBuildArgs(t *testing.T) {
 	})
 
 	t.Run("propagates the error when the path can't be quoted", func(t *testing.T) {
-		_, err := toolexecBuildArgs([]string{"build", "."}, `/home/it's "me"/otelc`, false)
+		_, err := toolexecBuildArgs([]string{"build", "."}, `/home/it's "me"/otelc`)
 		require.Error(t, err)
 	})
 }
@@ -246,12 +315,31 @@ type toolexecInvocation struct {
 	env  []string
 }
 
-func runBuildWithToolexec(t *testing.T, args []string, vendored bool) toolexecInvocation {
+// enterVendoredModule makes dir a module that vendors its dependencies
+// (go.mod and vendor/modules.txt), and makes it the current and the otelc
+// work directory.
+func enterVendoredModule(t *testing.T, dir string) {
+	t.Helper()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "go.mod"), []byte("module example.com/vend\n\ngo 1.25.0\n"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "vendor"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "vendor", "modules.txt"), []byte(""), 0o644))
+	t.Chdir(dir)
+	t.Setenv(util.EnvOtelcWorkDir, dir)
+	t.Setenv("GOWORK", "off")
+}
+
+// runBuildWithToolexec runs buildWithToolexec in a new temporary directory.
+// Each prepare function runs in that directory before the build.
+func runBuildWithToolexec(t *testing.T, args []string, prepare ...func(t *testing.T, dir string)) toolexecInvocation {
 	t.Helper()
 
 	dir := t.TempDir()
 	t.Chdir(dir)
 	t.Setenv(util.EnvOtelcWorkDir, dir)
+	for _, p := range prepare {
+		p(t, dir)
+	}
 	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
 
 	var got toolexecInvocation
@@ -262,35 +350,72 @@ func runBuildWithToolexec(t *testing.T, args []string, vendored bool) toolexecIn
 		return nil
 	}
 
-	cmd := &cli.Command{
+	goCmd := &cli.Command{
 		Name:            "go",
 		SkipFlagParsing: true,
-		Action: func(ctx context.Context, c *cli.Command) error {
-			return buildWithToolexec(ctx, c, vendored)
-		},
+		Action:          buildWithToolexec,
 	}
-	require.NoError(t, cmd.Run(t.Context(), args))
+	cmd := &cli.Command{
+		Name:     "otelc",
+		Flags:    []cli.Flag{&cli.BoolFlag{Name: "debug"}},
+		Commands: []*cli.Command{goCmd},
+	}
+	require.NoError(t, cmd.Run(t.Context(), append([]string{"otelc"}, args...)))
 	return got
 }
 
 func TestBuildWithToolexec(t *testing.T) {
-	t.Run("runs go with -work and a -toolexec pointing at this executable", func(t *testing.T) {
-		got := runBuildWithToolexec(t, []string{"go", "build", "."}, false)
+	t.Run("runs go without -work and with a -toolexec pointing at this executable", func(t *testing.T) {
+		got := runBuildWithToolexec(t, []string{"go", "build", "."})
 
 		require.NotEmpty(t, got.argv)
 		assert.Equal(t, "go", got.argv[0])
 		assert.Equal(t, "build", got.argv[1])
-		assert.Contains(t, got.argv, "-work")
+		assert.NotContains(t, got.argv, "-work")
 		assert.Contains(t, strings.Join(got.argv, " "), "-toolexec=")
 		assert.Contains(t, strings.Join(got.env, "\n"), util.EnvOtelcWorkDir+"=")
 	})
 
-	t.Run("forwards build flags and neutralizes vendor mode", func(t *testing.T) {
-		got := runBuildWithToolexec(t, []string{"go", "build", "-race", "-mod=vendor", "."}, true)
+	t.Run("keeps the work directory when the root debug flag is set", func(t *testing.T) {
+		got := runBuildWithToolexec(t, []string{"--debug", "go", "build", "."})
 
-		assert.NotContains(t, got.argv, "-mod=vendor", "vendor mode is rewritten for the instrumented build")
-		assert.Contains(t, strings.Join(got.env, "\n"), util.EnvOtelcBuildFlags+"=",
-			"context-affecting flags are forwarded to the toolexec child")
+		assert.Contains(t, got.argv, "-work")
+	})
+
+	t.Run("forwards build flags and keeps vendor mode", func(t *testing.T) {
+		t.Setenv("GOFLAGS", "")
+		got := runBuildWithToolexec(t, []string{"go", "build", "-race", "-mod=vendor", "."}, enterVendoredModule)
+
+		assert.Contains(t, got.argv, "-mod=vendor", "vendor mode is kept for the instrumented build")
+		assert.NotContains(t, got.argv, "-mod=mod")
+		// Look only at the variables of interest: the full environment is too
+		// large (and can hold secrets) for a failure message.
+		var buildFlags []string
+		for _, e := range got.env {
+			if v, ok := strings.CutPrefix(e, util.EnvOtelcBuildFlags+"="); ok {
+				buildFlags = append(buildFlags, v)
+			}
+			if v, ok := strings.CutPrefix(e, "GOFLAGS="); ok {
+				assert.NotContains(t, v, "-mod=mod", "GOFLAGS must not force module mode")
+			}
+		}
+		require.NotEmpty(t, buildFlags, "context-affecting flags are forwarded to the toolexec child")
+		assert.Equal(t, util.EncodeBuildFlags([]string{"-mod=vendor", "-race"}), buildFlags[len(buildFlags)-1],
+			"the toolexec child gets -mod=vendor unchanged")
+	})
+
+	t.Run("gives the -mod flag of the command line to the toolexec processes in GOFLAGS", func(t *testing.T) {
+		t.Setenv("GOFLAGS", "-trimpath -mod=vendor")
+		got := runBuildWithToolexec(t, []string{"go", "build", "-mod=mod", "."}, enterVendoredModule)
+
+		goflags := ""
+		for _, e := range got.env {
+			if v, ok := strings.CutPrefix(e, "GOFLAGS="); ok {
+				goflags = v // exec.Cmd uses the last value.
+			}
+		}
+		assert.Equal(t, "-trimpath -mod=mod", goflags,
+			"the loads of the toolexec processes must not use vendor mode")
 	})
 
 	t.Run("does not build when the go cache cannot be prepared", func(t *testing.T) {
@@ -313,9 +438,7 @@ func TestBuildWithToolexec(t *testing.T) {
 		cmd := &cli.Command{
 			Name:            "go",
 			SkipFlagParsing: true,
-			Action: func(ctx context.Context, c *cli.Command) error {
-				return buildWithToolexec(ctx, c, false)
-			},
+			Action:          buildWithToolexec,
 		}
 		err := cmd.Run(t.Context(), []string{"go", "build", "."})
 
@@ -342,9 +465,7 @@ func TestBuildWithToolexec(t *testing.T) {
 		cmd := &cli.Command{
 			Name:            "go",
 			SkipFlagParsing: true,
-			Action: func(ctx context.Context, c *cli.Command) error {
-				return buildWithToolexec(ctx, c, false)
-			},
+			Action:          buildWithToolexec,
 		}
 		err := cmd.Run(t.Context(), []string{"go", "build", "."})
 
@@ -423,7 +544,7 @@ func TestGetPackages(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pkgs, err := getBuildPackages(t.Context(), subcmdBuild, tt.args)
+			pkgs, _, err := getBuildPackages(t.Context(), subcmdBuild, tt.args)
 			if tt.expectError {
 				require.Error(t, err)
 			} else {
@@ -455,11 +576,170 @@ func TestGetPackagesWithChangeDirectoryFlag(t *testing.T) {
 	))
 	t.Chdir(tmpDir)
 
-	pkgs, err := getBuildPackages(t.Context(), subcmdBuild, []string{"-C", "app", "."})
+	pkgs, _, err := getBuildPackages(t.Context(), subcmdBuild, []string{"-C", "app", "."})
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 	require.NotNil(t, pkgs[0].Module)
 	require.Equal(t, "example.com/app", pkgs[0].Module.Path)
+}
+
+func TestGetBuildPackages_TestSubcommandIncludesTestOnlyImports(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "go.mod"),
+		[]byte("module testmodule\n\ngo 1.21\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "main.go"),
+		[]byte("package main\n\nfunc main() {}\n"),
+		0o644,
+	))
+	// Only main_test.go imports helper. A standard library package does not
+	// test this, because "testing" imports most of them.
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "helper"), 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "helper", "helper.go"),
+		[]byte("package helper\n\nfunc Name() string { return \"helper\" }\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "main_test.go"),
+		[]byte("package main\n\nimport (\n\t\"testing\"\n\n\t\"testmodule/helper\"\n)\n\n"+
+			"func TestUsesHelper(t *testing.T) { _ = helper.Name() }\n"),
+		0o644,
+	))
+	t.Chdir(tmpDir)
+
+	buildPkgs, _, err := getBuildPackages(t.Context(), subcmdBuild, nil)
+	require.NoError(t, err)
+	assert.NotContains(t, pkgload.CollectPackageNames(buildPkgs), "testmodule/helper",
+		"a build must not resolve names for imports that only appear in _test.go files")
+
+	testBuildPkgs, testAllPkgs, err := getBuildPackages(t.Context(), subcmdTest, nil)
+	require.NoError(t, err)
+	assert.Contains(t, pkgload.CollectPackageNames(testAllPkgs), "testmodule/helper",
+		"otelc go test must resolve real names for imports that only appear in _test.go files")
+	for _, pkg := range testBuildPkgs {
+		assert.Empty(t, pkg.ForTest,
+			"the build packages of a test run must not contain test packages: %s", pkg.ID)
+	}
+}
+
+func TestGetBuildPackages_TestSubcommandResolvesSubpackageTestOnlyImports(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "go.mod"),
+		[]byte("module testmodule\n\ngo 1.21\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "main.go"),
+		[]byte("package main\n\nimport _ \"testmodule/svc\"\n\nfunc main() {}\n"),
+		0o644,
+	))
+	svcDir := filepath.Join(tmpDir, "svc")
+	require.NoError(t, os.MkdirAll(svcDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(svcDir, "svc.go"),
+		[]byte("package svc\n\nfunc Hello() string { return \"hello\" }\n"),
+		0o644,
+	))
+	// Only svc_test.go imports helper. A standard library package does not
+	// test this, because "testing" imports most of them.
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "helper"), 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "helper", "helper.go"),
+		[]byte("package helper\n\nfunc Name() string { return \"helper\" }\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(svcDir, "svc_test.go"),
+		[]byte("package svc\n\nimport (\n\t\"testing\"\n\n\t\"testmodule/helper\"\n)\n\n"+
+			"func TestUsesHelper(t *testing.T) { _ = helper.Name() }\n"),
+		0o644,
+	))
+	t.Chdir(tmpDir)
+
+	// "./..." would select helper itself, so its name would be found without
+	// the test variant of svc.
+	_, testAllPkgs, err := getBuildPackages(t.Context(), subcmdTest, []string{".", "./svc"})
+	require.NoError(t, err)
+	assert.Contains(t, pkgload.CollectPackageNames(testAllPkgs), "testmodule/helper",
+		"otelc go test must resolve names for imports that only appear in a subpackage's _test.go files")
+}
+
+// TestGetBuildPackages_TestSubcommandExcludesExternalTestPackage guards the
+// split of a test load. The external test package ("p_test [p.test]") must
+// only feed the name table: otelc.runtime.go for it would declare
+// "package p_test" next to "p.go" and fail the build with conflicting
+// package names.
+func TestGetBuildPackages_TestSubcommandExcludesExternalTestPackage(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "go.mod"),
+		[]byte("module testmodule\n\ngo 1.21\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "p.go"),
+		[]byte("package p\n\nfunc F() {}\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "p_ext_test.go"),
+		[]byte("package p_test\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) {}\n"),
+		0o644,
+	))
+	t.Chdir(tmpDir)
+
+	buildPkgs, allPkgs, err := getBuildPackages(t.Context(), subcmdTest, nil)
+	require.NoError(t, err)
+
+	// Only the real package builds.
+	require.Len(t, buildPkgs, 1)
+	assert.Equal(t, "testmodule", buildPkgs[0].PkgPath)
+	assert.Equal(t, "p", buildPkgs[0].Name)
+	assert.Empty(t, buildPkgs[0].ForTest)
+
+	// The all-packages list still carries the test packages for the name table.
+	var externalTestPkg *packages.Package
+	for _, pkg := range allPkgs {
+		if pkg.Name == "p_test" {
+			externalTestPkg = pkg
+		}
+	}
+	require.NotNil(t, externalTestPkg,
+		"the all-packages list must keep the external test package: %v", extractPackageIDs(allPkgs))
+	assert.NotEmpty(t, externalTestPkg.ForTest)
+	assert.Len(t, allPkgs, len(buildPkgs)+2, // the variant and the synthesized test binary
+		"unexpected all-packages list: %v", extractPackageIDs(allPkgs))
+}
+
+// TestGetBuildPackages_TestOnlyPackage covers a package with only _test.go
+// files. Only go test builds it, so only a test load keeps it in the build
+// packages. A build that selects only that package still loads, and the go
+// command reports the error.
+func TestGetBuildPackages_TestOnlyPackage(t *testing.T) {
+	tmpDir := t.TempDir()
+	mustWriteFile(t, filepath.Join(tmpDir, "go.mod"), "module testmodule\n\ngo 1.21\n")
+	mustWriteFile(t, filepath.Join(tmpDir, "app", "main.go"), "package main\n\nfunc main() {}\n")
+	mustWriteFile(t, filepath.Join(tmpDir, "onlytest", "main_test.go"),
+		"package main_test\n\nimport \"testing\"\n\nfunc TestX(t *testing.T) {}\n")
+	t.Chdir(tmpDir)
+
+	buildPkgs, allPkgs, err := getBuildPackages(t.Context(), subcmdBuild, []string{"./..."})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"testmodule/app"}, extractPackageIDs(buildPkgs))
+	assert.ElementsMatch(t, []string{"testmodule/app", "testmodule/onlytest"}, extractPackageIDs(allPkgs))
+
+	buildPkgs, _, err = getBuildPackages(t.Context(), subcmdBuild, []string{"./onlytest"})
+	require.NoError(t, err)
+	assert.Empty(t, buildPkgs)
+
+	testBuildPkgs, _, err := getBuildPackages(t.Context(), subcmdTest, []string{"./..."})
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"testmodule/app", "testmodule/onlytest"}, extractPackageIDs(testBuildPkgs))
 }
 
 func TestSplitBuildTargets(t *testing.T) {
@@ -1079,6 +1359,52 @@ func TestExtractBuildFlags(t *testing.T) {
 			args:     []string{"build", "-cover=false", "-tags=foo", "-cover", "./..."},
 			expected: []string{"-tags=foo", "-cover"}, // value flags first, then bool
 		},
+		{
+			name:     "joined patterned gcflags",
+			args:     []string{"-gcflags=all=-N -l", "./..."},
+			expected: []string{"-gcflags=all=-N -l"},
+		},
+		{
+			name:     "separated patterned gcflags",
+			args:     []string{"-gcflags", "all=-N -l", "./..."},
+			expected: []string{"-gcflags", "all=-N -l"},
+		},
+		{
+			name:     "joined unpatterned gcflags",
+			args:     []string{"-gcflags=-N -l", "./..."},
+			expected: nil,
+		},
+		{
+			name:     "separated unpatterned gcflags",
+			args:     []string{"-gcflags", "-N -l", "./..."},
+			expected: nil,
+		},
+		{
+			name:     "empty gcflags",
+			args:     []string{"-gcflags=", "./..."},
+			expected: nil,
+		},
+		{
+			name:     "double dash patterned gcflags",
+			args:     []string{"--gcflags=all=-l", "./..."},
+			expected: []string{"--gcflags=all=-l"},
+		},
+		{
+			name:     "repeated gcflags keep patterned values in order",
+			args:     []string{"-gcflags=all=-N -l", "-gcflags=-l", "-gcflags", "std=-l", "./..."},
+			expected: []string{"-gcflags=all=-N -l", "-gcflags", "std=-l"},
+		},
+		{
+			name:     "gcflags mixed with tags keep order",
+			args:     []string{"-tags=foo", "-gcflags", "all=-N -l", "-tags", "bar", "-gcflags=std=-l", "./..."},
+			expected: []string{"-tags=foo", "-gcflags", "all=-N -l", "-tags", "bar", "-gcflags=std=-l"},
+		},
+		{
+			name:       "patterned gcflags in go test",
+			subcommand: subcmdTest,
+			args:       []string{"-gcflags=all=-N -l", "./pkg"},
+			expected:   []string{"-gcflags=all=-N -l"},
+		},
 		// go test tail preservation tests
 		{
 			name:       "test delimiter dash-dash ignores tags in tail",
@@ -1231,11 +1557,33 @@ func TestSetupPhaseLogDelegators(t *testing.T) {
 func TestGenerateRuntimePerPackageSkipsPackagesWithoutFiles(t *testing.T) {
 	sp := newTestSetupPhase()
 
-	// A package with no Go files has an empty package directory and must be
-	// skipped without error.
+	// A package without Go files or a directory must be skipped without error.
 	pkgs := []*packages.Package{{PkgPath: "example.com/empty"}}
 	err := sp.generateRuntimePerPackage(context.Background(), pkgs, []*rule.InstRuleSet{})
 	require.NoError(t, err)
+}
+
+// TestGenerateRuntimePerPackageWritesTestOnlyPackage covers a package with only
+// _test.go files. It has no GoFiles, and its test binary links the hook
+// packages only through its runtime file.
+func TestGenerateRuntimePerPackageWritesTestOnlyPackage(t *testing.T) {
+	sp := newTestSetupPhase()
+
+	pkgDir := t.TempDir()
+	mustWriteFile(t, filepath.Join(pkgDir, "testonly_test.go"), "package testonly\n")
+	pkgs := []*packages.Package{{PkgPath: "example.com/app/testonly", Name: "testonly", Dir: pkgDir}}
+
+	rset := newTestRuleSet(
+		"example.com/app/lib",
+		[]*rule.InstFuncRule{newTestFuncRule("example.com/hooks", "example.com/app/lib")},
+		nil,
+	)
+	require.NoError(t, sp.generateRuntimePerPackage(t.Context(), pkgs, []*rule.InstRuleSet{rset}))
+
+	generated, err := os.ReadFile(filepath.Join(pkgDir, otelcRuntimeFile))
+	require.NoError(t, err)
+	assert.Contains(t, string(generated), "package testonly")
+	assert.Contains(t, string(generated), `_ "example.com/hooks"`)
 }
 
 // TestGenerateRuntimePerPackageSkipsSelfImport covers the import path reaching
@@ -1249,6 +1597,8 @@ func TestGenerateRuntimePerPackageSkipsSelfImport(t *testing.T) {
 	hooksDir := filepath.Join(appDir, "hooks")
 	mustWriteFile(t, filepath.Join(appDir, "answer.go"), "package app\n")
 	mustWriteFile(t, filepath.Join(hooksDir, "hooks.go"), "package hooks\n")
+	mustWriteFile(t, filepath.Join(appDir, "go.mod"), "module example.com/app\n\ngo 1.25.0\n")
+	sp.buildFlags = []string{"-C", appDir}
 
 	pkgs := []*packages.Package{
 		{
@@ -1287,10 +1637,23 @@ func TestGenerateRuntimePerPackageSkipsSelfImportForFileTargets(t *testing.T) {
 	moduleDir := t.TempDir()
 	sp := newTestSetupPhase()
 	sp.buildFlags = []string{"-C", moduleDir}
+	t.Setenv(util.EnvOtelcWorkDir, moduleDir)
+	t.Setenv(util.EnvOtelcDebug, "1")
 	hooksDir := filepath.Join(moduleDir, "hooks")
-	mustWriteFile(t, filepath.Join(moduleDir, "go.mod"), "module example.com/app\n\ngo 1.25.0\n")
+	externalHooksDir := filepath.Join(moduleDir, "external-hooks")
+
+	mustWriteFile(t, filepath.Join(moduleDir, "go.mod"), `module example.com/app
+
+	go 1.25.0
+
+	require example.com/hooks v0.0.0
+
+	replace example.com/hooks => ./external-hooks
+	`)
 	mustWriteFile(t, filepath.Join(moduleDir, "answer.go"), "package app\n")
 	mustWriteFile(t, filepath.Join(hooksDir, "hooks.go"), "package hooks\n")
+	mustWriteFile(t, filepath.Join(externalHooksDir, "go.mod"), "module example.com/hooks\n\ngo 1.25.0\n")
+	mustWriteFile(t, filepath.Join(externalHooksDir, "hooks.go"), "package hooks\n")
 
 	pkgs := []*packages.Package{
 		{
@@ -1310,6 +1673,24 @@ func TestGenerateRuntimePerPackageSkipsSelfImportForFileTargets(t *testing.T) {
 	// A skip for any other reason also writes no file, so assert the resolved path too.
 	assert.Equal(t, "example.com/app/hooks", sp.runtimeImportPath(t.Context(), pkgs[0], hooksDir))
 	assert.NoFileExists(t, filepath.Join(hooksDir, otelcRuntimeFile))
+
+	// A file target keeps the compiler's synthetic package path for artifacts,
+	// even though setup resolves the real import path for self-import checks.
+	appPackage := &packages.Package{
+		PkgPath: pkgload.CommandLineArgumentsPackage,
+		Name:    "app",
+		GoFiles: []string{filepath.Join(moduleDir, "answer.go")},
+	}
+	externalRule := newTestRuleSet(
+		"example.com/app",
+		[]*rule.InstFuncRule{newTestFuncRule("example.com/hooks", "example.com/app")},
+		nil,
+	)
+	require.NoError(
+		t,
+		sp.generateRuntimePerPackage(t.Context(), []*packages.Package{appPackage}, []*rule.InstRuleSet{externalRule}),
+	)
+	assert.FileExists(t, filepath.Join(setupDebugDir(pkgload.CommandLineArgumentsPackage), otelcRuntimeFile+".diff"))
 }
 
 // TestRuntimeImportPathFallsBackWhenResolveFails verifies that a file target
@@ -1371,7 +1752,7 @@ func TestRuntimeImportPathUsesBuildFlags(t *testing.T) {
 			mustWriteFile(t, filepath.Join(moduleDir, "hooks", "hooks.go"), tt.hooksSrc)
 
 			args := tt.args(t, moduleDir)
-			pkgs, err := getBuildPackages(t.Context(), subcmdBuild, args)
+			pkgs, _, err := getBuildPackages(t.Context(), subcmdBuild, args)
 			require.NoError(t, err)
 			require.Len(t, pkgs, 1)
 
@@ -1406,15 +1787,15 @@ func TestGetBuildPackages_LoadErrors(t *testing.T) {
 	nonExistentDir := filepath.Join(t.TempDir(), "nonexistent")
 
 	// File targets with non-existent -C flag
-	_, err := getBuildPackages(ctx, subcmdBuild, []string{"-C", nonExistentDir, "main.go"})
+	_, _, err := getBuildPackages(ctx, subcmdBuild, []string{"-C", nonExistentDir, "main.go"})
 	require.Error(t, err)
 
 	// Package targets with non-existent -C flag
-	_, err = getBuildPackages(ctx, subcmdBuild, []string{"-C", nonExistentDir, "./pkg"})
+	_, _, err = getBuildPackages(ctx, subcmdBuild, []string{"-C", nonExistentDir, "./pkg"})
 	require.Error(t, err)
 
 	// Default targets with non-existent -C flag
-	_, err = getBuildPackages(ctx, subcmdBuild, []string{"-C", nonExistentDir})
+	_, _, err = getBuildPackages(ctx, subcmdBuild, []string{"-C", nonExistentDir})
 	require.Error(t, err)
 }
 
@@ -1501,6 +1882,30 @@ func TestSetup_MatchDepsError(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestSetup_ResolveRulePathsError(t *testing.T) {
+	setupTestModule(t, []string{"cmd"})
+	_ = os.RemoveAll(util.GetBuildTempDir())
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	dir := t.TempDir()
+	ruleFile := filepath.Join(dir, "rules.yaml")
+	mustWriteFile(t, ruleFile, `brokenRule:
+  target: main
+  func: main
+  path: example.com/nonexistent/package
+  after: SomeHook
+`)
+
+	cmd := &cli.Command{
+		Name:   "setup",
+		Flags:  []cli.Flag{&cli.StringFlag{Name: "rules"}},
+		Action: Setup,
+	}
+	err := cmd.Run(t.Context(), []string{"setup", "--rules", ruleFile, "."})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "resolving rule paths")
+}
+
 func TestSetupLocked_FindModuleDirsError(t *testing.T) {
 	// A standalone .go file outside any Go module causes FindModuleDirs to fail in setupLocked (line 377)
 	tmp := t.TempDir()
@@ -1518,11 +1923,98 @@ func TestSetupLocked_FindModuleDirsError(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestSetup_CleansDebugArtifactsWhenDebugEnabled(t *testing.T) {
+	setupTestModule(t, []string{"cmd"})
+	t.Setenv(util.EnvOtelcDebug, "1")
+
+	// Pre-create stale debug artifact
+	staleDir := filepath.Join(util.GetBuildTemp("debug"), "stale_pkg")
+	require.NoError(t, os.MkdirAll(staleDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(staleDir, "stale.diff"), []byte("stale"), 0o644))
+
+	cmd := &cli.Command{
+		Name:   "setup",
+		Action: Setup,
+	}
+	_ = cmd.Run(t.Context(), []string{"setup", "."})
+
+	assert.NoDirExists(t, staleDir, "expected stale debug directory to be cleaned by setup")
+}
+
+func TestSetup_RetainsDebugArtifactsWhenDebugDisabled(t *testing.T) {
+	setupTestModule(t, []string{"cmd"})
+	t.Setenv(util.EnvOtelcDebug, "")
+
+	// Pre-create stale debug artifact
+	staleDir := filepath.Join(util.GetBuildTemp("debug"), "stale_pkg")
+	require.NoError(t, os.MkdirAll(staleDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(staleDir, "stale.diff"), []byte("stale"), 0o644))
+
+	cmd := &cli.Command{
+		Name:   "setup",
+		Action: Setup,
+	}
+	_ = cmd.Run(t.Context(), []string{"setup", "."})
+
+	assert.DirExists(t, staleDir, "expected stale debug directory to be retained when debug is off")
+}
+
+func TestRunGoBuild_CleansDebugArtifactsWhenDebugEnabled(t *testing.T) {
+	setupTestModule(t, []string{"cmd"})
+	t.Setenv(util.EnvOtelcDebug, "1")
+
+	// Pre-create stale debug artifact
+	staleDir := filepath.Join(util.GetBuildTemp("debug"), "stale_pkg")
+	require.NoError(t, os.MkdirAll(staleDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(staleDir, "stale.diff"), []byte("stale"), 0o644))
+
+	cmd := &cli.Command{
+		Name:            "go",
+		SkipFlagParsing: true,
+		Action:          GoBuild,
+	}
+	// Passing a non-existent package causes Setup to fail fast without
+	// launching buildWithToolexec, while verifying runGoBuild executed
+	// CleanupDebugArtifacts at its lifecycle boundary.
+	_ = cmd.Run(t.Context(), []string{"go", "build", "./nonexistent_pkg"})
+
+	assert.NoDirExists(t, staleDir, "expected stale debug directory to be cleaned by runGoBuild")
+}
+
+func TestSetupDebugDir_EmptyPkgPath(t *testing.T) {
+	dir := setupDebugDir("")
+	assert.True(t, strings.HasSuffix(dir, "main"))
+}
+
+func TestKeepForDebug_Fallbacks(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	srcInWorkDir := filepath.Join(workDir, "root.go")
+	require.NoError(t, os.WriteFile(srcInWorkDir, []byte("package main"), 0o644))
+
+	srcInSubDir := filepath.Join(workDir, "sub", "sub.go")
+	require.NoError(t, os.MkdirAll(filepath.Dir(srcInSubDir), 0o755))
+	require.NoError(t, os.WriteFile(srcInSubDir, []byte("package sub"), 0o644))
+
+	// Case 1: Explicit pkgPath
+	keepForDebug(t.Context(), srcInSubDir, "example.com/explicit")
+	assert.FileExists(t, filepath.Join(setupDebugDir("example.com/explicit"), "sub.go"))
+
+	// Case 2: In root workdir
+	keepForDebug(t.Context(), srcInWorkDir, "")
+	assert.FileExists(t, filepath.Join(setupDebugDir("main"), "root.go"))
+
+	// Case 3: Default fallback
+	keepForDebug(t.Context(), srcInSubDir, "")
+	assert.FileExists(t, filepath.Join(setupDebugDir("sub"), "sub.go"))
+}
+
 func TestGetBuildPackages_TestWithoutTargets(t *testing.T) {
 	setupTestModule(t, nil)
 	for _, args := range [][]string{{"-test.run", "TestName"}, {"-run", "TestName"}, {"--", "custom"}, {"-args", "custom"}, {"--args", "custom"}} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			pkgs, err := getBuildPackages(t.Context(), subcmdTest, args)
+			pkgs, _, err := getBuildPackages(t.Context(), subcmdTest, args)
 			require.NoError(t, err)
 			require.Len(t, pkgs, 1)
 			assert.Equal(t, "testmodule", pkgs[0].PkgPath)
@@ -1544,14 +2036,14 @@ func TestRuntime(t *testing.T) {
 }
 `), 0o644))
 	for _, flags := range [][]string{{"-race", "--", "custom"}, {"-race", "-args", "custom"}, {"-race", "--args", "custom"}} {
-		args, err := toolexecBuildArgs(append([]string{"test", "main_test.go"}, flags...), "/usr/bin/otelc", false)
+		args, err := toolexecBuildArgs(append([]string{"test", "main_test.go"}, flags...), "/usr/bin/otelc")
 		require.NoError(t, err)
 		assert.Equal(t, slices.Index(args, "main_test.go")+1, slices.Index(args, otelcRuntimeFile))
 		assert.Less(t, slices.Index(args, otelcRuntimeFile), slices.Index(args, "-race"))
 	}
 	for _, flags := range [][]string{{"-run", "TestRuntime"}, {"-v", "--", "custom"}, {"-run", "TestRuntime", "-args", "custom"}} {
 		t.Run(strings.Join(flags, " "), func(t *testing.T) {
-			args, err := toolexecBuildArgs(append([]string{"test", "main_test.go"}, flags...), "/usr/bin/otelc", false)
+			args, err := toolexecBuildArgs(append([]string{"test", "main_test.go"}, flags...), "/usr/bin/otelc")
 			require.NoError(t, err)
 			assert.Equal(t, slices.Index(args, "main_test.go")+1, slices.Index(args, otelcRuntimeFile))
 			// Execute the generated file list without invoking the instrumentation wrapper.
@@ -1565,5 +2057,152 @@ func TestRuntime(t *testing.T) {
 			require.NoError(t, err, "%s", output)
 			assert.Contains(t, string(output), "ok")
 		})
+	}
+}
+
+// TestKeepForDebugDoesNotWriteThroughLinks: on Linux, the files of the
+// vendor scratch module can be hard links to the files in vendor/. A
+// symbolic link at the debug copy can point to such a file. keepForDebug
+// must not write through the link: the vendored file must not change. A
+// hard link at the debug copy must not change either.
+func TestKeepForDebugDoesNotWriteThroughLinks(t *testing.T) {
+	work := t.TempDir()
+	t.Chdir(work)
+	t.Setenv(util.EnvOtelcWorkDir, work)
+	src := filepath.Join(work, goModFileName)
+	mustWriteFile(t, src, "module example.com/app\n")
+	vendorFile := filepath.Join(work, vendorDirName, "example.com", "pkg", "p.go")
+	mustWriteFile(t, vendorFile, "package pkg\n")
+	debug := filepath.Join(util.GetBuildTemp("debug"), "main", goModFileName)
+	require.NoError(t, os.MkdirAll(filepath.Dir(debug), 0o755))
+
+	// A hard link at the debug copy.
+	if err := os.Link(vendorFile, debug); err != nil {
+		t.Skipf("no hard links: %v", err)
+	}
+	keepForDebug(t.Context(), src, "")
+	assert.Equal(t, "package pkg\n", readAppFile(t, work, filepath.Join(vendorDirName, "example.com", "pkg", "p.go")),
+		"the hard link is replaced, not written")
+	data, err := os.ReadFile(debug)
+	require.NoError(t, err)
+	assert.Equal(t, "module example.com/app\n", string(data), "the debug copy is made")
+
+	if runtime.GOOS == "windows" {
+		return
+	}
+	// The probe of the security review: a symbolic link at the debug copy
+	// points to a scratch file, which is a hard link to the vendored file.
+	scratch := filepath.Join(util.GetBuildTemp(vendorScratchDir), "deps", "0000", "p.go")
+	require.NoError(t, os.MkdirAll(filepath.Dir(scratch), 0o755))
+	require.NoError(t, os.Link(vendorFile, scratch))
+	require.NoError(t, os.Remove(debug))
+	require.NoError(t, os.Symlink(scratch, debug))
+	keepForDebug(t.Context(), src, "")
+	assert.Equal(t, "package pkg\n", readAppFile(t, work, filepath.Join(vendorDirName, "example.com", "pkg", "p.go")),
+		"keepForDebug must not write through a symbolic link")
+
+	// A linked parent directory of the debug copy.
+	outside := t.TempDir()
+	require.NoError(t, os.RemoveAll(util.GetBuildTemp("debug")))
+	require.NoError(t, os.Symlink(outside, util.GetBuildTemp("debug")))
+	keepForDebug(t.Context(), src, "")
+	assert.NoFileExists(t, filepath.Join(outside, "main", goModFileName),
+		"keepForDebug must not write through a linked directory")
+}
+
+// TestWriteDebugCopyErrors: a debug copy needs a source that otelc can read,
+// and a directory that it can make.
+func TestWriteDebugCopyErrors(t *testing.T) {
+	work := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, work)
+	dst := filepath.Join(util.GetBuildTemp("debug"), goModFileName)
+
+	absent := filepath.Join(work, "absent")
+	err := writeDebugCopy(absent, dst)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reading "+absent)
+	assert.NoFileExists(t, dst)
+
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		return
+	}
+	src := filepath.Join(work, goModFileName)
+	mustWriteFile(t, src, "module example.com/app\n")
+	require.NoError(t, os.Chmod(src, 0o000))
+	err = writeDebugCopy(src, dst)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reading "+src)
+	require.NoError(t, os.Chmod(src, 0o644))
+
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	makeReadOnly(t, util.GetBuildTempDir())
+	err = writeDebugCopy(src, dst)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "creating the directory of "+dst)
+	assert.NoFileExists(t, dst)
+}
+
+// TestSetupVendorGoVersionTooOld: otelc setup of a vendored module with -C
+// and -mod=vendor fails when the go version of the module is below 1.14.
+func TestSetupVendorGoVersionTooOld(t *testing.T) {
+	t.Setenv("GOWORK", "off")
+	t.Setenv("GOFLAGS", "")
+	setupTestModule(t, []string{"cmd"})
+	root := t.TempDir()
+	writeVendoredGoMod(t, root, "1.13")
+
+	cmd := &cli.Command{
+		Name:            "setup",
+		Action:          Setup,
+		SkipFlagParsing: true,
+	}
+	err := cmd.Run(t.Context(), []string{"setup", "-C", root, "-mod=vendor", "."})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "otelc needs go 1.14 or higher")
+}
+
+func TestSetupPhase_GetBuildContext(t *testing.T) {
+	t.Run("from GOFLAGS", func(t *testing.T) {
+		t.Setenv("GOFLAGS", "-tags=envtag")
+		sp := &setupPhase{}
+		bctx := sp.getBuildContext()
+		require.NotNil(t, bctx)
+		assert.Contains(t, bctx.BuildTags, "envtag")
+	})
+
+	t.Run("from buildFlags overriding GOFLAGS", func(t *testing.T) {
+		t.Setenv("GOFLAGS", "-tags=envtag")
+		sp := &setupPhase{buildFlags: []string{"-tags", "clitag"}}
+		bctx := sp.getBuildContext()
+		require.NotNil(t, bctx)
+		assert.Contains(t, bctx.BuildTags, "clitag")
+		assert.NotContains(t, bctx.BuildTags, "envtag")
+	})
+}
+
+func TestHookImportsError(t *testing.T) {
+	matched := []*rule.InstRuleSet{
+		{
+			FileRules: []*rule.InstFileRule{{Path: "example.com/app/hooks"}},
+		},
+	}
+	sp := newTestSetupPhase()
+	sp.buildFlags = []string{"-C"}
+	_, err := sp.hookImports(context.Background(), matched)
+	if err == nil {
+		t.Fatal("expected error for malformed build flags, got nil")
+	}
+}
+
+func TestHookImportsErrorOnBrokenHookPackage(t *testing.T) {
+	matched := []*rule.InstRuleSet{
+		{
+			FileRules: []*rule.InstFileRule{{Path: "example.com/this-package-does-not-exist"}},
+		},
+	}
+	sp := newTestSetupPhase()
+	_, err := sp.hookImports(context.Background(), matched)
+	if err == nil {
+		t.Fatal("expected error for a hook package that fails to load, got nil")
 	}
 }

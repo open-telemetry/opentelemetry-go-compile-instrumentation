@@ -24,12 +24,22 @@ var (
 	name   = flag.String("name", "world", "The name to greet")
 	stream = flag.Bool("stream", false, "Use streaming RPC")
 	count  = flag.Int("count", 1, "Number of requests to make (for streaming)")
+	dial   = flag.Bool("dial-context", false, "Use grpc.DialContext instead of grpc.NewClient")
 )
 
 func main() {
 	flag.Parse()
 
-	conn, err := grpc.NewClient(*addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	var (
+		conn *grpc.ClientConn
+		err  error
+	)
+	if *dial {
+		conn, err = grpc.DialContext(context.Background(), *addr,
+			grpc.WithTransportCredentials(insecure.NewCredentials()))
+	} else {
+		conn, err = grpc.NewClient(*addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	}
 	if err != nil {
 		log.Fatalf("failed to connect: %v", err)
 	}

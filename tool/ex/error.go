@@ -82,14 +82,16 @@ func captureStack() []string {
 	frames := runtime.CallersFrames(pcs)
 	cnt := 0
 	for {
+		// more reports whether the *next* call returns a frame, not whether
+		// this one did, so record before breaking or the last frame is lost.
 		frame, more := frames.Next()
-		if !more {
-			break
-		}
 		fnName := strings.TrimPrefix(frame.Function, modPrefix)
 		f := fmt.Sprintf("[%d] %s:%d %s", cnt, frame.File, frame.Line, fnName)
 		frameList = append(frameList, f)
 		cnt++
+		if !more {
+			break
+		}
 	}
 	return frameList
 }

@@ -121,9 +121,9 @@ func normalizeWhere(common, where map[string]any) (map[string]any, error) {
 			return nil, ex.Newf("unsupported where key %q", key)
 		}
 		switch key {
-		case selFunc, selRecv, selStruct, selStructLiteral, selFunctionCall, selDirective, selKind, selIdentifier,
-			selSignature, selSignatureContains, selResult, selLastResult, selParam,
-			selPattern, selPlacement:
+		case selFunc, selRecv, selStruct, selStructLiteral, selFunctionCall, selMethodCall, selDirective,
+			selKind, selIdentifier, selSignature, selSignatureContains, selResult, selLastResult, selParam,
+			selParamImplements, selResultImplements, selLastResultImplements, selPattern, selPlacement:
 			common[key] = value
 		case whereFile:
 			if _, ok := value.(map[string]any); !ok {

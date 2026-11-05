@@ -58,13 +58,17 @@ func (t parsedTypeName) matches(node dst.Expr, imports map[string]string) bool {
 			// Populated by a resolving decorator; already the real import path.
 			return t.importPath == ident.Path && t.name == n.Sel.Name
 		}
-		if resolved, importOk := imports[ident.Name]; importOk {
-			return t.importPath == resolved && t.name == n.Sel.Name
+		if imports != nil {
+			// The file's imports are known, so the identifier either resolves
+			// through them or it is not the package we are looking for. Falling
+			// back to the path tail here would match a name the file never
+			// imported, which is what #1271 reported.
+			resolved, importOk := imports[ident.Name]
+			return importOk && t.importPath == resolved && t.name == n.Sel.Name
 		}
 		// No import context at all (imports == nil, e.g. hand-built AST nodes in
 		// tests with no backing *dst.File): compare against importPath's last
-		// segment. Note this cannot rescue a miskeyed map — a tail match here
-		// would imply ident.Name is a key, so the lookup above would have hit.
+		// segment.
 		return defaultImportAlias(t.importPath) == ident.Name && t.name == n.Sel.Name
 
 	case *dst.StarExpr:
@@ -122,21 +126,51 @@ func MatchesTypeName(node dst.Expr, typeStr string, imports map[string]string) (
 	return tn.matches(node, imports), nil
 }
 
-// importAliasMap builds a map from the local identifier used to reference an
-// imported package within file (its explicit alias, or its default package
-// name when unaliased) to that package's real import path. It correctly disambiguates:
-//   - aliased imports (e.g. `import althttp "net/http"`)
-//   - distinct import paths that happen to share a last path segment (e.g.
-//     "text/template" vs "html/template", both conventionally "template")
+// ParseInterfaceName splits an interface type name of the form [pkg.]Name into
+// its import path and its type name, in that order. The import path is empty
+// for a predeclared or unqualified name. A pointer type is an error.
 //
-// This deliberately duplicates tool/internal/imports.parseFile rather than reusing
-// it: that resolves unaliased imports with pkgload.ResolvePackageName (a
-// go/packages load that ex.Fatalf's on failure), which is too costly and too fatal
-// for the setup/match path, where this runs for every compiled package in the build.
-// The cost is that the default name here is a syntactic guess; see defaultImportAlias.
+//nolint:revive // confusing-results conflicts with nonamedreturns
+func ParseInterfaceName(name string) (string, string, error) {
+	tn, err := parseTypeName(name)
+	if err != nil {
+		return "", "", err
+	}
+	if tn.pointer {
+		return "", "", ex.Newf("%q is not an interface type", name)
+	}
+	return tn.importPath, tn.name, nil
+}
+
+// ImportAliasMap builds a map from the local identifier used to reference an
+// imported package within file (its explicit alias, or its default package
+// name when unaliased) to that package's real import path.
+//
+// An aliased import always resolves to its own path, because the alias is
+// the local identifier. But two unaliased imports that share a package name
+// (e.g. "text/template" and "html/template", both "template") collide: only
+// one of them survives in the map, and a type match through that identifier
+// may then resolve to the wrong path.
+//
+// resolvedNames maps an import path to a package name. Pass nil, or
+// leave a path out, to use a guess instead. A live package lookup here
+// would be too costly.
+// Best to be used when matching existing code.
 //
 // Returns nil when file is nil.
-func ImportAliasMap(file *dst.File) map[string]string {
+func ImportAliasMap(file *dst.File, resolvedNames map[string]string) map[string]string {
+	return importAliasMap(file, resolvedNames, true)
+}
+
+// ResolvedImportAliasMap builds the same map as ImportAliasMap, but omits any
+// unaliased import whose package name isn't in resolvedNames.
+// Best to be used when generating new code.
+// Returns nil when file is nil.
+func ResolvedImportAliasMap(file *dst.File, resolvedNames map[string]string) map[string]string {
+	return importAliasMap(file, resolvedNames, false)
+}
+
+func importAliasMap(file *dst.File, resolvedNames map[string]string, allowGuess bool) map[string]string {
 	if file == nil {
 		return nil
 	}
@@ -167,8 +201,16 @@ func ImportAliasMap(file *dst.File) map[string]string {
 			continue
 		}
 		alias := defaultImportAlias(path)
+		name, resolved := resolvedNames[path]
+		if resolved && name != "" {
+			alias = name
+		}
 		if imp.Name != nil {
 			alias = imp.Name.Name
+			resolved = true
+		}
+		if !allowGuess && !resolved {
+			continue
 		}
 		// Blank and dot imports don't introduce a qualified identifier that a
 		// type reference could use, so they can't participate in matching.

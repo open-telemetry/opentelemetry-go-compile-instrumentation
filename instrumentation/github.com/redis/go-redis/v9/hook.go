@@ -31,9 +31,24 @@ var (
 const (
 	redisAuthCmd         = "auth"
 	redisHelloCmd        = "hello"
+	redisEvalCmd         = "eval"
+	redisEvalROCmd       = "eval_ro"
+	redisEchoCmd         = "echo"
+	redisSlaveOfCmd      = "slaveof"
+	redisReplicaOfCmd    = "replicaof"
 	redisSetNameOption   = "setname"
-	redisHelloAuthArgN   = 2
 	redisQueryTextRedact = "?"
+	// redisValueArgsStart is the index at which a command's data-value
+	// arguments conventionally begin: args[0] is the command name, args[1]
+	// is the key. EVAL, AUTH, and the pipeline pseudo-command carry other
+	// data at args[1]; see redisV9RedactRange.
+	redisValueArgsStart    = 2
+	redisErrArgsEchoMarker = "with args beginning with:"
+	// redisMaxArgBytes caps each unredacted argument in db.query.text so
+	// large keys or payloads do not produce unbounded span attributes while
+	// still accommodating normal structured Redis keys and pipeline summaries.
+	redisMaxArgBytes        = 256
+	redisArgTruncatedSuffix = "..."
 )
 
 func initInstrumentation() {
@@ -83,8 +98,7 @@ func (o *otelRedisHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 
 		err := next(ctx, cmd)
 		if err != nil && !errors.Is(err, redis.Nil) {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
+			recordRedisError(span, err)
 		}
 		return err
 	}
@@ -131,8 +145,7 @@ func (o *otelRedisHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redi
 
 		err := next(ctx, cmds)
 		if err != nil && !errors.Is(err, redis.Nil) {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
+			recordRedisError(span, err)
 		}
 		return err
 	}
@@ -150,7 +163,7 @@ func (o *otelRedisHook) DialHook(next redis.DialHook) redis.DialHook {
 
 func getRedisV9Statement(cmd redis.Cmder) string {
 	args := cmd.Args()
-	redactStart, redactEnd := redisV9CredentialRedactRange(cmd.Name(), args)
+	redactStart, redactEnd := redisV9RedactRange(cmd.Name(), args)
 
 	b := make([]byte, 0, 64)
 	for i, arg := range args {
@@ -164,18 +177,35 @@ func getRedisV9Statement(cmd redis.Cmder) string {
 		b = redisV9AppendArg(b, arg)
 	}
 
-	if err := cmd.Err(); err != nil && !errors.Is(err, redis.Nil) {
-		b = append(b, ": "...)
-		b = append(b, err.Error()...)
-	}
-
 	return string(b)
 }
 
-// redisV9CredentialRedactRange returns a half-open index range of args that
-// must not appear in db.query.text. AUTH arguments are credentials. HELLO
-// AUTH username/password are too; SETNAME and the protocol version are not.
-func redisV9CredentialRedactRange(name string, args []interface{}) (start, end int) {
+// recordRedisError records a sanitized error on the span so that Redis
+// unknown-command replies that echo command arguments (see
+// https://github.com/redis/redis/blob/c9d29f6a918c335bc1778d9f68e521c1bbb36a0f/src/server.c#L3828-L3835)
+// do not leak redacted values.
+func recordRedisError(span trace.Span, err error) {
+	sanitized := sanitizeRedisError(err)
+	span.RecordError(sanitized)
+	span.SetStatus(codes.Error, sanitized.Error())
+}
+
+func sanitizeRedisError(err error) error {
+	if err == nil {
+		return nil
+	}
+	before, _, ok := strings.Cut(err.Error(), redisErrArgsEchoMarker)
+	if !ok {
+		return err
+	}
+	return errors.New(before + redisErrArgsEchoMarker + " " + redisQueryTextRedact)
+}
+
+// redisV9RedactRange returns the half-open index range of arguments to redact in db.query.text.
+// Credentials in AUTH/HELLO, scripts/arguments in EVAL/EVAL_RO, and keyless command arguments
+// (ECHO, SLAVEOF, REPLICAOF) are redacted entirely. For all other commands, arguments after
+// the key (args[1]) are redacted to avoid leaking values.
+func redisV9RedactRange(name string, args []any) (start, end int) {
 	switch name {
 	case redisAuthCmd:
 		if len(args) > 1 {
@@ -183,7 +213,19 @@ func redisV9CredentialRedactRange(name string, args []interface{}) (start, end i
 		}
 	case redisHelloCmd:
 		if i := redisV9HelloAuthIndex(args); i >= 0 {
-			return i + 1, min(i+1+redisHelloAuthArgN, len(args))
+			// Redact to the end: a crafted HELLO can repeat the AUTH block.
+			return i + 1, len(args)
+		}
+	case redisEvalCmd, redisEvalROCmd, redisEchoCmd, redisSlaveOfCmd, redisReplicaOfCmd:
+		// EVAL carries its Lua script at args[1], not a key, and keyless commands
+		// (ECHO, SLAVEOF, REPLICAOF) carry non-key arguments at args[1], so redaction
+		// starts one index before redisValueArgsStart.
+		if len(args) > 1 {
+			return 1, len(args)
+		}
+	default:
+		if len(args) > redisValueArgsStart {
+			return redisValueArgsStart, len(args)
 		}
 	}
 	return 0, 0
@@ -222,12 +264,12 @@ func redisV9AppendArg(b []byte, v interface{}) []byte {
 		return append(b, "<nil>"...)
 	case string:
 		if utf8.ValidString(v) {
-			return append(b, v...)
+			return appendTruncatedUTF8(b, v)
 		}
 		return append(b, "<string>"...)
 	case []byte:
 		if utf8.Valid(v) {
-			return append(b, v...)
+			return appendTruncatedUTF8(b, v)
 		}
 		return append(b, "<byte>"...)
 	case int:
@@ -264,4 +306,19 @@ func redisV9AppendArg(b []byte, v interface{}) []byte {
 	default:
 		return append(b, "not_support_type"...)
 	}
+}
+
+// appendTruncatedUTF8 appends s to b, capping the appended text at
+// redisMaxArgBytes on a valid UTF-8 rune boundary and appending
+// redisArgTruncatedSuffix when truncated.
+func appendTruncatedUTF8[T ~string | ~[]byte](b []byte, s T) []byte {
+	if len(s) <= redisMaxArgBytes {
+		return append(b, s...)
+	}
+	limit := redisMaxArgBytes
+	for limit > 0 && !utf8.RuneStart(s[limit]) {
+		limit--
+	}
+	b = append(b, s[:limit]...)
+	return append(b, redisArgTruncatedSuffix...)
 }

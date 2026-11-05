@@ -1,0 +1,24 @@
+# Adds an import of late to dep. dep does not import it, so compiling dep
+# resolves the import in a nested build, while the outer build compiles late
+# itself through main's import of it.
+dep_wrap_call:
+  target: go.opentelemetry.io/otelc/test/apps/nestedimports/dep
+  where:
+    function_call: strings.ToUpper
+  do:
+    - wrap_call:
+        replace: "(func() string { late.Note(); return {{ . }} })()"
+  imports:
+    late: go.opentelemetry.io/otelc/test/apps/nestedimports/late
+
+# Instruments late itself, so the outer build's own compile of it differs from
+# an uninstrumented one; a nested build that skipped instrumentation would
+# leave a mismatching archive in the shared build cache.
+late_target_flag:
+  target: go.opentelemetry.io/otelc/test/apps/nestedimports/late
+  where:
+    kind: var
+    identifier: Instrumented
+  do:
+    - assign_value:
+        replace: "true"

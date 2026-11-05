@@ -1,6 +1,6 @@
 module go.opentelemetry.io/otelc/test/apps/elasticclient
 
-go 1.25.0
+go 1.26.0
 
 require github.com/olivere/elastic/v7 v7.0.32
 

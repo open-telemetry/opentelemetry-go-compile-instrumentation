@@ -11,8 +11,6 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
-	"log/slog"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -26,7 +24,6 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
-	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -456,9 +453,9 @@ func updateToolFile(ctx context.Context, toolFile string, prunedImports map[stri
 		}
 	}
 
-	updateGenerateDirective(f, opts)
+	updateGenerateDirective(f, vendorPinOptions(ctx, filepath.Dir(toolFile), opts))
 
-	updated, printErr := ast.PrintFile(f)
+	updated, printErr := ast.RenderFile(f)
 	if printErr != nil {
 		return printErr
 	}
@@ -468,6 +465,13 @@ func updateToolFile(ctx context.Context, toolFile string, prunedImports map[stri
 		if writeErr := util.WriteFileAtomic(toolFile, updated); writeErr != nil {
 			return writeErr
 		}
+	}
+
+	// In vendor mode, go.mod is not tidied: vendorSync already added the
+	// modules of the hook code, and "go mod tidy" would load all the modules
+	// of the user from the module cache.
+	if vendored, _ := vendorModeFromContext(ctx); vendored {
+		return nil
 	}
 
 	goModChanged, ensureErr := ensureOtelcRequire(filepath.Dir(toolFile), util.Version)
@@ -485,6 +489,52 @@ func updateToolFile(ctx context.Context, toolFile string, prunedImports map[stri
 	}
 
 	return runModTidy(ctx, filepath.Dir(toolFile))
+}
+
+// vendorPinOptions returns opts for the tool file of the module in moduleDir.
+// In vendor mode, otelc does not add the tool directive of otelc to go.mod, so
+// `go tool otelc` does not work. Then the //go:generate directive is removed,
+// unless go.mod has the tool directive already.
+func vendorPinOptions(ctx context.Context, moduleDir string, opts PinOptions) PinOptions {
+	if vendored, _ := vendorModeFromContext(ctx); !vendored || hasOtelcTool(moduleDir) {
+		return opts
+	}
+	generate := false
+	opts.Generate = &generate
+	return opts
+}
+
+// hasOtelcTool reports whether the go.mod file in moduleDir has the tool
+// directive of otelc.
+func hasOtelcTool(moduleDir string) bool {
+	f, err := parseGoMod(filepath.Join(moduleDir, goModFileName))
+	if err != nil {
+		return false
+	}
+	return slices.ContainsFunc(f.Tool, func(t *modfile.Tool) bool { return t.Path == util.OtelcToolCmdRoot })
+}
+
+// vendorSyncToolFiles runs vendorSync for the imports of each tool file.
+func vendorSyncToolFiles(ctx context.Context, toolFiles []string) error {
+	p := ast.NewAstParser()
+	for _, toolFile := range toolFiles {
+		f, err := p.Parse(toolFile, parser.ImportsOnly)
+		if err != nil {
+			return err
+		}
+		importPaths, err := collectImports(toolFile, f, make(map[string]bool))
+		if err != nil {
+			return err
+		}
+		imports := make(map[string]bool, len(importPaths))
+		for _, importPath := range importPaths {
+			imports[importPath] = true
+		}
+		if err = vendorSync(ctx, imports, filepath.Dir(toolFile)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func validateRuleFiles(ctx context.Context, ruleFiles []string) error {
@@ -513,6 +563,14 @@ func updatePinnedProjects(
 	opts PinOptions,
 ) (*PinResult, error) {
 	logger := util.LoggerFromContext(ctx)
+
+	// In vendor mode, the go command finds the instrumentation packages only
+	// in vendor/. Add them before the walk below loads them.
+	if vendored, _ := vendorModeFromContext(ctx); vendored {
+		if err := vendorSyncToolFiles(ctx, toolFiles); err != nil {
+			return nil, err
+		}
+	}
 	prunedImports := make(map[string]map[string]bool, len(toolFiles))
 
 	walkErr := walkInstrumentation(ctx, toolFiles,
@@ -574,7 +632,7 @@ func updatePinnedProjects(
 	return &PinResult{}, nil
 }
 
-func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opts PinOptions) (*PinResult, error) {
+func generatePinnedProjects(ctx context.Context, moduleDirs []string, opts PinOptions) (*PinResult, error) {
 	logger := util.LoggerFromContext(ctx)
 	subcommand := opts.Subcommand
 	if subcommand == "" {
@@ -621,48 +679,36 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 	}
 
 	// Generate otel.instrumentation.go file with imports for all matched rules.
-	f := generateOtelInstrumentationGo(imports, opts)
-	dirs := slices.Sorted(maps.Keys(moduleDirs))
-	for _, moduleDir := range dirs {
+	for _, moduleDir := range normalizeModuleDirs(moduleDirs) {
+		f := generateOtelInstrumentationGo(imports, vendorPinOptions(ctx, moduleDir, opts))
 		path := filepath.Join(moduleDir, toolFileCanonical)
 		if writeErr := ast.WriteFileAtomic(path, f); writeErr != nil {
 			return nil, ex.Wrapf(writeErr, "writing %s", path)
 		}
 
-		if _, ensureErr := ensureOtelcRequire(moduleDir, util.Version); ensureErr != nil {
-			return nil, ensureErr
+		if vendored, _ := vendorModeFromContext(ctx); vendored {
+			// The tool directive of otelc would need all the modules of otelc
+			// itself in vendor/, so it is not added in vendor mode.
+			if syncErr := vendorSync(ctx, imports, moduleDir); syncErr != nil {
+				return nil, syncErr
+			}
+		} else {
+			if _, ensureErr := ensureOtelcRequire(moduleDir, util.Version); ensureErr != nil {
+				return nil, ensureErr
+			}
+
+			if syncErr := syncDeps(ctx, imports, moduleDir); syncErr != nil {
+				return nil, syncErr
+			}
 		}
 
-		if syncErr := syncDeps(ctx, imports, moduleDir); syncErr != nil {
-			return nil, syncErr
-		}
-
-		keepForDebug(ctx, path)
+		keepForDebug(ctx, path, "")
 	}
 
 	// Intentionally return an empty PinResult
 	// Since we ran syncDeps, the dependencies may have been updated
 	// Therefore, we want to ensure we rerun findDeps in setup phase.
 	return &PinResult{}, nil
-}
-
-func prepareVendoredBuild(
-	ctx context.Context,
-	logger *slog.Logger,
-	subcommand string,
-	args []string,
-) ([]string, error) {
-	if !vendoringActive(ctx, util.GetOtelcWorkDir()) {
-		return args, nil
-	}
-
-	logger.InfoContext(ctx, "vendored project detected; building with -mod=mod")
-
-	if err := os.Setenv("GOFLAGS", forceModMod(os.Getenv("GOFLAGS"))); err != nil {
-		return nil, ex.Wrapf(err, "forcing module mode for vendored build")
-	}
-
-	return rewriteModVendor(subcommand, args), nil
 }
 
 type PinOptions struct {
@@ -676,9 +722,10 @@ type PinOptions struct {
 	Args []string
 	// Subcommand passed to go in findDeps (defaults to "build")
 	Subcommand string
-	// ModuleDirs is the set of module directories to search for tool files
-	// If empty, module directories will be found using opts.Args
-	ModuleDirs map[string]bool
+	// ModuleDirs lists the module directories to search for tool files.
+	// The list may hold duplicates and entries in any order; Pin normalizes it.
+	// If the list is empty, Pin finds the module directories with opts.Args.
+	ModuleDirs []string
 }
 
 type PinResult struct {
@@ -703,29 +750,25 @@ func Pin(ctx context.Context, opts PinOptions) (*PinResult, error) {
 }
 
 func pinLocked(ctx context.Context, opts PinOptions) (*PinResult, error) {
-	moduleDirs := opts.ModuleDirs
+	subcommand := opts.Subcommand
+	if subcommand == "" {
+		subcommand = subcmdBuild
+	}
+
+	// A vendored project keeps vendor mode. The modules of the hook code are
+	// added to vendor/ (see vendorSync) instead of a "go mod tidy", which
+	// would load all the modules of the user from the module cache.
+	ctx, err := contextWithBuildMode(ctx, subcommand, opts.Args)
+	if err != nil {
+		return nil, err
+	}
+
+	moduleDirs := normalizeModuleDirs(opts.ModuleDirs)
 	// moduleDirs being empty means Pin was invoked as a standalone command
 	// (not as part of a setup run), so use opts.Args to find module directories.
 	if len(moduleDirs) == 0 {
-		subcommand := opts.Subcommand
-		if subcommand == "" {
-			subcommand = subcmdBuild
-		}
-		// For same reason as Setup, we have to check vendoring state before
-		// forcing module mode and rewriting vendor/ paths to module mode.
-		args, err := prepareVendoredBuild(ctx, util.LoggerFromContext(ctx), subcommand, opts.Args)
-		if err != nil {
-			return nil, err
-		}
-		opts.Args = args
-
 		// Use opts.Args to find module directories
-		pkgs, getErr := getBuildPackages(ctx, subcommand, opts.Args)
-		if getErr != nil {
-			return nil, getErr
-		}
-
-		moduleDirs, err = pkgload.FindModuleDirs(ctx, pkgs)
+		moduleDirs, err = findBuildModuleDirs(ctx, subcommand, opts.Args)
 		if err != nil {
 			return nil, err
 		}
@@ -749,7 +792,7 @@ func pinLocked(ctx context.Context, opts PinOptions) (*PinResult, error) {
 
 // autoPin is a convenience function that automatically tracks generated/modified files before calling Pin
 // in order to restore them after the build completes.
-func autoPin(ctx context.Context, moduleDirs map[string]bool, subcommand string, args []string) (*PinResult, error) {
+func autoPin(ctx context.Context, moduleDirs []string, subcommand string, args []string) (*PinResult, error) {
 	stateManager, found := stateManagerFromContext(ctx)
 	if !found {
 		return nil, ex.New("state manager not found in context")

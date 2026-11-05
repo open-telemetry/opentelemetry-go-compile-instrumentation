@@ -75,6 +75,27 @@ func TestNormalize(t *testing.T) {
 			},
 		},
 		{
+			name: "where hoisting method_call",
+			fields: map[string]any{
+				"target": "$root",
+				"where": map[string]any{
+					"method_call": "go.uber.org/zap.Logger.Info",
+				},
+				"do": map[string]any{
+					"wrap_call": map[string]any{
+						"replace": "tracedInfo({{ . }})",
+					},
+				},
+			},
+			want: []map[string]any{
+				{
+					"target":      "$root",
+					"method_call": "go.uber.org/zap.Logger.Info",
+					"replace":     "tracedInfo({{ . }})",
+				},
+			},
+		},
+		{
 			name: "where hoists func signature selectors",
 			fields: map[string]any{
 				"target": "database/sql",
@@ -86,9 +107,12 @@ func TestNormalize(t *testing.T) {
 					"signature_contains": map[string]any{
 						"returns": []any{"error"},
 					},
-					"result":      "io.Reader",
-					"last_result": "error",
-					"param":       "context.Context",
+					"result":                 "io.Reader",
+					"last_result":            "error",
+					"param":                  "context.Context",
+					"param_implements":       "context.Context",
+					"result_implements":      "io.Reader",
+					"last_result_implements": "error",
 				},
 				"do": map[string]any{
 					"inject_hooks": map[string]any{
@@ -107,11 +131,14 @@ func TestNormalize(t *testing.T) {
 					"signature_contains": map[string]any{
 						"returns": []any{"error"},
 					},
-					"result":      "io.Reader",
-					"last_result": "error",
-					"param":       "context.Context",
-					"before":      "BeforeOpen",
-					"path":        "example.com/hooks",
+					"result":                 "io.Reader",
+					"last_result":            "error",
+					"param":                  "context.Context",
+					"param_implements":       "context.Context",
+					"result_implements":      "io.Reader",
+					"last_result_implements": "error",
+					"before":                 "BeforeOpen",
+					"path":                   "example.com/hooks",
 				},
 			},
 		},

@@ -6,6 +6,7 @@ package setup
 import (
 	"context"
 	"fmt"
+	gobuild "go/build"
 	"log/slog"
 	"maps"
 	"os"
@@ -25,40 +26,91 @@ import (
 )
 
 type setupPhase struct {
-	logger          *slog.Logger
-	ruleConfig      string
-	buildPackages   []*packages.Package
-	buildFlags      []string
+	logger        *slog.Logger
+	ruleConfig    string
+	buildPackages []*packages.Package
+	buildFlags    []string
+	// pgo is the build's effective -pgo value; see pgoValue.
+	pgo             string
 	rootModulePaths []string
+	// resolvedNames maps an import path to a package name, built from
+	// buildPackages' dependency graph.
+	resolvedNames map[string]string
+
+	// fileImportsCache caches discovered source imports for add_file rules during setup.
+	fileImportsCache map[string][]string
+	testMode         bool
 }
 
+func (sp *setupPhase) getBuildContext() *gobuild.Context {
+	bctx := gobuild.Default
+	bctx.BuildTags = append(
+		slices.Clone(gobuild.Default.BuildTags),
+		util.UserBuildTags(util.SplitGoflags(os.Getenv("GOFLAGS")), sp.buildFlags)...)
+	return &bctx
+}
 func (sp *setupPhase) Info(msg string, args ...any)  { sp.logger.Info(msg, args...) }
 func (sp *setupPhase) Error(msg string, args ...any) { sp.logger.Error(msg, args...) }
 func (sp *setupPhase) Warn(msg string, args ...any)  { sp.logger.Warn(msg, args...) }
 func (sp *setupPhase) Debug(msg string, args ...any) { sp.logger.Debug(msg, args...) }
 
+func setupDebugDir(pkgPath string) string {
+	if pkgPath == "" {
+		pkgPath = "main"
+	}
+	return filepath.Join(util.GetBuildTemp("debug"), util.EscapePackagePath(pkgPath))
+}
+
+func cleanupDebugArtifacts() error {
+	if !instrument.DiffDebugEnabled() {
+		return nil
+	}
+	return instrument.CleanupDebugArtifacts()
+}
+
 // keepForDebug copies the file to the build temp directory for debugging.
 // Error is tolerated as it's not critical.
-func keepForDebug(ctx context.Context, srcPath string) {
+func keepForDebug(ctx context.Context, srcPath, pkgPath string) {
 	logger := util.LoggerFromContext(ctx)
-
-	escape := func(s string) string {
-		s = strings.ReplaceAll(s, "/", "_")
-		s = strings.ReplaceAll(s, ".", "_")
-		return s
+	var targetDir string
+	switch {
+	case pkgPath != "":
+		targetDir = setupDebugDir(pkgPath)
+	case filepath.Clean(filepath.Dir(srcPath)) == filepath.Clean(util.GetOtelcWorkDir()):
+		targetDir = setupDebugDir("main")
+	default:
+		targetDir = setupDebugDir(filepath.Base(filepath.Dir(srcPath)))
 	}
-
-	var name string
-	if filepath.Clean(filepath.Dir(srcPath)) == filepath.Clean(util.GetOtelcWorkDir()) {
-		name = "main"
-	} else {
-		name = escape(filepath.Base(filepath.Dir(srcPath)))
-	}
-
-	dstPath := filepath.Join(util.GetBuildTemp("debug"), name, filepath.Base(srcPath))
-	if err := util.CopyFile(srcPath, dstPath); err != nil {
+	dstPath := filepath.Join(targetDir, filepath.Base(srcPath))
+	if err := writeDebugCopy(srcPath, dstPath); err != nil {
 		logger.WarnContext(ctx, "failed to record added file", "path", srcPath, "error", err)
 	}
+}
+
+// writeDebugCopy copies srcPath to dstPath in the build temp directory. It
+// does not write through a symbolic link or a hard link: dstPath and its
+// parent directories below the build temp directory must not be symbolic
+// links, and dstPath is replaced with a new file (see util.WriteFileAtomic).
+// On Linux, a file in the build temp directory can be a hard link to a file
+// in vendor/ (see linkNewFile), so a write through a link can change the
+// vendored files of the user.
+func writeDebugCopy(srcPath, dstPath string) error {
+	root := util.GetBuildTempDir()
+	if err := checkNoSymlink(root, dstPath); err != nil {
+		return err
+	}
+	info, err := os.Stat(srcPath)
+	if err != nil {
+		return ex.Wrapf(err, "reading %s", srcPath)
+	}
+	data, err := os.ReadFile(srcPath)
+	if err != nil {
+		return ex.Wrapf(err, "reading %s", srcPath)
+	}
+	if err = os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
+		return ex.Wrapf(err, "creating the directory of %s", dstPath)
+	}
+	return util.WriteFileAtomic(dstPath, data, info.Mode().Perm())
 }
 
 // This function can be used to check if the setup has been completed.
@@ -87,6 +139,9 @@ const (
 	delimiterDashDash = "--"
 	// flagJSON makes the go command report its output as JSON events.
 	flagJSON = "-json"
+	// flagGcflags is forwarded to `go list` only with a package pattern; see
+	// forwardedValueFlag.
+	flagGcflags = "-gcflags"
 )
 
 func lastFileTargetIndex(subcommand string, args []string) int {
@@ -99,17 +154,57 @@ func lastFileTargetIndex(subcommand string, args []string) int {
 	return last
 }
 
-// getBuildPackages loads all packages from the otelc go build/install or otelc setup command arguments.
-// Returns a list of loaded packages. If no package patterns are found in args,
-// defaults to loading the current directory package.
+// getBuildPackages loads all packages from the otelc go build/install/test or otelc setup command arguments.
+// If no package patterns are found in args, defaults to loading the current directory package.
+// subcommand is the go subcommand args from "build", "install", or "test".
+// The args parameter should be the go build/install/test command arguments (e.g., ["-a", "./cmd"]).
+// It returns two lists:
+//   - the build packages: the real packages the go command builds. A test load
+//     also returns test packages ("p [p.test]" variants, external "p_test"
+//     packages, and the synthesized "p.test" binaries). They are excluded,
+//     because otelc.runtime.go for one of them would declare "package p_test"
+//     next to "p.go" and fail the build. Outside a test load, packages with
+//     only _test.go files are excluded too, because the go command does not
+//     build them.
+//   - all packages: the build packages plus those test packages. Only this list
+//     sees them, because they carry imports that only _test.go files use.
+//
 // Returns an error if package loading fails or if invalid patterns are provided.
-func getBuildPackages(ctx context.Context, subcommand string, args []string) ([]*packages.Package, error) {
+// For example:
+//   - args ["-a", "./cmd"] returns packages for "./cmd"
+//   - args ["-a", "cmd"] returns packages for the "cmd" package in the module
+//   - args ["-a", ".", "./cmd"] returns packages for both "." and "./cmd"
+//   - args [] returns packages for "."
+//
+//nolint:revive // needed to balance confusing-results and nonamedreturns linters
+func getBuildPackages(
+	ctx context.Context,
+	subcommand string,
+	args []string,
+) ([]*packages.Package, []*packages.Package, error) {
+	// NeedForTest marks the test packages, so loadBuildPackages can split them
+	// from the real build packages.
+	mode := packages.NeedName | packages.NeedFiles | packages.NeedModule |
+		packages.NeedImports | packages.NeedDeps | packages.NeedForTest
+	return loadBuildPackages(ctx, mode, subcommand, args)
+}
+
+// loadBuildPackages loads the build packages of getBuildPackages with the
+// given load mode.
+//
+//nolint:revive // needed to balance confusing-results and nonamedreturns linters
+func loadBuildPackages(
+	ctx context.Context,
+	mode packages.LoadMode,
+	subcommand string,
+	args []string,
+) ([]*packages.Package, []*packages.Package, error) {
 	logger := util.LoggerFromContext(ctx)
-	mode := packages.NeedName | packages.NeedFiles | packages.NeedModule
+	tests := subcommand == subcmdTest
 
 	pkgTargets, fileTargets, err := splitBuildTargets(subcommand, args)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	buildFlags := extractBuildFlags(subcommand, args)
 
@@ -119,27 +214,38 @@ func getBuildPackages(ctx context.Context, subcommand string, args []string) ([]
 	)
 	switch {
 	case len(fileTargets) > 0:
-		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, buildFlags, fileTargets...)
+		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, buildFlags, tests, fileTargets...)
 		if loadErr != nil {
-			return nil, loadErr
+			return nil, nil, loadErr
 		}
 
 		if len(pkgs) > 1 {
-			return nil, ex.New("multiple packages found for file targets")
+			return nil, nil, ex.New("multiple packages found for file targets")
 		}
 	case len(pkgTargets) > 0:
-		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, buildFlags, pkgTargets...)
+		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, buildFlags, tests, pkgTargets...)
 		if loadErr != nil {
-			return nil, loadErr
+			return nil, nil, loadErr
 		}
 	default:
-		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, buildFlags, ".")
+		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, buildFlags, tests, ".")
 		if loadErr != nil {
-			return nil, loadErr
+			return nil, nil, loadErr
+		}
+	}
+
+	// A test load sets ForTest on every test package it adds. The synthesized
+	// test binaries ("p.test") have no marker of their own, but each one is the
+	// ForTest value of a test package plus a ".test" suffix.
+	testBinaries := make(map[string]bool, len(pkgs))
+	for _, pkg := range pkgs {
+		if pkg.ForTest != "" {
+			testBinaries[pkg.ForTest+".test"] = true
 		}
 	}
 
 	buildPkgs := make([]*packages.Package, 0, len(pkgs))
+	allPkgs := make([]*packages.Package, 0, len(pkgs))
 	for _, pkg := range pkgs {
 		// file-based builds use synthetic "command-line-arguments" packages
 		if len(pkg.Errors) > 0 || (pkg.Module == nil && pkg.PkgPath != pkgload.CommandLineArgumentsPackage) {
@@ -147,14 +253,24 @@ func getBuildPackages(ctx context.Context, subcommand string, args []string) ([]
 			continue
 		}
 
+		allPkgs = append(allPkgs, pkg)
+		if pkg.ForTest != "" || testBinaries[pkg.ID] {
+			continue
+		}
+		// A package with only _test.go files has no GoFiles. Only go test builds
+		// it. Outside a test load, the go command skips it or reports the error.
+		if !tests && len(pkg.GoFiles) == 0 {
+			logger.DebugContext(ctx, "skipping package with only _test.go files", "package", pkg.PkgPath)
+			continue
+		}
 		buildPkgs = append(buildPkgs, pkg)
 	}
 
-	if len(buildPkgs) == 0 {
-		return nil, ex.New("no valid packages found in build targets")
+	if len(allPkgs) == 0 {
+		return nil, nil, ex.New("no valid packages found in build targets")
 	}
 
-	return buildPkgs, nil
+	return buildPkgs, allPkgs, nil
 }
 
 //nolint:revive // if we add named returns then nonamedreturns will complain
@@ -217,7 +333,9 @@ func rootModulePaths(ctx context.Context, pkgs []*packages.Package) ([]string, e
 		if pkgDir == "" {
 			continue
 		}
-		mod, err := pkgload.ResolveModule(ctx, pkgDir)
+		// otelc can have changed go.mod before this load, so the load uses
+		// the -mod flag of the build.
+		mod, err := pkgload.ResolveModule(ctx, pkgDir, modBuildFlags(ctx)...)
 		if err != nil {
 			return nil, err
 		}
@@ -235,6 +353,13 @@ func (sp *setupPhase) generateRuntimePerPackage(
 	pkgs []*packages.Package,
 	matched []*rule.InstRuleSet,
 ) error {
+	// What each hook package imports. A package a hook imports must not
+	// import that hook back, or the build has an import cycle.
+	imports, err := sp.hookImports(ctx, matched)
+	if err != nil {
+		return err
+	}
+
 	for _, pkg := range pkgs {
 		pkgDir := pkgload.PackageDir(pkg)
 		if pkgDir == "" {
@@ -242,11 +367,23 @@ func (sp *setupPhase) generateRuntimePerPackage(
 			continue
 		}
 
+		importPath := sp.runtimeImportPath(ctx, pkg, pkgDir)
+		importedByHooks := make(map[string]bool)
+		for hookPath, deps := range imports {
+			if deps[importPath] {
+				importedByHooks[hookPath] = true
+			}
+		}
+
 		// Introduce additional hook code by generating otelc.runtime.go
-		if err := sp.addDeps(ctx, matched, runtimePackage{
-			dir:        pkgDir,
-			importPath: sp.runtimeImportPath(ctx, pkg, pkgDir),
-			name:       pkg.Name,
+		if err = sp.addDeps(ctx, matched, runtimePackage{
+			dir:             pkgDir,
+			importPath:      importPath,
+			debugPath:       pkg.PkgPath,
+			name:            pkg.Name,
+			importedByHooks: importedByHooks,
+			testMode:        sp.testMode,
+			fileTarget:      pkg.PkgPath == pkgload.CommandLineArgumentsPackage,
 		}); err != nil {
 			return ex.Wrapf(err, "adding deps for package at %s", pkgDir)
 		}
@@ -283,7 +420,7 @@ func (sp *setupPhase) runtimeImportPath(ctx context.Context, pkg *packages.Packa
 // every file in pkgDir, and relative -modfile or -overlay values resolve against
 // the -C directory of the build, so pkgDir cannot replace that directory.
 func resolveImportPath(ctx context.Context, buildFlags []string, pkgDir string) (string, error) {
-	pkgs, err := pkgload.LoadPackages(ctx, packages.NeedName, buildFlags, pkgDir)
+	pkgs, err := pkgload.LoadPackages(ctx, packages.NeedName, buildFlags, false, pkgDir)
 	if err != nil {
 		return "", err
 	}
@@ -303,6 +440,38 @@ func Setup(ctx context.Context, cmd *cli.Command) error {
 	})
 }
 
+func (sp *setupPhase) matchAllDeps(
+	ctx context.Context,
+	deps []*Dependency,
+	moduleDirs []string,
+	buildFlags []string,
+) ([]*rule.InstRuleSet, error) {
+	matched, err := sp.matchDeps(ctx, deps, moduleDirs)
+	if err != nil {
+		return nil, ex.Wrapf(err, "matching dependencies to hook rules")
+	}
+
+	// Resolve rule import paths before matching injected dependencies so add_file
+	// sources can be located and parsed for dependencies that must enter the build graph.
+	if err = sp.resolveRuleSetPaths(ctx, matched, moduleDirs); err != nil {
+		return nil, ex.Wrapf(err, "resolving rule paths")
+	}
+
+	// The hook packages the pass above selected get blank-imported into the
+	// application below, which compiles their dependencies too. The build plan
+	// never saw those, so match them now.
+	injected, err := sp.matchInjectedDeps(ctx, matched, deps, moduleDirs, buildFlags)
+	if err != nil {
+		return nil, err
+	}
+	matched = append(matched, injected...)
+	err = sortMatchedRuleSets(matched)
+	if err != nil {
+		return nil, ex.Wrapf(err, "sorting matched rules")
+	}
+	return matched, nil
+}
+
 func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	// Since Setup can be invoked in different contexts (i.e, via `otelc setup` or as part of `otelc go build`),
 	// we need to handle the arguments accordingly. If the command is `go build` or `go install`, we should trim the first argument
@@ -311,34 +480,32 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	if cmd.Name == "go" {
 		subcommand = cmd.Args().First() // build / install / test
 		args = cmd.Args().Tail()        // trim the subcommand
+	} else if err := cleanupDebugArtifacts(); err != nil {
+		// Clean up debug artifacts from previous runs for standalone `otelc setup`,
+		// as it prepares the environment for a subsequent toolexec build.
+		// For `otelc go ...`, runGoBuild already performed this cleanup at its
+		// lifecycle boundary before invoking Setup.
+		return ex.Wrapf(err, "cleaning debug artifacts")
 	}
 
 	logger := util.LoggerFromContext(ctx)
 
-	// Vendored projects fail the vendor consistency check: setup edits go.mod
-	// for the injected hook modules but not vendor/modules.txt. Force module
-	// mode so both build phases resolve dependency sources from the module cache
-	// (matching versions and paths) instead of vendor/, leaving the user's
-	// vendor directory untouched. This must run before isSetup() and
-	// getBuildPackages() below so a cached-setup `otelc go build` still sets
-	// GOFLAGS for the later buildWithToolexec, and before the findDeps dry run
-	// further down. Computed here rather than threaded in because Setup is also
-	// a standalone command action (otelc setup).
-	vendored := vendoringActive(ctx, util.GetOtelcWorkDir())
-	if vendored {
-		logger.InfoContext(ctx, "vendored project detected; building with -mod=mod")
-		// Mutates GOFLAGS process-wide with no restore. Fine for the one-shot
-		// CLI; a second in-process GoBuild would inherit this -mod=mod.
-		if err := os.Setenv("GOFLAGS", forceModMod(os.Getenv("GOFLAGS"))); err != nil {
-			return ex.Wrapf(err, "forcing module mode for vendored build")
+	// A standalone `otelc setup` (GoBuild puts a state manager in ctx and
+	// recovers first): restore the changes that a previous build or setup
+	// left, before the files are read and tracked again.
+	if _, found := stateManagerFromContext(ctx); !found {
+		if err := recoverLeftoverState(ctx); err != nil {
+			return err
 		}
+	}
 
-		// A CLI -mod=vendor beats the GOFLAGS=-mod=mod forced above, so the Phase-1
-		// build-plan dry run (both the auto-pin and the direct findDeps fallback
-		// below call it) would still resolve vendor/ paths without an @version;
-		// rewrite it to module mode when vendoring is active so both build phases
-		// agree on where the dependency source lives.
-		args = rewriteModVendor(subcommand, args)
+	// A vendored project keeps vendor mode: the dependencies of the user come
+	// only from vendor/. The modules of the hook code are added to vendor/
+	// for the time of the build (see vendorSync). The pin and sync steps
+	// below read the mode from the context.
+	ctx, err := contextWithBuildMode(ctx, subcommand, args)
+	if err != nil {
+		return err
 	}
 
 	if isSetup() {
@@ -350,79 +517,135 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		logger:     logger,
 		ruleConfig: cmd.String("rules"),
 		buildFlags: extractBuildFlags(subcommand, args),
+		pgo:        pgoValue(subcommand, args),
+		testMode:   subcommand == subcmdTest,
 	}
 
 	// Introduce additional hook code by generating otelc.runtime.go
 	// Use GetPackage to determine the build target directory
-	pkgs, err := getBuildPackages(ctx, subcommand, args)
+	buildPkgs, allPkgs, err := getBuildPackages(ctx, subcommand, args)
 	if err != nil {
 		return err
 	}
-	sp.buildPackages = pkgs
+	// Only the real packages are built. The test packages still feed the name
+	// table, because they carry imports that only _test.go files use.
+	sp.buildPackages = buildPkgs
+	sp.resolvedNames = pkgload.CollectPackageNames(allPkgs)
 
 	// Find the module directories for the build packages
-	moduleDirs, findModErr := pkgload.FindModuleDirs(ctx, pkgs)
+	moduleDirs, findModErr := pkgload.FindModuleDirs(ctx, buildPkgs)
 	if findModErr != nil {
 		return findModErr
 	}
 
 	// Ensure a state manager is available in the context
-	stateManager, found := stateManagerFromContext(ctx)
-	if !found {
+	if stateManager, found := stateManagerFromContext(ctx); !found {
 		// save this state manager in the context
 		ctx = contextWithStateManager(ctx, stateManager)
 	}
 
-	// Auto-pin generates/updates otel.instrumentation.go file
-	var deps []*Dependency
-	if sp.ruleConfig == "" && os.Getenv(util.EnvOtelcRules) == "" {
-		pinResult, pinErr := autoPin(ctx, moduleDirs, subcommand, args)
-		if pinErr != nil {
-			return pinErr
-		}
-		deps = pinResult.AllDeps
-	}
-
-	if deps == nil {
-		// Find all dependencies of the project being build
-		deps, err = findDeps(ctx, subcommand, args)
-		if err != nil {
-			return err
-		}
-	}
-
-	// Match the hook code with these dependencies
-	matched, err := sp.matchDeps(ctx, deps, moduleDirs)
-	if err != nil {
-		return ex.Wrapf(err, "matching dependencies to hook rules")
-	}
-
-	// The hook packages the pass above selected get blank-imported into the
-	// application below, which compiles their dependencies too. The build plan
-	// never saw those, so match them now.
-	injected, err := sp.matchInjectedDeps(
-		ctx, matched, deps, moduleDirs, extractBuildFlags(subcommand, args),
-	)
+	deps, err := sp.buildDeps(ctx, moduleDirs, subcommand, args)
 	if err != nil {
 		return err
 	}
-	matched = append(matched, injected...)
 
-	// Reported here rather than per matching pass: an individual pass matching
-	// nothing is normal, it is the combined result that tells the user whether
-	// anything will be instrumented.
-	if len(matched) == 0 {
-		_, _ = fmt.Fprintf(os.Stderr, "Warning: no instrumentation will be applied\n")
-		sp.Warn("no instrumentation rules matched any dependencies")
+	// Match the hook code with these dependencies, including dependencies
+	// introduced by the generated runtime imports.
+	matched, err := sp.matchAllDeps(ctx, deps, moduleDirs, sp.buildFlags)
+	if err != nil {
+		return err
 	}
 
+	if err = sp.validateSelectedConfigurationMetadata(matched); err != nil {
+		return ex.Wrapf(err, "validating selected instrumentation configuration metadata")
+	}
+
+	sp.warnIfNoInstrumentationMatched(matched)
+
 	// Generate otelc.runtime.go for all packages
-	if err = sp.generateRuntimePerPackage(ctx, pkgs, matched); err != nil {
+	if err = sp.generateRuntimePerPackage(ctx, buildPkgs, matched); err != nil {
 		return err
 	}
 
 	// Write the matched ruleset to matched.json for further instrument phase
-	return sp.store(ctx, matched, moduleDirs)
+	return sp.store(matched)
+}
+
+// buildDeps returns the dependencies of the build. Without custom rules, it
+// runs autoPin, which generates or updates the otel.instrumentation.go file.
+func (sp *setupPhase) buildDeps(
+	ctx context.Context,
+	moduleDirs []string,
+	subcommand string,
+	args []string,
+) ([]*Dependency, error) {
+	if !sp.usesCustomRules() {
+		pinResult, err := autoPin(ctx, moduleDirs, subcommand, args)
+		if err != nil {
+			return nil, err
+		}
+		if pinResult.AllDeps != nil {
+			return pinResult.AllDeps, nil
+		}
+	}
+	// Find all dependencies of the project being build
+	return findDeps(ctx, subcommand, args)
+}
+
+// usesCustomRules reports whether the build uses custom rules (--rules or
+// OTELC_RULES) in place of the rules of the tool files.
+func (sp *setupPhase) usesCustomRules() bool {
+	return sp.ruleConfig != "" || os.Getenv(util.EnvOtelcRules) != ""
+}
+
+// resolveRuleSetPaths resolves the paths of the rules in matched (see
+// resolveRulePaths), and adds the packages that these rules bring into the
+// build to vendor/ when this is necessary (see syncHooks).
+//
+// resolveRulePaths loads the hook packages, so they must be in vendor/ before
+// it runs. The imports of the add_file source files are known only after the
+// paths are resolved (see fileRuleSourceImports), and the next injection pass
+// loads them: thus a second sync adds them to vendor/.
+func (sp *setupPhase) resolveRuleSetPaths(
+	ctx context.Context,
+	matched []*rule.InstRuleSet,
+	moduleDirs []string,
+) error {
+	if err := sp.syncHooks(ctx, matched, moduleDirs); err != nil {
+		return err
+	}
+	if err := resolveRulePaths(ctx, matched, moduleDirs); err != nil {
+		return err
+	}
+	if !slices.ContainsFunc(matched, func(rs *rule.InstRuleSet) bool { return len(rs.FileRules) > 0 }) {
+		return nil
+	}
+	return sp.syncHooks(ctx, matched, moduleDirs)
+}
+
+// syncHooks adds the packages that the rules of matched bring into the build
+// to vendor/ (see vendorSyncRuleSets), when this is necessary.
+//
+// Custom rules skip autoPin, which adds the hook packages to vendor/ in vendor
+// mode. So, for custom rules in vendor mode, otelc adds the packages of the
+// rules to vendor/ before it loads them. A rule that matches in one injection
+// pass can add a new hook package, and the next pass loads this hook package:
+// thus the sync must occur for the rule sets of each pass, not only one time
+// at the start.
+func (sp *setupPhase) syncHooks(ctx context.Context, matched []*rule.InstRuleSet, moduleDirs []string) error {
+	if vendored, _ := vendorModeFromContext(ctx); !vendored || !sp.usesCustomRules() {
+		return nil
+	}
+	return sp.vendorSyncRuleSets(ctx, matched, moduleDirs)
+}
+
+// warnIfNoInstrumentationMatched reports the combined result. An individual
+// matching pass may legitimately find no instrumentation rules.
+func (sp *setupPhase) warnIfNoInstrumentationMatched(matched []*rule.InstRuleSet) {
+	if len(matched) == 0 {
+		_, _ = fmt.Fprintf(os.Stderr, "Warning: no instrumentation will be applied\n")
+		sp.Warn("no instrumentation rules matched any dependencies")
+	}
 }
 
 // setupGoCache creates a persistent GOCACHE in .otelc-build/gocache if one isn't already set.
@@ -448,6 +671,8 @@ func setupGoCache(ctx context.Context, env []string) ([]string, error) {
 // extractBuildFlags extracts flags that affect the build context from the arguments.
 // These flags need to be forwarded to `go list` when resolving import archives.
 // Returns a slice of flag arguments preserving their original form.
+// Only patterned -gcflags values are forwarded: unpatterned values apply to the
+// outer command's targets, not the imports resolved by the nested go command.
 //
 // For boolean flags, the last occurrence wins. This correctly handles cases like:
 //   - GOFLAGS=-race with -race=false on CLI (result: -race=false)
@@ -471,11 +696,7 @@ func extractBuildFlags(subcommand string, args []string) []string {
 		}
 
 		if isBuildContextFlagWithValue(a.FlagName) {
-			if a.HasValue {
-				valueFlags = append(valueFlags, a.Raw)
-			} else if i+1 < len(classified) && classified[i+1].Kind == ArgBuildFlagValue {
-				valueFlags = append(valueFlags, a.Raw, classified[i+1].Raw)
-			}
+			valueFlags = append(valueFlags, forwardedValueFlag(classified, i)...)
 			continue
 		}
 
@@ -505,6 +726,28 @@ func extractBuildFlags(subcommand string, args []string) []string {
 	slices.Sort(enabledBoolFlags)
 
 	return append(valueFlags, enabledBoolFlags...)
+}
+
+// forwardedValueFlag returns the tokens of the value flag at classified[i] as
+// the user wrote them, in its joined or separated form, or nil when it has no
+// value or must not be forwarded. cmd/go applies a -gcflags value without a
+// package pattern only to the packages named on its own command line: the
+// targets of this build, but the added import in a nested `go list`.
+func forwardedValueFlag(classified []ClassifiedArg, i int) []string {
+	a := classified[i]
+	tokens := []string{a.Raw}
+	value := a.Value
+	if !a.HasValue {
+		if i+1 >= len(classified) || classified[i+1].Kind != ArgBuildFlagValue {
+			return nil
+		}
+		value = classified[i+1].Raw
+		tokens = append(tokens, value)
+	}
+	if a.FlagName == flagGcflags && !util.HasPackagePattern(value) {
+		return nil
+	}
+	return tokens
 }
 
 // toolexecInsertArg builds the -toolexec=... argument for execPath. Split out
@@ -542,26 +785,23 @@ func addBuildFlags(args []string, flags ...string) []string {
 }
 
 // toolexecBuildArgs assembles the argv for the instrumented build: the
-// original go subcommand, -work, the -toolexec flag pointing at execPath, and
+// original go subcommand, optional goFlags, the -toolexec flag pointing at execPath, and
 // the caller's remaining arguments. Kept free of side effects so it can be
 // tested directly; buildWithToolexec cannot be, since it would spawn a go
 // build whose -toolexec target is the test binary itself.
-func toolexecBuildArgs(args []string, execPath string, vendored bool) ([]string, error) {
+func toolexecBuildArgs(args []string, execPath string, goFlags ...string) ([]string, error) {
 	insert, err := toolexecInsertArg(execPath)
 	if err != nil {
 		return nil, err
 	}
-	const additionalCount = 3
-	newArgs := make([]string, 0, len(args)+additionalCount) // Avoid in-place modification
+	const additionalCount = 2
+	newArgs := make([]string, 0, len(args)+additionalCount+len(goFlags)) // Avoid in-place modification
 	// Add "go build"
 	newArgs = append(newArgs, "go")
 	newArgs = append(newArgs, args[:1]...)
 	// Add the rest
 	subcommand := args[0]
 	restArgs := args[1:]
-	if vendored {
-		restArgs = rewriteModVendor(subcommand, restArgs)
-	}
 	if _, fileTargets, err2 := splitBuildTargets(subcommand, restArgs); err2 == nil && len(fileTargets) > 0 {
 		// add otelc.runtime.go manually to command line for file targets
 		dir := filepath.Dir(fileTargets[0])
@@ -573,9 +813,9 @@ func toolexecBuildArgs(args []string, execPath string, vendored bool) ([]string,
 			restArgs = slices.Insert(restArgs, insertAt, otelcRuntimePath)
 		}
 	}
-	// Add -work and -toolexec after a leading -C/--C. The go command rejects -C
+	// Add goFlags and -toolexec after a leading -C/--C. The go command rejects -C
 	// when any other flag comes before it.
-	restArgs = addBuildFlags(restArgs, "-work", insert)
+	restArgs = addBuildFlags(restArgs, slices.Concat(goFlags, []string{insert})...)
 	return append(newArgs, restArgs...), nil
 }
 
@@ -593,11 +833,10 @@ var runBuildCmd = util.RunCmdWithEnv
 //nolint:gochecknoglobals // test seam
 var executablePath = os.Executable
 
-// buildWithToolexec builds the project with the toolexec mode. vendored is
-// passed in by GoBuild: Setup already forced GOFLAGS=-mod=mod, but a CLI
-// -mod=vendor beats GOFLAGS, so it still has to be neutralized in the build
-// args and forwarded flags below.
-func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) error {
+// buildWithToolexec builds the project with the toolexec mode. The -mod flag of
+// the user is kept: a vendored project builds in vendor mode, with the modules
+// of the hook code that setup added to vendor/.
+func buildWithToolexec(ctx context.Context, cmd *cli.Command) error {
 	args := cmd.Args().Slice()
 	logger := util.LoggerFromContext(ctx)
 
@@ -606,7 +845,12 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 	if err != nil {
 		return ex.Wrapf(err, "failed to get executable path")
 	}
-	newArgs, err := toolexecBuildArgs(args, execPath, vendored)
+	var goFlags []string
+	if cmd.Bool("debug") {
+		// Keep Go's temporary work directory only for debugging.
+		goFlags = append(goFlags, "-work")
+	}
+	newArgs, err := toolexecBuildArgs(args, execPath, goFlags...)
 	if err != nil {
 		return err
 	}
@@ -623,14 +867,18 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 	subcommand := args[0]
 	restArgs := args[1:]
 	buildFlags := extractBuildFlags(subcommand, restArgs)
-	if vendored {
-		buildFlags = rewriteModVendor(subcommand, buildFlags)
-	}
 	if len(buildFlags) > 0 {
 		encoded := util.EncodeBuildFlags(buildFlags)
 		env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelcBuildFlags, encoded))
 		logger.DebugContext(ctx, "forwarding build flags", "flags", buildFlags)
 	}
+
+	// The toolexec processes load packages too (for example to resolve the
+	// imports that rules add). The go command does not give them the -mod
+	// flag of the command line. So the -mod flag goes in GOFLAGS: else, for
+	// example, the loads of a -mod=mod build of a vendored module use vendor
+	// mode, and fail with "inconsistent vendoring".
+	env = envWithModFlag(env, lastModFlag(subcommand, restArgs))
 
 	// Use a fresh GOCACHE to prevent cache pollution when modifying core packages
 	env, err = setupGoCache(ctx, env)
@@ -663,34 +911,37 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 	})
 }
 
-func runGoBuild(ctx context.Context, cmd *cli.Command) error {
+func runGoBuild(ctx context.Context, cmd *cli.Command) (err error) {
+	// A build that stopped before its cleanup left changed files. Restore
+	// them before this build tracks the files again.
+	if err = recoverLeftoverState(ctx); err != nil {
+		return err
+	}
 	ctx = contextWithStateManager(ctx, newStateManager())
 	logger := util.LoggerFromContext(ctx)
 
 	// Clean up import tracking files from previous builds at the start
 	// to prevent stale data from affecting this build.
 	instrument.CleanupImportTrackingFiles()
+	if err = cleanupDebugArtifacts(); err != nil {
+		return ex.Wrapf(err, "cleaning debug artifacts")
+	}
 
 	defer func() {
 		// Restore backed-up go.mod/go.sum but keep .otelc-build/ for debugging.
 		// Users can run `otelc cleanup` to remove it explicitly. Deferred
 		// inside the locked body so the restore always runs under the lock.
+		// A failed restore fails the build: the files of the user are not
+		// the same as before.
 		if cleanErr := Cleanup(ctx, false); cleanErr != nil {
-			logger.DebugContext(ctx, "cleanup failed", "error", cleanErr)
+			err = ex.Join(err, cleanErr)
 		}
 	}()
 
 	statsEnabled := os.Getenv(util.EnvOtelcStats) != ""
 
-	// Setup forces GOFLAGS=-mod=mod for a vendored project (needed for both
-	// entry points, otelc setup and otelc go build). vendored is still computed
-	// here too so buildWithToolexec can rewrite an explicit CLI -mod=vendor,
-	// which beats GOFLAGS.
-	pwd := util.GetOtelcWorkDir()
-	vendored := vendoringActive(ctx, pwd)
-
 	setupStart := time.Now()
-	err := Setup(ctx, cmd)
+	err = Setup(ctx, cmd)
 	if err != nil {
 		return err
 	}
@@ -700,7 +951,7 @@ func runGoBuild(ctx context.Context, cmd *cli.Command) error {
 	logger.InfoContext(ctx, "Setup completed successfully")
 
 	buildStart := time.Now()
-	err = buildWithToolexec(ctx, cmd, vendored)
+	err = buildWithToolexec(ctx, cmd)
 	if err != nil {
 		return err
 	}
@@ -709,4 +960,44 @@ func runGoBuild(ctx context.Context, cmd *cli.Command) error {
 	}
 	logger.InfoContext(ctx, "Instrumentation completed successfully")
 	return nil
+}
+
+// hookImports maps each hook package to every package it imports, directly or
+// through a chain. A package on a hook's list cannot import that hook back.
+func (sp *setupPhase) hookImports(
+	ctx context.Context,
+	matched []*rule.InstRuleSet,
+) (map[string]map[string]bool, error) {
+	hookPaths := sp.hookPackagePaths(matched)
+	if len(hookPaths) == 0 {
+		return map[string]map[string]bool{}, nil
+	}
+
+	pkgs, err := pkgload.LoadPackages(
+		ctx,
+		packages.NeedName|packages.NeedImports|packages.NeedDeps,
+		sp.buildFlags,
+		false,
+		hookPaths...,
+	)
+	if err != nil {
+		return nil, ex.Wrapf(err, "loading hook packages to find their imports")
+	}
+
+	result := make(map[string]map[string]bool, len(pkgs))
+	var loadErr error
+	for _, hook := range pkgs {
+		deps := make(map[string]bool)
+		packages.Visit([]*packages.Package{hook}, nil, func(p *packages.Package) {
+			if len(p.Errors) > 0 && loadErr == nil {
+				loadErr = ex.Newf("loading package %q: %v", p.PkgPath, p.Errors[0])
+			}
+			deps[p.PkgPath] = true
+		})
+		result[hook.PkgPath] = deps
+	}
+	if loadErr != nil {
+		return nil, loadErr
+	}
+	return result, nil
 }

@@ -10,6 +10,8 @@ import (
 	"github.com/dave/dst"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	toolast "go.opentelemetry.io/otelc/tool/internal/ast"
 )
 
 func TestNewCallTemplate_Success(t *testing.T) {
@@ -30,6 +32,14 @@ func TestNewCallTemplate_InvalidSyntax(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, tmpl)
 	assert.Contains(t, err.Error(), "failed to parse template")
+}
+
+func TestNewCallTemplate_InvalidSyntaxKeepsCause(t *testing.T) {
+	tmpl, err := newCallTemplate("wrapper({{ .CallArgument foo }})")
+
+	require.Error(t, err)
+	assert.Nil(t, tmpl)
+	assert.Contains(t, err.Error(), `function "foo" not defined`)
 }
 
 func TestNewCallTemplate_EmptyTemplate(t *testing.T) {
@@ -206,7 +216,7 @@ func TestCompileExpression_ReceiverWithEnclosingMethod(t *testing.T) {
 	enclosing := parseFunc(t, "package main\ntype T struct{}\nfunc (t T) Handler() {}")
 	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
 
-	result, err := tmpl.compileExpression(originalCall, enclosing, nil)
+	result, err := tmpl.compileExpression(originalCall, callSite{}, enclosing, nil, nil)
 
 	require.NoError(t, err)
 	resultCall, ok := result.(*dst.CallExpr)
@@ -256,7 +266,7 @@ func TestCompileExpression_FuncArgumentWithEnclosingFunc(t *testing.T) {
 	enclosing := parseFunc(t, "package main\nfunc Handler(name string) {}")
 	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
 
-	result, err := tmpl.compileExpression(originalCall, enclosing, nil)
+	result, err := tmpl.compileExpression(originalCall, callSite{}, enclosing, nil, nil)
 
 	require.NoError(t, err)
 	resultCall, ok := result.(*dst.CallExpr)
@@ -267,13 +277,45 @@ func TestCompileExpression_FuncArgumentWithEnclosingFunc(t *testing.T) {
 	assert.Equal(t, "name", nameArg.Name)
 }
 
+func TestCompileExpression_FuncReturnWithEnclosingFunc(t *testing.T) {
+	tmpl, err := newCallTemplate("wrap({{ .FuncReturn 0 }}, {{ . }})")
+	require.NoError(t, err)
+
+	enclosing := parseFunc(t, "package main\nfunc Handler() (result string) { return result }")
+	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
+
+	result, err := tmpl.compileExpression(originalCall, callSite{}, enclosing, nil, nil)
+
+	require.NoError(t, err)
+	resultCall, ok := result.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", result)
+	require.Len(t, resultCall.Args, 2)
+	retArg, ok := resultCall.Args[0].(*dst.Ident)
+	require.True(t, ok, "expected *dst.Ident, got %T", resultCall.Args[0])
+	assert.Equal(t, "result", retArg.Name,
+		"the marker added at render time must be stripped, leaving the result's real name")
+}
+
+func TestCompileExpression_FuncReturnOutOfRange(t *testing.T) {
+	tmpl, err := newCallTemplate("wrap({{ .FuncReturn 5 }})")
+	require.NoError(t, err)
+
+	enclosing := parseFunc(t, "package main\nfunc Handler() (result string) { return result }")
+	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
+
+	_, err = tmpl.compileExpression(originalCall, callSite{}, enclosing, nil, nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "FuncReturn index 5 out of range [0, 1)")
+}
+
 func TestCompileExpression_FuncTagWithoutEnclosingFuncErrors(t *testing.T) {
 	tmpl, err := newCallTemplate("traced({{ .FuncName }})")
 	require.NoError(t, err)
 
 	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
 
-	_, err = tmpl.compileExpression(originalCall, nil, nil)
+	_, err = tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no enclosing function is available")
@@ -286,7 +328,7 @@ func TestCompileExpression_FuncArgumentOfType_Found(t *testing.T) {
 	enclosing := parseFunc(t, "package main\nfunc Handler(ctx context.Context, name string) {}")
 	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
 
-	result, err := tmpl.compileExpression(originalCall, enclosing, nil)
+	result, err := tmpl.compileExpression(originalCall, callSite{}, enclosing, nil, nil)
 
 	require.NoError(t, err)
 	resultCall, ok := result.(*dst.CallExpr)
@@ -304,7 +346,7 @@ func TestCompileExpression_FuncArgumentOfType_NotFound(t *testing.T) {
 	enclosing := parseFunc(t, "package main\nfunc Handler(ctx context.Context, name string) {}")
 	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
 
-	result, err := tmpl.compileExpression(originalCall, enclosing, nil)
+	result, err := tmpl.compileExpression(originalCall, callSite{}, enclosing, nil, nil)
 
 	require.NoError(t, err)
 	resultCall, ok := result.(*dst.CallExpr)
@@ -324,7 +366,7 @@ func TestCompileExpression_FuncArgumentOfType_SkipsUnsupportedParamTypes(t *test
 	enclosing := parseFunc(t, "package main\nfunc Handler(data []byte, ctx context.Context) {}")
 	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
 
-	result, err := tmpl.compileExpression(originalCall, enclosing, nil)
+	result, err := tmpl.compileExpression(originalCall, callSite{}, enclosing, nil, nil)
 
 	require.NoError(t, err)
 	resultCall, ok := result.(*dst.CallExpr)
@@ -341,7 +383,7 @@ func TestCompileExpression_FuncArgumentOfType_NoEnclosingFuncErrors(t *testing.T
 
 	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
 
-	_, err = tmpl.compileExpression(originalCall, nil, nil)
+	_, err = tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no enclosing function is available")
@@ -354,7 +396,7 @@ func TestCompileExpression_FuncReturnOfType_Found(t *testing.T) {
 	enclosing := parseFunc(t, "package main\nfunc Handler() (err error) { return nil }")
 	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
 
-	result, err := tmpl.compileExpression(originalCall, enclosing, nil)
+	result, err := tmpl.compileExpression(originalCall, callSite{}, enclosing, nil, nil)
 
 	require.NoError(t, err)
 	resultCall, ok := result.(*dst.CallExpr)
@@ -371,7 +413,7 @@ func TestCompileExpression_FuncReturnOfType_NoEnclosingFuncErrors(t *testing.T) 
 
 	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
 
-	_, err = tmpl.compileExpression(originalCall, nil, nil)
+	_, err = tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no enclosing function is available")
@@ -387,7 +429,7 @@ func TestCompileExpression_CallArgumentIsWrappedCallNotEnclosingFunc(t *testing.
 		Args: []dst.Expr{&dst.Ident{Name: "innerArg"}},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, enclosing, nil)
+	result, err := tmpl.compileExpression(originalCall, callSite{}, enclosing, nil, nil)
 
 	require.NoError(t, err)
 	resultCall, ok := result.(*dst.CallExpr)
@@ -404,7 +446,7 @@ func TestCompileExpression_CallArgumentIsWrappedCallNotEnclosingFunc(t *testing.
 }
 
 func TestCompileExpression_WithoutDotExpression(t *testing.T) {
-	tmpl, err := newCallTemplate(`replacement({{ .CallArgumentCount }})`)
+	tmpl, err := newCallTemplate(`replacement({{ .CallArgumentCount }}, {{ .CallArgument 0 }})`)
 	require.NoError(t, err)
 
 	originalCall := &dst.CallExpr{
@@ -412,16 +454,48 @@ func TestCompileExpression_WithoutDotExpression(t *testing.T) {
 		Args: []dst.Expr{&dst.Ident{Name: "a"}, &dst.Ident{Name: "b"}},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, nil, nil)
+	result, err := tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
 
 	require.NoError(t, err)
 	resultCall, ok := result.(*dst.CallExpr)
 	require.True(t, ok, "expected *dst.CallExpr, got %T", result)
-	require.Len(t, resultCall.Args, 1)
+	require.Len(t, resultCall.Args, 2)
 	countLit, ok := resultCall.Args[0].(*dst.BasicLit)
 	require.True(t, ok, "expected *dst.BasicLit, got %T", resultCall.Args[0])
 	assert.Equal(t, "2", countLit.Value,
 		"CallArgumentCount must still resolve even without referencing the call itself")
+}
+
+func TestCompileExpression_NoPlaceholderRendered(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+	}{
+		{name: "CallArgument in false branch", text: `{{ if false }}{{ .CallArgument 0 }}{{ end }}replacement()`},
+		{name: "CallArgument in comment", text: `{{/* .CallArgument 0 */}}replacement()`},
+		{name: "dot in comment", text: `{{/* . */}}replacement()`},
+		{name: "only CallArgumentCount", text: `replacement({{ .CallArgumentCount }})`},
+		{name: "CallArguments in false branch", text: `{{ if false }}{{ .CallArguments }}{{ end }}replacement()`},
+		{name: "CallReceiver in false branch", text: `{{ if false }}{{ .CallReceiver }}{{ end }}replacement()`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpl, err := newCallTemplate(tt.text)
+			require.NoError(t, err)
+
+			originalCall := &dst.CallExpr{
+				Fun:  &dst.Ident{Name: "f"},
+				Args: []dst.Expr{&dst.Ident{Name: "a"}},
+			}
+
+			result, err := tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
+
+			require.Error(t, err)
+			assert.Nil(t, result)
+			assert.Contains(t, err.Error(), "template output did not use {{ . }}, {{ .CallReceiver }}, "+
+				"{{ .CallArguments }} or {{ .CallArgument N }}")
+		})
+	}
 }
 
 func TestCompileExpression_PerBranchDotUsage(t *testing.T) {
@@ -440,7 +514,7 @@ func TestCompileExpression_PerBranchDotUsage(t *testing.T) {
 			Args: []dst.Expr{&dst.Ident{Name: "a"}},
 		}
 
-		result, resErr := tmpl.compileExpression(originalCall, nil, nil)
+		result, resErr := tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
 		require.NoError(t, resErr)
 
 		resultCall, ok := result.(*dst.CallExpr)
@@ -455,7 +529,7 @@ func TestCompileExpression_PerBranchDotUsage(t *testing.T) {
 			Fun: &dst.Ident{Name: "getValue"},
 		}
 
-		result, resErr := tmpl.compileExpression(originalCall, nil, nil)
+		result, resErr := tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
 		require.NoError(t, resErr)
 
 		resultCall, ok := result.(*dst.CallExpr)
@@ -478,7 +552,7 @@ func TestCompileExpression_CallArgumentCount(t *testing.T) {
 		Args: []dst.Expr{&dst.Ident{Name: "a"}, &dst.Ident{Name: "b"}},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, nil, nil)
+	result, err := tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
 
 	require.NoError(t, err)
 	resultCall, ok := result.(*dst.CallExpr)
@@ -498,7 +572,7 @@ func TestCompileExpression_CallArgumentOutOfRange(t *testing.T) {
 		Args: []dst.Expr{&dst.Ident{Name: "a"}},
 	}
 
-	_, err = tmpl.compileExpression(originalCall, nil, nil)
+	_, err = tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "out of range")
@@ -514,7 +588,7 @@ func TestCompileExpression_CallArgumentUnwrapsParens(t *testing.T) {
 	}
 	parenthesized := &dst.ParenExpr{X: call}
 
-	result, err := tmpl.compileExpression(parenthesized, nil, nil)
+	result, err := tmpl.compileExpression(parenthesized, callSite{}, nil, nil, nil)
 
 	require.NoError(t, err)
 	resultCall, ok := result.(*dst.CallExpr)
@@ -534,14 +608,14 @@ func TestCompileExpression_CallArgumentRequiresCallExpr(t *testing.T) {
 
 	nonCall := &dst.BasicLit{Kind: token.INT, Value: "5"}
 
-	_, err = tmpl.compileExpression(nonCall, nil, nil)
+	_, err = tmpl.compileExpression(nonCall, callSite{}, nil, nil, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "function call")
 }
 
 func TestCompileExpression_CallArgumentComplexExpression(t *testing.T) {
-	tmpl, err := newCallTemplate("wrap({{ .CallArgument 0 }}, {{ . }})")
+	tmpl, err := newCallTemplate("wrap({{ .CallArgument 0 }})")
 	require.NoError(t, err)
 
 	originalCall := &dst.CallExpr{
@@ -551,17 +625,113 @@ func TestCompileExpression_CallArgumentComplexExpression(t *testing.T) {
 		},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, nil, nil)
+	result, err := tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
 
 	require.NoError(t, err)
 	resultCall, ok := result.(*dst.CallExpr)
 	require.True(t, ok, "expected *dst.CallExpr, got %T", result)
-	require.Len(t, resultCall.Args, 2)
+	require.Len(t, resultCall.Args, 1)
 	arg, ok := resultCall.Args[0].(*dst.BinaryExpr)
 	require.True(t, ok, "expected *dst.BinaryExpr, got %T", resultCall.Args[0])
 	xIdent, ok := arg.X.(*dst.Ident)
 	require.True(t, ok, "expected *dst.Ident, got %T", arg.X)
 	assert.Equal(t, "a", xIdent.Name)
+}
+
+func TestCompileExpression_CallArgumentNotRewrittenByAliasOverride(t *testing.T) {
+	// Regression test: the wrapped call's argument must be spliced in as its
+	// original AST after the alias rewrite, so a qualifier in the argument
+	// that merely shares the rule alias's name stays untouched.
+	tmpl, err := newCallTemplate("traced.Sprint({{ .CallArgument 0 }})")
+	require.NoError(t, err)
+
+	originalCall := &dst.CallExpr{
+		Fun: &dst.SelectorExpr{X: &dst.Ident{Name: "http"}, Sel: &dst.Ident{Name: "Get"}},
+		Args: []dst.Expr{
+			&dst.CallExpr{
+				Fun: &dst.SelectorExpr{X: &dst.Ident{Name: "traced"}, Sel: &dst.Ident{Name: "URL"}},
+			},
+		},
+	}
+
+	result, err := tmpl.compileExpression(originalCall, callSite{}, nil, nil, map[string]string{"traced": "f"})
+
+	require.NoError(t, err)
+	outer, ok := result.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", result)
+	outerSel, ok := outer.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", outer.Fun)
+	assert.Equal(t, "f", outerSel.X.(*dst.Ident).Name,
+		"the rule's own qualifier must move to the file's alias")
+	require.Len(t, outer.Args, 1)
+	argCall, ok := outer.Args[0].(*dst.CallExpr)
+	require.True(t, ok, "expected the argument to stay a *dst.CallExpr, got %T", outer.Args[0])
+	argSel, ok := argCall.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", argCall.Fun)
+	assert.Equal(t, "traced", argSel.X.(*dst.Ident).Name,
+		"the wrapped call's argument code must not be rewritten just because it shares the rule's alias name")
+}
+
+func TestCompileExpression_CallArgumentSameIndexTwice(t *testing.T) {
+	tmpl, err := newCallTemplate("combine({{ .CallArgument 0 }}, {{ .CallArgument 0 }})")
+	require.NoError(t, err)
+
+	// A selector has no side effects, so the template can use it twice.
+	originalArg := &dst.SelectorExpr{X: &dst.Ident{Name: "cfg"}, Sel: &dst.Ident{Name: "Timeout"}}
+	originalCall := &dst.CallExpr{
+		Fun:  &dst.Ident{Name: "f"},
+		Args: []dst.Expr{originalArg},
+	}
+
+	result, err := tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
+
+	require.NoError(t, err)
+	resultCall, ok := result.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", result)
+	require.Len(t, resultCall.Args, 2)
+
+	for i, arg := range resultCall.Args {
+		sel, selOk := arg.(*dst.SelectorExpr)
+		require.True(t, selOk, "expected *dst.SelectorExpr for arg %d, got %T", i, arg)
+		assert.Equal(t, "Timeout", sel.Sel.Name)
+		assert.NotSame(t, originalArg, sel,
+			"each occurrence must receive its own AST copy")
+	}
+	assert.NotSame(t, resultCall.Args[0], resultCall.Args[1],
+		"repeated occurrences of the same index must not share one AST")
+}
+
+func TestCompileExpression_CallArgumentOutOfRangeMessageUnchanged(t *testing.T) {
+	tmpl, err := newCallTemplate("wrap({{ .CallArgument 1 }})")
+	require.NoError(t, err)
+
+	originalCall := &dst.CallExpr{
+		Fun:  &dst.Ident{Name: "f"},
+		Args: []dst.Expr{&dst.Ident{Name: "a"}},
+	}
+
+	_, err = tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
+
+	require.Error(t, err)
+	// The delegate validation keeps the original error text verbatim inside
+	// text/template's own error wrapping.
+	assert.Contains(t, err.Error(), "error calling CallArgument: CallArgument index 1 out of range [0, 1)")
+}
+
+func TestCompileExpression_CallArgumentPlaceholderNotReplaced(t *testing.T) {
+	tmpl, err := newCallTemplate(`wrapper("{{ .CallArgument 0 }}")`)
+	require.NoError(t, err)
+
+	originalCall := &dst.CallExpr{
+		Fun:  &dst.Ident{Name: "f"},
+		Args: []dst.Expr{&dst.Ident{Name: "a"}},
+	}
+
+	result, err := tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
+
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "did not contain expected placeholder expression for {{ .CallArgument 0 }}")
 }
 
 func TestCompileExpression_SimpleWrapping(t *testing.T) {
@@ -573,7 +743,7 @@ func TestCompileExpression_SimpleWrapping(t *testing.T) {
 		Fun: &dst.Ident{Name: "funcCall"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, nil, nil)
+	result, err := tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
 
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -604,7 +774,7 @@ func TestCompileExpression_IIFE(t *testing.T) {
 		Fun: &dst.Ident{Name: "getValue"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, nil, nil)
+	result, err := tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
 
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -623,7 +793,7 @@ func TestCompileExpression_MultiplePlaceholders(t *testing.T) {
 		Fun: &dst.Ident{Name: "getValue"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, nil, nil)
+	result, err := tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
 
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -645,7 +815,7 @@ func TestCompileExpression_InvalidGoSyntax(t *testing.T) {
 		Fun: &dst.Ident{Name: "test"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, nil, nil)
+	result, err := tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
 
 	require.Error(t, err)
 	assert.Nil(t, result)
@@ -660,7 +830,7 @@ func TestCompileExpression_ComplexNestedExpression(t *testing.T) {
 		Fun: &dst.Ident{Name: "inner"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, nil, nil)
+	result, err := tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
 
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -689,7 +859,7 @@ func TestCompileExpression_WithBinaryExpression(t *testing.T) {
 		Fun: &dst.Ident{Name: "getValue"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, nil, nil)
+	result, err := tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
 
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -712,7 +882,7 @@ func TestCompileExpression_SelectorExpression(t *testing.T) {
 		Fun: &dst.Ident{Name: "getStruct"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, nil, nil)
+	result, err := tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
 
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -737,7 +907,7 @@ func TestCompileExpression_EmptyResult(t *testing.T) {
 		Fun: &dst.Ident{Name: "test"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, nil, nil)
+	result, err := tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
 
 	// Should error because the function body is empty
 	require.Error(t, err)
@@ -755,7 +925,7 @@ func TestCompileExpression_WhitespaceOnlyResult(t *testing.T) {
 		Fun: &dst.Ident{Name: "test"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, nil, nil)
+	result, err := tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
 
 	require.Error(t, err)
 	assert.Nil(t, result)
@@ -770,7 +940,7 @@ func TestCompileExpression_PlaceholderNotReplaced(t *testing.T) {
 		Fun: &dst.Ident{Name: "test"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, nil, nil)
+	result, err := tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
 
 	require.Error(t, err)
 	assert.Nil(t, result)
@@ -785,7 +955,7 @@ func TestCompileExpression_MultipleStatements(t *testing.T) {
 		Fun: &dst.Ident{Name: "test"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, nil, nil)
+	result, err := tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
 
 	require.Error(t, err)
 	assert.Nil(t, result)
@@ -802,7 +972,7 @@ func TestCompileExpression_NonExpressionStatement(t *testing.T) {
 		Fun: &dst.Ident{Name: "test"},
 	}
 
-	result, err := tmpl.compileExpression(originalCall, nil, nil)
+	result, err := tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
 
 	// Should error because it's not an expression statement
 	require.Error(t, err)
@@ -1125,4 +1295,400 @@ func TestParseGoTypeExpression_MultipleStatementsRejected(t *testing.T) {
 	_, err := parseGoTypeExpression("int\nvar y int")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "did not parse as a single statement")
+}
+
+// mustParseCall parses src as a call expression.
+func mustParseCall(t *testing.T, src string) *dst.CallExpr {
+	t.Helper()
+	expr, err := parseGoExpression(src)
+	require.NoError(t, err)
+	call, ok := expr.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", expr)
+	return call
+}
+
+// renderResult renders a compiled expression back to Go source text.
+func renderResult(t *testing.T, expr dst.Expr) string {
+	t.Helper()
+	text, err := toolast.RenderExpr(expr)
+	require.NoError(t, err)
+	return text
+}
+
+func TestCallTemplateData_CallReceiver(t *testing.T) {
+	t.Run("not a call errors", func(t *testing.T) {
+		d := &callTemplateData{}
+
+		_, err := d.CallReceiver()
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "requires the wrapped expression to be a function call")
+	})
+
+	t.Run("call without receiver errors", func(t *testing.T) {
+		d := &callTemplateData{isCall: true}
+
+		_, err := d.CallReceiver()
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "CallReceiver is only available for a call matched by method_call")
+	})
+
+	t.Run("returns receiver source", func(t *testing.T) {
+		call := mustParseCall(t, `getLogger().Info("x")`)
+		d := &callTemplateData{isCall: true, callRecv: call.Fun.(*dst.SelectorExpr).X}
+
+		recv, err := d.CallReceiver()
+
+		require.NoError(t, err)
+		assert.Equal(t, "getLogger()", recv)
+	})
+}
+
+func TestCallTemplateData_CallArguments(t *testing.T) {
+	tests := []struct {
+		name string
+		call string
+		want string
+	}{
+		{name: "no arguments", call: "log.Sync()", want: ""},
+		{name: "arguments", call: `log.Info("x", field("a"))`, want: `"x", field("a")`},
+		{name: "spread", call: `log.Info("x", fields...)`, want: `"x", fields...`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			call := mustParseCall(t, tt.call)
+			d := &callTemplateData{isCall: true, callArgs: call.Args, callEllipsis: call.Ellipsis}
+
+			args, err := d.CallArguments()
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, args)
+		})
+	}
+
+	t.Run("not a call errors", func(t *testing.T) {
+		d := &callTemplateData{}
+
+		_, err := d.CallArguments()
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "requires the wrapped expression to be a function call")
+	})
+}
+
+func TestCompileExpression_CallReceiverAndCallArguments(t *testing.T) {
+	tests := []struct {
+		name    string
+		call    string
+		replace string
+		want    string
+	}{
+		{
+			name:    "arguments",
+			call:    `log.Info("x", field("a"))`,
+			replace: "{{ .CallReceiver }}.With(trace()...).Info({{ .CallArguments }})",
+			want:    `log.With(trace()...).Info("x", field("a"))`,
+		},
+		{
+			name:    "spread keeps the ellipsis",
+			call:    `getLogger().Info("x", fields...)`,
+			replace: "{{ .CallReceiver }}.With(trace()...).Info({{ .CallArguments }})",
+			want:    `getLogger().With(trace()...).Info("x", fields...)`,
+		},
+		{
+			name:    "no arguments",
+			call:    `log.Sync()`,
+			replace: "{{ .CallReceiver }}.With(trace()...).Sync({{ .CallArguments }})",
+			want:    `log.With(trace()...).Sync()`,
+		},
+		{
+			name:    "only arguments and none passed",
+			call:    `log.Sync()`,
+			replace: "flush({{ .CallArguments }})",
+			want:    `flush()`,
+		},
+		{
+			name:    "receiver only",
+			call:    `s.log.Sync()`,
+			replace: "flush({{ .CallReceiver }})",
+			want:    `flush(s.log)`,
+		},
+		{
+			name:    "arguments after other arguments",
+			call:    `log.Info("x", fields...)`,
+			replace: "info({{ .CallReceiver }}, {{ .CallArguments }})",
+			want:    `info(log, "x", fields...)`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpl, err := newCallTemplate(tt.replace)
+			require.NoError(t, err)
+
+			result, err := tmpl.compileExpression(mustParseCall(t, tt.call), callSite{methodCall: true}, nil, nil, nil)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, renderResult(t, result))
+		})
+	}
+}
+
+func TestCompileExpression_CallReceiverNotRewrittenByAliasOverride(t *testing.T) {
+	tmpl, err := newCallTemplate("traced.Wrap({{ .CallReceiver }}).Info({{ .CallArguments }})")
+	require.NoError(t, err)
+
+	result, err := tmpl.compileExpression(
+		mustParseCall(t, `traced.Logger.Info(traced.Value)`),
+		callSite{methodCall: true}, nil, nil, map[string]string{"traced": "f"},
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, `f.Wrap(traced.Logger).Info(traced.Value)`, renderResult(t, result))
+}
+
+func TestCompileExpression_CallReceiverWithoutMethodCallErrors(t *testing.T) {
+	tmpl, err := newCallTemplate("{{ .CallReceiver }}.Info({{ .CallArguments }})")
+	require.NoError(t, err)
+
+	_, err = tmpl.compileExpression(mustParseCall(t, `log.Info("x")`), callSite{}, nil, nil, nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "CallReceiver is only available for a call matched by method_call")
+}
+
+func TestCompileExpression_CallPartPlaceholderNotSwapped(t *testing.T) {
+	tests := []struct {
+		name    string
+		replace string
+		wantErr string
+	}{
+		{
+			name:    "CallReceiver in a string literal",
+			replace: `wrapper("{{ .CallReceiver }}")`,
+			wantErr: "template output did not contain expected placeholder expression for {{ .CallReceiver }}",
+		},
+		{
+			name:    "CallArguments in a string literal",
+			replace: `wrapper({{ .CallReceiver }}, "{{ .CallArguments }}")`,
+			wantErr: "template output did not contain expected placeholder expression for {{ .CallArguments }}",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpl, err := newCallTemplate(tt.replace)
+			require.NoError(t, err)
+
+			_, err = tmpl.compileExpression(
+				mustParseCall(t, `log.Info("x")`),
+				callSite{methodCall: true},
+				nil,
+				nil,
+				nil,
+			)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
+func TestCompileExpression_CallArgumentsOnNonCallErrors(t *testing.T) {
+	tmpl, err := newCallTemplate("f({{ .CallArguments }})")
+	require.NoError(t, err)
+
+	_, err = tmpl.compileExpression(&dst.BasicLit{Kind: token.INT, Value: "5"}, callSite{}, nil, nil, nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "requires the wrapped expression to be a function call")
+}
+
+func TestCompileExpression_ReservedPlaceholderInTemplateText(t *testing.T) {
+	// The template text names the receiver placeholder itself, in a rule
+	// matched by function_call, so the call has no receiver.
+	const replace = "(func() { use(_.CALLRECV, {{ .CallArguments }}) })()"
+	tests := []struct {
+		name     string
+		deferred bool
+		wantErr  string
+	}{
+		{
+			name:    "plain call",
+			wantErr: "template output uses _.CALLRECV, a name reserved for otelc placeholders",
+		},
+		{
+			name:     "deferred call",
+			deferred: true,
+			wantErr:  `uses the argument 0 ("x") inside a function literal`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpl, err := newCallTemplate(replace)
+			require.NoError(t, err)
+
+			_, err = tmpl.compileExpression(
+				mustParseCall(t, `fmt.Println("x")`), callSite{deferred: tt.deferred}, nil, nil, nil,
+			)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
+func TestCompileExpression_CallPartsEvaluation(t *testing.T) {
+	tests := []struct {
+		name     string
+		call     string
+		replace  string
+		deferred bool
+		wantErr  string
+	}{
+		{
+			name:    "plain receiver used twice",
+			call:    `log.Info(x)`,
+			replace: "(func() { use({{ .CallReceiver }}); {{ . }} })()",
+		},
+		{
+			name:    "plain receiver dropped",
+			call:    `log.Info(x)`,
+			replace: "other.Info({{ .CallArguments }})",
+		},
+		{
+			name:    "side effect receiver used twice",
+			call:    `getLogger().Info(x)`,
+			replace: "(func() { use({{ .CallReceiver }}); {{ . }} })()",
+			wantErr: "evaluates the receiver getLogger() 2 times",
+		},
+		{
+			name:    "side effect receiver dropped",
+			call:    `getLogger().Info(x)`,
+			replace: "other.Info({{ .CallArguments }})",
+			wantErr: "evaluates the receiver getLogger() 0 times",
+		},
+		{
+			name:    "side effect argument used twice",
+			call:    `log.Info(field())`,
+			replace: "{{ .CallReceiver }}.Info({{ .CallArguments }}, {{ .CallArgument 0 }})",
+			wantErr: "evaluates the argument 0 (field()) 2 times",
+		},
+		{
+			name:    "side effect argument dropped",
+			call:    `log.Info("x", field())`,
+			replace: `{{ .CallReceiver }}.Info({{ .CallArgument 0 }})`,
+			wantErr: "evaluates the argument 1 (field()) 0 times",
+		},
+		{
+			name:    "side effect arguments reordered",
+			call:    `log.Info(a(), b())`,
+			replace: `{{ .CallReceiver }}.Info({{ .CallArgument 1 }}, {{ .CallArgument 0 }})`,
+			wantErr: "evaluates the argument 1 (b()) before the argument 0 (a())",
+		},
+		{
+			name:    "side effect receiver after arguments",
+			call:    `getLogger().Info(a())`,
+			replace: `info({{ .CallArguments }}, {{ .CallReceiver }})`,
+			wantErr: "evaluates the argument 0 (a()) before the receiver getLogger()",
+		},
+		{
+			name:     "deferred call rebuilt in place",
+			call:     `log.Info(a())`,
+			replace:  "{{ .CallReceiver }}.With(trace()...).Info({{ .CallArguments }})",
+			deferred: true,
+		},
+		{
+			name:     "deferred plain receiver in function literal",
+			call:     `log.Info("x")`,
+			replace:  "(func() { {{ .CallReceiver }}.Info({{ .CallArguments }}) })()",
+			deferred: true,
+			wantErr:  "uses the receiver log inside a function literal",
+		},
+		{
+			name:     "deferred argument in function literal",
+			call:     `log.Info(a())`,
+			replace:  "info({{ .CallReceiver }}, func() { use({{ .CallArguments }}) })",
+			deferred: true,
+			wantErr:  "uses the argument 0 (a()) inside a function literal",
+		},
+		{
+			name:     "deferred original call in function literal",
+			call:     `log.Info("x")`,
+			replace:  "info({{ .CallReceiver }}, func() { {{ . }} })",
+			deferred: true,
+			wantErr:  "uses the receiver log inside a function literal",
+		},
+		{
+			name:    "selector receiver used twice",
+			call:    `s.log.Info(x)`,
+			replace: "(func() { use({{ .CallReceiver }}); {{ . }} })()",
+		},
+		{
+			name:    "selector chain receiver used twice",
+			call:    `a.b.c.Info(x)`,
+			replace: "(func() { use({{ .CallReceiver }}); {{ . }} })()",
+		},
+		{
+			name:    "parenthesized receiver used twice",
+			call:    `(log).Info(x)`,
+			replace: "(func() { use({{ .CallReceiver }}); {{ . }} })()",
+		},
+		{
+			name:    "side effect argument with only CallArgument and the original call",
+			call:    `log.Info(a())`,
+			replace: "pair({{ .CallArgument 0 }}, {{ . }})",
+			wantErr: "evaluates the argument 0 (a()) 2 times",
+		},
+		{
+			name:    "side effect arguments reordered with only CallArgument",
+			call:    `f(a(), b())`,
+			replace: "g({{ .CallArgument 1 }}, {{ .CallArgument 0 }})",
+			wantErr: "evaluates the argument 1 (b()) before the argument 0 (a())",
+		},
+		{
+			name:     "deferred argument in function literal with only CallArgument",
+			call:     `f(a())`,
+			replace:  "g(func() { use({{ .CallArgument 0 }}) })",
+			deferred: true,
+			wantErr:  "uses the argument 0 (a()) inside a function literal",
+		},
+		{
+			name:    "plain arguments reordered with only CallArgument",
+			call:    `f(a, b)`,
+			replace: "g({{ .CallArgument 1 }}, {{ .CallArgument 0 }})",
+		},
+		{
+			name:    "function literal outside defer",
+			call:    `getLogger().Info(a())`,
+			replace: "(func() { {{ .CallReceiver }}.Info({{ .CallArguments }}) })()",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpl, err := newCallTemplate(tt.replace)
+			require.NoError(t, err)
+			site := callSite{methodCall: true, deferred: tt.deferred}
+
+			_, err = tmpl.compileExpression(mustParseCall(t, tt.call), site, nil, nil, nil)
+
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
+func TestCompileExpression_EvaluationCheckSkippedWithOnlyOriginalCall(t *testing.T) {
+	// The evaluation checks apply only to templates that use a call part.
+	// {{ . }} alone keeps the original call as it is.
+	tmpl, err := newCallTemplate("pair({{ . }}, {{ . }})")
+	require.NoError(t, err)
+
+	result, err := tmpl.compileExpression(mustParseCall(t, `log.Info(a())`), callSite{methodCall: true}, nil, nil, nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, `pair(log.Info(a()), log.Info(a()))`, renderResult(t, result))
 }

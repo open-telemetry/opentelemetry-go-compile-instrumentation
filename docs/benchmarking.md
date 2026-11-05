@@ -59,68 +59,61 @@ The `largeidle` scenario is the most important for realistic enterprise codebase
 
 ## Running benchmarks locally
 
-Prerequisites: `otelc` must be built first.
+The benchmarks are Go tests in `test/bench`. Both Make targets build `otelc` first and pass its path and the scenarios directory to the tests through `OTELC_BIN` and `BENCH_SCENARIOS_DIR`.
 
 ```bash
-# Build otelc, then build the harness and print usage.
-make benchmark
+# Time plain and otelc builds of every scenario (5 builds each by default).
+make benchmark/codspeed
 
-# Run all scenarios (5 timed iterations each, after warmup) and write bench.json.
-make benchmark/run
+# More builds per scenario for a more stable measurement.
+make benchmark/codspeed BENCH_TIME=10x
 
-# Use more iterations for a more stable measurement.
-make benchmark/run BENCH_ITERATIONS=10
+# Fail if otelc's overhead exceeds the ceiling. This is the check CI runs.
+make benchmark/threshold
+
+# Use a different ceiling, in percent.
+make benchmark/threshold BENCH_MAX_OVERHEAD_PCT=200
 ```
 
-The harness binary accepts additional flags for advanced use:
+To benchmark a single scenario, run `go test` from `test/bench` after `make build`:
 
 ```bash
-.bin/bench \
-  -otelc=./otelc \
-  -scenarios=test/bench/scenarios \
-  -iterations=5 \
-  -warmup=1 \
-  -output=bench.json
+cd test/bench
+OTELC_BIN=$PWD/../../otelc \
+BENCH_SCENARIOS_DIR=$PWD/scenarios \
+  go test -run='^$' -bench='Compile/largeidle' -benchtime=5x
 ```
 
 ## Measurement methodology
 
-The harness reduces run-to-run noise with the following defaults:
+Both benchmarks reduce run-to-run noise the same way:
 
-1. **Warmup** (`-warmup`, default `1`): Before any timed build, each scenario runs one discarded plain `go build -a` and one discarded `otelc go build -a` so filesystem and toolchain caches are warm.
-2. **Interleaved builds**: Timed iterations alternate plain then `otelc` for the same iteration index, so both tools see similar system load within each cycle (instead of timing all plain builds first, then all `otelc` builds).
-3. **Mean as the primary value**: The reported seconds and overhead percentage use the arithmetic mean of the timed iterations.
-4. **Trimmed spread in `range`**: When there are at least five timed iterations, the reported spread is the population standard deviation after dropping the single fastest and slowest sample. With fewer than five iterations the full-sample standard deviation is used.
-5. **`GOGC=off`**: Child processes run with `GOGC=off` to reduce garbage-collection jitter inside the Go toolchain during the measured builds.
+1. **Full rebuilds**: Every build is `go build -a -o app .` (or `otelc go build -a -o app .`) in the scenario directory, so the build cache is bypassed and each run measures end-to-end compile time.
+2. **Dependencies first**: `go mod download` runs for each scenario before any timed build.
+3. **`GOGC=off`**: Builds run with `GOGC=off` to reduce garbage-collection jitter inside the Go toolchain.
 
-For investigating a specific change, prefer `BENCH_ITERATIONS=10` (or higher) locally.
+`make benchmark/codspeed` runs `BenchmarkCompile` (`test/bench/bench_test.go`). It has two sub-benchmarks per scenario, `BenchmarkCompile/<scenario>/plain` and `BenchmarkCompile/<scenario>/otelc`, and each runs `BENCH_TIME` builds (default `5x`).
+
+`make benchmark/threshold` runs `TestOverheadCeiling` (`test/bench/overhead_test.go`, behind the `overhead_check` build tag). For each scenario it does one warmup build with each tool, then three timed builds with each, and uses the fastest. A build cannot finish faster than its real cost, so slower runs are treated as noise. The overhead is `(otelc - plain) / plain * 100`.
 
 ## Output format
 
-The harness emits a JSON array with one entry per scenario comparing the plain `go build` and `otelc` compile times:
+`make benchmark/codspeed` prints standard `go test -bench` results, with the time per build in `ns/op`:
 
-```json
-[
-  {
-    "scenario": "baseline",
-    "iterations": 5,
-    "warmup": 1,
-    "plain_mean_s": 1.230,
-    "plain_range_s": 0.050,
-    "otelc_mean_s": 1.450,
-    "otelc_range_s": 0.080,
-    "overhead_pct": 17.9
-  }
-]
+```text
+BenchmarkCompile/<scenario>/plain-<GOMAXPROCS>    <builds>    <nanoseconds per build> ns/op
+BenchmarkCompile/<scenario>/otelc-<GOMAXPROCS>    <builds>    <nanoseconds per build> ns/op
 ```
 
-The harness accepts a `-max-overhead-pct` flag for local threshold checks. When set, it writes `bench.json` and then exits non-zero if any scenario's overhead exceeds the threshold:
+`make benchmark/threshold` logs one line per scenario and fails if any scenario is over its ceiling:
 
-```bash
-make benchmark/run BENCH_ITERATIONS=10 BENCH_MAX_OVERHEAD_PCT=150
+```text
+<scenario>: plain=<seconds>s  otelc=<seconds>s  overhead=+<percent>%
 ```
 
-CI runs with `BENCH_MAX_OVERHEAD_PCT=150`, failing the job when `otelc` compile time is more than 150% above the plain `go build` baseline measured in the same run.
+The ceiling is `BENCH_MAX_OVERHEAD_PCT` (default `150`) for every scenario except `baseline`, which allows up to 550%: `otelc` always injects the OTel SDK initialization package, so even a build with no matching rules pays the one-time cost of compiling the SDK.
+
+In CI, the `Compile-Time Benchmarks` workflow runs `make benchmark/threshold` on pull requests and pushes to `main`, and `make benchmark/codspeed` under CodSpeed (walltime mode) on a nightly schedule.
 
 ## Complementary profiling
 

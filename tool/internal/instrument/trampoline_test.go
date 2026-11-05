@@ -4,9 +4,12 @@
 package instrument
 
 import (
+	"context"
 	"errors"
+	"go/token"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dave/dst"
@@ -56,6 +59,77 @@ func TestGetHookFuncPropagatesParseError(t *testing.T) {
 	r := &rule.InstFuncRule{Before: "beforeA", ResolvedPath: dir}
 	_, err := ip.getHookFunc(r, true)
 	require.Error(t, err)
+}
+
+// writeHookFiles writes each name -> content pair under dir, creating
+// subdirectories as needed.
+func writeHookFiles(t *testing.T, dir string, files map[string]string) {
+	t.Helper()
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	}
+}
+
+func TestFindHookFileOnlyReadsPackageDir(t *testing.T) {
+	tests := []struct {
+		name  string
+		files map[string]string
+	}{
+		{
+			// A nested v2 package declares a hook of the same name with another
+			// signature, and its directory sorts before the real hook file.
+			name: "nested package",
+			files: map[string]string{
+				"zz_hook.go": "package hook\n\nfunc BeforeA(n int) {}\n",
+				"v2/hook.go": "package hook\n\nfunc BeforeA(s string) {}\n",
+				"v2/go.mod":  "module example.com/hook/v2\n",
+			},
+		},
+		{
+			// A fixture under testdata is not part of the package and does not
+			// parse.
+			name: "testdata",
+			files: map[string]string{
+				"zz_hook.go":         "package hook\n\nfunc BeforeA(n int) {}\n",
+				"testdata/broken.go": "not valid go",
+			},
+		},
+		{
+			// The go command never builds a test file or a file starting with
+			// "_" into the package.
+			name: "ignored files",
+			files: map[string]string{
+				"hook_test.go": "package hook_test\n\nfunc BeforeA(s string) {}\n",
+				"_hook.go":     "package hook\n\nfunc BeforeA(s string) {}\n",
+				"zz_hook.go":   "package hook\n\nfunc BeforeA(n int) {}\n",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeHookFiles(t, dir, tt.files)
+
+			ip := &instrumentPhase{}
+			r := &rule.InstFuncRule{Before: "BeforeA", ResolvedPath: dir}
+			file, root, err := ip.findHookFile(r)
+			require.NoError(t, err)
+			require.NotNil(t, root)
+			assert.Equal(t, filepath.Join(dir, "zz_hook.go"), file)
+		})
+	}
+
+	t.Run("missing directory", func(t *testing.T) {
+		missing := filepath.Join(t.TempDir(), "missing")
+		ip := &instrumentPhase{}
+		r := &rule.InstFuncRule{Before: "BeforeA", ResolvedPath: missing}
+		_, _, err := ip.findHookFile(r)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "reading hook directory")
+	})
 }
 
 func TestMaterializeTemplateClonesIndependently(t *testing.T) {
@@ -502,7 +576,7 @@ func H1Before(ctx hook.HookContext, p1 struct{ Age int }) {}`,
 				ip.afterTrampFunc = trampFunc
 			}
 
-			err := ip.checkHookDecl(hookFunc, tt.before)
+			err := ip.checkHookDecl(hookFunc, nil, tt.before)
 
 			if tt.expectError {
 				require.Error(t, err)
@@ -514,6 +588,156 @@ func H1Before(ctx hook.HookContext, p1 struct{ Age int }) {}`,
 			}
 		})
 	}
+}
+
+// TestCheckHookDeclVariadicAny covers the variadic forms accepted and rejected
+// for issue #1601: ...any must work for a variadic whose element type the hook
+// cannot name, while plain any must be rejected for a variadic of a concrete
+// type (a type-parameter variadic receives the whole slice instead). An
+// any-element slice and an any-element variadic are interchangeable.
+func TestCheckHookDeclVariadicAny(t *testing.T) {
+	tests := []struct {
+		name      string
+		targetSrc string
+		hookSrc   string
+		errorMsg  string
+	}{
+		{
+			name: "valid - ...any for variadic of unnameable element type",
+			targetSrc: `package main
+type options struct{ name string }
+func New(id int, opts ...func(*options)) string { return "" }`,
+			hookSrc: `package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, id int, opts ...any) {}`,
+		},
+		{
+			name: "valid - ...any for variadic of a type parameter",
+			targetSrc: `package main
+func New[T any](id int, opts ...T) string { return "" }`,
+			hookSrc: `package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, id int, opts ...any) {}`,
+		},
+		{
+			name: "valid - plain any for variadic of a type parameter",
+			targetSrc: `package main
+func New[T any](id int, opts ...T) string { return "" }`,
+			hookSrc: `package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, id int, opts any) {}`,
+		},
+		{
+			name: "valid - []any for variadic of any",
+			targetSrc: `package main
+func New(id int, opts ...any) string { return "" }`,
+			hookSrc: `package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, id int, opts []any) {}`,
+		},
+		{
+			name: "valid - ...any for non-variadic slice of any",
+			targetSrc: `package main
+func New(id int, opts []any) string { return "" }`,
+			hookSrc: `package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, id int, opts ...any) {}`,
+		},
+		{
+			name: "invalid - plain any for variadic",
+			targetSrc: `package main
+func New(id int, opts ...string) string { return "" }`,
+			hookSrc: `package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, id int, opts any) {}`,
+			errorMsg: "use ...any instead of any",
+		},
+		{
+			name: "invalid - plain any for variadic of any",
+			targetSrc: `package main
+func New(id int, opts ...any) string { return "" }`,
+			hookSrc: `package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, id int, opts any) {}`,
+			errorMsg: "use ...any instead of any",
+		},
+		{
+			name: "invalid - []any for variadic",
+			targetSrc: `package main
+func New(id int, opts ...string) string { return "" }`,
+			hookSrc: `package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, id int, opts []any) {}`,
+			errorMsg: "use ...any instead of []any",
+		},
+		{
+			name: "invalid - ...any for non-variadic slice",
+			targetSrc: `package main
+func New(id int, opts []string) string { return "" }`,
+			hookSrc: `package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, id int, opts ...any) {}`,
+			errorMsg: "use any instead of ...any",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			targetFunc := parseFunc(t, tt.targetSrc)
+			hookFunc := parseFunc(t, tt.hookSrc)
+
+			ip := &instrumentPhase{targetFunc: targetFunc}
+			ip.beforeTrampFunc = &dst.FuncDecl{
+				Name: ast.Ident("OtelBeforeTrampoline"),
+				Type: &dst.FuncType{},
+			}
+			ip.buildTrampSignature(true)
+
+			err := ip.checkHookDecl(hookFunc, findTargetParamType(targetFunc), true)
+			if tt.errorMsg == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errorMsg)
+		})
+	}
+}
+
+func TestNeedsAnySliceConversion(t *testing.T) {
+	tests := []struct {
+		name       string
+		targetType string
+		hookType   string
+		want       bool
+	}{
+		{name: "concrete variadic and ...any", targetType: "...func(*options)", hookType: "...any", want: true},
+		{
+			name:       "concrete variadic and ...interface{}",
+			targetType: "...func(*options)",
+			hookType:   "...interface{}",
+			want:       true,
+		},
+		{name: "any variadic and ...any", targetType: "...any", hookType: "...any", want: false},
+		{name: "exact variadic", targetType: "...string", hookType: "...string", want: false},
+		{name: "non-variadic target", targetType: "[]string", hookType: "...any", want: false},
+		{name: "non-variadic hook", targetType: "...string", hookType: "[]any", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			targetType := parseType(t, tt.targetType)
+			hookType := parseType(t, tt.hookType)
+			assert.Equal(t, tt.want, needsAnySliceConversion(targetType, hookType))
+		})
+	}
+}
+
+// parseType parses a standalone type expression by wrapping it in a parameter.
+func parseType(t *testing.T, typeSrc string) dst.Expr {
+	t.Helper()
+	field := parseFunc(t, "package main\nfunc F(p "+typeSrc+") {}").Type.Params.List[0]
+	return field.Type
 }
 
 // genHookContext mirrors the HookContextImpl the trampoline generates for a
@@ -774,6 +998,66 @@ func TestReplaceTypeParamsWithAny(t *testing.T) {
 	})
 }
 
+func TestReferencesTypeParameter(t *testing.T) {
+	tp := typeParamsT()
+
+	assert.True(t, referencesTypeParameter(dst.NewIdent("T"), tp), "bare type parameter")
+	assert.True(t, referencesTypeParameter(&dst.StarExpr{X: dst.NewIdent("T")}, tp), "pointer to type parameter")
+	assert.True(t, referencesTypeParameter(&dst.ArrayType{Elt: dst.NewIdent("T")}, tp), "slice of type parameter")
+	assert.True(t, referencesTypeParameter(
+		&dst.IndexExpr{X: dst.NewIdent("GenStruct"), Index: dst.NewIdent("T")}, tp),
+		"generic-instantiated type")
+
+	assert.False(t, referencesTypeParameter(dst.NewIdent("string"), tp), "unrelated concrete type")
+	assert.False(t, referencesTypeParameter(&dst.ArrayType{Elt: dst.NewIdent("string")}, tp), "slice of concrete type")
+	assert.False(t, referencesTypeParameter(dst.NewIdent("T"), nil), "nil typeParams")
+	assert.False(t, referencesTypeParameter(nil, tp), "nil type expression")
+
+	// In func(T int), T names a parameter rather than its type.
+	funcTypeWithCollidingParamName := &dst.FuncType{
+		Params: &dst.FieldList{List: []*dst.Field{
+			{Names: []*dst.Ident{dst.NewIdent("T")}, Type: dst.NewIdent("int")},
+		}},
+	}
+	assert.False(t, referencesTypeParameter(funcTypeWithCollidingParamName, tp),
+		"parameter name colliding with type parameter is not a type reference")
+
+	funcTypeWithRealReference := &dst.FuncType{
+		Params: &dst.FieldList{List: []*dst.Field{
+			{Names: []*dst.Ident{dst.NewIdent("x")}, Type: dst.NewIdent("T")},
+		}},
+	}
+	assert.True(t, referencesTypeParameter(funcTypeWithRealReference, tp),
+		"func parameter whose type is the type parameter")
+
+	interfaceWithGenericMethod := &dst.InterfaceType{
+		Methods: &dst.FieldList{List: []*dst.Field{
+			{
+				Names: []*dst.Ident{dst.NewIdent("Get")},
+				Type:  &dst.FuncType{Results: &dst.FieldList{List: []*dst.Field{{Type: dst.NewIdent("T")}}}},
+			},
+		}},
+	}
+	assert.True(t, referencesTypeParameter(interfaceWithGenericMethod, tp),
+		"interface literal with a method referencing the type parameter")
+
+	interfaceWithoutGenericMethod := &dst.InterfaceType{
+		Methods: &dst.FieldList{List: []*dst.Field{
+			{
+				Names: []*dst.Ident{dst.NewIdent("Close")},
+				Type:  &dst.FuncType{Results: &dst.FieldList{List: []*dst.Field{{Type: dst.NewIdent("error")}}}},
+			},
+		}},
+	}
+	assert.False(t, referencesTypeParameter(interfaceWithoutGenericMethod, tp),
+		"interface literal with no method referencing the type parameter")
+
+	// The T in testing.T belongs to the imported package.
+	testingT := &dst.StarExpr{X: &dst.SelectorExpr{X: dst.NewIdent("testing"), Sel: dst.NewIdent("T")}}
+	assert.False(t, referencesTypeParameter(testingT, tp),
+		"*testing.T is not a reference despite the selector name colliding with T")
+}
+
 // parseReceiverType returns the file and the receiver type expression of a
 // method declared on the given receiver source, e.g. "*GenStruct[T]". The
 // synthetic file has no matching type declaration, so constraint recovery
@@ -997,6 +1281,75 @@ func TestExtractReceiverTypeParamsConstraint_MultipleParams(t *testing.T) {
 	}
 }
 
+// TestExtractReceiverTypeParamsConstraint_NameCollision covers a declaration
+// whose type parameter shares its name with the selector of a qualified
+// constraint. Remapping to the receiver's names must rewrite only genuine type
+// parameter references, so fmt.Stringer keeps its selector instead of becoming
+// the nonexistent fmt.A.
+func TestExtractReceiverTypeParamsConstraint_NameCollision(t *testing.T) {
+	file, recvType := parseReceiverTypeWithDecl(t, `import "fmt"`,
+		"type GenStruct[Stringer any, V fmt.Stringer] struct{}",
+		"GenStruct[A, B]")
+
+	params := extractReceiverTypeParams(file, recvType)
+	require.NotNil(t, params)
+	require.Len(t, params.List, 2)
+	assert.Equal(t, []string{"A", "B"}, typeParamNames(t, params))
+
+	sel, ok := params.List[1].Type.(*dst.SelectorExpr)
+	require.True(t, ok, "expected the constraint to be a package-qualified selector")
+	pkgIdent, ok := sel.X.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "fmt", pkgIdent.Name)
+	assert.Equal(t, "Stringer", sel.Sel.Name,
+		"the selector names fmt.Stringer and must not be renamed to the receiver's parameter")
+}
+
+// TestExtractReceiverTypeParamsConstraint_MethodNameCollision covers the same
+// hazard for a name a constraint declares rather than references: an interface
+// method whose name matches a type parameter must keep its own name.
+func TestExtractReceiverTypeParamsConstraint_MethodNameCollision(t *testing.T) {
+	file, recvType := parseReceiverTypeWithDecl(t, "",
+		"type GenStruct[T any, V interface{ T() string }] struct{}",
+		"GenStruct[A, B]")
+
+	params := extractReceiverTypeParams(file, recvType)
+	require.NotNil(t, params)
+	require.Len(t, params.List, 2)
+	assert.Equal(t, []string{"A", "B"}, typeParamNames(t, params))
+
+	iface, ok := params.List[1].Type.(*dst.InterfaceType)
+	require.True(t, ok, "expected the constraint to be an interface")
+	require.Len(t, iface.Methods.List, 1)
+	require.Len(t, iface.Methods.List[0].Names, 1)
+	assert.Equal(t, "T", iface.Methods.List[0].Names[0].Name,
+		"the interface declares the method name and must not be renamed")
+}
+
+// TestExtractReceiverTypeParamsConstraint_SingleParamNameCollision covers the
+// single type parameter path, which builds its field list separately from the
+// multi-parameter one. A one parameter receiver cannot carry an inter-parameter
+// constraint, having no sibling to reference, but it can still collide with the
+// selector of its own qualified constraint.
+func TestExtractReceiverTypeParamsConstraint_SingleParamNameCollision(t *testing.T) {
+	file, recvType := parseReceiverTypeWithDecl(t, `import "fmt"`,
+		"type GenStruct[Stringer fmt.Stringer] struct{}",
+		"GenStruct[A]")
+
+	params := extractReceiverTypeParams(file, recvType)
+	require.NotNil(t, params)
+	require.Len(t, params.List, 1)
+	assert.Equal(t, []string{"A"}, typeParamNames(t, params))
+
+	sel, ok := params.List[0].Type.(*dst.SelectorExpr)
+	require.True(t, ok, "expected the constraint to be a package-qualified selector")
+	pkgIdent, ok := sel.X.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "fmt", pkgIdent.Name)
+	assert.Equal(t, "Stringer", sel.Sel.Name,
+		"the selector names fmt.Stringer and must not be renamed to the receiver's parameter")
+}
+
 // TestReceiverBaseTypeName_NonIdent covers the defensive fallback directly: a
 // non-identifier base expression, which no valid Go receiver form actually
 // produces, returns "" rather than panicking.
@@ -1047,4 +1400,273 @@ func TestExtractReceiverTypeParamsNestedPointer(t *testing.T) {
 
 	require.NotNil(t, params)
 	assert.Equal(t, []string{"T"}, typeParamNames(t, params))
+}
+
+func TestHookGuardCond_WithoutBuildWideIgnoreUsage(t *testing.T) {
+	ip := &instrumentPhase{target: parseFile(t, "package main\n")}
+
+	cond, ok := ip.hookGuardCond("HBefore").(*dst.BinaryExpr)
+	require.True(t, ok)
+	assert.Equal(
+		t,
+		token.NEQ,
+		cond.Op,
+		"with no //otelc:ignore usage in this build, the guard checks only the hook var",
+	)
+}
+
+func TestHookGuardCond_WithBuildWideIgnoreUsage(t *testing.T) {
+	ip := &instrumentPhase{target: parseFile(t, "package main\n"), buildUsesIgnoreDirective: true}
+
+	cond, ok := ip.hookGuardCond("HBefore").(*dst.BinaryExpr)
+	require.True(t, ok)
+	require.Equal(t, token.LAND, cond.Op)
+
+	notSuppressed, ok := cond.Y.(*dst.UnaryExpr)
+	require.True(t, ok)
+	assert.Equal(t, token.NOT, notSuppressed.Op)
+
+	call, ok := notSuppressed.X.(*dst.CallExpr)
+	require.True(t, ok)
+	sel, ok := call.Fun.(*dst.SelectorExpr)
+	require.True(t, ok, "expects a call qualified with the runtime package, got %T", call.Fun)
+	assert.Equal(t, "runtime", sel.X.(*dst.Ident).Name)
+	assert.Equal(t, "HooksSuppressed", sel.Sel.Name)
+}
+
+func TestHookGuardCond_InsideRuntimePackageItselfIsUnqualified(t *testing.T) {
+	ip := &instrumentPhase{
+		target:                   parseFile(t, "package runtime\n"),
+		buildUsesIgnoreDirective: true,
+		compileArgs:              []string{"-p", "runtime"},
+	}
+
+	cond, ok := ip.hookGuardCond("HBefore").(*dst.BinaryExpr)
+	require.True(t, ok)
+	notSuppressed, ok := cond.Y.(*dst.UnaryExpr)
+	require.True(t, ok)
+
+	call, ok := notSuppressed.X.(*dst.CallExpr)
+	require.True(t, ok)
+	_, isSelector := call.Fun.(*dst.SelectorExpr)
+	assert.False(t, isSelector, "a call inside package runtime itself must not qualify itself with a self-import")
+	ident, ok := call.Fun.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "HooksSuppressed", ident.Name)
+}
+
+// TestExtractReceiverTypeParamsConstraint_RenamedInterParam covers a receiver
+// that renames the type parameters while a constraint refers to a sibling
+// parameter. type M[K any, V ~[]K] used as func (m M[A, B]) must recover V's
+// constraint as ~[]A, following the receiver's names, not the declaration's ~[]K.
+// A verbatim ~[]K would refer to a name the trampoline never declares and would
+// not compile.
+func TestExtractReceiverTypeParamsConstraint_RenamedInterParam(t *testing.T) {
+	file, recvType := parseReceiverTypeWithDecl(t, "",
+		"type M[K any, V ~[]K] struct{ k K; v V }", "M[A, B]")
+
+	params := extractReceiverTypeParams(file, recvType)
+	require.NotNil(t, params)
+	assert.Equal(t, []string{"A", "B"}, typeParamNames(t, params))
+	require.Len(t, params.List, 2)
+
+	// The second parameter's constraint is ~[]A: a ~ over a slice of the first
+	// receiver parameter, re-scoped from the declaration's ~[]K.
+	tilde, ok := params.List[1].Type.(*dst.UnaryExpr)
+	require.True(t, ok, "constraint should be a ~ expression")
+	slice, ok := tilde.X.(*dst.ArrayType)
+	require.True(t, ok, "constraint should be ~[]T")
+	elem, ok := slice.Elt.(*dst.Ident)
+	require.True(t, ok)
+	assert.Equal(t, "A", elem.Name,
+		"inter-parameter constraint must use the receiver name A, not the declaration name K")
+}
+
+// TestTypeParamDeclNames covers the positional flattening directly: a nil list
+// yields no names, a grouped field (type M[K, V any] declares K then V under
+// one field) contributes each name in order, and a field with no names, which
+// valid Go does not produce, still advances by one empty slot rather than being
+// dropped.
+func TestTypeParamDeclNames(t *testing.T) {
+	assert.Nil(t, typeParamDeclNames(nil))
+
+	params := &dst.FieldList{
+		List: []*dst.Field{
+			{Names: []*dst.Ident{ast.Ident("K"), ast.Ident("V")}, Type: ast.Ident("any")},
+			{Names: nil, Type: ast.Ident("comparable")},
+			{Names: []*dst.Ident{ast.Ident("T")}, Type: ast.Ident("any")},
+		},
+	}
+
+	assert.Equal(t, []string{"K", "V", "", "T"}, typeParamDeclNames(params))
+}
+
+func TestHookLinkName(t *testing.T) {
+	a := hookLinkName("example.com/app/hooks", "Before")
+	b := hookLinkName("example.com/app/hooks2", "Before")
+	c := hookLinkName("example.com/app/hooks", "After")
+	assert.True(t, strings.HasPrefix(a, "otelc_hook_"))
+	assert.True(t, strings.HasSuffix(a, "_Before"))
+	assert.NotEqual(t, a, b, "different hook paths must not share a local name")
+	assert.NotEqual(t, a, c, "Before and After from the same path must differ")
+	assert.Equal(t, a, hookLinkName("example.com/app/hooks", "Before"))
+}
+
+// Regression for #1606: hook //go:linkname stubs were named after the hook's
+// short name and only skipped when that name was already in the current file.
+
+func writeHookPkg(t *testing.T, dir, pkg, fnName string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "hook.go"),
+		[]byte("package "+pkg+"\n\nfunc "+fnName+"(ctx HookContext) {}\n"),
+		0o600,
+	))
+}
+
+func applyHookRule(t *testing.T, ip *instrumentPhase, root *dst.File, funcName string, r *rule.InstFuncRule) {
+	t.Helper()
+	fn := findFuncDeclInFile(t, root, funcName)
+	ip.target = root
+	if ip.parser == nil {
+		ip.parser = ast.NewAstParser()
+	}
+	_, err := ip.applyFuncRule(context.Background(), r, root, fn, true)
+	require.NoError(t, err)
+}
+
+func linknameStubs(root *dst.File) [][2]string {
+	var stubs [][2]string
+	for _, decl := range root.Decls {
+		fn, ok := decl.(*dst.FuncDecl)
+		if !ok {
+			continue
+		}
+		for _, c := range fn.Decs.Start {
+			rest, found := strings.CutPrefix(c, "//go:linkname ")
+			if !found {
+				continue
+			}
+			fields := strings.Fields(rest)
+			if len(fields) == 2 {
+				stubs = append(stubs, [2]string{fields[0], fields[1]})
+			}
+		}
+	}
+	return stubs
+}
+
+func TestAddHookDecl_CrossFileSameHookDoesNotRedeclare(t *testing.T) {
+	// Same hook used by rules on A and C in two files of one package. The stub
+	// must be declared once and both trampolines must call that local name.
+	hookDir := t.TempDir()
+	writeHookPkg(t, hookDir, "hooks", "Before")
+
+	ruleA := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "hook_a"},
+		Func:         "A",
+		Before:       "Before",
+		Path:         "example.com/app/hooks",
+		ResolvedPath: hookDir,
+	}
+	ruleC := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "hook_c"},
+		Func:         "C",
+		Before:       "Before",
+		Path:         "example.com/app/hooks",
+		ResolvedPath: hookDir,
+	}
+
+	ip := newTestPhase()
+	fileA := parseFile(t, "package lib\n\nfunc A() int { return 1 }\n")
+	fileC := parseFile(t, "package lib\n\nfunc C() int { return 3 }\n")
+	applyHookRule(t, ip, fileA, "A", ruleA)
+	applyHookRule(t, ip, fileC, "C", ruleC)
+
+	stubs := append(linknameStubs(fileA), linknameStubs(fileC)...)
+	require.Len(t, stubs, 1, "one hook stub for the package, not one per file")
+	assert.Equal(t, "example.com/app/hooks.Before", stubs[0][1])
+	assert.NotEqual(t, "Before", stubs[0][0], "local stub must not reuse the hook's short name")
+
+	local := stubs[0][0]
+	srcA := renderFile(t, fileA)
+	srcC := renderFile(t, fileC)
+	assert.Contains(t, srcA, "if "+local+" != nil")
+	assert.Contains(t, srcC, "if "+local+" != nil")
+	assert.NotContains(t, srcA, "if Before != nil")
+	assert.NotContains(t, srcC, "if Before != nil")
+}
+
+func TestAddHookDecl_SameNameDifferentPathsStayDistinct(t *testing.T) {
+	// Two Before hooks from different packages in one file must each get a
+	// stub linked to their own path. Sharing one Before stub drops the second.
+	hooksDir := t.TempDir()
+	hooks2Dir := t.TempDir()
+	writeHookPkg(t, hooksDir, "hooks", "Before")
+	writeHookPkg(t, hooks2Dir, "hooks2", "Before")
+
+	ruleA := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "hook_a"},
+		Func:         "A",
+		Before:       "Before",
+		Path:         "example.com/app/hooks",
+		ResolvedPath: hooksDir,
+	}
+	ruleB := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "hook_b"},
+		Func:         "B",
+		Before:       "Before",
+		Path:         "example.com/app/hooks2",
+		ResolvedPath: hooks2Dir,
+	}
+
+	ip := newTestPhase()
+	root := parseFile(t, "package lib\n\nfunc A() int { return 1 }\n\nfunc B() int { return 2 }\n")
+	applyHookRule(t, ip, root, "A", ruleA)
+	applyHookRule(t, ip, root, "B", ruleB)
+
+	stubs := linknameStubs(root)
+	require.Len(t, stubs, 2)
+	remotes := []string{stubs[0][1], stubs[1][1]}
+	assert.ElementsMatch(t, []string{
+		"example.com/app/hooks.Before",
+		"example.com/app/hooks2.Before",
+	}, remotes)
+	assert.NotEqual(t, stubs[0][0], stubs[1][0])
+	assert.NotEqual(t, "Before", stubs[0][0])
+	assert.NotEqual(t, "Before", stubs[1][0])
+
+	src := renderFile(t, root)
+	assert.Contains(t, src, "if "+stubs[0][0]+" != nil")
+	assert.Contains(t, src, "if "+stubs[1][0]+" != nil")
+	assert.NotContains(t, src, "if Before != nil")
+}
+
+func TestAddHookDecl_HookNameMatchingTargetFuncDoesNotCallTarget(t *testing.T) {
+	// A hook named B must not bind to the target file's own func B.
+	hookDir := t.TempDir()
+	writeHookPkg(t, hookDir, "hooks", "B")
+
+	r := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "hook_a"},
+		Func:         "A",
+		Before:       "B",
+		Path:         "example.com/app/hooks",
+		ResolvedPath: hookDir,
+	}
+
+	ip := newTestPhase()
+	root := parseFile(t, "package lib\n\nfunc A() int { return 1 }\n\nfunc B() int { return 2 }\n")
+	applyHookRule(t, ip, root, "A", r)
+
+	stubs := linknameStubs(root)
+	require.Len(t, stubs, 1, "hook named B must still get a linkname stub")
+	assert.Equal(t, "example.com/app/hooks.B", stubs[0][1])
+	assert.NotEqual(t, "B", stubs[0][0])
+
+	src := renderFile(t, root)
+	assert.Contains(t, src, "func B() int")
+	assert.Contains(t, src, "if "+stubs[0][0]+" != nil")
+	assert.NotContains(t, src, "if B != nil")
 }

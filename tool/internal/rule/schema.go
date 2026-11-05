@@ -21,6 +21,7 @@ const (
 	selectorStruct            selector = "struct"
 	selectorStructLiteral     selector = "struct_literal"
 	selectorFunctionCall      selector = "function_call"
+	selectorMethodCall        selector = "method_call"
 	selectorDirective         selector = "directive"
 	selectorKind              selector = "kind"
 	selectorIdentifier        selector = "identifier"
@@ -35,6 +36,11 @@ const (
 	selectorAllOf             selector = "all-of"
 	selectorOneOf             selector = "one-of"
 	selectorNot               selector = "not"
+
+	// Signature selectors that check types with go/types.
+	selectorParamImplements      selector = "param_implements"
+	selectorResultImplements     selector = "result_implements"
+	selectorLastResultImplements selector = "last_result_implements"
 )
 
 // do modifiers (docs/rules.md § modifier names → rule types).
@@ -47,6 +53,7 @@ const (
 	modifierExpandDirective modifier = "expand_directive"
 	modifierAssignValue     modifier = "assign_value"
 	modifierSetFields       modifier = "set_fields"
+	modifierWrapLiteral     modifier = "wrap_literal"
 )
 
 // String forms used as YAML / map keys. Existing call sites (normalize,
@@ -60,6 +67,7 @@ const (
 	selStruct            = string(selectorStruct)
 	selStructLiteral     = string(selectorStructLiteral)
 	selFunctionCall      = string(selectorFunctionCall)
+	selMethodCall        = string(selectorMethodCall)
 	selDirective         = string(selectorDirective)
 	selKind              = string(selectorKind)
 	selIdentifier        = string(selectorIdentifier)
@@ -70,6 +78,10 @@ const (
 	selParam             = string(selectorParam)
 	selPattern           = string(selectorPattern)
 	selPlacement         = string(selectorPlacement)
+
+	selParamImplements      = string(selectorParamImplements)
+	selResultImplements     = string(selectorResultImplements)
+	selLastResultImplements = string(selectorLastResultImplements)
 
 	whereFile = string(selectorFile)
 	combAllOf = string(selectorAllOf)
@@ -132,6 +144,7 @@ func allSelectors() []selector {
 		selectorStruct,
 		selectorStructLiteral,
 		selectorFunctionCall,
+		selectorMethodCall,
 		selectorDirective,
 		selectorKind,
 		selectorIdentifier,
@@ -140,6 +153,9 @@ func allSelectors() []selector {
 		selectorResult,
 		selectorLastResult,
 		selectorParam,
+		selectorParamImplements,
+		selectorResultImplements,
+		selectorLastResultImplements,
 		selectorPattern,
 		selectorPlacement,
 		selectorFile,
@@ -160,5 +176,6 @@ func allModifiers() []modifier {
 		modifierExpandDirective,
 		modifierAssignValue,
 		modifierSetFields,
+		modifierWrapLiteral,
 	}
 }
