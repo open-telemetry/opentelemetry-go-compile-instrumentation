@@ -23,8 +23,9 @@ import (
 const (
 	instrumentationName = "go.opentelemetry.io/otelc/" +
 		"instrumentation/github.com/segmentio/kafka-go"
-	instrumentationKey = "KAFKA"
-	messagesParamIndex = 2
+	instrumentationKey   = "KAFKA"
+	messagesParamIndex   = 2
+	propagatedHeadersCap = 2 // traceparent + baggage
 )
 
 // kafkaEnablerImpl controls whether the kafka-go producer instrumentation is enabled.
@@ -116,7 +117,7 @@ func BeforeWriteMessages(
 	spans := make([]trace.Span, len(msgs))
 	for i := range msgs {
 		out[i] = msgs[i]
-		out[i].Headers = make([]kafka.Header, len(msgs[i].Headers), len(msgs[i].Headers)+1)
+		out[i].Headers = make([]kafka.Header, len(msgs[i].Headers), len(msgs[i].Headers)+propagatedHeadersCap)
 		copy(out[i].Headers, msgs[i].Headers)
 
 		topic := msgs[i].Topic

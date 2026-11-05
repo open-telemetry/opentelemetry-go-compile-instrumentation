@@ -69,7 +69,7 @@ func TestBeforeWriteMessages_InjectsHeadersAndStartsSpans(t *testing.T) {
 
 	// The header-injected slice must be written back for the real call, and
 	// each message in it must carry the propagated trace context.
-	written, ok := ictx.GetParam(2).([]kafka.Message)
+	written, ok := ictx.GetParam(messagesParamIndex).([]kafka.Message)
 	require.True(t, ok)
 	require.Len(t, written, 2)
 	for i := range written {
@@ -112,7 +112,7 @@ func TestBeforeWriteMessages_DoesNotModifyCallerMessages(t *testing.T) {
 	assert.Equal(t, []kafka.Header{{Key: "app", Value: []byte("x")}}, msgs[0].Headers)
 	assert.Nil(t, msgs[1].Headers)
 
-	written, ok := ictx.GetParam(2).([]kafka.Message)
+	written, ok := ictx.GetParam(messagesParamIndex).([]kafka.Message)
 	require.True(t, ok)
 	hc := kafkaprop.NewHeaderCarrier(&written[0].Headers)
 	assert.Equal(t, "x", hc.Get("app"), "existing headers must be kept")
@@ -136,7 +136,7 @@ func TestBeforeWriteMessages_SharedHeaderBackingArray(t *testing.T) {
 	BeforeWriteMessages(ictx, w, context.Background(), msgs...)
 	AfterWriteMessages(ictx, nil)
 
-	written, ok := ictx.GetParam(2).([]kafka.Message)
+	written, ok := ictx.GetParam(messagesParamIndex).([]kafka.Message)
 	require.True(t, ok)
 	spans := sr.Ended()
 	require.Len(t, spans, 2)
