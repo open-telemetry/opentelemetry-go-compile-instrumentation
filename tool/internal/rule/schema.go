@@ -53,6 +53,7 @@ const (
 	modifierExpandDirective modifier = "expand_directive"
 	modifierAssignValue     modifier = "assign_value"
 	modifierSetFields       modifier = "set_fields"
+	modifierWrapLiteral     modifier = "wrap_literal"
 )
 
 // String forms used as YAML / map keys. Existing call sites (normalize,
@@ -175,5 +176,6 @@ func allModifiers() []modifier {
 		modifierExpandDirective,
 		modifierAssignValue,
 		modifierSetFields,
+		modifierWrapLiteral,
 	}
 }
