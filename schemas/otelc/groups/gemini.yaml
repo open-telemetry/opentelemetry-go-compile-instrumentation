@@ -32,9 +32,11 @@ groups:
   #     present and is otherwise derived (input + output).
   #   - `gen_ai.request.*` attributes come from the request's `generationConfig`
   #     and are absent when the caller sets no generation config.
-  #   - `gen_ai.response.*` attributes are absent on error responses and on
-  #     server-sent-event responses, which are passed through without
-  #     accumulation. `gen_ai.request.is_stream` is set only on that SSE path.
+  #   - `gen_ai.response.*` attributes are absent on error responses, on
+  #     responses larger than the 4 MB parse cap, and on server-sent-event
+  #     responses, which are passed through without accumulation.
+  #     `gen_ai.request.is_stream` is set only on that defensive SSE path.
+  #   - `server.address` and `server.port` come from the request URL.
   # ---------------------------------------------------------------------------
 
   - id: span.otelc.gen_ai.gemini.client
@@ -58,4 +60,6 @@ groups:
       - ref: gen_ai.usage.output_tokens
       - ref: gen_ai.usage.total_tokens
       - ref: gen_ai.request.is_stream
+      - ref: server.address
+      - ref: server.port
       - ref: error.type

@@ -57,7 +57,8 @@ HTTP client the SDK settled on:
 │     - Generate otelc.runtime.go             │
 │                                             │
 │  3. Instrument Phase:                       │
-│     - Inject after-hook into NewClient      │
+│     - Inject before/after hooks into        │
+│       NewClient                             │
 │     - Tracing transport installed on the    │
 │       client's *http.Client                 │
 │                                             │
@@ -65,7 +66,7 @@ HTTP client the SDK settled on:
 └─────────────────────────────────────────────┘
 ```
 
-### Why an After Hook
+### Why the Transport Is Installed After NewClient
 
 `NewClient` fills in a nil `ClientConfig.HTTPClient` itself, and for Vertex AI
 without explicit credentials the client it builds carries
@@ -78,9 +79,20 @@ authentication is untouched.
 pointer the copy shares with the internal API client that issues requests, so
 replacing its transport takes effect for every subsequent call.
 
+### Caller-Supplied HTTP Clients
+
+When the caller passes its own `ClientConfig.HTTPClient`, the before hook hands
+`NewClient` a shallow copy of it, and the transport is installed on that copy.
+The caller's `*http.Client` is never written to, so it stays safe to use from
+other goroutines, and two genai clients built over one `*http.Client` each get
+their own wrapper with their own backend. The copy is taken when `NewClient`
+runs, so later changes to the caller's client (for example its `Timeout`) do
+not reach the genai client.
+
 ### Runtime Execution
 
-1. **After `NewClient`**: Wraps the client's transport, once only; clients sharing an `*http.Client` do not stack
+1. **Before `NewClient`**: Copies a caller-supplied `*http.Client`
+2. **After `NewClient`**: Wraps the transport of the client the SDK will use, once only
 2. **Request**: Classifies the path, reads generation parameters, creates a span
 3. **Response**: Records response metadata, token usage, and ends the span
 
@@ -105,13 +117,15 @@ This instrumentation emits spans following the
 | `gen_ai.request.temperature` | `generationConfig.temperature` | `0.7` |
 | `gen_ai.request.top_p` | `generationConfig.topP` | `0.9` |
 | `gen_ai.request.top_k` | `generationConfig.topK` | `40` |
-| `gen_ai.request.is_stream` | Set only when a response arrives as SSE | `true` |
+| `gen_ai.request.is_stream` | Set only on the defensive path where a `generateContent` response arrives as SSE | `true` |
 | `gen_ai.response.id` | `responseId` | `"resp-abc123"` |
 | `gen_ai.response.model` | `modelVersion` | `"gemini-2.5-flash-001"` |
 | `gen_ai.response.finish_reasons` | Per-candidate `finishReason` | `["STOP"]` |
 | `gen_ai.usage.input_tokens` | `promptTokenCount` | `150` |
 | `gen_ai.usage.output_tokens` | `candidatesTokenCount` + `thoughtsTokenCount` | `42` |
 | `gen_ai.usage.total_tokens` | `totalTokenCount` (derived if absent) | `192` |
+| `server.address` | Host of the request URL | `"generativelanguage.googleapis.com"` |
+| `server.port` | Port of the request URL | `443` |
 | `error.type` | HTTP status code on a failed call | `"429"` |
 
 ### Token Accounting
@@ -150,7 +164,9 @@ not implement that opt-in, so metadata-only is the only behaviour.
 The request body is read through `Request.GetBody`, the replayable copy
 net/http keeps, so the payload the server receives is never consumed. The
 response body is read through a bounded `io.TeeReader` (4 MB) and reassembled so
-the SDK always sees the full payload.
+the SDK always sees the full payload. A response larger than the cap keeps its
+span, but the attributes parsed from the response body are omitted and a warning
+is logged once per process.
 
 ## Limitations
 
