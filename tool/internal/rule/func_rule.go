@@ -46,6 +46,14 @@ type FuncSignature struct {
 //	result: error
 //	last_result: error
 //	param: context.Context
+//
+// The *_implements sub-filters match a type that is the named interface or
+// implements it. They need type information, so the setup phase ignores them
+// and the instrument phase checks them:
+//
+//	param_implements: context.Context
+//	result_implements: error
+//	last_result_implements: error
 type InstFuncRule struct {
 	InstBaseRule `yaml:",inline"`
 
@@ -60,6 +68,10 @@ type InstFuncRule struct {
 	Result            string         `json:"result,omitempty"             yaml:"result"`
 	LastResult        string         `json:"last_result,omitempty"        yaml:"last_result"`
 	Param             string         `json:"param,omitempty"              yaml:"param"`
+
+	ParamImplements      string `json:"param_implements,omitempty"       yaml:"param_implements"`
+	ResultImplements     string `json:"result_implements,omitempty"      yaml:"result_implements"`
+	LastResultImplements string `json:"last_result_implements,omitempty" yaml:"last_result_implements"`
 }
 
 // NewInstFuncRule loads and validates an InstFuncRule from YAML data.
@@ -87,7 +99,22 @@ func (r *InstFuncRule) validate() error {
 	if strings.TrimSpace(r.Path) == "" {
 		return ex.Newf("path cannot be empty")
 	}
+	for _, f := range [...]struct{ key, name string }{
+		{"param_implements", r.ParamImplements},
+		{"result_implements", r.ResultImplements},
+		{"last_result_implements", r.LastResultImplements},
+	} {
+		if strings.HasPrefix(strings.TrimSpace(f.name), "*") {
+			return ex.Newf("%s must name an interface type, got %q", f.key, f.name)
+		}
+	}
 	return nil
+}
+
+// HasImplementsFilters reports whether r sets any of the *_implements
+// sub-filters.
+func (r *InstFuncRule) HasImplementsFilters() bool {
+	return r.ParamImplements != "" || r.ResultImplements != "" || r.LastResultImplements != ""
 }
 
 // Identity returns a content-derived key used to generate trampoline and
@@ -134,6 +161,11 @@ func (r *InstFuncRule) Identity() string {
 		enc(r.Before), enc(r.After), enc(r.Path),
 		enc(r.Result), enc(r.LastResult), enc(r.Param),
 		encSig(r.Signature), encSig(r.SignatureContains),
+	}
+	// Appended only when set, so the identity of a rule without them stays
+	// the same.
+	if r.HasImplementsFilters() {
+		parts = append(parts, enc(r.ParamImplements), enc(r.ResultImplements), enc(r.LastResultImplements))
 	}
 	return util.CRC32(strings.Join(parts, ""))
 }
