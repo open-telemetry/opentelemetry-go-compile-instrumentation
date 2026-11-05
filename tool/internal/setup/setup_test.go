@@ -1597,6 +1597,8 @@ func TestGenerateRuntimePerPackageSkipsSelfImport(t *testing.T) {
 	hooksDir := filepath.Join(appDir, "hooks")
 	mustWriteFile(t, filepath.Join(appDir, "answer.go"), "package app\n")
 	mustWriteFile(t, filepath.Join(hooksDir, "hooks.go"), "package hooks\n")
+	mustWriteFile(t, filepath.Join(appDir, "go.mod"), "module example.com/app\n\ngo 1.25.0\n")
+	sp.buildFlags = []string{"-C", appDir}
 
 	pkgs := []*packages.Package{
 		{
@@ -1638,9 +1640,20 @@ func TestGenerateRuntimePerPackageSkipsSelfImportForFileTargets(t *testing.T) {
 	t.Setenv(util.EnvOtelcWorkDir, moduleDir)
 	t.Setenv(util.EnvOtelcDebug, "1")
 	hooksDir := filepath.Join(moduleDir, "hooks")
-	mustWriteFile(t, filepath.Join(moduleDir, "go.mod"), "module example.com/app\n\ngo 1.25.0\n")
+	externalHooksDir := filepath.Join(moduleDir, "external-hooks")
+
+	mustWriteFile(t, filepath.Join(moduleDir, "go.mod"), `module example.com/app
+
+	go 1.25.0
+
+	require example.com/hooks v0.0.0
+
+	replace example.com/hooks => ./external-hooks
+	`)
 	mustWriteFile(t, filepath.Join(moduleDir, "answer.go"), "package app\n")
 	mustWriteFile(t, filepath.Join(hooksDir, "hooks.go"), "package hooks\n")
+	mustWriteFile(t, filepath.Join(externalHooksDir, "go.mod"), "module example.com/hooks\n\ngo 1.25.0\n")
+	mustWriteFile(t, filepath.Join(externalHooksDir, "hooks.go"), "package hooks\n")
 
 	pkgs := []*packages.Package{
 		{
@@ -2165,4 +2178,31 @@ func TestSetupPhase_GetBuildContext(t *testing.T) {
 		assert.Contains(t, bctx.BuildTags, "clitag")
 		assert.NotContains(t, bctx.BuildTags, "envtag")
 	})
+}
+
+func TestHookImportsError(t *testing.T) {
+	matched := []*rule.InstRuleSet{
+		{
+			FileRules: []*rule.InstFileRule{{Path: "example.com/app/hooks"}},
+		},
+	}
+	sp := newTestSetupPhase()
+	sp.buildFlags = []string{"-C"}
+	_, err := sp.hookImports(context.Background(), matched)
+	if err == nil {
+		t.Fatal("expected error for malformed build flags, got nil")
+	}
+}
+
+func TestHookImportsErrorOnBrokenHookPackage(t *testing.T) {
+	matched := []*rule.InstRuleSet{
+		{
+			FileRules: []*rule.InstFileRule{{Path: "example.com/this-package-does-not-exist"}},
+		},
+	}
+	sp := newTestSetupPhase()
+	_, err := sp.hookImports(context.Background(), matched)
+	if err == nil {
+		t.Fatal("expected error for a hook package that fails to load, got nil")
+	}
 }
