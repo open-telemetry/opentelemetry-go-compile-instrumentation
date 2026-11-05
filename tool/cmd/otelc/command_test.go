@@ -7,7 +7,7 @@ import (
 	"bytes"
 	"context"
 	"os"
-	"path/filepath"
+	"os/exec"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -36,36 +36,29 @@ func TestCommandVersion(t *testing.T) {
 	assert.Contains(t, out, "go1.")
 }
 
-// TestCommandVendorHelp: -h and --help show the help of otelc vendor. They
-// must not run otelc vendor, which changes the project.
-func TestCommandVendorHelp(t *testing.T) {
-	for _, flag := range []string{"-h", "--help"} {
-		t.Run(flag, func(t *testing.T) {
-			t.Chdir(t.TempDir())
-			var buf bytes.Buffer
-			vendor := commandVendor
-			vendor.Before = nil
-			app := &cli.Command{Name: "otelc", Writer: &buf, Commands: []*cli.Command{&vendor}}
-			require.NoError(t, app.Run(context.Background(), []string{"otelc", "vendor", flag}))
-			assert.Contains(t, buf.String(), "vendor")
-			assert.Contains(t, buf.String(), "go build flags")
-		})
-	}
-}
+// TestCommandToolexecNestedKeepsToolexec: a nested toolexec puts otelc back in
+// GOFLAGS, which startup stripped. A compile it instruments can resolve an
+// added import with a nested build of its own, and that build must run through
+// otelc too.
+func TestCommandToolexecNestedKeepsToolexec(t *testing.T) {
+	goBin, err := exec.LookPath("go")
+	require.NoError(t, err)
+	exe, err := os.Executable()
+	require.NoError(t, err)
+	innerFlag, err := util.BuildToolexecFlag(exe)
+	require.NoError(t, err)
+	wantToken, err := util.QuoteGoflagsToken(innerFlag)
+	require.NoError(t, err)
 
-// TestCommandVendorRuns: other arguments go to otelc vendor, which fails in a
-// module without a vendor directory.
-func TestCommandVendorRuns(t *testing.T) {
-	dir := t.TempDir()
-	t.Chdir(dir)
-	t.Setenv(util.EnvOtelcWorkDir, dir)
-	t.Setenv("GOWORK", "off")
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module m\n\ngo 1.25.0\n"), 0o644))
-	vendor := commandVendor
-	vendor.Before = nil
-	app := &cli.Command{Name: "otelc", Commands: []*cli.Command{&vendor}}
-	err := app.Run(context.Background(), []string{"otelc", "vendor", "-v", "."})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "go mod vendor")
-	assert.False(t, isHelpFlag("-v"))
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	t.Setenv(util.EnvOtelcNestedToolexec, "1")
+	t.Setenv("GOFLAGS", "-mod=mod")
+	toolexec := commandToolexec
+	toolexec.Before = nil
+	app := &cli.Command{Name: "otelc", Commands: []*cli.Command{&toolexec}}
+	require.NoError(t, app.Run(context.Background(), []string{"otelc", "toolexec", goBin, "env", "GOROOT"}))
+
+	tokens := util.SplitGoflags(os.Getenv("GOFLAGS"))
+	assert.Contains(t, tokens, "-mod=mod")
+	assert.Contains(t, tokens, wantToken)
 }
