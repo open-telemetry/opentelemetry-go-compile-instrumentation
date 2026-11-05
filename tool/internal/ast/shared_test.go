@@ -578,6 +578,192 @@ func TestFuncDeclMatchesFilters_Param(t *testing.T) {
 	assert.False(t, mustMatch(t, decl, &rule.InstFuncRule{Param: "int"}))
 }
 
+// TestFuncDeclMatchesFilters_CompositeTypes locks the documented no-match
+// behavior for composite parameter and result types. Scanning those nodes
+// used to call util.Unimplemented and abort setup; they must now be skipped.
+// "Contains" applies to the parameter/result list, not to nested element
+// types, so args: [string] does not match []string.
+func TestFuncDeclMatchesFilters_CompositeTypes(t *testing.T) {
+	chanDecl := makeFuncDecl(
+		[]*dst.Field{field(&dst.ChanType{Value: ident("int")})},
+		[]*dst.Field{field(ident("error"))},
+	)
+	readDecl := makeFuncDecl(
+		[]*dst.Field{field(&dst.ArrayType{Elt: ident("byte")})},
+		[]*dst.Field{field(ident("int")), field(ident("error"))},
+	)
+	mixedDecl := makeFuncDecl(
+		[]*dst.Field{field(ident("string")), field(&dst.ArrayType{Elt: ident("byte")})},
+		[]*dst.Field{field(ident("error"))},
+	)
+	mapDecl := makeFuncDecl(
+		[]*dst.Field{field(&dst.MapType{Key: ident("string"), Value: ident("int")})},
+		nil,
+	)
+	funcDecl := makeFuncDecl(
+		[]*dst.Field{field(&dst.FuncType{
+			Results: &dst.FieldList{List: []*dst.Field{field(ident("error"))}},
+		})},
+		nil,
+	)
+	variadicDecl := makeFuncDecl(
+		[]*dst.Field{field(&dst.Ellipsis{Elt: ident("string")})},
+		nil,
+	)
+	ptrSliceDecl := makeFuncDecl(
+		[]*dst.Field{field(&dst.StarExpr{X: &dst.ArrayType{Elt: ident("byte")}})},
+		[]*dst.Field{field(&dst.ArrayType{Elt: ident("error")})},
+	)
+
+	tests := []struct {
+		name string
+		decl *dst.FuncDecl
+		rule *rule.InstFuncRule
+		want bool
+	}{
+		{
+			name: "signature_contains does not match chan element type",
+			decl: chanDecl,
+			rule: &rule.InstFuncRule{SignatureContains: &rule.FuncSignature{Args: []string{"int"}}},
+			want: false,
+		},
+		{
+			name: "signature_contains still matches a simple result beside a composite param",
+			decl: chanDecl,
+			rule: &rule.InstFuncRule{SignatureContains: &rule.FuncSignature{Returns: []string{"error"}}},
+			want: true,
+		},
+		{
+			name: "signature_contains does not match slice element type",
+			decl: readDecl,
+			rule: &rule.InstFuncRule{SignatureContains: &rule.FuncSignature{Args: []string{"byte"}}},
+			want: false,
+		},
+		{
+			name: "param does not match slice element type",
+			decl: readDecl,
+			rule: &rule.InstFuncRule{Param: "byte"},
+			want: false,
+		},
+		{
+			name: "last_result still matches when an earlier param is composite",
+			decl: readDecl,
+			rule: &rule.InstFuncRule{LastResult: "error"},
+			want: true,
+		},
+		{
+			name: "result still matches when an earlier param is composite",
+			decl: readDecl,
+			rule: &rule.InstFuncRule{Result: "int"},
+			want: true,
+		},
+		{
+			name: "exact signature does not treat a composite slot as its element type",
+			decl: readDecl,
+			rule: &rule.InstFuncRule{Signature: &rule.FuncSignature{
+				Args:    []string{"byte"},
+				Returns: []string{"int", "error"},
+			}},
+			want: false,
+		},
+		{
+			name: "param matches a simple type in a mixed signature",
+			decl: mixedDecl,
+			rule: &rule.InstFuncRule{Param: "string"},
+			want: true,
+		},
+		{
+			name: "signature_contains matches a simple type in a mixed signature",
+			decl: mixedDecl,
+			rule: &rule.InstFuncRule{SignatureContains: &rule.FuncSignature{Args: []string{"string"}}},
+			want: true,
+		},
+		{
+			name: "signature_contains does not match map key or value",
+			decl: mapDecl,
+			rule: &rule.InstFuncRule{SignatureContains: &rule.FuncSignature{Args: []string{"string"}}},
+			want: false,
+		},
+		{
+			name: "param does not match a func type's result",
+			decl: funcDecl,
+			rule: &rule.InstFuncRule{Param: "error"},
+			want: false,
+		},
+		{
+			name: "param does not match a variadic element type",
+			decl: variadicDecl,
+			rule: &rule.InstFuncRule{Param: "string"},
+			want: false,
+		},
+		{
+			name: "param does not match pointer-to-slice element type",
+			decl: ptrSliceDecl,
+			rule: &rule.InstFuncRule{Param: "byte"},
+			want: false,
+		},
+		{
+			name: "result does not match a composite return's element type",
+			decl: ptrSliceDecl,
+			rule: &rule.InstFuncRule{Result: "error"},
+			want: false,
+		},
+		{
+			name: "last_result does not match a composite last return's element type",
+			decl: ptrSliceDecl,
+			rule: &rule.InstFuncRule{LastResult: "error"},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, mustMatch(t, tt.decl, tt.rule))
+		})
+	}
+}
+
+func TestFindFuncDeclCompositeSignatureFilters(t *testing.T) {
+	file, err := NewAstParser().ParseSource(`package main
+
+func Read(p []byte) (n int, err error) { return len(p), nil }
+func Send(ch chan int) error { return nil }
+func Log(msg string, extra []byte) {}
+`)
+	require.NoError(t, err)
+
+	t.Run("composite-only param is no-match not fatal", func(t *testing.T) {
+		fn, ok, findErr := FindFuncDecl(file, &rule.InstFuncRule{
+			Func:              "Read",
+			SignatureContains: &rule.FuncSignature{Args: []string{"byte"}},
+		}, nil)
+		require.NoError(t, findErr)
+		assert.False(t, ok)
+		assert.Nil(t, fn)
+	})
+
+	t.Run("simple type still matches beside a composite param", func(t *testing.T) {
+		fn, ok, findErr := FindFuncDecl(file, &rule.InstFuncRule{
+			Func:  "Log",
+			Param: "string",
+		}, nil)
+		require.NoError(t, findErr)
+		require.True(t, ok)
+		require.NotNil(t, fn)
+		assert.Equal(t, "Log", fn.Name.Name)
+	})
+
+	t.Run("chan param does not match element type", func(t *testing.T) {
+		fn, ok, findErr := FindFuncDecl(file, &rule.InstFuncRule{
+			Func:  "Send",
+			Param: "int",
+		}, nil)
+		require.NoError(t, findErr)
+		assert.False(t, ok)
+		assert.Nil(t, fn)
+	})
+}
+
 func TestFuncDeclMatchesFilters_CombinedFilters(t *testing.T) {
 	// func(context.Context, string) (io.Reader, error)
 	decl := makeFuncDecl(
