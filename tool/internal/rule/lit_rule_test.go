@@ -90,7 +90,52 @@ struct_literal: net/http.Transport
 `,
 			ruleName:    "bad",
 			wantErr:     true,
-			errContains: "field must list at least one field to set",
+			errContains: "set_fields must list at least one field, or wrap_literal must set pointer or value",
+		},
+		{
+			name: "wrap_literal pointer only",
+			yaml: `
+struct_literal: github.com/gocql/gocql.ClusterConfig
+pointer: "gocqltrace.Observe({{ . }})"
+`,
+			ruleName: "observe_cluster",
+			check: func(t *testing.T, r *InstLitRule) {
+				assert.Empty(t, r.Field)
+				assert.Equal(t, "gocqltrace.Observe({{ . }})", r.Pointer)
+				assert.Empty(t, r.Value)
+			},
+		},
+		{
+			name: "wrap_literal pointer and value",
+			yaml: `
+struct_literal: github.com/gocql/gocql.ClusterConfig
+pointer: "gocqltrace.Observe({{ . }})"
+value: "*gocqltrace.Observe(&{{ . }})"
+`,
+			ruleName: "observe_cluster",
+			check: func(t *testing.T, r *InstLitRule) {
+				assert.Equal(t, "*gocqltrace.Observe(&{{ . }})", r.Value)
+			},
+		},
+		{
+			name: "wrap_literal pointer without placeholder",
+			yaml: `
+struct_literal: github.com/gocql/gocql.ClusterConfig
+pointer: "gocqltrace.Observe()"
+`,
+			ruleName:    "bad",
+			wantErr:     true,
+			errContains: "pointer must contain {{ . }} placeholder",
+		},
+		{
+			name: "wrap_literal value without placeholder",
+			yaml: `
+struct_literal: github.com/gocql/gocql.ClusterConfig
+value: "gocqltrace.Observe()"
+`,
+			ruleName:    "bad",
+			wantErr:     true,
+			errContains: "value must contain {{ . }} placeholder",
 		},
 		{
 			name: "empty field name",
@@ -255,5 +300,21 @@ func TestInstLitRule_UnmarshalJSON(t *testing.T) {
 		var r InstLitRule
 		err := json.Unmarshal([]byte(`{bad`), &r)
 		require.Error(t, err)
+	})
+
+	t.Run("round-trips wrap_literal templates", func(t *testing.T) {
+		orig, err := NewInstLitRule([]byte(`
+struct_literal: github.com/gocql/gocql.ClusterConfig
+pointer: "Observe({{ . }})"
+value: "*Observe(&{{ . }})"
+`), "observe_cluster")
+		require.NoError(t, err)
+		data, err := json.Marshal(orig)
+		require.NoError(t, err)
+
+		var r InstLitRule
+		require.NoError(t, json.Unmarshal(data, &r))
+		assert.Equal(t, "Observe({{ . }})", r.Pointer)
+		assert.Equal(t, "*Observe(&{{ . }})", r.Value)
 	})
 }

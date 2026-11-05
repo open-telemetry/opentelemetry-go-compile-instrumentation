@@ -1,0 +1,22 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+//line /golden/work/main.go:6
+import "context"
+
+type RequestContext struct{ context.Context }
+
+type MyErr struct{}
+
+func (*MyErr) Error() string { return "" }
+
+func handle(_ignoredParam_2480480240_0 string, c *RequestContext) (_unnamedRetVal0 int, _unnamedRetVal1 *MyErr) {
+	/*line /<generated>:1*/ println("ctx:", c != nil)
+	defer func() { println("err:", _unnamedRetVal1 != nil) }()
+	/*line /golden/work/main.go:15*/ return 0, nil
+}
+
+//line /golden/work/main.go:18
+func main() { handle("x", &RequestContext{Context: context.Background()}) }

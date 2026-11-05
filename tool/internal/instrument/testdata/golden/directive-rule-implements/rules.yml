@@ -1,0 +1,9 @@
+span_directive:
+  target: main
+  where:
+    directive: "otelc:span"
+  do:
+    - expand_directive:
+        template: |-
+          println("ctx arg:", {{ printf "%q" (.FuncArgumentThatImplements "context.Context") }})
+          println("err ret:", {{ printf "%q" (.FuncReturnThatImplements "error") }})
