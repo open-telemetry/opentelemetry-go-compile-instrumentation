@@ -186,10 +186,57 @@ func WriteFileAtomic(filePath string, data []byte, perm ...os.FileMode) error {
 	// Atomic replacement on Unix-like systems when source and destination are on
 	// the same filesystem. On non-Unix platforms, os.Rename may replace the file
 	// but the operation is not guaranteed to be atomic.
-	if renameErr := os.Rename(tmpPath, filePath); renameErr != nil {
+	if renameErr := RenameReplace(tmpPath, filePath); renameErr != nil {
 		return ex.Wrapf(renameErr, "failed to atomically replace %s", filePath)
 	}
 
+	return nil
+}
+
+// RenameReplace renames oldPath to newPath. When newPath exists, it is
+// replaced. On Windows, a rename cannot replace a read-only file. Then
+// RenameReplace makes newPath writable and does the rename again. If the
+// second rename fails too, it sets the permissions of newPath back. On the
+// other systems, RenameReplace is os.Rename.
+//
+// The permissions belong to the file, not to its name. Thus RenameReplace
+// does not change the permissions of a newPath that has more than one hard
+// link: else a different file (the other link, which can be outside the
+// project) stays writable after the rename. Then the first error is returned.
+func RenameReplace(oldPath, newPath string) error {
+	return renameReplace(oldPath, newPath, os.Rename, IsWindows(), hasOneLink)
+}
+
+// renameReplace is RenameReplace with the rename function, the Windows
+// behavior and the link count check as parameters, so that a test on a
+// different system can examine the Windows behavior.
+func renameReplace(
+	oldPath, newPath string,
+	rename func(string, string) error,
+	windows bool,
+	oneLink func(string) bool,
+) error {
+	err := rename(oldPath, newPath)
+	if err == nil || !windows {
+		return err
+	}
+	info, statErr := os.Lstat(newPath)
+	if statErr != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o200 != 0 {
+		// newPath is not a read-only file: the error has a different cause.
+		return err
+	}
+	if !oneLink(newPath) {
+		// A different hard link shares the permissions of newPath.
+		return err
+	}
+	perm := info.Mode().Perm()
+	if chmodErr := os.Chmod(newPath, perm|0o200); chmodErr != nil {
+		return err
+	}
+	if err = rename(oldPath, newPath); err != nil {
+		_ = os.Chmod(newPath, perm)
+		return err
+	}
 	return nil
 }
 
