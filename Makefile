@@ -99,7 +99,7 @@ $(BUNDLE): $(wildcard $(TOOLS_DIR)/bundle/*.go) $(TOOLS_DIR)/bundle/go.mod | $(T
 	cd $(TOOLS_DIR)/bundle && GOWORK=off go build -o $@
 
 EMBEDMD = $(TOOLS)/embedmd
-$(EMBEDMD): PACKAGE=github.com/campoy/embedmd
+$(EMBEDMD): PACKAGE=github.com/campoy/embedmd/v2
 
 CHECKMAKE = $(TOOLS)/checkmake
 $(CHECKMAKE): PACKAGE=github.com/checkmake/checkmake/cmd/checkmake
@@ -770,7 +770,10 @@ test-integration/coverage: build build-demo
 	@echo "Running integration tests with coverage report..."
 	set -euo pipefail
 	# See test-integration: linodego builds need >20m when the suite is unsharded.
-	go -C "test" test -json -v -shuffle=on -timeout=40m -count=1 -tags integration ./integration/... -coverprofile=../coverage-integration.txt -covermode=atomic 2>&1 | tee ./gotest-integration.log
+	# 60m: the CI coverage step (this unsharded suite, with build and build-demo) takes
+	# 28m to 39m on main, and the vendored build tests (test/integration/vendor*_test.go)
+	# add about 3m. A 40m limit leaves no margin.
+	go -C "test" test -json -v -shuffle=on -timeout=60m -count=1 -tags integration ./integration/... -coverprofile=../coverage-integration.txt -covermode=atomic 2>&1 | tee ./gotest-integration.log
 
 .ONESHELL:
 test-e2e: ## Run e2e tests

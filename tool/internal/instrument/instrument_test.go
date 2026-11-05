@@ -112,7 +112,7 @@ func runTest(t *testing.T, testName string) {
 		importPath:   importPath,
 		isTest:       isTest,
 	})
-	writeMatchedJSON(ruleSet)
+	writeMatchedJSON(ruleSet, testName)
 
 	testcaseDir := filepath.Join(testdataDir, goldenDir, testName)
 	helpers := buildTestcaseHelpers(ctx, t, testcaseDir)
@@ -324,11 +324,18 @@ func fileFilterMatches(t *testing.T, def *rule.FilterDef, isTest bool, tree *dst
 	}
 }
 
-func writeMatchedJSON(ruleSet *rule.InstRuleSet) {
+func writeMatchedJSON(ruleSet *rule.InstRuleSet, testName string) {
 	// Before writing we want to ensure r.ResolvedPath is set
 	// otherwise ip.instrument() would not know where to look for files.
 	for _, r := range ruleSet.AllFuncRules() {
-		if r.Path != "" {
+		switch r.Path {
+		case "":
+		case testdataDir:
+			// A func rule with the shared testdata path keeps its hooks in the
+			// test case's own hook.go. Hooks are only looked up in the files of
+			// the resolved directory, so resolve to that directory.
+			r.ResolvedPath = filepath.Join(testdataDir, goldenDir, testName)
+		default:
 			r.ResolvedPath = r.Path
 		}
 	}

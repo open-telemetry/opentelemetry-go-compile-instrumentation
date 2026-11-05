@@ -79,6 +79,7 @@ func main() {
 		Flags:       rootFlags(),
 		Commands: []*cli.Command{
 			&commandPin,
+			&commandVendor,
 			&commandSetup,
 			&commandGo,
 			&commandCleanup,
