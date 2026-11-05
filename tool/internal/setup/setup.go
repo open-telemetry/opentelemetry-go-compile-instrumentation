@@ -39,6 +39,8 @@ type setupPhase struct {
 
 	// fileImportsCache caches discovered source imports for add_file rules during setup.
 	fileImportsCache map[string][]string
+	// tests is set for a go test build.
+	tests bool
 }
 
 func (sp *setupPhase) getBuildContext() *gobuild.Context {
@@ -491,6 +493,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		ruleConfig: cmd.String("rules"),
 		buildFlags: extractBuildFlags(subcommand, args),
 		pgo:        pgoValue(subcommand, args),
+		tests:      subcommand == subcmdTest,
 	}
 
 	// Introduce additional hook code by generating otelc.runtime.go
@@ -525,6 +528,10 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	// introduced by the generated runtime imports.
 	matched, err := sp.matchAllDeps(ctx, deps, moduleDirs, sp.buildFlags)
 	if err != nil {
+		return err
+	}
+
+	if err = sp.checkRuleImportCycles(ctx, matched, allPkgs); err != nil {
 		return err
 	}
 
