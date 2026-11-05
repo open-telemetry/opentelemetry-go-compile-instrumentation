@@ -122,6 +122,21 @@ func TestLoadPackagesWithChangeDirectoryFlag(t *testing.T) {
 	require.Error(t, err, "--C without a value")
 }
 
+func TestGOROOT(t *testing.T) {
+	goroot, err := GOROOT(t.Context(), nil)
+	require.NoError(t, err)
+
+	pkgs, err := LoadPackages(t.Context(), packages.NeedFiles|packages.NeedModule, nil, false, "fmt")
+	require.NoError(t, err)
+	require.Len(t, pkgs, 1)
+	require.Nil(t, pkgs[0].Module)
+	require.NotEmpty(t, pkgs[0].GoFiles)
+	assert.Equal(t, filepath.Join(goroot, "src", "fmt"), filepath.Dir(pkgs[0].GoFiles[0]))
+
+	_, err = GOROOT(t.Context(), []string{"-C"})
+	require.ErrorContains(t, err, "missing value for -C")
+}
+
 func TestResolvePackageName(t *testing.T) {
 	tests := []struct {
 		importPath string

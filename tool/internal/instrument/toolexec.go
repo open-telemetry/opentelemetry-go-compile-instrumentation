@@ -715,6 +715,10 @@ func markedToolVersion(rawOutput string) string {
 		if tags := util.ActiveBuildTags(); len(tags) > 0 {
 			content = append(content, "\ntags="+strings.Join(tags, ",")...)
 		}
+		// go never sees the packages rules add, so their hash stands in.
+		if injected, injErr := os.ReadFile(util.GetInjectedHashFile()); injErr == nil && len(injected) > 0 {
+			content = append(content, "\ninjected="+string(injected)...)
+		}
 		sum := sha256.Sum256(content)
 		rulesHash = hex.EncodeToString(sum[:8])
 	}

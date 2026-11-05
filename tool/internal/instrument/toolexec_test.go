@@ -1087,6 +1087,24 @@ func TestMarkedToolVersion(t *testing.T) {
 		assert.NotEqual(t, untagged, tagged)
 		assert.NotEqual(t, tagged, otherTag)
 	})
+
+	t.Run("injected package hash changes the rules hash", func(t *testing.T) {
+		workDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, workDir)
+		require.NoError(t, os.MkdirAll(filepath.Join(workDir, util.BuildTempDir), 0o755))
+		require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), []byte(`[{"module_path":"main"}]`), 0o644))
+
+		without := markedToolVersion(raw)
+		require.NoError(t, os.WriteFile(util.GetInjectedHashFile(), []byte("0011223344556677"), 0o644))
+		first := markedToolVersion(raw)
+		require.NoError(t, os.WriteFile(util.GetInjectedHashFile(), []byte("8899aabbccddeeff"), 0o644))
+		second := markedToolVersion(raw)
+		require.NoError(t, os.WriteFile(util.GetInjectedHashFile(), nil, 0o644))
+
+		assert.NotEqual(t, without, first)
+		assert.NotEqual(t, first, second)
+		assert.Equal(t, without, markedToolVersion(raw), "an empty hash file must not change the rules hash")
+	})
 }
 
 func TestEnableNestedToolexec(t *testing.T) {

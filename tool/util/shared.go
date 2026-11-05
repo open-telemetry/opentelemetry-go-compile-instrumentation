@@ -81,6 +81,13 @@ func GetPGOProfileFile() string {
 	return GetBuildTemp(pgoProfileFile)
 }
 
+// GetInjectedHashFile returns the path to the file that records the content
+// hash of the packages rules add to the build.
+func GetInjectedHashFile() string {
+	const injectedHashFile = "injected_hash"
+	return GetBuildTemp(injectedHashFile)
+}
+
 // GetAddedImportsFileForProcess returns the per-process import tracking file.
 // Each compile process writes to its own file to avoid inter-process race conditions.
 func GetAddedImportsFileForProcess() string {

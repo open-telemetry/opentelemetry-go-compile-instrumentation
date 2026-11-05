@@ -76,6 +76,27 @@ func ModuleAndWorkspace(ctx context.Context, dir string) (string, bool, error) {
 	return moduleDir, workspace, nil
 }
 
+// GOROOT returns the GOROOT of the go command that LoadPackages runs with the
+// same buildFlags. It asks that command rather than using runtime.GOROOT, as
+// GOTOOLCHAIN may select a toolchain other than the one that built this tool.
+func GOROOT(ctx context.Context, buildFlags []string) (string, error) {
+	dir, _, err := loadDirFromBuildFlags(buildFlags)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, "go", "env", "GOROOT")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", ex.Wrapf(err, "running go env GOROOT in %s", dir)
+	}
+	goroot := strings.TrimSpace(string(out))
+	if goroot == "" {
+		return "", ex.Newf("go env GOROOT in %s printed nothing", dir)
+	}
+	return goroot, nil
+}
+
 // BuildDir returns the absolute -C directory of buildFlags, or "" when
 // buildFlags has no -C flag. The flag can have one or two dashes (-C or --C),
 // as for the go command. LoadPackages loads the packages in this directory.
