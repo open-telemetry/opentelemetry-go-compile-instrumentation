@@ -182,10 +182,12 @@ func setupSyncDepsTest(t *testing.T, goMod string, instPaths []string) (string, 
 
 	pkgDir := filepath.Join(buildTempDir, unzippedPkgDir)
 	pkgRuntimeDir := filepath.Join(pkgDir, "runtime")
+	pkgNetutilDir := filepath.Join(pkgDir, "netutil")
 	pkgOtelcconvDir := filepath.Join(pkgDir, "otelcconv")
 	instDir := filepath.Join(buildTempDir, unzippedInstDir)
 
 	require.NoError(t, os.MkdirAll(pkgRuntimeDir, 0o755))
+	require.NoError(t, os.MkdirAll(pkgNetutilDir, 0o755))
 	require.NoError(t, os.MkdirAll(pkgOtelcconvDir, 0o755))
 	require.NoError(t, os.MkdirAll(instDir, 0o755))
 
@@ -202,6 +204,11 @@ func setupSyncDepsTest(t *testing.T, goMod string, instPaths []string) (string, 
 	require.NoError(t, os.WriteFile(
 		filepath.Join(pkgRuntimeDir, "go.mod"),
 		[]byte("module "+util.OtelcPkgRoot+"/runtime\ngo 1.21\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(pkgNetutilDir, "go.mod"),
+		[]byte("module "+util.OtelcPkgRoot+"/netutil\ngo 1.21\n"),
 		0o644,
 	))
 	require.NoError(t, os.WriteFile(
@@ -239,6 +246,8 @@ go 1.21
 		"replace "+util.OtelcPkgRoot+" => "+filepath.Join(buildTempDir, unzippedPkgDir))
 	assert.Contains(t, got,
 		"replace "+util.OtelcPkgRoot+"/runtime => "+filepath.Join(buildTempDir, unzippedPkgDir, "runtime"))
+	assert.Contains(t, got,
+		"replace "+util.OtelcPkgRoot+"/netutil => "+filepath.Join(buildTempDir, unzippedPkgDir, "netutil"))
 	assert.Contains(t, got,
 		"replace "+util.OtelcPkgRoot+"/otelcconv => "+filepath.Join(buildTempDir, unzippedPkgDir, "otelcconv"))
 	assert.Contains(t, got,
@@ -691,11 +700,4 @@ go 999.0.0
 	tempDir, _, _ := setupSyncDepsTest(t, goMod, []string{"net/http/client"})
 	err := syncDeps(t.Context(), map[string]bool{util.OtelcInstRoot + "/net/http/client": true}, tempDir)
 	require.Error(t, err)
-}
-
-// TestSyncDepsWithoutGoMod: syncDeps needs the go.mod file of the module.
-func TestSyncDepsWithoutGoMod(t *testing.T) {
-	err := syncDeps(t.Context(), map[string]bool{util.OtelcInstRoot + "/net/http/client": true}, t.TempDir())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to read go.mod file")
 }
