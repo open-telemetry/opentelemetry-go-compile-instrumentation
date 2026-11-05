@@ -19,7 +19,7 @@ import (
 func (ip *instrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule, root *dst.File) (bool, error) {
 	importAliases, aliasOverrides := ip.resolveImportOverrides(root, r.Imports)
 
-	setters, err := newLitFieldSetters(r, aliasOverrides)
+	setters, err := newLitFieldSetters(r, aliasOverrides, ip.fileTypes())
 	if err != nil {
 		return false, err
 	}
@@ -114,7 +114,11 @@ type litFieldSetter struct {
 	wrap *callTemplate
 }
 
-func newLitFieldSetters(r *rule.InstLitRule, aliasOverrides map[string]string) ([]*litFieldSetter, error) {
+// newLitFieldSetters returns the setters of the fields of r. typeInfo is for
+// the ThatImplements helpers in the wrap templates.
+func newLitFieldSetters(
+	r *rule.InstLitRule, aliasOverrides map[string]string, typeInfo *funcTypes,
+) ([]*litFieldSetter, error) {
 	setters := make([]*litFieldSetter, 0, len(r.Field))
 	for _, f := range r.Field {
 		setter := &litFieldSetter{name: f.Name}
@@ -131,6 +135,7 @@ func newLitFieldSetters(r *rule.InstLitRule, aliasOverrides map[string]string) (
 			if err != nil {
 				return nil, ex.Wrapf(err, "failed to compile wrap template for field %q", f.Name)
 			}
+			tmpl.typeInfo = typeInfo
 			setter.wrap = tmpl
 		}
 		setters = append(setters, setter)

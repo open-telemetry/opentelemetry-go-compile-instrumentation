@@ -36,6 +36,11 @@ const (
 	selectorAllOf             selector = "all-of"
 	selectorOneOf             selector = "one-of"
 	selectorNot               selector = "not"
+
+	// Signature selectors that check types with go/types.
+	selectorParamImplements      selector = "param_implements"
+	selectorResultImplements     selector = "result_implements"
+	selectorLastResultImplements selector = "last_result_implements"
 )
 
 // do modifiers (docs/rules.md § modifier names → rule types).
@@ -72,6 +77,10 @@ const (
 	selParam             = string(selectorParam)
 	selPattern           = string(selectorPattern)
 	selPlacement         = string(selectorPlacement)
+
+	selParamImplements      = string(selectorParamImplements)
+	selResultImplements     = string(selectorResultImplements)
+	selLastResultImplements = string(selectorLastResultImplements)
 
 	whereFile = string(selectorFile)
 	combAllOf = string(selectorAllOf)
@@ -143,6 +152,9 @@ func allSelectors() []selector {
 		selectorResult,
 		selectorLastResult,
 		selectorParam,
+		selectorParamImplements,
+		selectorResultImplements,
+		selectorLastResultImplements,
 		selectorPattern,
 		selectorPlacement,
 		selectorFile,
