@@ -339,7 +339,9 @@ import (
 
 // main records a CPU profile in which extra.Note is the dominant cost. The
 // loop does no allocation and no timing calls, so the samples land on Note
-// instead of on the runtime.
+// instead of on the runtime. The count is the smallest that keeps Note
+// dominant: profiling samples at 100 Hz, and at 3e7 iterations and below
+// the samples thin out until the top node flips between Note and the loop.
 func main() {
 	f, err := os.Create(os.Args[1])
 	if err != nil {
@@ -348,7 +350,7 @@ func main() {
 	if err := pprof.StartCPUProfile(f); err != nil {
 		panic(err)
 	}
-	for i := 0; i < 1000000000; i++ {
+	for i := 0; i < 100000000; i++ {
 		_ = extra.Note()
 	}
 	pprof.StopCPUProfile()
