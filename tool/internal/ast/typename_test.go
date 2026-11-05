@@ -517,7 +517,7 @@ func f(c *vault.Client) {}
 		assert.Equal(t, "net/http", imports["althttp"])
 	})
 
-	t.Run("Imports takes precedence when both Imports and Decls contain specs", func(t *testing.T) {
+	t.Run("Decls include imports added after parsing", func(t *testing.T) {
 		file := &dst.File{
 			Imports: []*dst.ImportSpec{
 				{Path: &dst.BasicLit{Value: `"net/http"`}},
@@ -537,8 +537,7 @@ func f(c *vault.Client) {}
 
 		imports := ImportAliasMap(file, nil)
 		assert.Len(t, imports, 1)
-		assert.Equal(t, "net/http", imports["http"])
-		assert.NotContains(t, imports, "ignored")
+		assert.Equal(t, "other/pkg", imports["ignored"])
 	})
 }
 

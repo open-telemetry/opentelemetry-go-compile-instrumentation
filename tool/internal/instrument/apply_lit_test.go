@@ -490,10 +490,9 @@ func TestApplyLitRule_InvalidValueExpression(t *testing.T) {
 
 // --- import alias override tests ---
 
-func TestApplyLitRule_ValueAliasMismatchUsesFileExistingAlias(t *testing.T) {
-	// The rule's field value is written against the alias "traced" for
-	// "fmt". The file already imports "fmt" under its own alias "f". The
-	// injected value must use "f", not fail the build.
+func TestApplyLitRule_ValueUsesRuleAliasAlongsideExistingAlias(t *testing.T) {
+	// The rule uses the configured alias "traced" for fmt.
+	// The file already imports fmt as "f", so both aliases must coexist.
 	root := parseFile(t, `package main
 
 import (
@@ -511,6 +510,7 @@ func f2() *http.Transport {
 	_, err := newTestPhase().applyLitRule(context.Background(), r, root)
 
 	require.NoError(t, err)
+	assert.Equal(t, 3, countImportSpecs(root))
 	lit := litFromReturn(t, root, "f2")
 	require.Len(t, lit.Elts, 1)
 	kv := lit.Elts[0].(*dst.KeyValueExpr)
@@ -521,11 +521,11 @@ func f2() *http.Transport {
 	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
 	ident, ok := sel.X.(*dst.Ident)
 	require.True(t, ok)
-	assert.Equal(t, "f", ident.Name, "injected value must use the file's existing alias, not the rule's")
+	assert.Equal(t, "traced", ident.Name, "injected value must use the rule's alias")
 	assert.Equal(t, "Sprintf", sel.Sel.Name)
 }
 
-func TestApplyLitRule_WrapAliasMismatchUsesFileExistingAlias(t *testing.T) {
+func TestApplyLitRule_WrapUsesRuleAliasAlongsideExistingAlias(t *testing.T) {
 	// Same mismatch as above, but exercised through the wrap path instead
 	// of value, since the two are rewritten at different points.
 	root := parseFile(t, `package main
@@ -545,6 +545,7 @@ func f2() *http.Transport {
 	_, err := newTestPhase().applyLitRule(context.Background(), r, root)
 
 	require.NoError(t, err)
+	assert.Equal(t, 3, countImportSpecs(root))
 	lit := litFromReturn(t, root, "f2")
 	require.Len(t, lit.Elts, 1)
 	kv := lit.Elts[0].(*dst.KeyValueExpr)
@@ -554,47 +555,44 @@ func f2() *http.Transport {
 	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
 	ident, ok := sel.X.(*dst.Ident)
 	require.True(t, ok)
-	assert.Equal(t, "f", ident.Name, "wrapped value must use the file's existing alias, not the rule's")
+	assert.Equal(t, "traced", ident.Name, "wrapped value must use the rule's alias")
 	assert.Equal(t, "Sprint", sel.Sel.Name)
 	require.Len(t, call.Args, 1)
 	assert.Equal(t, "myProxy", call.Args[0].(*dst.Ident).Name)
 }
 
-func TestApplyLitRule_AliasOverrideUsesResolvedName(t *testing.T) {
-	// The target file imports a divergent-name dependency unaliased, so the
-	// override must use ip.importNames' resolved real name, not a guess
-	// derived from the import path.
-	const importPath = "github.com/redis/go-redis/v9"
+func TestApplyLitRule_UnaliasedImportGetsRuleAlias(t *testing.T) {
 	root := parseFile(t, `package main
 
 import (
+	"fmt"
 	"net/http"
-	"`+importPath+`"
 )
 
 func f2() *http.Transport {
 	return &http.Transport{}
 }
 `)
-	r := transportRule(&rule.InstLitField{Name: "Internal", Value: "traced.NewClient()"})
-	r.Imports = map[string]string{"traced": importPath}
+	r := transportRule(&rule.InstLitField{
+		Name:  "Internal",
+		Value: `traced.Sprintf("x")`,
+	})
+	r.Imports = map[string]string{"traced": "fmt"}
 
-	ip := newTestPhase()
-	ip.importNames = map[string]string{importPath: "redis"}
-
-	_, err := ip.applyLitRule(context.Background(), r, root)
+	_, err := newTestPhase().applyLitRule(context.Background(), r, root)
 
 	require.NoError(t, err)
 	lit := litFromReturn(t, root, "f2")
 	kv := lit.Elts[0].(*dst.KeyValueExpr)
-	call := kv.Value.(*dst.CallExpr)
+	call, ok := kv.Value.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", kv.Value)
 	sel, ok := call.Fun.(*dst.SelectorExpr)
-	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
+	require.True(t, ok, "expected *dst.SelectorExpr, got %T", kv.Value)
 	ident, ok := sel.X.(*dst.Ident)
 	require.True(t, ok)
-	assert.Equal(t, "redis", ident.Name, "override must use the resolved real name, not the path-derived guess")
-	assert.Equal(t, "NewClient", sel.Sel.Name)
-	assert.Equal(t, 2, countImportSpecs(root), "must not add a redundant import for an alias the rewrite eliminated")
+	assert.Equal(t, "traced", ident.Name)
+	assert.Equal(t, "Sprintf", sel.Sel.Name)
+	assert.Equal(t, 3, countImportSpecs(root), "both aliases of fmt should be imported")
 }
 
 func TestApplyLitRule_DotImportConflictSurfacesAsAnError(t *testing.T) {
@@ -618,11 +616,9 @@ func f2() *http.Transport {
 	assert.Contains(t, err.Error(), "dot-import conflict")
 }
 
-func TestApplyLitRule_OverrideShadowedByParameterReportsConflict(t *testing.T) {
-	// The rule writes its injected code against alias "traced" for "fmt",
-	// which the rewrite moves to the file's alias "f". The enclosing
-	// function's parameter is also named "f", so the rewritten code would
-	// resolve to the parameter while still compiling.
+func TestApplyLitRule_WrapRuleAliasNotShadowedByParameter(t *testing.T) {
+	// The function parameter shadows the file's existing alias "f".
+	// The instrumentation must use its separate configured alias "traced".
 	root := parseFile(t, `package main
 
 import (
@@ -639,15 +635,18 @@ func run(f sink) *http.Transport {
 
 	_, err := newTestPhase().applyLitRule(context.Background(), r, root)
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "alias override conflict")
-	assert.Contains(t, err.Error(), "run", "the error names the offending function")
+	require.NoError(t, err)
+
+	lit := litFromReturn(t, root, "run")
+	kv := lit.Elts[0].(*dst.KeyValueExpr)
+	call := kv.Value.(*dst.CallExpr)
+	sel := call.Fun.(*dst.SelectorExpr)
+	assert.Equal(t, "traced", sel.X.(*dst.Ident).Name)
 }
 
-func TestApplyLitRule_OverrideShadowedByNestedLocalReportsConflict(t *testing.T) {
-	// The matched composite literal sits inside a nested block that rebinds
-	// the file's alias, so the wrapped field value would resolve to that local
-	// instead of the import.
+func TestApplyLitRule_WrapRuleAliasNotShadowedByNestedLocal(t *testing.T) {
+	// A nested local shadows the file's existing alias "f".
+	// The instrumentation must still use its separate configured alias "traced".
 	root := parseFile(t, `package main
 
 import (
@@ -669,15 +668,20 @@ func run() *http.Transport {
 
 	_, err := newTestPhase().applyLitRule(context.Background(), r, root)
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "alias override conflict")
-	assert.Contains(t, err.Error(), "run", "the error names the offending function")
+	require.NoError(t, err)
+
+	lit := litFromReturn(t, root, "run")
+	kv := lit.Elts[0].(*dst.KeyValueExpr)
+	call := kv.Value.(*dst.CallExpr)
+	sel := call.Fun.(*dst.SelectorExpr)
+
+	assert.Equal(t, "traced", sel.X.(*dst.Ident).Name)
+	assert.Equal(t, "Sprint", sel.Sel.Name)
 }
 
-func TestApplyLitRule_OverrideNonShadowingSignatureAppliesRule(t *testing.T) {
-	// Same rule and file aliases as the shadowing test above, but the
-	// enclosing function's signature does not name "f", so the rule applies
-	// and the wrapped value uses the file's alias.
+func TestApplyLitRule_WrapUsesConfiguredAliasWithoutShadowing(t *testing.T) {
+	// The file already imports fmt as "f", while the rule configures
+	// "traced". The instrumentation must retain the rule's configured alias.
 	root := parseFile(t, `package main
 
 import (
@@ -704,7 +708,7 @@ func run(s sink) *http.Transport {
 	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
 	ident, ok := sel.X.(*dst.Ident)
 	require.True(t, ok)
-	assert.Equal(t, "f", ident.Name, "wrapped value must use the file's existing alias, not the rule's")
+	assert.Equal(t, "traced", ident.Name, "wrapped value must use the rule's configured alias")
 	assert.Equal(t, "Sprint", sel.Sel.Name)
 	require.Len(t, call.Args, 1)
 	assert.Equal(t, "myProxy", call.Args[0].(*dst.Ident).Name)
@@ -738,17 +742,39 @@ func run(name string) *http.Transport {
 	assert.Equal(t, "myProxy", call.Args[1].(*dst.Ident).Name)
 }
 
-// litFromReturn returns the composite literal returned by the named
-// function's first (and only) return statement, unwrapping the leading "&".
+// litFromReturn finds the first returned composite literal, including one
+// nested in control flow, and unwraps a leading "&".
 func litFromReturn(t *testing.T, root *dst.File, funcName string) *dst.CompositeLit {
 	t.Helper()
 	fn := findFuncDeclInFile(t, root, funcName)
-	ret, ok := fn.Body.List[0].(*dst.ReturnStmt)
-	require.True(t, ok, "expected *dst.ReturnStmt, got %T", fn.Body.List[0])
-	require.Len(t, ret.Results, 1)
-	unary, ok := ret.Results[0].(*dst.UnaryExpr)
-	require.True(t, ok, "expected *dst.UnaryExpr (&T{...}), got %T", ret.Results[0])
-	lit, ok := unary.X.(*dst.CompositeLit)
-	require.True(t, ok, "expected *dst.CompositeLit, got %T", unary.X)
+
+	var lit *dst.CompositeLit
+	dst.Inspect(fn.Body, func(n dst.Node) bool {
+		if lit != nil {
+			return false
+		}
+
+		ret, ok := n.(*dst.ReturnStmt)
+		if !ok || len(ret.Results) != 1 {
+			return true
+		}
+
+		candidate, ok := ret.Results[0].(*dst.CompositeLit)
+		if !ok {
+			unary, unaryOK := ret.Results[0].(*dst.UnaryExpr)
+			if !unaryOK || unary.Op.String() != "&" {
+				return true
+			}
+			candidate, ok = unary.X.(*dst.CompositeLit)
+		}
+		if ok {
+			lit = candidate
+			return false
+		}
+
+		return true
+	})
+
+	require.NotNil(t, lit, "expected function %s to return a composite literal", funcName)
 	return lit
 }

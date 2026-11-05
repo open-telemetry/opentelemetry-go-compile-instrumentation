@@ -57,22 +57,20 @@ func (ip *instrumentPhase) applyDeclRule(ctx context.Context, r *rule.InstDeclRu
 	nameIdx := slices.IndexFunc(spec.Names, func(name *dst.Ident) bool { return name.Name == r.Identifier })
 	util.Assert(nameIdx >= 0, "matched spec must declare the targeted identifier")
 
-	_, aliasOverrides := ip.resolveImportOverrides(root, r.Imports)
-
 	// Validate and apply the rewrite before touching imports: a rule that
 	// fails here (unparsable wrap/replace expression, tuple-valued
 	// initializer) must not leave an import spec in root.Decls behind it.
 	if r.Wrap != "" {
-		if err := wrapDeclValue(spec, r.Wrap, nameIdx, aliasOverrides); err != nil {
+		if err := wrapDeclValue(spec, r.Wrap, nameIdx); err != nil {
 			return err
 		}
 	} else {
-		if err := replaceDeclValue(spec, r.Replace, nameIdx, aliasOverrides); err != nil {
+		if err := replaceDeclValue(spec, r.Replace, nameIdx); err != nil {
 			return err
 		}
 	}
 
-	if err := ip.addRuleImports(ctx, root, usedRuleImports(root, r.Imports, aliasOverrides), r.Name); err != nil {
+	if err := ip.addRuleImports(ctx, root, usedRuleImports(root, r.Imports), r.Name); err != nil {
 		return err
 	}
 
@@ -82,14 +80,11 @@ func (ip *instrumentPhase) applyDeclRule(ctx context.Context, r *rule.InstDeclRu
 
 // replaceDeclValue assigns the parsed replacement expression to the initializer
 // of the name at nameIdx, leaving every sibling name in the spec untouched.
-// aliasOverrides maps each rule alias to the file's alias; see
-// resolveAliasOverrides.
-func replaceDeclValue(spec *dst.ValueSpec, replace string, nameIdx int, aliasOverrides map[string]string) error {
+func replaceDeclValue(spec *dst.ValueSpec, replace string, nameIdx int) error {
 	expr, err := parseValueExpr(replace)
 	if err != nil {
 		return err
 	}
-	replaceQualifierAliases(expr, aliasOverrides)
 
 	switch {
 	case len(spec.Values) == len(spec.Names):
@@ -107,9 +102,8 @@ func replaceDeclValue(spec *dst.ValueSpec, replace string, nameIdx int, aliasOve
 // wrapDeclValue wraps the initializer of the name at nameIdx using the given
 // template, leaving every sibling name in the spec untouched. Returns an error
 // if spec has no initializers, since wrap requires an existing value to
-// substitute into {{ . }}. aliasOverrides maps each rule alias to the file's
-// alias; see resolveAliasOverrides.
-func wrapDeclValue(spec *dst.ValueSpec, templateStr string, nameIdx int, aliasOverrides map[string]string) error {
+// substitute into {{ . }}.
+func wrapDeclValue(spec *dst.ValueSpec, templateStr string, nameIdx int) error {
 	if len(spec.Values) == 0 {
 		return ex.Newf(
 			"wrap requires an existing initializer but the declaration has none",
@@ -125,7 +119,7 @@ func wrapDeclValue(spec *dst.ValueSpec, templateStr string, nameIdx int, aliasOv
 	}
 
 	// Package-level var/const initializers have no enclosing function.
-	wrapped, err := tmpl.compileExpression(spec.Values[nameIdx], callSite{}, nil, nil, aliasOverrides)
+	wrapped, err := tmpl.compileExpression(spec.Values[nameIdx], callSite{}, nil, nil)
 	if err != nil {
 		return ex.Wrapf(err, "failed to wrap expression at index %d", nameIdx)
 	}

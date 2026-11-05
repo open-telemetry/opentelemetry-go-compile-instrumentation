@@ -3842,7 +3842,7 @@ func TestMarkLineDirectives_CompilerCommentOnOwnLineAfterGeneratedCode(t *testin
 	}{
 		{"raw rule", func(root *dst.File) {
 			raw := &rule.InstRawRule{Func: "main", Raw: "_ = 1\n// end of hook"}
-			require.NoError(t, insertRaw(context.Background(), raw, findFunc(t, root, "main"), root, rawAliasContext{}))
+			require.NoError(t, insertRaw(context.Background(), raw, findFunc(t, root, "main"), root, nil))
 		}},
 		{"line comment", func(root *dst.File) {
 			prepend(t, findFunc(t, root, "main").Body, "_ = 1\n// tail")
@@ -3852,7 +3852,7 @@ func TestMarkLineDirectives_CompilerCommentOnOwnLineAfterGeneratedCode(t *testin
 		}},
 		{"raw rule with a multi-line comment", func(root *dst.File) {
 			raw := &rule.InstRawRule{Func: "main", Raw: "_ = 1 /* head\nanother line */"}
-			require.NoError(t, insertRaw(context.Background(), raw, findFunc(t, root, "main"), root, rawAliasContext{}))
+			require.NoError(t, insertRaw(context.Background(), raw, findFunc(t, root, "main"), root, nil))
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

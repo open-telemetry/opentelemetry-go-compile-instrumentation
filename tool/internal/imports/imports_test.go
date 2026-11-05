@@ -340,10 +340,13 @@ func TestAddToFile(t *testing.T) {
 			checkResult: func(t *testing.T, root *dst.File) {
 				require.Len(t, root.Decls, 1)
 				genDecl := root.Decls[0].(*dst.GenDecl)
-				assert.Len(t, genDecl.Specs, 1)
-				spec := genDecl.Specs[0].(*dst.ImportSpec)
-				require.NotNil(t, spec.Name)
-				assert.Equal(t, "ctx", spec.Name.Name)
+				require.Len(t, genDecl.Specs, 2)
+				first := genDecl.Specs[0].(*dst.ImportSpec)
+				second := genDecl.Specs[1].(*dst.ImportSpec)
+				require.NotNil(t, first.Name)
+				require.NotNil(t, second.Name)
+				assert.Equal(t, "ctx", first.Name.Name)
+				assert.Equal(t, "c", second.Name.Name)
 			},
 		},
 		{
@@ -492,7 +495,7 @@ func TestFindNew(t *testing.T) {
 				},
 			},
 			ruleImports:      map[string]string{"c": "context"},
-			expectedNew:      map[string]string{},
+			expectedNew:      map[string]string{"c": "context"},
 			expectedAliases:  map[string]string{"context": "ctx"},
 			expectedExplicit: map[string]bool{"context": true},
 		},
@@ -511,9 +514,29 @@ func TestFindNew(t *testing.T) {
 				},
 			},
 			ruleImports:      map[string]string{"ctx": "context"},
-			expectedNew:      map[string]string{},
+			expectedNew:      map[string]string{"ctx": "context"},
 			expectedAliases:  map[string]string{"context": "context"},
 			expectedExplicit: map[string]bool{},
+		},
+		{
+			name: "same path same alias - nothing to add",
+			root: &dst.File{
+				Decls: []dst.Decl{
+					&dst.GenDecl{
+						Tok: token.IMPORT,
+						Specs: []dst.Spec{
+							&dst.ImportSpec{
+								Name: dst.NewIdent("ctx"),
+								Path: &dst.BasicLit{Value: `"context"`},
+							},
+						},
+					},
+				},
+			},
+			ruleImports:      map[string]string{"ctx": "context"},
+			expectedNew:      map[string]string{},
+			expectedAliases:  map[string]string{"context": "ctx"},
+			expectedExplicit: map[string]bool{"context": true},
 		},
 		{
 			name: "blank import - explicit alias",
@@ -568,6 +591,85 @@ func TestFindNew_MultiAliasSets(t *testing.T) {
 	assert.Equal(t, map[string][]string{"fmt": {"a", "b"}}, result.ExistingAliasSets)
 	assert.Equal(t, "b", result.ExistingAliases["fmt"], "the last spec wins in the single-alias view")
 	assert.Empty(t, result.NewImports, "alias a already names fmt in the file")
+}
+
+func TestAddToFile_RejectsFileScopeAliasCollision(t *testing.T) {
+	root := &dst.File{
+		Decls: []dst.Decl{
+			&dst.GenDecl{
+				Tok: token.VAR,
+				Specs: []dst.Spec{
+					&dst.ValueSpec{Names: []*dst.Ident{dst.NewIdent("traced")}},
+				},
+			},
+		},
+	}
+
+	err := AddToFile(t.Context(), root, map[string]string{"traced": "fmt"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "file-scope declaration")
+}
+
+func TestAddToFile_FileScopeDeclarations(t *testing.T) {
+	tests := []struct {
+		name    string
+		decls   []dst.Decl
+		wantErr bool
+	}{
+		{
+			name: "package function collision",
+			decls: []dst.Decl{
+				&dst.FuncDecl{Name: dst.NewIdent("traced")},
+			},
+			wantErr: true,
+		},
+		{
+			name: "type declaration collision",
+			decls: []dst.Decl{
+				&dst.GenDecl{
+					Tok: token.TYPE,
+					Specs: []dst.Spec{
+						&dst.TypeSpec{Name: dst.NewIdent("traced")},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "method name does not collide",
+			decls: []dst.Decl{
+				&dst.GenDecl{
+					Tok: token.TYPE,
+					Specs: []dst.Spec{
+						&dst.TypeSpec{Name: dst.NewIdent("T")},
+					},
+				},
+				&dst.FuncDecl{
+					Recv: &dst.FieldList{
+						List: []*dst.Field{{Type: dst.NewIdent("T")}},
+					},
+					Name: dst.NewIdent("traced"),
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := &dst.File{Decls: tt.decls}
+			err := AddToFile(t.Context(), root, map[string]string{
+				"traced": "fmt",
+			})
+
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "file-scope declaration")
+				return
+			}
+
+			require.NoError(t, err)
+		})
+	}
 }
 
 func TestCollectImportPaths(t *testing.T) {
