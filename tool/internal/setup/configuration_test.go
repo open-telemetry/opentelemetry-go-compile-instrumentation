@@ -5,6 +5,7 @@ package setup
 
 import (
 	"bytes"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.opentelemetry.io/otelc/tool/internal/configuration"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
@@ -23,8 +25,10 @@ func TestValidateSelectedConfigurationMetadata(t *testing.T) {
 	matched := matchedConfigurationRules(module)
 	sp := newTestSetupPhase()
 
-	err := sp.validateSelectedConfigurationMetadata(matched)
+	result, err := sp.validateSelectedConfigurationMetadata(matched)
 	require.NoError(t, err)
+	require.Len(t, result.Definitions, 1)
+	assert.Empty(t, result.ModulesWithoutMetadata)
 	assert.Equal(t, filepath.Join(module.dir, "hooks"), matched[0].AllFuncRules()[0].ResolvedPath)
 }
 
@@ -34,7 +38,7 @@ func TestValidateSelectedConfigurationMetadataUnknownReference(t *testing.T) {
 `)
 	matched := matchedConfigurationRules(module)
 
-	err := newTestSetupPhase().validateSelectedConfigurationMetadata(matched)
+	_, err := newTestSetupPhase().validateSelectedConfigurationMetadata(matched)
 	require.ErrorContains(t, err, `unknown configuration ref "missing.definition"`)
 	require.ErrorContains(t, err, filepath.Join(module.dir, "metadata.yaml"))
 }
@@ -47,16 +51,22 @@ func TestValidateSelectedConfigurationMetadataSkipsUnselectedModules(t *testing.
 	matched := matchedConfigurationRules(selected)
 	assert.NotContains(t, selectedHookPackageDirs(matched), filepath.Join(unselected.dir, "hooks"))
 
-	err := newTestSetupPhase().validateSelectedConfigurationMetadata(matched)
+	result, err := newTestSetupPhase().validateSelectedConfigurationMetadata(matched)
 	require.NoError(t, err)
+	assert.Equal(t, []string{selected.dir}, result.ModulesWithoutMetadata)
 }
 
 func TestValidateSelectedConfigurationMetadataReportsMetadataReadErrors(t *testing.T) {
 	module := makeConfigurationModule(t, "example.com/instrumentation", "")
 	require.NoError(t, os.Mkdir(filepath.Join(module.dir, instrumentationMetadataFilename), 0o755))
-	matched := matchedConfigurationRules(module)
+	var base rule.InstBaseRule
+	base.SetModuleRoot(module.dir)
+	base.SetMetadataPath(filepath.Join(module.dir, instrumentationMetadataFilename))
+	set := rule.NewInstRuleSet(module.hookPath)
+	set.AddFuncRule(filepath.Join(module.dir, "hooks", "hooks.go"), &rule.InstFuncRule{InstBaseRule: base})
+	matched := []*rule.InstRuleSet{set}
 
-	err := newTestSetupPhase().validateSelectedConfigurationMetadata(matched)
+	_, err := newTestSetupPhase().validateSelectedConfigurationMetadata(matched)
 
 	require.ErrorContains(t, err, "read selected instrumentation metadata")
 }
@@ -65,18 +75,57 @@ func TestValidateSelectedConfigurationMetadataReportsParseErrors(t *testing.T) {
 	module := makeConfigurationModule(t, "example.com/instrumentation", "configurations: [\n")
 	matched := matchedConfigurationRules(module)
 
-	err := newTestSetupPhase().validateSelectedConfigurationMetadata(matched)
+	_, err := newTestSetupPhase().validateSelectedConfigurationMetadata(matched)
 
 	require.ErrorContains(t, err, filepath.Join(module.dir, instrumentationMetadataFilename))
 	require.ErrorContains(t, err, "parse")
 }
 
+func TestValidateSelectedConfigurationMetadataReportsCatalogLoadErrors(t *testing.T) {
+	module := makeConfigurationModule(t, "example.com/instrumentation", "configurations: []\n")
+	matched := matchedConfigurationRules(module)
+	sp := newTestSetupPhase()
+	loadCatalog := func() (map[string]configuration.Entry, error) {
+		return nil, errors.New("catalog unavailable")
+	}
+
+	_, err := sp.validateSelectedConfigurationMetadataWithCatalog(matched, loadCatalog)
+
+	require.ErrorContains(t, err, "load pinned configuration catalog")
+	require.ErrorContains(t, err, "catalog unavailable")
+}
+
+func TestValidateSelectedConfigurationMetadataFileDisappearsAfterDiscovery(t *testing.T) {
+	module := makeConfigurationModule(t, "example.com/instrumentation", "configurations: []\n")
+	matched := matchedConfigurationRules(module)
+	require.NoError(t, os.Remove(filepath.Join(module.dir, instrumentationMetadataFilename)))
+
+	result, err := newTestSetupPhase().validateSelectedConfigurationMetadata(matched)
+
+	require.NoError(t, err)
+	assert.Empty(t, result.Definitions)
+	assert.Equal(t, []string{module.dir}, result.ModulesWithoutMetadata)
+}
+
 func TestValidateSelectedConfigurationMetadataWithNoMatchedHooks(t *testing.T) {
 	sp := newTestSetupPhase()
 
-	err := sp.validateSelectedConfigurationMetadata(nil)
+	result, err := sp.validateSelectedConfigurationMetadata([]*rule.InstRuleSet{nil})
 
 	require.NoError(t, err)
+	assert.Empty(t, result.Definitions)
+	assert.Empty(t, result.ModulesWithoutMetadata)
+}
+
+func TestValidateAndStoreSelectedConfigurationMetadataReturnsValidationError(t *testing.T) {
+	module := makeConfigurationModule(t, "example.com/instrumentation", "configurations: [\n")
+	sp := newTestSetupPhase()
+
+	err := sp.validateAndStoreSelectedConfigurationMetadata(matchedConfigurationRules(module))
+
+	require.ErrorContains(t, err, "validating selected instrumentation configuration metadata")
+	require.ErrorContains(t, err, "parse")
+	assert.Empty(t, sp.configurationMetadata.Definitions)
 }
 
 func TestModuleRootForPackage(t *testing.T) {
@@ -102,6 +151,95 @@ func TestModuleRootForPackage(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestFindInstrumentationMetadataForNestedInRepoModules(t *testing.T) {
+	instrumentationRoot, err := filepath.Abs(filepath.Join("testdata", "instrumentation"))
+	require.NoError(t, err)
+	moduleBase := filepath.Join(instrumentationRoot, "github.com", "segmentio", "kafka-go")
+	metadataPath := filepath.Join(moduleBase, instrumentationMetadataFilename)
+
+	consumerRoot := filepath.Join(moduleBase, "consumer")
+	producerRoot := filepath.Join(moduleBase, "producer")
+	consumerMetadata, err := findInstrumentationMetadata(consumerRoot, instrumentationRoot)
+	require.NoError(t, err)
+	producerMetadata, err := findInstrumentationMetadata(producerRoot, instrumentationRoot)
+	require.NoError(t, err)
+	assert.Equal(t, metadataPath, consumerMetadata)
+	assert.Equal(t, metadataPath, producerMetadata)
+
+	consumerRules := matchedModuleConfigurationRules(consumerRoot, consumerMetadata)
+	producerRules := matchedModuleConfigurationRules(producerRoot, producerMetadata)
+	consumerResult, err := newTestSetupPhase().validateSelectedConfigurationMetadata([]*rule.InstRuleSet{consumerRules})
+	require.NoError(t, err)
+	require.Len(t, consumerResult.Definitions, 1)
+	assert.Empty(t, consumerResult.ModulesWithoutMetadata)
+
+	combinedResult, err := newTestSetupPhase().validateSelectedConfigurationMetadata(
+		[]*rule.InstRuleSet{consumerRules, producerRules},
+	)
+	require.NoError(t, err)
+	require.Len(
+		t,
+		combinedResult.Definitions,
+		1,
+		"shared metadata should be parsed once and resolved entries deduplicated",
+	)
+	assert.Empty(t, combinedResult.ModulesWithoutMetadata)
+}
+
+func TestFindInstrumentationMetadataDoesNotEscapeRoot(t *testing.T) {
+	parent := t.TempDir()
+	require.NoError(
+		t,
+		os.WriteFile(filepath.Join(parent, instrumentationMetadataFilename), []byte("configurations: []\n"), 0o644),
+	)
+	instrumentationRoot := filepath.Join(parent, "instrumentation")
+	moduleRoot := filepath.Join(instrumentationRoot, "example.com", "module")
+	require.NoError(t, os.MkdirAll(moduleRoot, 0o755))
+
+	metadataPath, err := findInstrumentationMetadata(moduleRoot, instrumentationRoot)
+	require.NoError(t, err)
+	assert.Empty(t, metadataPath, "an unrelated ancestor's metadata must not be used")
+}
+
+func TestFindInstrumentationMetadataOutsideRoot(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+
+	_, err := findInstrumentationMetadata(outside, root)
+
+	require.ErrorContains(t, err, "outside metadata search root")
+
+	_, err = findInstrumentationMetadata(filepath.Dir(root), root)
+	require.ErrorContains(t, err, "outside metadata search root")
+}
+
+func TestFindInstrumentationMetadataStatError(t *testing.T) {
+	root := t.TempDir()
+	// A NUL byte gives a portable non-NotExist stat error; Windows may treat
+	// traversing through a regular file as a missing path instead.
+	module := filepath.Join(root, "module\x00")
+
+	_, err := findInstrumentationMetadata(module, root)
+
+	require.ErrorContains(t, err, "checking instrumentation metadata")
+}
+
+func TestFindInstrumentationMetadataInExternalModuleRoot(t *testing.T) {
+	module := makeConfigurationModule(t, "example.com/external", "configurations: []\n")
+	metadataPath, err := findInstrumentationMetadata(module.dir, module.dir)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(module.dir, instrumentationMetadataFilename), metadataPath)
+}
+
+func matchedModuleConfigurationRules(moduleRoot, metadataPath string) *rule.InstRuleSet {
+	var base rule.InstBaseRule
+	base.SetModuleRoot(moduleRoot)
+	base.SetMetadataPath(metadataPath)
+	set := rule.NewInstRuleSet("example.com/app")
+	set.AddCallRule(filepath.Join(moduleRoot, "hook.go"), &rule.InstCallRule{InstBaseRule: base})
+	return set
+}
+
 func TestSelectedHookPackageDirsDeduplicatesAndSorts(t *testing.T) {
 	matched := []*rule.InstRuleSet{
 		nil,
@@ -121,6 +259,28 @@ func TestSelectedHookPackageDirsDeduplicatesAndSorts(t *testing.T) {
 	assert.Equal(t, []string{"/a/hooks", "/m/hooks", "/z/hooks"}, selectedHookPackageDirs(matched))
 }
 
+func TestMatchedRuleTypesRetainConfigurationModuleMetadata(t *testing.T) {
+	moduleRoot := filepath.Join(t.TempDir(), "module")
+	sourceFile := filepath.Join(t.TempDir(), "app.go")
+	metadataPath := filepath.Join(moduleRoot, instrumentationMetadataFilename)
+	var base rule.InstBaseRule
+	base.SetModuleRoot(moduleRoot)
+	base.SetMetadataPath(metadataPath)
+	assert.Equal(t, moduleRoot, base.GetModuleRoot())
+	assert.Equal(t, metadataPath, base.GetMetadataPath())
+	set := rule.NewInstRuleSet("example.com/app")
+	set.AddRawRule(sourceFile, &rule.InstRawRule{InstBaseRule: base})
+	set.AddFuncRule(sourceFile, &rule.InstFuncRule{InstBaseRule: base})
+	set.AddStructRule(sourceFile, &rule.InstStructRule{InstBaseRule: base})
+	set.AddCallRule(sourceFile, &rule.InstCallRule{InstBaseRule: base})
+	set.AddLitRule(sourceFile, &rule.InstLitRule{InstBaseRule: base})
+	set.AddDirectiveRule(sourceFile, &rule.InstDirectiveRule{InstBaseRule: base})
+	set.AddDeclRule(sourceFile, &rule.InstDeclRule{InstBaseRule: base})
+	set.AddFileRule(&rule.InstFileRule{InstBaseRule: base})
+
+	assert.Equal(t, map[string]string{moduleRoot: metadataPath}, set.ConfigurationModuleMetadata())
+}
+
 func TestWarnIfNoInstrumentationMatched(t *testing.T) {
 	var logs bytes.Buffer
 	sp := &setupPhase{logger: slog.New(slog.NewTextHandler(&logs, nil))}
@@ -131,19 +291,24 @@ func TestWarnIfNoInstrumentationMatched(t *testing.T) {
 }
 
 type configurationTestModule struct {
-	dir      string
-	hookPath string
+	dir         string
+	hookPath    string
+	hasMetadata bool
 }
 
 func matchedConfigurationRules(module configurationTestModule) []*rule.InstRuleSet {
-	return []*rule.InstRuleSet{{
-		FuncRules: map[string][]*rule.InstFuncRule{
-			"http.go": {{
-				Path:         module.hookPath,
-				ResolvedPath: filepath.Join(module.dir, "hooks"),
-			}},
-		},
-	}}
+	var base rule.InstBaseRule
+	base.SetModuleRoot(module.dir)
+	if module.hasMetadata {
+		base.SetMetadataPath(filepath.Join(module.dir, instrumentationMetadataFilename))
+	}
+	set := rule.NewInstRuleSet(module.hookPath)
+	set.AddFuncRule(filepath.Join(module.dir, "hooks", "hooks.go"), &rule.InstFuncRule{
+		InstBaseRule: base,
+		Path:         module.hookPath,
+		ResolvedPath: filepath.Join(module.dir, "hooks"),
+	})
+	return []*rule.InstRuleSet{set}
 }
 
 func makeConfigurationModule(t *testing.T, modulePath, metadata string) configurationTestModule {
@@ -160,7 +325,7 @@ func makeConfigurationModule(t *testing.T, modulePath, metadata string) configur
 	if metadata != "" {
 		require.NoError(t, os.WriteFile(filepath.Join(moduleDir, "metadata.yaml"), []byte(metadata), 0o644))
 	}
-	return configurationTestModule{dir: moduleDir, hookPath: modulePath + "/hooks"}
+	return configurationTestModule{dir: moduleDir, hookPath: modulePath + "/hooks", hasMetadata: metadata != ""}
 }
 
 // vendoredHook is the application of makeVendoredHook.
@@ -233,24 +398,33 @@ func TestValidateSelectedConfigurationMetadataVendoredHookIgnoresApplicationMeta
 	// The metadata.yaml of the application is not an otelc metadata file, and
 	// must not be read in place of the one of the hook module.
 	hookDir := makeVendoredHook(t, "configurations: {}\n", "").hookDir
-	matched := []*rule.InstRuleSet{{
-		FuncRules: map[string][]*rule.InstFuncRule{
-			"http.go": {{Path: "example.com/hooks/hooks", ResolvedPath: hookDir}},
-		},
-	}}
+	var base rule.InstBaseRule
+	moduleRoot := filepath.Dir(hookDir)
+	base.SetModuleRoot(moduleRoot)
+	set := rule.NewInstRuleSet("example.com/hooks/hooks")
+	set.AddFuncRule(filepath.Join(hookDir, "hooks.go"), &rule.InstFuncRule{
+		InstBaseRule: base, Path: "example.com/hooks/hooks", ResolvedPath: hookDir,
+	})
+	matched := []*rule.InstRuleSet{set}
 
-	require.NoError(t, newTestSetupPhase().validateSelectedConfigurationMetadata(matched))
+	result, err := newTestSetupPhase().validateSelectedConfigurationMetadata(matched)
+	require.NoError(t, err)
+	assert.Equal(t, []string{moduleRoot}, result.ModulesWithoutMetadata)
 }
 
 func TestValidateSelectedConfigurationMetadataVendoredHookReadsModuleMetadata(t *testing.T) {
 	hookDir := makeVendoredHook(t, "", "configurations:\n  - ref: missing.definition\n").hookDir
-	matched := []*rule.InstRuleSet{{
-		FuncRules: map[string][]*rule.InstFuncRule{
-			"http.go": {{Path: "example.com/hooks/hooks", ResolvedPath: hookDir}},
-		},
-	}}
+	var base rule.InstBaseRule
+	moduleRoot := filepath.Dir(hookDir)
+	base.SetModuleRoot(moduleRoot)
+	base.SetMetadataPath(filepath.Join(moduleRoot, instrumentationMetadataFilename))
+	set := rule.NewInstRuleSet("example.com/hooks/hooks")
+	set.AddFuncRule(filepath.Join(hookDir, "hooks.go"), &rule.InstFuncRule{
+		InstBaseRule: base, Path: "example.com/hooks/hooks", ResolvedPath: hookDir,
+	})
+	matched := []*rule.InstRuleSet{set}
 
-	err := newTestSetupPhase().validateSelectedConfigurationMetadata(matched)
+	_, err := newTestSetupPhase().validateSelectedConfigurationMetadata(matched)
 
 	require.ErrorContains(t, err, `unknown configuration ref "missing.definition"`)
 }

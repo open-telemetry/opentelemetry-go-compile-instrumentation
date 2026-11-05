@@ -26,6 +26,10 @@ type InstRule interface {
 	GetTarget() *Target  // The packages the rule applies to
 	GetVersion() string  // The version range of target module if available, e.g "v1.0.0,v2.0.0"
 	GetWhere() *WhereDef // Optional non-package selectors that remain after normalization
+	GetMetadataPath() string
+	SetMetadataPath(string)
+	GetModuleRoot() string
+	SetModuleRoot(string)
 }
 
 // FilterDef describes file predicates nested under where.file.
@@ -70,18 +74,24 @@ type WhereDef struct {
 
 // InstBaseRule is the base rule for all instrumentation rules.
 type InstBaseRule struct {
-	Name    string            `json:"name,omitempty"    yaml:"name,omitempty"`
-	Target  Target            `json:"target"            yaml:"target"`
-	Version string            `json:"version,omitempty" yaml:"version,omitempty"`
-	Imports map[string]string `json:"imports,omitempty" yaml:"imports,omitempty"`
-	Where   *WhereDef         `json:"where,omitempty"   yaml:"where,omitempty"`
+	Name         string            `json:"name,omitempty"    yaml:"name,omitempty"`
+	Target       Target            `json:"target"            yaml:"target"`
+	Version      string            `json:"version,omitempty" yaml:"version,omitempty"`
+	Imports      map[string]string `json:"imports,omitempty" yaml:"imports,omitempty"`
+	Where        *WhereDef         `json:"where,omitempty"   yaml:"where,omitempty"`
+	metadataPath string
+	moduleRoot   string
 }
 
-func (ibr *InstBaseRule) String() string      { return ibr.Name }
-func (ibr *InstBaseRule) GetName() string     { return ibr.Name }
-func (ibr *InstBaseRule) GetTarget() *Target  { return &ibr.Target }
-func (ibr *InstBaseRule) GetVersion() string  { return ibr.Version }
-func (ibr *InstBaseRule) GetWhere() *WhereDef { return ibr.Where }
+func (ibr *InstBaseRule) String() string              { return ibr.Name }
+func (ibr *InstBaseRule) GetName() string             { return ibr.Name }
+func (ibr *InstBaseRule) GetTarget() *Target          { return &ibr.Target }
+func (ibr *InstBaseRule) GetVersion() string          { return ibr.Version }
+func (ibr *InstBaseRule) GetWhere() *WhereDef         { return ibr.Where }
+func (ibr *InstBaseRule) GetMetadataPath() string     { return ibr.metadataPath }
+func (ibr *InstBaseRule) SetMetadataPath(path string) { ibr.metadataPath = path }
+func (ibr *InstBaseRule) GetModuleRoot() string       { return ibr.moduleRoot }
+func (ibr *InstBaseRule) SetModuleRoot(root string)   { ibr.moduleRoot = root }
 
 // InstRuleSet represents a collection of instrumentation rules that apply to a
 // single Go package within a specific module. It acts as a container for rules,
@@ -106,6 +116,9 @@ type InstRuleSet struct {
 	// IsTest reports whether the set was matched against a test build of the
 	// package. A go test run can compile the same import path both ways.
 	IsTest bool `json:"is_test,omitempty"`
+	// configurationModules maps matched instrumentation module roots to their
+	// metadata file, or an empty path when no metadata file was found.
+	configurationModules map[string]string
 }
 
 func NewInstRuleSet(importPath string) *InstRuleSet {
@@ -160,30 +173,37 @@ func addRule[T InstRule](file string, rule T, rulesMap map[string][]T) {
 
 func (irs *InstRuleSet) AddRawRule(file string, rule *InstRawRule) {
 	addRule(file, rule, irs.RawRules)
+	irs.recordConfigurationModule(rule)
 }
 
 func (irs *InstRuleSet) AddFuncRule(file string, rule *InstFuncRule) {
 	addRule(file, rule, irs.FuncRules)
+	irs.recordConfigurationModule(rule)
 }
 
 func (irs *InstRuleSet) AddStructRule(file string, rule *InstStructRule) {
 	addRule(file, rule, irs.StructRules)
+	irs.recordConfigurationModule(rule)
 }
 
 func (irs *InstRuleSet) AddCallRule(file string, rule *InstCallRule) {
 	addRule(file, rule, irs.CallRules)
+	irs.recordConfigurationModule(rule)
 }
 
 func (irs *InstRuleSet) AddLitRule(file string, rule *InstLitRule) {
 	addRule(file, rule, irs.LitRules)
+	irs.recordConfigurationModule(rule)
 }
 
 func (irs *InstRuleSet) AddDirectiveRule(file string, rule *InstDirectiveRule) {
 	addRule(file, rule, irs.DirectiveRules)
+	irs.recordConfigurationModule(rule)
 }
 
 func (irs *InstRuleSet) AddDeclRule(file string, rule *InstDeclRule) {
 	addRule(file, rule, irs.DeclRules)
+	irs.recordConfigurationModule(rule)
 }
 
 // AddIgnoredCallFile records that file holds a //otelc:ignore comment above
@@ -195,6 +215,25 @@ func (irs *InstRuleSet) AddIgnoredCallFile(file string) {
 
 func (irs *InstRuleSet) AddFileRule(rule *InstFileRule) {
 	irs.FileRules = append(irs.FileRules, rule)
+	irs.recordConfigurationModule(rule)
+}
+
+func (irs *InstRuleSet) recordConfigurationModule(r InstRule) {
+	if r == nil || r.GetModuleRoot() == "" {
+		return
+	}
+	if irs.configurationModules == nil {
+		irs.configurationModules = make(map[string]string)
+	}
+	irs.configurationModules[r.GetModuleRoot()] = r.GetMetadataPath()
+}
+
+// ConfigurationModuleMetadata returns matched module roots and their metadata
+// paths. An empty metadata path means that no metadata.yaml was discovered.
+func (irs *InstRuleSet) ConfigurationModuleMetadata() map[string]string {
+	result := make(map[string]string, len(irs.configurationModules))
+	maps.Copy(result, irs.configurationModules)
+	return result
 }
 
 func (irs *InstRuleSet) SetPackageName(name string) {

@@ -613,12 +613,17 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 		rootTool := writeInstrumentationModule(t, tmp, "example.com/root", false, map[string]string{
 			"example.com/foo": filepath.Join(tmp, "foo"),
 		})
-		writeInstrumentationModule(t, filepath.Join(tmp, "foo"), "example.com/foo", true, nil)
+		fooDir := filepath.Join(tmp, "foo")
+		writeInstrumentationModule(t, fooDir, "example.com/foo", true, nil)
+		metadataPath := filepath.Join(fooDir, instrumentationMetadataFilename)
+		require.NoError(t, os.WriteFile(metadataPath, []byte("configurations: []\n"), 0o644))
 
 		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
 		require.NoError(t, err)
 		require.Len(t, rules, 1)
 		require.Equal(t, "dummyrule", rules[0].GetName())
+		assert.Equal(t, fooDir, rules[0].GetModuleRoot())
+		assert.Equal(t, metadataPath, rules[0].GetMetadataPath())
 	})
 
 	t.Run("loads nested tool files recursively", func(t *testing.T) {
@@ -636,6 +641,24 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, rules, 1)
 		require.Equal(t, "dummyrule", rules[0].GetName())
+		assert.Empty(t, rules[0].GetMetadataPath())
+	})
+
+	t.Run("reports metadata discovery errors", func(t *testing.T) {
+		tmp := t.TempDir()
+		fooDir := filepath.Join(tmp, "foo")
+		rootTool := writeInstrumentationModule(t, tmp, "example.com/root", false, map[string]string{
+			"example.com/foo": fooDir,
+		})
+		writeInstrumentationModule(t, fooDir, "example.com/foo", true, nil)
+		metadataPath := filepath.Join(fooDir, instrumentationMetadataFilename)
+		if err := os.Symlink(metadataPath, metadataPath); err != nil {
+			t.Skipf("cannot create a self-referential metadata symlink: %v", err)
+		}
+
+		_, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
+
+		require.ErrorContains(t, err, "checking instrumentation metadata")
 	})
 
 	t.Run("duplicate rule names from different packages are preserved", func(t *testing.T) {

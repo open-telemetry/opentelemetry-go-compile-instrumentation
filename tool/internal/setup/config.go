@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"go/parser"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -30,6 +31,7 @@ const (
 
 type instrumentationConfig struct {
 	ImportPath string
+	ModuleDir  string
 	ToolFile   string
 	RuleFiles  []string
 	Error      error
@@ -75,6 +77,36 @@ func findToolFiles(moduleDirs []string) ([]string, error) {
 	// Sort for deterministic rule loading.
 	slices.Sort(toolFiles)
 	return toolFiles, nil
+}
+
+// findInstrumentationMetadata returns the nearest metadata.yaml between
+// moduleDir and instrumentationRoot, inclusive. When instrumentationRoot is
+// the module directory, only that module's metadata is considered.
+func findInstrumentationMetadata(moduleDir, instrumentationRoot string) (string, error) {
+	moduleDir = filepath.Clean(moduleDir)
+	instrumentationRoot = filepath.Clean(instrumentationRoot)
+	relative, err := filepath.Rel(instrumentationRoot, moduleDir)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return "", ex.Newf(
+			"instrumentation module %s is outside metadata search root %s",
+			moduleDir,
+			instrumentationRoot,
+		)
+	}
+
+	for dir := moduleDir; ; dir = filepath.Dir(dir) {
+		path := filepath.Join(dir, "metadata.yaml")
+		_, statErr := os.Stat(path)
+		if statErr == nil {
+			return path, nil
+		}
+		if !errors.Is(statErr, os.ErrNotExist) {
+			return "", ex.Wrapf(statErr, "checking instrumentation metadata %s", path)
+		}
+		if dir == instrumentationRoot {
+			return "", nil
+		}
+	}
 }
 
 const packagesLoadTimeout = 30 * time.Second
@@ -259,6 +291,7 @@ func walkInstrumentation(ctx context.Context, toolFiles []string, visit instrume
 // its error. modDir and pkgDir are the module and the package directories of
 // pkg.
 func fillInstrumentationConfig(cfg *instrumentationConfig, pkg *packages.Package, modDir, pkgDir string) {
+	cfg.ModuleDir = modDir
 	// Always look for tool file in the module directory
 	toolFile, findErr := findToolFile(modDir)
 	if findErr != nil {

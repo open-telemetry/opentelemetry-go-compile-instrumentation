@@ -61,6 +61,13 @@ func parseRuleFile(ctx context.Context, file string, content []byte, otelcVersio
 	return doc.Rules()
 }
 
+func setRuleMetadataSource(rules []rule.InstRule, moduleRoot, metadataPath string) {
+	for _, r := range rules {
+		r.SetModuleRoot(moduleRoot)
+		r.SetMetadataPath(metadataPath)
+	}
+}
+
 func matchVersion(dependency *Dependency, rule rule.InstRule) bool {
 	return util.VersionInRange(dependency.Version, rule.GetVersion())
 }
@@ -523,6 +530,15 @@ func loadRulesFromToolFiles(
 			if parseErr != nil {
 				return false, parseErr
 			}
+			metadataRoot := v.Config.ModuleDir
+			if _, embedded := embeddedSourceDir(v.Config.ImportPath); embedded {
+				metadataRoot = filepath.Join(util.GetBuildTempDir(), unzippedInstDir)
+			}
+			metadataPath, metadataErr := findInstrumentationMetadata(v.Config.ModuleDir, metadataRoot)
+			if metadataErr != nil {
+				return false, metadataErr
+			}
+			setRuleMetadataSource(rules, v.Config.ModuleDir, metadataPath)
 
 			ruleSet = append(ruleSet, rules...)
 		}
