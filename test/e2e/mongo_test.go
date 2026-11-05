@@ -63,12 +63,13 @@ func assertMongoPeerNetworkAttrs(t *testing.T, insertSpan ptrace.Span, uri strin
 
 	peerAddr, ok := testutil.Attrs(insertSpan)["network.peer.address"].(string)
 	require.True(t, ok, "network.peer.address must be a string")
-	require.NotEmpty(t, peerAddr)
-	// Do not require equality with the URI host: on Linux CI Docker may publish
-	// localhost while the TCP peer is the bridge address. Accept a valid IP or
-	// an exact match with the URI host.
-	require.True(t, net.ParseIP(peerAddr) != nil || peerAddr == uriHost,
-		"network.peer.address %q must be an IP or match URI host %q", peerAddr, uriHost)
+	// otelmongo v1 emits network.peer.address as "host:port"; v2 emits the bare
+	// host. The host comes verbatim from the URI, so compare the host part.
+	if host, _, err := net.SplitHostPort(peerAddr); err == nil {
+		peerAddr = host
+	}
+	require.Equal(t, uriHost, peerAddr,
+		"network.peer.address %q must match URI host %q", peerAddr, uriHost)
 
 	testutil.RequireAttributeExists(t, insertSpan, "network.peer.port")
 	switch port := testutil.Attrs(insertSpan)["network.peer.port"].(type) {
