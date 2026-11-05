@@ -1482,13 +1482,21 @@ func TestGenerateRuntimePerPackageSkipsPackagesWithoutFiles(t *testing.T) {
 func TestGenerateRuntimePerPackageWritesTestOnlyPackage(t *testing.T) {
 	sp := newTestSetupPhase()
 
-	pkgDir := t.TempDir()
+	tmpDir := t.TempDir()
+	appDir := filepath.Join(tmpDir, "app")
+	pkgDir := filepath.Join(appDir, "testonly")
+	hooksDir := filepath.Join(appDir, "hooks")
+
+	mustWriteFile(t, filepath.Join(appDir, "go.mod"), "module example.com/app\n\ngo 1.25.0\n")
 	mustWriteFile(t, filepath.Join(pkgDir, "testonly_test.go"), "package testonly\n")
+	mustWriteFile(t, filepath.Join(hooksDir, "hooks.go"), "package hooks\n")
+	sp.buildFlags = []string{"-C", appDir}
+
 	pkgs := []*packages.Package{{PkgPath: "example.com/app/testonly", Name: "testonly", Dir: pkgDir}}
 
 	rset := newTestRuleSet(
 		"example.com/app/lib",
-		[]*rule.InstFuncRule{newTestFuncRule("example.com/hooks", "example.com/app/lib")},
+		[]*rule.InstFuncRule{newTestFuncRule("example.com/app/hooks", "example.com/app/lib")},
 		nil,
 	)
 	require.NoError(t, sp.generateRuntimePerPackage(t.Context(), pkgs, []*rule.InstRuleSet{rset}))
@@ -1496,7 +1504,7 @@ func TestGenerateRuntimePerPackageWritesTestOnlyPackage(t *testing.T) {
 	generated, err := os.ReadFile(filepath.Join(pkgDir, otelcRuntimeFile))
 	require.NoError(t, err)
 	assert.Contains(t, string(generated), "package testonly")
-	assert.Contains(t, string(generated), `_ "example.com/hooks"`)
+	assert.Contains(t, string(generated), `_ "example.com/app/hooks"`)
 }
 
 // TestGenerateRuntimePerPackageSkipsSelfImport covers the import path reaching
