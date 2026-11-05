@@ -121,16 +121,20 @@ func (w *writerWrapper) FlushError() error {
 		return http.ErrNotSupported
 	}
 
+	if hasFlushError {
+		if err := fe.FlushError(); err != nil {
+			return err
+		}
+	} else {
+		f.Flush()
+	}
+
 	// Flushing commits the response, and net/http sends a 200 when no status
 	// was set. Record it, or a later WriteHeader would replace it on the span.
 	if !w.wroteHeader {
 		w.WriteHeader(http.StatusOK)
 	}
 
-	if hasFlushError {
-		return fe.FlushError()
-	}
-	f.Flush()
 	return nil
 }
 

@@ -615,12 +615,14 @@ func TestWriterWrapper_FlushCommitsStatusOK(t *testing.T) {
 }
 
 func TestWriterWrapper_FlushKeepsExplicitStatus(t *testing.T) {
-	wrapper := &writerWrapper{ResponseWriter: httptest.NewRecorder(), statusCode: http.StatusOK}
+	rec := httptest.NewRecorder()
+	wrapper := &writerWrapper{ResponseWriter: rec, statusCode: http.StatusOK}
 
 	wrapper.WriteHeader(http.StatusAccepted)
 	wrapper.Flush()
 
 	assert.Equal(t, http.StatusAccepted, wrapper.statusCode)
+	assert.Equal(t, http.StatusAccepted, rec.Code)
 }
 
 func TestWriterWrapper_FlushOverRealServer(t *testing.T) {
@@ -651,6 +653,18 @@ func TestWriterWrapper_FlushError_NotSupported(t *testing.T) {
 
 	require.ErrorIs(t, wrapper.FlushError(), http.ErrNotSupported)
 	assert.False(t, wrapper.wroteHeader, "a flush that did nothing must not commit a status")
+}
+
+func TestWriterWrapper_FlushError_UnderlyingErrorDoesNotCommit(t *testing.T) {
+	mock := &mockFlushErrorWriter{
+		ResponseWriter: httptest.NewRecorder(),
+		err:            http.ErrNotSupported,
+	}
+	wrapper := &writerWrapper{ResponseWriter: mock, statusCode: http.StatusOK}
+
+	err := wrapper.FlushError()
+	require.ErrorIs(t, err, http.ErrNotSupported)
+	assert.False(t, wrapper.wroteHeader, "a failed flush must not commit a status")
 }
 
 // mockFlushErrorWriter is a mock ResponseWriter that implements FlushError() error.
