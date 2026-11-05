@@ -369,6 +369,8 @@ func main() {
 	out, err := gen.CombinedOutput()
 	require.NoError(t, err, "recording the CPU profile failed:\n%s", out)
 
+	assertNoteInliningPremise(t, filepath.Join(appDir, "extra"), profile)
+
 	// The profile path must be absolute: the nested builds toolexec runs
 	// for the link resolution work from other directories.
 	baseEnv := append(
@@ -412,4 +414,39 @@ func main() {
 		// recovery, run with the recorded profile, can have resolved extra.
 		assertStatsLinkRecovered(t, log)
 	})
+}
+
+// assertNoteInliningPremise fails the test when the premise the warm subtest
+// is built on breaks. extra.Note is tuned to sit past the compiler's inlining
+// budget, so only the recorded profile, which marks it hot, can lift it over.
+// A compiler that inlines Note unprofiled too, or one the profile no longer
+// reaches, makes the profiled and the unprofiled compile of extra produce the
+// same export data: the fingerprint mismatch this test relies on disappears,
+// and the warm subtest would keep passing while proving nothing. The
+// compiler's -m diagnostics are an escape hatch, not a stable API; the
+// wording was verified against the toolchains this repository builds with
+// (go 1.26 and 1.27), and a future wording change fails here loudly instead
+// of silently voiding the test.
+func assertNoteInliningPremise(t *testing.T, extraDir, profile string) {
+	t.Helper()
+
+	build := func(args ...string) string {
+		t.Helper()
+		cmd := exec.CommandContext(t.Context(), "go", append([]string{"build"}, args...)...)
+		cmd.Dir = extraDir
+		// A fresh cache forces the compile of extra, so the diagnostics
+		// always print; extra imports nothing, so this compiles one tiny
+		// package.
+		cmd.Env = append(preparedBuildBaseEnvironment(),
+			"GOWORK=off", "GOCACHE="+t.TempDir())
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "go build %v failed:\n%s", args, out)
+		return string(out)
+	}
+
+	const noteInline = "can inline Note"
+	assert.NotContains(t, build("-gcflags=-m=2", "."), noteInline,
+		"an unprofiled compile inlines Note, so profiled and unprofiled extra no longer differ and the warm subtest proves nothing")
+	assert.Contains(t, build("-pgo="+profile, "-gcflags=-m=2", "."), noteInline,
+		"a profiled compile no longer inlines Note, so profiled and unprofiled extra no longer differ and the warm subtest proves nothing")
 }
