@@ -579,8 +579,8 @@ func TestFuncDeclMatchesFilters_Param(t *testing.T) {
 }
 
 // TestFuncDeclMatchesFilters_CompositeTypes locks the documented no-match
-// behavior for composite parameter and result types. Scanning those nodes
-// used to call util.Unimplemented and abort setup; they must now be skipped.
+// behavior for composite parameter and result types: those nodes never
+// satisfy a type-name filter.
 // "Contains" applies to the parameter/result list, not to nested element
 // types, so args: [string] does not match []string.
 func TestFuncDeclMatchesFilters_CompositeTypes(t *testing.T) {
