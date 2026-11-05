@@ -1916,6 +1916,90 @@ func TestResolveRuleAddedImportsFollowsChainedRuleSets(t *testing.T) {
 		"the pass after fmt joins the importcfg must resolve the rule set fmt carries")
 }
 
+// chainLinkPackages returns stdlib packages for the depth-bound test below,
+// ordered so that no one of them imports a later one, verified against go's
+// own dependency graph: resolving any one of them never drags a later chain
+// element into the importcfg, so each recovery pass adds exactly one hop.
+func chainLinkPackages() []string {
+	return []string{
+		"cmp", "container/list", "unicode", "image/color", "unicode/utf16",
+		"container/ring", "unicode/utf8", "math/bits", "image/color/palette",
+		"math", "slices", "errors", "path", "strconv", "sort", "container/heap",
+		"hash/maphash", "hash/adler32", "hash/crc32", "hash/crc64", "hash/fnv",
+		"encoding/ascii85", "strings", "encoding/base32", "encoding/base64",
+		"encoding/hex", "text/scanner", "net/url", "crypto/rc4", "crypto/md5",
+		"crypto/des", "crypto/aes", "crypto/sha512", "crypto/sha256",
+	}
+}
+
+// chainLinkSets returns the rule sets that chain the first hops packages
+// into a d-hop chain: the set of package i declares an import of package
+// i+1, so a recovery pass resolves package i+1 only after package i joined
+// the importcfg, one hop per pass.
+func chainLinkSets(hops int) []*rule.InstRuleSet {
+	packages := chainLinkPackages()
+	sets := make([]*rule.InstRuleSet, hops)
+	for i := range sets {
+		sets[i] = &rule.InstRuleSet{
+			PackageName: "dep" + strconv.Itoa(i),
+			ModulePath:  packages[i],
+			FuncRules: map[string][]*rule.InstFuncRule{
+				"dep.go": {{InstBaseRule: rule.InstBaseRule{
+					Name:   "chain-rule",
+					Target: rule.NewTarget(packages[i]),
+					Imports: map[string]string{
+						"next": packages[i+1],
+					},
+				}}},
+			},
+		}
+	}
+	return sets
+}
+
+// TestResolveRuleAddedImportsAcceptsChainsTheCompileAccepted proves the
+// pass bound of the link recovery matches the compile bound exactly. The
+// compile side accepts a chain of maxResolutionChain hops: enterNestedResolution
+// fails only on a chain that holds more entries than that. A chain of d hops
+// needs d recovery passes that each add one level, plus one final pass that
+// adds nothing, so the link must run one more pass than the compile bound to
+// accept every chain a compile accepted. One pass less, and a chain of
+// maxResolutionChain hops, which compiled cold, fails its warm recovery.
+func TestResolveRuleAddedImportsAcceptsChainsTheCompileAccepted(t *testing.T) {
+	t.Run("a chain of maxResolutionChain hops recovers", func(t *testing.T) {
+		workDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, workDir)
+		writeMatchedRules(t, chainLinkSets(maxResolutionChain))
+
+		// The link lists only the chain's root, the first package a rule of
+		// the build instrumented.
+		packages := chainLinkPackages()
+		linkConfig := &imports.ImportConfig{PackageFile: map[string]string{
+			packages[0]: "/unused/root.a",
+		}}
+		updated, err := resolveRuleAddedImports(t.Context(), nil, linkConfig)
+		require.NoError(t, err)
+		assert.True(t, updated)
+		assert.Contains(t, linkConfig.PackageFile, packages[maxResolutionChain],
+			"the last hop of a chain the compile accepted must resolve for the link")
+	})
+
+	t.Run("a chain one hop deeper exhausts the passes", func(t *testing.T) {
+		workDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, workDir)
+		writeMatchedRules(t, chainLinkSets(maxResolutionChain+1))
+
+		packages := chainLinkPackages()
+		linkConfig := &imports.ImportConfig{PackageFile: map[string]string{
+			packages[0]: "/unused/root.a",
+		}}
+		_, err := resolveRuleAddedImports(t.Context(), nil, linkConfig)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(),
+			"rules add imports nested deeper than "+strconv.Itoa(maxResolutionChain))
+	})
+}
+
 // TestResolveRuleAddedImportsKeepsLinkedBinarysMainSets covers a
 // multi-binary build: every main package compiles with -p main, so every
 // executable's rule set carries ModulePath "main" and no link importcfg can

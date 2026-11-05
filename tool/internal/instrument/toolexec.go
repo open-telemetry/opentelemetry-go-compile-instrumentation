@@ -645,10 +645,13 @@ func resolveRuleAddedImports(ctx context.Context, linkArgs []string, linkConfig 
 	// add_file on A imports B, and a matched rule on B imports C, which joins
 	// the link only after B does. Repeat until a pass adds nothing. Every
 	// adding pass grows the importcfg, so the rule-added candidates bound the
-	// loop; the chain bound matches the compile side, where each nested
-	// resolution closes one level of the same nesting and fails past the
-	// bound, so a link that walks past it follows a chain no compile accepted.
-	for range maxResolutionChain {
+	// loop. A chain of d hops needs d passes that each add one level plus one
+	// pass that adds nothing, and the compile side accepts at most
+	// maxResolutionChain hops: enterNestedResolution fails only past that
+	// many chain entries. The one extra pass makes the link accept exactly
+	// the chains the compile accepted, so a link that still exhausts the
+	// loop follows a chain no compile accepted.
+	for range maxResolutionChain + 1 {
 		pass, passErr := resolveRuleAddedImportsPass(ctx, linkArgs, buildFlags, linkConfig)
 		if passErr != nil {
 			return updated, passErr
