@@ -54,6 +54,47 @@
         '*',
       ],
     },
+    {
+      // This gates all major go updates into individual updates and will disappear
+      // when a versioned module is created & old version go mod added to the next rule.
+      matchManagers: [
+        'gomod',
+      ],
+      matchUpdateTypes: [
+        'major',
+      ],
+      matchPackageNames: [
+        '!github.com/stretchr/testify',
+        '!go.opentelemetry.io/**',
+      ],
+      dependencyDashboardApproval: true,
+      dependencyDashboardCategory: 'Instrumentation Targets',
+      dependencyDashboardHeader: 'The below instrumentation targets are needing a new module directory created.',
+    },
+    {
+      // Each instrumentation module deliberately targets a single major of the
+      // library it instruments, so supporting a new major means adding a new
+      // module directory (openai-go -> openai-go/v2 -> openai-go/v3), never
+      // bumping in place. When a new major gains its own module directory,
+      // add the file path for the old go mod added to this rule.
+      matchManagers: [
+        'gomod',
+      ],
+      matchUpdateTypes: [
+        'major',
+      ],
+      matchPackageNames: [
+        '!github.com/stretchr/testify',
+        '!go.opentelemetry.io/**',
+      ],
+      matchFileNames:
+        'instrumentation/github.com/openai/openai-go/go.mod',
+        'instrumentation/github.com/openai/openai-go/v2/go.mod',
+        'instrumentation/go.mongodb.org/mongo-driver/mongo/go.mod',
+      ],
+      enabled: false,
+    },
+      
   ],
   labels: [
     'dependencies',
