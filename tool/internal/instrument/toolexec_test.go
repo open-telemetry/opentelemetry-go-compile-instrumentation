@@ -2000,6 +2000,54 @@ func TestResolveRuleAddedImportsAcceptsChainsTheCompileAccepted(t *testing.T) {
 	})
 }
 
+// TestLinkedBinaryName covers every name shape go gives a link's -o
+// output: the bare name go derives from the main package's import path,
+// the ".test" suffix of test binaries, the ".exe" suffix Windows adds, both
+// suffixes together, a custom -o name, and a command that names no output.
+func TestLinkedBinaryName(t *testing.T) {
+	tests := []struct {
+		name     string
+		linkArgs []string
+		want     string
+	}{
+		{
+			name:     "bare binary name",
+			linkArgs: []string{"link", "-o", "/build/out/app", "-importcfg", "cfg"},
+			want:     "app",
+		},
+		{
+			name:     "test binary suffix",
+			linkArgs: []string{"link", "-o", "/build/out/app.test", "-importcfg", "cfg"},
+			want:     "app",
+		},
+		{
+			name:     "windows exe suffix",
+			linkArgs: []string{"link", "-o", "/build/out/app.exe", "-importcfg", "cfg"},
+			want:     "app",
+		},
+		{
+			name:     "test binary on windows",
+			linkArgs: []string{"link", "-o", "/build/out/app.test.exe", "-importcfg", "cfg"},
+			want:     "app",
+		},
+		{
+			name:     "custom output name",
+			linkArgs: []string{"link", "-o", "/build/out/custom-name", "-importcfg", "cfg"},
+			want:     "custom-name",
+		},
+		{
+			name:     "no output flag",
+			linkArgs: []string{"link", "-importcfg", "cfg"},
+			want:     "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, linkedBinaryName(tt.linkArgs))
+		})
+	}
+}
+
 // TestResolveRuleAddedImportsKeepsLinkedBinarysMainSets covers a
 // multi-binary build: every main package compiles with -p main, so every
 // executable's rule set carries ModulePath "main" and no link importcfg can
