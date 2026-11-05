@@ -110,27 +110,16 @@ func extractGZip(bundleReader io.Reader, targetDir string) (retErr error) {
 		// Normalize path to Unix style for consistent string operations
 		cleanName := normalizePath(header.Name)
 
-		// Sanitize the file path to prevent Zip Slip vulnerability
-		if cleanName == "." || cleanName == ".." ||
-			strings.HasPrefix(cleanName, "..") {
-			continue
-		}
-
-		// Ensure the resolved path is within the target directory
-		targetPath := filepath.Join(targetDir, cleanName)
-		resolvedPath, err := filepath.EvalSymlinks(targetPath)
-		if err != nil {
-			// If symlink evaluation fails, use the original path
-			resolvedPath = targetPath
-		}
-
-		// Check if the resolved path is within the target directory
-		relPath, err := filepath.Rel(targetDir, resolvedPath)
-		if err != nil || strings.HasPrefix(relPath, "..") ||
-			filepath.IsAbs(relPath) {
+		// Sanitize the file path to prevent Zip Slip vulnerability.
+		// filepath.IsLocal is checked directly here so CodeQL's taint
+		// tracking recognizes the destination path as sanitized.
+		name := filepath.FromSlash(cleanName)
+		if !filepath.IsLocal(name) {
 			continue // Skip files that would be extracted outside target dir
 		}
-		err = extract(tarReader, header, filepath.Join(targetDir, relPath))
+
+		targetPath := filepath.Join(targetDir, name)
+		err = extract(tarReader, header, targetPath)
 		if err != nil {
 			return err
 		}
