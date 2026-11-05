@@ -47,12 +47,8 @@ func TestMongoClientV1(t *testing.T) {
 			)
 
 			// Assert MongoDB specific semantic conventions attributes
-			testutil.RequireAttribute(t, insertSpan, "db.system.name", "mongodb")
-			testutil.RequireAttribute(t, insertSpan, "db.operation.name", "insert")
-			testutil.RequireAttribute(t, insertSpan, "db.namespace", "testdb")
-			testutil.RequireAttribute(t, insertSpan, "db.collection.name", "users")
+			testutil.RequireMongoClientSemconv(t, insertSpan, "insert", "testdb", "users")
 			testutil.RequireAttributeContains(t, insertSpan, "network.peer.address", "127.0.0.1")
-			testutil.RequireAttribute(t, insertSpan, "network.transport", "tcp")
 		})
 	}
 }
@@ -87,12 +83,8 @@ func TestMongoClientV2(t *testing.T) {
 			)
 
 			// Assert MongoDB specific semantic conventions attributes
-			testutil.RequireAttribute(t, insertSpan, "db.system.name", "mongodb")
-			testutil.RequireAttribute(t, insertSpan, "db.operation.name", "insert")
-			testutil.RequireAttribute(t, insertSpan, "db.namespace", "testdb")
-			testutil.RequireAttribute(t, insertSpan, "db.collection.name", "users")
+			testutil.RequireMongoClientSemconv(t, insertSpan, "insert", "testdb", "users")
 			testutil.RequireAttributeContains(t, insertSpan, "network.peer.address", "127.0.0.1")
-			testutil.RequireAttribute(t, insertSpan, "network.transport", "tcp")
 		})
 	}
 }

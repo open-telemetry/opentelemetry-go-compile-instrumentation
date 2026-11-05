@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/url"
 	"runtime"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -19,9 +20,10 @@ import (
 	"go.opentelemetry.io/otelc/test/testutil"
 )
 
-// TestMongo verifies MongoDB client spans against a real MongoDB process
-// (testcontainers), rather than the in-process mock used by the integration
-// suite. That exercises peer / network attributes under real TCP conditions.
+// TestMongo verifies MongoDB client spans against a real mongod process
+// (testcontainers), rather than the mock wire-protocol server used by the
+// integration suite. That exercises real driver/server fidelity and
+// non-loopback peer addresses, which the loopback mock cannot produce.
 func TestMongo(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("mongodb testcontainer not supported on windows")
@@ -37,17 +39,17 @@ func TestMongo(t *testing.T) {
 			output := f.BuildAndRun("mongoclient", "-uri="+uri, "-version="+version)
 			require.Contains(t, output, "MongoDB operations completed successfully")
 
-			insertSpan := testutil.RequireSpan(t, f.Traces(),
-				testutil.IsClient,
-				testutil.HasAttribute("db.operation.name", "insert"),
-			)
+			var insertSpans []ptrace.Span
+			for _, s := range testutil.AllSpans(f.Traces()) {
+				if testutil.IsClient(s) && testutil.HasAttribute("db.operation.name", "insert")(s) {
+					insertSpans = append(insertSpans, s)
+				}
+			}
+			require.Len(t, insertSpans, 1, "expected exactly one insert span")
+			insertSpan := insertSpans[0]
 
-			testutil.RequireAttribute(t, insertSpan, "db.system.name", "mongodb")
-			testutil.RequireAttribute(t, insertSpan, "db.operation.name", "insert")
-			testutil.RequireAttribute(t, insertSpan, "db.namespace", "testdb")
-			testutil.RequireAttribute(t, insertSpan, "db.collection.name", "users")
+			testutil.RequireMongoClientSemconv(t, insertSpan, "insert", "testdb", "users")
 			assertMongoPeerNetworkAttrs(t, insertSpan, uri)
-			testutil.RequireAttribute(t, insertSpan, "network.transport", "tcp")
 		})
 	}
 }
@@ -71,15 +73,11 @@ func assertMongoPeerNetworkAttrs(t *testing.T, insertSpan ptrace.Span, uri strin
 	require.Equal(t, uriHost, peerAddr,
 		"network.peer.address %q must match URI host %q", peerAddr, uriHost)
 
-	testutil.RequireAttributeExists(t, insertSpan, "network.peer.port")
-	switch port := testutil.Attrs(insertSpan)["network.peer.port"].(type) {
-	case int64:
-		require.NotZero(t, port)
-	case int:
-		require.NotZero(t, port)
-	default:
-		t.Fatalf("network.peer.port has unexpected type %T (%v)", port, port)
-	}
+	uriPort, err := strconv.Atoi(parsed.Port())
+	require.NoError(t, err)
+	port, ok := testutil.Attrs(insertSpan)["network.peer.port"].(int64)
+	require.True(t, ok, "network.peer.port must be an int64")
+	require.Equal(t, int64(uriPort), port)
 }
 
 func startMongoContainer(t *testing.T) string {
@@ -87,8 +85,8 @@ func startMongoContainer(t *testing.T) string {
 
 	ctx := t.Context()
 	mongoContainer, err := mongodb.Run(ctx, "mongo:7.0")
-	require.NoError(t, err)
 	testcontainers.CleanupContainer(t, mongoContainer)
+	require.NoError(t, err)
 
 	uri, err := mongoContainer.ConnectionString(ctx)
 	require.NoError(t, err)
