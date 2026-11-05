@@ -1,0 +1,44 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+//line /golden/work/main.go:6
+import "context"
+
+// RequestContext implements context.Context through its embedded field.
+type RequestContext struct{ context.Context }
+
+type MyErr struct{}
+
+func (*MyErr) Error() string { return "" }
+
+//otelc:span
+func plain(ctx context.Context) (_unnamedRetVal_1628854475_0 error) {
+	/*line /<generated>:1*/ println("ctx arg:", "ctx")
+	println("err ret:", "_unnamedRetVal_1628854475_0")
+	/*line /golden/work/main.go:16*/ return nil
+}
+
+//otelc:span
+//line /golden/work/main.go:19
+func framework(n int, c *RequestContext) (_unnamedRetVal_1628854475_0 int, _unnamedRetVal_1628854475_1 *MyErr) {
+	/*line /<generated>:1*/ println("ctx arg:", "c")
+	println("err ret:", "_unnamedRetVal_1628854475_1")
+	/*line /golden/work/main.go:19*/ return n, nil
+}
+
+//otelc:span
+//line /golden/work/main.go:22
+func none(n int) (_unnamedRetVal_1628854475_0 MyErr) {
+	/*line /<generated>:1*/ println("ctx arg:", "")
+	println("err ret:", "")
+	/*line /golden/work/main.go:22*/ return MyErr{}
+}
+
+//line /golden/work/main.go:24
+func main() {
+	_ = plain(context.Background())
+	framework(1, &RequestContext{Context: context.Background()})
+	none(1)
+}
