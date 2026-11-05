@@ -55,6 +55,63 @@ func TestAddedImportsResolveInNestedBuild(t *testing.T) {
 	appDir := copyNestedImportsApp(t, repoRoot)
 	padNestedImportsLate(t, appDir)
 
+	runOut := buildAndRunNestedImports(t, absoluteOtelcPath, appDir)
+	assert.Contains(
+		t,
+		runOut,
+		"nestedimports: dep rule called into late",
+		"the code the dep rule injected must call into the package it added, which only links when the nested build resolved its archive",
+	)
+	assert.Contains(
+		t,
+		runOut,
+		"nestedimports: late.Instrumented= true",
+		"the outer build must compile late instrumented; an uninstrumented nested archive poisons their shared cache entry",
+	)
+}
+
+// TestAddedImportsResolveInSecondNestedBuild covers an added import resolved
+// inside a nested build. late imports inner, and the inner rule adds an import
+// of leaf, so the nested build that resolves late for dep compiles inner and
+// resolves leaf with a nested build of its own. The application imports leaf
+// too, so the outer build links its own instrumented leaf.
+//
+// otelc strips -toolexec from GOFLAGS at startup. When only the outer toolexec
+// added it back, the second nested build compiled leaf uninstrumented and
+// inner was compiled against that copy. The outer build then reused that inner
+// from their shared cache entry, and the link failed with `fingerprint
+// mismatch`. -p=1 makes the outer build compile dep, and wait for its nested
+// build, before it reaches inner, so the failure does not depend on timing.
+func TestAddedImportsResolveInSecondNestedBuild(t *testing.T) {
+	otelcPath, err := testutil.OtelcPath()
+	require.NoError(t, err)
+	absoluteOtelcPath, err := filepath.Abs(otelcPath)
+	require.NoError(t, err)
+	repoRoot := filepath.Dir(absoluteOtelcPath)
+
+	appDir := copyNestedImportsApp(t, repoRoot)
+
+	runOut := buildAndRunNestedImports(t, absoluteOtelcPath, appDir, "GOFLAGS=-p=1")
+	assert.Contains(
+		t,
+		runOut,
+		"nestedimports: inner rule called into leaf",
+		"the code the inner rule injected must call into the package it added",
+	)
+	assert.Contains(
+		t,
+		runOut,
+		"nestedimports: leaf.Instrumented= true",
+		"the outer build must link leaf instrumented",
+	)
+}
+
+// buildAndRunNestedImports builds the application in appDir with otelc on a
+// fresh GOCACHE, runs it, and returns its output. env is added to the build
+// environment.
+func buildAndRunNestedImports(t *testing.T, otelcPath, appDir string, env ...string) string {
+	t.Helper()
+
 	// A fresh GOCACHE makes every build cold: the nested build cannot reuse an
 	// archive a warm cache already holds.
 	goCache := filepath.Join(t.TempDir(), "gocache")
@@ -62,33 +119,23 @@ func TestAddedImportsResolveInNestedBuild(t *testing.T) {
 	if util.IsWindows() {
 		binary += ".exe"
 	}
-	cmd := exec.CommandContext(t.Context(), absoluteOtelcPath, "go", "build", "-o", binary, ".")
+	cmd := exec.CommandContext(t.Context(), otelcPath, "go", "build", "-o", binary, ".")
 	cmd.Dir = appDir
 	cmd.Env = append(
 		preparedBuildBaseEnvironment(),
 		"GOWORK=off",
 		"GOCACHE="+goCache,
 	)
+	cmd.Env = append(cmd.Env, env...)
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err,
-		"the link needs the archive dep imported; an uninstrumented nested copy mismatches it:\n%s", out)
+		"the link needs the archives of the added imports; an uninstrumented nested copy mismatches them:\n%s", out)
 
 	run := exec.CommandContext(t.Context(), binary)
 	run.Dir = appDir
 	runOut, err := run.CombinedOutput()
 	require.NoError(t, err, string(runOut))
-	assert.Contains(
-		t,
-		string(runOut),
-		"nestedimports: dep rule called into late",
-		"the code the dep rule injected must call into the package it added, which only links when the nested build resolved its archive",
-	)
-	assert.Contains(
-		t,
-		string(runOut),
-		"nestedimports: late.Instrumented= true",
-		"the outer build must compile late instrumented; an uninstrumented nested archive poisons their shared cache entry",
-	)
+	return string(runOut)
 }
 
 // copyNestedImportsApp copies the committed nestedimports application into a
