@@ -74,7 +74,6 @@ func TestPrepareCapturesLiveBase(t *testing.T) {
 			want := []string{
 				"authorized=true", "pr_number=1", "base_ref=main", "base_sha=" + baseSHA,
 				"head_ref=contribution", "head_repo_full=test/fork", "head_sha=" + headSHA,
-				"is_cross_repository=true",
 			}
 			if got := fx.lines(t); !slices.Equal(got, want) {
 				t.Errorf("outputs = %q, want %q", got, want)
@@ -83,7 +82,7 @@ func TestPrepareCapturesLiveBase(t *testing.T) {
 	}
 }
 
-func TestPrepareSameRepositoryIsNotCrossRepository(t *testing.T) {
+func TestPrepareSameRepository(t *testing.T) {
 	fx := newPrepFixture(t, false)
 	fx.setPull(func(p map[string]any) {
 		p["head"] = map[string]any{"sha": headSHA, "ref": "feature/x", "repo": map[string]any{"full_name": testRepo}}
@@ -92,7 +91,7 @@ func TestPrepareSameRepositoryIsNotCrossRepository(t *testing.T) {
 		t.Fatalf("exit code = %d: %s", code, out.stderr)
 	}
 	got := fx.lines(t)
-	if !slices.Contains(got, "is_cross_repository=false") || !slices.Contains(got, "head_ref=feature/x") {
+	if !slices.Contains(got, "head_repo_full="+testRepo) || !slices.Contains(got, "head_ref=feature/x") {
 		t.Errorf("outputs = %q", got)
 	}
 }
@@ -360,8 +359,8 @@ func TestIdentityMissingToken(t *testing.T) {
 		t.Fatalf("exit code = %d", code)
 	}
 	wantOut := "::error::Missing publisher token in bundle-publisher.\n" +
-		"Configure OTELC_BUNDLE_PUSH_TOKEN as an environment secret.\n" +
-		"The App remains supported for repository branches.\n"
+		"Configure the OTELBOT_GO_COMPILE_INSTRUMENTATION_* App credentials\n" +
+		"or OTELC_BUNDLE_PUSH_TOKEN as an environment secret.\n"
 	if out.stdout != wantOut {
 		t.Errorf("stdout = %q, want %q", out.stdout, wantOut)
 	}

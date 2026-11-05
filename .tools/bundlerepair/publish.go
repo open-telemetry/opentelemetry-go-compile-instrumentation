@@ -322,8 +322,8 @@ func (a app) identity(ctx context.Context, args []string) error {
 func (a app) reportMissingToken(files ghaction.Files) error {
 	for _, line := range []string{
 		"::error::Missing publisher token in bundle-publisher.",
-		"Configure OTELC_BUNDLE_PUSH_TOKEN as an environment secret.",
-		"The App remains supported for repository branches.",
+		"Configure the OTELBOT_GO_COMPILE_INSTRUMENTATION_* App credentials",
+		"or OTELC_BUNDLE_PUSH_TOKEN as an environment secret.",
 	} {
 		if err := a.sayLine(line); err != nil {
 			return err

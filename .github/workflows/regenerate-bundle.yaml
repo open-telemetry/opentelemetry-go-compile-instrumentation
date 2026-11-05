@@ -69,7 +69,6 @@ jobs:
       head_ref: ${{ steps.pr.outputs.head_ref }}
       head_repo_full: ${{ steps.pr.outputs.head_repo_full }}
       head_sha: ${{ steps.pr.outputs.head_sha }}
-      is_cross_repository: ${{ steps.pr.outputs.is_cross_repository }}
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
@@ -115,7 +114,6 @@ jobs:
       head_ref: ${{ needs.prepare.outputs.head_ref }}
       head_repo_full: ${{ needs.prepare.outputs.head_repo_full }}
       head_sha: ${{ needs.prepare.outputs.head_sha }}
-      is_cross_repository: ${{ needs.prepare.outputs.is_cross_repository }}
       expires_at: ${{ inputs.expires_at }}
     secrets:
       OTELC_BUNDLE_PUSH_TOKEN: ${{ secrets.OTELC_BUNDLE_PUSH_TOKEN }}

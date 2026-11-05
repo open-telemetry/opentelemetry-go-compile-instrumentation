@@ -21,9 +21,6 @@ on:
       head_sha:
         required: true
         type: string
-      is_cross_repository:
-        required: true
-        type: string
       expires_at:
         required: false
         type: string
