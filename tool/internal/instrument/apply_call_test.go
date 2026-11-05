@@ -1698,6 +1698,62 @@ func TestPackageSourceFiles(t *testing.T) {
 		"flags, their values, and non-Go-file args must all be skipped")
 }
 
+func TestPackageSourceFiles_ImportPathEndingInGo(t *testing.T) {
+	dir := t.TempDir()
+	goFile := writeTempGoFile(t, dir, "nats.go", "package nats\n")
+
+	compileArgs := []string{
+		"compile",
+		"-o", filepath.Join(dir, "nats.a"),
+		"-p", "github.com/nats-io/nats.go",
+		goFile,
+	}
+
+	files := packageSourceFiles(compileArgs)
+
+	wantAbs, err := filepath.Abs(goFile)
+	require.NoError(t, err)
+	assert.Equal(t, []string{wantAbs}, files,
+		"an import path ending in .go is the -p value, not a source file")
+}
+
+func TestApplyCallRule_MethodCall_ImportPathEndingInGo(t *testing.T) {
+	const pkgPath = "github.com/nats-io/nats.go"
+	dir := t.TempDir()
+	path := writeTempGoFile(t, dir, "nats.go", `package nats
+
+type Conn struct{}
+
+func (c Conn) Publish(subj string) {}
+
+func run() {
+	var c Conn
+	c.Publish("orders")
+}
+`)
+	ip := &instrumentPhase{
+		logger:      slog.New(slog.DiscardHandler),
+		compileArgs: []string{"compile", "-o", filepath.Join(dir, "nats.a"), "-p", pkgPath, path},
+	}
+	root, err := ip.parseFile(path)
+	require.NoError(t, err)
+
+	r := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_publish"},
+		MethodCall:   pkgPath + ".Conn.Publish",
+		ImportPath:   pkgPath,
+		RecvType:     "Conn",
+		FuncName:     "Publish",
+		Replace:      "traced({{ . }})",
+	}
+
+	_, err = ip.applyCallRule(context.Background(), r, root)
+	require.NoError(t, err)
+
+	out := renderFile(t, root)
+	assert.Contains(t, out, `traced(c.Publish("orders"))`)
+}
+
 func TestPackageSourceFiles_NoGoFiles(t *testing.T) {
 	compileArgs := []string{"compile", "-p", "main", "-complete"}
 
