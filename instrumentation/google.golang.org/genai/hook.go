@@ -4,6 +4,7 @@
 package genai
 
 import (
+	"context"
 	"sync"
 
 	"go.opentelemetry.io/otel"
@@ -66,6 +67,32 @@ func providerAndSystem(backend genaisdk.Backend) (provider, system string) {
 	return providerGemini, systemGemini
 }
 
+// BeforeNewClient matches the parameters of genai.NewClient. When the caller
+// supplies an *http.Client, it hands NewClient a shallow copy instead, so that
+// AfterNewClient installs the tracing transport on a client only this genai
+// client holds. The caller's *http.Client may be shared with other goroutines
+// and other genai clients, so it is never written to.
+//
+// The copy replaces cc.HTTPClient. NewClient itself already writes to the
+// config it is given (it fills in HTTPClient, HTTPOptions.BaseURL and
+// HTTPOptions.APIVersion), so this does not change what callers can rely on.
+func BeforeNewClient(_ hook.HookContext, _ context.Context, cc *genaisdk.ClientConfig) {
+	if !enabler.Enable() {
+		return
+	}
+	if cc == nil || cc.HTTPClient == nil {
+		// NewClient builds a fresh client that nothing else can reach yet;
+		// AfterNewClient wraps it directly.
+		return
+	}
+	if _, ok := cc.HTTPClient.Transport.(*otelTransport); ok {
+		// A config reused across NewClient calls already carries a copy.
+		return
+	}
+	httpClient := *cc.HTTPClient
+	cc.HTTPClient = &httpClient
+}
+
 // AfterNewClient matches the return values of genai.NewClient and installs the
 // tracing transport on the HTTP client the SDK will use.
 //
@@ -79,6 +106,8 @@ func providerAndSystem(backend genaisdk.Backend) (provider, system string) {
 // Client.ClientConfig returns a copy of the config, but HTTPClient is a pointer
 // that the copy shares with the internal apiClient issuing the requests, so
 // swapping the transport through it takes effect for every subsequent call.
+// That pointer is either the copy BeforeNewClient made or a client NewClient
+// built itself, so no other goroutine can be using it while it is written.
 func AfterNewClient(ictx hook.HookContext, client *genaisdk.Client, err error) {
 	if !enabler.Enable() {
 		return
@@ -98,8 +127,9 @@ func AfterNewClient(ictx hook.HookContext, client *genaisdk.Client, err error) {
 		return
 	}
 	if _, ok := httpClient.Transport.(*otelTransport); ok {
-		// Callers may build several clients over one *http.Client; wrapping it
-		// again would emit a duplicate span per request.
+		// A ClientConfig reused across NewClient calls hands every client the
+		// same, already wrapped copy; wrapping it again would emit a duplicate
+		// span per request.
 		return
 	}
 

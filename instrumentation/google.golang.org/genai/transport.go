@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -18,6 +19,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"go.opentelemetry.io/otelc/instrumentation/google.golang.org/genai/semconv"
+	"go.opentelemetry.io/otelc/pkg/netutil"
 	"go.opentelemetry.io/otelc/pkg/runtime"
 )
 
@@ -27,6 +29,10 @@ const (
 
 	operationChat = "chat"
 )
+
+// responseTruncatedWarnOnce logs the size-cap warning once per process rather
+// than once per oversized response.
+var responseTruncatedWarnOnce sync.Once
 
 // otelTransport wraps the round tripper the GenAI SDK issues requests through
 // and emits one client span per non-streaming generateContent call.
@@ -99,9 +105,12 @@ func (t *otelTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	attrs := []attribute.KeyValue{
 		semconv.GenAISystem(t.system),
-		semconv.GenAIProviderName(t.provider),
-		semconv.GenAIOperationName(operationChat),
-		semconv.GenAIRequestModel(model),
+		otelsemconv.GenAIProviderNameKey.String(t.provider),
+		otelsemconv.GenAIOperationNameChat,
+		otelsemconv.GenAIRequestModel(model),
+	}
+	if address, port := netutil.HTTPServerEndpoint(req.URL); address != "" && port > 0 {
+		attrs = append(attrs, otelsemconv.ServerAddress(address), otelsemconv.ServerPort(port))
 	}
 	attrs = append(attrs, requestConfigAttrs(req)...)
 
@@ -132,9 +141,12 @@ func (t *otelTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return resp, nil
 	}
 
-	// A non-streaming request answered with SSE: end the span without response
-	// attributes rather than block on a body this instrumentation does not
-	// accumulate.
+	// Defensive only: the SDK sends generateContent without alt=sse and asks
+	// for SSE solely on streamGenerateContent, which returned above, so a
+	// conforming server never takes this branch. A proxy or test double that
+	// answers with SSE anyway gets a span without response attributes rather
+	// than a blocked read on a body this instrumentation does not accumulate.
+	// The Anthropic instrumentation keeps the same guard.
 	if strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
 		span.SetAttributes(semconv.GenAIRequestIsStream(true))
 		return resp, nil
@@ -180,20 +192,41 @@ func requestConfigAttrs(req *http.Request) []attribute.KeyValue {
 	config := parsed.GenerationConfig
 	var attrs []attribute.KeyValue
 	if config.MaxOutputTokens != nil {
-		attrs = append(attrs, semconv.GenAIRequestMaxTokens(*config.MaxOutputTokens))
+		attrs = append(attrs, otelsemconv.GenAIRequestMaxTokensKey.Int64(*config.MaxOutputTokens))
 	}
 	if config.Temperature != nil {
-		attrs = append(attrs, semconv.GenAIRequestTemperature(*config.Temperature))
+		attrs = append(attrs, otelsemconv.GenAIRequestTemperature(*config.Temperature))
 	}
 	if config.TopP != nil {
-		attrs = append(attrs, semconv.GenAIRequestTopP(*config.TopP))
+		attrs = append(attrs, otelsemconv.GenAIRequestTopP(*config.TopP))
 	}
 	if config.TopK != nil {
-		// The API models topK as a floating-point number, but semconv declares
-		// gen_ai.request.top_k as an int.
-		attrs = append(attrs, semconv.GenAIRequestTopK(int64(*config.TopK)))
+		// gen_ai.request.top_k is a double in semconv, matching the API's
+		// float topK, so it is reported without conversion.
+		attrs = append(attrs, otelsemconv.GenAIRequestTopK(*config.TopK))
 	}
 	return attrs
+}
+
+// readBounded reads up to limit bytes from body for attribute parsing while
+// preserving the full stream for the SDK. truncated reports whether body held
+// more than limit bytes; in that case bodyBytes is nil so no caller can parse a
+// cut-off prefix as JSON.
+func readBounded(body io.ReadCloser, limit int64) (bodyBytes []byte, truncated bool, reassembled io.ReadCloser, err error) {
+	var buf bytes.Buffer
+	tee := io.TeeReader(body, &buf)
+	// Read one byte past the limit so a body of exactly limit bytes can be
+	// told apart from a longer one. The tee captures that byte too, so the
+	// reassembled stream is complete either way.
+	read, err := io.ReadAll(io.LimitReader(tee, limit+1))
+	reassembled = struct {
+		io.Reader
+		io.Closer
+	}{io.MultiReader(&buf, body), body}
+	if int64(len(read)) > limit {
+		return nil, true, reassembled, err
+	}
+	return read, false, reassembled, err
 }
 
 // recordResponse parses the generateContent response onto the span. It reads a
@@ -204,16 +237,16 @@ func recordResponse(resp *http.Response, span trace.Span) {
 		return
 	}
 
-	var buf bytes.Buffer
-	tee := io.TeeReader(resp.Body, &buf)
-	raw, err := io.ReadAll(io.LimitReader(tee, maxResponseBodySize))
-	// Reassemble regardless of the read outcome so the SDK always sees the
-	// complete body.
-	resp.Body = struct {
-		io.Reader
-		io.Closer
-	}{io.MultiReader(&buf, resp.Body), resp.Body}
+	raw, truncated, body, err := readBounded(resp.Body, maxResponseBodySize)
+	resp.Body = body
 	if err != nil {
+		return
+	}
+	if truncated {
+		responseTruncatedWarnOnce.Do(func() {
+			logger.Warn("Gemini response body exceeds the size cap; response attributes omitted",
+				"limit_bytes", maxResponseBodySize)
+		})
 		return
 	}
 
@@ -240,10 +273,10 @@ func responseAttrs(body []byte) []attribute.KeyValue {
 
 	var attrs []attribute.KeyValue
 	if parsed.ResponseID != "" {
-		attrs = append(attrs, semconv.GenAIResponseID(parsed.ResponseID))
+		attrs = append(attrs, otelsemconv.GenAIResponseID(parsed.ResponseID))
 	}
 	if parsed.ModelVersion != "" {
-		attrs = append(attrs, semconv.GenAIResponseModel(parsed.ModelVersion))
+		attrs = append(attrs, otelsemconv.GenAIResponseModel(parsed.ModelVersion))
 	}
 
 	reasons := make([]string, 0, len(parsed.Candidates))
@@ -253,7 +286,7 @@ func responseAttrs(body []byte) []attribute.KeyValue {
 		}
 	}
 	if len(reasons) > 0 {
-		attrs = append(attrs, semconv.GenAIResponseFinishReasons(reasons))
+		attrs = append(attrs, otelsemconv.GenAIResponseFinishReasons(reasons...))
 	}
 
 	usage := parsed.UsageMetadata
@@ -276,8 +309,8 @@ func responseAttrs(body []byte) []attribute.KeyValue {
 	}
 
 	return append(attrs,
-		semconv.GenAIUsageInputTokens(usage.PromptTokenCount),
-		semconv.GenAIUsageOutputTokens(outputTokens),
+		otelsemconv.GenAIUsageInputTokensKey.Int64(usage.PromptTokenCount),
+		otelsemconv.GenAIUsageOutputTokensKey.Int64(outputTokens),
 		semconv.GenAIUsageTotalTokens(totalTokens),
 	)
 }

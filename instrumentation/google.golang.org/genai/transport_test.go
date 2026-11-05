@@ -143,7 +143,7 @@ func TestRequestConfigAttrs(t *testing.T) {
 	assert.Equal(t, int64(256), byKey["gen_ai.request.max_tokens"].AsInt64())
 	assert.InDelta(t, 0.5, byKey["gen_ai.request.temperature"].AsFloat64(), 1e-9)
 	assert.InDelta(t, 0.9, byKey["gen_ai.request.top_p"].AsFloat64(), 1e-9)
-	assert.Equal(t, int64(40), byKey["gen_ai.request.top_k"].AsInt64())
+	assert.InDelta(t, 40.0, byKey["gen_ai.request.top_k"].AsFloat64(), 1e-9)
 }
 
 func TestRequestConfigAttrs_NoGenerationConfig(t *testing.T) {
@@ -308,6 +308,57 @@ func TestRoundTrip_EmitsGenAISpan(t *testing.T) {
 	assert.Equal(t, int64(11), attrs["gen_ai.usage.input_tokens"].AsInt64())
 	assert.Equal(t, int64(22), attrs["gen_ai.usage.output_tokens"].AsInt64())
 	assert.Equal(t, int64(33), attrs["gen_ai.usage.total_tokens"].AsInt64())
+	assert.Equal(t, "127.0.0.1", attrs["server.address"].AsString())
+	assert.Positive(t, attrs["server.port"].AsInt64())
+}
+
+func TestReadBounded_Boundary(t *testing.T) {
+	const limit = 8
+
+	atLimit := strings.Repeat("a", limit)
+	got, truncated, body, err := readBounded(io.NopCloser(strings.NewReader(atLimit)), limit)
+	require.NoError(t, err)
+	assert.False(t, truncated, "a body of exactly limit bytes is not truncated")
+	assert.Equal(t, atLimit, string(got))
+	rest, err := io.ReadAll(body)
+	require.NoError(t, err)
+	assert.Equal(t, atLimit, string(rest))
+
+	overLimit := atLimit + "b"
+	got, truncated, body, err = readBounded(io.NopCloser(strings.NewReader(overLimit)), limit)
+	require.NoError(t, err)
+	assert.True(t, truncated, "one byte over the limit is truncated")
+	assert.Nil(t, got, "a truncated prefix must not be handed out for parsing")
+	rest, err = io.ReadAll(body)
+	require.NoError(t, err)
+	assert.Equal(t, overLimit, string(rest))
+}
+
+func TestRoundTrip_OversizedResponseReachesCallerIntact(t *testing.T) {
+	// Valid JSON whose size exceeds maxResponseBodySize, so the bounded read
+	// stops partway through it.
+	padding := strings.Repeat("x", maxResponseBodySize)
+	respBody := `{"responseId":"resp-big","candidates":[{"finishReason":"STOP",` +
+		`"content":{"parts":[{"text":"` + padding + `"}]}}],` +
+		`"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":2,"totalTokenCount":3}}`
+	require.Greater(t, len(respBody), maxResponseBodySize)
+
+	span, body := roundTripThrough(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, respBody)
+	}, `{}`)
+
+	// The SDK must receive every byte, in order.
+	assert.Len(t, body, len(respBody))
+	assert.Equal(t, respBody, body)
+
+	// The span still ends cleanly; only the attributes parsed from the body
+	// are omitted.
+	assert.Equal(t, codes.Unset, span.Status().Code)
+	attrs := attrsOf(t, span)
+	assert.Equal(t, "chat", attrs["gen_ai.operation.name"].AsString())
+	assert.NotContains(t, attrs, attribute.Key("gen_ai.response.id"))
+	assert.NotContains(t, attrs, attribute.Key("gen_ai.usage.input_tokens"))
 }
 
 func TestRoundTrip_HTTPErrorSetsErrorStatus(t *testing.T) {

@@ -6,6 +6,8 @@ package genai
 import (
 	"errors"
 	"net/http"
+	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -15,8 +17,10 @@ import (
 	"go.opentelemetry.io/otelc/pkg/hook/hooktest"
 )
 
-// newTestClient builds a Gemini API client without reaching the network. A base
-// URL suppresses endpoint resolution and an API key keeps NewClient off the
+// newTestClient builds a Gemini API client without reaching the network, running
+// the hooks the way the compiled rule does: BeforeNewClient on the config, then
+// NewClient, then AfterNewClient on its results. A base URL suppresses endpoint
+// resolution and an API key keeps NewClient off the
 // application-default-credentials path.
 func newTestClient(t *testing.T, backend genaisdk.Backend, httpClient *http.Client) *genaisdk.Client {
 	t.Helper()
@@ -32,10 +36,23 @@ func newTestClient(t *testing.T, backend genaisdk.Backend, httpClient *http.Clie
 		config.Location = "us-central1"
 	}
 
+	return newInstrumentedClient(t, config)
+}
+
+func newInstrumentedClient(t *testing.T, config *genaisdk.ClientConfig) *genaisdk.Client {
+	t.Helper()
+
+	BeforeNewClient(hooktest.NewMockHookContext(), t.Context(), config)
 	client, err := genaisdk.NewClient(t.Context(), config)
 	require.NoError(t, err)
+	AfterNewClient(hooktest.NewMockHookContext(), client, nil)
 
 	return client
+}
+
+// sdkTransport returns the transport the SDK will issue requests through.
+func sdkTransport(client *genaisdk.Client) http.RoundTripper {
+	return client.ClientConfig().HTTPClient.Transport
 }
 
 func TestProviderAndSystem(t *testing.T) {
@@ -53,40 +70,46 @@ func TestProviderAndSystem(t *testing.T) {
 	assert.Equal(t, systemGemini, system)
 }
 
-func TestAfterNewClient_Enabled(t *testing.T) {
+func TestNewClient_Enabled(t *testing.T) {
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "GEMINI")
 
 	httpClient := &http.Client{}
 	client := newTestClient(t, genaisdk.BackendGeminiAPI, httpClient)
 
-	AfterNewClient(hooktest.NewMockHookContext(), client, nil)
-
-	transport, ok := httpClient.Transport.(*otelTransport)
+	transport, ok := sdkTransport(client).(*otelTransport)
 	require.True(t, ok, "transport should be wrapped")
 	assert.Equal(t, providerGemini, transport.provider)
 	assert.Equal(t, systemGemini, transport.system)
 	// The SDK left Transport nil, so the wrapper falls back to the default.
 	assert.Nil(t, transport.base)
 
-	// The client the SDK actually issues requests through is the same one.
-	assert.Same(t, httpClient, client.ClientConfig().HTTPClient)
+	// The caller's client is left exactly as it was handed in.
+	assert.NotSame(t, httpClient, client.ClientConfig().HTTPClient)
+	assert.Nil(t, httpClient.Transport, "the caller's *http.Client must not be written to")
 }
 
-func TestAfterNewClient_VertexBackend(t *testing.T) {
+func TestNewClient_SDKBuiltClientIsWrapped(t *testing.T) {
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "GEMINI")
 
-	httpClient := &http.Client{}
-	client := newTestClient(t, genaisdk.BackendVertexAI, httpClient)
+	// No HTTPClient: NewClient builds one and AfterNewClient wraps it.
+	client := newTestClient(t, genaisdk.BackendGeminiAPI, nil)
 
-	AfterNewClient(hooktest.NewMockHookContext(), client, nil)
+	_, ok := sdkTransport(client).(*otelTransport)
+	assert.True(t, ok)
+}
 
-	transport, ok := httpClient.Transport.(*otelTransport)
+func TestNewClient_VertexBackend(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "GEMINI")
+
+	client := newTestClient(t, genaisdk.BackendVertexAI, &http.Client{})
+
+	transport, ok := sdkTransport(client).(*otelTransport)
 	require.True(t, ok)
 	assert.Equal(t, providerVertexAI, transport.provider)
 	assert.Equal(t, systemVertexAI, transport.system)
 }
 
-func TestAfterNewClient_PreservesExistingTransport(t *testing.T) {
+func TestNewClient_PreservesExistingTransport(t *testing.T) {
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "GEMINI")
 
 	base := roundTripFunc(func(*http.Request) (*http.Response, error) {
@@ -95,21 +118,20 @@ func TestAfterNewClient_PreservesExistingTransport(t *testing.T) {
 	httpClient := &http.Client{Transport: base}
 	client := newTestClient(t, genaisdk.BackendGeminiAPI, httpClient)
 
-	AfterNewClient(hooktest.NewMockHookContext(), client, nil)
-
-	transport, ok := httpClient.Transport.(*otelTransport)
+	transport, ok := sdkTransport(client).(*otelTransport)
 	require.True(t, ok)
 	assert.NotNil(t, transport.base, "the caller's transport must stay in the chain")
+	_, stillPlain := httpClient.Transport.(roundTripFunc)
+	assert.True(t, stillPlain, "the caller's transport must not be replaced")
 }
 
-func TestAfterNewClient_Disabled(t *testing.T) {
+func TestNewClient_Disabled(t *testing.T) {
 	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "GEMINI")
 
 	httpClient := &http.Client{}
 	client := newTestClient(t, genaisdk.BackendGeminiAPI, httpClient)
 
-	AfterNewClient(hooktest.NewMockHookContext(), client, nil)
-
+	assert.Same(t, httpClient, client.ClientConfig().HTTPClient, "a disabled instrumentation must not copy the client")
 	assert.Nil(t, httpClient.Transport, "a disabled instrumentation must not touch the client")
 }
 
@@ -122,24 +144,89 @@ func TestAfterNewClient_ConstructorFailure(t *testing.T) {
 	})
 
 	httpClient := &http.Client{}
-	client := newTestClient(t, genaisdk.BackendGeminiAPI, httpClient)
+	client, err := genaisdk.NewClient(t.Context(), &genaisdk.ClientConfig{
+		APIKey:      "test-key",
+		Backend:     genaisdk.BackendGeminiAPI,
+		HTTPClient:  httpClient,
+		HTTPOptions: genaisdk.HTTPOptions{BaseURL: "http://127.0.0.1:0"},
+	})
+	require.NoError(t, err)
 	AfterNewClient(hooktest.NewMockHookContext(), client, errors.New("bad config"))
 	assert.Nil(t, httpClient.Transport)
 }
 
-func TestAfterNewClient_DoesNotDoubleWrap(t *testing.T) {
+func TestNewClient_SharedHTTPClientGetsOneWrapperPerClient(t *testing.T) {
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "GEMINI")
 
-	// Two clients sharing one *http.Client must yield one span per request,
-	// not one per client.
+	// Two genai clients built over one *http.Client each get their own wrapped
+	// copy, so a request passes through exactly one otelTransport and each
+	// client reports its own backend.
 	httpClient := &http.Client{}
-	first := newTestClient(t, genaisdk.BackendGeminiAPI, httpClient)
-	second := newTestClient(t, genaisdk.BackendGeminiAPI, httpClient)
+	gemini := newTestClient(t, genaisdk.BackendGeminiAPI, httpClient)
+	vertex := newTestClient(t, genaisdk.BackendVertexAI, httpClient)
 
-	AfterNewClient(hooktest.NewMockHookContext(), first, nil)
-	wrapped := httpClient.Transport
+	geminiTransport, ok := sdkTransport(gemini).(*otelTransport)
+	require.True(t, ok)
+	vertexTransport, ok := sdkTransport(vertex).(*otelTransport)
+	require.True(t, ok)
 
-	AfterNewClient(hooktest.NewMockHookContext(), second, nil)
+	assert.Nil(t, geminiTransport.base, "wrappers must not nest")
+	assert.Nil(t, vertexTransport.base, "wrappers must not nest")
+	assert.Equal(t, providerGemini, geminiTransport.provider)
+	assert.Equal(t, providerVertexAI, vertexTransport.provider)
+	assert.Nil(t, httpClient.Transport)
+}
 
-	assert.Same(t, wrapped, httpClient.Transport, "transport must be wrapped exactly once")
+func TestNewClient_ReusedConfigDoesNotDoubleWrap(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "GEMINI")
+
+	config := &genaisdk.ClientConfig{
+		APIKey:      "test-key",
+		Backend:     genaisdk.BackendGeminiAPI,
+		HTTPClient:  &http.Client{},
+		HTTPOptions: genaisdk.HTTPOptions{BaseURL: "http://127.0.0.1:0"},
+	}
+	first := newInstrumentedClient(t, config)
+	second := newInstrumentedClient(t, config)
+
+	assert.Same(t, sdkTransport(first), sdkTransport(second), "transport must be wrapped exactly once")
+	transport, ok := sdkTransport(second).(*otelTransport)
+	require.True(t, ok)
+	assert.Nil(t, transport.base)
+}
+
+func TestNewClient_ConcurrentUseOfCallerClientIsRaceFree(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "GEMINI")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(server.Close)
+
+	// The caller keeps using its client while genai clients are built over
+	// it. Run with -race: writing httpClient.Transport here would be flagged.
+	httpClient := &http.Client{}
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 20 {
+				resp, err := httpClient.Get(server.URL)
+				if assert.NoError(t, err) {
+					_ = resp.Body.Close()
+				}
+			}
+		}()
+	}
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			newTestClient(t, genaisdk.BackendGeminiAPI, httpClient)
+		}()
+	}
+	wg.Wait()
+
+	assert.Nil(t, httpClient.Transport)
 }
