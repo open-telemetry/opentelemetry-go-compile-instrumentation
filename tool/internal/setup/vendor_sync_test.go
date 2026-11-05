@@ -1499,12 +1499,14 @@ func TestEmbeddedSourceDirRoots(t *testing.T) {
 	instDir := filepath.Join(workDir, util.BuildTempDir, unzippedInstDir)
 	pkgDir := filepath.Join(workDir, util.BuildTempDir, unzippedPkgDir)
 	require.NoError(t, os.MkdirAll(filepath.Join(pkgDir, "runtime"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(pkgDir, "netutil"), 0o755))
 	require.NoError(t, os.MkdirAll(instDir, 0o755))
 
 	for importPath, want := range map[string]string{
 		util.OtelcInstRoot:             instDir,
 		util.OtelcPkgRoot:              pkgDir,
 		util.OtelcPkgRoot + "/runtime": filepath.Join(pkgDir, "runtime"),
+		util.OtelcPkgRoot + "/netutil": filepath.Join(pkgDir, "netutil"),
 	} {
 		dir, ok := embeddedSourceDir(importPath)
 		assert.True(t, ok, importPath)

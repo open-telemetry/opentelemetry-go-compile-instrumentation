@@ -214,6 +214,9 @@ func otelcReplaces(modPaths map[string]bool) (map[string]string, error) {
 	// hook code to be present.
 	replaces[util.OtelcPkgRoot+"/runtime"] = filepath.Join(util.GetBuildTempDir(), unzippedPkgDir, "runtime")
 
+	// Add replace directive for special netutil module
+	replaces[util.OtelcPkgRoot+"/netutil"] = filepath.Join(util.GetBuildTempDir(), unzippedPkgDir, "netutil")
+
 	// Add replace directive for instrumentation module
 	// instrumentation module contains shared semconv packages.
 	replaces[util.OtelcInstRoot] = filepath.Join(util.GetBuildTempDir(), unzippedInstDir)
