@@ -47,6 +47,8 @@ const (
 	trampolineSetReturnValName      = "SetReturnVal"
 	trampolineGetReturnValName      = "GetReturnVal"
 	trampolineSetSkipCallName       = "SetSkipCall"
+	trampolineAnyItemsIdentifier    = "_otel_anyItems"
+	trampolineAnyIndexIdentifier    = "_otel_anyIndex"
 	trampolineValIdentifier         = "val"
 	trampolineCtxIdentifier         = "c"
 	trampolineParamsIdentifier      = "params"
@@ -454,38 +456,67 @@ func matchBaseType(trampBase, hookBase string) bool {
 	return false
 }
 
+// needsAnySliceConversion reports whether a hook parameter must receive a
+// freshly built []any instead of the target's own variadic slice. This happens
+// when the target is variadic with a non-interface element type (typically an
+// unexported type the hook cannot name) and the hook declares ...any. Passing
+// the target slice directly would make the hook read elements at the wrong
+// stride and crash at runtime.
+func needsAnySliceConversion(targetType, hookType dst.Expr) bool {
+	targetElt, ok := targetType.(*dst.Ellipsis)
+	if !ok {
+		return false
+	}
+	hookElt, ok := hookType.(*dst.Ellipsis)
+	if !ok {
+		return false
+	}
+	return isAnyOrInterface(baseTypeName(hookElt.Elt)) && !isAnyOrInterface(baseTypeName(targetElt.Elt))
+}
+
+// hasAnyElement reports whether expr is a slice or variadic parameter whose
+// element type is any/interface{}.
+func hasAnyElement(expr dst.Expr) bool {
+	elt, ok := sliceOrEllipsisElt(baseTypeName(expr))
+	return ok && isAnyOrInterface(elt)
+}
+
+// validateVariadicHookParam rejects hook parameter forms that pass
+// matchBaseType but cannot be generated into valid code. An any-element slice
+// and an any-element variadic share the same representation, so []any and
+// ...any are interchangeable for a target that is already any-element. A plain
+// any hook for a variadic of a type parameter is allowed: the unknown element
+// type cannot be spread, so the hook receives the whole slice.
+func validateVariadicHookParam(idx int, targetType, hookType dst.Expr, genericTypes *dst.FieldList) error {
+	targetVariadic := ast.IsEllipsis(targetType)
+	hookVariadic := ast.IsEllipsis(hookType)
+	targetAnyElement := hasAnyElement(targetType)
+	if targetVariadic {
+		if ast.IsInterfaceType(hookType) {
+			if containsTypeParameter(targetType, genericTypes) {
+				return nil
+			}
+			return ex.Newf("hook func param %d: target parameter is variadic, use ...any instead of any", idx)
+		}
+		if !hookVariadic && !targetAnyElement && hasAnyElement(hookType) {
+			return ex.Newf("hook func param %d: target parameter is variadic, use ...any instead of []any", idx)
+		}
+		return nil
+	}
+	if hookVariadic && !targetAnyElement && hasAnyElement(hookType) {
+		return ex.Newf("hook func param %d: target parameter is not variadic, use any instead of ...any", idx)
+	}
+	return nil
+}
+
 // checkHookDecl checks if the hook function declaration is correct, i.e. if they
 // have correct signature (parameter count and types)
-func (ip *instrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, before bool) error {
+func (ip *instrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, targetParams *dst.FieldList, before bool) error {
 	// TargetFunc:  func A(a int, b string) (ret string)
 	// BeforeTramp: func B(a *int, b *string) (ctx *HookContext, skip bool)
 	// BeforeHook:  func C(ctx *HookContext, a int, b string)
 	if before {
-		beforeTrampParams := ast.SplitMultiNameFields(ip.beforeTrampFunc.Type.Params)
-		beforeHookParams := ast.SplitMultiNameFields(hookFunc.Type.Params)
-
-		if len(beforeHookParams.List) != len(beforeTrampParams.List)+1 {
-			return ex.Newf("hook func signature mismatch, expected %d params, got %d",
-				len(beforeTrampParams.List)+1, len(beforeHookParams.List))
-		}
-
-		// First param must be HookContext
-		if baseTypeName(beforeHookParams.List[0].Type) != trampolineHookContextType {
-			return ex.Newf("hook func first param must be %s, got %s",
-				trampolineHookContextType, baseTypeName(beforeHookParams.List[0].Type))
-		}
-
-		// Remaining params must match dereferenced trampoline params
-		// (interface{} or any in hook accepts any type, used for generics)
-		for i, trampField := range beforeTrampParams.List {
-			trampBase := baseTypeName(trampField.Type)
-			hookBase := baseTypeName(beforeHookParams.List[i+1].Type)
-			if !matchBaseType(trampBase, hookBase) {
-				return ex.Newf("hook func param %d type mismatch, expected %s, got %s",
-					i+1, trampBase, hookBase)
-			}
-		}
-		return nil
+		return ip.checkBeforeHookDecl(hookFunc, targetParams)
 	}
 
 	// TargetFunc:  func A(a int, b string) (ret string)
@@ -512,8 +543,62 @@ func (ip *instrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, before bool) er
 	return nil
 }
 
-func (ip *instrumentPhase) callBeforeHook(t *rule.InstFuncRule) {
-	// Query whether the parameter is a variadic parameter in the target function
+func (ip *instrumentPhase) checkBeforeHookDecl(hookFunc *dst.FuncDecl, targetParams *dst.FieldList) error {
+	beforeTrampParams := ast.SplitMultiNameFields(ip.beforeTrampFunc.Type.Params)
+	beforeHookParams := ast.SplitMultiNameFields(hookFunc.Type.Params)
+
+	if len(beforeHookParams.List) != len(beforeTrampParams.List)+1 {
+		return ex.Newf("hook func signature mismatch, expected %d params, got %d",
+			len(beforeTrampParams.List)+1, len(beforeHookParams.List))
+	}
+
+	// First param must be HookContext
+	if baseTypeName(beforeHookParams.List[0].Type) != trampolineHookContextType {
+		return ex.Newf("hook func first param must be %s, got %s",
+			trampolineHookContextType, baseTypeName(beforeHookParams.List[0].Type))
+	}
+
+	// Remaining params must match dereferenced trampoline params
+	// (interface{} or any in hook accepts any type, used for generics)
+	var genericTypes *dst.FieldList
+	if targetParams != nil && ip.targetFunc != nil {
+		genericTypes = ip.targetFunc.Type.TypeParams
+		if ip.target != nil {
+			genericTypes = findTargetGenericType(ip.target, ip.targetFunc)
+		}
+	}
+	for i, trampField := range beforeTrampParams.List {
+		hookType := beforeHookParams.List[i+1].Type
+		if targetParams != nil {
+			if err := validateVariadicHookParam(
+				i+1,
+				targetParams.List[i].Type,
+				hookType,
+				genericTypes,
+			); err != nil {
+				return err
+			}
+		}
+		trampBase := baseTypeName(trampField.Type)
+		hookBase := baseTypeName(hookType)
+		if !matchBaseType(trampBase, hookBase) {
+			return ex.Newf("hook func param %d type mismatch, expected %s, got %s",
+				i+1, trampBase, hookBase)
+		}
+	}
+	return nil
+}
+
+func (ip *instrumentPhase) callBeforeHook(t *rule.InstFuncRule) error {
+	// A ...any hook parameter cannot receive the target's own variadic slice
+	// when the element type is not an interface (e.g. an unexported type): the
+	// hook would read the elements at the wrong stride and crash. Copy the
+	// elements into a fresh []any and spread that instead.
+	hookFunc, err := ip.getHookFunc(t, true)
+	if err != nil {
+		return err
+	}
+	hookParams := ast.SplitMultiNameFields(hookFunc.Type.Params)
 	targetParams := findTargetParamType(ip.targetFunc)
 	genericTypes := findTargetGenericType(ip.target, ip.targetFunc)
 	isEllipsis := func(i int) bool {
@@ -522,21 +607,70 @@ func (ip *instrumentPhase) callBeforeHook(t *rule.InstFuncRule) {
 	}
 
 	args := []dst.Expr{ast.Ident(trampolineHookContextName)}
+	spread := false
 	for i, field := range ip.beforeTrampFunc.Type.Params.List {
 		for _, name := range field.Names {
-			// If the parameter is a variadic parameter, pass "*param..." to the
-			// hook function, otherwise pass "*param"
-			if isEllipsis(i) {
+			switch {
+			case needsAnySliceConversion(targetParams.List[i].Type, hookParams.List[i+1].Type):
+				args = append(args, anySliceSpread(name.Name))
+				spread = true
+			case isEllipsis(i):
+				// If the parameter is a variadic parameter, pass "*param..." to
+				// the hook function, otherwise pass "*param"
 				args = append(args, ast.DereferenceOf(ast.Ident(name.Name+"...")))
-			} else {
+			default:
 				args = append(args, ast.DereferenceOf(ast.Ident(name.Name)))
 			}
 		}
 	}
 	fnName := hookLinkName(t.Path, getHookFuncName(t, trampolineBefore))
-	call := ast.ExprStmt(ast.CallTo(fnName, nil, args))
-	iff := &dst.IfStmt{Cond: ip.hookGuardCond(fnName), Body: ast.Block(call)}
+	call := ast.CallTo(fnName, nil, args)
+	// The converted []any is the last argument, so spreading is expressed on
+	// the hook call itself.
+	call.Ellipsis = spread
+	iff := &dst.IfStmt{Cond: ip.hookGuardCond(fnName), Body: ast.Block(ast.ExprStmt(call))}
 	insertAt(ip.beforeTrampFunc, iff, len(ip.beforeTrampFunc.Body.List)-1)
+	return nil
+}
+
+// anySliceSpread builds an expression that copies the variadic slice paramName
+// into a new []interface{} and spreads it, so a ...any hook receives one
+// argument per element even when the target's element type is not an interface.
+func anySliceSpread(paramName string) dst.Expr {
+	src := func() dst.Expr { return ast.DereferenceOf(ast.Ident(paramName)) }
+	items := func() dst.Expr { return ast.Ident(trampolineAnyItemsIdentifier) }
+	index := func() dst.Expr { return ast.Ident(trampolineAnyIndexIdentifier) }
+	loop := &dst.RangeStmt{
+		Key: index(),
+		Tok: token.DEFINE,
+		X:   src(),
+		Body: ast.Block(&dst.AssignStmt{
+			Lhs: []dst.Expr{ast.IndexExpr(items(), index())},
+			Tok: token.ASSIGN,
+			Rhs: []dst.Expr{ast.IndexExpr(src(), index())},
+		}),
+	}
+	makeCall := ast.CallTo("make", nil, []dst.Expr{
+		ast.ArrayType(ast.InterfaceType()),
+		ast.CallTo("len", nil, []dst.Expr{src()}),
+	})
+	body := ast.BlockStmts(
+		&dst.AssignStmt{
+			Lhs: []dst.Expr{items()},
+			Tok: token.DEFINE,
+			Rhs: []dst.Expr{makeCall},
+		},
+		loop,
+		ast.ReturnStmt([]dst.Expr{items()}),
+	)
+	lit := &dst.FuncLit{
+		Type: &dst.FuncType{
+			Params:  &dst.FieldList{Opening: true, Closing: true},
+			Results: &dst.FieldList{List: []*dst.Field{{Type: ast.ArrayType(ast.InterfaceType())}}},
+		},
+		Body: body,
+	}
+	return &dst.CallExpr{Fun: lit}
 }
 
 func (ip *instrumentPhase) callAfterHook(t *rule.InstFuncRule) {
@@ -783,6 +917,13 @@ func (ip *instrumentPhase) buildHookSignature(t *rule.InstFuncRule, before bool)
 	} else {
 		paramTypes = findTargetResultType(ip.targetFunc)
 	}
+	// Keep a pristine copy of the target parameters: it is the source of truth
+	// for whether a parameter is variadic, before HookContext is prepended and
+	// before type parameters are replaced with any.
+	var targetParams *dst.FieldList
+	if before {
+		targetParams = util.AssertType[*dst.FieldList](dst.Clone(paramTypes))
+	}
 	addHookContext(paramTypes)
 
 	// Replace type parameters with interface{}
@@ -796,7 +937,7 @@ func (ip *instrumentPhase) buildHookSignature(t *rule.InstFuncRule, before bool)
 		return nil, err
 	}
 	// Check if the hook function declaration is correct
-	err = ip.checkHookDecl(hookFunc, before)
+	err = ip.checkHookDecl(hookFunc, targetParams, before)
 	if err != nil {
 		return nil, err
 	}
@@ -809,8 +950,15 @@ func (ip *instrumentPhase) buildHookSignature(t *rule.InstFuncRule, before bool)
 	hookParamTypes := ast.SplitMultiNameFields(hookFunc.Type.Params)
 	util.Assert(len(hookParamTypes.List) == len(paramTypes.List), "sanity check")
 	for i, field := range hookParamTypes.List {
-		if ast.IsInterfaceType(field.Type) {
+		switch {
+		case ast.IsInterfaceType(field.Type):
 			paramTypes.List[i].Type = ast.InterfaceType()
+		case targetParams != nil && i > 0 &&
+			needsAnySliceConversion(targetParams.List[i-1].Type, field.Type):
+			// A ...any hook accepts the target variadic values one by one; the
+			// declaration must stay variadic even though the element type is
+			// not an interface.
+			paramTypes.List[i].Type = ast.Ellipsis(ast.InterfaceType())
 		}
 	}
 	return paramTypes, nil
@@ -1420,7 +1568,9 @@ func (ip *instrumentPhase) callHookFunc(t *rule.InstFuncRule, before bool) error
 	}
 	// Add the function call to the real hook code.
 	if before {
-		ip.callBeforeHook(t)
+		if err = ip.callBeforeHook(t); err != nil {
+			return err
+		}
 	} else {
 		ip.callAfterHook(t)
 	}

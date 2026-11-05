@@ -576,7 +576,7 @@ func H1Before(ctx hook.HookContext, p1 struct{ Age int }) {}`,
 				ip.afterTrampFunc = trampFunc
 			}
 
-			err := ip.checkHookDecl(hookFunc, tt.before)
+			err := ip.checkHookDecl(hookFunc, nil, tt.before)
 
 			if tt.expectError {
 				require.Error(t, err)
@@ -588,6 +588,156 @@ func H1Before(ctx hook.HookContext, p1 struct{ Age int }) {}`,
 			}
 		})
 	}
+}
+
+// TestCheckHookDeclVariadicAny covers the variadic forms accepted and rejected
+// for issue #1601: ...any must work for a variadic whose element type the hook
+// cannot name, while plain any must be rejected for a variadic of a concrete
+// type (a type-parameter variadic receives the whole slice instead). An
+// any-element slice and an any-element variadic are interchangeable.
+func TestCheckHookDeclVariadicAny(t *testing.T) {
+	tests := []struct {
+		name      string
+		targetSrc string
+		hookSrc   string
+		errorMsg  string
+	}{
+		{
+			name: "valid - ...any for variadic of unnameable element type",
+			targetSrc: `package main
+type options struct{ name string }
+func New(id int, opts ...func(*options)) string { return "" }`,
+			hookSrc: `package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, id int, opts ...any) {}`,
+		},
+		{
+			name: "valid - ...any for variadic of a type parameter",
+			targetSrc: `package main
+func New[T any](id int, opts ...T) string { return "" }`,
+			hookSrc: `package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, id int, opts ...any) {}`,
+		},
+		{
+			name: "valid - plain any for variadic of a type parameter",
+			targetSrc: `package main
+func New[T any](id int, opts ...T) string { return "" }`,
+			hookSrc: `package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, id int, opts any) {}`,
+		},
+		{
+			name: "valid - []any for variadic of any",
+			targetSrc: `package main
+func New(id int, opts ...any) string { return "" }`,
+			hookSrc: `package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, id int, opts []any) {}`,
+		},
+		{
+			name: "valid - ...any for non-variadic slice of any",
+			targetSrc: `package main
+func New(id int, opts []any) string { return "" }`,
+			hookSrc: `package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, id int, opts ...any) {}`,
+		},
+		{
+			name: "invalid - plain any for variadic",
+			targetSrc: `package main
+func New(id int, opts ...string) string { return "" }`,
+			hookSrc: `package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, id int, opts any) {}`,
+			errorMsg: "use ...any instead of any",
+		},
+		{
+			name: "invalid - plain any for variadic of any",
+			targetSrc: `package main
+func New(id int, opts ...any) string { return "" }`,
+			hookSrc: `package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, id int, opts any) {}`,
+			errorMsg: "use ...any instead of any",
+		},
+		{
+			name: "invalid - []any for variadic",
+			targetSrc: `package main
+func New(id int, opts ...string) string { return "" }`,
+			hookSrc: `package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, id int, opts []any) {}`,
+			errorMsg: "use ...any instead of []any",
+		},
+		{
+			name: "invalid - ...any for non-variadic slice",
+			targetSrc: `package main
+func New(id int, opts []string) string { return "" }`,
+			hookSrc: `package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, id int, opts ...any) {}`,
+			errorMsg: "use any instead of ...any",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			targetFunc := parseFunc(t, tt.targetSrc)
+			hookFunc := parseFunc(t, tt.hookSrc)
+
+			ip := &instrumentPhase{targetFunc: targetFunc}
+			ip.beforeTrampFunc = &dst.FuncDecl{
+				Name: ast.Ident("OtelBeforeTrampoline"),
+				Type: &dst.FuncType{},
+			}
+			ip.buildTrampSignature(true)
+
+			err := ip.checkHookDecl(hookFunc, findTargetParamType(targetFunc), true)
+			if tt.errorMsg == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errorMsg)
+		})
+	}
+}
+
+func TestNeedsAnySliceConversion(t *testing.T) {
+	tests := []struct {
+		name       string
+		targetType string
+		hookType   string
+		want       bool
+	}{
+		{name: "concrete variadic and ...any", targetType: "...func(*options)", hookType: "...any", want: true},
+		{
+			name:       "concrete variadic and ...interface{}",
+			targetType: "...func(*options)",
+			hookType:   "...interface{}",
+			want:       true,
+		},
+		{name: "any variadic and ...any", targetType: "...any", hookType: "...any", want: false},
+		{name: "exact variadic", targetType: "...string", hookType: "...string", want: false},
+		{name: "non-variadic target", targetType: "[]string", hookType: "...any", want: false},
+		{name: "non-variadic hook", targetType: "...string", hookType: "[]any", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			targetType := parseType(t, tt.targetType)
+			hookType := parseType(t, tt.hookType)
+			assert.Equal(t, tt.want, needsAnySliceConversion(targetType, hookType))
+		})
+	}
+}
+
+// parseType parses a standalone type expression by wrapping it in a parameter.
+func parseType(t *testing.T, typeSrc string) dst.Expr {
+	t.Helper()
+	field := parseFunc(t, "package main\nfunc F(p "+typeSrc+") {}").Type.Params.List[0]
+	return field.Type
 }
 
 // genHookContext mirrors the HookContextImpl the trampoline generates for a
