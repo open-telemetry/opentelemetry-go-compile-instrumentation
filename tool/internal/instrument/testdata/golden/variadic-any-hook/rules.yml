@@ -1,0 +1,8 @@
+hook_variadic_any:
+  target: main
+  where:
+    func: New
+  do:
+    - inject_hooks:
+        before: HAnyBefore
+        path: testdata/golden/variadic-any-hook

@@ -35,14 +35,17 @@
   ],
   packageRules: [
     {
-      matchFileNames: [
-        '.github/**',
+      matchCategories: [
+        'ci',
       ],
-      enabled: false,
+      dependencyDashboardApproval: true,
     },
     {
       groupName: 'all dependencies',
       groupSlug: 'all-deps',
+      matchCategories: [
+        '!ci',
+      ],
       matchUpdateTypes: [
         'patch',
         'minor',
