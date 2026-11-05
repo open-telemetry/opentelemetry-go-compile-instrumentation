@@ -1560,7 +1560,7 @@ func TestRuleAddedImportsCollectsEveryRuleKind(t *testing.T) {
 		},
 	})
 
-	paths := ruleAddedImports(t.Context(), nil, &imports.ImportConfig{
+	paths := parseLinkRuleImports(t.Context(), nil).candidates(&imports.ImportConfig{
 		PackageFile: map[string]string{"example.com/app/dep": "/unused/dep.a"},
 	})
 	assert.Equal(t, map[string]struct{}{
@@ -1748,7 +1748,7 @@ func TestRuleAddedImportsCollectsStructLitDirectiveDeclRules(t *testing.T) {
 		},
 	})
 
-	paths := ruleAddedImports(t.Context(), nil, &imports.ImportConfig{
+	paths := parseLinkRuleImports(t.Context(), nil).candidates(&imports.ImportConfig{
 		PackageFile: map[string]string{"example.com/app/dep": "/unused/dep.a"},
 	})
 	assert.Equal(t, map[string]struct{}{
@@ -1807,7 +1807,7 @@ func TestRuleAddedImportsIgnoresMalformedMatchedRules(t *testing.T) {
 	require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), []byte("{not json"), 0o600))
 
 	linkConfig := imports.ImportConfig{PackageFile: map[string]string{"example.com/app/dep": "/unused/dep.a"}}
-	assert.Empty(t, ruleAddedImports(t.Context(), nil, &linkConfig))
+	assert.Empty(t, parseLinkRuleImports(t.Context(), nil).candidates(&linkConfig))
 }
 
 // TestFileRuleImportsSkipsUnusableSources checks every add_file source the
