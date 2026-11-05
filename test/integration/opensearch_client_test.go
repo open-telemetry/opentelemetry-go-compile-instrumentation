@@ -17,6 +17,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/pdata/ptrace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 
 	"go.opentelemetry.io/otelc/test/testutil"
 )
@@ -86,12 +87,17 @@ func TestOpenSearchClient(t *testing.T) {
 	)
 	require.Equal(t, indexServer.TraceID(), indexClient.TraceID())
 	require.Equal(t, indexServer.SpanID(), indexClient.ParentSpanID())
+	indexMethod, ok := testutil.Attrs(indexClient)[string(semconv.HTTPRequestMethodKey)].(string)
+	require.True(t, ok, "span missing http.request.method attribute")
+	// opensearch-go/v5 v5.0.0 unconditionally sent POST for Doc.Index, while
+	// v5.1.0 and later sends PUT when an explicit document ID is provided.
+	require.Contains(t, []string{"POST", "PUT"}, indexMethod)
 	testutil.RequireOpenSearchClientSemconv(
 		t,
 		indexClient,
 		"index",
 		"orders",
-		"POST",
+		indexMethod,
 		"/orders/_doc/1",
 		200,
 	)
