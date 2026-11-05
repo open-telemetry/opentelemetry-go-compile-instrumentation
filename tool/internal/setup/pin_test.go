@@ -27,11 +27,6 @@ import (
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
-// discardLogger returns a logger that drops all output, keeping test logs quiet.
-func discardLogger() *slog.Logger {
-	return slog.New(slog.DiscardHandler)
-}
-
 func TestRemoveImports(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
@@ -1410,57 +1405,6 @@ func main() {
 	require.Contains(t, string(goMod), "go.opentelemetry.io/otelc")
 }
 
-func TestPrepareVendoredBuild_NotVendored(t *testing.T) {
-	// A plain module with no vendor/ directory must be left untouched: the
-	// args come back verbatim and GOFLAGS is not forced to module mode.
-	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(
-		filepath.Join(dir, "go.mod"),
-		[]byte("module example.com/test\n\ngo 1.25\n"),
-		0o644,
-	))
-	t.Setenv(util.EnvOtelcWorkDir, dir)
-	t.Setenv("GOFLAGS", "")
-
-	args := []string{"build", "-mod=vendor", "./..."}
-	got, err := prepareVendoredBuild(t.Context(), discardLogger(), subcmdBuild, args)
-	require.NoError(t, err)
-
-	// Unchanged: not a vendored project, so no rewriting happens.
-	assert.Equal(t, args, got)
-	assert.Empty(t, os.Getenv("GOFLAGS"))
-}
-
-func TestPrepareVendoredBuild_Vendored(t *testing.T) {
-	// A module that vendors its dependencies must be switched to module mode:
-	// GOFLAGS gains -mod=mod and an explicit -mod=vendor on the command line
-	// is rewritten so it cannot re-select vendoring.
-	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(
-		filepath.Join(dir, "go.mod"),
-		[]byte("module example.com/test\n\ngo 1.25\n"),
-		0o644,
-	))
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "vendor"), 0o755))
-	require.NoError(t, os.WriteFile(
-		filepath.Join(dir, "vendor", "modules.txt"),
-		[]byte(""),
-		0o644,
-	))
-	t.Setenv(util.EnvOtelcWorkDir, dir)
-	t.Setenv("GOFLAGS", "")
-	// Force non-workspace mode; -mod=mod is forbidden in a workspace, so a
-	// stray ambient go.work would otherwise suppress vendoring detection.
-	t.Setenv("GOWORK", "off")
-
-	args := []string{"build", "-mod=vendor", "./..."}
-	got, err := prepareVendoredBuild(t.Context(), discardLogger(), subcmdBuild, args)
-	require.NoError(t, err)
-
-	assert.Equal(t, []string{"build", "-mod=mod", "./..."}, got)
-	assert.Contains(t, os.Getenv("GOFLAGS"), "-mod=mod")
-}
-
 func TestPinLocked_UpdatesExistingToolFile(t *testing.T) {
 	// With ModuleDirs supplied, pinLocked skips dependency discovery and goes
 	// straight to updating the existing tool file. A dependency that turns out
@@ -1752,36 +1696,6 @@ func TestAutoPin_TracksAndPins(t *testing.T) {
 	assert.NotContains(t, string(data), "example.com/notinstrumentation")
 }
 
-// newModuleDir creates a minimal Go module in a fresh temp directory and
-// returns its path.
-func newModuleDir(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(
-		filepath.Join(dir, "go.mod"),
-		[]byte("module example.com/vend\n\ngo 1.25\n"),
-		0o644,
-	))
-	return dir
-}
-
-func TestPrepareVendoredBuild(t *testing.T) {
-	// With no vendored module active, prepareVendoredBuild returns the args
-	// unchanged and does not force module mode.
-	dir := newModuleDir(t)
-	t.Setenv(util.EnvOtelcWorkDir, dir)
-
-	args := []string{"build", "./..."}
-	got, err := prepareVendoredBuild(
-		context.Background(),
-		util.LoggerFromContext(context.Background()),
-		subcmdBuild,
-		args,
-	)
-	require.NoError(t, err)
-	assert.Equal(t, args, got)
-}
-
 func TestPinLocked_GetBuildPackagesError(t *testing.T) {
 	_, err := Pin(t.Context(), PinOptions{
 		Args: []string{"-o"}, // missing required flag value
@@ -1954,4 +1868,32 @@ func TestUpdateToolFile_RemoveImportsError(t *testing.T) {
 
 	err := updateToolFile(t.Context(), toolFile, map[string]bool{"foo": true}, PinOptions{})
 	require.Error(t, err)
+}
+
+// TestPinVendorGoVersionTooOld: a -mod=vendor pin of a module with a go
+// version below 1.14 fails before it changes the module.
+func TestPinVendorGoVersionTooOld(t *testing.T) {
+	t.Setenv("GOWORK", "off")
+	t.Setenv("GOFLAGS", "")
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+	writeVendoredGoMod(t, tmp, "1.13")
+
+	_, err := Pin(t.Context(), PinOptions{Args: []string{"-mod=vendor"}, ModuleDirs: []string{tmp}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "otelc needs go 1.14 or higher")
+	assert.NoFileExists(t, filepath.Join(tmp, toolFileCanonical))
+}
+
+// TestUpdatePinnedProjectsVendorSyncFails: in vendor mode, a tool file that
+// is not valid Go stops the pin before the walk.
+func TestUpdatePinnedProjectsVendorSyncFails(t *testing.T) {
+	toolFile := filepath.Join(t.TempDir(), toolFileCanonical)
+	mustWriteFile(t, toolFile, "not Go")
+	ctx := contextWithVendorMode(t.Context(), true)
+	result, err := updatePinnedProjects(ctx, []string{toolFile}, PinOptions{})
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), toolFileCanonical)
 }
