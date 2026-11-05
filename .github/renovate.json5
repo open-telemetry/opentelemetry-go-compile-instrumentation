@@ -94,7 +94,6 @@
       ],
       enabled: false,
     },
-      
   ],
   labels: [
     'dependencies',
