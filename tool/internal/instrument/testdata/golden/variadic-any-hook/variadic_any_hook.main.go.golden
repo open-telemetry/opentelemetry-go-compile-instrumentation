@@ -1,0 +1,145 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+//line /<generated>:1
+import _ "unsafe"
+
+//line /golden/work/main.go:6
+type options struct{ name string }
+
+func New(id int, opts ...func(*options)) (_unnamedRetVal_1091505788_0 string) {
+	/*line /<generated>:1*/ if OtelBeforeTrampoline_New1091505788(&id, &opts); false {
+	} else {
+	}
+	/*line /golden/work/main.go:9*/ o := options{}
+	for _, fn := range opts {
+		fn(&o)
+	}
+	return o.name
+}
+
+//line /golden/work/main.go:16
+func main() {}
+
+//line /<generated>:1
+type HookContextImpl1091505788 struct {
+	params      []interface{}
+	returnVals  []interface{}
+	skipCall    bool
+	data        interface{}
+	funcName    string
+	packageName string
+}
+
+func (c *HookContextImpl1091505788) SetSkipCall(skip bool)    { c.skipCall = skip }
+func (c *HookContextImpl1091505788) IsSkipCall() bool         { return c.skipCall }
+func (c *HookContextImpl1091505788) SetData(data interface{}) { c.data = data }
+func (c *HookContextImpl1091505788) GetData() interface{}     { return c.data }
+func (c *HookContextImpl1091505788) GetKeyData(key string) interface{} {
+	if m, ok := c.data.(map[string]interface{}); ok {
+		return m[key]
+	}
+	return nil
+}
+
+func (c *HookContextImpl1091505788) SetKeyData(key string, val interface{}) {
+	m, ok := c.data.(map[string]interface{})
+	if !ok || m == nil {
+		m = make(map[string]interface{})
+		c.data = m
+	}
+	m[key] = val
+}
+
+func (c *HookContextImpl1091505788) HasKeyData(key string) bool {
+	if m, ok := c.data.(map[string]interface{}); ok {
+		_, ok := m[key]
+		return ok
+	}
+	return false
+}
+
+func (c *HookContextImpl1091505788) GetParam(idx int) interface{} {
+	switch idx {
+	case 0:
+		return *(c.params[0].(*int))
+	case 1:
+		return *(c.params[1].(*[]func(*options)))
+	}
+	return nil
+}
+
+func (c *HookContextImpl1091505788) SetParam(idx int, val interface{}) {
+	switch idx {
+	case 0:
+		if val == nil {
+			*(c.params[0].(*int)) = *new(int)
+		} else {
+			*(c.params[0].(*int)) = val.(int)
+		}
+	case 1:
+		if val == nil {
+			*(c.params[1].(*[]func(*options))) = *new([]func(*options))
+		} else {
+			*(c.params[1].(*[]func(*options))) = val.([]func(*options))
+		}
+	}
+}
+
+func (c *HookContextImpl1091505788) GetReturnVal(idx int) interface{} {
+	switch idx {
+	case 0:
+		return *(c.returnVals[0].(*string))
+	}
+	return nil
+}
+
+func (c *HookContextImpl1091505788) SetReturnVal(idx int, val interface{}) {
+	switch idx {
+	case 0:
+		if val == nil {
+			*(c.returnVals[0].(*string)) = *new(string)
+		} else {
+			*(c.returnVals[0].(*string)) = val.(string)
+		}
+	}
+}
+func (c *HookContextImpl1091505788) GetParamCount() int     { return len(c.params) }
+func (c *HookContextImpl1091505788) GetReturnValCount() int { return len(c.returnVals) }
+func (c *HookContextImpl1091505788) GetFuncName() string    { return c.funcName }
+func (c *HookContextImpl1091505788) GetPackageName() string { return c.packageName }
+
+// Trampoline Template
+func OtelBeforeTrampoline_New1091505788(param0 *int, param1 *[]func(*options)) (hookContext *HookContextImpl1091505788, skipCall bool) {
+	defer func() {
+		if err := recover(); err != nil {
+			println("failed to exec Before hook", "HAnyBefore")
+			if e, ok := err.(error); ok {
+				println(e.Error())
+			}
+			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
+			if fetchStack != nil && printStack != nil {
+				printStack(fetchStack())
+			}
+		}
+	}()
+	hookContext = &HookContextImpl1091505788{}
+	hookContext.params = []interface{}{param0, param1}
+	hookContext.funcName = "New"
+	hookContext.packageName = "main"
+	if otelc_hook_4198193957_HAnyBefore != nil {
+		otelc_hook_4198193957_HAnyBefore(hookContext, *param0, func() []interface{} {
+			_otel_anyItems := make([]interface{}, len(*param1))
+			for _otel_anyIndex := range *param1 {
+				_otel_anyItems[_otel_anyIndex] = (*param1)[_otel_anyIndex]
+			}
+			return _otel_anyItems
+		}()...)
+	}
+	return hookContext, hookContext.skipCall
+}
+
+//go:linkname otelc_hook_4198193957_HAnyBefore testdata/golden/variadic-any-hook.HAnyBefore
+func otelc_hook_4198193957_HAnyBefore(hookContext HookContext, param0 int, param1 ...interface{})

@@ -438,10 +438,21 @@ func (ip *instrumentPhase) ensureMethodCallInfo() *methodCallPackageInfo {
 	return ip.methodCallInfo
 }
 
-// packageSourceFiles returns the compile command's source files
+// packageSourceFiles returns the compile command's source files. The value of
+// -p is skipped, since an import path such as github.com/nats-io/nats.go also
+// ends in .go.
 func packageSourceFiles(compileArgs []string) []string {
 	var files []string
+	afterP := false
 	for _, arg := range compileArgs {
+		if afterP {
+			afterP = false
+			continue
+		}
+		if arg == "-p" {
+			afterP = true
+			continue
+		}
 		if strings.HasPrefix(arg, "-") || !util.IsGoFile(arg) {
 			continue
 		}
