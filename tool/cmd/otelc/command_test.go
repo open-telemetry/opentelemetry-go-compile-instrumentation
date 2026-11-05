@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -68,4 +69,31 @@ func TestCommandVendorRuns(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "go mod vendor")
 	assert.False(t, isHelpFlag("-v"))
+}
+
+// TestCommandToolexecNestedKeepsToolexec: a nested toolexec puts otelc back in
+// GOFLAGS, which startup stripped. A compile it instruments can resolve an
+// added import with a nested build of its own, and that build must run through
+// otelc too.
+func TestCommandToolexecNestedKeepsToolexec(t *testing.T) {
+	goBin, err := exec.LookPath("go")
+	require.NoError(t, err)
+	exe, err := os.Executable()
+	require.NoError(t, err)
+	innerFlag, err := util.BuildToolexecFlag(exe)
+	require.NoError(t, err)
+	wantToken, err := util.QuoteGoflagsToken(innerFlag)
+	require.NoError(t, err)
+
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	t.Setenv(util.EnvOtelcNestedToolexec, "1")
+	t.Setenv("GOFLAGS", "-mod=mod")
+	toolexec := commandToolexec
+	toolexec.Before = nil
+	app := &cli.Command{Name: "otelc", Commands: []*cli.Command{&toolexec}}
+	require.NoError(t, app.Run(context.Background(), []string{"otelc", "toolexec", goBin, "env", "GOROOT"}))
+
+	tokens := util.SplitGoflags(os.Getenv("GOFLAGS"))
+	assert.Contains(t, tokens, "-mod=mod")
+	assert.Contains(t, tokens, wantToken)
 }
