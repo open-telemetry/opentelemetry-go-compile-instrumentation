@@ -163,7 +163,9 @@ func lastFileTargetIndex(subcommand string, args []string) int {
 //     also returns test packages ("p [p.test]" variants, external "p_test"
 //     packages, and the synthesized "p.test" binaries). They are excluded,
 //     because otelc.runtime.go for one of them would declare "package p_test"
-//     next to "p.go" and fail the build.
+//     next to "p.go" and fail the build. Outside a test load, packages with
+//     only _test.go files are excluded too, because the go command does not
+//     build them.
 //   - all packages: the build packages plus those test packages. Only this list
 //     sees them, because they carry imports that only _test.go files use.
 //
@@ -252,12 +254,19 @@ func loadBuildPackages(
 		}
 
 		allPkgs = append(allPkgs, pkg)
-		if pkg.ForTest == "" && !testBinaries[pkg.ID] {
-			buildPkgs = append(buildPkgs, pkg)
+		if pkg.ForTest != "" || testBinaries[pkg.ID] {
+			continue
 		}
+		// A package with only _test.go files has no GoFiles. Only go test builds
+		// it. Outside a test load, the go command skips it or reports the error.
+		if !tests && len(pkg.GoFiles) == 0 {
+			logger.DebugContext(ctx, "skipping package with only _test.go files", "package", pkg.PkgPath)
+			continue
+		}
+		buildPkgs = append(buildPkgs, pkg)
 	}
 
-	if len(buildPkgs) == 0 {
+	if len(allPkgs) == 0 {
 		return nil, nil, ex.New("no valid packages found in build targets")
 	}
 

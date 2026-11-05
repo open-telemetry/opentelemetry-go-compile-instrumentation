@@ -716,6 +716,32 @@ func TestGetBuildPackages_TestSubcommandExcludesExternalTestPackage(t *testing.T
 		"unexpected all-packages list: %v", extractPackageIDs(allPkgs))
 }
 
+// TestGetBuildPackages_TestOnlyPackage covers a package with only _test.go
+// files. Only go test builds it, so only a test load keeps it in the build
+// packages. A build that selects only that package still loads, and the go
+// command reports the error.
+func TestGetBuildPackages_TestOnlyPackage(t *testing.T) {
+	tmpDir := t.TempDir()
+	mustWriteFile(t, filepath.Join(tmpDir, "go.mod"), "module testmodule\n\ngo 1.21\n")
+	mustWriteFile(t, filepath.Join(tmpDir, "app", "main.go"), "package main\n\nfunc main() {}\n")
+	mustWriteFile(t, filepath.Join(tmpDir, "onlytest", "main_test.go"),
+		"package main_test\n\nimport \"testing\"\n\nfunc TestX(t *testing.T) {}\n")
+	t.Chdir(tmpDir)
+
+	buildPkgs, allPkgs, err := getBuildPackages(t.Context(), subcmdBuild, []string{"./..."})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"testmodule/app"}, extractPackageIDs(buildPkgs))
+	assert.ElementsMatch(t, []string{"testmodule/app", "testmodule/onlytest"}, extractPackageIDs(allPkgs))
+
+	buildPkgs, _, err = getBuildPackages(t.Context(), subcmdBuild, []string{"./onlytest"})
+	require.NoError(t, err)
+	assert.Empty(t, buildPkgs)
+
+	testBuildPkgs, _, err := getBuildPackages(t.Context(), subcmdTest, []string{"./..."})
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"testmodule/app", "testmodule/onlytest"}, extractPackageIDs(testBuildPkgs))
+}
+
 func TestSplitBuildTargets(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -1531,11 +1557,33 @@ func TestSetupPhaseLogDelegators(t *testing.T) {
 func TestGenerateRuntimePerPackageSkipsPackagesWithoutFiles(t *testing.T) {
 	sp := newTestSetupPhase()
 
-	// A package with no Go files has an empty package directory and must be
-	// skipped without error.
+	// A package without Go files or a directory must be skipped without error.
 	pkgs := []*packages.Package{{PkgPath: "example.com/empty"}}
 	err := sp.generateRuntimePerPackage(context.Background(), pkgs, []*rule.InstRuleSet{})
 	require.NoError(t, err)
+}
+
+// TestGenerateRuntimePerPackageWritesTestOnlyPackage covers a package with only
+// _test.go files. It has no GoFiles, and its test binary links the hook
+// packages only through its runtime file.
+func TestGenerateRuntimePerPackageWritesTestOnlyPackage(t *testing.T) {
+	sp := newTestSetupPhase()
+
+	pkgDir := t.TempDir()
+	mustWriteFile(t, filepath.Join(pkgDir, "testonly_test.go"), "package testonly\n")
+	pkgs := []*packages.Package{{PkgPath: "example.com/app/testonly", Name: "testonly", Dir: pkgDir}}
+
+	rset := newTestRuleSet(
+		"example.com/app/lib",
+		[]*rule.InstFuncRule{newTestFuncRule("example.com/hooks", "example.com/app/lib")},
+		nil,
+	)
+	require.NoError(t, sp.generateRuntimePerPackage(t.Context(), pkgs, []*rule.InstRuleSet{rset}))
+
+	generated, err := os.ReadFile(filepath.Join(pkgDir, otelcRuntimeFile))
+	require.NoError(t, err)
+	assert.Contains(t, string(generated), "package testonly")
+	assert.Contains(t, string(generated), `_ "example.com/hooks"`)
 }
 
 // TestGenerateRuntimePerPackageSkipsSelfImport covers the import path reaching
