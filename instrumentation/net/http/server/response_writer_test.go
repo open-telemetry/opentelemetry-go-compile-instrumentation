@@ -614,6 +614,38 @@ func TestWriterWrapper_FlushCommitsStatusOK(t *testing.T) {
 	assert.True(t, wrapper.wroteHeader)
 }
 
+type writeHeaderTrackingFlusher struct {
+	http.ResponseWriter
+	writeHeaderCalls int
+	flushCalled      bool
+}
+
+func (m *writeHeaderTrackingFlusher) WriteHeader(statusCode int) {
+	m.writeHeaderCalls++
+	m.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (m *writeHeaderTrackingFlusher) Flush() {
+	m.flushCalled = true
+}
+
+func TestWriterWrapper_FlushDoesNotCallUnderlyingWriteHeader(t *testing.T) {
+	rec := httptest.NewRecorder()
+	mock := &writeHeaderTrackingFlusher{ResponseWriter: rec}
+	wrapper := &writerWrapper{ResponseWriter: mock, statusCode: http.StatusOK}
+
+	wrapper.Flush()
+	assert.True(t, mock.flushCalled)
+	assert.Equal(t, 0, mock.writeHeaderCalls, "Flush must not call underlying WriteHeader directly")
+	assert.True(t, wrapper.wroteHeader)
+	assert.Equal(t, http.StatusOK, wrapper.statusCode)
+
+	// Subsequent WriteHeader from user handler is also ignored.
+	wrapper.WriteHeader(http.StatusInternalServerError)
+	assert.Equal(t, 0, mock.writeHeaderCalls)
+	assert.Equal(t, http.StatusOK, wrapper.statusCode)
+}
+
 func TestWriterWrapper_FlushKeepsExplicitStatus(t *testing.T) {
 	rec := httptest.NewRecorder()
 	wrapper := &writerWrapper{ResponseWriter: rec, statusCode: http.StatusOK}

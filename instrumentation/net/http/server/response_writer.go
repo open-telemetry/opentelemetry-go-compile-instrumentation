@@ -130,9 +130,12 @@ func (w *writerWrapper) FlushError() error {
 	}
 
 	// Flushing commits the response, and net/http sends a 200 when no status
-	// was set. Record it, or a later WriteHeader would replace it on the span.
+	// was set. Record it directly on the wrapper so a later WriteHeader does
+	// not replace it on the span or forward a superfluous WriteHeader call to
+	// the underlying writer, which has already committed headers.
 	if !w.wroteHeader {
-		w.WriteHeader(http.StatusOK)
+		w.wroteHeader = true
+		w.statusCode = http.StatusOK
 	}
 
 	return nil
