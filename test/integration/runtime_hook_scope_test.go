@@ -24,6 +24,11 @@ import (
 // registry when they are initialized, so each binary reports the hooks it
 // links. The tests of both packages import shared, whose own tests use libb,
 // so the test binary of a must not link the hook of libb through shared.
+//
+// The same invocation also builds logger, which uses log, and a rule
+// instruments log. The runtime files of a and b import log, so their binaries
+// must link the hook of log although their own code does not use log. That
+// hook records itself when it runs, so it does not change what a and b report.
 func TestRuntimeHookScope(t *testing.T) {
 	otelcPath, err := testutil.OtelcPath()
 	require.NoError(t, err)
@@ -152,6 +157,16 @@ func main() {
         path: %[3]s/hook%[1]s
 `, name, upper, module)
 	}
+	rules += fmt.Sprintf(`instrument_log:
+  target: log
+  where:
+    func: output
+    recv: "*Logger"
+  do:
+    - inject_hooks:
+        before: BeforeLogOutput
+        path: %s/hooklog
+`, module)
 	writeTestFile(t, moduleDir, "rules.yml", rules)
 	writeTestFile(t, moduleDir, filepath.Join("shared", "shared.go"), `// Copyright The OpenTelemetry Authors
 
@@ -182,29 +197,115 @@ func TestHooks(t *testing.T) {
 }
 `, module),
 	)
+	writeTestFile(
+		t,
+		moduleDir,
+		filepath.Join("hooklog", "hooks.go"),
+		fmt.Sprintf(`// Copyright The OpenTelemetry Authors
+
+package hooklog
+
+import (
+	"log"
+
+	"go.opentelemetry.io/otelc/pkg/hook"
+
+	"%s/registry"
+)
+
+func BeforeLogOutput(
+	ictx hook.HookContext,
+	logger *log.Logger,
+	pc uintptr,
+	calldepth int,
+	appendOutput func([]byte) []byte,
+) {
+	registry.Add("hooklog")
+}
+`, module),
+	)
+	writeTestFile(t, moduleDir, filepath.Join("logger", "logger.go"), `// Copyright The OpenTelemetry Authors
+
+package logger
+
+import (
+	"io"
+	"log"
+)
+
+func Print() { log.New(io.Discard, "", 0).Print("logger") }
+`)
+	writeTestFile(
+		t,
+		moduleDir,
+		filepath.Join("logger", "logger_test.go"),
+		fmt.Sprintf(`// Copyright The OpenTelemetry Authors
+
+package logger
+
+import (
+	"testing"
+
+	"%s/registry"
+)
+
+func TestHooks(t *testing.T) {
+	Print()
+	if got := registry.Loaded(); got != "hooklog" {
+		t.Fatalf("linked hooks = %%q, want %%q", got, "hooklog")
+	}
+}
+`, module),
+	)
+	writeTestFile(
+		t,
+		moduleDir,
+		filepath.Join("cmd", "logger", "main.go"),
+		fmt.Sprintf(`// Copyright The OpenTelemetry Authors
+
+package main
+
+import (
+	"fmt"
+
+	"%[1]s/logger"
+	"%[1]s/registry"
+)
+
+func main() {
+	logger.Print()
+	fmt.Println("linked hooks:", registry.Loaded())
+}
+`, module),
+	)
 
 	env := append(os.Environ(), "OTELC_RULES=rules.yml")
 
 	t.Run("test", func(t *testing.T) {
 		output := runOtelcCommand(t, moduleDir, env, otelcPath,
-			"go", "test", "-count=1", "-v", "./a", "./b", "./shared")
+			"go", "test", "-count=1", "-v", "./a", "./b", "./shared", "./logger")
 		require.Contains(t, output, "ok  \t"+module+"/a")
 		require.Contains(t, output, "ok  \t"+module+"/b")
 		require.Contains(t, output, "ok  \t"+module+"/shared")
+		require.Contains(t, output, "ok  \t"+module+"/logger")
 	})
 
 	t.Run("build", func(t *testing.T) {
 		binDir := t.TempDir()
 		runOtelcCommand(t, moduleDir, env, otelcPath, "go", "build", "-o", binDir+string(filepath.Separator),
-			"./cmd/a", "./cmd/b")
-		for _, name := range []string{"a", "b"} {
-			bin := filepath.Join(binDir, name)
+			"./cmd/a", "./cmd/b", "./cmd/logger")
+		for _, tc := range []struct{ name, hooks string }{
+			{name: "a", hooks: "hooka"},
+			{name: "b", hooks: "hookb"},
+			{name: "logger", hooks: "hooklog"},
+		} {
+			bin := filepath.Join(binDir, tc.name)
 			if _, statErr := os.Stat(bin + ".exe"); statErr == nil {
 				bin += ".exe"
 			}
 			output, runErr := exec.CommandContext(t.Context(), bin).CombinedOutput()
 			require.NoError(t, runErr, "%s failed:\n%s", bin, output)
-			require.Equal(t, "linked hooks: hook"+name+"\n", strings.ReplaceAll(string(output), "\r\n", "\n"))
+			require.Equal(t, "linked hooks: "+tc.hooks+"\n", strings.ReplaceAll(string(output), "\r\n", "\n"))
 		}
 	})
 }
