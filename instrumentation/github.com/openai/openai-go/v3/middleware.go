@@ -26,6 +26,7 @@ import (
 	"go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go/internal/streaming"
 	"go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go/v3/semconv"
 	"go.opentelemetry.io/otelc/pkg/netutil"
+	"go.opentelemetry.io/otelc/pkg/otelcconv"
 	"go.opentelemetry.io/otelc/pkg/runtime"
 )
 
@@ -281,7 +282,7 @@ func otelMiddleware(
 		isStreaming = strings.EqualFold(contentType, "text/event-stream")
 
 		if isStreaming {
-			span.SetAttributes(semconv.GenAIRequestIsStream(true))
+			span.SetAttributes(otelcconv.GenAIRequestIsStream(true))
 			resp.Body = newStreamingReader(resp.Body, span, start, op, captureContent, func() {
 				if operationDuration != nil {
 					attrs := slices.Concat(baseAttrs, errorAttrs)
@@ -529,7 +530,7 @@ func parseChatResponse(body []byte, span trace.Span, captureContent bool) {
 		otelsemconv.GenAIResponseFinishReasonsKey.StringSlice(reasons),
 		otelsemconv.GenAIUsageInputTokensKey.Int64(resp.Usage.PromptTokens),
 		otelsemconv.GenAIUsageOutputTokensKey.Int64(resp.Usage.CompletionTokens),
-		semconv.GenAIUsageTotalTokens(resp.Usage.TotalTokens),
+		otelcconv.GenAIUsageTotalTokensKey.Int64(resp.Usage.TotalTokens),
 	)
 }
 
@@ -566,7 +567,7 @@ func parseCompletionResponse(body []byte, span trace.Span, captureContent bool) 
 		otelsemconv.GenAIResponseFinishReasonsKey.StringSlice(reasons),
 		otelsemconv.GenAIUsageInputTokensKey.Int64(resp.Usage.PromptTokens),
 		otelsemconv.GenAIUsageOutputTokensKey.Int64(resp.Usage.CompletionTokens),
-		semconv.GenAIUsageTotalTokens(resp.Usage.TotalTokens),
+		otelcconv.GenAIUsageTotalTokensKey.Int64(resp.Usage.TotalTokens),
 	)
 }
 
@@ -623,6 +624,6 @@ func parseEmbeddingResponse(body []byte, span trace.Span) {
 	span.SetAttributes(
 		otelsemconv.GenAIResponseModel(resp.Model),
 		otelsemconv.GenAIUsageInputTokensKey.Int64(resp.Usage.PromptTokens),
-		semconv.GenAIUsageTotalTokens(resp.Usage.TotalTokens),
+		otelcconv.GenAIUsageTotalTokensKey.Int64(resp.Usage.TotalTokens),
 	)
 }

@@ -20,7 +20,7 @@ endif
         test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage test-unit/instrumentation/coverage \
         check-coverage test-integration/coverage test-e2e/coverage test-latestlibrun test-versionmatrix \
         weaver-install tidy/test-apps \
-        fetch-upstream-semconv lint-schema \
+        fetch-upstream-semconv lint-schema generate \
         adr-tools adr-new adr-list \
         benchmark/codspeed benchmark/threshold govulncheck govulncheck/instrumentation
 
@@ -217,9 +217,11 @@ package: ## Package the instrumentation code into binary
 	@mkdir -p $(INST_BUNDLE_PKG_TMP)
 	@cp -r pkg/runtime $(INST_BUNDLE_PKG_TMP)/runtime
 	@cp -r pkg/netutil $(INST_BUNDLE_PKG_TMP)/netutil
+	@cp -r pkg/otelcconv $(INST_BUNDLE_PKG_TMP)/otelcconv
 	@cp -r instrumentation $(INST_BUNDLE_INST_TMP)
 	@(cd $(INST_BUNDLE_PKG_TMP)/runtime && go mod tidy)
 	@(cd $(INST_BUNDLE_PKG_TMP)/netutil && go mod tidy)
+	@(cd $(INST_BUNDLE_PKG_TMP)/otelcconv && go mod tidy)
 	@(cd $(INST_BUNDLE_INST_TMP) && go mod tidy)
 	@mkdir -p tool/data/
 	@$(MAKE) $(BUNDLE)
@@ -956,6 +958,11 @@ lint-schema: fetch-upstream-semconv
 	fi; \
 	echo "Upstream semconv dependency: v$$MANIFEST_VERSION (matches .semconv-version)"
 	@scripts/semconv/lint-schema.sh $(OCI_BIN) $(WEAVER_IMAGE) "$(OTELC_REGISTRY_DIR)"
+
+generate: ## Generate pkg/otelcconv from the attributes declared with `id:` in schemas/otelc/
+generate: fetch-upstream-semconv
+	@scripts/semconv/generate.sh $(OCI_BIN) $(WEAVER_IMAGE) "$(OTELC_REGISTRY_DIR)" \
+		"$(CURDIR)/schemas/templates/registry" "$(CURDIR)/pkg/otelcconv"
 
 # `lint/semantic-conventions` is the umbrella entry point used by CI and the
 # top-level `lint` target; it now validates the project's own registry.
