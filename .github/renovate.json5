@@ -87,7 +87,7 @@
         '!github.com/stretchr/testify',
         '!go.opentelemetry.io/**',
       ],
-      matchFileNames:
+      matchFileNames: [
         'instrumentation/github.com/openai/openai-go/go.mod',
         'instrumentation/github.com/openai/openai-go/v2/go.mod',
         'instrumentation/go.mongodb.org/mongo-driver/mongo/go.mod',
