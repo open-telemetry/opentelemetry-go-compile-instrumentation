@@ -853,8 +853,9 @@ var executablePath = os.Executable
 // EnableNestedToolexec points GOFLAGS at this executable in nested mode, so go
 // commands this process spawns (e.g. `go list -export`) run through otelc,
 // instrument compiles the same way and share this build's cache keys. Any
-// existing -toolexec was stripped at startup. Must only be called from the
-// real otelc binary, since os.Executable is what nested go commands will run.
+// existing -toolexec was stripped at startup, so every toolexec invocation
+// calls it, nested ones too. Must only be called from the real otelc binary,
+// since os.Executable is what nested go commands will run.
 //
 // A -gcflags value without a package pattern applies only to a go command's
 // command-line packages. The outer build applied it to its targets, whereas

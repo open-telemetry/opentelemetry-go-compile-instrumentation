@@ -76,23 +76,11 @@ func ModuleAndWorkspace(ctx context.Context, dir string) (string, bool, error) {
 	return moduleDir, workspace, nil
 }
 
-// BuildDir returns the absolute -C directory of buildFlags, or "" when
-// buildFlags has no -C flag. The flag can have one or two dashes (-C or --C),
-// as for the go command. LoadPackages loads the packages in this directory.
-func BuildDir(buildFlags []string) (string, error) {
-	dir, _, err := loadDirFromBuildFlags(buildFlags)
-	return dir, err
-}
-
 func loadDirFromBuildFlags(buildFlags []string) (string, []string, error) {
 	var dir string
 	filtered := make([]string, 0, len(buildFlags))
 	for i := 0; i < len(buildFlags); i++ {
-		// The go command accepts each flag with one or two dashes.
 		flag := buildFlags[i]
-		if strings.HasPrefix(flag, "--") {
-			flag = flag[1:]
-		}
 
 		switch {
 		case flag == "-C":
@@ -104,7 +92,7 @@ func loadDirFromBuildFlags(buildFlags []string) (string, []string, error) {
 		case strings.HasPrefix(flag, "-C="):
 			dir = strings.TrimPrefix(flag, "-C=")
 		default:
-			filtered = append(filtered, buildFlags[i])
+			filtered = append(filtered, flag)
 		}
 	}
 	if dir == "" {
@@ -210,17 +198,19 @@ func CollectPackageNames(pkgs []*packages.Package) map[string]string {
 	return result
 }
 
+// PackageDir returns the directory of pkg. A package with only _test.go files
+// has no GoFiles, so PackageDir falls back to the directory that go list
+// reports. Load pkg with packages.NeedFiles, or that directory is empty.
 func PackageDir(pkg *packages.Package) string {
 	if len(pkg.GoFiles) > 0 {
 		return filepath.Dir(pkg.GoFiles[0])
 	}
-	return ""
+	return pkg.Dir
 }
 
-// ResolveModule returns the module for a given package directory. buildFlags
-// go to the package load (for example a -mod flag).
-func ResolveModule(ctx context.Context, pkgDir string, buildFlags ...string) (*packages.Module, error) {
-	pkgs, err := LoadPackages(ctx, packages.NeedModule, buildFlags, false, pkgDir)
+// ResolveModule returns the module for a given package directory.
+func ResolveModule(ctx context.Context, pkgDir string) (*packages.Module, error) {
+	pkgs, err := LoadPackages(ctx, packages.NeedModule, nil, false, pkgDir)
 	if err != nil {
 		return nil, err
 	}
@@ -262,16 +252,15 @@ func FindModuleDirs(ctx context.Context, pkgs []*packages.Package) ([]string, er
 			continue
 		}
 
-		pkgDir := PackageDir(pkg)
-		if pkgDir == "" {
-			logger.WarnContext(ctx, "skipping package without Go files", "package", pkg.PkgPath)
-			continue
-		}
-
 		var moduleDir string
 		if pkg.Module != nil {
 			moduleDir = pkg.Module.Dir
 		} else {
+			pkgDir := PackageDir(pkg)
+			if pkgDir == "" {
+				return nil, ex.Newf("cannot find the directory of package %s", pkg.PkgPath)
+			}
+
 			modDir, err := resolveModuleDir(ctx, pkgDir)
 			if err != nil {
 				return nil, err
