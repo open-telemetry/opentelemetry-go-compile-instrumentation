@@ -653,7 +653,7 @@ func (imp *exportImporter) Import(path string) (*types.Package, error) {
 
 // ImportFrom implements types.ImporterFrom.
 func (imp *exportImporter) ImportFrom(path, _ string, _ types.ImportMode) (*types.Package, error) {
-	if path == "unsafe" {
+	if path == unsafePackageName {
 		return types.Unsafe, nil
 	}
 	if pkg, ok := imp.packages[path]; ok && pkg.Complete() {
