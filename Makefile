@@ -217,9 +217,11 @@ package: ## Package the instrumentation code into binary
 	@mkdir -p $(INST_BUNDLE_PKG_TMP)
 	@cp -r pkg/runtime $(INST_BUNDLE_PKG_TMP)/runtime
 	@cp -r pkg/netutil $(INST_BUNDLE_PKG_TMP)/netutil
+	@cp -r pkg/otelcconv $(INST_BUNDLE_PKG_TMP)/otelcconv
 	@cp -r instrumentation $(INST_BUNDLE_INST_TMP)
 	@(cd $(INST_BUNDLE_PKG_TMP)/runtime && go mod tidy)
 	@(cd $(INST_BUNDLE_PKG_TMP)/netutil && go mod tidy)
+	@(cd $(INST_BUNDLE_PKG_TMP)/otelcconv && go mod tidy)
 	@(cd $(INST_BUNDLE_INST_TMP) && go mod tidy)
 	@mkdir -p tool/data/
 	@$(MAKE) $(BUNDLE)
