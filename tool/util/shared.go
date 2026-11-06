@@ -27,6 +27,11 @@ const (
 	// EnvOtelcNestedToolexec marks toolexec invocations spawned by a go
 	// command otelc itself ran (e.g. `go list -export`).
 	EnvOtelcNestedToolexec = "OTELC_NESTED_TOOLEXEC"
+	// EnvOtelcHeldBuildLocks lists the build lock files that a parent otelc
+	// invocation holds, separated by os.PathListSeparator. otelc sets it for
+	// the go command it runs, so an otelc invocation started under that
+	// command (for example from a test) does not wait for its own parent.
+	EnvOtelcHeldBuildLocks = "OTELC_HELD_BUILD_LOCKS"
 	// EnvOtelcNestedResolving lists, outermost first, the compiles waiting on
 	// a nested build to resolve an import a rule added, as comma-separated
 	// "package>added import" entries. Import paths cannot contain "," or ">",

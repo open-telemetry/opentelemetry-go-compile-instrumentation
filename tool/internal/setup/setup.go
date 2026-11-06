@@ -835,6 +835,9 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 	pwd := util.GetOtelcWorkDir()
 	util.Assert(pwd != "", "invalid working directory")
 	env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelcWorkDir, pwd))
+	// Tell otelc invocations started under the go command (for example from
+	// a test) which build locks this invocation holds.
+	env = append(env, heldBuildLocksEnv(ctx))
 
 	// Extract and forward build flags that affect the build context
 	// This ensures `go list` resolves archives matching the current build
