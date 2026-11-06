@@ -24,10 +24,6 @@ const (
 	// EnvOtelcDebug enables debug-level logging when set to "1".
 	// Set automatically when --debug is used; propagated to child processes.
 	EnvOtelcDebug = "OTELC_DEBUG"
-	// EnvOtelcPackageLoadTimeout overrides how long setup waits for one
-	// package load, as a Go duration such as "5m". "0" removes the limit.
-	// Child processes inherit it, so nested otelc builds use it too.
-	EnvOtelcPackageLoadTimeout = "OTELC_PACKAGE_LOAD_TIMEOUT"
 	// EnvOtelcNestedToolexec marks toolexec invocations spawned by a go
 	// command otelc itself ran (e.g. `go list -export`).
 	EnvOtelcNestedToolexec = "OTELC_NESTED_TOOLEXEC"
