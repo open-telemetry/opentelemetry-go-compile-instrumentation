@@ -20,8 +20,8 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/semconv/v1.37.0"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otelc/instrumentation/github.com/stripe/stripe-go/v81/semconv"
 )
 
 const (

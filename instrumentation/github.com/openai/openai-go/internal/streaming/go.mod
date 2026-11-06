@@ -7,6 +7,7 @@ require (
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/sdk v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
+	go.opentelemetry.io/otelc/instrumentation/github.com/stripe/stripe-go/v81 v81.0.0-20261106124457-ccdc88fe8924
 )
 
 require (
@@ -20,3 +21,7 @@ require (
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 )
+
+replace go.opentelemetry.io/otelc/instrumentation/github.com/stripe/stripe-go/v81 => ../../../../stripe/stripe-go/v81
+
+replace go.opentelemetry.io/otelc/pkg/runtime => ../../../../../../pkg/runtime

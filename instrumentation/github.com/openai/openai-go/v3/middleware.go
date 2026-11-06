@@ -137,7 +137,10 @@ func operationName(op operationType) string {
 // preserving the full stream for downstream consumers (the SDK or the HTTP
 // caller). truncated reports whether body held more than limit bytes; in that
 // case bodyBytes is nil so no caller can parse a cut-off prefix as JSON.
-func readBounded(body io.ReadCloser, limit int64) (bodyBytes []byte, truncated bool, reassembled io.ReadCloser, err error) {
+func readBounded(
+	body io.ReadCloser,
+	limit int64,
+) (bodyBytes []byte, truncated bool, reassembled io.ReadCloser, err error) {
 	var buf bytes.Buffer
 	tee := io.TeeReader(body, &buf)
 	// Read one byte past the limit so a full body can be told apart from one
