@@ -2198,10 +2198,11 @@ type matchAllDepsFixture struct {
 
 // matchAllDepsTestModule writes a module whose original packages (aaa, zzz)
 // and hook-injected packages (mmm, and nnn through a second hook only mmm's
-// own rule names) interleave alphabetically, so the merge boundary in
-// matchAllDeps is the only thing standing between a deterministic matched.json
-// and worker-completion order. It returns the module directory, the rule file
-// path, and the original dependencies.
+// own rule names) interleave alphabetically, so the merge layout is visible
+// in the encoded result: the batch sort inside matchDeps already neutralizes
+// worker-completion order, and the merge decides only where the injected
+// batches land. It returns the module directory, the rule file path, and the
+// original dependencies.
 func matchAllDepsTestModule(t *testing.T) matchAllDepsFixture {
 	t.Helper()
 
