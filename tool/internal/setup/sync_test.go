@@ -192,11 +192,6 @@ func setupSyncDepsTest(t *testing.T, goMod string, instPaths []string) (string, 
 	require.NoError(t, os.MkdirAll(instDir, 0o755))
 
 	require.NoError(t, os.WriteFile(
-		filepath.Join(pkgDir, "go.mod"),
-		[]byte("module "+util.OtelcPkgRoot+"\ngo 1.21\n"),
-		0o644,
-	))
-	require.NoError(t, os.WriteFile(
 		filepath.Join(instDir, "go.mod"),
 		[]byte("module "+util.OtelcInstRoot+"\ngo 1.21\n"),
 		0o644,
@@ -242,8 +237,8 @@ go 1.21
 	require.NoError(t, err)
 	got := string(content)
 
-	assert.Contains(t, got,
-		"replace "+util.OtelcPkgRoot+" => "+filepath.Join(buildTempDir, unzippedPkgDir))
+	assert.NotContains(t, got,
+		"replace "+util.OtelcPkgRoot+" => ")
 	assert.Contains(t, got,
 		"replace "+util.OtelcPkgRoot+"/runtime => "+filepath.Join(buildTempDir, unzippedPkgDir, "runtime"))
 	assert.Contains(t, got,

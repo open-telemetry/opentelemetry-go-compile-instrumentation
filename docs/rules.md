@@ -542,7 +542,7 @@ Type names follow the form `[*][pkg.]Name`, for example `error`, `context.Contex
 
 > **Note on scalar filter semantics:** `result`, `last_result`, and `param` perform an exact type-name match. For example, `result: error` matches functions that literally return the `error` type, but not functions that return a concrete type (e.g. `*MyError`) that happens to implement `error`. Use `result_implements`, `last_result_implements`, and `param_implements` to also match such types; see [Matching by interface](#matching-by-interface).
 >
-> **Unsupported type expressions:** Complex type expressions — `chan`, `func`, `map`, slice (`[]T`), and non-empty interface literals — cannot be matched by type-name filters. If a parameter or return value uses one of these forms, the filter will never match it.
+> **Unsupported type expressions:** Complex type expressions — `chan`, `func`, `map`, slice (`[]T`), and non-empty interface literals — cannot be matched by type-name filters. If a parameter or return value uses one of these forms, the filter will never match it (it is skipped, not a fatal error). `signature_contains` applies to the list of parameter and result types, not to types nested inside composites: `args: [string]` matches a `string` argument, not `[]string` or `chan string`.
 
 **Example — match only functions with a specific signature:**
 
