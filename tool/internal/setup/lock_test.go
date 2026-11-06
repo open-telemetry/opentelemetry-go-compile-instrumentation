@@ -6,6 +6,8 @@ package setup
 import (
 	"context"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -24,6 +26,54 @@ func lockTestDir(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 	t.Setenv(util.EnvOtelcWorkDir, tmp)
+	t.Setenv(util.EnvOtelcHeldBuildLocks, "")
+}
+
+// lockTestModule sandboxes a lock test in a module and returns its root. The
+// working directory is a package directory of the module. Each test sets the
+// work dir itself.
+func lockTestModule(t *testing.T) string {
+	t.Helper()
+	moduleDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(moduleDir, "go.mod"), []byte("module m\n\ngo 1.25.0\n"), 0o644))
+	pkgDir := filepath.Join(moduleDir, "cmd", "app")
+	require.NoError(t, os.MkdirAll(pkgDir, 0o755))
+	t.Chdir(pkgDir)
+	t.Setenv("GOWORK", "off")
+	t.Setenv(util.EnvOtelcHeldBuildLocks, "")
+	return moduleDir
+}
+
+// assertWaitsFor checks that taking paths waits while the locks that release
+// frees are held, and succeeds once release runs.
+func assertWaitsFor(t *testing.T, release func(), paths []string) {
+	t.Helper()
+	// The goroutine never touches t after the test can have completed: its
+	// error goes over a channel, and its context is canceled on cleanup.
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var second atomic.Bool
+	done := make(chan error, 1)
+	go func() {
+		release2, _, err := acquireBuildLocks(ctx, paths)
+		if err == nil {
+			second.Store(true)
+			release2()
+		}
+		done <- err
+	}()
+
+	time.Sleep(3 * buildLockRetryInterval)
+	waited := !second.Load()
+
+	release()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("second invocation never acquired the lock after release")
+	}
+	assert.True(t, waited, "second invocation must wait for the lock holder")
 }
 
 func TestAcquireBuildLockExcludes(t *testing.T) {
@@ -147,4 +197,114 @@ func TestAcquireBuildLockMissingWorkDirIsNoop(t *testing.T) {
 	require.NoError(t, err)
 	release()
 	assert.False(t, util.PathExists(missing), "no-op acquisition must not create the work dir")
+}
+
+func TestBuildLockPathsWorkDirIsModuleRoot(t *testing.T) {
+	moduleDir := lockTestModule(t)
+	t.Setenv(util.EnvOtelcWorkDir, moduleDir)
+
+	// The default layout keeps a single lock file, the one in the module root.
+	assert.Equal(t, []string{lockPathIn(moduleDir)}, buildLockPaths(t.Context()))
+}
+
+func TestBuildLockPathsIncludesWorkspace(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "go.work"), []byte("go 1.25.0\n\nuse ./m\n"), 0o644))
+	moduleDir := filepath.Join(root, "m")
+	require.NoError(t, os.MkdirAll(moduleDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(moduleDir, "go.mod"), []byte("module m\n\ngo 1.25.0\n"), 0o644))
+	t.Chdir(moduleDir)
+	t.Setenv("GOWORK", "")
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	t.Setenv(util.EnvOtelcHeldBuildLocks, "")
+
+	paths := buildLockPaths(t.Context())
+	assert.Contains(t, paths, lockPathIn(moduleDir))
+	assert.Contains(t, paths, lockPathIn(root), "go.work.sum is shared by every module of the workspace")
+}
+
+func TestAcquireBuildLockExcludesAcrossWorkDirs(t *testing.T) {
+	moduleDir := lockTestModule(t)
+
+	// Two invocations in one module with different work dirs edit the same
+	// go.mod, so the second must wait for the first.
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	first := buildLockPaths(t.Context())
+	release, _, err := acquireBuildLocks(t.Context(), first)
+	require.NoError(t, err)
+
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	second := buildLockPaths(t.Context())
+
+	assert.Contains(t, first, lockPathIn(moduleDir))
+	assert.Contains(t, second, lockPathIn(moduleDir))
+	assertWaitsFor(t, release, second)
+}
+
+func TestAcquireBuildLockNestedDoesNotWaitForParent(t *testing.T) {
+	moduleDir := lockTestModule(t)
+	t.Setenv(util.EnvOtelcWorkDir, moduleDir)
+
+	err := withBuildLock(t.Context(), func(ctx context.Context) error {
+		// A child otelc started from a test of the parent's build sees the
+		// environment of the parent's go command, and uses its own work dir.
+		key, value, _ := strings.Cut(heldBuildLocksEnv(ctx), "=")
+		t.Setenv(key, value)
+		t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+
+		paths := buildLockPaths(ctx)
+		assert.NotContains(t, paths, lockPathIn(moduleDir))
+		assert.Contains(t, paths, lockPathIn(moduleDir)+".1")
+
+		// The parent waits for its child, so the child must not wait for the
+		// parent: give it a deadline far shorter than a real wait.
+		waitCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		release, _, err := acquireBuildLocks(waitCtx, paths)
+		require.NoError(t, err, "a child invocation must not wait for the lock its parent holds")
+		release()
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+func TestAcquireBuildLockNestedSharedWorkDirWaits(t *testing.T) {
+	moduleDir := lockTestModule(t)
+	t.Setenv(util.EnvOtelcWorkDir, moduleDir)
+
+	err := withBuildLock(t.Context(), func(ctx context.Context) error {
+		// A child that uses the work dir of its parent would overwrite the
+		// parent's .otelc-build, so it must keep waiting for the parent.
+		key, value, _ := strings.Cut(heldBuildLocksEnv(ctx), "=")
+		t.Setenv(key, value)
+
+		waitCtx, cancel := context.WithTimeout(ctx, 3*buildLockRetryInterval)
+		defer cancel()
+		_, _, err := acquireBuildLocks(waitCtx, buildLockPaths(ctx))
+		require.Error(t, err, "a child sharing the parent's work dir must wait for the parent")
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+func TestAcquireBuildLockNestedSiblingsExclude(t *testing.T) {
+	moduleDir := lockTestModule(t)
+	t.Setenv(util.EnvOtelcHeldBuildLocks, lockPathIn(moduleDir))
+
+	// Two children of the same parent edit the same go.mod, so they still
+	// exclude each other.
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	release, err := acquireBuildLock(t.Context())
+	require.NoError(t, err)
+
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	assertWaitsFor(t, release, buildLockPaths(t.Context()))
+}
+
+func TestHeldBuildLocksEnv(t *testing.T) {
+	t.Setenv(util.EnvOtelcHeldBuildLocks, "a")
+	ctx := contextWithBuildLockHeld(t.Context(), []string{"b", "c"})
+
+	sep := string(os.PathListSeparator)
+	assert.Equal(t, util.EnvOtelcHeldBuildLocks+"=a"+sep+"b"+sep+"c", heldBuildLocksEnv(ctx))
 }

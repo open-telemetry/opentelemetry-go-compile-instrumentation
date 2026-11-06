@@ -450,6 +450,36 @@ func TestModuleAndWorkspace(t *testing.T) {
 	})
 }
 
+func TestModuleAndWorkFile(t *testing.T) {
+	t.Run("returns the go.work file of a workspace", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(root, "go.work"), []byte("go 1.25.0\n\nuse .\n"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte("module m\n\ngo 1.25.0\n"), 0o644))
+		sub := filepath.Join(root, "a")
+		require.NoError(t, os.MkdirAll(sub, 0o755))
+		dir, workFile, err := ModuleAndWorkFile(t.Context(), sub)
+		require.NoError(t, err)
+		assert.FileExists(t, filepath.Join(dir, "go.mod"))
+		assert.Equal(t, "go.work", filepath.Base(workFile))
+		assert.FileExists(t, workFile)
+	})
+	t.Run("empty outside a workspace", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte("module m\n\ngo 1.25.0\n"), 0o644))
+		_, workFile, err := ModuleAndWorkFile(t.Context(), root)
+		require.NoError(t, err)
+		assert.Empty(t, workFile)
+	})
+	t.Run("empty when explicitly disabled", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(root, "go.work"), []byte("go 1.25.0\n\nuse .\n"), 0o644))
+		t.Setenv("GOWORK", "off")
+		_, workFile, err := ModuleAndWorkFile(t.Context(), root)
+		require.NoError(t, err)
+		assert.Empty(t, workFile)
+	})
+}
+
 func TestFindModuleDirs(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
