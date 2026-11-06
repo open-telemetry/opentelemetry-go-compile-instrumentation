@@ -21,3 +21,7 @@ require (
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 )
+
+replace go.opentelemetry.io/otelc/instrumentation/github.com/stripe/stripe-go/v81 => ../../../../stripe/stripe-go/v81
+
+replace go.opentelemetry.io/otelc/pkg/runtime => ../../../../../../pkg/runtime
