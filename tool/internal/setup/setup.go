@@ -116,6 +116,10 @@ const (
 	// flagGcflags is forwarded to `go list` only with a package pattern; see
 	// forwardedValueFlag.
 	flagGcflags = "-gcflags"
+	// flagCover and flagCoverpkg select the packages a build collects
+	// coverage for; see nestedCoverFlags.
+	flagCover    = "-cover"
+	flagCoverpkg = "-coverpkg"
 )
 
 func lastFileTargetIndex(subcommand string, args []string) int {
@@ -674,6 +678,37 @@ func forwardedValueFlag(classified []ClassifiedArg, i int) []string {
 	return tokens
 }
 
+// coverPkgWork selects the packages of the main modules for coverage, as
+// cmd/go does when -cover is given without -coverpkg.
+const coverPkgWork = "-coverpkg=work"
+
+// nestedCoverFlags returns the flags that make a nested `go list -export`
+// select the same packages for coverage as the build. Without -coverpkg,
+// cmd/go covers the main module packages and the packages named on its command
+// line. The nested command names the added import, so it would cover that
+// import, which the build did not, and the link fails with a fingerprint
+// mismatch. goflags are the GOFLAGS tokens and forwarded the flags that
+// extractBuildFlags returned; a forwarded flag overrides GOFLAGS.
+func nestedCoverFlags(goflags, forwarded []string) []string {
+	cover, coverPkg := false, false
+	for _, tok := range slices.Concat(goflags, forwarded) {
+		name, value, hasValue := strings.Cut(util.UnquoteGoflagsToken(tok), "=")
+		switch flagName(name) {
+		case flagCover:
+			cover = !hasValue
+			if hasValue {
+				cover, _ = strconv.ParseBool(value)
+			}
+		case flagCoverpkg:
+			coverPkg = true
+		}
+	}
+	if !cover || coverPkg {
+		return nil
+	}
+	return []string{coverPkgWork}
+}
+
 // toolexecInsertArg builds the -toolexec=... argument for execPath. Split out
 // from buildWithToolexec so the error path (reachable only when execPath
 // contains both quote characters) is testable without depending on
@@ -798,6 +833,7 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 	if vendored {
 		buildFlags = rewriteModVendor(subcommand, buildFlags)
 	}
+	buildFlags = append(buildFlags, nestedCoverFlags(util.SplitGoflags(os.Getenv("GOFLAGS")), buildFlags)...)
 	if len(buildFlags) > 0 {
 		encoded := util.EncodeBuildFlags(buildFlags)
 		env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelcBuildFlags, encoded))
