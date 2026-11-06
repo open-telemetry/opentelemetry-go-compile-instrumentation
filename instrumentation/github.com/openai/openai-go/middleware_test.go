@@ -300,7 +300,9 @@ func TestParseChatRequest_ContentCapture(t *testing.T) {
 }
 
 func TestParseChatRequest_MultimodalContentCapture(t *testing.T) {
-	body := []byte(`{"model":"gpt-4-vision-preview","messages":[{"role":"user","content":[{"type":"text","text":"describe this"},{"type":"image_url","image_url":{"url":"https://example.com/image.png"}}]}]}`)
+	body := []byte(
+		`{"model":"gpt-4-vision-preview","messages":[{"role":"user","content":[{"type":"text","text":"describe this"},{"type":"image_url","image_url":{"url":"https://example.com/image.png"}}]}]}`,
+	)
 	model, _, prompts := parseChatRequest(body, true)
 
 	assert.Equal(t, "gpt-4-vision-preview", model)
@@ -322,7 +324,11 @@ func TestParseChatRequest_MaxCompletionTokens(t *testing.T) {
 		body    string
 		wantMax int64
 	}{
-		{"max_completion_tokens preferred over max_tokens", `{"model":"gpt-4.1","max_tokens":100,"max_completion_tokens":200}`, 200},
+		{
+			"max_completion_tokens preferred over max_tokens",
+			`{"model":"gpt-4.1","max_tokens":100,"max_completion_tokens":200}`,
+			200,
+		},
 		{"max_completion_tokens only", `{"model":"gpt-4.1","max_completion_tokens":200}`, 200},
 		{"max_tokens fallback", `{"model":"gpt-4","max_tokens":100}`, 100},
 	}
@@ -356,7 +362,11 @@ func TestParseCompletionRequest_ContentCapture(t *testing.T) {
 		expected []string
 	}{
 		{"string", []byte(`{"model":"gpt-3.5-turbo-instruct","prompt":"hello"}`), []string{"hello"}},
-		{"array", []byte(`{"model":"gpt-3.5-turbo-instruct","prompt":["first","second"]}`), []string{"first", "second"}},
+		{
+			"array",
+			[]byte(`{"model":"gpt-3.5-turbo-instruct","prompt":["first","second"]}`),
+			[]string{"first", "second"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -499,7 +509,11 @@ func TestParseCompletionResponse_ContentCapture(t *testing.T) {
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
 	_, span := tp.Tracer("test").Start(t.Context(), "completion-content")
 
-	parseCompletionResponse([]byte(`{"choices":[{"text":"first","finish_reason":"stop"},{"text":"second","finish_reason":"stop"}]}`), span, true)
+	parseCompletionResponse(
+		[]byte(`{"choices":[{"text":"first","finish_reason":"stop"},{"text":"second","finish_reason":"stop"}]}`),
+		span,
+		true,
+	)
 	span.End()
 
 	spans := sr.Ended()
@@ -566,7 +580,12 @@ func TestOtelMiddleware_ContentCapture_Enabled(t *testing.T) {
 	sr := setupTestTracer(t)
 
 	reqBody := `{"model":"gpt-4","messages":[{"role":"user","content":"hello"}]}`
-	req, err := http.NewRequestWithContext(context.Background(), "POST", "https://api.openai.com/v1/chat/completions", bytes.NewBufferString(reqBody))
+	req, err := http.NewRequestWithContext(
+		context.Background(),
+		"POST",
+		"https://api.openai.com/v1/chat/completions",
+		bytes.NewBufferString(reqBody),
+	)
 	require.NoError(t, err)
 
 	resp := &http.Response{
@@ -590,7 +609,12 @@ func TestOtelMiddleware_ContentCapture_Enabled(t *testing.T) {
 }
 
 func TestOtelMiddleware_ErrorResponse(t *testing.T) {
-	req, err := http.NewRequestWithContext(context.Background(), "POST", "https://api.openai.com/v1/chat/completions", bytes.NewBufferString(`{}`))
+	req, err := http.NewRequestWithContext(
+		context.Background(),
+		"POST",
+		"https://api.openai.com/v1/chat/completions",
+		bytes.NewBufferString(`{}`),
+	)
 	require.NoError(t, err)
 
 	resp := &http.Response{
