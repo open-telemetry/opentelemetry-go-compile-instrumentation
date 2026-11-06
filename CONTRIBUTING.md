@@ -400,6 +400,16 @@ Here are some examples for the various supported commit types:
 
 [conv-commit]: https://www.conventionalcommits.org/en/v1.0.0/
 
+### Claiming an issue
+
+Comment `/assign` on an issue to assign it to yourself, and `/unassign` to give
+it up. The command reacts 👍 when the claim is recorded. If someone else already
+holds the issue it is left alone and the workflow says so, so coordinate on the
+issue rather than opening a competing pull request.
+
+Claiming is how you signal that you are working on something. An unassigned
+issue is fair game for anyone.
+
 ### How to Send Pull Requests
 
 Everyone is welcome to contribute code to `opentelemetry-go-compile-instrumentation` via
