@@ -144,6 +144,16 @@ func FindFuncDecl[R rule.InstFuncRule | rule.InstRawRule | rule.FilterDef](
 	case *rule.InstRawRule:
 		funcName = rr.Func
 		recv = rr.Recv
+		// InstRawRule carries the same signature sub-filters as InstFuncRule.
+		// Reuse the InstFuncRule matcher rather than duplicating the five
+		// fields' evaluation. FilterDef stays name/receiver-only.
+		funcRule = &rule.InstFuncRule{
+			Signature:         rr.Signature,
+			SignatureContains: rr.SignatureContains,
+			Result:            rr.Result,
+			LastResult:        rr.LastResult,
+			Param:             rr.Param,
+		}
 	case *rule.FilterDef:
 		funcName = rr.HasFunc
 		recv = rr.HasRecv

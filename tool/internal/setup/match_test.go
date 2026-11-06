@@ -2212,6 +2212,37 @@ func TestMatchOneRule(t *testing.T) {
 	}
 }
 
+// TestMatchOneRule_InjectCodeHonorsSignatureFilters is the setup-phase
+// regression for issue #1607. An inject_code rule whose where.signature does
+// not match the declared function must not be added to the rule set.
+func TestMatchOneRule_InjectCodeHonorsSignatureFilters(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "sample.go")
+	dep := &Dependency{ImportPath: "example.com/sample"}
+	sp := newTestSetupPhase()
+	set := rule.NewInstRuleSet("example.com/sample")
+
+	const yaml = `
+raw_with_signature:
+  target: example.com/sample
+  where:
+    func: Plain
+    signature:
+      args: [context.Context]
+  do:
+    - inject_code:
+        raw: 'println("injected")'
+`
+	doc, err := rule.ParseFile([]byte(yaml))
+	require.NoError(t, err)
+	rules, err := doc.Rules()
+	require.NoError(t, err)
+	require.Len(t, rules, 1)
+
+	require.NoError(t, sp.matchOneRule(parseMatchSource(t), source, rules[0], set, dep))
+	assert.Empty(t, set.RawRules[source],
+		"inject_code with a non-matching signature must not match func Plain()")
+}
+
 func TestCreateRuleFromFields_CallRule(t *testing.T) {
 	doc, err := rule.ParseFile(
 		[]byte("call-rule:\n  target: example.com/x\n  function_call: net/http.Get\n  replace: tracedGet({{ . }})\n"),
