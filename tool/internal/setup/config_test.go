@@ -13,10 +13,13 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dave/dst"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 func TestFindToolFile(t *testing.T) {
@@ -878,4 +881,73 @@ func TestWalkInstrumentationParseError(t *testing.T) {
 		func(v *instrumentationVisit) (bool, error) { return false, nil },
 	)
 	require.Error(t, err)
+}
+
+func TestPackageLoadTimeout(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		want    time.Duration
+		wantErr string
+	}{
+		{name: "unset uses the default", value: "", want: defaultPackageLoadTimeout},
+		{name: "duration", value: "90s", want: 90 * time.Second},
+		{name: "zero removes the limit", value: "0", want: 0},
+		{name: "not a duration", value: "abc", wantErr: `invalid OTELC_PACKAGE_LOAD_TIMEOUT "abc"`},
+		{name: "negative", value: "-1s", wantErr: `invalid OTELC_PACKAGE_LOAD_TIMEOUT "-1s"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(util.EnvOtelcPackageLoadTimeout, tt.value)
+			got, err := packageLoadTimeout()
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestWithPackageLoadTimeout(t *testing.T) {
+	t.Run("zero keeps only the caller's deadline", func(t *testing.T) {
+		t.Setenv(util.EnvOtelcPackageLoadTimeout, "0")
+		ctx, cancel, err := withPackageLoadTimeout(t.Context())
+		require.NoError(t, err)
+		defer cancel()
+		_, hasDeadline := ctx.Deadline()
+		assert.False(t, hasDeadline)
+	})
+
+	t.Run("expiry names the setting", func(t *testing.T) {
+		t.Setenv(util.EnvOtelcPackageLoadTimeout, "1ms")
+		ctx, cancel, err := withPackageLoadTimeout(t.Context())
+		require.NoError(t, err)
+		defer cancel()
+		<-ctx.Done()
+		loadErr := packageLoadError(ctx, errors.New("err: context deadline exceeded"))
+		var timeoutErr packageLoadTimeoutError
+		require.ErrorAs(t, loadErr, &timeoutErr)
+		assert.Equal(t, time.Millisecond, timeoutErr.timeout)
+		assert.ErrorContains(t, loadErr, "set OTELC_PACKAGE_LOAD_TIMEOUT")
+	})
+
+	t.Run("caller cancellation keeps the error", func(t *testing.T) {
+		t.Setenv(util.EnvOtelcPackageLoadTimeout, "")
+		parent, cancelParent := context.WithCancel(t.Context())
+		ctx, cancel, err := withPackageLoadTimeout(parent)
+		require.NoError(t, err)
+		defer cancel()
+		cancelParent()
+		<-ctx.Done()
+		want := errors.New("load failed")
+		assert.Equal(t, want, packageLoadError(ctx, want))
+	})
+
+	t.Run("invalid value", func(t *testing.T) {
+		t.Setenv(util.EnvOtelcPackageLoadTimeout, "abc")
+		_, _, err := withPackageLoadTimeout(t.Context())
+		require.ErrorContains(t, err, "OTELC_PACKAGE_LOAD_TIMEOUT")
+	})
 }

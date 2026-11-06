@@ -1795,6 +1795,21 @@ func TestSetup_FindDepsErrorWithRules(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestSetup_InvalidPackageLoadTimeout covers an invalid
+// OTELC_PACKAGE_LOAD_TIMEOUT: setup fails and names the setting instead of
+// silently using the default.
+func TestSetup_InvalidPackageLoadTimeout(t *testing.T) {
+	setupTestModule(t, []string{"cmd"})
+	t.Setenv(util.EnvOtelcPackageLoadTimeout, "abc")
+
+	cmd := &cli.Command{
+		Name:   "setup",
+		Action: Setup,
+	}
+	err := cmd.Run(t.Context(), []string{"setup", "."})
+	require.ErrorContains(t, err, `invalid OTELC_PACKAGE_LOAD_TIMEOUT "abc"`)
+}
+
 func TestSetup_MatchDepsError(t *testing.T) {
 	setupTestModule(t, []string{"cmd"})
 	t.Setenv(util.EnvOtelcRules, "/nonexistent/rules.yaml")

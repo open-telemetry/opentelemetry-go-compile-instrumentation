@@ -222,6 +222,17 @@ Errors from `pkgload` (for example, `"failed to resolve package name for ..."` o
 are fatal. Common causes: the package is not in the module graph, the module is not
 downloaded, or the module proxy is unreachable. Run `go mod download` and try again.
 
+### `package load timed out`
+
+During setup, `otelc` loads packages with `go list`, and each load can take at most 2
+minutes. On a busy machine, for example when one `otelc go test` runs many nested builds at
+the same time, a load can take longer. Set `OTELC_PACKAGE_LOAD_TIMEOUT` to a longer Go
+duration, or to `0` to remove the limit. Nested `otelc` builds inherit the setting.
+
+```bash
+OTELC_PACKAGE_LOAD_TIMEOUT=10m otelc go test ./...
+```
+
 ## Hook and Instrumentation Limitations
 
 The following constraints apply to all hook implementations. They come from the compile-time

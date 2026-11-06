@@ -123,7 +123,10 @@ func injectedDeps(
 		return nil, nil
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, packagesLoadTimeout)
+	ctx, cancel, err := withPackageLoadTimeout(ctx)
+	if err != nil {
+		return nil, err
+	}
 	defer cancel()
 
 	pkgs, err := pkgload.LoadPackages(
@@ -134,7 +137,7 @@ func injectedDeps(
 		hookPaths...,
 	)
 	if err != nil {
-		return nil, ex.Wrapf(err, "loading hook packages to complete the build plan")
+		return nil, ex.Wrapf(packageLoadError(ctx, err), "loading hook packages to complete the build plan")
 	}
 
 	deps := make([]*Dependency, 0)

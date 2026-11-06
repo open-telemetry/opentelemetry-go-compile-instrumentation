@@ -6,7 +6,9 @@ package setup
 import (
 	"context"
 	"errors"
+	"fmt"
 	"go/parser"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -77,7 +79,65 @@ func findToolFiles(moduleDirs []string) ([]string, error) {
 	return toolFiles, nil
 }
 
-const packagesLoadTimeout = 30 * time.Second
+// defaultPackageLoadTimeout bounds one package load that setup runs, so a go
+// list that stalls (for example on a module proxy that does not answer) fails
+// the build instead of hanging it. Many otelc setups that run at the same time
+// make go list slow, so the limit leaves a wide margin.
+// util.EnvOtelcPackageLoadTimeout overrides it.
+const defaultPackageLoadTimeout = 2 * time.Minute
+
+// packageLoadTimeoutError is the cause of a load that the package load timeout
+// stopped. It names the setting that changes the limit.
+type packageLoadTimeoutError struct {
+	timeout time.Duration
+}
+
+func (e packageLoadTimeoutError) Error() string {
+	return fmt.Sprintf("package load timed out after %s: set %s to a longer duration, or to 0 to remove the limit",
+		e.timeout, util.EnvOtelcPackageLoadTimeout)
+}
+
+// packageLoadTimeout returns the limit for one package load. Zero means that
+// only the caller's context limits the load.
+func packageLoadTimeout() (time.Duration, error) {
+	value := os.Getenv(util.EnvOtelcPackageLoadTimeout)
+	if value == "" {
+		return defaultPackageLoadTimeout, nil
+	}
+	timeout, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, ex.Wrapf(err, "invalid %s %q", util.EnvOtelcPackageLoadTimeout, value)
+	}
+	if timeout < 0 {
+		return 0, ex.Newf("invalid %s %q: the timeout must not be negative",
+			util.EnvOtelcPackageLoadTimeout, value)
+	}
+	return timeout, nil
+}
+
+// withPackageLoadTimeout limits ctx by the package load timeout. When the
+// timeout stops a load, packageLoadError adds the setting to change.
+func withPackageLoadTimeout(ctx context.Context) (context.Context, context.CancelFunc, error) {
+	timeout, err := packageLoadTimeout()
+	if err != nil {
+		return nil, nil, err
+	}
+	if timeout == 0 {
+		loadCtx, cancel := context.WithCancel(ctx)
+		return loadCtx, cancel, nil
+	}
+	loadCtx, cancel := context.WithTimeoutCause(ctx, timeout, packageLoadTimeoutError{timeout: timeout})
+	return loadCtx, cancel, nil
+}
+
+// packageLoadError adds the cause to err when the package load timeout
+// stopped the load. go/packages reports only the context error as text.
+func packageLoadError(ctx context.Context, err error) error {
+	if timeoutErr, ok := errors.AsType[packageLoadTimeoutError](context.Cause(ctx)); ok {
+		return ex.Join(err, timeoutErr)
+	}
+	return err
+}
 
 // resolveInstrumentationConfigs resolves instrumentation configs for the given import paths.
 //
@@ -91,7 +151,10 @@ func resolveInstrumentationConfigs(
 		return nil, nil
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, packagesLoadTimeout)
+	ctx, cancel, timeoutErr := withPackageLoadTimeout(ctx)
+	if timeoutErr != nil {
+		return nil, timeoutErr
+	}
 	defer cancel()
 
 	pkgs, loadErr := packages.Load(&packages.Config{
@@ -100,7 +163,7 @@ func resolveInstrumentationConfigs(
 		Dir:     dir,
 	}, importPaths...)
 	if loadErr != nil {
-		return nil, ex.Wrapf(loadErr, "failed to load instrumentation packages")
+		return nil, ex.Wrapf(packageLoadError(ctx, loadErr), "failed to load instrumentation packages")
 	}
 
 	cfgs := make(map[string]*instrumentationConfig, len(importPaths))
