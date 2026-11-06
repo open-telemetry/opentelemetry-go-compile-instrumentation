@@ -5,6 +5,7 @@ package setup
 
 import (
 	"log/slog"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -20,6 +21,64 @@ func ruleSetPaths(sets []*rule.InstRuleSet) []string {
 		paths = append(paths, rs.ModulePath)
 	}
 	return paths
+}
+
+func TestRuleSetAdditions(t *testing.T) {
+	dir := t.TempDir()
+	withFuncRule := newTestRuleSet(
+		"example.com/lib",
+		[]*rule.InstFuncRule{newTestFuncRule("example.com/hook", "F")},
+		nil,
+	)
+	withFuncRule.AddRawRule(filepath.Join(dir, "raw.go"), &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{Imports: map[string]string{"raw": "example.com/rawimport"}},
+	})
+	withFuncRule.AddCallRule(filepath.Join(dir, "call.go"), &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Imports: map[string]string{"call": "example.com/callimport"}},
+		ImportPath:   "example.com/called",
+	})
+	withFuncRule.AddLitRule(filepath.Join(dir, "lit.go"), &rule.InstLitRule{
+		InstBaseRule: rule.InstBaseRule{Imports: map[string]string{"lit": "example.com/litimport"}},
+		ImportPath:   "example.com/littype",
+	})
+
+	callOnly := rule.NewInstRuleSet("example.com/lib")
+	callOnly.AddCallRule(filepath.Join(dir, "call.go"), &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Imports: map[string]string{"call": "example.com/callimport"}},
+		ImportPath:   "example.com/called",
+	})
+
+	tests := []struct {
+		name string
+		rs   *rule.InstRuleSet
+		want []ruleImport
+	}{
+		{
+			name: "func rules add the imports of the runtime file",
+			rs:   withFuncRule,
+			want: []ruleImport{
+				{path: "example.com/callimport", requires: "example.com/called"},
+				{path: "example.com/hook"},
+				{path: "example.com/litimport", requires: "example.com/littype"},
+				{path: "example.com/rawimport"},
+				{path: "log"},
+				{path: "runtime/debug"},
+				{path: "unsafe"},
+			},
+		},
+		{
+			name: "call rules alone do not add the imports of the runtime file",
+			rs:   callOnly,
+			want: []ruleImport{
+				{path: "example.com/callimport", requires: "example.com/called"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, newTestSetupPhase().ruleSetAdditions(tt.rs))
+		})
+	}
 }
 
 func TestSelectRuleSets(t *testing.T) {
