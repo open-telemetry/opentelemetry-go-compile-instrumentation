@@ -24,9 +24,10 @@ type selectedConfigurationMetadata struct {
 	ModulesWithoutMetadata []string
 }
 
-// validateSelectedConfigurationMetadata reads metadata.yaml only for modules
-// whose rules matched this build. Missing metadata is returned to the caller so
-// application-configuration validation can decide whether it is needed.
+// validateSelectedConfigurationMetadata reads module-local metadata.yaml files
+// only for instrumentation modules whose rules matched this build. Missing
+// metadata is returned so application-configuration validation can decide
+// whether it is needed.
 func (sp *setupPhase) validateSelectedConfigurationMetadata(
 	matched []*rule.InstRuleSet,
 ) (selectedConfigurationMetadata, error) {
@@ -37,38 +38,14 @@ func (sp *setupPhase) validateSelectedConfigurationMetadataWithCatalog(
 	matched []*rule.InstRuleSet,
 	loadCatalog func() (map[string]configuration.Entry, error),
 ) (selectedConfigurationMetadata, error) {
-	moduleMetadata := make(map[string]string)
-	for _, ruleset := range matched {
-		if ruleset == nil {
-			continue
-		}
-		maps.Copy(moduleMetadata, ruleset.ConfigurationModuleMetadata())
-	}
-
-	moduleRoots := slices.Sorted(maps.Keys(moduleMetadata))
+	sortedModuleRoots := sp.selectedConfigurationModuleRoots(matched)
 	result := selectedConfigurationMetadata{}
-	metadataPaths := make(map[string]struct{})
-	for _, moduleRoot := range moduleRoots {
-		metadataPath := moduleMetadata[moduleRoot]
-		if metadataPath == "" {
-			result.ModulesWithoutMetadata = append(result.ModulesWithoutMetadata, moduleRoot)
-			continue
-		}
-		metadataPaths[metadataPath] = struct{}{}
-	}
-
 	var metadataFiles []configuration.Metadata
-	for _, metadataPath := range slices.Sorted(maps.Keys(metadataPaths)) {
+	for _, moduleRoot := range sortedModuleRoots {
+		metadataPath := filepath.Join(moduleRoot, instrumentationMetadataFilename)
 		data, err := os.ReadFile(metadataPath)
 		if errors.Is(err, os.ErrNotExist) {
-			// The file may have disappeared after rule loading. Preserve the module
-			// roots that referenced it as missing so the later config validator can
-			// report the actionable error in context.
-			for _, moduleRoot := range moduleRoots {
-				if moduleMetadata[moduleRoot] == metadataPath {
-					result.ModulesWithoutMetadata = append(result.ModulesWithoutMetadata, moduleRoot)
-				}
-			}
+			result.ModulesWithoutMetadata = append(result.ModulesWithoutMetadata, moduleRoot)
 			continue
 		}
 		if err != nil {
@@ -91,7 +68,7 @@ func (sp *setupPhase) validateSelectedConfigurationMetadataWithCatalog(
 		sp.Info(
 			"Discovered selected instrumentation configuration metadata",
 			"modules",
-			len(moduleRoots),
+			len(sortedModuleRoots),
 			"configurations",
 			0,
 		)
@@ -110,11 +87,51 @@ func (sp *setupPhase) validateSelectedConfigurationMetadataWithCatalog(
 	sp.Info(
 		"Validated selected instrumentation configuration metadata",
 		"modules",
-		len(moduleRoots)-len(result.ModulesWithoutMetadata),
+		len(sortedModuleRoots)-len(result.ModulesWithoutMetadata),
 		"configurations",
 		len(resolved),
 	)
 	return result, nil
+}
+
+func (sp *setupPhase) selectedConfigurationModuleRoots(matched []*rule.InstRuleSet) []string {
+	moduleRoots := make(map[string]struct{})
+	for _, ruleset := range matched {
+		if ruleset == nil {
+			continue
+		}
+		addRuleMapModuleRoots(moduleRoots, sp.ruleModuleRoots, ruleset.RawRules)
+		addRuleMapModuleRoots(moduleRoots, sp.ruleModuleRoots, ruleset.FuncRules)
+		addRuleMapModuleRoots(moduleRoots, sp.ruleModuleRoots, ruleset.StructRules)
+		addRuleMapModuleRoots(moduleRoots, sp.ruleModuleRoots, ruleset.CallRules)
+		addRuleMapModuleRoots(moduleRoots, sp.ruleModuleRoots, ruleset.LitRules)
+		addRuleMapModuleRoots(moduleRoots, sp.ruleModuleRoots, ruleset.DirectiveRules)
+		addRuleMapModuleRoots(moduleRoots, sp.ruleModuleRoots, ruleset.DeclRules)
+		addRuleSliceModuleRoots(moduleRoots, sp.ruleModuleRoots, ruleset.FileRules)
+	}
+	return slices.Sorted(maps.Keys(moduleRoots))
+}
+
+func addRuleMapModuleRoots[T rule.InstRule](
+	moduleRoots map[string]struct{},
+	ruleModuleRoots map[rule.InstRule]string,
+	rulesByFile map[string][]T,
+) {
+	for _, rules := range rulesByFile {
+		addRuleSliceModuleRoots(moduleRoots, ruleModuleRoots, rules)
+	}
+}
+
+func addRuleSliceModuleRoots[T rule.InstRule](
+	moduleRoots map[string]struct{},
+	ruleModuleRoots map[rule.InstRule]string,
+	rules []T,
+) {
+	for _, instRule := range rules {
+		if moduleRoot, ok := ruleModuleRoots[instRule]; ok {
+			moduleRoots[moduleRoot] = struct{}{}
+		}
+	}
 }
 
 // moduleRootForPackage returns the root directory of the module that owns the

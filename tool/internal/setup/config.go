@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"go/parser"
-	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -79,36 +78,6 @@ func findToolFiles(moduleDirs []string) ([]string, error) {
 	return toolFiles, nil
 }
 
-// findInstrumentationMetadata returns the nearest metadata.yaml between
-// moduleDir and instrumentationRoot, inclusive. When instrumentationRoot is
-// the module directory, only that module's metadata is considered.
-func findInstrumentationMetadata(moduleDir, instrumentationRoot string) (string, error) {
-	moduleDir = filepath.Clean(moduleDir)
-	instrumentationRoot = filepath.Clean(instrumentationRoot)
-	relative, err := filepath.Rel(instrumentationRoot, moduleDir)
-	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return "", ex.Newf(
-			"instrumentation module %s is outside metadata search root %s",
-			moduleDir,
-			instrumentationRoot,
-		)
-	}
-
-	for dir := moduleDir; ; dir = filepath.Dir(dir) {
-		path := filepath.Join(dir, "metadata.yaml")
-		_, statErr := os.Stat(path)
-		if statErr == nil {
-			return path, nil
-		}
-		if !errors.Is(statErr, os.ErrNotExist) {
-			return "", ex.Wrapf(statErr, "checking instrumentation metadata %s", path)
-		}
-		if dir == instrumentationRoot {
-			return "", nil
-		}
-	}
-}
-
 const packagesLoadTimeout = 30 * time.Second
 
 // resolveInstrumentationConfigs resolves instrumentation configs for the given import paths.
@@ -164,12 +133,12 @@ func resolveInstrumentationConfigs(
 		}
 
 		modDir := pkg.Module.Dir
-		// Prefer the directory of a real Go file. A tools-only instrumentation
-		// package (its only .go file carries //go:build tools) has no buildable Go
-		// files, so packages.Load reports "build constraints exclude all Go files"
-		// and GoFiles is empty; fall back to deriving the dir from the module path +
-		// import-path suffix (correct even under replace directives). The walk only
-		// needs the directory, not a compilable package.
+		// A tools-only instrumentation package (its only .go file carries
+		// //go:build tools) has no buildable Go files, so packages.Load reports
+		// "build constraints exclude all Go files" and PackageDir returns the
+		// directory from go list. If that is empty too, derive the dir from the
+		// module path + import-path suffix (correct even under replace
+		// directives). The walk only needs the directory, not a compilable package.
 		pkgDir := pkgload.PackageDir(pkg)
 		if pkgDir == "" {
 			pkgDir = filepath.Join(modDir, filepath.FromSlash(strings.TrimPrefix(importPath, pkg.Module.Path)))
