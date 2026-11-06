@@ -1,0 +1,30 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package semconv
+
+import (
+	"go.opentelemetry.io/otel/attribute"
+)
+
+// Only the attributes that go.opentelemetry.io/otel/semconv/v1.37.0 does not
+// provide are declared here. gen_ai.system is deprecated upstream, so the
+// upstream package omits it; the other two are not defined in v1.37.0.
+// Everything else is imported from upstream directly.
+const (
+	GenAISystemKey           = attribute.Key("gen_ai.system")
+	GenAIUsageTotalTokensKey = attribute.Key("gen_ai.usage.total_tokens")
+	GenAIRequestIsStreamKey  = attribute.Key("gen_ai.request.is_stream")
+)
+
+func GenAISystem(val string) attribute.KeyValue {
+	return GenAISystemKey.String(val)
+}
+
+func GenAIUsageTotalTokens(val int64) attribute.KeyValue {
+	return GenAIUsageTotalTokensKey.Int64(val)
+}
+
+func GenAIRequestIsStream(val bool) attribute.KeyValue {
+	return GenAIRequestIsStreamKey.Bool(val)
+}
