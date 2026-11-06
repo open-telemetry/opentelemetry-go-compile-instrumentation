@@ -1797,17 +1797,39 @@ func TestSetup_FindDepsErrorWithRules(t *testing.T) {
 
 // TestSetup_InvalidPackageLoadTimeout covers an invalid
 // OTELC_PACKAGE_LOAD_TIMEOUT: setup fails and names the setting instead of
-// silently using the default.
+// silently using the default. With OTELC_RULES, setup reads the rule files
+// directly and never loads a tool file, so the only load that reads the
+// setting turns its errors into a warning.
 func TestSetup_InvalidPackageLoadTimeout(t *testing.T) {
-	setupTestModule(t, []string{"cmd"})
-	t.Setenv(util.EnvOtelcPackageLoadTimeout, "abc")
+	for _, tt := range []struct {
+		name  string
+		rules string
+	}{
+		{name: "tool file"},
+		{
+			name: "rule file",
+			rules: "noMatchRule:\n  target: example.com/nomatch\n  func: F\n" +
+				"  before: OtelBeforeF\n  path: example.com/nomatch/hook\n",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			setupTestModule(t, []string{"cmd"})
+			require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+			if tt.rules != "" {
+				ruleFile := filepath.Join(t.TempDir(), "rules.yaml")
+				mustWriteFile(t, ruleFile, tt.rules)
+				t.Setenv(util.EnvOtelcRules, ruleFile)
+			}
+			t.Setenv(util.EnvOtelcPackageLoadTimeout, "abc")
 
-	cmd := &cli.Command{
-		Name:   "setup",
-		Action: Setup,
+			cmd := &cli.Command{
+				Name:   "setup",
+				Action: Setup,
+			}
+			err := cmd.Run(t.Context(), []string{"setup", "."})
+			require.ErrorContains(t, err, `invalid OTELC_PACKAGE_LOAD_TIMEOUT "abc"`)
+		})
 	}
-	err := cmd.Run(t.Context(), []string{"setup", "."})
-	require.ErrorContains(t, err, `invalid OTELC_PACKAGE_LOAD_TIMEOUT "abc"`)
 }
 
 func TestSetup_MatchDepsError(t *testing.T) {

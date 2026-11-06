@@ -224,10 +224,12 @@ downloaded, or the module proxy is unreachable. Run `go mod download` and try ag
 
 ### `package load timed out`
 
-During setup, `otelc` loads packages with `go list`, and each load can take at most 2
-minutes. On a busy machine, for example when one `otelc go test` runs many nested builds at
-the same time, a load can take longer. Set `OTELC_PACKAGE_LOAD_TIMEOUT` to a longer Go
-duration, or to `0` to remove the limit. Nested `otelc` builds inherit the setting.
+During setup, `otelc` loads the instrumentation packages of the tool file and the hook
+packages with `go list`. Each of these two loads can take at most 2 minutes. The other
+package loads in setup have no limit. On a busy machine, for example when one
+`otelc go test` runs many nested builds at the same time, one of the two loads can take
+longer. Set `OTELC_PACKAGE_LOAD_TIMEOUT` to a longer Go duration, or to `0` to remove the
+limit. Nested `otelc` builds inherit the setting.
 
 ```bash
 OTELC_PACKAGE_LOAD_TIMEOUT=10m otelc go test ./...

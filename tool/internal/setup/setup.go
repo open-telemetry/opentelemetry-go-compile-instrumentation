@@ -459,6 +459,13 @@ func (sp *setupPhase) matchAllDeps(
 }
 
 func setupLocked(ctx context.Context, cmd *cli.Command) error {
+	// Check the package load timeout before any load. With OTELC_RULES or
+	// --rules, setup never loads a tool file, and the only load that reads
+	// the setting turns its errors into a warning.
+	if _, err := packageLoadTimeout(); err != nil {
+		return err
+	}
+
 	// Since Setup can be invoked in different contexts (i.e, via `otelc setup` or as part of `otelc go build`),
 	// we need to handle the arguments accordingly. If the command is `go build` or `go install`, we should trim the first argument
 	args := cmd.Args().Slice()
