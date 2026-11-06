@@ -22,7 +22,8 @@ import (
 // a different instrumented library, and each binary must link only the hook
 // package of the library it uses. The hook packages record themselves in a
 // registry when they are initialized, so each binary reports the hooks it
-// links.
+// links. The tests of both packages import shared, whose own tests use libb,
+// so the test binary of a must not link the hook of libb through shared.
 func TestRuntimeHookScope(t *testing.T) {
 	otelcPath, err := testutil.OtelcPath()
 	require.NoError(t, err)
@@ -108,10 +109,12 @@ import (
 	"testing"
 
 	"%[2]s/registry"
+	"%[2]s/shared"
 )
 
 func TestHooks(t *testing.T) {
 	_ = Run()
+	_ = shared.Name()
 	if got := registry.Loaded(); got != "hook%[1]s" {
 		t.Fatalf("linked hooks = %%q, want %%q", got, "hook%[1]s")
 	}
@@ -150,13 +153,44 @@ func main() {
 `, name, upper, module)
 	}
 	writeTestFile(t, moduleDir, "rules.yml", rules)
+	writeTestFile(t, moduleDir, filepath.Join("shared", "shared.go"), `// Copyright The OpenTelemetry Authors
+
+package shared
+
+func Name() string { return "shared" }
+`)
+	writeTestFile(
+		t,
+		moduleDir,
+		filepath.Join("shared", "shared_test.go"),
+		fmt.Sprintf(`// Copyright The OpenTelemetry Authors
+
+package shared
+
+import (
+	"testing"
+
+	"%[1]s/libb"
+	"%[1]s/registry"
+)
+
+func TestHooks(t *testing.T) {
+	_ = libb.B()
+	if got := registry.Loaded(); got != "hookb" {
+		t.Fatalf("linked hooks = %%q, want %%q", got, "hookb")
+	}
+}
+`, module),
+	)
 
 	env := append(os.Environ(), "OTELC_RULES=rules.yml")
 
 	t.Run("test", func(t *testing.T) {
-		output := runOtelcCommand(t, moduleDir, env, otelcPath, "go", "test", "-count=1", "-v", "./a", "./b")
+		output := runOtelcCommand(t, moduleDir, env, otelcPath,
+			"go", "test", "-count=1", "-v", "./a", "./b", "./shared")
 		require.Contains(t, output, "ok  \t"+module+"/a")
 		require.Contains(t, output, "ok  \t"+module+"/b")
+		require.Contains(t, output, "ok  \t"+module+"/shared")
 	})
 
 	t.Run("build", func(t *testing.T) {

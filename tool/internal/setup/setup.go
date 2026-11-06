@@ -351,18 +351,19 @@ func (sp *setupPhase) generateRuntimePerPackage(
 			}
 		}
 
-		pkgMatched := matched
+		pkgMatched := runtimeRuleSets{pkg: matched}
 		if scope != nil {
 			pkgMatched = scope.ruleSets(pkg, importPath)
 		}
 
 		// Introduce additional hook code by generating otelc.runtime.go
-		if err = sp.addDeps(ctx, pkgMatched, runtimePackage{
+		if err = sp.addDeps(ctx, pkgMatched.pkg, runtimePackage{
 			dir:             pkgDir,
 			importPath:      importPath,
 			debugPath:       pkg.PkgPath,
 			name:            pkg.Name,
 			importedByHooks: importedByHooks,
+			testRuleSets:    pkgMatched.test,
 			testMode:        sp.testMode,
 			fileTarget:      pkg.PkgPath == pkgload.CommandLineArgumentsPackage,
 		}); err != nil {

@@ -126,9 +126,10 @@ func TestSelectRuleSets(t *testing.T) {
 	}
 }
 
-func TestRuntimeScopeReachable(t *testing.T) {
+func TestRuntimeScopeRuleSets(t *testing.T) {
 	lib := &packages.Package{ID: "example.com/lib", PkgPath: "example.com/lib"}
 	testLib := &packages.Package{ID: "example.com/testlib", PkgPath: "example.com/testlib"}
+	otherLib := &packages.Package{ID: "example.com/otherlib", PkgPath: "example.com/otherlib"}
 	app := &packages.Package{
 		ID:      "example.com/app",
 		PkgPath: "example.com/app",
@@ -140,31 +141,43 @@ func TestRuntimeScopeReachable(t *testing.T) {
 		ForTest: "example.com/app",
 		Imports: map[string]*packages.Package{lib.PkgPath: lib, testLib.PkgPath: testLib},
 	}
-	other := &packages.Package{
+	otherTest := &packages.Package{
 		ID:      "example.com/other [example.com/other.test]",
 		PkgPath: "example.com/other",
 		ForTest: "example.com/other",
+		Imports: map[string]*packages.Package{otherLib.PkgPath: otherLib},
+	}
+
+	targets := []string{lib.PkgPath, testLib.PkgPath, otherLib.PkgPath}
+	matched := make([]*rule.InstRuleSet, 0, len(targets))
+	added := make([][]ruleImport, 0, len(targets))
+	deps := make(map[string]map[string]bool)
+	for _, target := range targets {
+		hook := target + "/hook"
+		matched = append(matched, newTestRuleSet(target, []*rule.InstFuncRule{newTestFuncRule(hook, "F")}, nil))
+		added = append(added, []ruleImport{{path: hook}})
+		deps[hook] = map[string]bool{hook: true}
+	}
+	newScope := func(testMode bool) *runtimeScope {
+		return &runtimeScope{
+			matched:  matched,
+			added:    added,
+			deps:     deps,
+			testPkgs: []*packages.Package{appTest, otherTest},
+			testMode: testMode,
+		}
 	}
 
 	t.Run("build", func(t *testing.T) {
-		s := &runtimeScope{testPkgs: []*packages.Package{appTest, other}}
-		got := s.reachable(app, app.PkgPath)
-		assert.Equal(t, map[string]bool{
-			"example.com/app": true,
-			"example.com/lib": true,
-			mainPackagePath:   true,
-		}, got)
+		got := newScope(false).ruleSets(app, app.PkgPath)
+		assert.Equal(t, []string{lib.PkgPath}, ruleSetPaths(got.pkg))
+		assert.Empty(t, got.test)
 	})
 
 	t.Run("test", func(t *testing.T) {
-		s := &runtimeScope{testPkgs: []*packages.Package{appTest, other}, testMode: true}
-		got := s.reachable(app, app.PkgPath)
-		assert.True(
-			t,
-			got["example.com/testlib"],
-			"the dependencies of the tests of app are built into its test binary",
-		)
-		assert.False(t, got["example.com/other"], "the tests of other packages are not")
+		got := newScope(true).ruleSets(app, app.PkgPath)
+		assert.Equal(t, []string{lib.PkgPath}, ruleSetPaths(got.pkg), "every binary that builds app links these")
+		assert.Equal(t, []string{testLib.PkgPath}, ruleSetPaths(got.test), "only the test binary of app links these")
 	})
 }
 
@@ -190,5 +203,5 @@ func TestNewRuntimeScopeSinglePackage(t *testing.T) {
 
 	scope := sp.newRuntimeScope(t.Context(), pkgs, matched, nil)
 	require.Nil(t, scope, "a single build package keeps every matched rule set")
-	assert.Nil(t, scope.ruleSets(pkgs[0], pkgs[0].PkgPath))
+	assert.Equal(t, runtimeRuleSets{}, scope.ruleSets(pkgs[0], pkgs[0].PkgPath))
 }

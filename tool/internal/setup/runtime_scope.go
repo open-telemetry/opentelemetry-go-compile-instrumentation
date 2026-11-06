@@ -19,14 +19,7 @@ import (
 const mainPackagePath = "main"
 
 // runtimeScope selects, for each package that receives an otelc.runtime.go, the
-// matched rule sets whose hooks its binary needs.
-//
-// A build with several targets matches rules against the dependencies of all
-// of them. Without a scope, the runtime file of each target imports the hook
-// packages of every matched rule, so each binary links the hooks of the other
-// targets and everything they import. Two targets that use libraries which
-// cannot be linked together (such as two major versions of a cgo library that
-// define the same C symbols) then fail to link.
+// matched rule sets whose hooks its binaries need.
 type runtimeScope struct {
 	matched []*rule.InstRuleSet
 	// added maps each rule set to the packages its rules add to the build:
@@ -214,34 +207,63 @@ func (sp *setupPhase) addedPackageDeps(
 	return deps, nil
 }
 
-// ruleSets returns the rule sets whose hooks the binary of pkg needs, in the
-// order of the matched rule sets. importPath is the import path the runtime
-// file of pkg is compiled under.
-func (s *runtimeScope) ruleSets(pkg *packages.Package, importPath string) []*rule.InstRuleSet {
-	if s == nil {
-		return nil
-	}
-	return selectRuleSets(s.matched, s.added, s.deps, s.reachable(pkg, importPath))
+// runtimeRuleSets holds the rule sets whose hooks the runtime files of one
+// package import.
+type runtimeRuleSets struct {
+	// pkg holds the rule sets of otelc.runtime.go. Every binary that builds
+	// the package links that file.
+	pkg []*rule.InstRuleSet
+	// test holds the rule sets that only the test binary of the package needs.
+	// Their hooks go to otelc.runtime_test.go, which only that binary links.
+	test []*rule.InstRuleSet
 }
 
-// reachable returns the packages that the binary of pkg builds: pkg and its
-// dependencies, and in a go test build, the test variants and the test binary
-// of pkg with their dependencies.
-func (s *runtimeScope) reachable(pkg *packages.Package, importPath string) map[string]bool {
-	roots := []*packages.Package{pkg}
-	if s.testMode {
-		for _, tp := range s.testPkgs {
-			if tp.ForTest == pkg.PkgPath || tp.PkgPath == pkg.PkgPath+".test" {
-				roots = append(roots, tp)
-			}
-		}
+// ruleSets returns the rule sets whose hooks the binaries of pkg need, in the
+// order of the matched rule sets. importPath is the import path the runtime
+// file of pkg is compiled under.
+func (s *runtimeScope) ruleSets(pkg *packages.Package, importPath string) runtimeRuleSets {
+	if s == nil {
+		return runtimeRuleSets{}
+	}
+	sets := selectRuleSets(s.matched, s.added, s.deps, reachable([]*packages.Package{pkg}, importPath))
+	if !s.testMode {
+		return runtimeRuleSets{pkg: sets}
 	}
 
-	reachable := map[string]bool{importPath: true, mainPackagePath: true}
+	inPkg := make(map[*rule.InstRuleSet]bool, len(sets))
+	for _, rs := range sets {
+		inPkg[rs] = true
+	}
+	var test []*rule.InstRuleSet
+	withTests := append([]*packages.Package{pkg}, s.testRoots(pkg)...)
+	for _, rs := range selectRuleSets(s.matched, s.added, s.deps, reachable(withTests, importPath)) {
+		if !inPkg[rs] {
+			test = append(test, rs)
+		}
+	}
+	return runtimeRuleSets{pkg: sets, test: test}
+}
+
+// testRoots returns the test variants and the test binary of pkg.
+func (s *runtimeScope) testRoots(pkg *packages.Package) []*packages.Package {
+	var roots []*packages.Package
+	for _, tp := range s.testPkgs {
+		if tp.ForTest == pkg.PkgPath || tp.PkgPath == pkg.PkgPath+".test" {
+			roots = append(roots, tp)
+		}
+	}
+	return roots
+}
+
+// reachable returns the packages that a binary with roots builds: roots and
+// their dependencies. importPath is the import path the runtime file is
+// compiled under.
+func reachable(roots []*packages.Package, importPath string) map[string]bool {
+	built := map[string]bool{importPath: true, mainPackagePath: true}
 	packages.Visit(roots, nil, func(p *packages.Package) {
-		reachable[p.PkgPath] = true
+		built[p.PkgPath] = true
 	})
-	return reachable
+	return built
 }
 
 // selectRuleSets returns the rule sets that target a package in reachable. The
