@@ -4,6 +4,7 @@
 package rule
 
 import (
+	"go/version"
 	"regexp"
 	"strconv"
 	"strings"
@@ -33,6 +34,7 @@ type InstRawRule struct {
 	Raw       string `json:"raw"                 yaml:"raw"`
 	Pattern   string `json:"pattern,omitempty"   yaml:"pattern,omitempty"`
 	Placement string `json:"placement,omitempty" yaml:"placement,omitempty"`
+	Lang      string `json:"lang,omitempty"      yaml:"lang,omitempty"`
 }
 
 // NewInstRawRule loads and validates an InstRawRule from YAML data.
@@ -66,7 +68,28 @@ func (r *InstRawRule) validate() error {
 	if r.Placement != "" && r.Placement != "before" && r.Placement != "after" {
 		return ex.Newf("invalid placement value: %q, must be 'before' or 'after'", r.Placement)
 	}
+	if r.Lang != "" {
+		norm, err := normalizeLang(r.Lang)
+		if err != nil {
+			return err
+		}
+		r.Lang = norm
+	}
 	return nil
+}
+
+// normalizeLang normalizes a Go language version string (such as "go1.18" or "1.18")
+// to canonical "go1.X" form.
+func normalizeLang(v string) (string, error) {
+	candidate := strings.TrimSpace(v)
+	if !strings.HasPrefix(candidate, "go") {
+		candidate = "go" + candidate
+	}
+	lang := version.Lang(candidate)
+	if lang == "" {
+		return "", ex.Newf("invalid lang %q for raw rule", v)
+	}
+	return lang, nil
 }
 
 // Identity returns a content-derived key used to salt the synthetic argument
@@ -78,5 +101,8 @@ func (r *InstRawRule) validate() error {
 func (r *InstRawRule) Identity() string {
 	enc := func(s string) string { return strconv.Itoa(len(s)) + ":" + s }
 	parts := []string{enc(r.Target.String()), enc(r.Version), enc(r.Func), enc(r.Recv), enc(r.Raw)}
+	if r.Lang != "" {
+		parts = append(parts, enc(r.Lang))
+	}
 	return util.CRC32(strings.Join(parts, ""))
 }

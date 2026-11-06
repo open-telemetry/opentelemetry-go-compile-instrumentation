@@ -125,6 +125,34 @@ raw: "println({{ .FuncArgument 0 }})"
 			yaml:    "target: main\nfunc: Bar\nraw: \"println({{ FuncArgument 0 )\"",
 			wantErr: true,
 		},
+		{
+			name:   "valid lang with go prefix",
+			ruleID: "raw-lang-go-prefix",
+			yaml:   "target: main\nfunc: Bar\nraw: println()\nlang: go1.18",
+			check: func(t *testing.T, r *InstRawRule) {
+				assert.Equal(t, "go1.18", r.Lang)
+			},
+		},
+		{
+			name:   "valid lang normalized without go prefix",
+			ruleID: "raw-lang-no-prefix",
+			yaml:   "target: main\nfunc: Bar\nraw: println()\nlang: 1.21",
+			check: func(t *testing.T, r *InstRawRule) {
+				assert.Equal(t, "go1.21", r.Lang)
+			},
+		},
+		{
+			name:    "invalid lang rejected",
+			ruleID:  "raw-lang-invalid",
+			yaml:    "target: main\nfunc: Bar\nraw: println()\nlang: invalid-version",
+			wantErr: true,
+		},
+		{
+			name:    "whitespace lang rejected",
+			ruleID:  "raw-lang-whitespace",
+			yaml:    "target: main\nfunc: Bar\nraw: println()\nlang: \"   \"",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -192,6 +220,12 @@ func TestInstRawRule_Identity(t *testing.T) {
 	diffRaw["raw"] = `println("bye")`
 	assert.NotEqual(t, rawIdentity(t, "r", base()), rawIdentity(t, "r", diffRaw),
 		"rules differing only in raw must have distinct identities")
+
+	// Differing lang yields a distinct identity.
+	diffLang := base()
+	diffLang["lang"] = "go1.18"
+	assert.NotEqual(t, rawIdentity(t, "r", base()), rawIdentity(t, "r", diffLang),
+		"rules differing only in lang must have distinct identities")
 
 	// The length-prefixed encoding must not let field boundaries shift: moving
 	// characters from func into recv (same concatenation, different split)
