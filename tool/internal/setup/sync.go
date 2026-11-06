@@ -213,12 +213,6 @@ func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) e
 		maps.Copy(replaces, nested)
 	}
 
-	// Add replace directive for special pkg module
-	// TODO: Since we haven't published the instrumentation packages yet,
-	// we need to add the replace directive to the local path.
-	// Once the instrumentation packages are published, we can remove this.
-	replaces[util.OtelcPkgRoot] = filepath.Join(util.GetBuildTempDir(), unzippedPkgDir)
-
 	// Add replace directive for special runtime module
 	// runtime module initializes the OpenTelemetry SDK. It is required by all
 	// hook code to be present.
