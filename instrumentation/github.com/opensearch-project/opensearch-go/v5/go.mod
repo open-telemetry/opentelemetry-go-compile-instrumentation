@@ -7,7 +7,7 @@ replace go.opentelemetry.io/otelc/pkg => ../../../../../pkg
 replace go.opentelemetry.io/otelc/pkg/runtime => ../../../../../pkg/runtime
 
 require (
-	github.com/opensearch-project/opensearch-go/v5 v5.0.0
+	github.com/opensearch-project/opensearch-go/v5 v5.1.3
 	github.com/stretchr/testify v1.12.1
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/sdk v1.47.0
