@@ -40,6 +40,9 @@ type setupPhase struct {
 	// fileImportsCache caches discovered source imports for add_file rules during setup.
 	fileImportsCache map[string][]string
 	testMode         bool
+	// testPackages holds the test variants and test binaries of a go test
+	// build, which buildPackages leaves out.
+	testPackages []*packages.Package
 }
 
 func (sp *setupPhase) getBuildContext() *gobuild.Context {
@@ -335,6 +338,7 @@ func (sp *setupPhase) generateRuntimePerPackage(
 	if err != nil {
 		return err
 	}
+	scope := sp.newRuntimeScope(ctx, pkgs, matched, imports)
 
 	for _, pkg := range pkgs {
 		pkgDir := pkgload.PackageDir(pkg)
@@ -351,13 +355,19 @@ func (sp *setupPhase) generateRuntimePerPackage(
 			}
 		}
 
+		pkgMatched := runtimeRuleSets{pkg: matched}
+		if scope != nil {
+			pkgMatched = scope.ruleSets(pkg, importPath)
+		}
+
 		// Introduce additional hook code by generating otelc.runtime.go
-		if err = sp.addDeps(ctx, matched, runtimePackage{
+		if err = sp.addDeps(ctx, pkgMatched.pkg, runtimePackage{
 			dir:             pkgDir,
 			importPath:      importPath,
 			debugPath:       pkg.PkgPath,
 			name:            pkg.Name,
 			importedByHooks: importedByHooks,
+			testRuleSets:    pkgMatched.test,
 			testMode:        sp.testMode,
 			fileTarget:      pkg.PkgPath == pkgload.CommandLineArgumentsPackage,
 		}); err != nil {
@@ -514,6 +524,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	// table, because they carry imports that only _test.go files use.
 	sp.buildPackages = buildPkgs
 	sp.resolvedNames = pkgload.CollectPackageNames(allPkgs)
+	sp.testPackages = testPackages(buildPkgs, allPkgs)
 
 	// Find the module directories for the build packages
 	moduleDirs, findModErr := pkgload.FindModuleDirs(ctx, buildPkgs)

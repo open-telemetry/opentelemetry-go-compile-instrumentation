@@ -2,8 +2,6 @@ module go.opentelemetry.io/otelc/instrumentation/github.com/segmentio/kafka-go/c
 
 go 1.26.0
 
-replace go.opentelemetry.io/otelc/pkg => ../../../../../pkg
-
 replace go.opentelemetry.io/otelc/pkg/runtime => ../../../../../pkg/runtime
 
 replace go.opentelemetry.io/otelc/instrumentation => ../../../..
@@ -15,7 +13,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
 	go.opentelemetry.io/otelc/instrumentation v0.0.0-00010101000000-000000000000
-	go.opentelemetry.io/otelc/pkg v0.0.0-00010101000000-000000000000
+	go.opentelemetry.io/otelc/pkg v0.1.0
 	go.opentelemetry.io/otelc/pkg/runtime v0.0.0-00010101000000-000000000000
 )
 
