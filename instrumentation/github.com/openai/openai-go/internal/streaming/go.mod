@@ -7,6 +7,7 @@ require (
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/sdk v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
+	go.opentelemetry.io/otelc/instrumentation/github.com/stripe/stripe-go/v81 v81.0.0-20261106124457-ccdc88fe8924
 )
 
 require (
