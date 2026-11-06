@@ -38,8 +38,11 @@ type runtimePackage struct {
 	// directly or through a chain. A generated file here cannot import them
 	// back without creating an import cycle.
 	importedByHooks map[string]bool
-	testMode        bool
-	fileTarget      bool
+	// testRuleSets holds the matched rule sets that only the test binary of
+	// this package needs.
+	testRuleSets []*rule.InstRuleSet
+	testMode     bool
+	fileTarget   bool
 }
 
 //nolint:gochecknoglobals // This is a constant
@@ -367,23 +370,60 @@ func collectFileRules(
 	return fileRules
 }
 
+// addTestOnlyHooks adds to testHooks the hook packages of pkg.testRuleSets that
+// the runtime file of pkg does not import.
+func addTestOnlyHooks(
+	testHooks map[string]bool,
+	pkg runtimePackage,
+	funcRules []*rule.InstFuncRule,
+	fileRules []*rule.InstFileRule,
+) {
+	if len(pkg.testRuleSets) == 0 {
+		return
+	}
+	imported := make(map[string]bool, len(funcRules)+len(fileRules))
+	for _, r := range funcRules {
+		imported[r.Path] = true
+	}
+	for _, r := range fileRules {
+		imported[r.Path] = true
+	}
+	add := func(hookPath string) {
+		if hookPath != "" && hookPath != pkg.importPath && !imported[hookPath] {
+			testHooks[hookPath] = true
+		}
+	}
+	for _, m := range pkg.testRuleSets {
+		for _, r := range m.AllFuncRules() {
+			add(r.Path)
+		}
+		for _, r := range m.FileRules {
+			add(r.Path)
+		}
+	}
+}
+
 // addDeps generates and writes otelc.runtime.go with required imports and variable
 // declarations for OpenTelemetry instrumentation based on matched rules.
 //
 // Hooks whose packages import pkg cannot be imported by pkg's generated
 // runtime file without creating an import cycle. During `otelc go test ./...`,
 // those hooks are linked through a generated external test package instead.
+// The hooks of pkg.testRuleSets go there too, because every binary that builds
+// pkg links its runtime file.
 func (sp *setupPhase) addDeps(
 	ctx context.Context,
 	matched []*rule.InstRuleSet,
 	pkg runtimePackage,
 ) error {
-	funcRules, skippedHooks := collectFunctionRules(matched, pkg)
-	fileRules := collectFileRules(matched, pkg, skippedHooks)
+	funcRules, testHooks := collectFunctionRules(matched, pkg)
+	fileRules := collectFileRules(matched, pkg, testHooks)
+	addTestOnlyHooks(testHooks, pkg, funcRules, fileRules)
 
-	// Keep hooks that cannot be imported by the runtime file linked into
-	// test binaries through a generated external test package.
-	hookPaths := slices.Sorted(maps.Keys(skippedHooks))
+	// Keep the hooks that the runtime file cannot import, and the hooks that
+	// only the test binary needs, linked into the test binary through a
+	// generated external test package.
+	hookPaths := slices.Sorted(maps.Keys(testHooks))
 	if err := sp.addRuntimeTestDeps(ctx, pkg, hookPaths); err != nil {
 		return err
 	}
