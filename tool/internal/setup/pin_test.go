@@ -1380,7 +1380,7 @@ func main() {
 
 	result, err := generatePinnedProjects(
 		t.Context(),
-		map[string]bool{dir: true},
+		[]string{dir},
 		PinOptions{},
 	)
 	require.NoError(t, err)
@@ -1423,7 +1423,7 @@ func TestPrepareVendoredBuild_NotVendored(t *testing.T) {
 	t.Setenv("GOFLAGS", "")
 
 	args := []string{"build", "-mod=vendor", "./..."}
-	got, err := prepareVendoredBuild(t.Context(), discardLogger(), args)
+	got, err := prepareVendoredBuild(t.Context(), discardLogger(), subcmdBuild, args)
 	require.NoError(t, err)
 
 	// Unchanged: not a vendored project, so no rewriting happens.
@@ -1454,7 +1454,7 @@ func TestPrepareVendoredBuild_Vendored(t *testing.T) {
 	t.Setenv("GOWORK", "off")
 
 	args := []string{"build", "-mod=vendor", "./..."}
-	got, err := prepareVendoredBuild(t.Context(), discardLogger(), args)
+	got, err := prepareVendoredBuild(t.Context(), discardLogger(), subcmdBuild, args)
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{"build", "-mod=mod", "./..."}, got)
@@ -1480,13 +1480,77 @@ func TestPinLocked_UpdatesExistingToolFile(t *testing.T) {
 
 	_, err := pinLocked(t.Context(), PinOptions{
 		Prune:      true,
-		ModuleDirs: map[string]bool{tmp: true},
+		ModuleDirs: []string{tmp},
 	})
 	require.NoError(t, err)
 
 	data, err := os.ReadFile(toolFile)
 	require.NoError(t, err)
 	assert.NotContains(t, string(data), "example.com/notinstrumentation")
+}
+
+func TestPinLocked_UnsortedDuplicateModuleDirs(t *testing.T) {
+	// Assert that unsorted, duplicate PinOptions.ModuleDirs are normalized
+	// so each module is processed exactly once, and the caller's slice is not mutated.
+	tmp := t.TempDir()
+
+	notInstDirA := filepath.Join(tmp, "notiA")
+	writeInstrumentationModule(
+		t,
+		notInstDirA,
+		"example.com/notiA",
+		false,
+		nil,
+	)
+
+	notInstDirB := filepath.Join(tmp, "notiB")
+	writeInstrumentationModule(
+		t,
+		notInstDirB,
+		"example.com/notiB",
+		false,
+		nil,
+	)
+
+	modA := filepath.Join(tmp, "modA")
+	modB := filepath.Join(tmp, "modB")
+
+	toolFileA := writeInstrumentationModule(t, modA, "example.com/modA", false, map[string]string{
+		"example.com/notiA": notInstDirA,
+	})
+	toolFileB := writeInstrumentationModule(t, modB, "example.com/modB", false, map[string]string{
+		"example.com/notiB": notInstDirB,
+	})
+
+	var logOutput strings.Builder
+	logger := slog.New(slog.NewTextHandler(&logOutput, nil))
+	ctx := util.ContextWithLogger(t.Context(), logger)
+
+	callerDirs := []string{modB, modA, modB, modA}
+	callerOrig := append([]string(nil), callerDirs...)
+
+	result, err := pinLocked(ctx, PinOptions{
+		Prune:      true,
+		ModuleDirs: callerDirs,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// Caller slice must remain unchanged
+	assert.Equal(t, callerOrig, callerDirs, "caller slice must not be mutated")
+
+	// Both tool files must be updated and uninstrumented imports pruned
+	dataA, err := os.ReadFile(toolFileA)
+	require.NoError(t, err)
+	assert.NotContains(t, string(dataA), "example.com/notiA")
+
+	dataB, err := os.ReadFile(toolFileB)
+	require.NoError(t, err)
+	assert.NotContains(t, string(dataB), "example.com/notiB")
+
+	// Each module should have been processed exactly once
+	assert.Equal(t, 1, strings.Count(logOutput.String(), toolFileA), "modA should be processed exactly once")
+	assert.Equal(t, 1, strings.Count(logOutput.String(), toolFileB), "modB should be processed exactly once")
 }
 
 func TestPinLocked_DiscoversModuleDirs(t *testing.T) {
@@ -1516,6 +1580,103 @@ func TestPinLocked_DiscoversModuleDirs(t *testing.T) {
 	require.FileExists(t, filepath.Join(dir, toolFileCanonical))
 }
 
+// newPinRoot is newBuildRoot for a standalone pin, which keeps its work files
+// in the build root.
+func newPinRoot(t *testing.T, files map[string]string) string {
+	t.Helper()
+	root := newBuildRoot(t, files)
+	t.Setenv(util.EnvOtelcWorkDir, root)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	return root
+}
+
+func TestPinLocked_StandaloneToolFile(t *testing.T) {
+	// The golden path is relative to the working directory, which the
+	// subtests change, so make it absolute first.
+	goldenFile, absErr := filepath.Abs(filepath.Join("testdata", "standalone.otel.instrumentation.go.golden"))
+	require.NoError(t, absErr)
+
+	tests := []struct {
+		name  string
+		files map[string]string
+		args  []string
+		want  []string // dirs with a tool file, relative to the build root
+	}{
+		{
+			name:  "-C flag",
+			files: changeDirFiles(),
+			args:  []string{"-C", "app", "."},
+			want:  []string{"app"},
+		},
+		{
+			name:  "go.work with two modules",
+			files: workspaceFiles(),
+			args:  []string{"./a", "./b"},
+			want:  []string{"a", "b"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := newPinRoot(t, tt.files)
+
+			_, err := pinLocked(t.Context(), PinOptions{Prune: true, Args: tt.args})
+			require.NoError(t, err)
+
+			for _, dir := range tt.want {
+				actual, readErr := os.ReadFile(filepath.Join(root, dir, toolFileCanonical))
+				require.NoError(t, readErr)
+
+				actualNorm := strings.ReplaceAll(string(actual), "\r\n", "\n")
+				golden.Assert(t, actualNorm, goldenFile)
+			}
+		})
+	}
+}
+
+func TestPinLocked_ImportCycleRoot(t *testing.T) {
+	// Finding the module dirs does not resolve imports, so a root package in
+	// an import cycle is not skipped there. A fresh pin fails later, with the
+	// error of the go command; an already pinned module is updated as usual.
+	tests := []struct {
+		name        string
+		pinnedFirst bool
+		wantErr     string
+	}{
+		{name: "fresh pin", wantErr: "import cycle not allowed"},
+		{name: "already pinned", pinnedFirst: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := newPinRoot(t, plainModuleFiles())
+			toolFile := filepath.Join(root, toolFileCanonical)
+
+			var pinned []byte
+			if tt.pinnedFirst {
+				_, err := pinLocked(t.Context(), PinOptions{Prune: true})
+				require.NoError(t, err)
+				pinned, err = os.ReadFile(toolFile)
+				require.NoError(t, err)
+			}
+
+			mustWriteFile(t, filepath.Join(root, "a", "a.go"), "package a\n\nimport _ \"example.com/app/b\"\n")
+			mustWriteFile(t, filepath.Join(root, "b", "b.go"), "package b\n\nimport _ \"example.com/app/a\"\n")
+
+			_, err := pinLocked(t.Context(), PinOptions{Prune: true, Args: []string{"./a"}})
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				assert.NoFileExists(t, toolFile)
+				return
+			}
+			require.NoError(t, err)
+			actual, err := os.ReadFile(toolFile)
+			require.NoError(t, err)
+			assert.Equal(t, string(pinned), string(actual), "tool file must not change")
+		})
+	}
+}
+
 func TestPin_UpdatesExistingToolFile(t *testing.T) {
 	// Pin wraps pinLocked under the build lock. Point the work dir at the
 	// module so the lock is taken in the sandbox rather than an ambient path.
@@ -1535,7 +1696,7 @@ func TestPin_UpdatesExistingToolFile(t *testing.T) {
 
 	result, err := Pin(t.Context(), PinOptions{
 		Prune:      true,
-		ModuleDirs: map[string]bool{tmp: true},
+		ModuleDirs: []string{tmp},
 	})
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -1547,7 +1708,7 @@ func TestPin_UpdatesExistingToolFile(t *testing.T) {
 
 func TestAutoPin_NoStateManager(t *testing.T) {
 	// autoPin cannot track files to restore without a stateManager in context.
-	_, err := autoPin(t.Context(), map[string]bool{t.TempDir(): true}, subcmdBuild, nil)
+	_, err := autoPin(t.Context(), []string{t.TempDir()}, subcmdBuild, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "state manager not found")
 }
@@ -1573,7 +1734,7 @@ func TestAutoPin_TracksAndPins(t *testing.T) {
 	sm := newStateManager()
 	ctx := contextWithStateManager(t.Context(), sm)
 
-	_, err := autoPin(ctx, map[string]bool{tmp: true}, subcmdBuild, nil)
+	_, err := autoPin(ctx, []string{tmp}, subcmdBuild, nil)
 	require.NoError(t, err)
 
 	// getBackupFiles tracks go.mod, go.sum, and the tool file together for
@@ -1611,7 +1772,12 @@ func TestPrepareVendoredBuild(t *testing.T) {
 	t.Setenv(util.EnvOtelcWorkDir, dir)
 
 	args := []string{"build", "./..."}
-	got, err := prepareVendoredBuild(context.Background(), util.LoggerFromContext(context.Background()), args)
+	got, err := prepareVendoredBuild(
+		context.Background(),
+		util.LoggerFromContext(context.Background()),
+		subcmdBuild,
+		args,
+	)
 	require.NoError(t, err)
 	assert.Equal(t, args, got)
 }
@@ -1639,7 +1805,7 @@ func TestAutoPin_TrackAllError(t *testing.T) {
 	sm := newStateManager()
 	ctx := contextWithStateManager(t.Context(), sm)
 
-	_, err := autoPin(ctx, map[string]bool{modDir: true}, "build", []string{"."})
+	_, err := autoPin(ctx, []string{modDir}, "build", []string{"."})
 	require.Error(t, err)
 }
 
@@ -1670,7 +1836,7 @@ func TestAutoPin_GetBackupFilesError(t *testing.T) {
 	sm := newStateManager()
 	ctx = contextWithStateManager(ctx, sm)
 
-	_, err := autoPin(ctx, map[string]bool{"/some/dir": true}, "build", []string{"."})
+	_, err := autoPin(ctx, []string{"/some/dir"}, "build", []string{"."})
 	require.Error(t, err)
 }
 
@@ -1678,7 +1844,7 @@ func TestGeneratePinnedProjects_FindDepsError(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel() // canceled context causes findDeps to fail
 
-	_, err := generatePinnedProjects(ctx, map[string]bool{"/some/dir": true}, PinOptions{})
+	_, err := generatePinnedProjects(ctx, []string{"/some/dir"}, PinOptions{})
 	require.Error(t, err)
 }
 
@@ -1704,7 +1870,7 @@ func TestGeneratePinnedProjects_LoadMinimalRulesError(t *testing.T) {
 	require.NoError(t, os.MkdirAll(instDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(instDir, "go.mod"), []byte("invalid go.mod"), 0o644))
 
-	_, err := generatePinnedProjects(t.Context(), map[string]bool{tempDir: true}, PinOptions{})
+	_, err := generatePinnedProjects(t.Context(), []string{tempDir}, PinOptions{})
 	require.Error(t, err)
 }
 
@@ -1730,7 +1896,7 @@ require (
 	ruleFile := filepath.Join(util.GetBuildTempDir(), unzippedInstDir, "net", "http", "client", "rules.yaml")
 	require.NoError(t, os.WriteFile(ruleFile, []byte("rule1:\n  target: net/http\n  func: Get\n"), 0o644))
 
-	_, err := generatePinnedProjects(t.Context(), map[string]bool{tempDir: true}, PinOptions{
+	_, err := generatePinnedProjects(t.Context(), []string{tempDir}, PinOptions{
 		Args: []string{"."},
 	})
 	require.Error(t, err)
@@ -1756,7 +1922,7 @@ go 1.21
 	// Corrupt go.mod so ensureOtelcRequire fails in generatePinnedProjects (line 563)
 	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte("invalid go.mod {"), 0o644))
 
-	_, err := generatePinnedProjects(t.Context(), map[string]bool{tempDir: true}, PinOptions{})
+	_, err := generatePinnedProjects(t.Context(), []string{tempDir}, PinOptions{})
 	require.Error(t, err)
 }
 
@@ -1774,7 +1940,7 @@ func TestGeneratePinnedProjects_ExtractBundleError(t *testing.T) {
 	pkgPath := filepath.Join(buildTemp, unzippedPkgDir)
 	require.NoError(t, os.WriteFile(pkgPath, []byte("file"), 0o644))
 
-	_, err := generatePinnedProjects(t.Context(), map[string]bool{tempDir: true}, PinOptions{
+	_, err := generatePinnedProjects(t.Context(), []string{tempDir}, PinOptions{
 		Args: []string{"."},
 	})
 	require.Error(t, err)

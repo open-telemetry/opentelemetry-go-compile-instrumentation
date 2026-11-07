@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"golang.org/x/mod/module"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/util"
@@ -26,6 +29,10 @@ type Dependency struct {
 	Version    string
 	Sources    []string
 	CgoFiles   map[string]string
+	// IsTest reports whether the compile is part of a test binary. It is read
+	// from the compile command, because the generated _testmain.go does not
+	// exist yet when the build plan is listed and so is not in Sources.
+	IsTest bool
 }
 
 func (d *Dependency) String() string {
@@ -75,59 +82,18 @@ func findCommands(buildPlanLog *os.File) ([]string, error) {
 	return commands, nil
 }
 
-// planIrrelevantFlags names flags that change how the go command formats its
-// own output without changing the build plan. listBuildPlan reads the plan from
-// the go command's stderr, and -json moves it to stdout as a stream of JSON
-// build-output events instead, so the plan parses empty and no dependency is
-// found. The real build keeps the flag; only the dry run drops it.
-//
-//nolint:gochecknoglobals // private lookup table
-var planIrrelevantFlags = map[string]bool{
-	flagJSON: true,
-}
-
-// flagName returns the flag name of arg in single-dash form, without a joined
-// value. The go command accepts -flag and --flag interchangeably.
-func flagName(arg string) string {
-	name, _, _ := strings.Cut(arg, "=")
-	if strings.HasPrefix(name, "--") {
-		return name[1:]
+// disableJSONOutput keeps the build plan on stderr as shell commands.
+// Retain the flag position: removing a flag after go test's package list
+// could turn a test-binary argument into another package target.
+func disableJSONOutput(subcommand string, args []string) []string {
+	out := make([]string, len(args))
+	copy(out, args)
+	for _, arg := range classifyArgs(subcommand, args) {
+		if arg.Kind == ArgBuildFlag && arg.FlagName == flagJSON {
+			out[arg.Index] = "-json=false"
+		}
 	}
-	return name
-}
-
-// dropPlanIrrelevantFlags returns cmdArgs without the flags listed in
-// planIrrelevantFlags. Arguments after -args go to the test binary rather than
-// the go command, so they pass through untouched, and a value that follows a
-// flag in separated form travels with its flag so it is never read as one.
-func dropPlanIrrelevantFlags(cmdArgs []string) []string {
-	kept := make([]string, 0, len(cmdArgs))
-	for i := 0; i < len(cmdArgs); i++ {
-		arg := cmdArgs[i]
-
-		// Everything after -args is passed to the test binary, so it can
-		// contain neither go flags nor packages.
-		if arg == flagArgs {
-			kept = append(kept, cmdArgs[i:]...)
-			break
-		}
-		if !strings.HasPrefix(arg, "-") {
-			kept = append(kept, arg)
-			continue
-		}
-
-		name := flagName(arg)
-		end := i + 1
-		if !strings.Contains(arg, "=") && (flagsWithPathValues[name] || testFlagsWithValues[name]) &&
-			end < len(cmdArgs) {
-			end++ // the flag's value is the next argument
-		}
-		if !planIrrelevantFlags[name] {
-			kept = append(kept, cmdArgs[i:end]...)
-		}
-		i = end - 1
-	}
-	return kept
+	return out
 }
 
 // listBuildPlan lists the build plan by running `go build -a -x -n`
@@ -152,7 +118,7 @@ func listBuildPlan(ctx context.Context, subcommand string, cmdArgs []string) ([]
 		planVerb = subcmdTest
 	}
 	// The full command is: "go build/test [-C dir] -a -x -n {...}"
-	planArgs := dropPlanIrrelevantFlags(cmdArgs)
+	planArgs := disableJSONOutput(subcommand, cmdArgs)
 	planFlags := []string{"-a", "-x", "-n"}
 	args := make([]string, 0, len(planArgs)+len(planFlags)+1)
 	args = append(args, planVerb)
@@ -160,10 +126,12 @@ func listBuildPlan(ctx context.Context, subcommand string, cmdArgs []string) ([]
 	logger.InfoContext(ctx, "go build command", "args", args)
 
 	cmd := execCommandContext(ctx, "go", args...)
-	// This is a little anti-intuitive as the error message is not printed to
-	// the stderr, instead it is printed to the stdout, only the build tool
-	// knows the reason why.
-	cmd.Stdout = os.Stdout
+	// The plan is on stderr. Stdout is kept out of the user's output: go test
+	// writes a "[no test files]" line there for each package without tests,
+	// and the real run writes it again. Some failures, such as a test setup
+	// failure, are reported on stdout, so it is kept for the error.
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
 	cmd.Stderr = buildPlanLog
 	// @@Note that dir should not be set, as the dry build should be run in the
 	// same directory as the original build command
@@ -172,7 +140,7 @@ func listBuildPlan(ctx context.Context, subcommand string, cmdArgs []string) ([]
 	if err != nil {
 		// Read the build plan log to see what went wrong
 		logContent, _ := os.ReadFile(util.GetBuildTemp(buildPlanLogName))
-		return nil, ex.Wrapf(err, "failed to run build plan: \n%s", string(logContent))
+		return nil, ex.Wrapf(err, "failed to run build plan: \n%s%s", string(logContent), stdout.String())
 	}
 
 	// Find compile commands from build plan log
@@ -213,7 +181,11 @@ func findModVersion(path string) string {
 	if version == "" {
 		return ""
 	}
-	return version[1 : len(version)-1]
+	raw := version[1 : len(version)-1]
+	if unescaped, err := module.UnescapeVersion(raw); err == nil {
+		return unescaped
+	}
+	return raw
 }
 
 // findGoSources extracts Go source files from compile command arguments,
@@ -225,6 +197,7 @@ func findGoSources(ctx context.Context, args []string, cgoObjDirs map[string]str
 		ImportPath: util.FindFlagValue(args, "-p"),
 		Sources:    make([]string, 0),
 		CgoFiles:   make(map[string]string),
+		IsTest:     util.IsTestBuild(args),
 	}
 	util.Assert(dep.ImportPath != "", "import path is empty")
 
@@ -279,6 +252,10 @@ func findDeps(ctx context.Context, subcommand string, cmdArgs []string) ([]*Depe
 		deps       []*Dependency
 		cgoObjDirs = make(map[string]string)
 		currentDir string
+		// A package can be compiled more than once with the same sources,
+		// e.g. once with and once without a PGO profile when only some of the
+		// main packages have a default.pgo. Keep one of them.
+		seen = make(map[string]bool)
 	)
 
 	for _, cmd := range buildPlan {
@@ -293,6 +270,11 @@ func findDeps(ctx context.Context, subcommand string, cmdArgs []string) ([]*Depe
 			if err1 != nil {
 				return nil, err1
 			}
+			key := dep.ImportPath + "\x00" + strings.Join(dep.Sources, "\x00")
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
 			deps = append(deps, dep)
 			logger.InfoContext(ctx, "Found dependency", "dep", dep)
 		} else if util.IsCgoCommand(cmd) && currentDir != "" {

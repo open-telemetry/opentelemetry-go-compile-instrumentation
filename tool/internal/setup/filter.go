@@ -59,6 +59,10 @@ type matchContext struct {
 	// AST is the parsed dst tree of the source file. Filters must treat it
 	// as read-only; node updates would corrupt downstream rule matching.
 	AST *dst.File
+
+	// ResolvedNames maps an import path to a package name, for
+	// signature matching against real names instead of a guess.
+	ResolvedNames map[string]string
 }
 
 // --- Leaf filters ---
@@ -84,7 +88,7 @@ func (f *funcFilter) Match(ctx *matchContext) bool {
 		Func: f.Func,
 		Recv: f.Recv,
 	}
-	_, ok, _ := ast.FindFuncDecl(ctx.AST, fr)
+	_, ok, _ := ast.FindFuncDecl(ctx.AST, fr, ctx.ResolvedNames)
 	return ok
 }
 
@@ -288,28 +292,29 @@ func buildFile(def *rule.FilterDef) (filter, error) {
 		return nil, ex.Newf("where.file.has_recv requires where.file.has_func")
 	}
 
-	active := 0
+	var active []string
 	if def.HasFunc != "" {
-		active++
+		active = append(active, "has_func")
 	}
 	if def.HasStruct != "" {
-		active++
+		active = append(active, "has_struct")
 	}
 	if def.HasDirective != "" {
-		active++
+		active = append(active, "has_directive")
 	}
 	if strings.TrimSpace(def.HasPackage) != "" {
-		active++
+		active = append(active, "has_package")
 	}
 	if def.IsTest != nil {
-		active++
+		active = append(active, "is_test")
 	}
 
-	if active == 0 {
+	if len(active) == 0 {
 		return nil, ex.Newf("where.file has no active predicate")
 	}
-	if active > 1 {
-		return nil, ex.Newf("where.file has multiple active predicates; explicit composition is not yet supported")
+	if len(active) > 1 {
+		return nil, ex.Newf("where.file has multiple active predicates (%s); combine them with all-of",
+			strings.Join(active, ", "))
 	}
 
 	switch {

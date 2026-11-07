@@ -64,4 +64,6 @@ groups:
       - ref: gen_ai.usage.total_tokens
       - ref: gen_ai.request.is_stream
       - ref: gen_ai.response.time_to_first_token
+      - ref: server.address
+      - ref: server.port
       - ref: error.type

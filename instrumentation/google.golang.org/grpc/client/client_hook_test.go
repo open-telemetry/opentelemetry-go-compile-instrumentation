@@ -227,6 +227,26 @@ func TestBeforeDialContext(t *testing.T) {
 	}
 }
 
+func TestDialContextDelegatingToNewClientInjectsOnce(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "grpc")
+
+	target := "localhost:50051"
+	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+	dialCtx := hooktest.NewMockHookContext(t.Context(), target, opts)
+	BeforeDialContext(dialCtx, t.Context(), target, opts...)
+
+	dialOpts, ok := dialCtx.GetParam(dialOptionsParamIndex).([]grpc.DialOption)
+	require.True(t, ok)
+	require.Len(t, dialOpts, len(opts)+2, "first hook should add one marker and one stats handler")
+
+	newClientCtx := hooktest.NewMockHookContext(target, dialOpts)
+	BeforeNewClient(newClientCtx, target, dialOpts...)
+
+	newClientOpts, ok := newClientCtx.GetParam(newClientOptionsParamIndex).([]grpc.DialOption)
+	require.True(t, ok)
+	assert.Equal(t, dialOpts, newClientOpts, "delegated NewClient call must not add another stats handler")
+}
+
 // TestAfterDialContext verifies the AfterDialContext hook handles various connection outcomes
 // without panicking. This hook is primarily for debug logging and doesn't modify state,
 // so we verify it gracefully handles both success and error cases.
@@ -673,4 +693,120 @@ func TestClientStatsHandler_NilGRPCContext_IsSafeNoOp(t *testing.T) {
 			EndTime:   time.Now(),
 		})
 	}, "HandleRPC must return before dereferencing a nil gRPCContext")
+}
+
+type nonRecordingSpan struct {
+	trace.Span
+	ended bool
+}
+
+func (s *nonRecordingSpan) IsRecording() bool {
+	return false
+}
+
+func (s *nonRecordingSpan) End(_ ...trace.SpanEndOption) {
+	s.ended = true
+}
+
+// initInstrumentation is skipped on purpose: the span and gRPCContext are
+// injected by hand, and the metric instruments stay nil-guarded zero values.
+func TestClientStatsHandler_HandleRPC_NonRecordingSpan(t *testing.T) {
+	handler := newClientStatsHandler()
+
+	mockSpan := &nonRecordingSpan{Span: trace.SpanFromContext(t.Context())}
+	ctx := trace.ContextWithSpan(t.Context(), mockSpan)
+	ctx = context.WithValue(ctx, gRPCContextKey{}, &gRPCContext{})
+
+	handler.HandleRPC(ctx, &stats.End{
+		BeginTime: time.Now().Add(-10 * time.Millisecond),
+		EndTime:   time.Now(),
+	})
+
+	assert.True(t, mockSpan.ended, "span.End() must be called for non-recording spans")
+}
+
+func TestClientStatsHandler_UnsampledRPC_NoExport(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "grpc")
+	initInstrumentation()
+
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSyncer(exporter),
+		sdktrace.WithSampler(sdktrace.NeverSample()),
+	)
+	oldTP := otel.GetTracerProvider()
+	oldTracer := tracer
+	otel.SetTracerProvider(tp)
+	t.Cleanup(func() {
+		_ = tp.Shutdown(context.Background())
+		otel.SetTracerProvider(oldTP)
+		tracer = oldTracer
+	})
+	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(runtime.ModuleVersion()))
+
+	handler := newClientStatsHandler()
+	ctx := handler.TagRPC(t.Context(), &stats.RPCTagInfo{
+		FullMethodName: "/test.Service/Method",
+	})
+	span := trace.SpanFromContext(ctx)
+	require.False(t, span.IsRecording(), "sampler should have marked the span non-recording")
+
+	handler.HandleRPC(ctx, &stats.End{
+		BeginTime: time.Now().Add(-50 * time.Millisecond),
+		EndTime:   time.Now(),
+	})
+
+	require.Empty(t, exporter.GetSpans(), "NeverSample spans are not exported")
+}
+
+func TestClientStatsHandler_HandleRPC_UsesStatsEndTime(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "grpc")
+	initInstrumentation()
+
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	oldTP := otel.GetTracerProvider()
+	oldTracer := tracer
+	otel.SetTracerProvider(tp)
+	t.Cleanup(func() {
+		_ = tp.Shutdown(context.Background())
+		otel.SetTracerProvider(oldTP)
+		tracer = oldTracer
+	})
+	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(runtime.ModuleVersion()))
+
+	handler := newClientStatsHandler()
+
+	t.Run("explicit EndTime", func(t *testing.T) {
+		exporter.Reset()
+		ctx := handler.TagRPC(t.Context(), &stats.RPCTagInfo{
+			FullMethodName: "/test.Service/Method",
+		})
+
+		endTime := time.Now().Add(5 * time.Second).Truncate(time.Microsecond)
+		handler.HandleRPC(ctx, &stats.End{
+			BeginTime: time.Now(),
+			EndTime:   endTime,
+		})
+
+		spans := exporter.GetSpans()
+		require.Len(t, spans, 1)
+		assert.True(t, spans[0].EndTime.Equal(endTime), "span EndTime should match stats.End.EndTime")
+	})
+
+	t.Run("zero EndTime", func(t *testing.T) {
+		exporter.Reset()
+		before := time.Now().Truncate(time.Microsecond)
+		ctx := handler.TagRPC(t.Context(), &stats.RPCTagInfo{
+			FullMethodName: "/test.Service/Method",
+		})
+
+		handler.HandleRPC(ctx, &stats.End{})
+
+		after := time.Now().Add(time.Second)
+		spans := exporter.GetSpans()
+		require.Len(t, spans, 1)
+		assert.False(t, spans[0].EndTime.IsZero(), "span EndTime should not be zero")
+		assert.True(t, !spans[0].EndTime.Before(before) && !spans[0].EndTime.After(after), "span EndTime should be set to current time")
+	})
 }

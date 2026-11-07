@@ -191,6 +191,14 @@ func TestOtelMiddleware_RecordsDuration(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, uint64(1), durationCount(t, reader), "duration should be recorded once on success")
+	dps := durationDataPoints(t, reader)
+	require.Len(t, dps, 1)
+	addrVal, ok := dps[0].Attributes.Value(attribute.Key("server.address"))
+	require.True(t, ok, "server.address must be present on the metric data point")
+	assert.Equal(t, "api.anthropic.com", addrVal.AsString())
+	portVal, ok := dps[0].Attributes.Value(attribute.Key("server.port"))
+	require.True(t, ok, "server.port must be present on the metric data point")
+	assert.Equal(t, int64(80), portVal.AsInt64())
 }
 
 // TestOtelMiddleware_RecordsDurationOnError verifies the duration is recorded
@@ -267,7 +275,7 @@ func TestOtelMiddleware_Messages(t *testing.T) {
 	reqBody := `{"model":"claude-sonnet-4-5","max_tokens":1024,"temperature":0.7,"top_p":0.9,"top_k":40,"messages":[{"role":"user","content":"Hello"}]}`
 	req, _ := http.NewRequest(
 		"POST",
-		"http://api.anthropic.com/v1/messages",
+		"https://api.anthropic.com/v1/messages",
 		io.NopCloser(bytes.NewReader([]byte(reqBody))),
 	)
 
@@ -295,6 +303,8 @@ func TestOtelMiddleware_Messages(t *testing.T) {
 	assertAttribute(t, attrs, "gen_ai.operation.name", "chat")
 	assertAttribute(t, attrs, "gen_ai.request.model", "claude-sonnet-4-5")
 	assertAttribute(t, attrs, "gen_ai.provider.name", "anthropic")
+	assertAttribute(t, attrs, "server.address", "api.anthropic.com")
+	assertInt64Attribute(t, attrs, "server.port", 443)
 	assertInt64Attribute(t, attrs, "gen_ai.request.max_tokens", 1024)
 	assertFloat64Attribute(t, attrs, "gen_ai.request.temperature", 0.7)
 	assertFloat64Attribute(t, attrs, "gen_ai.request.top_p", 0.9)
@@ -321,7 +331,7 @@ func TestOtelMiddleware_Messages_NoCacheUsage(t *testing.T) {
 	reqBody := `{"model":"claude-sonnet-4-5","max_tokens":1024,"messages":[{"role":"user","content":"Hello"}]}`
 	req, _ := http.NewRequest(
 		"POST",
-		"http://api.anthropic.com/v1/messages",
+		"https://custom-proxy.example.com:8443/v1/messages",
 		io.NopCloser(bytes.NewReader([]byte(reqBody))),
 	)
 
@@ -341,6 +351,8 @@ func TestOtelMiddleware_Messages_NoCacheUsage(t *testing.T) {
 	require.Len(t, spans, 1)
 
 	attrs := spans[0].Attributes()
+	assertAttribute(t, attrs, "server.address", "custom-proxy.example.com")
+	assertInt64Attribute(t, attrs, "server.port", 8443)
 	_, found := findAttribute(attrs, "gen_ai.usage.cache_read.input_tokens")
 	assert.False(t, found, "cache_read attribute should be omitted when zero")
 	_, found = findAttribute(attrs, "gen_ai.usage.cache_creation.input_tokens")
@@ -729,6 +741,31 @@ func TestOtelMiddleware_SkipsNilBody(t *testing.T) {
 	middleware := OtelMiddleware()
 
 	req, _ := http.NewRequest("POST", "http://api.anthropic.com/v1/messages", nil)
+
+	called := false
+	next := func(r *http.Request) (*http.Response, error) {
+		called = true
+		return &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{},
+			Body:       io.NopCloser(strings.NewReader("")),
+		}, nil
+	}
+
+	_, err := middleware(req, next)
+	require.NoError(t, err)
+	assert.True(t, called)
+	assert.Empty(t, sr.Ended())
+}
+
+func TestOtelMiddleware_SkipsNilURL(t *testing.T) {
+	sr := setupTestTracer(t)
+
+	middleware := OtelMiddleware()
+
+	req := &http.Request{
+		Body: io.NopCloser(strings.NewReader(`{"model":"claude-3-5-sonnet-20241022"}`)),
+	}
 
 	called := false
 	next := func(r *http.Request) (*http.Response, error) {

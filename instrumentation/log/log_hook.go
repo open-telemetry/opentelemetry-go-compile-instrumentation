@@ -6,7 +6,7 @@ package log
 import (
 	"bytes"
 	"log"
-	"strings"
+	"slices"
 
 	"go.opentelemetry.io/otelc/pkg/hook"
 	"go.opentelemetry.io/otelc/pkg/runtime"
@@ -58,28 +58,29 @@ func BeforeLogOutput(
 			return b
 		}
 
-		var sb strings.Builder
-		sb.WriteString(" ")
-		sb.WriteString(traceIDKey)
-		sb.WriteString("=")
-		sb.WriteString(traceID)
+		// Trace and span ids are short and of a known width, so the suffix is
+		// assembled in a small array here instead of a strings.Builder. A
+		// longer id than expected still works, append just grows it.
+		var buf [96]byte
+		suffix := append(buf[:0], ' ')
+		suffix = append(suffix, traceIDKey...)
+		suffix = append(suffix, '=')
+		suffix = append(suffix, traceID...)
 
 		if spanID != "" {
-			sb.WriteString(" ")
-			sb.WriteString(spanIDKey)
-			sb.WriteString("=")
-			sb.WriteString(spanID)
+			suffix = append(suffix, ' ')
+			suffix = append(suffix, spanIDKey...)
+			suffix = append(suffix, '=')
+			suffix = append(suffix, spanID...)
 		}
 
-		traceSuffix := sb.String()
-
+		// Keep the ids on the log line itself, ahead of any line ending.
 		idx := len(b)
 		for idx > 0 && (b[idx-1] == '\n' || b[idx-1] == '\r') {
 			idx--
 		}
 
-		b = append(b[:idx], append([]byte(traceSuffix), b[idx:]...)...)
-		return b
+		return slices.Insert(b, idx, suffix...)
 	}
 
 	ictx.SetParam(3, newAppendOutput)

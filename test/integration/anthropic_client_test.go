@@ -59,13 +59,14 @@ func TestAnthropicClient(t *testing.T) {
 			testutil.RequireGenAIClientSemconv(
 				t,
 				span,
-				"anthropic",          // system
-				"chat",               // operationName
-				tc.model,             // requestModel
-				"local",              // providerName (127.0.0.1 maps to "local")
-				"msg-test-123",       // responseID
-				tc.model,             // responseModel
-				[]string{"end_turn"}, // finishReasons
+				"anthropic",                     // system
+				"chat",                          // operationName
+				tc.model,                        // requestModel
+				"local",                         // providerName (127.0.0.1 maps to "local")
+				server.Listener.Addr().String(), // serverEndpoint
+				"msg-test-123",                  // responseID
+				tc.model,                        // responseModel
+				[]string{"end_turn"},            // finishReasons
 				inputTokens,
 				outputTokens,
 				inputTokens+outputTokens, // totalTokens (computed)
@@ -102,6 +103,25 @@ func TestAnthropicClient(t *testing.T) {
 		testutil.RequireAttribute(t, span, "gen_ai.usage.input_tokens", int64(5))
 		_, found := testutil.Attrs(span)["gen_ai.usage.output_tokens"]
 		require.False(t, found, "count_tokens has no output tokens")
+	})
+
+	t.Run("sdk_native_opentelemetry", func(t *testing.T) {
+		f := testutil.NewTestFixture(t)
+		f.SetEnv("ANTHROPIC_OPEN_TELEMETRY", "true")
+		server := startMockAnthropicServer(t, 0, 0)
+
+		f.Run("anthropicclient",
+			fmt.Sprintf("-addr=%s", server.URL),
+			"-api-key=test-key",
+			"-model=claude-sonnet-4-5",
+		)
+
+		spans := testutil.AllSpans(f.Traces())
+		require.NotEmpty(t, spans)
+		for _, s := range spans {
+			require.False(t, testutil.HasAttribute("gen_ai.system", "anthropic")(s),
+				"otelc anthropic span must not be emitted when ANTHROPIC_OPEN_TELEMETRY=true")
+		}
 	})
 }
 

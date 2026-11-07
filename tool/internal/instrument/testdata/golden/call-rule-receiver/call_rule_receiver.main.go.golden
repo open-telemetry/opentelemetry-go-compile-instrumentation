@@ -3,6 +3,7 @@
 
 package main
 
+//line /golden/work/main.go:6
 import "fmt"
 
 type Handler string
@@ -11,7 +12,7 @@ func (h Handler) Serve(name string) {
 	(func() (int, error) {
 		println("handler recv:", h)
 		return fmt.Println("hello")
-	})()
+	})() /*line /golden/work/main.go:11*/
 }
 
 func main() { Handler("svc").Serve("world") }

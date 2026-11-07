@@ -1,0 +1,113 @@
+name: Auto-fix Bundle Conflicts
+
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Probe conflicts without requesting repairs
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  autofix:
+    name: Select bundle repairs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      prs: ${{ steps.scan.outputs.prs || '[]' }}
+    if: |-
+      github.repository ==
+      'open-telemetry/opentelemetry-go-compile-instrumentation' &&
+      github.ref == 'refs/heads/main'
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          cache: false
+          go-version-file: go.mod
+
+      - name: Build bundle repair tool
+        env:
+          GOFLAGS: -mod=readonly
+          GOPROXY: 'off'
+          GOTOOLCHAIN: local
+        run: go -C .tools/bundlerepair build -trimpath -o "${RUNNER_TEMP}/bundlerepair" .
+
+      - name: Check manual scanner permission
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          CALLER_WORKFLOW_REF: ''
+          COMMENTER: ${{ github.triggering_actor }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          "${RUNNER_TEMP}/bundlerepair" authorize
+
+      - name: Check automatic repair budget
+        id: budget
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          "${RUNNER_TEMP}/bundlerepair" select --budget
+
+      - name: Select bounded bundle repairs
+        id: scan
+        if: steps.budget.outputs.remaining != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          AUTO_DEADLINE: ${{ steps.budget.outputs.expires_at }}
+          RECENT_REQUESTS: ${{ steps.budget.outputs.requests }}
+        run: |
+          "${RUNNER_TEMP}/bundlerepair" select
+
+      - name: 'Bundle repair selection: ${{ steps.scan.outputs.rate_record }}'
+        if: steps.scan.conclusion == 'success'
+        run: ':'
+
+  repair:
+    name: 'Bundle repair #${{ matrix.request.pr_number }}'
+    needs: autofix
+    if: |-
+      needs.autofix.outputs.prs != '[]' &&
+      needs.autofix.outputs.prs != ''
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        request: ${{ fromJSON(needs.autofix.outputs.prs) }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/regenerate-bundle.yaml
+    with:
+      pr_number: ${{ format('{0}', matrix.request.pr_number) }}
+      expected_head_sha: ${{ matrix.request.head_sha }}
+      expected_base_sha: ${{ matrix.request.base_sha }}
+      expires_at: ${{ format('{0}', matrix.request.expires_at) }}
+    secrets:
+      OTELC_BUNDLE_PUSH_TOKEN: ${{ secrets.OTELC_BUNDLE_PUSH_TOKEN }}
+      OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY: >-
+        ${{ secrets.OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY }}

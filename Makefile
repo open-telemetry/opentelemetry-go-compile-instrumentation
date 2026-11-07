@@ -4,6 +4,14 @@
 # Use bash for all shell commands (required for pipefail and other bash features)
 SHELL := /bin/bash
 
+# Many recipes use .ONESHELL, so that "set -euo pipefail" applies to all the
+# lines of the recipe. GNU Make 3.81 (the default on macOS) does not support
+# .ONESHELL: it runs each line in a different shell, and failures can be
+# hidden. Thus GNU Make 3.82 or later is required.
+ifeq ($(filter oneshell,$(.FEATURES)),)
+$(error GNU Make 3.82 or later is required (found $(MAKE_VERSION)). On macOS, run "brew install make", then use "gmake")
+endif
+
 .PHONY: all test test-unit test-integration test-e2e format lint build build-all build/pkg install package manifest verify-manifest clean setup-git \
         build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
         lint/action lint/makefile lint/license-header lint/license-header/fix lint/dockerfile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
@@ -37,10 +45,7 @@ PKG_COVERAGE_THRESHOLD ?= 70
 # Instrumentation is scanned separately via instrumented integration-test binaries
 # (see govulncheck/instrumentation): source scans skip //go:build ignore files and
 # cannot typecheck modules that need compile-time field injection (e.g. database/sql).
-# Known gap: that makes instrumentation coverage only as good as the test apps.
-# An instrumentation module that no app under test/apps builds against is scanned
-# by neither job, so adding a module without an app leaves it uncovered (currently
-# instrumentation/github.com/openai/openai-go/v3).
+# This coverage is only as complete as the top-level apps under test/apps.
 # Demos are intentionally excluded (pinned example deps).
 GOVULNCHECK_CORE_MODULES := . $(shell find pkg -type f -name 'go.mod' -exec dirname {} \; | sort)
 # Top-level integration apps only (skip nested modules such as
@@ -86,11 +91,15 @@ RATCHET = $(TOOLS)/ratchet
 $(RATCHET): PACKAGE=github.com/sethvargo/ratchet
 
 BUNDLE = $(TOOLS)/bundle
-$(BUNDLE): | $(TOOLS)
+# The sources are real prerequisites, not order-only: with only `| $(TOOLS)`
+# make never rebuilds an existing .bin/bundle, so editing the bundle tool (or
+# switching to a branch that changed it) silently keeps using the stale binary
+# and `make package` then writes an archive that fails Verify Bundle in CI.
+$(BUNDLE): $(wildcard $(TOOLS_DIR)/bundle/*.go) $(TOOLS_DIR)/bundle/go.mod | $(TOOLS)
 	cd $(TOOLS_DIR)/bundle && GOWORK=off go build -o $@
 
 EMBEDMD = $(TOOLS)/embedmd
-$(EMBEDMD): PACKAGE=github.com/campoy/embedmd
+$(EMBEDMD): PACKAGE=github.com/campoy/embedmd/v2
 
 CHECKMAKE = $(TOOLS)/checkmake
 $(CHECKMAKE): PACKAGE=github.com/checkmake/checkmake/cmd/checkmake
@@ -205,9 +214,12 @@ package: ## Package the instrumentation code into binary
 		exit 1; \
 	fi
 	@trap 'rm -rf $(INST_BUNDLE_PKG_TMP) $(INST_BUNDLE_INST_TMP)' EXIT
-	@cp -r pkg $(INST_BUNDLE_PKG_TMP)
+	@mkdir -p $(INST_BUNDLE_PKG_TMP)
+	@cp -r pkg/runtime $(INST_BUNDLE_PKG_TMP)/runtime
+	@cp -r pkg/netutil $(INST_BUNDLE_PKG_TMP)/netutil
 	@cp -r instrumentation $(INST_BUNDLE_INST_TMP)
-	@(cd $(INST_BUNDLE_PKG_TMP) && go mod tidy)
+	@(cd $(INST_BUNDLE_PKG_TMP)/runtime && go mod tidy)
+	@(cd $(INST_BUNDLE_PKG_TMP)/netutil && go mod tidy)
 	@(cd $(INST_BUNDLE_INST_TMP) && go mod tidy)
 	@mkdir -p tool/data/
 	@$(MAKE) $(BUNDLE)
@@ -251,6 +263,7 @@ format/go: ## Format Go code only
 format/go: $(GOLANGCI_LINT)
 	@echo "Formatting Go code..."
 	$(GOLANGCI_LINT) fmt --config .tools/golangci.yml
+	cd $(TOOLS_DIR)/bundlerepair && GOWORK=off $(GOLANGCI_LINT) fmt --config ../golangci.yml
 
 format/yaml: ## Format YAML files only (excludes testdata and schemas/otelc/.deps)
 format/yaml: $(YAMLFMT)
@@ -272,11 +285,27 @@ lint/go: ## Run golangci-lint on Go code
 lint/go: $(GOLANGCI_LINT) package
 	@echo "Linting Go code..."
 	$(GOLANGCI_LINT) run --config .tools/golangci.yml
+	cd $(TOOLS_DIR)/bundlerepair && GOWORK=off $(GOLANGCI_LINT) run --config ../golangci.yml
 
 lint/go/fix: ## Run golangci-lint on Go code and fix the issues
 lint/go/fix: $(GOLANGCI_LINT)
 	@echo "Linting Go code..."
 	$(GOLANGCI_LINT) run --config .tools/golangci.yml --fix
+	cd $(TOOLS_DIR)/bundlerepair && GOWORK=off $(GOLANGCI_LINT) run --config ../golangci.yml --fix
+
+.ONESHELL:
+lint/go/instrumentation: ## Lint new issues in instrumentation modules (golangci-lint only sees the root module via ./...)
+lint/go/instrumentation: $(GOLANGCI_LINT)
+	@echo "Linting instrumentation modules (new issues only)..."
+	@set -euo pipefail
+	@BASE_REV=$${LINT_BASE_REV:-origin/main}
+	@CONFIG=$(CURDIR)/.tools/golangci.yml
+	@INSTR_MODULES=$$(find instrumentation -name "go.mod" -type f -exec dirname {} \; | grep -v "instrumentation/runtime" | grep -v "instrumentation/database/sql"); \
+	for moddir in $$INSTR_MODULES; do \
+		echo "Linting $$moddir..."; \
+		(cd $$moddir && $(GOLANGCI_LINT) run --config $$CONFIG --new-from-rev="$$BASE_REV" ./...); \
+	done
+	@echo "All instrumentation modules linted successfully"
 
 lint/yaml: ## Lint YAML formatting
 lint/yaml: $(YAMLFMT)
@@ -295,7 +324,8 @@ lint/dockerfile: hadolint
 	elif [ -f /opt/homebrew/bin/hadolint ]; then \
 		HADOLINT_CMD="/opt/homebrew/bin/hadolint"; \
 	fi; \
-	$$HADOLINT_CMD -c .tools/hadolint.yaml demo/app/grpc/client/Dockerfile demo/app/grpc/server/Dockerfile demo/app/http/client/Dockerfile demo/app/http/server/Dockerfile
+	DOCKERFILES=$$(find demo/app -name "Dockerfile" | sort); \
+	$$HADOLINT_CMD --failure-threshold warning -c .tools/hadolint.yaml $$DOCKERFILES
 
 lint/makefile: ## Lint Makefile
 lint/makefile: $(CHECKMAKE)
@@ -519,7 +549,12 @@ benchmark/threshold: build ## Enforce absolute otelc overhead ceiling (fails if 
 # when Go compiles the test packages, the embed will fail.
 
 test: ## Run all tests (unit + integration + e2e)
-test: test-unit test-integration test-e2e
+test: test-bundle-workflows test-unit test-integration test-e2e
+
+.PHONY: test-bundle-workflows
+test-bundle-workflows: ## Test the bundle repair tool and check the repair workflows
+	@GOWORK=off go -C .tools test -count=1 ./workflows
+	@GOWORK=off go -C .tools/bundlerepair test -count=1 -race ./...
 
 test-unit: test-unit/tool test-unit/pkg test-unit/instrumentation test-unit/demo test-unit/helper ## Run all unit tests (tool + pkg + demo + test helpers)
 
@@ -762,7 +797,7 @@ crosslink: $(CROSSLINK) ## Update intra-repository dependencies in all go module
 	@# Clean .otel-build directories before generating go.work to avoid parsing generated go.mod
 	@find . -type d -name ".otel-build" -exec rm -rf {} + 2>/dev/null || true
 	@echo "Updating intra-repository dependencies in all go modules" \
-		&& $(CROSSLINK) --root=$(CURDIR)
+		&& $(CROSSLINK) --root=$(CURDIR) --exclude=go.opentelemetry.io/otelc/pkg --skip=go.opentelemetry.io/otelc/pkg
 
 .PHONY: go-work
 go-work: $(CROSSLINK) ## Generate go.work file for local development
@@ -774,6 +809,7 @@ go-work: $(CROSSLINK) ## Generate go.work file for local development
 	@# (e.g. old monolithic genproto vs. split genproto/googleapis/rpc).
 	@go work edit -dropuse ./.tools
 	@go work edit -dropuse ./.github/tools
+	@go work edit -dropuse ./pkg
 	@echo "go.work file generated successfully"
 
 .PHONY: go-mod-tidy

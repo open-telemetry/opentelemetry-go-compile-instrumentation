@@ -98,6 +98,65 @@ func TestDBClient(t *testing.T) {
 		require.Equal(t, "SELECT", stmtSpan.Name())
 	})
 
+	t.Run("TxStmtContext", func(t *testing.T) {
+		// A statement reused inside a transaction via (*Tx).StmtContext must
+		// keep its span name and db.query.text (issue #1469).
+		f := testutil.NewTestFixture(t)
+
+		f.Run("dbclient", "-op=tx-stmt")
+
+		stmtSpan := testutil.RequireSpan(t, f.Traces(),
+			testutil.IsClient,
+			testutil.HasAttribute(string(semconv.DBOperationNameKey), "SELECT"),
+		)
+		require.Equal(t, "SELECT", stmtSpan.Name())
+		testutil.RequireDBClientSemconv(t, stmtSpan,
+			"SELECT",
+			"SELECT id FROM users WHERE name = ?",
+			"unknown", 0,
+			"testdb",
+		)
+	})
+
+	t.Run("Conn", func(t *testing.T) {
+		// A query and a prepared statement run on a *sql.Conn rather than on the
+		// *sql.DB. Their spans only learn the connection's identity because the
+		// hooks copy it from the pool onto the Conn, and from the Conn onto the
+		// statement. A DSN with a real address and database name is used so that
+		// each copy has to carry every field to pass.
+		f := testutil.NewTestFixture(t)
+
+		f.Run("dbclient",
+			"-driver=mysql",
+			"-dsn=user:pass@tcp(127.0.0.1:3306)/inventory",
+			"-op=conn",
+		)
+
+		const connQuery = "SELECT id, name FROM users WHERE name = ?"
+		querySpan := testutil.RequireSpan(t, f.Traces(),
+			testutil.IsClient,
+			testutil.HasAttribute(string(semconv.DBQueryTextKey), connQuery),
+		)
+		require.Equal(t, "SELECT", querySpan.Name())
+		testutil.RequireDBClientSemconv(t, querySpan,
+			"SELECT", connQuery,
+			"127.0.0.1", 3306,
+			"inventory",
+		)
+
+		const stmtQuery = "SELECT id FROM users WHERE name = ?"
+		stmtSpan := testutil.RequireSpan(t, f.Traces(),
+			testutil.IsClient,
+			testutil.HasAttribute(string(semconv.DBQueryTextKey), stmtQuery),
+		)
+		require.Equal(t, "SELECT", stmtSpan.Name())
+		testutil.RequireDBClientSemconv(t, stmtSpan,
+			"SELECT", stmtQuery,
+			"127.0.0.1", 3306,
+			"inventory",
+		)
+	})
+
 	t.Run("Transaction", func(t *testing.T) {
 		f := testutil.NewTestFixture(t)
 
@@ -124,6 +183,37 @@ func TestDBClient(t *testing.T) {
 			testutil.HasAttribute("db.operation.name", "COMMIT"),
 		)
 		require.Equal(t, "COMMIT", commitSpan.Name())
+
+		// Regression for #1187: Commit must land in the same trace as BeginTx,
+		// not get orphaned onto its own trace by starting from
+		// context.Background(). (ExecContext's span isn't asserted here: it
+		// takes its own ctx argument from the caller, independent of the
+		// transaction's begin context, so it isn't guaranteed to match.)
+		require.Equal(t, beginSpan.TraceID(), commitSpan.TraceID(),
+			"commit span must share the transaction's trace, not start a new one")
+	})
+
+	t.Run("TransactionRollback", func(t *testing.T) {
+		f := testutil.NewTestFixture(t)
+
+		f.Run("dbclient", "-op=tx-rollback")
+
+		beginSpan := testutil.RequireSpan(t, f.Traces(),
+			testutil.IsClient,
+			testutil.HasAttribute("db.operation.name", "START"),
+		)
+
+		rollbackSpan := testutil.RequireSpan(t, f.Traces(),
+			testutil.IsClient,
+			testutil.HasAttribute("db.operation.name", "ROLLBACK"),
+		)
+		require.Equal(t, "ROLLBACK", rollbackSpan.Name())
+
+		// Regression for #1187: same fix as Commit, via the same txContext
+		// helper, but exercised independently so a change that fixes one and
+		// breaks the other doesn't slip through untested.
+		require.Equal(t, beginSpan.TraceID(), rollbackSpan.TraceID(),
+			"rollback span must share the transaction's trace, not start a new one")
 	})
 
 	t.Run("TransactionFailure", func(t *testing.T) {

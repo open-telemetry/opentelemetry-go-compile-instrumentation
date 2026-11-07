@@ -14,6 +14,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	semconv "go.opentelemetry.io/otel/semconv/v1.20.0"
+	"go.opentelemetry.io/otelc/test/shared/grpcpb"
 	"go.opentelemetry.io/otelc/test/shared/grpcpb/pb"
 	"go.opentelemetry.io/otelc/test/testutil"
 	"go.opentelemetry.io/otelc/tool/util"
@@ -88,6 +89,17 @@ func TestGRPCServer(t *testing.T) {
 
 			client := NewGRPCClient(t, addr)
 			client.SayHello(t, "ShutdownTest")
+
+			// The client holding its response does not mean the server span is
+			// buffered yet: gRPC fires stats.End, where the instrumentation ends the
+			// span, only after the response has been written. Signalling straight
+			// away therefore races span.End(), and a flush that wins finds an empty
+			// batch and drops the span for good. Wait instead for the server to
+			// report this RPC finished, which its stats handler does after the
+			// instrumentation's has ended the span. The wait names the method so
+			// that another RPC, such as a health check or a later streaming call,
+			// cannot satisfy it before SayHello reaches stats.End.
+			srv.WaitForLog(grpcpb.RPCCompletedLog(pb.Greeter_SayHello_FullMethodName))
 
 			// Instrumentation flushes buffered telemetry on the signal but must not
 			// terminate the process — the app owns its exit. Wait for the flushed

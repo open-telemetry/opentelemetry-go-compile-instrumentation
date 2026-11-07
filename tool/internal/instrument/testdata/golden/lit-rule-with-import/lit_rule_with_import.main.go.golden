@@ -5,14 +5,16 @@ package main
 
 // The literal is reached through an import alias, and the injected value needs
 // an import the file does not already have.
+//line /golden/work/main.go:8
 import (
 	stdio "io"
 
 	"strings"
 )
 
+//line /golden/work/main.go:10
 func NewReader() *stdio.LimitedReader {
-	return &stdio.LimitedReader{R: strings.NewReader("hello"), N: 10}
+	return &stdio.LimitedReader{R: strings.NewReader("hello"), N: 10} /*line /golden/work/main.go:11*/
 }
 
 func main() {

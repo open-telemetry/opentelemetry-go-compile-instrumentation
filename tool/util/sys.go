@@ -18,6 +18,9 @@ import (
 )
 
 func runCmd(ctx context.Context, dir string, env []string, args ...string) error {
+	if len(args) == 0 {
+		return ex.New("no command specified")
+	}
 	path := args[0]
 	args = args[1:]
 	cmd := exec.CommandContext(ctx, path, args...)

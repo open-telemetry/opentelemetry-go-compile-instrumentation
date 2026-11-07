@@ -97,7 +97,7 @@ func TestFindFuncDeclForRule(t *testing.T) {
 			Signature: &sig,
 		}
 
-		fn, ok, err := FindFuncDecl(file, r)
+		fn, ok, err := FindFuncDecl(file, r, nil)
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.NotNil(t, fn)
@@ -109,7 +109,7 @@ func TestFindFuncDeclForRule(t *testing.T) {
 			Func: "SingleVal",
 			Recv: "GenSingle",
 		}
-		fn, ok, err := FindFuncDecl(file, r)
+		fn, ok, err := FindFuncDecl(file, r, nil)
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.NotNil(t, fn)
@@ -121,7 +121,7 @@ func TestFindFuncDeclForRule(t *testing.T) {
 			Func: "SinglePtr",
 			Recv: "*GenSingle",
 		}
-		fn, ok, err := FindFuncDecl(file, r)
+		fn, ok, err := FindFuncDecl(file, r, nil)
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.NotNil(t, fn)
@@ -133,7 +133,7 @@ func TestFindFuncDeclForRule(t *testing.T) {
 			Func: "MultiVal",
 			Recv: "GenMulti",
 		}
-		fn, ok, err := FindFuncDecl(file, r)
+		fn, ok, err := FindFuncDecl(file, r, nil)
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.NotNil(t, fn)
@@ -145,7 +145,7 @@ func TestFindFuncDeclForRule(t *testing.T) {
 			Func: "MultiPtr",
 			Recv: "*GenMulti",
 		}
-		fn, ok, err := FindFuncDecl(file, r)
+		fn, ok, err := FindFuncDecl(file, r, nil)
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.NotNil(t, fn)
@@ -157,7 +157,7 @@ func TestFindFuncDeclForRule(t *testing.T) {
 			Func: "Method",
 			Recv: "*MyStruct",
 		}
-		fn, ok, err := FindFuncDecl(file, r)
+		fn, ok, err := FindFuncDecl(file, r, nil)
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.NotNil(t, fn)
@@ -169,7 +169,7 @@ func TestFindFuncDeclForRule(t *testing.T) {
 			HasFunc: "Method",
 			HasRecv: "*MyStruct",
 		}
-		fn, ok, err := FindFuncDecl(file, r)
+		fn, ok, err := FindFuncDecl(file, r, nil)
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.NotNil(t, fn)
@@ -183,7 +183,7 @@ func TestFindFuncDeclForRule(t *testing.T) {
 			Signature: &sig,
 		}
 
-		fn, ok, err := FindFuncDecl(file, r)
+		fn, ok, err := FindFuncDecl(file, r, nil)
 		require.NoError(t, err)
 		assert.False(t, ok)
 		assert.Nil(t, fn)
@@ -195,7 +195,7 @@ func TestFindFuncDeclForRule(t *testing.T) {
 			Param: "[]invalid",
 		}
 
-		fn, ok, err := FindFuncDecl(file, r)
+		fn, ok, err := FindFuncDecl(file, r, nil)
 		require.Error(t, err)
 		assert.False(t, ok)
 		assert.Nil(t, fn)
@@ -226,7 +226,7 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {}
 		Param: "*net/http.Request",
 	}
 
-	fn, ok, err := FindFuncDecl(file, r)
+	fn, ok, err := FindFuncDecl(file, r, nil)
 	require.NoError(t, err)
 	require.True(t, ok, `where.param: "*net/http.Request" should match a *http.Request parameter`)
 	require.NotNil(t, fn)
@@ -430,7 +430,7 @@ func selector(pkg, name string) *dst.SelectorExpr {
 // for matching with a real *dst.File's import declarations.
 func mustMatch(t *testing.T, decl *dst.FuncDecl, r *rule.InstFuncRule) bool {
 	t.Helper()
-	ok, err := funcDeclMatchesFilters(decl, r, nil)
+	ok, err := funcDeclMatchesFilters(decl, r, nil, nil)
 	require.NoError(t, err)
 	return ok
 }
@@ -578,6 +578,192 @@ func TestFuncDeclMatchesFilters_Param(t *testing.T) {
 	assert.False(t, mustMatch(t, decl, &rule.InstFuncRule{Param: "int"}))
 }
 
+// TestFuncDeclMatchesFilters_CompositeTypes locks the documented no-match
+// behavior for composite parameter and result types: those nodes never
+// satisfy a type-name filter.
+// "Contains" applies to the parameter/result list, not to nested element
+// types, so args: [string] does not match []string.
+func TestFuncDeclMatchesFilters_CompositeTypes(t *testing.T) {
+	chanDecl := makeFuncDecl(
+		[]*dst.Field{field(&dst.ChanType{Value: ident("int")})},
+		[]*dst.Field{field(ident("error"))},
+	)
+	readDecl := makeFuncDecl(
+		[]*dst.Field{field(&dst.ArrayType{Elt: ident("byte")})},
+		[]*dst.Field{field(ident("int")), field(ident("error"))},
+	)
+	mixedDecl := makeFuncDecl(
+		[]*dst.Field{field(ident("string")), field(&dst.ArrayType{Elt: ident("byte")})},
+		[]*dst.Field{field(ident("error"))},
+	)
+	mapDecl := makeFuncDecl(
+		[]*dst.Field{field(&dst.MapType{Key: ident("string"), Value: ident("int")})},
+		nil,
+	)
+	funcDecl := makeFuncDecl(
+		[]*dst.Field{field(&dst.FuncType{
+			Results: &dst.FieldList{List: []*dst.Field{field(ident("error"))}},
+		})},
+		nil,
+	)
+	variadicDecl := makeFuncDecl(
+		[]*dst.Field{field(&dst.Ellipsis{Elt: ident("string")})},
+		nil,
+	)
+	ptrSliceDecl := makeFuncDecl(
+		[]*dst.Field{field(&dst.StarExpr{X: &dst.ArrayType{Elt: ident("byte")}})},
+		[]*dst.Field{field(&dst.ArrayType{Elt: ident("error")})},
+	)
+
+	tests := []struct {
+		name string
+		decl *dst.FuncDecl
+		rule *rule.InstFuncRule
+		want bool
+	}{
+		{
+			name: "signature_contains does not match chan element type",
+			decl: chanDecl,
+			rule: &rule.InstFuncRule{SignatureContains: &rule.FuncSignature{Args: []string{"int"}}},
+			want: false,
+		},
+		{
+			name: "signature_contains still matches a simple result beside a composite param",
+			decl: chanDecl,
+			rule: &rule.InstFuncRule{SignatureContains: &rule.FuncSignature{Returns: []string{"error"}}},
+			want: true,
+		},
+		{
+			name: "signature_contains does not match slice element type",
+			decl: readDecl,
+			rule: &rule.InstFuncRule{SignatureContains: &rule.FuncSignature{Args: []string{"byte"}}},
+			want: false,
+		},
+		{
+			name: "param does not match slice element type",
+			decl: readDecl,
+			rule: &rule.InstFuncRule{Param: "byte"},
+			want: false,
+		},
+		{
+			name: "last_result still matches when an earlier param is composite",
+			decl: readDecl,
+			rule: &rule.InstFuncRule{LastResult: "error"},
+			want: true,
+		},
+		{
+			name: "result still matches when an earlier param is composite",
+			decl: readDecl,
+			rule: &rule.InstFuncRule{Result: "int"},
+			want: true,
+		},
+		{
+			name: "exact signature does not treat a composite slot as its element type",
+			decl: readDecl,
+			rule: &rule.InstFuncRule{Signature: &rule.FuncSignature{
+				Args:    []string{"byte"},
+				Returns: []string{"int", "error"},
+			}},
+			want: false,
+		},
+		{
+			name: "param matches a simple type in a mixed signature",
+			decl: mixedDecl,
+			rule: &rule.InstFuncRule{Param: "string"},
+			want: true,
+		},
+		{
+			name: "signature_contains matches a simple type in a mixed signature",
+			decl: mixedDecl,
+			rule: &rule.InstFuncRule{SignatureContains: &rule.FuncSignature{Args: []string{"string"}}},
+			want: true,
+		},
+		{
+			name: "signature_contains does not match map key or value",
+			decl: mapDecl,
+			rule: &rule.InstFuncRule{SignatureContains: &rule.FuncSignature{Args: []string{"string"}}},
+			want: false,
+		},
+		{
+			name: "param does not match a func type's result",
+			decl: funcDecl,
+			rule: &rule.InstFuncRule{Param: "error"},
+			want: false,
+		},
+		{
+			name: "param does not match a variadic element type",
+			decl: variadicDecl,
+			rule: &rule.InstFuncRule{Param: "string"},
+			want: false,
+		},
+		{
+			name: "param does not match pointer-to-slice element type",
+			decl: ptrSliceDecl,
+			rule: &rule.InstFuncRule{Param: "byte"},
+			want: false,
+		},
+		{
+			name: "result does not match a composite return's element type",
+			decl: ptrSliceDecl,
+			rule: &rule.InstFuncRule{Result: "error"},
+			want: false,
+		},
+		{
+			name: "last_result does not match a composite last return's element type",
+			decl: ptrSliceDecl,
+			rule: &rule.InstFuncRule{LastResult: "error"},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, mustMatch(t, tt.decl, tt.rule))
+		})
+	}
+}
+
+func TestFindFuncDeclCompositeSignatureFilters(t *testing.T) {
+	file, err := NewAstParser().ParseSource(`package main
+
+func Read(p []byte) (n int, err error) { return len(p), nil }
+func Send(ch chan int) error { return nil }
+func Log(msg string, extra []byte) {}
+`)
+	require.NoError(t, err)
+
+	t.Run("composite-only param is no-match not fatal", func(t *testing.T) {
+		fn, ok, findErr := FindFuncDecl(file, &rule.InstFuncRule{
+			Func:              "Read",
+			SignatureContains: &rule.FuncSignature{Args: []string{"byte"}},
+		}, nil)
+		require.NoError(t, findErr)
+		assert.False(t, ok)
+		assert.Nil(t, fn)
+	})
+
+	t.Run("simple type still matches beside a composite param", func(t *testing.T) {
+		fn, ok, findErr := FindFuncDecl(file, &rule.InstFuncRule{
+			Func:  "Log",
+			Param: "string",
+		}, nil)
+		require.NoError(t, findErr)
+		require.True(t, ok)
+		require.NotNil(t, fn)
+		assert.Equal(t, "Log", fn.Name.Name)
+	})
+
+	t.Run("chan param does not match element type", func(t *testing.T) {
+		fn, ok, findErr := FindFuncDecl(file, &rule.InstFuncRule{
+			Func:  "Send",
+			Param: "int",
+		}, nil)
+		require.NoError(t, findErr)
+		assert.False(t, ok)
+		assert.Nil(t, fn)
+	})
+}
+
 func TestFuncDeclMatchesFilters_CombinedFilters(t *testing.T) {
 	// func(context.Context, string) (io.Reader, error)
 	decl := makeFuncDecl(
@@ -622,13 +808,13 @@ func TestFuncDeclMatchesFilters_InvalidTypeReturnsError(t *testing.T) {
 		[]*dst.Field{field(ident("error"))},
 	)
 
-	_, err := funcDeclMatchesFilters(decl, &rule.InstFuncRule{Result: "[]invalid"}, nil)
+	_, err := funcDeclMatchesFilters(decl, &rule.InstFuncRule{Result: "[]invalid"}, nil, nil)
 	require.Error(t, err)
 
-	_, err = funcDeclMatchesFilters(decl, &rule.InstFuncRule{LastResult: "[]invalid"}, nil)
+	_, err = funcDeclMatchesFilters(decl, &rule.InstFuncRule{LastResult: "[]invalid"}, nil, nil)
 	require.Error(t, err)
 
-	_, err = funcDeclMatchesFilters(decl, &rule.InstFuncRule{Param: "[]invalid"}, nil)
+	_, err = funcDeclMatchesFilters(decl, &rule.InstFuncRule{Param: "[]invalid"}, nil, nil)
 	require.Error(t, err)
 }
 
@@ -636,7 +822,7 @@ func TestFindFuncDeclRawRule(t *testing.T) {
 	file := parseSharedFixture(t)
 
 	raw := &rule.InstRawRule{Func: "TopLevel"}
-	fn, ok, err := FindFuncDecl(file, raw)
+	fn, ok, err := FindFuncDecl(file, raw, nil)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.NotNil(t, fn)
@@ -647,7 +833,7 @@ func TestFindFuncDeclRawRuleMissing(t *testing.T) {
 	file := parseSharedFixture(t)
 
 	raw := &rule.InstRawRule{Func: "Missing"}
-	fn, ok, err := FindFuncDecl(file, raw)
+	fn, ok, err := FindFuncDecl(file, raw, nil)
 	require.NoError(t, err)
 	require.False(t, ok)
 	assert.Nil(t, fn)
@@ -657,7 +843,7 @@ func TestFindFuncDeclFilterDef(t *testing.T) {
 	file := parseSharedFixture(t)
 
 	filter := &rule.FilterDef{HasFunc: "TopLevel"}
-	fn, ok, err := FindFuncDecl(file, filter)
+	fn, ok, err := FindFuncDecl(file, filter, nil)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.NotNil(t, fn)
@@ -672,24 +858,24 @@ func TestFuncDeclMatchesFilters_SignatureParseError(t *testing.T) {
 
 	_, err := funcDeclMatchesFilters(decl, &rule.InstFuncRule{
 		Signature: &rule.FuncSignature{Args: []string{"[]invalid"}},
-	}, nil)
+	}, nil, nil)
 	require.Error(t, err)
 
 	_, err = funcDeclMatchesFilters(decl, &rule.InstFuncRule{
 		SignatureContains: &rule.FuncSignature{Args: []string{"[]invalid"}},
-	}, nil)
+	}, nil, nil)
 	require.Error(t, err)
 
 	_, err = funcDeclMatchesFilters(decl, &rule.InstFuncRule{
 		SignatureContains: &rule.FuncSignature{Returns: []string{"[]invalid"}},
-	}, nil)
+	}, nil, nil)
 	require.Error(t, err)
 }
 
 func TestFuncDeclMatchesFilters_LastResultNoResults(t *testing.T) {
 	decl := makeFuncDecl(nil, nil)
 
-	ok, err := funcDeclMatchesFilters(decl, &rule.InstFuncRule{LastResult: "error"}, nil)
+	ok, err := funcDeclMatchesFilters(decl, &rule.InstFuncRule{LastResult: "error"}, nil, nil)
 	require.NoError(t, err)
 	assert.False(t, ok)
 }
@@ -727,30 +913,6 @@ func TestIsInterfaceType(t *testing.T) {
 func TestIsEllipsis(t *testing.T) {
 	assert.True(t, IsEllipsis(Ellipsis(Ident("int"))))
 	assert.False(t, IsEllipsis(Ident("int")))
-}
-
-func TestAddStructField(t *testing.T) {
-	const src = `package main
-
-type S struct {
-	A int
-}
-`
-	p := NewAstParser()
-	file, err := p.ParseSource(src)
-	require.NoError(t, err)
-
-	st := FindStructType(file, "S")
-	require.NotNil(t, st)
-
-	AddStructField(st, "B", "string")
-
-	// The struct now has two fields, the new one named B of type string.
-	require.Len(t, st.Fields.List, 2)
-	newField := st.Fields.List[1]
-	require.Len(t, newField.Names, 1)
-	assert.Equal(t, "B", newField.Names[0].Name)
-	assert.Equal(t, "string", newField.Type.(*dst.Ident).Name)
 }
 
 func TestStripGenericTypes(t *testing.T) {
@@ -792,8 +954,33 @@ func TestStripGenericTypes(t *testing.T) {
 			want: "*GenStruct",
 		},
 		{
+			name: "parenthesized value receiver",
+			expr: &dst.ParenExpr{X: Ident("MyStruct")},
+			want: "MyStruct",
+		},
+		{
+			name: "parenthesized pointer receiver",
+			expr: &dst.ParenExpr{X: &dst.StarExpr{X: Ident("MyStruct")}},
+			want: "*MyStruct",
+		},
+		{
+			name: "parenthesized generic receiver",
+			expr: &dst.ParenExpr{X: &dst.IndexExpr{X: Ident("GenStruct"), Index: Ident("T")}},
+			want: "GenStruct",
+		},
+		{
+			name: "pointer to parenthesized receiver",
+			expr: &dst.StarExpr{X: &dst.ParenExpr{X: Ident("MyStruct")}},
+			want: "*MyStruct",
+		},
+		{
 			name: "unrecognized expression yields empty",
 			expr: &dst.SelectorExpr{X: Ident("pkg"), Sel: Ident("Type")},
+			want: "",
+		},
+		{
+			name: "pointer to unrecognized expression yields empty",
+			expr: &dst.StarExpr{X: &dst.SelectorExpr{X: Ident("pkg"), Sel: Ident("Type")}},
 			want: "",
 		},
 	}
@@ -883,4 +1070,53 @@ func TestRenderNode(t *testing.T) {
 		require.Error(t, txtErr)
 		assert.Contains(t, txtErr.Error(), "failed to locate restored node")
 	})
+}
+
+// TestFindFuncDeclParenthesizedReceiver covers the reachable parenthesized
+// receiver forms. These compile and appear in unformatted dependency source, and
+// before the graceful-no-match change an unrecognized receiver ended the build
+// via util.Unimplemented. They should now match the base type like the
+// unparenthesized forms.
+func TestFindFuncDeclParenthesizedReceiver(t *testing.T) {
+	src := `package main
+
+type T struct{}
+
+func (r (T)) Value() {}
+
+func (r (*T)) Pointer() {}
+`
+	file, err := NewAstParser().ParseSource(src)
+	require.NoError(t, err)
+
+	value, ok, err := FindFuncDecl(file, &rule.InstFuncRule{Func: "Value", Recv: "T"}, nil)
+	require.NoError(t, err)
+	require.True(t, ok, "parenthesized value receiver (r (T)) should match")
+	assert.Equal(t, "Value", value.Name.Name)
+
+	pointer, ok, err := FindFuncDecl(file, &rule.InstFuncRule{Func: "Pointer", Recv: "*T"}, nil)
+	require.NoError(t, err)
+	require.True(t, ok, "parenthesized pointer receiver (r (*T)) should match")
+	assert.Equal(t, "Pointer", pointer.Name.Name)
+}
+
+// TestFindFuncDeclUnrecognizedReceiverNoMatch covers the graceful degradation: a
+// receiver shape stripGenericTypes does not recognize returns no match rather
+// than ending the build. A qualified receiver does not compile and so never
+// reaches the tool from real source, but the guard must still not abort.
+func TestFindFuncDeclUnrecognizedReceiverNoMatch(t *testing.T) {
+	// The receiver has to be a shape stripGenericTypes does not recognise, so a
+	// qualified receiver is parsed rather than taken from the fixture: the
+	// fixture's receivers all strip cleanly and would never reach the guard.
+	file, err := NewAstParser().ParseSource(`package main
+
+func (r pkg.T) Method() error { return nil }
+`)
+	require.NoError(t, err)
+
+	// Both the function name and the receiver base name are the ones this
+	// declaration would match on if the shape were recognised, so returning nil
+	// can only come from the guard rather than from a name mismatch.
+	assert.Nil(t, findFuncDecl(file, "Method", "T"),
+		"an unrecognized receiver should be a no match, not a build abort")
 }

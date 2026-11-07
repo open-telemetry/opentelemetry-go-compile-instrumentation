@@ -124,6 +124,13 @@ jobs:
       # false failure annotations from the default "go" problem matcher.
       - name: Disable Go problem matcher
         run: echo "::remove-matcher owner=go::"
+      # macOS has GNU Make 3.81, which does not support .ONESHELL. The
+      # Makefile requires GNU Make 3.82 or later.
+      - name: Install GNU Make (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install make
+          echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
       - name: Build and test
         env:
           GOARCH: ${{ matrix.platform.arch }}
