@@ -92,12 +92,13 @@ func (ip *instrumentPhase) applyRulesCapturingDiffsWithRenderer(
 			}
 			continue
 		}
+		ignoredBefore := ip.ignoredCallSites
 		res, err := ip.applyOneRule(ctx, r, root, funcDecl, found)
 		if err != nil {
 			return result, changes, ex.Wrapf(err, "applying rule %s", r.GetName())
 		}
 		if debug {
-			ip.reportApplied(r, res.modified)
+			ip.reportApplied(r, res, ip.ignoredCallSites > ignoredBefore)
 		}
 		result.modified = result.modified || res.modified
 		if res.needsGlobals {
@@ -165,13 +166,18 @@ func (ip *instrumentPhase) findFuncRuleTarget(r rule.InstRule, root *dst.File, d
 
 // reportApplied reports the decision for a rule that was applied. A function
 // rule is reported only when it changed the file: findFuncRuleTarget already
-// reported a failed lookup.
-func (ip *instrumentPhase) reportApplied(r rule.InstRule, modified bool) {
-	if _, isFunc := r.(*rule.InstFuncRule); isFunc && !modified {
+// reported a failed lookup. ignoredSites reports that the rule skipped a
+// matching call site for //otelc:ignore.
+func (ip *instrumentPhase) reportApplied(r rule.InstRule, res ruleResult, ignoredSites bool) {
+	if _, isFunc := r.(*rule.InstFuncRule); isFunc && !res.modified {
 		return
 	}
 	reason := ""
-	if !modified {
+	switch {
+	case res.modified && !res.noJoinpoint:
+	case ignoredSites:
+		reason = "ignored"
+	default:
 		reason = "no_joinpoint"
 	}
 	ip.reportDecision(r, reason)

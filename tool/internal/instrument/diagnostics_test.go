@@ -92,3 +92,65 @@ func TestInstrumentMatchDiagnosticsImplements(t *testing.T) {
 	require.Equal(t, "signature_mismatch", row.Reason)
 	require.False(t, row.Matched)
 }
+
+func TestInstrumentMatchDiagnosticsApplicationOutcome(t *testing.T) {
+	directive := &rule.InstDirectiveRule{
+		InstBaseRule: rule.InstBaseRule{Name: "candidate"},
+		Directive:    "otelc:test",
+		Template:     `println("{{ .FuncName }}")`,
+	}
+	call := httpGetRule("traced({{ . }})")
+	call.Name = "candidate"
+	tests := []struct {
+		name    string
+		source  string
+		r       rule.InstRule
+		matched bool
+		reason  string
+	}{
+		{
+			"every call site ignored",
+			"package p\n\nimport \"net/http\"\n\nfunc Run() {\n\t//otelc:ignore\n\thttp.Get(\"x\")\n}\n",
+			call, false, "ignored",
+		},
+		{
+			"one call site ignored, one instrumented",
+			"package p\n\nimport \"net/http\"\n\nfunc Run() {\n\t//otelc:ignore\n\thttp.Get(\"x\")\n\thttp.Get(\"y\")\n}\n",
+			call, true, "",
+		},
+		{
+			"directive above a variable",
+			"package p\n\n//otelc:test\nvar x = 1\n",
+			directive, false, "no_joinpoint",
+		},
+		{
+			"directive above a function",
+			"package p\n\n//otelc:test\nfunc F() {}\n",
+			directive, true, "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+			t.Setenv(util.EnvOtelcDebug, "true")
+			ip := newTestPhase()
+			ip.parser = ast.NewAstParser()
+			root, err := ip.parser.ParseSource(tt.source)
+			require.NoError(t, err)
+			ip.compileArgs = []string{"-p", "example.com/p"}
+			ip.diagnosticSource = "source.go"
+			_, _, err = ip.applyRulesCapturingDiffs(t.Context(), []rule.InstRule{tt.r}, root)
+			require.NoError(t, err)
+
+			data, err := os.ReadFile(filepath.Join(ip.debugArtifactDir(), "source.go.matches.jsonl"))
+			require.NoError(t, err)
+			var row struct {
+				Reason  string `json:"reason"`
+				Matched bool   `json:"matched"`
+			}
+			require.NoError(t, json.Unmarshal(data, &row))
+			require.Equal(t, tt.reason, row.Reason)
+			require.Equal(t, tt.matched, row.Matched)
+		})
+	}
+}

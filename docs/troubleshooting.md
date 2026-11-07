@@ -125,15 +125,17 @@ The initial closed set of rejection codes is:
 | `struct_not_found` | The requested struct was absent. |
 | `directive_not_found` | The requested directive was absent. |
 | `declaration_not_found` | No named declaration of the requested kind existed. |
-| `ignored` | An `otelc:ignore` directive suppressed instrumentation. |
-| `no_joinpoint` | A call/literal rule made no change in this file. |
+| `ignored` | An `otelc:ignore` directive suppressed instrumentation, of the file, the function, or every matching call site. |
+| `no_joinpoint` | A call, literal, or directive rule found nothing to instrument in this file. |
 
 A rule whose target (exact, glob, list, or `$root`) does not select a package is
 never a candidate for it and produces no record, so the stream lists only rules
 that could have applied. Duplicate glob candidates are also omitted. Parse, predicate
 construction, and transformation errors remain build errors. Predicate failures
 report the whole `where` clause, including its combinators, rather than inventing
-a single failing leaf. These diagnostics do not alter `matched.json` or build IDs.
+a single failing leaf. A file rule whose added file is excluded by its build
+constraints produces no record: that is decided when the file is added, not by
+the matcher. These diagnostics do not alter `matched.json` or build IDs.
 Debug setup clears old artifacts; direct toolexec runs append. Record order across
 setup workers is unspecified. Go may reuse cached packages without running toolexec;
 use `go build -a` when you need fresh instrumentation decisions. The format is

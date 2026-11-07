@@ -110,6 +110,7 @@ func (ip *instrumentPhase) applyCallReplace(
 			return true
 		}
 		if ast.HasLeadingDirective(stmts[call], util.DirectiveIgnore) {
+			ip.ignoredCallSites++
 			ip.Debug("Skip call site due to //otelc:ignore", "rule", r.Name)
 			return true
 		}
@@ -227,6 +228,7 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 			return true
 		}
 		if ast.HasLeadingDirective(stmts[call], util.DirectiveIgnore) {
+			ip.ignoredCallSites++
 			ip.Debug("Skip call site due to //otelc:ignore", "rule", r.Name)
 			return true
 		}
