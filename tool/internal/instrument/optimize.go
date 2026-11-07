@@ -357,26 +357,36 @@ func stripTJumpLabel(tjump *tJump) {
 	ifStmt.Decs.If = nil
 }
 
+// omitUnusedContext marks tjump when no hook of its rule uses the hook
+// context, and removes building the context from the rule's trampolines.
+func (ip *instrumentPhase) omitUnusedContext(tjump *tJump) error {
+	usesContext, err := ip.ruleUsesContext(tjump.rule)
+	if err != nil {
+		return err
+	}
+	tjump.unusedContext = !usesContext
+	if !tjump.unusedContext {
+		return nil
+	}
+	for _, before := range []bool{true, false} {
+		name := makeName(tjump.rule, tjump.target, before)
+		for _, decl := range ip.target.Decls {
+			if fn, ok := decl.(*dst.FuncDecl); ok && fn.Name.Name == name {
+				omitTrampolineContext(fn, before)
+			}
+		}
+	}
+	return nil
+}
+
 func (ip *instrumentPhase) optimizeTJumps() error {
 	for _, tjump := range ip.tjumps {
 		mustTJump(tjump.ifStmt)
 		// Strip the trampoline-jump-if anchor label as no longer needed
 		stripTJumpLabel(tjump)
 
-		usesContext, err := ip.ruleUsesContext(tjump.rule)
-		if err != nil {
+		if err := ip.omitUnusedContext(tjump); err != nil {
 			return err
-		}
-		tjump.unusedContext = !usesContext
-		if tjump.unusedContext {
-			for _, before := range []bool{true, false} {
-				name := makeName(tjump.rule, tjump.target, before)
-				for _, decl := range ip.target.Decls {
-					if fn, ok := decl.(*dst.FuncDecl); ok && fn.Name.Name == name {
-						omitTrampolineContext(fn, before)
-					}
-				}
-			}
 		}
 
 		// No After hook present? Remove generated calls to After trampoline.

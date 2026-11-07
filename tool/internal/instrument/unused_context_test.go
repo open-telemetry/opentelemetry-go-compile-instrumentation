@@ -87,12 +87,18 @@ func TestRuleUsesContextChecksEveryPlatformDefinition(t *testing.T) {
 		{"one unused definition", map[string]string{"hooks.go": unused}, false},
 		{
 			"another platform uses the context",
-			map[string]string{"a_windows.go": "//go:build windows\n\n" + unused, "z_linux.go": "//go:build linux\n\n" + used},
+			map[string]string{
+				"a_windows.go": "//go:build windows\n\n" + unused,
+				"z_linux.go":   "//go:build linux\n\n" + used,
+			},
 			true,
 		},
 		{
 			"every platform leaves it unused",
-			map[string]string{"a_windows.go": "//go:build windows\n\n" + unused, "z_linux.go": "//go:build linux\n\n" + unused},
+			map[string]string{
+				"a_windows.go": "//go:build windows\n\n" + unused,
+				"z_linux.go":   "//go:build linux\n\n" + unused,
+			},
 			false,
 		},
 		{"hook not found", map[string]string{"other.go": "package hooks\n"}, true},

@@ -78,7 +78,7 @@ func omitTrampolineContext(fn *dst.FuncDecl, before bool) {
 			contextAssignment := false
 			for _, lhs := range assign.Lhs {
 				dst.Inspect(lhs, func(n dst.Node) bool {
-					if id, ok := n.(*dst.Ident); ok && id.Name == trampolineHookContextName {
+					if isHookContextIdent(n) {
 						contextAssignment = true
 					}
 					return true
@@ -93,7 +93,7 @@ func omitTrampolineContext(fn *dst.FuncDecl, before bool) {
 		}
 		dst.Inspect(stmt, func(n dst.Node) bool {
 			if call, ok := n.(*dst.CallExpr); ok && len(call.Args) > 0 {
-				if id, ok := call.Args[0].(*dst.Ident); ok && id.Name == trampolineHookContextName {
+				if isHookContextIdent(call.Args[0]) {
 					call.Args[0] = ast.Nil()
 				}
 			}
@@ -102,4 +102,10 @@ func omitTrampolineContext(fn *dst.FuncDecl, before bool) {
 		stmts = append(stmts, stmt)
 	}
 	fn.Body.List = stmts
+}
+
+// isHookContextIdent reports whether n is the trampoline's hook context variable.
+func isHookContextIdent(n dst.Node) bool {
+	id, ok := n.(*dst.Ident)
+	return ok && id.Name == trampolineHookContextName
 }
