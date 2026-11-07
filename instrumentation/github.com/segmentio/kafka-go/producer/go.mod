@@ -2,8 +2,6 @@ module go.opentelemetry.io/otelc/instrumentation/github.com/segmentio/kafka-go/p
 
 go 1.26.0
 
-replace go.opentelemetry.io/otelc/pkg => ../../../../../pkg
-
 replace go.opentelemetry.io/otelc/pkg/runtime => ../../../../../pkg/runtime
 
 replace go.opentelemetry.io/otelc/instrumentation => ../../../..
@@ -15,7 +13,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
 	go.opentelemetry.io/otelc/instrumentation v0.0.0-00010101000000-000000000000
-	go.opentelemetry.io/otelc/pkg v0.0.0-00010101000000-000000000000
+	go.opentelemetry.io/otelc/pkg v0.1.0
 	go.opentelemetry.io/otelc/pkg/runtime v0.0.0-00010101000000-000000000000
 )
 
@@ -27,7 +25,7 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.31.0 // indirect
-	github.com/klauspost/compress v1.19.1 // indirect
+	github.com/klauspost/compress v1.20.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/pierrec/lz4/v4 v4.1.21 // indirect
 	github.com/prometheus/client_golang v1.24.1 // indirect
