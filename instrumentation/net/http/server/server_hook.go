@@ -134,7 +134,7 @@ func AfterServeHTTP(ictx hook.HookContext) {
 	// ServeMux fills in r.Pattern on the same request after the span was created.
 	// A router mounted under it (mux, gin) has already named the span, or left
 	// it unnamed on a 404/405, and r.Pattern must not replace that.
-	if r, ok := ictx.GetParam(requestIndex).(*http.Request); ok && r != nil && !data.routed && span.IsRecording() {
+	if r, _ := ictx.GetParam(requestIndex).(*http.Request); r != nil && !data.routed && span.IsRecording() {
 		if route := semconv.HTTPRoute(r.Pattern); route != "" {
 			span.SetName(semconv.HTTPServerSpanName(r.Method, route))
 			span.SetAttributes(semconv.HTTPServerRoute(route))

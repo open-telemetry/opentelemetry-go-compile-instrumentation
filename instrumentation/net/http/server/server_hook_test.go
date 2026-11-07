@@ -547,11 +547,11 @@ func TestAfterServeHTTP_RoutedIgnoresServeMuxPattern(t *testing.T) {
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 
 	for _, routerName := range []string{"GET /hello/{name}", ""} {
-		initOnce = *new(sync.Once)
+		initOnce = sync.Once{}
 		sr, _ := setupTestTracer(t)
 
 		mockCtx := hooktest.NewMockHookContext()
-		BeforeServeHTTP(mockCtx, nil, httptest.NewRecorder(), httptest.NewRequest("GET", "/hello/alice", nil))
+		BeforeServeHTTP(mockCtx, nil, httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/hello/alice", nil))
 
 		req := mockCtx.GetParam(requestIndex).(*http.Request)
 		req.Pattern = "/"
