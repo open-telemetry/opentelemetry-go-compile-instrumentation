@@ -432,7 +432,13 @@ func (sp *setupPhase) matchAllDeps(
 	moduleDirs []string,
 	buildFlags []string,
 ) ([]*rule.InstRuleSet, error) {
-	matched, err := sp.matchDeps(ctx, deps, moduleDirs)
+	// Prepare rules once for both the initial and injected dependencies.
+	idx, err := sp.loadRuleIndex(ctx, moduleDirs)
+	if err != nil {
+		return nil, ex.Wrapf(err, "loading hook rules")
+	}
+
+	matched, err := sp.matchDeps(ctx, deps, idx)
 	if err != nil {
 		return nil, ex.Wrapf(err, "matching dependencies to hook rules")
 	}
@@ -446,7 +452,7 @@ func (sp *setupPhase) matchAllDeps(
 	// The hook packages the pass above selected get blank-imported into the
 	// application below, which compiles their dependencies too. The build plan
 	// never saw those, so match them now.
-	injected, err := sp.matchInjectedDeps(ctx, matched, deps, moduleDirs, buildFlags)
+	injected, err := sp.matchInjectedDeps(ctx, matched, deps, idx, buildFlags)
 	if err != nil {
 		return nil, err
 	}
