@@ -1,0 +1,9 @@
+raw_implements:
+  target: main
+  where:
+    func: handle
+  do:
+    - inject_code:
+        raw: |-
+          println("ctx:", {{ .FuncArgumentThatImplements "context.Context" }} != nil)
+          defer func() { println("err:", {{ .FuncReturnThatImplements "error" }} != nil) }()

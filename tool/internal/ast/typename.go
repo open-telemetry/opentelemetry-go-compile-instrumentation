@@ -87,9 +87,14 @@ func (t parsedTypeName) matches(node dst.Expr, imports map[string]string) bool {
 		// Only the empty interface matches "any".
 		return len(n.Methods.List) == 0 && t.importPath == "" && t.name == "any"
 
+	case *dst.ArrayType, *dst.ChanType, *dst.MapType, *dst.FuncType, *dst.Ellipsis:
+		// Composite and variadic types cannot satisfy a plain type-name filter.
+		// "Contains" applies to the parameter/result list, not to nested
+		// element types: []string is not string.
+		return false
+
 	default:
-		// Unsupported AST node types (chan, func, map, slice, array, interface
-		// literals) can never satisfy a plain type-name filter.
+		// Unrecognized type expressions are a no-match, not a fatal error.
 		return false
 	}
 }
@@ -124,6 +129,22 @@ func MatchesTypeName(node dst.Expr, typeStr string, imports map[string]string) (
 		return false, err
 	}
 	return tn.matches(node, imports), nil
+}
+
+// ParseInterfaceName splits an interface type name of the form [pkg.]Name into
+// its import path and its type name, in that order. The import path is empty
+// for a predeclared or unqualified name. A pointer type is an error.
+//
+//nolint:revive // confusing-results conflicts with nonamedreturns
+func ParseInterfaceName(name string) (string, string, error) {
+	tn, err := parseTypeName(name)
+	if err != nil {
+		return "", "", err
+	}
+	if tn.pointer {
+		return "", "", ex.Newf("%q is not an interface type", name)
+	}
+	return tn.importPath, tn.name, nil
 }
 
 // ImportAliasMap builds a map from the local identifier used to reference an

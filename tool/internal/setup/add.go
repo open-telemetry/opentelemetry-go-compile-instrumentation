@@ -6,6 +6,7 @@ package setup
 import (
 	"context"
 	"fmt"
+	"go/token"
 	"maps"
 	"os"
 	"path/filepath"
@@ -21,7 +22,8 @@ import (
 )
 
 const (
-	otelcRuntimeFile = "otelc.runtime.go"
+	otelcRuntimeFile     = "otelc.runtime.go"
+	otelcRuntimeTestFile = "otelc.runtime_test.go"
 )
 
 // runtimePackage describes the package that receives a generated
@@ -32,6 +34,15 @@ type runtimePackage struct {
 	importPath string
 	debugPath  string
 	name       string
+	// importedByHooks holds the hook packages that import this package,
+	// directly or through a chain. A generated file here cannot import them
+	// back without creating an import cycle.
+	importedByHooks map[string]bool
+	// testRuleSets holds the matched rule sets that only the test binary of
+	// this package needs.
+	testRuleSets []*rule.InstRuleSet
+	testMode     bool
+	fileTarget   bool
 }
 
 //nolint:gochecknoglobals // This is a constant
@@ -62,8 +73,17 @@ func genImportDecl(funcRules []*rule.InstFuncRule, fileRules []*rule.InstFileRul
 	return importDecls
 }
 
+// genVarDecl declares the stack helper variables for each hook package and an
+// init function that assigns them.
+//
+// The variables have no initializer, so each one is a BSS symbol. The linker
+// accepts several BSS definitions of the same symbol, so two packages of one
+// binary can both declare them. A variable with an initializer is a data
+// symbol, and two data definitions fail the link with "duplicated definition
+// of symbol".
 func genVarDecl(matched []*rule.InstFuncRule) []dst.Decl {
-	decls := make([]dst.Decl, 0, len(matched))
+	decls := make([]dst.Decl, 0, 2*len(matched)+1)
+	var assigns []dst.Stmt
 	uniquePath := map[string]bool{}
 	for i, m := range matched {
 		if _, ok := uniquePath[m.Path]; ok {
@@ -72,16 +92,40 @@ func genVarDecl(matched []*rule.InstFuncRule) []dst.Decl {
 		uniquePath[m.Path] = true
 		// First variable declaration
 		// //go:linkname _getstack%d %s.OtelGetStackImpl
-		// var _getstack%d = _otel_debug.Stack
-		value := ast.SelectorExpr(ast.Ident("_otel_debug"), "Stack")
-		getStackVar := ast.VarDecl(fmt.Sprintf("_getstack%d", i), value)
+		// var _getstack%d func() []byte
+		getStackName := fmt.Sprintf("_getstack%d", i)
+		getStackType := &dst.FuncType{
+			Params: &dst.FieldList{},
+			Results: &dst.FieldList{
+				List: []*dst.Field{{Type: ast.ArrayType(ast.Ident("byte"))}},
+			},
+		}
+		getStackVar := typedVarDecl(getStackName, getStackType)
 		getStackVar.Decs = dst.GenDeclDecorations{
 			NodeDecs: ast.LineComments(
-				fmt.Sprintf("//go:linkname _getstack%d %s.OtelGetStackImpl", i, m.Path)),
+				fmt.Sprintf("//go:linkname %s %s.OtelGetStackImpl", getStackName, m.Path)),
 		}
 		// Second variable declaration
 		// //go:linkname _printstack%d %s.OtelPrintStackImpl
-		// var _printstack%d = func (bt []byte){ _otel_log.Print(string(bt)) }
+		// var _printstack%d func([]byte)
+		printStackName := fmt.Sprintf("_printstack%d", i)
+		printStackType := &dst.FuncType{
+			Params: &dst.FieldList{
+				List: []*dst.Field{{Type: ast.ArrayType(ast.Ident("byte"))}},
+			},
+		}
+		printStackVar := typedVarDecl(printStackName, printStackType)
+		printStackVar.Decs = dst.GenDeclDecorations{
+			NodeDecs: ast.LineComments(
+				fmt.Sprintf("//go:linkname %s %s.OtelPrintStackImpl", printStackName, m.Path)),
+		}
+		decls = append(decls, getStackVar, printStackVar)
+
+		// build: _getstack%d = _otel_debug.Stack
+		assigns = append(assigns, ast.AssignStmt(
+			ast.Ident(getStackName),
+			ast.SelectorExpr(ast.Ident("_otel_debug"), "Stack"),
+		))
 		// build: string(bt)
 		stringCall := &dst.CallExpr{
 			Fun:  ast.Ident("string"),
@@ -103,14 +147,30 @@ func genVarDecl(matched []*rule.InstFuncRule) []dst.Decl {
 			},
 			Body: ast.BlockStmts(ast.ExprStmt(printCall)),
 		}
-		printStackVar := ast.VarDecl(fmt.Sprintf("_printstack%d", i), printStackFunc)
-		printStackVar.Decs = dst.GenDeclDecorations{
-			NodeDecs: ast.LineComments(
-				fmt.Sprintf("//go:linkname _printstack%d %s.OtelPrintStackImpl", i, m.Path)),
-		}
-		decls = append(decls, getStackVar, printStackVar)
+		// build: _printstack%d = func (bt []byte) { _otel_log.Print(string(bt)) }
+		assigns = append(assigns, ast.AssignStmt(ast.Ident(printStackName), printStackFunc))
 	}
-	return decls
+	if len(assigns) == 0 {
+		return decls
+	}
+	initFunc := &dst.FuncDecl{
+		Name: ast.Ident("init"),
+		Type: &dst.FuncType{Params: &dst.FieldList{}},
+		Body: ast.BlockStmts(assigns...),
+	}
+	return append(decls, initFunc)
+}
+
+func typedVarDecl(name string, typ dst.Expr) *dst.GenDecl {
+	return &dst.GenDecl{
+		Tok: token.VAR,
+		Specs: []dst.Spec{
+			&dst.ValueSpec{
+				Names: []*dst.Ident{ast.Ident(name)},
+				Type:  typ,
+			},
+		},
+	}
 }
 
 func buildOtelcRuntimeAst(decls []dst.Decl, packageName string) *dst.File {
@@ -180,69 +240,214 @@ func (sp *setupPhase) writeRuntimeDiffForDebug(
 	instrument.WriteAddedSourceDiff(dest, srcPath, header, sp.logger)
 }
 
+// addRuntimeTestDeps generates a test-only external package file that keeps
+// hooks linked without adding a cyclic import to the package under test.
+func (sp *setupPhase) addRuntimeTestDeps(
+	ctx context.Context,
+	pkg runtimePackage,
+	hookPaths []string,
+) error {
+	if len(hookPaths) == 0 {
+		return sp.removeRuntimeTestFile(ctx, pkg.dir)
+	}
+
+	if pkg.testMode && pkg.fileTarget {
+		if err := sp.removeRuntimeTestFile(ctx, pkg.dir); err != nil {
+			return err
+		}
+		return ex.Newf(
+			"cannot keep hook packages %v linked when testing named Go files in %s; use a package pattern instead",
+			hookPaths, pkg.dir,
+		)
+	}
+
+	decls := make([]dst.Decl, 0, len(hookPaths))
+	for _, hookPath := range hookPaths {
+		decls = append(decls, ast.ImportDecl(ast.IdentIgnore, hookPath))
+	}
+
+	root := buildOtelcRuntimeAst(decls, pkg.name+"_test")
+	filePath := filepath.Join(pkg.dir, otelcRuntimeTestFile)
+
+	if stateManager, found := stateManagerFromContext(ctx); found {
+		if err := stateManager.Track(filePath); err != nil {
+			return err
+		}
+	}
+
+	if err := ast.WriteFileAtomic(filePath, root); err != nil {
+		return ex.Wrapf(err, "writing otelc runtime test file %s", filePath)
+	}
+
+	keepForDebug(ctx, filePath, pkg.importPath)
+	sp.Info("Created otelc runtime test file", "path", filePath)
+	return nil
+}
+
 // removeRuntimeFile deletes the runtime file in pkgDir that an earlier setup
 // generated from rules that no longer apply. A stale runtime file keeps its old
 // imports and linkname declarations active in the build.
 func (sp *setupPhase) removeRuntimeFile(ctx context.Context, pkgDir string) error {
-	otelcRuntimeFilePath := filepath.Join(pkgDir, otelcRuntimeFile)
-	if !util.PathExists(otelcRuntimeFilePath) {
+	return sp.removeGeneratedRuntimeFile(ctx, pkgDir, otelcRuntimeFile)
+}
+
+func (sp *setupPhase) removeRuntimeTestFile(ctx context.Context, pkgDir string) error {
+	return sp.removeGeneratedRuntimeFile(ctx, pkgDir, otelcRuntimeTestFile)
+}
+
+func (sp *setupPhase) removeGeneratedRuntimeFile(
+	ctx context.Context,
+	pkgDir string,
+	fileName string,
+) error {
+	filePath := filepath.Join(pkgDir, fileName)
+	if !util.PathExists(filePath) {
 		return nil
 	}
 
-	// Track the file first so that a later revert can restore it.
+	// Track the file first so a later revert can restore it.
 	if stateManager, found := stateManagerFromContext(ctx); found {
-		if err := stateManager.Track(otelcRuntimeFilePath); err != nil {
+		if err := stateManager.Track(filePath); err != nil {
 			return err
 		}
 	}
-	if err := os.Remove(otelcRuntimeFilePath); err != nil {
-		return ex.Wrapf(err, "removing stale otelc runtime file %s", otelcRuntimeFilePath)
-	}
-	sp.Info("Removed stale otelc.runtime.go", "path", otelcRuntimeFilePath)
 
+	if err := os.Remove(filePath); err != nil {
+		return ex.Wrapf(err, "removing stale generated runtime file %s", filePath)
+	}
+
+	sp.Info("Removed stale generated runtime file", "path", filePath)
 	return nil
+}
+
+func recordSkippedHook(
+	skippedHooks map[string]bool,
+	hookPath string,
+	pkg runtimePackage,
+) {
+	if hookPath != pkg.importPath && pkg.importedByHooks[hookPath] {
+		skippedHooks[hookPath] = true
+	}
+}
+
+func collectFunctionRules(
+	matched []*rule.InstRuleSet,
+	pkg runtimePackage,
+) ([]*rule.InstFuncRule, map[string]bool) {
+	funcRules := []*rule.InstFuncRule{}
+	skippedHooks := make(map[string]bool)
+
+	for _, m := range matched {
+		for _, funcRule := range m.AllFuncRules() {
+			if skipHook(funcRule.Path, pkg) {
+				recordSkippedHook(skippedHooks, funcRule.Path, pkg)
+				continue
+			}
+			funcRules = append(funcRules, funcRule)
+		}
+	}
+
+	return funcRules, skippedHooks
+}
+
+func collectFileRules(
+	matched []*rule.InstRuleSet,
+	pkg runtimePackage,
+	skippedHooks map[string]bool,
+) []*rule.InstFileRule {
+	fileRules := []*rule.InstFileRule{}
+
+	for _, m := range matched {
+		for _, fileRule := range m.FileRules {
+			if skipHook(fileRule.Path, pkg) {
+				recordSkippedHook(skippedHooks, fileRule.Path, pkg)
+				continue
+			}
+			fileRules = append(fileRules, fileRule)
+		}
+	}
+
+	return fileRules
+}
+
+// addTestOnlyHooks adds to testHooks the hook packages of pkg.testRuleSets that
+// the runtime file of pkg does not import.
+func addTestOnlyHooks(
+	testHooks map[string]bool,
+	pkg runtimePackage,
+	funcRules []*rule.InstFuncRule,
+	fileRules []*rule.InstFileRule,
+) {
+	if len(pkg.testRuleSets) == 0 {
+		return
+	}
+	imported := make(map[string]bool, len(funcRules)+len(fileRules))
+	for _, r := range funcRules {
+		imported[r.Path] = true
+	}
+	for _, r := range fileRules {
+		imported[r.Path] = true
+	}
+	add := func(hookPath string) {
+		if hookPath != "" && hookPath != pkg.importPath && !imported[hookPath] {
+			testHooks[hookPath] = true
+		}
+	}
+	for _, m := range pkg.testRuleSets {
+		for _, r := range m.AllFuncRules() {
+			add(r.Path)
+		}
+		for _, r := range m.FileRules {
+			add(r.Path)
+		}
+	}
 }
 
 // addDeps generates and writes otelc.runtime.go with required imports and variable
 // declarations for OpenTelemetry instrumentation based on matched rules.
 //
-// Rules that keep their hook code in pkg itself are dropped, since a generated
-// file cannot import the package it belongs to. `otelc go test ./...` selects
-// such a package when the hooks live in the application module.
-func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, pkg runtimePackage) error {
-	var funcRules []*rule.InstFuncRule
-	var fileRules []*rule.InstFileRule
+// Hooks whose packages import pkg cannot be imported by pkg's generated
+// runtime file without creating an import cycle. During `otelc go test ./...`,
+// those hooks are linked through a generated external test package instead.
+// The hooks of pkg.testRuleSets go there too, because every binary that builds
+// pkg links its runtime file.
+func (sp *setupPhase) addDeps(
+	ctx context.Context,
+	matched []*rule.InstRuleSet,
+	pkg runtimePackage,
+) error {
+	funcRules, testHooks := collectFunctionRules(matched, pkg)
+	fileRules := collectFileRules(matched, pkg, testHooks)
+	addTestOnlyHooks(testHooks, pkg, funcRules, fileRules)
 
-	for _, m := range matched {
-		for _, funcRule := range m.AllFuncRules() {
-			if funcRule.Path != pkg.importPath {
-				funcRules = append(funcRules, funcRule)
-			}
-		}
-		for _, fileRule := range m.FileRules {
-			if fileRule.Path != pkg.importPath {
-				fileRules = append(fileRules, fileRule)
-			}
-		}
+	// Keep the hooks that the runtime file cannot import, and the hooks that
+	// only the test binary needs, linked into the test binary through a
+	// generated external test package.
+	hookPaths := slices.Sorted(maps.Keys(testHooks))
+	if err := sp.addRuntimeTestDeps(ctx, pkg, hookPaths); err != nil {
+		return err
 	}
+
 	if len(funcRules) == 0 && len(fileRules) == 0 {
 		return sp.removeRuntimeFile(ctx, pkg.dir)
 	}
 
-	// Add required imports
+	// Add required imports.
 	importDecls := genImportDecl(funcRules, fileRules)
-	// Generate the variable declarations that used by otel runtime
+
+	// Generate the variable declarations used by the runtime.
 	varDecls := genVarDecl(funcRules)
-	// build the ast
+
 	root := buildOtelcRuntimeAst(append(importDecls, varDecls...), pkg.name)
 	otelcRuntimeFilePath := filepath.Join(pkg.dir, otelcRuntimeFile)
-	// Track file in state manager
+
+	// Track the file in the state manager.
 	if stateManager, found := stateManagerFromContext(ctx); found {
 		if err := stateManager.Track(otelcRuntimeFilePath); err != nil {
 			return err
 		}
 	}
-	// Write the ast to file
+
 	if err := ast.WriteFileAtomic(otelcRuntimeFilePath, root); err != nil {
 		return ex.Wrapf(err, "writing otelc runtime file %s", otelcRuntimeFilePath)
 	}
@@ -254,4 +459,10 @@ func (sp *setupPhase) addDeps(ctx context.Context, matched []*rule.InstRuleSet, 
 	sp.writeRuntimeDiffForDebug(otelcRuntimeFilePath, debugPath, funcRules, fileRules)
 	sp.Info("Created otelc.runtime.go", "path", otelcRuntimeFilePath)
 	return nil
+}
+
+// skipHook reports whether the hook at hookPath must be left out of pkg's
+// runtime file to avoid an import cycle.
+func skipHook(hookPath string, pkg runtimePackage) bool {
+	return hookPath == pkg.importPath || pkg.importedByHooks[hookPath]
 }

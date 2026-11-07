@@ -5,7 +5,6 @@ go 1.26.0
 replace (
 	go.opentelemetry.io/otelc/demo/app/basic/instrumentation => ./instrumentation
 	go.opentelemetry.io/otelc/instrumentation/runtime => ../../../instrumentation/runtime
-	go.opentelemetry.io/otelc/pkg => ../../../pkg
 )
 
 require (
@@ -26,6 +25,6 @@ require (
 	go.opentelemetry.io/otel/metric v1.47.0 // indirect
 	go.opentelemetry.io/otel/sdk v1.47.0 // indirect
 	go.opentelemetry.io/otel/trace v1.47.0 // indirect
-	go.opentelemetry.io/otelc/pkg v0.0.0-00010101000000-000000000000 // indirect
+	go.opentelemetry.io/otelc/pkg v0.1.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 )

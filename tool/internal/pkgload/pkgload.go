@@ -198,11 +198,14 @@ func CollectPackageNames(pkgs []*packages.Package) map[string]string {
 	return result
 }
 
+// PackageDir returns the directory of pkg. A package with only _test.go files
+// has no GoFiles, so PackageDir falls back to the directory that go list
+// reports. Load pkg with packages.NeedFiles, or that directory is empty.
 func PackageDir(pkg *packages.Package) string {
 	if len(pkg.GoFiles) > 0 {
 		return filepath.Dir(pkg.GoFiles[0])
 	}
-	return ""
+	return pkg.Dir
 }
 
 // ResolveModule returns the module for a given package directory.
@@ -249,16 +252,15 @@ func FindModuleDirs(ctx context.Context, pkgs []*packages.Package) ([]string, er
 			continue
 		}
 
-		pkgDir := PackageDir(pkg)
-		if pkgDir == "" {
-			logger.WarnContext(ctx, "skipping package without Go files", "package", pkg.PkgPath)
-			continue
-		}
-
 		var moduleDir string
 		if pkg.Module != nil {
 			moduleDir = pkg.Module.Dir
 		} else {
+			pkgDir := PackageDir(pkg)
+			if pkgDir == "" {
+				return nil, ex.Newf("cannot find the directory of package %s", pkg.PkgPath)
+			}
+
 			modDir, err := resolveModuleDir(ctx, pkgDir)
 			if err != nil {
 				return nil, err
