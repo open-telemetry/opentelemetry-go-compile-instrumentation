@@ -984,3 +984,39 @@ func TestAddDeps_RuntimeTestDepsError(t *testing.T) {
 
 	require.ErrorContains(t, err, "use a package pattern instead")
 }
+
+// TestAddDeps_TestRuleSetsGoToRuntimeTestFile covers a package whose tests use a
+// library that the package does not. Other test binaries can import the package,
+// so the hook of that library goes only to the test file.
+func TestAddDeps_TestRuleSetsGoToRuntimeTestFile(t *testing.T) {
+	pkgPath := "example.com/app"
+	outDir := t.TempDir()
+	matched := []*rule.InstRuleSet{
+		newTestRuleSet("example.com/lib", []*rule.InstFuncRule{newTestFuncRule("example.com/libhook", "F")}, nil),
+	}
+	testRuleSets := []*rule.InstRuleSet{
+		newTestRuleSet("example.com/lib", []*rule.InstFuncRule{newTestFuncRule("example.com/libhook", "G")}, nil),
+		newTestRuleSet("example.com/testlib", []*rule.InstFuncRule{newTestFuncRule("example.com/testhook", "F")}, nil),
+		newTestRuleSet("example.com/self", []*rule.InstFuncRule{newTestFuncRule(pkgPath, "F")}, nil),
+	}
+
+	err := newTestSetupPhase().addDeps(t.Context(), matched, runtimePackage{
+		dir:          outDir,
+		importPath:   pkgPath,
+		name:         "app",
+		testRuleSets: testRuleSets,
+		testMode:     true,
+	})
+	require.NoError(t, err)
+
+	runtime, err := os.ReadFile(filepath.Join(outDir, otelcRuntimeFile))
+	require.NoError(t, err)
+	assert.Contains(t, string(runtime), `_ "example.com/libhook"`)
+	assert.NotContains(t, string(runtime), "example.com/testhook")
+
+	runtimeTest, err := os.ReadFile(filepath.Join(outDir, otelcRuntimeTestFile))
+	require.NoError(t, err)
+	assert.Contains(t, string(runtimeTest), `_ "example.com/testhook"`)
+	assert.NotContains(t, string(runtimeTest), "example.com/libhook", "the runtime file already imports it")
+	assert.NotContains(t, string(runtimeTest), `_ "`+pkgPath+`"`, "a package cannot import itself")
+}

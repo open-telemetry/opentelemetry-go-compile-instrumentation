@@ -216,9 +216,12 @@ package: ## Package the instrumentation code into binary
 		exit 1; \
 	fi
 	@trap 'rm -rf $(INST_BUNDLE_PKG_TMP) $(INST_BUNDLE_INST_TMP)' EXIT
-	@cp -r pkg $(INST_BUNDLE_PKG_TMP)
+	@mkdir -p $(INST_BUNDLE_PKG_TMP)
+	@cp -r pkg/runtime $(INST_BUNDLE_PKG_TMP)/runtime
+	@cp -r pkg/netutil $(INST_BUNDLE_PKG_TMP)/netutil
 	@cp -r instrumentation $(INST_BUNDLE_INST_TMP)
-	@(cd $(INST_BUNDLE_PKG_TMP) && go mod tidy)
+	@(cd $(INST_BUNDLE_PKG_TMP)/runtime && go mod tidy)
+	@(cd $(INST_BUNDLE_PKG_TMP)/netutil && go mod tidy)
 	@(cd $(INST_BUNDLE_INST_TMP) && go mod tidy)
 	@mkdir -p tool/data/
 	@$(MAKE) $(BUNDLE)
@@ -799,7 +802,7 @@ crosslink: $(CROSSLINK) ## Update intra-repository dependencies in all go module
 	@# Clean .otel-build directories before generating go.work to avoid parsing generated go.mod
 	@find . -type d -name ".otel-build" -exec rm -rf {} + 2>/dev/null || true
 	@echo "Updating intra-repository dependencies in all go modules" \
-		&& $(CROSSLINK) --root=$(CURDIR)
+		&& $(CROSSLINK) --root=$(CURDIR) --exclude=go.opentelemetry.io/otelc/pkg --skip=go.opentelemetry.io/otelc/pkg
 
 .PHONY: go-work
 go-work: $(CROSSLINK) ## Generate go.work file for local development
@@ -811,6 +814,7 @@ go-work: $(CROSSLINK) ## Generate go.work file for local development
 	@# (e.g. old monolithic genproto vs. split genproto/googleapis/rpc).
 	@go work edit -dropuse ./.tools
 	@go work edit -dropuse ./.github/tools
+	@go work edit -dropuse ./pkg
 	@echo "go.work file generated successfully"
 
 .PHONY: go-mod-tidy
