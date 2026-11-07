@@ -54,6 +54,7 @@ func BeforeNext(ictx hook.HookContext, c *gin.Context) {
 	} else {
 		c.Set(nextDepthKey, 1)
 	}
+	httpsemconv.MarkRouted(c.Request.Context())
 
 	route := c.FullPath()
 	if route == "" {
@@ -79,7 +80,6 @@ func BeforeNext(ictx hook.HookContext, c *gin.Context) {
 
 	span.SetName(httpsemconv.HTTPServerSpanName(c.Request.Method, route))
 	span.SetAttributes(semconv.HTTPRouteKey.String(route))
-	httpsemconv.SetServerRoute(c.Request.Context(), route)
 
 	logger.Debug("gin route resolved", "route", route)
 }

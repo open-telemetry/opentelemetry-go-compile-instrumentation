@@ -81,24 +81,20 @@ func TestAfterMatch_UpdatesSpanNameAndRoute(t *testing.T) {
 	assert.Equal(t, "/users/{id}", routeAttrs(ended)["http.route"])
 }
 
-// The net/http server hook keeps this route instead of the ServeMux pattern
-// when the router is mounted under http.ServeMux.
-func TestAfterMatch_RecordsServerRoute(t *testing.T) {
-	_, tr := setupContextTracer(t)
+// Marking the request as routed, matched or not, stops the net/http server
+// hook from naming the span from a ServeMux pattern above the router.
+func TestAfterMatch_MarksRouted(t *testing.T) {
 	r := mux.NewRouter()
 	r.HandleFunc("/users/{id}", func(http.ResponseWriter, *http.Request) {}).Methods(http.MethodGet)
 
-	for path, want := range map[string]string{"/users/42": "/users/{id}", "/does-not-exist": ""} {
-		ctx, span := tr.Start(context.Background(), "GET")
-		var route string
-		ctx = httpsemconv.ContextWithServerRoute(ctx, &route)
-
-		req := httptest.NewRequest(http.MethodGet, path, nil).WithContext(ctx)
+	for _, target := range []string{"/users/42", "/does-not-exist"} {
+		var routed bool
+		ctx := httpsemconv.ContextWithRouted(context.Background(), &routed)
+		req := httptest.NewRequest(http.MethodGet, target, nil).WithContext(ctx)
 		var match mux.RouteMatch
 		afterMatch(req, &match, r.Match(req, &match))
-		span.End()
 
-		assert.Equal(t, want, route, path)
+		assert.True(t, routed, target)
 	}
 }
 

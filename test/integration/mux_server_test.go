@@ -26,21 +26,9 @@ func TestMuxServer(t *testing.T) {
 		name       string
 		method     string
 		path       string
-		serveMux   bool
 		wantStatus int
 		assertSpan func(t *testing.T, span ptrace.Span)
 	}{
-		{
-			name:       "route under http.ServeMux is not replaced by the ServeMux pattern",
-			method:     http.MethodGet,
-			path:       "/hello/alice",
-			serveMux:   true,
-			wantStatus: http.StatusOK,
-			assertSpan: func(t *testing.T, span ptrace.Span) {
-				assert.Equal(t, "GET /hello/{name}", span.Name())
-				testutil.RequireAttribute(t, span, string(semconv.HTTPRouteKey), "/hello/{name}")
-			},
-		},
 		{
 			name:       "matched route is enriched with http.route",
 			method:     http.MethodGet,
@@ -114,32 +102,42 @@ func TestMuxServer(t *testing.T) {
 		},
 	}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			f := testutil.NewTestFixture(t)
-			port := testutil.FreePort(t)
-
-			f.Start("muxserver", fmt.Sprintf("-port=%d", port), fmt.Sprintf("-servemux=%t", tc.serveMux))
-			testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", port))
-
-			req, err := http.NewRequestWithContext(
-				t.Context(),
-				tc.method,
-				fmt.Sprintf("http://127.0.0.1:%d%s", port, tc.path),
-				nil,
-			)
-			require.NoError(t, err)
-			resp, err := http.DefaultClient.Do(req)
-			require.NoError(t, err)
-			require.NoError(t, resp.Body.Close())
-			require.Equal(t, tc.wantStatus, resp.StatusCode)
-
-			f.WaitForSpans(1)
-
-			f.RequireTraceCount(1)
-			f.RequireSpansPerTrace(1)
-			span := testutil.RequireSpan(t, f.Traces(), testutil.IsServer)
-			tc.assertSpan(t, span)
-		})
+	// Under http.ServeMux at "/", r.Pattern is "/" and must not replace the
+	// mux route, nor name the span on a mux 404/405.
+	for _, serveMux := range []bool{false, true} {
+		for _, tc := range testCases {
+			t.Run(fmt.Sprintf("servemux=%t/%s", serveMux, tc.name), func(t *testing.T) {
+				runMuxServerCase(t, serveMux, tc.method, tc.path, tc.wantStatus, tc.assertSpan)
+			})
+		}
 	}
+}
+
+func runMuxServerCase(
+	t *testing.T, serveMux bool, method, path string, wantStatus int, assertSpan func(*testing.T, ptrace.Span),
+) {
+	f := testutil.NewTestFixture(t)
+	port := testutil.FreePort(t)
+
+	f.Start("muxserver", fmt.Sprintf("-port=%d", port), fmt.Sprintf("-servemux=%t", serveMux))
+	testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", port))
+
+	req, err := http.NewRequestWithContext(
+		t.Context(),
+		method,
+		fmt.Sprintf("http://127.0.0.1:%d%s", port, path),
+		nil,
+	)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, wantStatus, resp.StatusCode)
+
+	f.WaitForSpans(1)
+
+	f.RequireTraceCount(1)
+	f.RequireSpansPerTrace(1)
+	span := testutil.RequireSpan(t, f.Traces(), testutil.IsServer)
+	assertSpan(t, span)
 }

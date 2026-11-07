@@ -432,20 +432,20 @@ func HTTPServerRoute(route string) attribute.KeyValue {
 	return defaultHTTPServer.Route(route)
 }
 
-type serverRouteKey struct{}
+type routedKey struct{}
 
-// ContextWithServerRoute returns a copy of ctx in which SetServerRoute stores
-// the route into *route.
-func ContextWithServerRoute(ctx context.Context, route *string) context.Context {
-	return context.WithValue(ctx, serverRouteKey{}, route)
+// ContextWithRouted returns a copy of ctx in which MarkRouted sets *routed.
+func ContextWithRouted(ctx context.Context, routed *bool) context.Context {
+	return context.WithValue(ctx, routedKey{}, routed)
 }
 
-// SetServerRoute records the route a router matched for the server request
-// whose context is ctx. The net/http server hook then keeps it rather than
-// the less specific pattern of a ServeMux the router is mounted under.
-func SetServerRoute(ctx context.Context, route string) {
-	if p, ok := ctx.Value(serverRouteKey{}).(*string); ok {
-		*p = route
+// MarkRouted records that a router (mux, gin) routed the server request whose
+// context is ctx, whether or not a route matched. The router names the span
+// itself, so the net/http server hook must not replace that with the less
+// specific pattern of a ServeMux the router is mounted under.
+func MarkRouted(ctx context.Context) {
+	if p, ok := ctx.Value(routedKey{}).(*bool); ok {
+		*p = true
 	}
 }
 

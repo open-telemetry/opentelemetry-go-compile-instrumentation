@@ -540,27 +540,37 @@ func TestAfterServeHTTP_DisabledAfterStart_Regression(t *testing.T) {
 	assert.Equal(t, "GET", ended[0].Name())
 }
 
-// A router mounted under http.ServeMux names the span from its own route.
-// The ServeMux pattern ("/") that is left in r.Pattern must not replace it.
-func TestAfterServeHTTP_RouterRouteWinsOverServeMuxPattern(t *testing.T) {
+// A router mounted under http.ServeMux names the span from its own route, or
+// leaves it as the method on a 404. The ServeMux pattern ("/") that is left in
+// r.Pattern must not replace either.
+func TestAfterServeHTTP_RoutedIgnoresServeMuxPattern(t *testing.T) {
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
-	initOnce = *new(sync.Once)
-	sr, _ := setupTestTracer(t)
 
-	mockCtx := hooktest.NewMockHookContext()
-	BeforeServeHTTP(mockCtx, nil, httptest.NewRecorder(), httptest.NewRequest("GET", "/hello/alice", nil))
+	for _, routerName := range []string{"GET /hello/{name}", ""} {
+		initOnce = *new(sync.Once)
+		sr, _ := setupTestTracer(t)
 
-	req := mockCtx.GetParam(requestIndex).(*http.Request)
-	req.Pattern = "/"
-	trace.SpanFromContext(req.Context()).SetName("GET /hello/{name}")
-	httpsemconv.SetServerRoute(req.Context(), "/hello/{name}")
+		mockCtx := hooktest.NewMockHookContext()
+		BeforeServeHTTP(mockCtx, nil, httptest.NewRecorder(), httptest.NewRequest("GET", "/hello/alice", nil))
 
-	AfterServeHTTP(mockCtx)
+		req := mockCtx.GetParam(requestIndex).(*http.Request)
+		req.Pattern = "/"
+		if routerName != "" {
+			trace.SpanFromContext(req.Context()).SetName(routerName)
+		}
+		httpsemconv.MarkRouted(req.Context())
 
-	require.Len(t, sr.Ended(), 1)
-	span := sr.Ended()[0]
-	assert.Equal(t, "GET /hello/{name}", span.Name())
-	assert.NotContains(t, span.Attributes(), semconv.HTTPRoute("/"))
+		AfterServeHTTP(mockCtx)
+
+		require.Len(t, sr.Ended(), 1)
+		span := sr.Ended()[0]
+		want := routerName
+		if want == "" {
+			want = "GET"
+		}
+		assert.Equal(t, want, span.Name())
+		assert.NotContains(t, span.Attributes(), semconv.HTTPRoute("/"))
+	}
 }
 
 // BenchmarkServeHTTPHooks measures the per-request overhead of the hook pair.

@@ -27,13 +27,20 @@ import (
 // ErrMethodMismatch) and must not receive http.route — same as a 404/405
 // that used mux's default handlers.
 func AfterMatch(ictx hook.HookContext, ok bool) {
-	if !enabler.Enable() || ictx == nil || !ok {
+	if !enabler.Enable() || ictx == nil {
 		return
 	}
 
 	req, _ := ictx.GetParam(1).(*http.Request)
+	if req == nil {
+		return
+	}
+	// Mux routed this request even on a 404/405, so a ServeMux pattern
+	// above it must not name the span.
+	httpsemconv.MarkRouted(req.Context())
+
 	match, _ := ictx.GetParam(2).(*mux.RouteMatch)
-	if req == nil || match == nil || match.MatchErr != nil || match.Route == nil {
+	if !ok || match == nil || match.MatchErr != nil || match.Route == nil {
 		return
 	}
 
@@ -49,6 +56,5 @@ func AfterMatch(ictx hook.HookContext, ok bool) {
 
 	span.SetName(httpsemconv.HTTPServerSpanName(req.Method, route))
 	span.SetAttributes(semconv.HTTPRoute(route))
-	httpsemconv.SetServerRoute(req.Context(), route)
 	logger.Debug("mux route resolved", "route", route)
 }
