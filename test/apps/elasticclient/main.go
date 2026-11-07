@@ -71,6 +71,35 @@ func main() {
 		_, _ = fmt.Fprintf(w, "result=%s id=%s\n", res.Result, res.Id)
 	})
 
+	mux.HandleFunc("/bulk", func(w http.ResponseWriter, r *http.Request) {
+		res, err := client.Bulk().
+			Index("orders").
+			Add(
+				elastic.NewBulkIndexRequest().Id("1").Doc(map[string]string{"name": "widget"}),
+				elastic.NewBulkIndexRequest().Id("2").Doc(map[string]string{"name": "gadget"}),
+				elastic.NewBulkDeleteRequest().Id("3"),
+			).
+			Do(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, "items=%d errors=%t\n", len(res.Items), res.Errors)
+	})
+	mux.HandleFunc("/get-missing", func(w http.ResponseWriter, r *http.Request) {
+		_, err := client.Get().
+			Index("orders").
+			Id("missing").
+			Do(r.Context())
+		if err != nil && !elastic.IsNotFound(err) {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, "found=%t\n", err == nil)
+	})
+
 	server := &http.Server{
 		Addr:    fmt.Sprintf(":%d", *frontPort),
 		Handler: mux,
