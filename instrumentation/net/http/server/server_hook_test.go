@@ -7,8 +7,10 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -90,6 +92,39 @@ func TestServeHTTPRecordsMetrics(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, active.DataPoints, 1)
 	assert.Equal(t, int64(0), active.DataPoints[0].Value)
+}
+
+func TestServeHTTPRecordsResponseSizeForServeContent(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+	initOnce = *new(sync.Once)
+	setupTestTracer(t)
+	reader := setupTestMeter(t)
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/file", nil)
+	ctx := hooktest.NewMockHookContext()
+	// net/http's own writer implements io.ReaderFrom, so http.ServeContent
+	// writes the body through the wrapper's ReadFrom fast path, not Write.
+	BeforeServeHTTP(ctx, nil, &mockReaderFrom{ResponseWriter: httptest.NewRecorder()}, req)
+	w, ok := ctx.GetParam(responseWriterIndex).(http.ResponseWriter)
+	require.True(t, ok)
+	r, ok := ctx.GetParam(requestIndex).(*http.Request)
+	require.True(t, ok)
+	http.ServeContent(w, r, "file.txt", time.Time{}, strings.NewReader("file contents"))
+	AfterServeHTTP(ctx)
+
+	var got metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &got))
+	var responseSize metricdata.Histogram[int64]
+	for _, scope := range got.ScopeMetrics {
+		for _, metric := range scope.Metrics {
+			if metric.Name == "http.server.response.body.size" {
+				responseSize, ok = metric.Data.(metricdata.Histogram[int64])
+				require.True(t, ok)
+			}
+		}
+	}
+	require.Len(t, responseSize.DataPoints, 1)
+	assert.Equal(t, int64(len("file contents")), responseSize.DataPoints[0].Sum)
 }
 
 func TestBeforeServeHTTP(t *testing.T) {

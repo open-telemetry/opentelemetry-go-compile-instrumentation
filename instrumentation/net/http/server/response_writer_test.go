@@ -630,3 +630,64 @@ type nonFlusher struct{ rec *httptest.ResponseRecorder }
 func (n nonFlusher) Header() http.Header         { return n.rec.Header() }
 func (n nonFlusher) Write(b []byte) (int, error) { return n.rec.Write(b) }
 func (n nonFlusher) WriteHeader(code int)        { n.rec.WriteHeader(code) }
+
+func TestWriterWrapper_CountsWrittenBytes(t *testing.T) {
+	tests := []struct {
+		name  string
+		inner func() http.ResponseWriter
+		write func(w *writerWrapper) error
+	}{
+		{
+			name:  "Write",
+			inner: func() http.ResponseWriter { return httptest.NewRecorder() },
+			write: func(w *writerWrapper) error {
+				_, err := w.Write([]byte("payload"))
+				return err
+			},
+		},
+		{
+			name:  "WriteString fast path",
+			inner: func() http.ResponseWriter { return httptest.NewRecorder() },
+			write: func(w *writerWrapper) error {
+				_, err := io.WriteString(w, "payload")
+				return err
+			},
+		},
+		{
+			name:  "WriteString fallback",
+			inner: func() http.ResponseWriter { return &plainResponseWriter{rec: httptest.NewRecorder()} },
+			write: func(w *writerWrapper) error {
+				_, err := io.WriteString(w, "payload")
+				return err
+			},
+		},
+		{
+			name:  "ReadFrom fast path",
+			inner: func() http.ResponseWriter { return &mockReaderFrom{ResponseWriter: httptest.NewRecorder()} },
+			write: func(w *writerWrapper) error {
+				_, err := io.Copy(w, bodyReader("payload"))
+				return err
+			},
+		},
+		{
+			// The fallback copies through wrapper.Write, so it must not be
+			// counted a second time in ReadFrom.
+			name:  "ReadFrom fallback",
+			inner: func() http.ResponseWriter { return httptest.NewRecorder() },
+			write: func(w *writerWrapper) error {
+				_, err := io.Copy(w, bodyReader("payload"))
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wrapper := &writerWrapper{ResponseWriter: tt.inner(), statusCode: http.StatusOK}
+
+			require.NoError(t, tt.write(wrapper))
+
+			assert.Equal(t, int64(len("payload")), wrapper.written)
+		})
+	}
+}

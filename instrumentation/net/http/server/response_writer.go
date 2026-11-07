@@ -22,7 +22,8 @@ var (
 	_ interface{ Unwrap() http.ResponseWriter } = (*writerWrapper)(nil)
 )
 
-// writerWrapper wraps http.ResponseWriter to capture the status code
+// writerWrapper wraps http.ResponseWriter to capture the status code and the
+// number of response body bytes written.
 type writerWrapper struct {
 	http.ResponseWriter
 	statusCode  int
@@ -79,11 +80,14 @@ func (w *writerWrapper) ReadFrom(src io.Reader) (int64, error) {
 	}
 
 	if rf, ok := w.ResponseWriter.(io.ReaderFrom); ok {
-		return rf.ReadFrom(src)
+		n, err := rf.ReadFrom(src)
+		w.written += n
+		return n, err
 	}
 
 	// The underlying writer has no fast path, so fall back to a plain copy
-	// through Write. writeOnly keeps io.Copy from picking this method up again.
+	// through Write, which counts the bytes. writeOnly keeps io.Copy from
+	// picking this method up again.
 	return io.Copy(writeOnly{w}, src)
 }
 
@@ -101,11 +105,15 @@ func (w *writerWrapper) WriteString(s string) (int, error) {
 	}
 
 	if sw, ok := w.ResponseWriter.(io.StringWriter); ok {
-		return sw.WriteString(s)
+		n, err := sw.WriteString(s)
+		w.written += int64(n)
+		return n, err
 	}
 
 	// The underlying writer has no fast path, so fall back to a plain Write.
-	return w.ResponseWriter.Write([]byte(s))
+	n, err := w.ResponseWriter.Write([]byte(s))
+	w.written += int64(n)
+	return n, err
 }
 
 // Hijack implements the http.Hijacker interface
