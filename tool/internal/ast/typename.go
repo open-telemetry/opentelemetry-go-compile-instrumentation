@@ -87,9 +87,14 @@ func (t parsedTypeName) matches(node dst.Expr, imports map[string]string) bool {
 		// Only the empty interface matches "any".
 		return len(n.Methods.List) == 0 && t.importPath == "" && t.name == "any"
 
+	case *dst.ArrayType, *dst.ChanType, *dst.MapType, *dst.FuncType, *dst.Ellipsis:
+		// Composite and variadic types cannot satisfy a plain type-name filter.
+		// "Contains" applies to the parameter/result list, not to nested
+		// element types: []string is not string.
+		return false
+
 	default:
-		// Unsupported AST node types (chan, func, map, slice, array, interface
-		// literals) can never satisfy a plain type-name filter.
+		// Unrecognized type expressions are a no-match, not a fatal error.
 		return false
 	}
 }
