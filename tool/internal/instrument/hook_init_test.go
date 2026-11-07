@@ -17,6 +17,7 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 func TestGuardHookFunctions(t *testing.T) {
@@ -91,6 +92,35 @@ func TestGuardHookInitializers(t *testing.T) {
 	untouched := &instrumentPhase{compileArgs: []string{"compile", "-p", "unrelated", file}}
 	require.NoError(t, untouched.guardHookInitializers(t.Context(), []*rule.InstRuleSet{set}))
 	require.Equal(t, []string{"compile", "-p", "unrelated", file}, untouched.compileArgs)
+}
+
+func TestGuardHookInitializersKeepsRuleDiff(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	t.Setenv(util.EnvOtelcDebug, "true")
+	work := t.TempDir()
+	// A rule already instrumented this hook file into the work directory.
+	file := filepath.Join(work, "hooks.go")
+	require.NoError(t, os.WriteFile(file, []byte("package hooks; func Before() {}"), 0o600))
+	ip := &instrumentPhase{
+		logger:      slog.New(slog.DiscardHandler),
+		workDir:     work,
+		compileArgs: []string{"compile", "-p", "hooks", file},
+	}
+	diff := filepath.Join(ip.debugArtifactDir(), "hooks.go.diff")
+	require.NoError(t, os.MkdirAll(filepath.Dir(diff), 0o755))
+	require.NoError(t, os.WriteFile(diff, []byte("diff of the rule\n"), 0o600))
+
+	set := rule.NewInstRuleSet("target")
+	set.FuncRules["target.go"] = []*rule.InstFuncRule{{Path: "hooks", Before: "Before"}}
+	require.NoError(t, ip.guardHookInitializers(t.Context(), []*rule.InstRuleSet{set}))
+
+	require.Equal(t, file, ip.compileArgs[3])
+	rewritten, err := os.ReadFile(file)
+	require.NoError(t, err)
+	require.Contains(t, string(rewritten), "if !otelcHookReady()")
+	kept, err := os.ReadFile(diff)
+	require.NoError(t, err)
+	require.Equal(t, "diff of the rule\n", string(kept))
 }
 
 func TestHookReadinessPublication(t *testing.T) {

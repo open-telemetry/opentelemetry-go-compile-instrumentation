@@ -49,7 +49,7 @@ func (ip *instrumentPhase) guardHookInitializers(ctx context.Context, sets []*ru
 		if absErr != nil {
 			return ex.Wrap(absErr)
 		}
-		if err = ip.writeInstrumented(root, abs, nil); err != nil {
+		if err = ip.writeGuardedHookFile(root, abs); err != nil {
 			return err
 		}
 	}
@@ -63,6 +63,25 @@ func (ip *instrumentPhase) guardHookInitializers(ctx context.Context, sets []*ru
 	ip.addCompileArg(path)
 	ip.keepForDebug(path)
 	return ip.updateImportConfig(ctx, map[string]string{"atomic": "sync/atomic"})
+}
+
+// writeGuardedHookFile writes the guarded AST of file. A file that a rule
+// already instrumented is in the work directory and is rewritten in place:
+// writeInstrumented would compare it with itself and remove the diff of
+// those rules. The guard then shows only in the kept copy of the file.
+func (ip *instrumentPhase) writeGuardedHookFile(root *dst.File, file string) error {
+	workDir, err := filepath.Abs(ip.workDir)
+	if err != nil {
+		return ex.Wrap(err)
+	}
+	if filepath.Dir(file) != workDir {
+		return ip.writeInstrumented(root, file, nil)
+	}
+	if err = ast.WriteFile(file, root); err != nil {
+		return ex.Wrapf(err, "writing guarded hook file %s", file)
+	}
+	ip.keepForDebug(file)
+	return nil
 }
 
 func hookNamesForPackage(sets []*rule.InstRuleSet, pkg string) map[string]bool {
