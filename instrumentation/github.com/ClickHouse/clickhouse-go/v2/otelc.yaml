@@ -1,0 +1,131 @@
+version: "v1.0.0"
+
+# clickhouse.Open returns a native driver.Conn that does not go through
+# database/sql, so the database/sql rules do not see it. These rules trace the
+# methods of that conn (the unexported *clickhouse type) and the Send of the
+# batches it prepares. clickhouse.OpenDB keeps using the database/sql
+# instrumentation: it does not call these methods, and its batches are not
+# marked by the PrepareBatch hook, so their Send is not traced twice.
+#
+# The hooked signatures and the fields accessors.go reads are the same from
+# v2.13.0 on. The bound is v2.32.0, the first release that builds against the
+# current github.com/ClickHouse/ch-go, so the version matrix can test it.
+
+clickhouse_accessors:
+  target: github.com/ClickHouse/clickhouse-go/v2
+  version: v2.32.0
+  do:
+    - add_file:
+        file: accessors.go
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/ClickHouse/clickhouse-go/v2"
+
+clickhouse_query:
+  target: github.com/ClickHouse/clickhouse-go/v2
+  version: v2.32.0
+  where:
+    func: Query
+    recv: "*clickhouse"
+  do:
+    - inject_hooks:
+        before: BeforeQuery
+        after: AfterQuery
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/ClickHouse/clickhouse-go/v2"
+
+clickhouse_query_row:
+  target: github.com/ClickHouse/clickhouse-go/v2
+  version: v2.32.0
+  where:
+    func: QueryRow
+    recv: "*clickhouse"
+  do:
+    - inject_hooks:
+        before: BeforeQueryRow
+        after: AfterQueryRow
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/ClickHouse/clickhouse-go/v2"
+
+# Select calls Query in recent releases; the Select span covers the whole call
+# and the nested Query is not traced again.
+clickhouse_select:
+  target: github.com/ClickHouse/clickhouse-go/v2
+  version: v2.32.0
+  where:
+    func: Select
+    recv: "*clickhouse"
+  do:
+    - inject_hooks:
+        before: BeforeSelect
+        after: AfterSelect
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/ClickHouse/clickhouse-go/v2"
+
+clickhouse_exec:
+  target: github.com/ClickHouse/clickhouse-go/v2
+  version: v2.32.0
+  where:
+    func: Exec
+    recv: "*clickhouse"
+  do:
+    - inject_hooks:
+        before: BeforeExec
+        after: AfterExec
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/ClickHouse/clickhouse-go/v2"
+
+clickhouse_async_insert:
+  target: github.com/ClickHouse/clickhouse-go/v2
+  version: v2.32.0
+  where:
+    func: AsyncInsert
+    recv: "*clickhouse"
+  do:
+    - inject_hooks:
+        before: BeforeAsyncInsert
+        after: AfterAsyncInsert
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/ClickHouse/clickhouse-go/v2"
+
+clickhouse_ping:
+  target: github.com/ClickHouse/clickhouse-go/v2
+  version: v2.32.0
+  where:
+    func: Ping
+    recv: "*clickhouse"
+  do:
+    - inject_hooks:
+        before: BeforePing
+        after: AfterPing
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/ClickHouse/clickhouse-go/v2"
+
+clickhouse_prepare_batch:
+  target: github.com/ClickHouse/clickhouse-go/v2
+  version: v2.32.0
+  where:
+    func: PrepareBatch
+    recv: "*clickhouse"
+  do:
+    - inject_hooks:
+        before: BeforePrepareBatch
+        after: AfterPrepareBatch
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/ClickHouse/clickhouse-go/v2"
+
+# A batch gets one span when it is sent, not one per appended row.
+clickhouse_batch_send:
+  target: github.com/ClickHouse/clickhouse-go/v2
+  version: v2.32.0
+  where:
+    func: Send
+    recv: "*batch"
+  do:
+    - inject_hooks:
+        before: BeforeBatchSend
+        after: AfterBatchSend
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/ClickHouse/clickhouse-go/v2"
+
+clickhouse_http_batch_send:
+  target: github.com/ClickHouse/clickhouse-go/v2
+  version: v2.32.0
+  where:
+    func: Send
+    recv: "*httpBatch"
+  do:
+    - inject_hooks:
+        before: BeforeBatchSend
+        after: AfterBatchSend
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/ClickHouse/clickhouse-go/v2"

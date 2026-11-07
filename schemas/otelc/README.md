@@ -21,6 +21,7 @@ schemas/otelc/
 │   ├── anthropic.yaml       # anthropics/anthropic-sdk-go GenAI client spans
 │   ├── mongo.yaml           # go.mongodb.org/mongo-driver client spans
 │   ├── elasticsearch.yaml   # olivere/elastic (v7) client spans
+│   ├── clickhouse.yaml      # ClickHouse/clickhouse-go (v2) native API client spans
 │   ├── gin.yaml             # gin-gonic/gin server-span enrichment
 │   ├── fiber.yaml           # gofiber/fiber (v2) server spans
 │   ├── echo.yaml            # labstack/echo/v4 server-span enrichment
@@ -60,6 +61,7 @@ signals an undeclared instrumentation.
 | `go.mongodb.org/mongo-driver/mongo`                 | `mongo.yaml`        | DB client spans                                                        |
 | `go.mongodb.org/mongo-driver/v2/mongo`              | `mongo.yaml`        | DB client spans                                                        |
 | `github.com/olivere/elastic/v7`                     | `elasticsearch.yaml` | DB client spans                                                        |
+| `github.com/ClickHouse/clickhouse-go/v2`            | `clickhouse.yaml`   | DB client spans (native API)                                           |
 | `github.com/gin-gonic/gin`                          | `gin.yaml`          | `http.route` on the enclosing `net/http` server span                   |
 | `github.com/gofiber/fiber/v2`                       | `fiber.yaml`        | HTTP server spans                                                      |
 | `github.com/labstack/echo/v4`                       | `echo.yaml`         | `http.route` on the enclosing `net/http` server span                   |

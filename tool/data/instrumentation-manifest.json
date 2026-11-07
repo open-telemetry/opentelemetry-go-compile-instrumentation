@@ -4,6 +4,11 @@
     "target": "database/sql"
   },
   {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/ClickHouse/clickhouse-go/v2",
+    "target": "github.com/ClickHouse/clickhouse-go/v2",
+    "versionRange": "v2.32.0"
+  },
+  {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/anthropics/anthropic-sdk-go",
     "target": "github.com/anthropics/anthropic-sdk-go",
     "versionRange": "v1.0.0"

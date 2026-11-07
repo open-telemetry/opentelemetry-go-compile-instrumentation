@@ -1,0 +1,35 @@
+groups:
+  # ---------------------------------------------------------------------------
+  # ClickHouse/clickhouse-go (v2) native API instrumentation emission contract.
+  #
+  # Source of truth for this file:
+  #   instrumentation/github.com/ClickHouse/clickhouse-go/v2/hook.go            (span lifecycle)
+  #   instrumentation/github.com/ClickHouse/clickhouse-go/v2/semconv/client.go  (ClientTraceAttrs, ErrorAttrs)
+  #
+  # The instrumentation is trace-only: it creates one client span per call on a
+  # native driver.Conn (Query, QueryRow, Select, Exec, AsyncInsert, Ping,
+  # PrepareBatch) and one per Send of a batch prepared on it, never one per
+  # appended row, and records no metrics. Connections opened through
+  # database/sql (clickhouse.OpenDB) are covered by database-sql.yaml instead.
+  # Every attribute is standard upstream OpenTelemetry database telemetry,
+  # referenced with `ref:`. `db.system.name` is always `clickhouse`.
+  # `db.query.text` is absent on PING. `db.namespace` is emitted when the conn
+  # names a database, `server.address` and `server.port` when it has a single
+  # address, and `db.response.status_code` when the server returned an
+  # exception.
+  # ---------------------------------------------------------------------------
+
+  - id: span.otelc.db.clickhouse.client
+    type: span
+    span_kind: client
+    stability: development
+    brief: clickhouse-go client span, one per native API call or batch Send.
+    attributes:
+      - ref: db.system.name
+      - ref: db.operation.name
+      - ref: db.namespace
+      - ref: db.query.text
+      - ref: db.response.status_code
+      - ref: error.type
+      - ref: server.address
+      - ref: server.port
