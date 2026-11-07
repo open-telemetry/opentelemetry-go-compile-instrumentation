@@ -396,11 +396,12 @@ func TestHashPackages(t *testing.T) {
 		return b.String()
 	}
 
-	// A versioned module is identified by its version, so its files are not read.
+	// A versioned module in the module cache is identified by its version, so its files are not read.
+	modCache := t.TempDir()
 	versioned := &packages.Package{
 		PkgPath: "example.com/v/p",
-		Module:  &packages.Module{Path: "example.com/v", Version: "v1.2.3"},
-		GoFiles: []string{filepath.Join(t.TempDir(), "missing.go")},
+		Module:  &packages.Module{Path: "example.com/v", Version: "v1.2.3", Dir: modCache},
+		GoFiles: []string{filepath.Join(modCache, "missing.go")},
 	}
 	assert.Equal(t, "example.com/v/p example.com/v@v1.2.3\n", hashOf(versioned))
 
@@ -408,10 +409,25 @@ func TestHashPackages(t *testing.T) {
 		PkgPath: "example.com/v/p",
 		Module: &packages.Module{
 			Path: "example.com/v", Version: "v1.2.3",
-			Replace: &packages.Module{Path: "example.com/fork", Version: "v1.2.4"},
+			Replace: &packages.Module{Path: "example.com/fork", Version: "v1.2.4", Dir: modCache},
 		},
 	}
 	assert.Equal(t, "example.com/v/p example.com/fork@v1.2.4\n", hashOf(replaced))
+
+	// Under -mod=vendor the version comes from vendor/modules.txt but Dir is empty,
+	// and the vendored files can change without a version bump.
+	vendorFile := filepath.Join(t.TempDir(), "vendor", "example.com", "v", "p", "p.go")
+	require.NoError(t, os.MkdirAll(filepath.Dir(vendorFile), 0o755))
+	require.NoError(t, os.WriteFile(vendorFile, []byte("package p\n"), 0o644))
+	vendored := &packages.Package{
+		PkgPath: "example.com/v/p",
+		Module:  &packages.Module{Path: "example.com/v", Version: "v1.2.3"},
+		GoFiles: []string{vendorFile},
+	}
+	vendoredBefore := hashOf(vendored)
+	assert.Contains(t, vendoredBefore, vendorFile)
+	require.NoError(t, os.WriteFile(vendorFile, []byte("package p\n\nconst X = 1\n"), 0o644))
+	assert.NotEqual(t, vendoredBefore, hashOf(vendored))
 
 	// The standard library is covered by the toolchain version, so its files are not read.
 	std := &packages.Package{PkgPath: "fmt", GoFiles: []string{filepath.Join(goroot, "src", "fmt", "missing.go")}}
