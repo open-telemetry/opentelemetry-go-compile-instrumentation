@@ -1954,8 +1954,11 @@ func TestExtractBuildFlags_DashPrefixedValue(t *testing.T) {
 }
 
 func TestAbsChangeDir(t *testing.T) {
-	wd := t.TempDir()
-	t.Chdir(wd)
+	t.Chdir(t.TempDir())
+	// filepath.Abs builds on os.Getwd, which can spell the directory
+	// differently from t.TempDir: a Windows short name such as RUNNER~1.
+	wd, wdErr := os.Getwd()
+	require.NoError(t, wdErr)
 	app := filepath.Join(wd, "app")
 	tests := []struct {
 		name       string
@@ -1999,7 +2002,8 @@ func TestAbsChangeDir(t *testing.T) {
 		// The toolexec processes load packages with the forwarded flags, in
 		// a working directory other than the one go build -C ran in.
 		require.NoError(t, os.MkdirAll(app, 0o755))
-		require.NoError(t, os.WriteFile(filepath.Join(app, "go.mod"), []byte("module example.com/app\n\ngo 1.26\n"), 0o644))
+		goMod := []byte("module example.com/app\n\ngo 1.26\n")
+		require.NoError(t, os.WriteFile(filepath.Join(app, "go.mod"), goMod, 0o644))
 		args, err := absChangeDir(subcmdBuild, []string{"-C", "app", "."})
 		require.NoError(t, err)
 		flags := extractBuildFlags(subcmdBuild, args)
