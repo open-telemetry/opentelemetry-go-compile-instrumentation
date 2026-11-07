@@ -304,10 +304,11 @@ func appendRuleImports[T interface{ Base() *rule.InstBaseRule }](
 }
 
 // hashPackages writes pkgs and their dependencies to w in import path order.
-// A package from a versioned module is written as its module version, since
-// the module cache never changes under a version. Any other package, from the
-// main module, a local replace, GOPATH or a vendor directory, is written as
-// the content of its files. A standard library package, one with no module
+// A package from a versioned module in the module cache is written as its
+// module version, since the module cache never changes under a version. Any
+// other package, from the main module, a local replace, GOPATH or a vendor
+// directory (which has a version from vendor/modules.txt but no module Dir),
+// is written as the content of its files. A standard library package, one with no module
 // whose files all lie under goroot/src, is skipped: the toolchain version in
 // the tool ID covers it.
 func hashPackages(w io.Writer, goroot string, pkgs []*packages.Package) error {
@@ -323,7 +324,7 @@ func hashPackages(w io.Writer, goroot string, pkgs []*packages.Package) error {
 			if mod.Replace != nil {
 				mod = mod.Replace
 			}
-			if mod.Version != "" {
+			if mod.Version != "" && mod.Dir != "" {
 				_, _ = fmt.Fprintf(w, "%s %s@%s\n", pkg.PkgPath, mod.Path, mod.Version)
 				continue
 			}
