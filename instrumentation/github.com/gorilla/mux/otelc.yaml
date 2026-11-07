@@ -6,7 +6,7 @@ version: "v1.0.0"
 # NotFoundHandler / MethodNotAllowedHandler (Match still returns true).
 mux_router_match_hook:
   target: github.com/gorilla/mux
-  version: v1.8.1
+  version: v1.8.0
   where:
     func: Match
     recv: "*Router"

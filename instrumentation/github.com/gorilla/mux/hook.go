@@ -49,5 +49,6 @@ func AfterMatch(ictx hook.HookContext, ok bool) {
 
 	span.SetName(httpsemconv.HTTPServerSpanName(req.Method, route))
 	span.SetAttributes(semconv.HTTPRoute(route))
+	httpsemconv.SetServerRoute(req.Context(), route)
 	logger.Debug("mux route resolved", "route", route)
 }

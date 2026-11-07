@@ -14,7 +14,10 @@ import (
 	"github.com/gorilla/mux"
 )
 
-var port = flag.String("port", "8080", "port to listen on")
+var (
+	port     = flag.String("port", "8080", "port to listen on")
+	serveMux = flag.Bool("servemux", false, `mount the router under an http.ServeMux at "/"`)
+)
 
 func main() {
 	flag.Parse()
@@ -53,9 +56,16 @@ func main() {
 		})
 	}).Methods(http.MethodGet)
 
+	var handler http.Handler = r
+	if *serveMux {
+		sm := http.NewServeMux()
+		sm.Handle("/", r)
+		handler = sm
+	}
+
 	srv := &http.Server{
 		Addr:    ":" + *port,
-		Handler: r,
+		Handler: handler,
 	}
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("server error: %v", err)

@@ -18,6 +18,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 
+	httpsemconv "go.opentelemetry.io/otelc/instrumentation/net/http/semconv"
 	"go.opentelemetry.io/otelc/pkg/hook/hooktest"
 )
 
@@ -78,6 +79,27 @@ func TestAfterMatch_UpdatesSpanNameAndRoute(t *testing.T) {
 	ended := sr.Ended()[0]
 	assert.Equal(t, "GET /users/{id}", ended.Name())
 	assert.Equal(t, "/users/{id}", routeAttrs(ended)["http.route"])
+}
+
+// The net/http server hook keeps this route instead of the ServeMux pattern
+// when the router is mounted under http.ServeMux.
+func TestAfterMatch_RecordsServerRoute(t *testing.T) {
+	_, tr := setupContextTracer(t)
+	r := mux.NewRouter()
+	r.HandleFunc("/users/{id}", func(http.ResponseWriter, *http.Request) {}).Methods(http.MethodGet)
+
+	for path, want := range map[string]string{"/users/42": "/users/{id}", "/does-not-exist": ""} {
+		ctx, span := tr.Start(context.Background(), "GET")
+		var route string
+		ctx = httpsemconv.ContextWithServerRoute(ctx, &route)
+
+		req := httptest.NewRequest(http.MethodGet, path, nil).WithContext(ctx)
+		var match mux.RouteMatch
+		afterMatch(req, &match, r.Match(req, &match))
+		span.End()
+
+		assert.Equal(t, want, route, path)
+	}
 }
 
 func TestAfterMatch_SubrouterUsesFullPathTemplate(t *testing.T) {

@@ -79,6 +79,7 @@ func BeforeNext(ictx hook.HookContext, c *gin.Context) {
 
 	span.SetName(httpsemconv.HTTPServerSpanName(c.Request.Method, route))
 	span.SetAttributes(semconv.HTTPRouteKey.String(route))
+	httpsemconv.SetServerRoute(c.Request.Context(), route)
 
 	logger.Debug("gin route resolved", "route", route)
 }

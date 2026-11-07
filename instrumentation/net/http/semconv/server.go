@@ -432,6 +432,23 @@ func HTTPServerRoute(route string) attribute.KeyValue {
 	return defaultHTTPServer.Route(route)
 }
 
+type serverRouteKey struct{}
+
+// ContextWithServerRoute returns a copy of ctx in which SetServerRoute stores
+// the route into *route.
+func ContextWithServerRoute(ctx context.Context, route *string) context.Context {
+	return context.WithValue(ctx, serverRouteKey{}, route)
+}
+
+// SetServerRoute records the route a router matched for the server request
+// whose context is ctx. The net/http server hook then keeps it rather than
+// the less specific pattern of a ServeMux the router is mounted under.
+func SetServerRoute(ctx context.Context, route string) {
+	if p, ok := ctx.Value(serverRouteKey{}).(*string); ok {
+		*p = route
+	}
+}
+
 // HTTPServerSpanName returns the span name for an HTTP server request.
 // Unknown methods use "HTTP" so names stay low-cardinality and match semconv.
 func HTTPServerSpanName(method, route string) string {

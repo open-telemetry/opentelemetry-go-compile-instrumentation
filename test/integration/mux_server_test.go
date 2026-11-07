@@ -26,9 +26,21 @@ func TestMuxServer(t *testing.T) {
 		name       string
 		method     string
 		path       string
+		serveMux   bool
 		wantStatus int
 		assertSpan func(t *testing.T, span ptrace.Span)
 	}{
+		{
+			name:       "route under http.ServeMux is not replaced by the ServeMux pattern",
+			method:     http.MethodGet,
+			path:       "/hello/alice",
+			serveMux:   true,
+			wantStatus: http.StatusOK,
+			assertSpan: func(t *testing.T, span ptrace.Span) {
+				assert.Equal(t, "GET /hello/{name}", span.Name())
+				testutil.RequireAttribute(t, span, string(semconv.HTTPRouteKey), "/hello/{name}")
+			},
+		},
 		{
 			name:       "matched route is enriched with http.route",
 			method:     http.MethodGet,
@@ -107,7 +119,7 @@ func TestMuxServer(t *testing.T) {
 			f := testutil.NewTestFixture(t)
 			port := testutil.FreePort(t)
 
-			f.Start("muxserver", fmt.Sprintf("-port=%d", port))
+			f.Start("muxserver", fmt.Sprintf("-port=%d", port), fmt.Sprintf("-servemux=%t", tc.serveMux))
 			testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", port))
 
 			req, err := http.NewRequestWithContext(
