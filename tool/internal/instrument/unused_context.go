@@ -33,16 +33,36 @@ func hookUsesContext(hook *dst.FuncDecl) bool {
 	return used
 }
 
+// ruleUsesContext reports whether a hook of r may use its context. A hook
+// package can define a hook once per platform, in files with build
+// constraints, and which of them is built is not known here. So every
+// definition counts: the context is omitted only when none uses it.
 func (ip *instrumentPhase) ruleUsesContext(r *rule.InstFuncRule) (bool, error) {
+	files, err := hookPackageFiles(r)
+	if err != nil {
+		return true, err
+	}
 	for _, before := range []bool{true, false} {
-		if getHookFuncName(r, before) == "" {
+		name := getHookFuncName(r, before)
+		if name == "" {
 			continue
 		}
-		hook, err := ip.getHookFunc(r, before)
-		if err != nil {
-			return true, err
+		found := false
+		for _, file := range files {
+			root, parseErr := ip.parseHookFileCached(file)
+			if parseErr != nil {
+				return true, parseErr
+			}
+			hook := ast.FindFuncDeclWithoutRecv(root, name)
+			if hook == nil {
+				continue
+			}
+			found = true
+			if hookUsesContext(hook) {
+				return true, nil
+			}
 		}
-		if hookUsesContext(hook) {
+		if !found {
 			return true, nil
 		}
 	}

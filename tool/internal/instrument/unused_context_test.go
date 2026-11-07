@@ -4,9 +4,14 @@
 package instrument
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
 func TestHookUsesContext(t *testing.T) {
@@ -67,4 +72,42 @@ func TestOmitTrampolineContext(t *testing.T) {
  if enabled { hook(nil, *result) }
  }`)
 	assert.Equal(t, expectedAfter.Body, after.Body)
+}
+
+func TestRuleUsesContextChecksEveryPlatformDefinition(t *testing.T) {
+	const unused = "package hooks\n\nimport \"go.opentelemetry.io/otelc/pkg/hook\"\n\n" +
+		"func Before(ctx hook.HookContext, x int) {}\n"
+	const used = "package hooks\n\nimport \"go.opentelemetry.io/otelc/pkg/hook\"\n\n" +
+		"func Before(ctx hook.HookContext, x int) { ctx.SetParam(0, x+1) }\n"
+	tests := []struct {
+		name  string
+		files map[string]string
+		want  bool
+	}{
+		{"one unused definition", map[string]string{"hooks.go": unused}, false},
+		{
+			"another platform uses the context",
+			map[string]string{"a_windows.go": "//go:build windows\n\n" + unused, "z_linux.go": "//go:build linux\n\n" + used},
+			true,
+		},
+		{
+			"every platform leaves it unused",
+			map[string]string{"a_windows.go": "//go:build windows\n\n" + unused, "z_linux.go": "//go:build linux\n\n" + unused},
+			false,
+		},
+		{"hook not found", map[string]string{"other.go": "package hooks\n"}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for name, src := range tt.files {
+				require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(src), 0o600))
+			}
+			ip := newTestPhase()
+			r := &rule.InstFuncRule{Before: "Before", Path: "example.com/hooks", ResolvedPath: dir}
+			got, err := ip.ruleUsesContext(r)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }
