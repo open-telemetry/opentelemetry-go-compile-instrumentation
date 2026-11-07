@@ -43,6 +43,29 @@ func TestApplyStructRule_NonStructType_ReturnsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "not a struct type")
 }
 
+func TestApplyStructRule_CollidesWithExistingField_ReturnsError(t *testing.T) {
+	// A new_field entry that duplicates a field already declared on the target
+	// struct must be rejected here, not silently appended into invalid Go that
+	// only fails later at `go build`.
+	target := &dst.StructType{Fields: &dst.FieldList{
+		List: []*dst.Field{
+			{Names: []*dst.Ident{{Name: "Existing"}}, Type: &dst.Ident{Name: "string"}},
+		},
+	}}
+	file := typeDeclFile(&dst.TypeSpec{Name: &dst.Ident{Name: "Target"}, Type: target})
+	r := &rule.InstStructRule{
+		InstBaseRule: rule.InstBaseRule{Name: "add_field"},
+		Struct:       "Target",
+		NewField:     []*rule.InstStructField{{Name: "Existing", Type: "bool"}},
+	}
+
+	err := newTestPhase().applyStructRule(context.Background(), r, file)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `struct "Target" already has a field named "Existing"`)
+	require.Len(t, target.Fields.List, 1)
+}
+
 func TestApplyStructRule_GroupedTypeBlock_TargetsNamedStruct(t *testing.T) {
 	// In a grouped type block the field must land in the NAMED struct, not the
 	// first spec (here a non-struct that used to be asserted via Specs[0]).
