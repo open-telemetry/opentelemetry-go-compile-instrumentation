@@ -1117,6 +1117,6 @@ func (r pkg.T) Method() error { return nil }
 	// Both the function name and the receiver base name are the ones this
 	// declaration would match on if the shape were recognised, so returning nil
 	// can only come from the guard rather than from a name mismatch.
-	assert.Nil(t, findFuncDecl(file, "Method", "T"),
+	assert.Nil(t, findFuncDecl(file, "Method", "T", nil),
 		"an unrecognized receiver should be a no match, not a build abort")
 }

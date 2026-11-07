@@ -78,7 +78,7 @@ func (ip *instrumentPhase) applyRulesCapturingDiffsWithRenderer(
 		changes []ruleChange
 	)
 	for _, r := range rules {
-		target, err := ip.findFuncRuleTarget(r, root)
+		target, err := ip.findFuncRuleTarget(r, root, debug)
 		if err != nil {
 			return result, changes, err
 		}
@@ -87,11 +87,17 @@ func (ip *instrumentPhase) applyRulesCapturingDiffsWithRenderer(
 		}
 		funcDecl, found := target.decl, target.found
 		if fileIgnored && ip.skipRuleForFileIgnore(r, funcDecl, found) {
+			if debug {
+				ip.reportDecision(r, "ignored")
+			}
 			continue
 		}
-		res, err1 := ip.applyOneRule(ctx, r, root, funcDecl, found)
-		if err1 != nil {
-			return result, changes, ex.Wrapf(err1, "applying rule %s", r.GetName())
+		res, err := ip.applyOneRule(ctx, r, root, funcDecl, found)
+		if err != nil {
+			return result, changes, ex.Wrapf(err, "applying rule %s", r.GetName())
+		}
+		if debug {
+			ip.reportApplied(r, res.modified)
 		}
 		result.modified = result.modified || res.modified
 		if res.needsGlobals {
@@ -128,13 +134,19 @@ type funcRuleTarget struct {
 }
 
 // findFuncRuleTarget finds the function r targets in root when r is a func
-// rule. It returns the zero value for other rules.
-func (ip *instrumentPhase) findFuncRuleTarget(r rule.InstRule, root *dst.File) (funcRuleTarget, error) {
+// rule. It returns the zero value for other rules. Under debug, a failed
+// lookup or *_implements filter is reported as r's decision.
+func (ip *instrumentPhase) findFuncRuleTarget(r rule.InstRule, root *dst.File, debug bool) (funcRuleTarget, error) {
 	fr, ok := r.(*rule.InstFuncRule)
 	if !ok {
 		return funcRuleTarget{}, nil
 	}
-	decl, found, err := ast.FindFuncDecl(root, fr, ip.importNames)
+	reason := ""
+	var rejection *string
+	if debug {
+		rejection = &reason
+	}
+	decl, found, err := ast.FindFuncDeclReporting(root, fr, ip.importNames, rejection)
 	if err != nil {
 		return funcRuleTarget{}, ex.Wrapf(err, "finding function %s", fr.Func)
 	}
@@ -142,7 +154,27 @@ func (ip *instrumentPhase) findFuncRuleTarget(r rule.InstRule, root *dst.File) (
 	if err != nil {
 		return funcRuleTarget{}, ex.Wrapf(err, "matching function %s", fr.Func)
 	}
+	if skip {
+		reason = "signature_mismatch"
+	}
+	if debug && reason != "" {
+		ip.reportDecision(r, reason)
+	}
 	return funcRuleTarget{decl: decl, found: found, skip: skip}, nil
+}
+
+// reportApplied reports the decision for a rule that was applied. A function
+// rule is reported only when it changed the file: findFuncRuleTarget already
+// reported a failed lookup.
+func (ip *instrumentPhase) reportApplied(r rule.InstRule, modified bool) {
+	if _, isFunc := r.(*rule.InstFuncRule); isFunc && !modified {
+		return
+	}
+	reason := ""
+	if !modified {
+		reason = "no_joinpoint"
+	}
+	ip.reportDecision(r, reason)
 }
 
 // removeStaleDiff removes a stale diff file at dest if it exists.

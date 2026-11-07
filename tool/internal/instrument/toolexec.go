@@ -31,7 +31,8 @@ import (
 )
 
 type instrumentPhase struct {
-	logger *slog.Logger
+	diagnosticSource string
+	logger           *slog.Logger
 	// buildContext evaluates build constraints (GOOS, GOARCH, etc.) for file rules.
 	// If nil, defaults to &build.Default.
 	buildContext *build.Context

@@ -92,6 +92,53 @@ OTELC_DEBUG=1 otelc go build .
 Debug output goes to `.otelc-build/debug.log`. The file is opened in append mode, so
 entries accumulate across runs. Delete it between runs if you want a clean log.
 
+### Rule matching decisions
+
+With `--debug` (or `OTELC_DEBUG=1`), the real matcher also writes experimental
+JSON Lines diagnostics under `.otelc-build/debug/<escaped-package>/`:
+
+- `setup.matches.jsonl`: target/version and per-source AST decisions during setup.
+- `<source-base>.matches.jsonl`: decisions when toolexec applies rules to that source.
+
+For example, a function exists but its argument types differ from the rule:
+
+```json
+{"package":"example.com/foo","rule":"client_hook","phase":"setup","source":"/src/foo.go","matched":false,"reason":"signature_mismatch"}
+```
+
+Records describe individual decisions, not a package-wide verdict. A rule can fail
+in one file and match another. An omitted `source` means a package-level decision.
+`matched: true` omits `reason`; in setup it means eligibility, not an applied change.
+Call and literal rules are eligible in every file passing `where`; their join points
+are resolved during instrumentation. Use the `.diff` reports to inspect changes.
+
+The initial closed set of rejection codes is:
+
+| Code | Decision |
+| --- | --- |
+| `version_mismatch` | The resolved version failed the rule's range (including unresolved versions). |
+| `no_source_files` | There were no files for precise matching. |
+| `where_mismatch` | The real `where` predicate tree returned false for this file. |
+| `function_not_found` | No declaration had the requested function name. |
+| `receiver_mismatch` | The name existed, but no receiver matched. |
+| `signature_mismatch` | A signature, parameter, or result filter failed, including the `*_implements` filters. |
+| `struct_not_found` | The requested struct was absent. |
+| `directive_not_found` | The requested directive was absent. |
+| `declaration_not_found` | No named declaration of the requested kind existed. |
+| `ignored` | An `otelc:ignore` directive suppressed instrumentation. |
+| `no_joinpoint` | A call/literal rule made no change in this file. |
+
+A rule whose target (exact, glob, list, or `$root`) does not select a package is
+never a candidate for it and produces no record, so the stream lists only rules
+that could have applied. Duplicate glob candidates are also omitted. Parse, predicate
+construction, and transformation errors remain build errors. Predicate failures
+report the whole `where` clause, including its combinators, rather than inventing
+a single failing leaf. These diagnostics do not alter `matched.json` or build IDs.
+Debug setup clears old artifacts; direct toolexec runs append. Record order across
+setup workers is unspecified. Go may reuse cached packages without running toolexec;
+use `go build -a` when you need fresh instrumentation decisions. The format is
+experimental and may change.
+
 ### Instrumentation Diffs
 
 When running with `--debug` (or `OTELC_DEBUG=1`), `otelc` writes unified `.diff` reports

@@ -228,11 +228,19 @@ func insertRaw(
 // of the function.
 func (ip *instrumentPhase) applyRawRule(ctx context.Context, rule *rule.InstRawRule, root *dst.File) error {
 	// Find the target function to be instrumented
-	funcDecl, ok, err := ast.FindFuncDecl(root, rule, ip.importNames)
+	var reason string
+	var rejection *string
+	if DiffDebugEnabled() {
+		rejection = &reason
+	}
+	funcDecl, ok, err := ast.FindFuncDeclReporting(root, rule, ip.importNames, rejection)
 	if err != nil {
 		return err
 	}
 	if !ok {
+		if rejection != nil {
+			ip.reportDecision(rule, reason)
+		}
 		return ex.Newf("can not find function %s", rule.Func)
 	}
 

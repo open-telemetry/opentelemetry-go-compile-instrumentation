@@ -164,6 +164,9 @@ func (ip *instrumentPhase) instrumentFile(ctx context.Context, file string, rule
 			"file", file)
 	}
 
+	if DiffDebugEnabled() {
+		ip.diagnosticSource = file
+	}
 	result, changes, err := ip.applyRulesCapturingDiffs(ctx, rules, root)
 	if err != nil {
 		return false, err
