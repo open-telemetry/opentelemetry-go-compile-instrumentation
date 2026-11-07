@@ -14,12 +14,12 @@ import (
 // Mux only enriches the span created by the net/http server instrumentation.
 const instrumentationKey = "MUX"
 
-var logger = runtime.Logger()
+// Parameter indices of (*Router).Match in the hook context.
+const (
+	requestIndex = 1
+	matchIndex   = 2
+)
 
-type muxEnabler struct{}
-
-func (muxEnabler) Enable() bool {
+func enabled() bool {
 	return runtime.Instrumented(instrumentationKey)
 }
-
-var enabler = muxEnabler{}

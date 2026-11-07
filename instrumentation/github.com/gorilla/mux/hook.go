@@ -12,6 +12,7 @@ import (
 
 	httpsemconv "go.opentelemetry.io/otelc/instrumentation/net/http/semconv"
 	"go.opentelemetry.io/otelc/pkg/hook"
+	"go.opentelemetry.io/otelc/pkg/runtime"
 )
 
 // AfterMatch runs after (*Router).Match. The after hook sees only the bool
@@ -27,11 +28,11 @@ import (
 // ErrMethodMismatch) and must not receive http.route — same as a 404/405
 // that used mux's default handlers.
 func AfterMatch(ictx hook.HookContext, ok bool) {
-	if !enabler.Enable() || ictx == nil {
+	if !enabled() || ictx == nil {
 		return
 	}
 
-	req, _ := ictx.GetParam(1).(*http.Request)
+	req, _ := ictx.GetParam(requestIndex).(*http.Request)
 	if req == nil {
 		return
 	}
@@ -39,7 +40,7 @@ func AfterMatch(ictx hook.HookContext, ok bool) {
 	// above it must not name the span.
 	httpsemconv.MarkRouted(req.Context())
 
-	match, _ := ictx.GetParam(2).(*mux.RouteMatch)
+	match, _ := ictx.GetParam(matchIndex).(*mux.RouteMatch)
 	if !ok || match == nil || match.MatchErr != nil || match.Route == nil {
 		return
 	}
@@ -56,5 +57,5 @@ func AfterMatch(ictx hook.HookContext, ok bool) {
 
 	span.SetName(httpsemconv.HTTPServerSpanName(req.Method, route))
 	span.SetAttributes(semconv.HTTPRoute(route))
-	logger.Debug("mux route resolved", "route", route)
+	runtime.Logger().Debug("mux route resolved", "route", route)
 }
