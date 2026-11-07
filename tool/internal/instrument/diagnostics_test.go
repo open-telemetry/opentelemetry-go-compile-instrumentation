@@ -116,7 +116,9 @@ func TestInstrumentMatchDiagnosticsApplicationOutcome(t *testing.T) {
 		{
 			"one call site ignored, one instrumented",
 			"package p\n\nimport \"net/http\"\n\nfunc Run() {\n\t//otelc:ignore\n\thttp.Get(\"x\")\n\thttp.Get(\"y\")\n}\n",
-			call, true, "",
+			call,
+			true,
+			"",
 		},
 		{
 			"directive above a variable",
