@@ -271,9 +271,17 @@ func TestInitRoot(t *testing.T) {
 
 		ctxCh := make(chan context.Context, 1)
 		app := &cli.Command{
-			Name:   "otelc",
-			Flags:  rootFlags(),
-			Before: initRoot,
+			Name:  "otelc",
+			Flags: rootFlags(),
+			Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+				ctx, err := initRoot(ctx, cmd)
+				if err != nil {
+					// After does not run when Before fails. Close the log
+					// file here so the temp dir can be removed on Windows.
+					_ = closeLogger(ctx)
+				}
+				return ctx, err
+			},
 			Action: func(ctx context.Context, _ *cli.Command) error {
 				ctxCh <- ctx
 				return nil
