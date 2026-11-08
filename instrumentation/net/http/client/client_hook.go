@@ -169,6 +169,8 @@ func AfterRoundTrip(ictx hook.HookContext, res *http.Response, err error) {
 		logger.Debug("AfterRoundTrip: no span from before hook")
 		return
 	}
+	initInstrumentation()
+
 	ctx := data.ctx
 	if ctx == nil {
 		ctx = context.Background()
