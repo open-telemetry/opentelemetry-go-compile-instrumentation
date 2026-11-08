@@ -93,6 +93,23 @@ func AfterNewServer(ictx hook.HookContext, server *grpc.Server) {
 
 If we cannot import a specific type (e.g., it is unexported), we can use `interface{}` in the hook signature.
 
+For a variadic parameter, use `...any` instead of `any` or `[]any`:
+
+```go
+// Target: func NewClient(opts ...*option) *Client, where *option is unexported.
+
+// Before hook: match the variadic with ...any.
+func BeforeNewClient(ictx hook.HookContext, opts ...any) {
+	for _, opt := range opts {
+		// opt is one variadic argument, copied into a new []any.
+	}
+}
+```
+
+A plain `any` or `[]any` is rejected for a variadic of a concrete type with `use ...any instead of any` or `use ...any instead of []any`. `[]any` and `...any` are interchangeable when the target is already an any-element slice or variadic, and a plain `any` is still valid for a variadic of a type parameter (`...T`), where the hook receives the whole `[]T` as one value.
+
+The hook receives a copy of the variadic arguments (one allocation and an `O(n)` copy per call), so mutating the slice does not change the target's arguments; use `HookContext.SetParam` to change them. Match the target's exact element type when it is accessible to avoid the copy.
+
 ### Runtime Enable/Disable Gate
 
 Every instrumentation must be switchable at runtime through
@@ -245,11 +262,10 @@ is recognized as ended by any other goroutine holding a GLS clone of it), bounde
 
 ##### 3) Hook integration points
 
-Configured in `instrumentation/go.opentelemetry.io/otel/hook/hooks.yaml` and implemented in `instrumentation/go.opentelemetry.io/otel/hook/`:
+Configured in the `otelc.yaml` next to each hook file under `instrumentation/go.opentelemetry.io/otel/`:
 
-- `tracer_setup.go`: add span to GLS after span creation
-- `span_setup.go`: remove span from GLS before span end
-- `span_context.go`: fallback to GLS in `trace.SpanFromContext`
+- `sdk/trace/gls.go`: add the span to GLS after span creation, and remove it from GLS before span end
+- `trace/hook.go`: fall back to GLS in `trace.SpanFromContext`
 
 #### Why GLS is Needed
 

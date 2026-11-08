@@ -3,17 +3,17 @@
 
 package main
 
+//line /<generated>:1
 import _ "unsafe"
 
+//line /golden/work/main.go:6
 func EllipsisFunc(p1 ...string) {
-	//line <generated>:1
-	if OtelBeforeTrampoline_EllipsisFunc1782564695(&p1); false {
+	/*line /<generated>:1*/ if OtelBeforeTrampoline_EllipsisFunc1782564695(&p1); false {
 	} else {
-	}
-	//line main.go:6:33
+	} /*line /golden/work/main.go:5*/
 }
 
-//line <generated>:1
+//line /<generated>:1
 type HookContextImpl1782564695 struct {
 	params      []interface{}
 	returnVals  []interface{}
@@ -103,11 +103,11 @@ func OtelBeforeTrampoline_EllipsisFunc1782564695(param0 *[]string) (hookContext 
 	hookContext.params = []interface{}{param0}
 	hookContext.funcName = "EllipsisFunc"
 	hookContext.packageName = "main"
-	if H9Before != nil {
-		H9Before(hookContext, *param0...)
+	if otelc_hook_2007357514_H9Before != nil {
+		otelc_hook_2007357514_H9Before(hookContext, *param0...)
 	}
 	return hookContext, hookContext.skipCall
 }
 
-//go:linkname H9Before testdata/golden/ellipsis-syntax.H9Before
-func H9Before(hookContext HookContext, param0 ...string)
+//go:linkname otelc_hook_2007357514_H9Before testdata/golden/ellipsis-syntax.H9Before
+func otelc_hook_2007357514_H9Before(hookContext HookContext, param0 ...string)

@@ -97,6 +97,7 @@ func (ip *instrumentPhase) applyCallReplace(
 	if err != nil {
 		return false, err
 	}
+	tmpl.typeInfo = ip.fileTypes()
 
 	stmts := ast.CallEnclosingStmts(root)
 
@@ -112,22 +113,27 @@ func (ip *instrumentPhase) applyCallReplace(
 			ip.Debug("Skip call site due to //otelc:ignore", "rule", r.Name)
 			return true
 		}
-		if shadowErr := checkAliasOverrideShadowing(aliasOverrides, enclosing); shadowErr != nil {
+		if shadowErr := checkAliasOverrideShadowingAt(aliasOverrides, enclosing, call); shadowErr != nil {
 			wrapError = shadowErr
 			return false
 		}
-		wrapped, wrapErr := tmpl.compileExpression(call, enclosing, importAliases, aliasOverrides)
+		site := callSite{
+			methodCall: r.MethodCall != "",
+			deferred:   isGoOrDeferCall(stmts[call], call),
+			clone:      ip.cloneWithPositions,
+		}
+		wrapped, wrapErr := tmpl.compileExpression(call, site, enclosing, importAliases, aliasOverrides)
+		if wrapErr == nil && site.deferred {
+			if _, isCall := wrapped.(*dst.CallExpr); !isCall {
+				wrapErr = ex.Newf("the template output is a %T, but the matched call is the call of a defer "+
+					"or go statement, which must be replaced with a call expression", wrapped)
+			}
+		}
 		if wrapErr != nil {
-			wrapError = wrapErr
+			wrapError = ip.withCallPosition(wrapErr, r, call)
 			return false
 		}
-		cloned := util.AssertType[dst.Expr](dst.Clone(wrapped))
-		// dst.Clone gives the wrapped call's nodes fresh pointers absent from the
-		// parser's position map
-		if ip.parser != nil {
-			ip.parser.PropagatePositions(wrapped, cloned)
-		}
-		replacements[call] = cloned
+		replacements[call] = ip.cloneWithPositions(wrapped)
 		return true
 	})
 
@@ -156,6 +162,44 @@ func (ip *instrumentPhase) applyCallReplace(
 	return true, nil
 }
 
+// cloneWithPositions returns a dst.Clone copy of expr. dst.Clone gives the
+// nodes fresh pointers absent from the parser's position map, so it maps the
+// copy to the source positions of expr. Later method_call rules then still
+// match calls inside the copy.
+func (ip *instrumentPhase) cloneWithPositions(expr dst.Expr) dst.Expr {
+	cloned := util.AssertType[dst.Expr](dst.Clone(expr))
+	if ip.parser != nil {
+		ip.parser.PropagatePositions(expr, cloned)
+	}
+	return cloned
+}
+
+// withCallPosition adds the source position of call to err, when call has
+// one.
+func (ip *instrumentPhase) withCallPosition(err error, r *rule.InstCallRule, call *dst.CallExpr) error {
+	if ip.parser == nil {
+		return err
+	}
+	pos, ok := ip.parser.OriginalPosition(call)
+	if !ok {
+		return err
+	}
+	return ex.Wrapf(err, "rule %s cannot wrap the call at %s", r.Name, pos)
+}
+
+// isGoOrDeferCall reports whether call is the call of stmt, a defer or go
+// statement.
+func isGoOrDeferCall(stmt dst.Stmt, call *dst.CallExpr) bool {
+	switch s := stmt.(type) {
+	case *dst.DeferStmt:
+		return s.Call == call
+	case *dst.GoStmt:
+		return s.Call == call
+	default:
+		return false
+	}
+}
+
 // applyCallAppendArgs appends r's extra arguments to every call site that
 // matches r. A //otelc:ignore comment above a matching call's enclosing
 // statement opts that one call site out and leaves every other matching call
@@ -177,11 +221,8 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 
 	stmts := ast.CallEnclosingStmts(root)
 	var matchingCalls []*dst.CallExpr
-	dst.Inspect(root, func(node dst.Node) bool {
-		call, ok := node.(*dst.CallExpr)
-		if !ok {
-			return true
-		}
+	var shadowErr error
+	walkCallsWithEnclosingFunc(root, func(call *dst.CallExpr, enclosing *dst.FuncDecl) bool {
 		if !ip.matchesRule(call, r, importAliases) {
 			return true
 		}
@@ -189,9 +230,15 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 			ip.Debug("Skip call site due to //otelc:ignore", "rule", r.Name)
 			return true
 		}
+		if shadowErr = checkAliasOverrideShadowingAt(aliasOverrides, enclosing, call); shadowErr != nil {
+			return false
+		}
 		matchingCalls = append(matchingCalls, call)
 		return true
 	})
+	if shadowErr != nil {
+		return false, shadowErr
+	}
 	modified := false
 	for _, call := range matchingCalls {
 		callArgs := make([]dst.Expr, len(newArgs))
@@ -369,7 +416,8 @@ func (ip *instrumentPhase) logUnresolvedMethodCall(
 	ip.Debug("method_call: call could not be resolved to a receiver type, rule will not match", args...)
 }
 
-// ensureMethodCallInfo type-checks the package at most once.
+// ensureMethodCallInfo type-checks the package at most once. It must run
+// before any file of the package is rewritten.
 func (ip *instrumentPhase) ensureMethodCallInfo() *methodCallPackageInfo {
 	if ip.methodCallInfoLoaded {
 		return ip.methodCallInfo
@@ -380,7 +428,8 @@ func (ip *instrumentPhase) ensureMethodCallInfo() *methodCallPackageInfo {
 	files := packageSourceFiles(ip.compileArgs)
 	info, err := checkPackageForMethodCalls(pkgPath, files, ip.importConfig)
 	if err != nil {
-		ip.Warn("method_call type-checking failed; method_call rules will not match in this package",
+		ip.Warn("type-checking failed; method_call rules will not match in this package, "+
+			"and *_implements selectors and ThatImplements helpers will match the type name only",
 			"package", pkgPath, "error", err)
 		return nil
 	}
@@ -389,10 +438,21 @@ func (ip *instrumentPhase) ensureMethodCallInfo() *methodCallPackageInfo {
 	return ip.methodCallInfo
 }
 
-// packageSourceFiles returns the compile command's source files
+// packageSourceFiles returns the compile command's source files. The value of
+// -p is skipped, since an import path such as github.com/nats-io/nats.go also
+// ends in .go.
 func packageSourceFiles(compileArgs []string) []string {
 	var files []string
+	afterP := false
 	for _, arg := range compileArgs {
+		if afterP {
+			afterP = false
+			continue
+		}
+		if arg == "-p" {
+			afterP = true
+			continue
+		}
 		if strings.HasPrefix(arg, "-") || !util.IsGoFile(arg) {
 			continue
 		}
@@ -414,9 +474,13 @@ type methodCallPosition struct {
 }
 
 // methodCallPackageInfo is the result of type-checking one package for
-// method_call matching.
+// method_call matching and for the *_implements selectors and the
+// ThatImplements template helpers.
 type methodCallPackageInfo struct {
 	selByPos       map[methodCallPosition]*types.Selection
+	sigByPos       map[methodCallPosition]*types.Signature // keyed by the position of the func keyword
+	pkg            *types.Package
+	importer       *exportImporter
 	firstTypeError error
 }
 
@@ -438,6 +502,8 @@ func checkPackageForMethodCalls(
 
 	info := &types.Info{
 		Selections: make(map[*goast.SelectorExpr]*types.Selection),
+		Defs:       make(map[*goast.Ident]types.Object),
+		Types:      make(map[goast.Expr]types.TypeAndValue),
 	}
 	var firstTypeError error
 	// Sizes is nil, so go/types uses SizesFor("gc", "amd64") — unsafe sizing
@@ -445,25 +511,57 @@ func checkPackageForMethodCalls(
 	// surface as type errors, which degrade method_call matching, never break
 	// the build. Set Sizes explicitly if the setup phase learns the target
 	// GOARCH.
+	importer := newExportImporter(fset, cfg.PackageFile, cfg.ImportMap)
 	tcfg := &types.Config{
-		Importer: newExportImporter(fset, cfg.PackageFile, cfg.ImportMap),
+		Importer: importer,
 		Error: func(err error) {
 			if firstTypeError == nil {
 				firstTypeError = err
 			}
 		},
 	}
-	_, _ = tcfg.Check(pkgPath, fset, astFiles, info)
+	pkg, _ := tcfg.Check(pkgPath, fset, astFiles, info)
 
 	pi := &methodCallPackageInfo{
 		selByPos:       make(map[methodCallPosition]*types.Selection, len(info.Selections)),
+		sigByPos:       make(map[methodCallPosition]*types.Signature),
+		pkg:            pkg,
+		importer:       importer,
 		firstTypeError: firstTypeError,
 	}
 	for sel, selection := range info.Selections {
 		pos := fset.Position(sel.Sel.Pos())
 		pi.selByPos[methodCallPosition{file: pos.Filename, line: pos.Line, col: pos.Column}] = selection
 	}
+	for _, astFile := range astFiles {
+		goast.Inspect(astFile, func(node goast.Node) bool {
+			if typ, sig := funcSignature(node, info); sig != nil {
+				pos := fset.Position(typ.Pos())
+				pi.sigByPos[methodCallPosition{file: pos.Filename, line: pos.Line, col: pos.Column}] = sig
+			}
+			return true
+		})
+	}
 	return pi, nil
+}
+
+// funcSignature returns the type of node and its signature when node is a
+// function declaration or a function literal.
+func funcSignature(node goast.Node, info *types.Info) (*goast.FuncType, *types.Signature) {
+	switch n := node.(type) {
+	case *goast.FuncDecl:
+		fn, _ := info.Defs[n.Name].(*types.Func)
+		if fn == nil {
+			return nil, nil
+		}
+		sig, _ := fn.Type().(*types.Signature)
+		return n.Type, sig
+	case *goast.FuncLit:
+		sig, _ := info.TypeOf(n).(*types.Signature)
+		return n.Type, sig
+	default:
+		return nil, nil
+	}
 }
 
 // parseForTypeCheck records position filenames as filepath.Base(path)
@@ -802,13 +900,33 @@ func hasEscapingControlFlow(stmt dst.Stmt) bool {
 func hasMultipleCalls(stmt dst.Stmt) bool {
 	calls := 0
 	dst.Inspect(stmt, func(n dst.Node) bool {
-		switch n.(type) {
+		switch node := n.(type) {
 		case *dst.FuncLit:
 			return false
 		case *dst.CallExpr:
-			calls++
+			// A type conversion such as []byte(s) or map[string]int(m) parses
+			// as a CallExpr but is never a hookable call, so it must not count
+			// toward the limit.
+			if !isSyntacticConversion(node) {
+				calls++
+			}
 		}
 		return true
 	})
 	return calls > 1
+}
+
+// isSyntacticConversion reports whether call is unambiguously a type
+// conversion rather than a function call, based on syntax alone. A conversion
+// whose target type is a named identifier (for example string(b) or int(x)) is
+// indistinguishable from a call without type information and is not detected
+// here.
+func isSyntacticConversion(call *dst.CallExpr) bool {
+	switch call.Fun.(type) {
+	case *dst.ArrayType, *dst.MapType, *dst.ChanType,
+		*dst.StructType, *dst.InterfaceType, *dst.FuncType:
+		return true
+	default:
+		return false
+	}
 }

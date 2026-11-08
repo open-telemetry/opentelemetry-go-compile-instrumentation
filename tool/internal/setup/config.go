@@ -120,12 +120,12 @@ func resolveInstrumentationConfigs(
 		}
 
 		modDir := pkg.Module.Dir
-		// Prefer the directory of a real Go file. A tools-only instrumentation
-		// package (its only .go file carries //go:build tools) has no buildable Go
-		// files, so packages.Load reports "build constraints exclude all Go files"
-		// and GoFiles is empty; fall back to deriving the dir from the module path +
-		// import-path suffix (correct even under replace directives). The walk only
-		// needs the directory, not a compilable package.
+		// A tools-only instrumentation package (its only .go file carries
+		// //go:build tools) has no buildable Go files, so packages.Load reports
+		// "build constraints exclude all Go files" and PackageDir returns the
+		// directory from go list. If that is empty too, derive the dir from the
+		// module path + import-path suffix (correct even under replace
+		// directives). The walk only needs the directory, not a compilable package.
 		pkgDir := pkgload.PackageDir(pkg)
 		if pkgDir == "" {
 			pkgDir = filepath.Join(modDir, filepath.FromSlash(strings.TrimPrefix(importPath, pkg.Module.Path)))

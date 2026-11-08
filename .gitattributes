@@ -1,4 +1,6 @@
 *.golden text eol=lf
+# Preserve the upstream schema snapshot byte-for-byte; its SHA-256 is verified in tests.
+tool/internal/configuration/upstream-instrumentation.yaml -text
 # otelc-bundle.tgz is a binary archive derived from pkg/ and instrumentation/.
 # Treat it as binary (no diff/eol conversion). The custom 'otelc-bundle' merge
 # driver keeps the current version instead of conflicting so rebases/merges

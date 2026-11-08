@@ -49,6 +49,34 @@ func TestParseTypeName(t *testing.T) {
 	}
 }
 
+func TestParseInterfaceName(t *testing.T) {
+	tests := []struct {
+		input      string
+		wantErr    bool
+		wantImport string
+		wantName   string
+	}{
+		{input: "error", wantName: "error"},
+		{input: "context.Context", wantImport: "context", wantName: "Context"},
+		{input: "net/http.Handler", wantImport: "net/http", wantName: "Handler"},
+		{input: "*context.Context", wantErr: true},
+		{input: "[]error", wantErr: true},
+		{input: "", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			importPath, name, err := ParseInterfaceName(tt.input)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantImport, importPath)
+			assert.Equal(t, tt.wantName, name)
+		})
+	}
+}
+
 func TestTypeNameMatches(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -155,6 +183,18 @@ func TestTypeNameMatches(t *testing.T) {
 			name:    "unsupported func type node returns false without panic",
 			typeStr: "error",
 			node:    &dst.FuncType{},
+			want:    false,
+		},
+		{
+			name:    "variadic type does not match element type",
+			typeStr: "string",
+			node:    &dst.Ellipsis{Elt: &dst.Ident{Name: "string"}},
+			want:    false,
+		},
+		{
+			name:    "pointer to slice does not match element type",
+			typeStr: "byte",
+			node:    &dst.StarExpr{X: &dst.ArrayType{Elt: &dst.Ident{Name: "byte"}}},
 			want:    false,
 		},
 	}
@@ -679,6 +719,9 @@ func TestFieldListContainsType(t *testing.T) {
 	assert.True(t, mustContains(t, fields, "error"))
 	assert.False(t, mustContains(t, fields, "int"))
 	assert.False(t, mustContains(t, fields, "io.Reader"))
+	// "Contains" is list-level: []byte is not byte, and map[string]string is
+	// not matched by looking inside the map.
+	assert.False(t, mustContains(t, fields, "byte"))
 	assert.False(t, mustContains(t, nil, "error"))
 	assert.False(t, mustContains(t, &dst.FieldList{}, "error"))
 

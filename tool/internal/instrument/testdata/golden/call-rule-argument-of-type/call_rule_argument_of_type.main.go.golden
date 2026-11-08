@@ -3,6 +3,7 @@
 
 package main
 
+//line /golden/work/main.go:6
 import (
 	"fmt"
 	"io"
@@ -12,7 +13,7 @@ func Handler(r io.Reader, name string) {
 	(func() (int, error) {
 		println("call arg0:", "hello", "nargs:", 2, "reader ok:", r != nil)
 		return fmt.Println("hello", name)
-	})()
+	})() /*line /golden/work/main.go:12*/
 }
 
 func main() { Handler(nil, "world") }

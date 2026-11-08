@@ -36,6 +36,9 @@ func TestBasic(t *testing.T) {
 		"Hello, Generic Recv World!",
 		"GenericRecvExample after hook",
 		"traceID: 123, spanID: 456",
+		"Query before hook",
+		"Query: SELECT 1",
+		"Query after hook",
 		"[MyHook]",
 		"RawCode",
 		"funcName:Example",
@@ -54,6 +57,7 @@ func TestBasic(t *testing.T) {
 	}
 
 	verifyGenericHookContextLogs(t, output)
+	verifyQueryHookContextLogs(t, output)
 	verifyExportedHelloWorldSpan(t, output)
 	verifyTracePropagationBetweenFunctionAAndB(t, output)
 }
@@ -95,6 +99,17 @@ func verifyGenericHookContextLogs(t *testing.T, output string) {
 	}
 	for _, log := range expectedGenericLogs {
 		require.Contains(t, output, log, "Expected generic HookContext log: %s", log)
+	}
+}
+
+func verifyQueryHookContextLogs(t *testing.T, output string) {
+	expectedQueryLogs := []string{
+		"[Query] GetParam(1): SELECT 1",
+		"[Query] GetReturnVal(1): <nil>",
+		"[Query] GetReturnVal(0): 0",
+	}
+	for _, log := range expectedQueryLogs {
+		require.Contains(t, output, log, "Expected Query HookContext log: %s", log)
 	}
 }
 

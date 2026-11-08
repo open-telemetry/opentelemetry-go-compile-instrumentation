@@ -6,6 +6,8 @@ package setup
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -772,6 +774,32 @@ func TestRuleFileKey(t *testing.T) {
 		}
 		assert.Equal(t, want, ruleFileKey(filepath.Join(link, "a.otelc.yml")))
 	})
+
+	t.Run("dot-dot through a symbolic link does not collide with the link's sibling", func(t *testing.T) {
+		// base/link -> other/sub. base/link/../r.yml resolves, through the
+		// link, to other/r.yml on disk. filepath.Abs alone would instead
+		// clean ".." lexically against "link" and land on base/r.yml, a
+		// different file. The path must be built by plain concatenation,
+		// not filepath.Join: Join calls Clean internally and would collapse
+		// the ".." itself before ruleFileKey ever saw it, same as the raw
+		// string a shell command line would pass in.
+		base := t.TempDir()
+		other := t.TempDir()
+		sub := filepath.Join(other, "sub")
+		require.NoError(t, os.Mkdir(sub, 0o755))
+		link := filepath.Join(base, "link")
+		if err := os.Symlink(sub, link); err != nil {
+			t.Skipf("cannot create symbolic link: %v", err)
+		}
+		otherFile := filepath.Join(other, "r.yml")
+		baseFile := filepath.Join(base, "r.yml")
+		require.NoError(t, os.WriteFile(otherFile, []byte(""), 0o644))
+		require.NoError(t, os.WriteFile(baseFile, []byte(""), 0o644))
+
+		viaLink := ruleFileKey(link + string(filepath.Separator) + ".." + string(filepath.Separator) + "r.yml")
+		assert.Equal(t, ruleFileKey(otherFile), viaLink)
+		assert.NotEqual(t, ruleFileKey(baseFile), viaLink)
+	})
 }
 
 func ruleNames(rules []rule.InstRule) []string {
@@ -1128,7 +1156,8 @@ func TestPreciseMatching_WhereFileFilterBuildError(t *testing.T) {
 
 	_, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{badRule}, set)
 	require.Error(t, err)
-	require.ErrorContains(t, err, "where.file has multiple active predicates")
+	require.ErrorContains(t, err,
+		"where.file has multiple active predicates (has_func, has_struct); combine them with all-of")
 }
 
 // Helper functions for constructing test data
@@ -1163,9 +1192,12 @@ func newTestRuleSet(
 	fileRules []*rule.InstFileRule,
 ) *rule.InstRuleSet {
 	rs := rule.NewInstRuleSet(modulePath)
-	fakeFilePath := filepath.Join(os.TempDir(), "file.go")
-	for _, fr := range funcRules {
-		rs.AddFuncRule(fakeFilePath, fr)
+	// One file key per rule. Filing them all under a single key leaves the
+	// per-file map with no order to get wrong, which is how the flattening
+	// bug in #1526 stayed invisible to every test using this helper. The
+	// zero-padded names keep lexical order equal to insertion order.
+	for i, fr := range funcRules {
+		rs.AddFuncRule(filepath.Join(os.TempDir(), fmt.Sprintf("file%02d.go", i)), fr)
 	}
 	for _, fr := range fileRules {
 		rs.AddFileRule(fr)
@@ -1337,6 +1369,24 @@ func TestCheckRuleFileVersion(t *testing.T) {
 	})
 }
 
+func TestParseRuleFile(t *testing.T) {
+	t.Run("parse error", func(t *testing.T) {
+		_, err := parseRuleFile(t.Context(), "bad.yaml", []byte("not: valid: yaml:"), util.Version)
+		require.ErrorContains(t, err, "bad.yaml")
+	})
+
+	t.Run("valid file returns its rules", func(t *testing.T) {
+		content := []byte(`my_rule:
+  target: main
+  func: Example
+  raw: "_ = 1"`)
+		rules, err := parseRuleFile(t.Context(), "rules.yaml", content, util.Version)
+		require.NoError(t, err)
+		require.Len(t, rules, 1)
+		assert.Equal(t, "my_rule", rules[0].GetName())
+	})
+}
+
 func TestLoadCustomRulesDeterministicOrder(t *testing.T) {
 	content := `zebra:
   target: main
@@ -1477,6 +1527,16 @@ func TestRunMatch_EmptyRules(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, set)
 	assert.True(t, set.IsEmpty())
+}
+
+func TestRunMatch_RecordsTestBuild(t *testing.T) {
+	sp := newTestSetupPhase()
+	for _, isTest := range []bool{false, true} {
+		dep := &Dependency{ImportPath: "example.com/lib", CgoFiles: map[string]string{}, IsTest: isTest}
+		set, err := sp.runMatch(context.Background(), dep, map[string][]rule.InstRule{}, nil)
+		require.NoError(t, err)
+		assert.Equal(t, isTest, set.IsTest)
+	}
 }
 
 func TestRunMatch_FileRuleInvalidSource(t *testing.T) {
@@ -1646,6 +1706,97 @@ func TestRunMatch_ExactAndGlobCoexist(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.Len(t, set.FuncRules[srcFile], 2, "both exact and glob rules should match")
+}
+
+func TestMatchDeps_DeterministicOrder(t *testing.T) {
+	t.Setenv(util.EnvOtelcRules, "")
+	sp := newTestSetupPhase()
+	sp.ruleConfig = writeCustomRules(t, "order.yaml", `first:
+  target: example.com/svc/**
+  file: z.go
+  path: example.com/hooks
+second:
+  target: example.com/svc/**
+  file: a.go
+  path: example.com/hooks
+`)
+	deps := []*Dependency{
+		{ImportPath: "example.com/svc/zeta"},
+		{ImportPath: "example.com/svc/alpha"},
+		{ImportPath: "example.com/svc/gamma"},
+		{ImportPath: "example.com/svc/beta"},
+	}
+	wantPaths := []string{
+		"example.com/svc/alpha",
+		"example.com/svc/beta",
+		"example.com/svc/gamma",
+		"example.com/svc/zeta",
+	}
+	var baseline []byte
+	for range deps {
+		matched, err := sp.matchDeps(t.Context(), deps, nil)
+		require.NoError(t, err)
+		require.Len(t, matched, len(wantPaths))
+		for i, set := range matched {
+			assert.Equal(t, wantPaths[i], set.ModulePath)
+			require.Len(t, set.FileRules, 2)
+			assert.Equal(t, "z.go", set.FileRules[0].File)
+			assert.Equal(t, "a.go", set.FileRules[1].File)
+		}
+
+		encoded, err := json.Marshal(matched)
+		require.NoError(t, err)
+		if baseline == nil {
+			baseline = encoded
+		} else {
+			assert.Equal(t, string(baseline), string(encoded))
+		}
+		deps = append(deps[1:], deps[0])
+	}
+}
+
+func TestMatchDeps_DeterministicOrderSameModulePath(t *testing.T) {
+	t.Setenv(util.EnvOtelcRules, "")
+	sp := newTestSetupPhase()
+	sp.ruleConfig = writeCustomRules(t, "same-module.yaml", `first:
+  target: example.com/svc
+  version: v1.0.0,v2.0.0
+  file: z.go
+  path: example.com/hooks
+second:
+  target: example.com/svc
+  version: v2.0.0,v3.0.0
+  file: a.go
+  path: example.com/hooks
+`)
+
+	deps := []*Dependency{
+		{ImportPath: "example.com/svc", Version: "v1.5.0"},
+		{ImportPath: "example.com/svc", Version: "v2.5.0"},
+	}
+
+	var baseline []byte
+	for range 20 {
+		matched, err := sp.matchDeps(t.Context(), deps, nil)
+		require.NoError(t, err)
+		require.Len(t, matched, 2)
+		files := make(map[string]bool, len(matched))
+		for _, set := range matched {
+			require.Len(t, set.FileRules, 1)
+			files[set.FileRules[0].File] = true
+		}
+		assert.True(t, files["a.go"])
+		assert.True(t, files["z.go"])
+
+		encoded, err := json.Marshal(matched)
+		require.NoError(t, err)
+		if baseline == nil {
+			baseline = encoded
+		} else {
+			assert.Equal(t, string(baseline), string(encoded))
+		}
+		deps = append(deps[1:], deps[0])
+	}
 }
 
 func TestMatchDeps_GlobTargetSplit(t *testing.T) {
@@ -2507,4 +2658,74 @@ func TestLoadRules_NoRulesAvailable(t *testing.T) {
 	rules, err := sp.loadRules(t.Context(), []string{})
 	require.NoError(t, err)
 	assert.Nil(t, rules)
+}
+
+// benchMatchedRuleSets builds a synthetic matched slice of total rule sets:
+// five of every twenty-five consecutive sets share one ModulePath, mimicking
+// separate source variants of one package, and the rest have unique ones.
+// Each set carries several rules so the JSON encoding it would need as a sort
+// key is representative of a real build.
+func benchMatchedRuleSets(total int) []*rule.InstRuleSet {
+	src := filepath.Join(os.TempDir(), "bench_source.go")
+	sets := make([]*rule.InstRuleSet, 0, total)
+	for i := 0; len(sets) < total; i++ {
+		module := fmt.Sprintf("example.com/bench/pkg%05d", i)
+		if i%25 < 5 {
+			module = fmt.Sprintf("example.com/bench/shared%05d", i/25)
+		}
+		set := rule.NewInstRuleSet(module)
+		for j := range 3 {
+			set.AddFileRule(&rule.InstFileRule{
+				InstBaseRule: rule.InstBaseRule{
+					Name:   fmt.Sprintf("file-rule-%d-%d", i, j),
+					Target: rule.NewTarget(module),
+				},
+				File: fmt.Sprintf("added_%d_%d.go", i, j),
+				Path: "example.com/bench/hooks",
+			})
+		}
+		for j := range 2 {
+			set.AddFuncRule(src, &rule.InstFuncRule{
+				InstBaseRule: rule.InstBaseRule{
+					Name:   fmt.Sprintf("func-rule-%d-%d", i, j),
+					Target: rule.NewTarget(module),
+				},
+				Func:   fmt.Sprintf("Fn%d_%d", i, j),
+				Before: "BeforeFn",
+				Path:   "example.com/bench/hooks",
+			})
+		}
+		sets = append(sets, set)
+	}
+	return sets
+}
+
+// BenchmarkSortMatchedRuleSets measures the cost of the stable-order sort on
+// a large matched slice, the shape a big build produces.
+func BenchmarkSortMatchedRuleSets(b *testing.B) {
+	sets := benchMatchedRuleSets(5000)
+
+	// Sanity-check the helper: sorted output is grouped by ModulePath, and
+	// the shared-module groups land in a stable, fully-ordered position.
+	sorted := make([]*rule.InstRuleSet, len(sets))
+	copy(sorted, sets)
+	if err := sortMatchedRuleSets(sorted); err != nil {
+		b.Fatal(err)
+	}
+	for i := 1; i < len(sorted); i++ {
+		if sorted[i-1].ModulePath > sorted[i].ModulePath {
+			b.Fatalf("sets %d and %d out of order: %s > %s",
+				i-1, i, sorted[i-1].ModulePath, sorted[i].ModulePath)
+		}
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		in := make([]*rule.InstRuleSet, len(sets))
+		copy(in, sets)
+		if err := sortMatchedRuleSets(in); err != nil {
+			b.Fatal(err)
+		}
+	}
 }

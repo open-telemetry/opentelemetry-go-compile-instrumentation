@@ -1,28 +1,142 @@
 name: Release
+
 on:
-  push:
-    tags:
-      - 'v*.*.*'
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+      - 'release/v*.*.x'  # for hotfix releases
+
 jobs:
   release:
     name: Build and Release
     runs-on: ubuntu-latest
+    if: >
+      github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/v')
     permissions:
       contents: write
     steps:
-      - name: Checkout code
+      - name: Extract version
+        id: version
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          VERSION="${HEAD_REF#release/}"
+          if [[ ! "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "Branch '${HEAD_REF}' is not a valid release version (must match ^v<semver>). Skipping release."
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Determine if pre-release
+        id: prerelease
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if [[ "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+- ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout merge commit
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
-          persist-credentials: false
+          persist-credentials: true
           fetch-depth: 0
+
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: 'go.mod'
           cache: false
-      - name: Build binary
-        run: make build-all
-      - name: Create release
+
+      - name: Detect pkg version
+        id: pkg_version
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          PKG_VERSION=""
+          if [[ "${PR_TITLE}" =~ ^release:[[:space:]]*v[0-9]+[^/]*/(v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?)$ ]]; then
+            PKG_VERSION="${BASH_REMATCH[1]}"
+          elif [[ "${PR_BODY}" =~ \<\!--[[:space:]]*release-pkg:[[:space:]]*(v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?)[[:space:]]*--\> ]]; then
+            PKG_VERSION="${BASH_REMATCH[1]}"
+          fi
+          if [ -n "${PKG_VERSION}" ]; then
+            echo "release_pkg=true" >> "$GITHUB_OUTPUT"
+            echo "pkg_version=${PKG_VERSION}" >> "$GITHUB_OUTPUT"
+          else
+            echo "release_pkg=false" >> "$GITHUB_OUTPUT"
+            echo "pkg_version=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Test pkg module
+        if: steps.pkg_version.outputs.release_pkg == 'true'
+        run: go test -C pkg ./...
+
+      - name: Build binaries
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: make build-all VERSION="${VERSION}"
+
+      - name: Generate SHA256 checksums
+        run: |
+          cd dist
+          sha256sum otelc-* > checksums.txt
+
+      - name: Create and push tags
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_PKG: ${{ steps.pkg_version.outputs.release_pkg }}
+          PKG_VERSION: ${{ steps.pkg_version.outputs.pkg_version }}
+        run: |
+          push_tag() {
+            local tag="$1"
+            local head_commit
+            head_commit=$(git rev-parse HEAD)
+            local remote_commit
+            remote_commit=$(git ls-remote --tags origin "refs/tags/${tag}^{}" | awk '{print $1}')
+            if [ -z "${remote_commit}" ]; then
+              remote_commit=$(git ls-remote --tags origin "refs/tags/${tag}" | awk '{print $1}')
+            fi
+
+            if [ -n "${remote_commit}" ]; then
+              if [ "${remote_commit}" = "${head_commit}" ]; then
+                echo "Tag '${tag}' already exists on origin pointing to current commit (${head_commit}). Skipping tag creation."
+              else
+                echo "Tag '${tag}' already exists on remote pointing to a different commit!" >&2
+                exit 1
+              fi
+            else
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              git tag -a "${tag}" -m "Release ${tag}"
+              git push origin "${tag}"
+            fi
+          }
+
+          push_tag "${VERSION}"
+          if [ "${RELEASE_PKG}" = "true" ]; then
+            push_tag "pkg/${PKG_VERSION}"
+          fi
+
+      - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/otelc-* --generate-notes
+          VERSION: ${{ steps.version.outputs.version }}
+          PKG_VERSION: ${{ steps.pkg_version.outputs.pkg_version }}
+          IS_PRERELEASE: ${{ steps.prerelease.outputs.prerelease }}
+        run: |
+          RELEASE_FLAGS=()
+          if [ "${IS_PRERELEASE}" = "true" ]; then
+            RELEASE_FLAGS+=(--prerelease)
+          fi
+          RELEASE_TITLE="${VERSION}"
+          if [ -n "${PKG_VERSION}" ]; then
+            RELEASE_TITLE="${VERSION}/${PKG_VERSION}"
+          fi
+          gh release create "${VERSION}" dist/otelc-* dist/checksums.txt \
+            --title "${RELEASE_TITLE}" \
+            --notes-file .github/release-notes.md \
+            "${RELEASE_FLAGS[@]}"

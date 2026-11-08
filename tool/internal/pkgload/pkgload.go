@@ -184,38 +184,28 @@ func ResolveExportFiles(ctx context.Context, importPath string, buildFlags ...st
 // each import path to its declared package name. Load pkgs with
 // packages.NeedImports and packages.NeedDeps, or the walk finds no
 // imports to collect.
+//
+// The walk visits each package once, not each import path once. A test
+// variant such as "p [p.test]" has the same PkgPath as p, but it also has
+// the imports of p's _test.go files.
 func CollectPackageNames(pkgs []*packages.Package) map[string]string {
 	result := make(map[string]string)
-	visited := make(map[string]bool)
-
-	var walk func(pkg *packages.Package)
-	walk = func(pkg *packages.Package) {
-		if visited[pkg.PkgPath] {
-			return
-		}
-		visited[pkg.PkgPath] = true
-
+	packages.Visit(pkgs, nil, func(pkg *packages.Package) {
 		if pkg.Name != "" {
 			result[pkg.PkgPath] = pkg.Name
 		}
-
-		for _, dep := range pkg.Imports {
-			walk(dep)
-		}
-	}
-
-	for _, pkg := range pkgs {
-		walk(pkg)
-	}
-
+	})
 	return result
 }
 
+// PackageDir returns the directory of pkg. A package with only _test.go files
+// has no GoFiles, so PackageDir falls back to the directory that go list
+// reports. Load pkg with packages.NeedFiles, or that directory is empty.
 func PackageDir(pkg *packages.Package) string {
 	if len(pkg.GoFiles) > 0 {
 		return filepath.Dir(pkg.GoFiles[0])
 	}
-	return ""
+	return pkg.Dir
 }
 
 // ResolveModule returns the module for a given package directory.
@@ -262,16 +252,15 @@ func FindModuleDirs(ctx context.Context, pkgs []*packages.Package) ([]string, er
 			continue
 		}
 
-		pkgDir := PackageDir(pkg)
-		if pkgDir == "" {
-			logger.WarnContext(ctx, "skipping package without Go files", "package", pkg.PkgPath)
-			continue
-		}
-
 		var moduleDir string
 		if pkg.Module != nil {
 			moduleDir = pkg.Module.Dir
 		} else {
+			pkgDir := PackageDir(pkg)
+			if pkgDir == "" {
+				return nil, ex.Newf("cannot find the directory of package %s", pkg.PkgPath)
+			}
+
 			modDir, err := resolveModuleDir(ctx, pkgDir)
 			if err != nil {
 				return nil, err

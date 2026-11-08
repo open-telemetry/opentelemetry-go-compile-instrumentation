@@ -92,12 +92,13 @@ var commandToolexec = cli.Command{
 	Before:          addLoggerPhaseAttribute,
 	Action: func(ctx context.Context, cmd *cli.Command) error {
 		nested := os.Getenv(util.EnvOtelcNestedToolexec) != ""
-		if !nested {
-			// Here, not in instrument.Toolexec, so os.Executable resolves to
-			// this binary for the go commands it spawns.
-			if err := instrument.EnableNestedToolexec(); err != nil {
-				return err
-			}
+		// Here, not in instrument.Toolexec, so os.Executable resolves to this
+		// binary for the go commands it spawns. A nested invocation needs it
+		// too: startup stripped -toolexec from GOFLAGS, and a compile it
+		// instruments can resolve an added import with a nested build of its
+		// own.
+		if err := instrument.EnableNestedToolexec(); err != nil {
+			return err
 		}
 		return instrument.Toolexec(ctx, cmd.Args().Slice(), nested)
 	},

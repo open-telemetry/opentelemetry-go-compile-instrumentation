@@ -3,33 +3,32 @@
 
 package main
 
+//line /<generated>:1
 import _ "unsafe"
 
+//line /golden/work/main.go:6
 func GenericFunc[T any](p1 []T, p2 ...T) (_unnamedRetVal_1523734358_0 []T, _unnamedRetVal_1523734358_1 error) {
-	//line <generated>:1
-	if hookContext1523734358, _ := OtelBeforeTrampoline_GenericFunc1523734358[T](&p1, &p2); false {
+	/*line /<generated>:1*/ if hookContext1523734358, _ := OtelBeforeTrampoline_GenericFunc1523734358[T](&p1, &p2); false {
 	} else {
 		defer OtelAfterTrampoline_GenericFunc1523734358[T](hookContext1523734358, &_unnamedRetVal_1523734358_0, &_unnamedRetVal_1523734358_1)
 	}
-	//line main.go:7:2
-	return p1, nil
+	/*line /golden/work/main.go:7*/ return p1, nil
 }
 
+//line /golden/work/main.go:10
 type GenStruct[T any] struct {
 	value T
 }
 
 func (g *GenStruct[T]) GenericMethod(p1 T, p2 string) (_unnamedRetVal_1139503255_0 T, _unnamedRetVal_1139503255_1 error) {
-	//line <generated>:1
-	if hookContext1139503255, _ := OtelBeforeTrampoline_GenericMethod1139503255[T](&g, &p1, &p2); false {
+	/*line /<generated>:1*/ if hookContext1139503255, _ := OtelBeforeTrampoline_GenericMethod1139503255[T](&g, &p1, &p2); false {
 	} else {
 		defer OtelAfterTrampoline_GenericMethod1139503255[T](hookContext1139503255, &_unnamedRetVal_1139503255_0, &_unnamedRetVal_1139503255_1)
 	}
-	//line main.go:15:2
-	return p1, nil
+	/*line /golden/work/main.go:15*/ return p1, nil
 }
 
-//line <generated>:1
+//line /<generated>:1
 type HookContextImpl1523734358[T any] struct {
 	params      []interface{}
 	returnVals  []interface{}
@@ -143,8 +142,8 @@ func OtelBeforeTrampoline_GenericFunc1523734358[T any](param0 *[]T, param1 *[]T)
 	hookContext.params = []interface{}{param0, param1}
 	hookContext.funcName = "GenericFunc"
 	hookContext.packageName = "main"
-	if GenericFuncBefore != nil {
-		GenericFuncBefore(hookContext, *param0, *param1)
+	if otelc_hook_3784484425_GenericFuncBefore != nil {
+		otelc_hook_3784484425_GenericFuncBefore(hookContext, *param0, *param1)
 	}
 	return hookContext, hookContext.skipCall
 }
@@ -163,18 +162,17 @@ func OtelAfterTrampoline_GenericFunc1523734358[T any](hookContext HookContext, a
 		}
 	}()
 	hookContext.(*HookContextImpl1523734358[T]).returnVals = []interface{}{arg0, arg1}
-	if GenericFuncAfter != nil {
-		GenericFuncAfter(hookContext, *arg0, *arg1)
+	if otelc_hook_3784484425_GenericFuncAfter != nil {
+		otelc_hook_3784484425_GenericFuncAfter(hookContext, *arg0, *arg1)
 	}
 }
 
-//go:linkname GenericFuncBefore testdata/golden/generic-functions.GenericFuncBefore
-func GenericFuncBefore(hookContext HookContext, param0 interface{}, param1 interface{})
+//go:linkname otelc_hook_3784484425_GenericFuncBefore testdata/golden/generic-functions.GenericFuncBefore
+func otelc_hook_3784484425_GenericFuncBefore(hookContext HookContext, param0 interface{}, param1 interface{})
 
-//go:linkname GenericFuncAfter testdata/golden/generic-functions.GenericFuncAfter
-func GenericFuncAfter(hookContext HookContext, arg0 interface{}, arg1 error)
+//go:linkname otelc_hook_3784484425_GenericFuncAfter testdata/golden/generic-functions.GenericFuncAfter
+func otelc_hook_3784484425_GenericFuncAfter(hookContext HookContext, arg0 interface{}, arg1 error)
 
-//line <generated>:1
 type HookContextImpl1139503255[T any] struct {
 	params      []interface{}
 	returnVals  []interface{}
@@ -296,8 +294,8 @@ func OtelBeforeTrampoline_GenericMethod1139503255[T any](recv0 **GenStruct[T], p
 	hookContext.params = []interface{}{recv0, param0, param1}
 	hookContext.funcName = "GenericMethod"
 	hookContext.packageName = "main"
-	if GenericMethodBefore != nil {
-		GenericMethodBefore(hookContext, *recv0, *param0, *param1)
+	if otelc_hook_3784484425_GenericMethodBefore != nil {
+		otelc_hook_3784484425_GenericMethodBefore(hookContext, *recv0, *param0, *param1)
 	}
 	return hookContext, hookContext.skipCall
 }
@@ -316,13 +314,13 @@ func OtelAfterTrampoline_GenericMethod1139503255[T any](hookContext HookContext,
 		}
 	}()
 	hookContext.(*HookContextImpl1139503255[T]).returnVals = []interface{}{arg0, arg1}
-	if GenericMethodAfter != nil {
-		GenericMethodAfter(hookContext, *arg0, *arg1)
+	if otelc_hook_3784484425_GenericMethodAfter != nil {
+		otelc_hook_3784484425_GenericMethodAfter(hookContext, *arg0, *arg1)
 	}
 }
 
-//go:linkname GenericMethodBefore testdata/golden/generic-functions.GenericMethodBefore
-func GenericMethodBefore(hookContext HookContext, recv0 interface{}, param0 interface{}, param1 string)
+//go:linkname otelc_hook_3784484425_GenericMethodBefore testdata/golden/generic-functions.GenericMethodBefore
+func otelc_hook_3784484425_GenericMethodBefore(hookContext HookContext, recv0 interface{}, param0 interface{}, param1 string)
 
-//go:linkname GenericMethodAfter testdata/golden/generic-functions.GenericMethodAfter
-func GenericMethodAfter(hookContext HookContext, arg0 interface{}, arg1 error)
+//go:linkname otelc_hook_3784484425_GenericMethodAfter testdata/golden/generic-functions.GenericMethodAfter
+func otelc_hook_3784484425_GenericMethodAfter(hookContext HookContext, arg0 interface{}, arg1 error)
