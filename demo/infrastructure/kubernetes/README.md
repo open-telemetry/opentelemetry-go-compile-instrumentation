@@ -2,7 +2,7 @@
 
 This directory deploys the observability backends used by the demo: the OpenTelemetry Collector, Jaeger, Prometheus, and Grafana. The demo applications are not deployed here; configure them to export OTLP telemetry to the Collector.
 
-The manifests use the same component versions and configuration as the Docker Compose stack. Data is ephemeral and is lost when the pods are replaced.
+The manifests use the same component versions and configuration as the Docker Compose stack. Grafana datasources are provisioned, but the Docker Compose dashboards are not included in this Kubernetes stack. To use the pre-provisioned dashboards, run the Docker Compose stack instead. Data is ephemeral and is lost when the pods are replaced.
 This setup is for local demos: Jaeger stores traces in memory, storage is ephemeral, and Grafana allows anonymous administrator access. Do not expose it publicly.
 
 ## Deploy
