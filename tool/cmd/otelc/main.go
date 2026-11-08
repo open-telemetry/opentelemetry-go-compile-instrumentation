@@ -86,21 +86,7 @@ func main() {
 			&commandToolexec,
 			&commandVersion,
 		},
-		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
-			ctx, err := initGoflags(ctx)
-			if err != nil {
-				return ctx, err
-			}
-			ctx, err = initLogger(ctx, cmd)
-			if err != nil {
-				return ctx, err
-			}
-			ctx, err = initProfiling(ctx, cmd)
-			if err != nil {
-				return ctx, err
-			}
-			return initStats(ctx, cmd)
-		},
+		Before: initRoot,
 		After: func(ctx context.Context, cmd *cli.Command) error {
 			return ex.Join(stopProfiling(ctx, cmd), closeLogger(ctx))
 		},
@@ -113,6 +99,23 @@ func main() {
 	if err != nil {
 		ex.Fatal(err)
 	}
+}
+
+// initRoot prepares the process before any subcommand runs.
+func initRoot(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+	ctx, err := initGoflags(ctx)
+	if err != nil {
+		return ctx, err
+	}
+	ctx, err = initLogger(ctx, cmd)
+	if err != nil {
+		return ctx, err
+	}
+	ctx, err = initProfiling(ctx, cmd)
+	if err != nil {
+		return ctx, err
+	}
+	return initStats(ctx, cmd)
 }
 
 // initGoflags removes the GOFLAGS entries that the go commands otelc spawns

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/urfave/cli/v3"
@@ -258,6 +259,57 @@ func TestInitGoflags(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestInitRoot(t *testing.T) {
+	run := func(t *testing.T, args ...string) (context.Context, error) {
+		t.Helper()
+
+		ctxCh := make(chan context.Context, 1)
+		app := &cli.Command{
+			Name:   "otelc",
+			Flags:  rootFlags(),
+			Before: initRoot,
+			Action: func(ctx context.Context, _ *cli.Command) error {
+				ctxCh <- ctx
+				return nil
+			},
+			After: func(ctx context.Context, _ *cli.Command) error {
+				return closeLogger(ctx)
+			},
+		}
+		err := app.Run(t.Context(), append([]string{"otelc", "--" + flagWorkDir, t.TempDir()}, args...))
+		if err != nil {
+			return nil, err
+		}
+		return <-ctxCh, nil
+	}
+
+	t.Run("strips GOFLAGS and records json output", func(t *testing.T) {
+		t.Setenv("GOFLAGS", "-json -mod=mod")
+		t.Setenv(util.EnvOtelcWorkDir, "")
+
+		ctx, err := run(t)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := os.Getenv("GOFLAGS"); got != "-mod=mod" {
+			t.Errorf("GOFLAGS = %q, want %q", got, "-mod=mod")
+		}
+		if !setup.JSONOutputFromContext(ctx) {
+			t.Error("JSONOutputFromContext = false, want true")
+		}
+	})
+
+	t.Run("reports a profiling error", func(t *testing.T) {
+		t.Setenv("GOFLAGS", "")
+		t.Setenv(util.EnvOtelcWorkDir, "")
+
+		_, err := run(t, "--profile", "cpu")
+		if err == nil || !strings.Contains(err.Error(), "--profile-path is required") {
+			t.Fatalf("err = %v, want the --profile-path error", err)
+		}
+	})
 }
 
 func TestCloseLoggerNoWriter(t *testing.T) {
