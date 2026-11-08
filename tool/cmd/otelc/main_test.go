@@ -264,6 +264,10 @@ func TestInitGoflags(t *testing.T) {
 func TestInitRoot(t *testing.T) {
 	run := func(t *testing.T, args ...string) (context.Context, error) {
 		t.Helper()
+		// CI can set the profiling variables for the whole run; keep this
+		// test independent of them so it never starts a profile.
+		t.Setenv(envProfilePath, "")
+		t.Setenv(envEnabledProfiles, "")
 
 		ctxCh := make(chan context.Context, 1)
 		app := &cli.Command{
