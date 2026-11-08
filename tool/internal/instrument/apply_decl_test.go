@@ -397,6 +397,60 @@ func TestDeclRuleReplaceHandlesConstIotaImplicitRepeat(t *testing.T) {
 	assert.Contains(t, renderFile(t, file), "B = 99")
 }
 
+func TestDeclRuleReplaceRejectsIotaCascadeIntoLaterSibling(t *testing.T) {
+	// C has no initializer and currently implicitly repeats B's. Rewriting B
+	// would silently change C's value too, so this must be refused.
+	file := parseTestFile(t, "package main\n\nconst (\n\tA = iota\n\tB\n\tC\n)\n")
+	r := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{Name: "replace_b"},
+		Kind:         "const",
+		Identifier:   "B",
+		Replace:      "99",
+	}
+
+	err := newTestPhase().applyDeclRule(context.Background(), r, file)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `rewriting "B" would also change the value of C`)
+	assert.Contains(t, renderFile(t, file), "const (\n\tA = iota\n\tB\n\tC\n)", "declaration must be left untouched")
+}
+
+func TestDeclRuleReplaceAllowsCascadeStoppedByExplicitSibling(t *testing.T) {
+	// D has its own initializer, so it breaks the implicit-repeat chain: only
+	// C (between B and D) inherits B's value, and D is unaffected. A
+	// preceding func decl and an unrelated var block also exercise the
+	// decl-skipping path for declarations that aren't this const block.
+	file := parseTestFile(t,
+		"package main\n\nfunc noop() {}\n\nvar unrelated = 1\n\nconst (\n\tA = iota\n\tB\n\tC\n\tD = 7\n)\n")
+	r := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{Name: "replace_b"},
+		Kind:         "const",
+		Identifier:   "B",
+		Replace:      "99",
+	}
+
+	err := newTestPhase().applyDeclRule(context.Background(), r, file)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `rewriting "B" would also change the value of C`)
+	assert.NotContains(t, err.Error(), "D", "D has its own initializer and must not be reported as cascaded")
+}
+
+func TestDeclRuleWrapRejectsIotaCascadeIntoLaterSibling(t *testing.T) {
+	file := parseTestFile(t, "package main\n\nconst (\n\tA = iota\n\tB = 5\n\tC\n)\n")
+	r := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap_b"},
+		Kind:         "const",
+		Identifier:   "B",
+		Wrap:         "{{ . }} * 2",
+	}
+
+	err := newTestPhase().applyDeclRule(context.Background(), r, file)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `rewriting "B" would also change the value of C`)
+}
+
 func TestApplyDeclRule_ReplaceAliasMismatchUsesFileExistingAlias(t *testing.T) {
 	// The rule's replacement value is written against the alias "traced" for
 	// "fmt". The file already imports "fmt" under its own alias "f". The

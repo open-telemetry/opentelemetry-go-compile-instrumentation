@@ -6,6 +6,7 @@ package instrument
 import (
 	"context"
 	"slices"
+	"strings"
 
 	"github.com/dave/dst"
 
@@ -57,6 +58,12 @@ func (ip *instrumentPhase) applyDeclRule(ctx context.Context, r *rule.InstDeclRu
 	nameIdx := slices.IndexFunc(spec.Names, func(name *dst.Ident) bool { return name.Name == r.Identifier })
 	util.Assert(nameIdx >= 0, "matched spec must declare the targeted identifier")
 
+	if r.Kind == "const" {
+		if err := rejectIotaCascade(root, spec, r.Identifier); err != nil {
+			return err
+		}
+	}
+
 	_, aliasOverrides := ip.resolveImportOverrides(root, r.Imports)
 
 	// Validate and apply the rewrite before touching imports: a rule that
@@ -77,6 +84,45 @@ func (ip *instrumentPhase) applyDeclRule(ctx context.Context, r *rule.InstDeclRu
 	}
 
 	ip.Info("Apply decl rule", "rule", r)
+	return nil
+}
+
+// rejectIotaCascade returns an error when rewriting spec's value would change
+// what a later sibling ValueSpec in the same const block evaluates to. Within
+// a parenthesized const declaration, a ValueSpec with no expression list
+// textually substitutes the nearest preceding non-empty expression list (the
+// Go spec's "Iota" section), so rewriting spec's value also changes every
+// later spec that currently inherits it, with no indication in source that
+// those constants depend on spec at all.
+func rejectIotaCascade(root *dst.File, spec *dst.ValueSpec, identifier string) error {
+	for _, decl := range root.Decls {
+		genDecl, ok := decl.(*dst.GenDecl)
+		if !ok {
+			continue
+		}
+		specIdx := slices.Index(genDecl.Specs, dst.Spec(spec))
+		if specIdx < 0 {
+			continue
+		}
+		var cascaded []string
+		for i := specIdx + 1; i < len(genDecl.Specs); i++ {
+			sibling, ok := genDecl.Specs[i].(*dst.ValueSpec)
+			if !ok || len(sibling.Values) > 0 {
+				break
+			}
+			for _, name := range sibling.Names {
+				cascaded = append(cascaded, name.Name)
+			}
+		}
+		if len(cascaded) > 0 {
+			return ex.Newf(
+				"rewriting %q would also change the value of %s, which has no initializer "+
+					"of its own and implicitly repeats %q's",
+				identifier, strings.Join(cascaded, ", "), identifier,
+			)
+		}
+		return nil
+	}
 	return nil
 }
 
