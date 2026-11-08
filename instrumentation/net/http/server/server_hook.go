@@ -173,7 +173,10 @@ func AfterServeHTTP(ictx hook.HookContext) {
 	if p, ok := ictx.GetParam(responseWriterIndex).(http.ResponseWriter); ok {
 		if wrapper, ok := p.(*writerWrapper); ok {
 			statusCode = wrapper.statusCode
-			responseSize = wrapper.written
+			// net/http discards body writes for HEAD requests, so none reach the client.
+			if data.req == nil || data.req.Method != http.MethodHead {
+				responseSize = wrapper.written
+			}
 		}
 	}
 

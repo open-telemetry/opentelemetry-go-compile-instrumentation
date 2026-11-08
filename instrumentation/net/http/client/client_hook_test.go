@@ -96,6 +96,36 @@ func TestRoundTripRecordsMetrics(t *testing.T) {
 	assert.Equal(t, int64(0), active.DataPoints[0].Value)
 }
 
+func TestRoundTripRecordsNoResponseSizeForHEAD(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+	initOnce = *new(sync.Once)
+	setupTestTracer(t)
+	reader := setupTestMeter(t)
+
+	req, err := http.NewRequest(http.MethodHead, "http://example.com:8080/path", nil)
+	require.NoError(t, err)
+	ctx := hooktest.NewMockHookContext()
+	BeforeRoundTrip(ctx, &http.Transport{}, req)
+	// A HEAD response advertises the size of the GET body but carries none.
+	AfterRoundTrip(ctx, &http.Response{
+		StatusCode:    http.StatusOK,
+		Proto:         "HTTP/1.1",
+		ContentLength: 34,
+		Request:       req,
+	}, nil)
+
+	var got metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &got))
+	var names []string
+	for _, scope := range got.ScopeMetrics {
+		for _, metric := range scope.Metrics {
+			names = append(names, metric.Name)
+		}
+	}
+	assert.Contains(t, names, "http.client.request.duration")
+	assert.NotContains(t, names, "http.client.response.body.size")
+}
+
 func TestBeforeRoundTrip(t *testing.T) {
 	tests := []struct {
 		name            string

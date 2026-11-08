@@ -127,6 +127,34 @@ func TestServeHTTPRecordsResponseSizeForServeContent(t *testing.T) {
 	assert.Equal(t, int64(len("file contents")), responseSize.DataPoints[0].Sum)
 }
 
+func TestServeHTTPRecordsNoResponseSizeForHEAD(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+	initOnce = *new(sync.Once)
+	setupTestTracer(t)
+	reader := setupTestMeter(t)
+
+	req := httptest.NewRequest(http.MethodHead, "http://example.com/path", nil)
+	ctx := hooktest.NewMockHookContext()
+	BeforeServeHTTP(ctx, nil, httptest.NewRecorder(), req)
+	w, ok := ctx.GetParam(responseWriterIndex).(http.ResponseWriter)
+	require.True(t, ok)
+	// net/http accepts and discards body writes for HEAD requests.
+	_, err := w.Write([]byte("response"))
+	require.NoError(t, err)
+	AfterServeHTTP(ctx)
+
+	var got metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &got))
+	var names []string
+	for _, scope := range got.ScopeMetrics {
+		for _, metric := range scope.Metrics {
+			names = append(names, metric.Name)
+		}
+	}
+	assert.Contains(t, names, "http.server.request.duration")
+	assert.NotContains(t, names, "http.server.response.body.size")
+}
+
 func TestBeforeServeHTTP(t *testing.T) {
 	tests := []struct {
 		name            string

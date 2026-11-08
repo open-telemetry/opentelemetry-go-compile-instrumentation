@@ -222,7 +222,10 @@ func AfterRoundTrip(ictx hook.HookContext, res *http.Response, err error) {
 		metricAttrs := []attribute.KeyValue(nil)
 		if res != nil {
 			statusCode = res.StatusCode
-			responseSize = res.ContentLength
+			// A HEAD response advertises the size of the GET body but carries none.
+			if req.Method != http.MethodHead {
+				responseSize = res.ContentLength
+			}
 			networkProtocol = res.Proto
 		}
 		if err != nil {
