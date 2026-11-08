@@ -23,6 +23,11 @@ func (ip *instrumentPhase) applyStructRule(ctx context.Context, rule *rule.InstS
 
 	existingFields := make(map[string]bool, len(structType.Fields.List))
 	for _, f := range structType.Fields.List {
+		if len(f.Names) == 0 {
+			// Embedded field: its effective name is the type name itself.
+			existingFields[embeddedFieldName(f.Type)] = true
+			continue
+		}
 		for _, name := range f.Names {
 			existingFields[name.Name] = true
 		}
@@ -48,4 +53,27 @@ func (ip *instrumentPhase) applyStructRule(ctx context.Context, rule *rule.InstS
 
 	ip.Info("Apply struct rule", "rule", rule)
 	return nil
+}
+
+// embeddedFieldName returns the field name Go derives for an embedded field,
+// which is the type name with any pointer, package qualifier and type
+// arguments removed (e.g. *pkg.Inner[T] embeds as "Inner").
+func embeddedFieldName(typeExpr dst.Expr) string {
+	if star, ok := typeExpr.(*dst.StarExpr); ok {
+		typeExpr = star.X
+	}
+	switch e := typeExpr.(type) {
+	case *dst.IndexExpr:
+		typeExpr = e.X
+	case *dst.IndexListExpr:
+		typeExpr = e.X
+	}
+	switch e := typeExpr.(type) {
+	case *dst.SelectorExpr:
+		return e.Sel.Name
+	case *dst.Ident:
+		return e.Name
+	default:
+		return ""
+	}
 }

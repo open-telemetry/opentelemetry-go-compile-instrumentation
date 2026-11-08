@@ -66,6 +66,48 @@ func TestApplyStructRule_CollidesWithExistingField_ReturnsError(t *testing.T) {
 	require.Len(t, target.Fields.List, 1)
 }
 
+func TestApplyStructRule_CollidesWithEmbeddedField_ReturnsError(t *testing.T) {
+	// An embedded field has no Names; its effective field name is the type
+	// name with any pointer, package qualifier and type arguments removed.
+	// new_field must be checked against that derived name too, not just
+	// against named fields.
+	cases := []struct {
+		name     string
+		embedded dst.Expr
+		newField string
+	}{
+		{"plain", &dst.Ident{Name: "Mutex"}, "Mutex"},
+		{"pointer", &dst.StarExpr{X: &dst.Ident{Name: "Inner"}}, "Inner"},
+		{"qualified", &dst.SelectorExpr{X: &dst.Ident{Name: "sync"}, Sel: &dst.Ident{Name: "Mutex"}}, "Mutex"},
+		{
+			"pointer to qualified generic",
+			&dst.StarExpr{X: &dst.IndexExpr{
+				X:     &dst.SelectorExpr{X: &dst.Ident{Name: "pkg"}, Sel: &dst.Ident{Name: "Box"}},
+				Index: &dst.Ident{Name: "T"},
+			}},
+			"Box",
+		},
+	}
+
+	for _, c := range cases {
+		target := &dst.StructType{Fields: &dst.FieldList{
+			List: []*dst.Field{{Type: c.embedded}},
+		}}
+		file := typeDeclFile(&dst.TypeSpec{Name: &dst.Ident{Name: "Target"}, Type: target})
+		r := &rule.InstStructRule{
+			InstBaseRule: rule.InstBaseRule{Name: "add_field"},
+			Struct:       "Target",
+			NewField:     []*rule.InstStructField{{Name: c.newField, Type: "bool"}},
+		}
+
+		err := newTestPhase().applyStructRule(context.Background(), r, file)
+
+		require.Errorf(t, err, "case %q", c.name)
+		assert.Containsf(t, err.Error(), `already has a field named "`+c.newField+`"`, "case %q", c.name)
+		require.Lenf(t, target.Fields.List, 1, "case %q", c.name)
+	}
+}
+
 func TestApplyStructRule_GroupedTypeBlock_TargetsNamedStruct(t *testing.T) {
 	// In a grouped type block the field must land in the NAMED struct, not the
 	// first spec (here a non-struct that used to be asserted via Specs[0]).
