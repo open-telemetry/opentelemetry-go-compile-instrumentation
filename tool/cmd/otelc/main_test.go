@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/urfave/cli/v3"
+	"go.opentelemetry.io/otelc/tool/internal/setup"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -219,6 +220,44 @@ func TestInitLoggerToolexecWorkDir(t *testing.T) {
 			t.Fatalf("expected %s=%q, got %q", util.EnvOtelcWorkDir, workDir, got)
 		}
 	})
+}
+
+func TestInitGoflags(t *testing.T) {
+	tests := []struct {
+		name       string
+		goflags    string
+		expected   string
+		jsonOutput bool
+	}{
+		{name: "unset", goflags: "", expected: ""},
+		{name: "nothing to strip", goflags: "-mod=mod", expected: "-mod=mod"},
+		{name: "toolexec", goflags: "-mod=mod '-toolexec=otelc toolexec'", expected: "-mod=mod"},
+		{name: "json", goflags: "-json -mod=mod", expected: "-mod=mod", jsonOutput: true},
+		{name: "json turned off", goflags: "-json=false", expected: ""},
+		{
+			name:       "toolexec and json",
+			goflags:    "-toolexec=otelc -json -race",
+			expected:   "-race",
+			jsonOutput: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("GOFLAGS", tt.goflags)
+
+			ctx, err := initGoflags(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := os.Getenv("GOFLAGS"); got != tt.expected {
+				t.Errorf("GOFLAGS = %q, want %q", got, tt.expected)
+			}
+			if got := setup.JSONOutputFromContext(ctx); got != tt.jsonOutput {
+				t.Errorf("JSONOutputFromContext = %v, want %v", got, tt.jsonOutput)
+			}
+		})
+	}
 }
 
 func TestCloseLoggerNoWriter(t *testing.T) {

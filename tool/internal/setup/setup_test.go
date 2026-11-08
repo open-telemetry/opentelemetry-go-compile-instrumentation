@@ -272,6 +272,11 @@ type toolexecInvocation struct {
 
 func runBuildWithToolexec(t *testing.T, args []string, vendored bool) toolexecInvocation {
 	t.Helper()
+	return runBuildWithToolexecContext(t.Context(), t, args, vendored)
+}
+
+func runBuildWithToolexecContext(ctx context.Context, t *testing.T, args []string, vendored bool) toolexecInvocation {
+	t.Helper()
 
 	dir := t.TempDir()
 	t.Chdir(dir)
@@ -298,7 +303,7 @@ func runBuildWithToolexec(t *testing.T, args []string, vendored bool) toolexecIn
 		Flags:    []cli.Flag{&cli.BoolFlag{Name: "debug"}},
 		Commands: []*cli.Command{goCmd},
 	}
-	require.NoError(t, cmd.Run(t.Context(), append([]string{"otelc"}, args...)))
+	require.NoError(t, cmd.Run(ctx, append([]string{"otelc"}, args...)))
 	return got
 }
 
@@ -318,6 +323,17 @@ func TestBuildWithToolexec(t *testing.T) {
 		got := runBuildWithToolexec(t, []string{"--debug", "go", "build", "."}, false)
 
 		assert.Contains(t, got.argv, "-work")
+	})
+
+	t.Run("passes -json on the command line when GOFLAGS asked for it", func(t *testing.T) {
+		assert.NotContains(t, runBuildWithToolexec(t, []string{"go", "test", "./..."}, false).argv, "-json")
+
+		ctx := ContextWithJSONOutput(t.Context())
+		got := runBuildWithToolexecContext(ctx, t, []string{"go", "test", "-json=false", "./..."}, false)
+
+		// A -json=false of the user comes later and still wins.
+		require.Contains(t, got.argv, "-json")
+		assert.Less(t, slices.Index(got.argv, "-json"), slices.Index(got.argv, "-json=false"))
 	})
 
 	t.Run("forwards build flags and neutralizes vendor mode", func(t *testing.T) {
