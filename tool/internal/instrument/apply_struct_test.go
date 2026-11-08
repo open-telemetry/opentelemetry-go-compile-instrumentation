@@ -108,6 +108,28 @@ func TestApplyStructRule_CollidesWithEmbeddedField_ReturnsError(t *testing.T) {
 	}
 }
 
+func TestEmbeddedFieldName(t *testing.T) {
+	cases := []struct {
+		name string
+		expr dst.Expr
+		want string
+	}{
+		{
+			"generic with multiple type parameters",
+			&dst.IndexListExpr{
+				X:       &dst.Ident{Name: "Box"},
+				Indices: []dst.Expr{&dst.Ident{Name: "K"}, &dst.Ident{Name: "V"}},
+			},
+			"Box",
+		},
+		{"unrecognized expression", &dst.ArrayType{Elt: &dst.Ident{Name: "int"}}, ""},
+	}
+
+	for _, c := range cases {
+		assert.Equalf(t, c.want, embeddedFieldName(c.expr), "case %q", c.name)
+	}
+}
+
 func TestApplyStructRule_GroupedTypeBlock_TargetsNamedStruct(t *testing.T) {
 	// In a grouped type block the field must land in the NAMED struct, not the
 	// first spec (here a non-struct that used to be asserted via Specs[0]).
