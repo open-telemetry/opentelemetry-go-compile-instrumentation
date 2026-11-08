@@ -103,19 +103,13 @@ func main() {
 
 // initRoot prepares the process before any subcommand runs.
 func initRoot(ctx context.Context, cmd *cli.Command) (context.Context, error) {
-	ctx, err := initGoflags(ctx)
-	if err != nil {
-		return ctx, err
+	var err error
+	for _, step := range []cli.BeforeFunc{initGoflags, initLogger, initProfiling, initStats} {
+		if ctx, err = step(ctx, cmd); err != nil {
+			return ctx, err
+		}
 	}
-	ctx, err = initLogger(ctx, cmd)
-	if err != nil {
-		return ctx, err
-	}
-	ctx, err = initProfiling(ctx, cmd)
-	if err != nil {
-		return ctx, err
-	}
-	return initStats(ctx, cmd)
+	return ctx, nil
 }
 
 // initGoflags removes the GOFLAGS entries that the go commands otelc spawns
@@ -127,7 +121,7 @@ func initRoot(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 // A -json entry would make them print JSON where otelc reads text: the build
 // plan would be empty and go list -f would fail. `otelc go` re-adds -json to
 // the build it runs, recorded in the returned context.
-func initGoflags(ctx context.Context) (context.Context, error) {
+func initGoflags(ctx context.Context, _ *cli.Command) (context.Context, error) {
 	goflags := os.Getenv("GOFLAGS")
 	if goflags == "" {
 		return ctx, nil

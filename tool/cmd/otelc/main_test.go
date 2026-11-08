@@ -247,7 +247,7 @@ func TestInitGoflags(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("GOFLAGS", tt.goflags)
 
-			ctx, err := initGoflags(t.Context())
+			ctx, err := initGoflags(t.Context(), nil)
 			if err != nil {
 				t.Fatal(err)
 			}
