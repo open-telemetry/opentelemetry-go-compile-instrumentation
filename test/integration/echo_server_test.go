@@ -55,7 +55,7 @@ func TestEchoServer(t *testing.T) {
 			},
 		},
 		{
-			name:       "c.Error() surfaces as span status and exception event",
+			name:       "handler error surfaces as span status and exception event",
 			method:     http.MethodGet,
 			path:       "/error",
 			wantStatus: http.StatusInternalServerError,

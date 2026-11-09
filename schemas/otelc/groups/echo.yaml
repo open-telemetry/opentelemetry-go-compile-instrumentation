@@ -1,10 +1,10 @@
 groups:
   # ---------------------------------------------------------------------------
-  # labstack/echo/v4 instrumentation emission contract.
+  # labstack/echo v4/v5 instrumentation emission contract.
   #
   # Source of truth for this file:
   #   instrumentation/github.com/labstack/echo/v4/hook.go
-  #   (AfterFind / BeforeError / BeforeDefaultHTTPErrorHandler)
+  #   instrumentation/github.com/labstack/echo/v5/hook.go
   #
   # The echo instrumentation creates no spans and records no metrics of its own.
   # An echo application is served through `net/http`, so the server span already
