@@ -66,6 +66,12 @@
       ], 
     },
     {
+      matchManagers: [
+        'gomod',
+      ],
+      separateMultipleMajor: true,
+    },
+    {
       // This gates all major go updates into individual updates and will disappear
       // when a versioned module is created & old version go mod added to the next rule.
       matchManagers: [
