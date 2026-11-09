@@ -36,7 +36,7 @@
   ],
   packageRules: [
     {
-      dependencyDashboardCategory: 'CI Tooling'
+      dependencyDashboardCategory: 'CI Tooling',
       matchCategories: [
         'ci',
       ],
