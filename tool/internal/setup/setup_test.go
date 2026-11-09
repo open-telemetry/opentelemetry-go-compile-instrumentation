@@ -1795,7 +1795,7 @@ func TestSetup_FindDepsErrorWithRules(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestSetup_MatchDepsError(t *testing.T) {
+func TestSetup_RuleLoadError(t *testing.T) {
 	setupTestModule(t, []string{"cmd"})
 	t.Setenv(util.EnvOtelcRules, "/nonexistent/rules.yaml")
 	_ = os.RemoveAll(util.GetBuildTempDir())
@@ -1806,7 +1806,7 @@ func TestSetup_MatchDepsError(t *testing.T) {
 		Action: Setup,
 	}
 	err := cmd.Run(t.Context(), []string{"setup", "."})
-	require.Error(t, err)
+	require.ErrorContains(t, err, "loading hook rules")
 }
 
 func TestSetup_ResolveRulePathsError(t *testing.T) {
@@ -2120,10 +2120,10 @@ func TestMatchAllDeps_DeterministicOrder(t *testing.T) {
 	}
 }
 
-// TestMatchAllDeps_MatchDepsError covers the first error boundary of
-// matchAllDeps: a rule file that cannot be parsed must surface the matchDeps
+// TestMatchAllDeps_RuleLoadError covers the first error boundary of
+// matchAllDeps: a rule file that cannot be parsed must surface the rule loading
 // failure, not a silently empty result.
-func TestMatchAllDeps_MatchDepsError(t *testing.T) {
+func TestMatchAllDeps_RuleLoadError(t *testing.T) {
 	t.Setenv(util.EnvOtelcRules, "")
 
 	dir := t.TempDir()
@@ -2136,7 +2136,7 @@ func TestMatchAllDeps_MatchDepsError(t *testing.T) {
 	deps := []*Dependency{{ImportPath: "example.com/maddeps/aaa"}}
 	_, err := sp.matchAllDeps(t.Context(), deps, []string{dir}, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "matching dependencies to hook rules")
+	assert.Contains(t, err.Error(), "loading hook rules")
 }
 
 // TestMatchAllDeps_ResolveRulePathsError covers the second error boundary of

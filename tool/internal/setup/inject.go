@@ -227,7 +227,7 @@ func (sp *setupPhase) matchInjectedDeps(
 	ctx context.Context,
 	matched []*rule.InstRuleSet,
 	deps []*Dependency,
-	moduleDirs []string,
+	idx *ruleIndex,
 	buildFlags []string,
 ) ([]*rule.InstRuleSet, error) {
 	known := make(map[string]bool, len(deps))
@@ -257,11 +257,15 @@ func (sp *setupPhase) matchInjectedDeps(
 			return injected, nil
 		},
 		match: func(ctx context.Context, injected []*Dependency) ([]*rule.InstRuleSet, error) {
-			more, err := sp.matchDeps(ctx, injected, moduleDirs)
+			more, err := sp.matchDeps(ctx, injected, idx)
 			if err != nil {
 				return nil, ex.Wrapf(err, "matching injected dependencies to hook rules")
 			}
 			if len(more) > 0 {
+				var moduleDirs []string
+				if idx != nil {
+					moduleDirs = idx.moduleDirs
+				}
 				if err = resolveRulePaths(ctx, more, moduleDirs); err != nil {
 					return nil, ex.Wrapf(err, "resolving injected rule paths")
 				}
