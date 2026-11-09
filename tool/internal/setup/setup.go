@@ -432,7 +432,13 @@ func (sp *setupPhase) matchAllDeps(
 	moduleDirs []string,
 	buildFlags []string,
 ) ([]*rule.InstRuleSet, error) {
-	matched, err := sp.matchDeps(ctx, deps, moduleDirs)
+	// Prepare rules once for both the initial and injected dependencies.
+	idx, err := sp.loadRuleIndex(ctx, moduleDirs)
+	if err != nil {
+		return nil, ex.Wrapf(err, "loading hook rules")
+	}
+
+	matched, err := sp.matchDeps(ctx, deps, idx)
 	if err != nil {
 		return nil, ex.Wrapf(err, "matching dependencies to hook rules")
 	}
@@ -446,7 +452,7 @@ func (sp *setupPhase) matchAllDeps(
 	// The hook packages the pass above selected get blank-imported into the
 	// application below, which compiles their dependencies too. The build plan
 	// never saw those, so match them now.
-	injected, err := sp.matchInjectedDeps(ctx, matched, deps, moduleDirs, buildFlags)
+	injected, err := sp.matchInjectedDeps(ctx, matched, deps, idx, buildFlags)
 	if err != nil {
 		return nil, err
 	}
@@ -834,6 +840,22 @@ var runBuildCmd = util.RunCmdWithEnv
 //nolint:gochecknoglobals // test seam
 var executablePath = os.Executable
 
+type jsonOutputKey struct{}
+
+// ContextWithJSONOutput records that GOFLAGS turned on -json before otelc
+// removed it from GOFLAGS (see util.StripJSONFromGoflags). The instrumented
+// build then passes -json on its own command line, so it still reports its
+// output as JSON.
+func ContextWithJSONOutput(ctx context.Context) context.Context {
+	return context.WithValue(ctx, jsonOutputKey{}, true)
+}
+
+// JSONOutputFromContext reports whether ctx carries ContextWithJSONOutput.
+func JSONOutputFromContext(ctx context.Context) bool {
+	jsonOutput, _ := ctx.Value(jsonOutputKey{}).(bool)
+	return jsonOutput
+}
+
 // buildWithToolexec builds the project with the toolexec mode. vendored is
 // passed in by GoBuild: Setup already forced GOFLAGS=-mod=mod, but a CLI
 // -mod=vendor beats GOFLAGS, so it still has to be neutralized in the build
@@ -851,6 +873,11 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 	if cmd.Bool("debug") {
 		// Keep Go's temporary work directory only for debugging.
 		goFlags = append(goFlags, "-work")
+	}
+	if JSONOutputFromContext(ctx) {
+		// Ahead of the user's flags, so a -json=false there still wins, as it
+		// does over GOFLAGS.
+		goFlags = append(goFlags, flagJSON)
 	}
 	newArgs, err := toolexecBuildArgs(args, execPath, vendored, goFlags...)
 	if err != nil {
