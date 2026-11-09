@@ -164,7 +164,7 @@ func setupImplementsPhase(t *testing.T, source string, omit ...string) (*instrum
 
 func TestThatImplementsHelpers(t *testing.T) {
 	ip, root := setupImplementsPhase(t, implementsSource)
-	require.NotNil(t, ip.ensureMethodCallInfo())
+	require.NotNil(t, ip.ensureMethodCallInfo(t.Context()))
 	require.NoError(t, ip.methodCallInfo.firstTypeError)
 	importAliases := ast.ImportAliasMap(root, nil)
 
@@ -292,7 +292,7 @@ func undefinedFirst(x Undefined, c *ReqCtx) {}
 func undefinedCtx(c Undefined, ctx context.Context) {}
 func undefinedOnly(c Undefined) {}
 `)
-	require.NotNil(t, ip.ensureMethodCallInfo())
+	require.NotNil(t, ip.ensureMethodCallInfo(t.Context()))
 	require.Error(t, ip.methodCallInfo.firstTypeError)
 	importAliases := ast.ImportAliasMap(root, nil)
 
@@ -321,7 +321,7 @@ import (
 
 func handle(r *http.Request, ctx context.Context) {}
 `, "context")
-	require.NotNil(t, ip.ensureMethodCallInfo())
+	require.NotNil(t, ip.ensureMethodCallInfo(t.Context()))
 	require.Error(t, ip.methodCallInfo.firstTypeError)
 	iface, err := ip.fileTypes().lookupInterface("context.Context")
 	require.NoError(t, err)
@@ -343,7 +343,7 @@ import "example.com/framework"
 
 func handle(c *framework.Context) {}
 `)
-	require.NotNil(t, ip.ensureMethodCallInfo())
+	require.NotNil(t, ip.ensureMethodCallInfo(t.Context()))
 	require.NoError(t, ip.methodCallInfo.firstTypeError)
 
 	data := newFuncTemplateData(findFuncDeclInFile(t, root, "handle"), nil, ast.ImportAliasMap(root, nil), "h1")
@@ -355,7 +355,7 @@ func handle(c *framework.Context) {}
 
 func TestCallTemplate_ThatImplementsHelpers(t *testing.T) {
 	ip, root := setupImplementsPhase(t, implementsSource)
-	require.NotNil(t, ip.ensureMethodCallInfo())
+	require.NotNil(t, ip.ensureMethodCallInfo(t.Context()))
 	importAliases := ast.ImportAliasMap(root, nil)
 
 	tmpl, err := newCallTemplate(
@@ -376,7 +376,7 @@ func TestCallTemplate_ThatImplementsHelpers(t *testing.T) {
 
 func TestMatchesImplementsFilters(t *testing.T) {
 	ip, root := setupImplementsPhase(t, implementsSource)
-	require.NotNil(t, ip.ensureMethodCallInfo())
+	require.NotNil(t, ip.ensureMethodCallInfo(t.Context()))
 
 	cases := []struct {
 		name string
@@ -507,7 +507,7 @@ var handler = func(c *ReqCtx) {}
 
 func TestLitRule_ThatImplementsHelpers(t *testing.T) {
 	ip, root := setupImplementsPhase(t, literalSource)
-	require.NotNil(t, ip.ensureMethodCallInfo())
+	require.NotNil(t, ip.ensureMethodCallInfo(t.Context()))
 	require.NoError(t, ip.methodCallInfo.firstTypeError)
 
 	r := &rule.InstLitRule{
@@ -538,7 +538,7 @@ func TestLitRule_ThatImplementsHelpers(t *testing.T) {
 
 func TestThatImplementsHelpers_FuncLit(t *testing.T) {
 	ip, root := setupImplementsPhase(t, literalSource)
-	require.NotNil(t, ip.ensureMethodCallInfo())
+	require.NotNil(t, ip.ensureMethodCallInfo(t.Context()))
 	require.NoError(t, ip.methodCallInfo.firstTypeError)
 
 	var lit *dst.FuncLit

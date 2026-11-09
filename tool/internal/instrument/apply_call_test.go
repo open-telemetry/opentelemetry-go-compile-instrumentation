@@ -525,7 +525,7 @@ func TestApplyCallReplace_DoesNotRewriteOriginalCallArguments(t *testing.T) {
 	importAliases := map[string]string{"http": "net/http"}
 	aliasOverrides := map[string]string{"traced": "f"}
 
-	modified, err := newTestPhase().applyCallReplace(r, root, importAliases, aliasOverrides)
+	modified, err := newTestPhase().applyCallReplace(t.Context(), r, root, importAliases, aliasOverrides)
 
 	require.NoError(t, err)
 	assert.True(t, modified)
@@ -1261,7 +1261,7 @@ func TestApplyCallAppendArgs_NoMatchReturnsFalse(t *testing.T) {
 
 	ip := newTestPhase()
 	importAliases := ast.ImportAliasMap(file, nil)
-	result, err := ip.applyCallAppendArgs(r, file, importAliases, nil)
+	result, err := ip.applyCallAppendArgs(t.Context(), r, file, importAliases, nil)
 
 	require.NoError(t, err)
 	assert.False(t, result, "applyCallAppendArgs must return false when no calls match")
@@ -2263,7 +2263,7 @@ func TestMatchesMethodCallRule_TypeCheckFailureSkipsMatch(t *testing.T) {
 		},
 	}
 
-	assert.False(t, ip.matchesMethodCallRule(call, r))
+	assert.False(t, ip.matchesMethodCallRule(t.Context(), call, r))
 	assert.True(t, ip.methodCallInfoLoaded)
 	assert.Nil(t, ip.methodCallInfo)
 }
@@ -2284,7 +2284,7 @@ func (l Logger) Info(msg string) {}
 		},
 	}
 
-	assert.False(t, ip.matchesMethodCallRule(call, r))
+	assert.False(t, ip.matchesMethodCallRule(t.Context(), call, r))
 }
 
 func TestMatchesMethodCallRule_NoSourcePositionLogsMiss(t *testing.T) {
@@ -2305,7 +2305,7 @@ func (l Logger) Info(msg string) {}
 		},
 	}
 
-	assert.False(t, ip.matchesMethodCallRule(call, r))
+	assert.False(t, ip.matchesMethodCallRule(t.Context(), call, r))
 	assert.Contains(t, logs.String(), "no source position")
 }
 
@@ -2354,7 +2354,7 @@ func run() {
 	call := findCallByMethodName(root, "Write")
 	require.NotNil(t, call, "did not find Write call via dst")
 
-	assert.False(t, ip.matchesMethodCallRule(call, r),
+	assert.False(t, ip.matchesMethodCallRule(t.Context(), call, r),
 		"a call through an interface-typed receiver must not resolve, so it must not match")
 	assert.Contains(t, logs.String(), "could not be resolved to a receiver type")
 }
@@ -2382,7 +2382,7 @@ func run() {
 	call := findCallByMethodName(root, "Info")
 	require.NotNil(t, call, "did not find Info call via dst")
 
-	assert.False(t, ip.matchesMethodCallRule(call, r))
+	assert.False(t, ip.matchesMethodCallRule(t.Context(), call, r))
 	assert.Contains(t, logs.String(), "could not be resolved to a receiver type")
 	assert.Contains(t, logs.String(), "first_type_error")
 	assert.Contains(t, logs.String(), "undefined")
@@ -2534,7 +2534,7 @@ func TestExportImporter_ImportFrom_MissingArchive(t *testing.T) {
 	_, err := imp.ImportFrom("example.com/missing", "", 0)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no archive for import path")
+	assert.Contains(t, err.Error(), "no export data for import path")
 }
 
 func TestExportImporter_ImportFrom_OpenArchiveError(t *testing.T) {
@@ -2546,10 +2546,10 @@ func TestExportImporter_ImportFrom_OpenArchiveError(t *testing.T) {
 	_, err := imp.ImportFrom("example.com/gone", "", 0)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "opening archive")
+	assert.Contains(t, err.Error(), "opening export data")
 }
 
-func TestExportImporter_ImportFrom_NewReaderError(t *testing.T) {
+func TestExportImporter_ImportFrom_GarbageFile(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempGoFile(t, dir, "notanarchive.a", "not an archive at all")
 	imp := newExportImporter(token.NewFileSet(), map[string]string{"example.com/bad": path}, nil)
@@ -2557,7 +2557,7 @@ func TestExportImporter_ImportFrom_NewReaderError(t *testing.T) {
 	_, err := imp.ImportFrom("example.com/bad", "", 0)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "reading export data section")
+	assert.Contains(t, err.Error(), "decoding export data")
 }
 
 func TestExportImporter_ImportFrom_DecodeError(t *testing.T) {
