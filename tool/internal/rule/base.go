@@ -83,6 +83,11 @@ func (ibr *InstBaseRule) GetTarget() *Target  { return &ibr.Target }
 func (ibr *InstBaseRule) GetVersion() string  { return ibr.Version }
 func (ibr *InstBaseRule) GetWhere() *WhereDef { return ibr.Where }
 
+// Base returns the embedded base rule. Every rule kind promotes this method,
+// so code that holds any rule kind can reach the fields all kinds share, such
+// as the imports the rule declares.
+func (ibr *InstBaseRule) Base() *InstBaseRule { return ibr }
+
 // InstRuleSet represents a collection of instrumentation rules that apply to a
 // single Go package within a specific module. It acts as a container for rules,
 // organizing them by file and by the specific functions or structs they target.
