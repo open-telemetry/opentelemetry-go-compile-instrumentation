@@ -50,12 +50,20 @@
       matchUpdateTypes: [
         'patch',
         'minor',
-        'major',
         'digest',
       ],
       matchPackageNames: [
         '*',
       ],
+    },
+    {
+      groupName: 'all major docker dependencies',
+      matchCategories: [
+        'docker',
+      ],
+      matchUpdateTypes: [
+        'major',
+      ], 
     },
     {
       // This gates all major go updates into individual updates and will disappear
