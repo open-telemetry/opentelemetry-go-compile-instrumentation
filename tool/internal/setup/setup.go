@@ -840,6 +840,22 @@ var runBuildCmd = util.RunCmdWithEnv
 //nolint:gochecknoglobals // test seam
 var executablePath = os.Executable
 
+type jsonOutputKey struct{}
+
+// ContextWithJSONOutput records that GOFLAGS turned on -json before otelc
+// removed it from GOFLAGS (see util.StripJSONFromGoflags). The instrumented
+// build then passes -json on its own command line, so it still reports its
+// output as JSON.
+func ContextWithJSONOutput(ctx context.Context) context.Context {
+	return context.WithValue(ctx, jsonOutputKey{}, true)
+}
+
+// JSONOutputFromContext reports whether ctx carries ContextWithJSONOutput.
+func JSONOutputFromContext(ctx context.Context) bool {
+	jsonOutput, _ := ctx.Value(jsonOutputKey{}).(bool)
+	return jsonOutput
+}
+
 // buildWithToolexec builds the project with the toolexec mode. vendored is
 // passed in by GoBuild: Setup already forced GOFLAGS=-mod=mod, but a CLI
 // -mod=vendor beats GOFLAGS, so it still has to be neutralized in the build
@@ -857,6 +873,11 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 	if cmd.Bool("debug") {
 		// Keep Go's temporary work directory only for debugging.
 		goFlags = append(goFlags, "-work")
+	}
+	if JSONOutputFromContext(ctx) {
+		// Ahead of the user's flags, so a -json=false there still wins, as it
+		// does over GOFLAGS.
+		goFlags = append(goFlags, flagJSON)
 	}
 	newArgs, err := toolexecBuildArgs(args, execPath, vendored, goFlags...)
 	if err != nil {
