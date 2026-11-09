@@ -28,6 +28,7 @@ const (
 	// Blank named returns get their own prefix; sharing ignoredParam with a blank
 	// param or receiver would collide, since both live in the same scope.
 	ignoredRetValName = "_ignoredRetVal"
+	ignoredTypeParam  = "_ignoredTypeParam"
 )
 
 // renameReturnValues assigns referenceable names to funcDecl's unnamed return
