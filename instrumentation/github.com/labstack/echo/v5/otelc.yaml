@@ -1,0 +1,22 @@
+version: "v1.0.0"
+
+echo_router_route_hook:
+  target: github.com/labstack/echo/v5
+  version: v5.0.0
+  where:
+    func: Route
+    recv: "*DefaultRouter"
+  do:
+    - inject_hooks:
+        after: AfterRoute
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/labstack/echo/v5"
+
+echo_default_http_error_handler_hook:
+  target: github.com/labstack/echo/v5
+  version: v5.0.0
+  where:
+    func: DefaultHTTPErrorHandler
+  do:
+    - inject_hooks:
+        after: AfterDefaultHTTPErrorHandler
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/labstack/echo/v5"

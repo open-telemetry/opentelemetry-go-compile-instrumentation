@@ -78,13 +78,8 @@ func MyHookGenericBefore(ictx hook.HookContext, _, _ interface{}) {
 	fmt.Printf("[Generic] Function: %s.%s\n", ictx.GetPackageName(), ictx.GetFuncName())
 	fmt.Printf("[Generic] Param count: %d\n", ictx.GetParamCount())
 	fmt.Printf("[Generic] Skip call: %v\n", ictx.IsSkipCall())
+	fmt.Printf("[Generic] Param 0: %v\n", ictx.GetParam(0))
 	ictx.SetData("test-data")
-
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Printf("[Generic] SetParam panic (expected): %v\n", r)
-		}
-	}()
 	ictx.SetParam(0, 999)
 }
 
@@ -92,12 +87,7 @@ func MyHookGenericAfter(ictx hook.HookContext, _ interface{}) {
 	println("GenericExample after hook")
 	fmt.Printf("[Generic] Data from Before: %v\n", ictx.GetData())
 	fmt.Printf("[Generic] Return value count: %d\n", ictx.GetReturnValCount())
-
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Printf("[Generic] SetReturnVal panic (expected): %v\n", r)
-		}
-	}()
+	fmt.Printf("[Generic] Return value 0: %v\n", ictx.GetReturnVal(0))
 	ictx.SetReturnVal(0, 999)
 }
 
@@ -110,13 +100,7 @@ func MyHookQueryBefore(ictx hook.HookContext, _ context.Context, _ string) {
 func MyHookQueryAfter(ictx hook.HookContext, _ interface{}, _ error) {
 	println("Query after hook")
 	fmt.Printf("[Query] GetReturnVal(1): %v\n", ictx.GetReturnVal(1))
-
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Printf("[Query] GetReturnVal(0) panic (expected): %v\n", r)
-		}
-	}()
-	ictx.GetReturnVal(0)
+	fmt.Printf("[Query] GetReturnVal(0): %v\n", ictx.GetReturnVal(0))
 }
 
 func BeforeUnderscore(ictx hook.HookContext, _ int, _ float32) {

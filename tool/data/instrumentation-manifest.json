@@ -31,6 +31,11 @@
     "versionRange": "v4.2.0"
   },
   {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/labstack/echo/v5",
+    "target": "github.com/labstack/echo/v5",
+    "versionRange": "v5.0.0"
+  },
+  {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2",
     "target": "github.com/linode/linodego/v2",
     "versionRange": "v2.0.0"
