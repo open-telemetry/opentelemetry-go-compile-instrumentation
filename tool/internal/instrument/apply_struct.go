@@ -29,12 +29,15 @@ func (ip *instrumentPhase) applyStructRule(ctx context.Context, rule *rule.InstS
 			continue
 		}
 		for _, name := range f.Names {
+			if name.Name == "_" {
+				continue
+			}
 			existingFields[name.Name] = true
 		}
 	}
 
 	for _, field := range rule.NewField {
-		if existingFields[field.Name] {
+		if field.Name != "_" && existingFields[field.Name] {
 			return ex.Newf("struct %q already has a field named %q", rule.Struct, field.Name)
 		}
 		typeExpr, err := parseGoTypeExpression(field.Type)
@@ -43,7 +46,9 @@ func (ip *instrumentPhase) applyStructRule(ctx context.Context, rule *rule.InstS
 		}
 		replaceQualifierAliases(typeExpr, aliasOverrides)
 		structType.Fields.List = append(structType.Fields.List, ast.Field(field.Name, typeExpr))
-		existingFields[field.Name] = true
+		if field.Name != "_" {
+			existingFields[field.Name] = true
+		}
 	}
 
 	// Handle imports if specified in the rule

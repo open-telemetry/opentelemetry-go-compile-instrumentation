@@ -66,6 +66,27 @@ func TestApplyStructRule_CollidesWithExistingField_ReturnsError(t *testing.T) {
 	require.Len(t, target.Fields.List, 1)
 }
 
+func TestApplyStructRule_BlankFieldDoesNotCollide(t *testing.T) {
+	// Go allows any number of fields named "_" on one struct; the collision
+	// check must not treat it like a real name.
+	target := &dst.StructType{Fields: &dst.FieldList{
+		List: []*dst.Field{
+			{Names: []*dst.Ident{{Name: "_"}}, Type: &dst.Ident{Name: "int"}},
+		},
+	}}
+	file := typeDeclFile(&dst.TypeSpec{Name: &dst.Ident{Name: "Target"}, Type: target})
+	r := &rule.InstStructRule{
+		InstBaseRule: rule.InstBaseRule{Name: "add_field"},
+		Struct:       "Target",
+		NewField:     []*rule.InstStructField{{Name: "_", Type: "bool"}, {Name: "_", Type: "string"}},
+	}
+
+	err := newTestPhase().applyStructRule(context.Background(), r, file)
+
+	require.NoError(t, err)
+	require.Len(t, target.Fields.List, 3)
+}
+
 func TestApplyStructRule_CollidesWithEmbeddedField_ReturnsError(t *testing.T) {
 	// An embedded field has no Names; its effective field name is the type
 	// name with any pointer, package qualifier and type arguments removed.
