@@ -26,6 +26,9 @@ func TestInstBaseRuleAccessors(t *testing.T) {
 	assert.Equal(t, "example.com/pkg", base.GetTarget().String())
 	assert.Equal(t, "v1.0.0,v2.0.0", base.GetVersion())
 	assert.Same(t, where, base.GetWhere())
+	assert.Same(t, base, base.Base())
+	funcRule := &InstFuncRule{InstBaseRule: *base}
+	assert.Same(t, &funcRule.InstBaseRule, funcRule.Base(), "a rule kind reaches its own embedded base")
 
 	// InstBaseRule satisfies the InstRule interface.
 	var _ InstRule = base
