@@ -7,3 +7,4 @@ register:
         before: Before
         after: After
         path: example.com/hookinit/hooks
+        requires_init: true

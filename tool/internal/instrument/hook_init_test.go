@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -56,9 +57,10 @@ func (T) Before() { println("method") }
 func TestHookNamesForPackage(t *testing.T) {
 	set := rule.NewInstRuleSet("target")
 	set.FuncRules["target.go"] = []*rule.InstFuncRule{
-		{Path: "hooks", Before: "Before", After: "After"},
+		{Path: "hooks", Before: "Before", After: "After", RequiresInit: true},
 		{Path: "hooks", Before: "Before"},
-		{Path: "other", Before: "Other"},
+		{Path: "hooks", Before: "InitSafe", After: "InitSafeAfter"},
+		{Path: "other", Before: "Other", RequiresInit: true},
 	}
 	require.Equal(
 		t,
@@ -66,6 +68,24 @@ func TestHookNamesForPackage(t *testing.T) {
 		hookNamesForPackage([]*rule.InstRuleSet{set}, "hooks"),
 	)
 	require.Empty(t, hookNamesForPackage([]*rule.InstRuleSet{set}, "unrelated"))
+}
+
+func TestGuardHookInitializersIsOptIn(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "hooks.go")
+	require.NoError(t, os.WriteFile(file, []byte("package hooks; func Before() {}"), 0o600))
+	args := []string{"compile", "-p", "hooks", file}
+	ip := &instrumentPhase{
+		logger:      slog.New(slog.DiscardHandler),
+		workDir:     t.TempDir(),
+		compileArgs: slices.Clone(args),
+	}
+	set := rule.NewInstRuleSet("target")
+	set.FuncRules["target.go"] = []*rule.InstFuncRule{{Path: "hooks", Before: "Before"}}
+	require.NoError(t, ip.guardHookInitializers(t.Context(), []*rule.InstRuleSet{set}))
+	require.Equal(t, args, ip.compileArgs)
+	source, err := os.ReadFile(file)
+	require.NoError(t, err)
+	require.NotContains(t, string(source), "otelcHookReady")
 }
 
 func TestGuardHookInitializers(t *testing.T) {
@@ -79,7 +99,7 @@ func TestGuardHookInitializers(t *testing.T) {
 		compileArgs: []string{"compile", "-p", "hooks", file},
 	}
 	set := rule.NewInstRuleSet("target")
-	set.FuncRules["target.go"] = []*rule.InstFuncRule{{Path: "hooks", Before: "Before"}}
+	set.FuncRules["target.go"] = []*rule.InstFuncRule{{Path: "hooks", Before: "Before", RequiresInit: true}}
 	require.NoError(t, ip.guardHookInitializers(t.Context(), []*rule.InstRuleSet{set}))
 	require.Equal(t, filepath.Join(work, "otelc.hook-ready.go"), ip.compileArgs[len(ip.compileArgs)-1])
 	rewritten, err := os.ReadFile(ip.compileArgs[len(ip.compileArgs)-2])
@@ -111,7 +131,7 @@ func TestGuardHookInitializersKeepsRuleDiff(t *testing.T) {
 	require.NoError(t, os.WriteFile(diff, []byte("diff of the rule\n"), 0o600))
 
 	set := rule.NewInstRuleSet("target")
-	set.FuncRules["target.go"] = []*rule.InstFuncRule{{Path: "hooks", Before: "Before"}}
+	set.FuncRules["target.go"] = []*rule.InstFuncRule{{Path: "hooks", Before: "Before", RequiresInit: true}}
 	require.NoError(t, ip.guardHookInitializers(t.Context(), []*rule.InstRuleSet{set}))
 
 	require.Equal(t, file, ip.compileArgs[3])

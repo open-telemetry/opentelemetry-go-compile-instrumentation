@@ -234,6 +234,20 @@ When implementing hooks, we must adhere to certain limitations:
    The logrus instrumentation uses this pattern for the logger created by logrus's own
    package initialization.
 
+   A hook that cannot be written this way can set `requires_init: true` on its
+   `inject_hooks` modifier. Its hooks then return at entry until every variable initializer
+   and `init()` function of the hook package has run, and the first skipped call prints one
+   message per hook package to standard error:
+
+   ```text
+   otelc: skipping hooks in <package> before package initialization completes
+   ```
+
+   The target function still runs. Skipped calls are not queued or replayed, so calls made
+   during initialization, including those from the hook package's own initializers, are not
+   instrumented. Prefer lazy initialization where possible: a hook that runs early and is
+   safe keeps that instrumentation.
+
 ### GLS Operation for OTel SDK Instrumentation
 
 This section explains how goroutine-local storage (GLS) is used by the OTel SDK instrumentation.
@@ -365,23 +379,3 @@ Check that your instrumentation package has the following elements:
 - Unit tests alongside the hooks for logic-level behavior.
 - Integration tests in `test/integration/` that execute an instrumented binary and validate spans/attributes.
 - If applicable, a PR has been opened to add the instrumentation to the OpenTelemetry registry in the `opentelemetry.io` repository.
-
-### Hooks called during package initialization
-
-A function can be called before the package containing its instrumentation hooks
-has initialized. Hook linknames do not create Go import dependencies. The generated
-blank import in the application orders hooks before the application, but does not
-order them before every other imported package.
-
-The tool guards hook entry points until all variables and init functions in the
-hook package have initialized. Calls made earlier skip the hook body and emit
-one message per hook package to standard error:
-
-```text
-otelc: skipping hooks in <package> before package initialization completes
-```
-
-The original function still runs. Skipped hooks are not queued or replayed, so
-initialization-time operations may have no instrumentation. This also applies to
-calls made by the hook package's own initializers. Hooks that need to observe
-startup registration should arrange to discover that state after initialization.

@@ -84,11 +84,15 @@ func (ip *instrumentPhase) writeGuardedHookFile(root *dst.File, file string) err
 	return nil
 }
 
+// hookNamesForPackage returns the hooks in pkg whose rules set requires_init.
+// Other hooks are left alone: many are written to be safe before their
+// package initializes, and skipping them would lose that instrumentation.
+// A hook shared by several rules is guarded when any of them asks for it.
 func hookNamesForPackage(sets []*rule.InstRuleSet, pkg string) map[string]bool {
 	names := make(map[string]bool)
 	for _, set := range sets {
 		for _, r := range set.AllFuncRules() {
-			if r.Path == pkg {
+			if r.Path == pkg && r.RequiresInit {
 				if r.Before != "" {
 					names[r.Before] = true
 				}
