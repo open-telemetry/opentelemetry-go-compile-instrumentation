@@ -25,7 +25,7 @@ func TestDBClient(t *testing.T) {
 		f.Run("dbclient", "-op=ping")
 
 		span := f.RequireSingleSpan()
-		require.Equal(t, "PING", span.Name())
+		require.Equal(t, "PING testdb", span.Name())
 		testutil.RequireDBClientSemconv(t, span,
 			"PING",
 			"ping",
@@ -44,7 +44,7 @@ func TestDBClient(t *testing.T) {
 		f.Run("dbclient", "-op=opendb")
 
 		span := f.RequireSingleSpan()
-		require.Equal(t, "PING", span.Name())
+		require.Equal(t, "PING testdb", span.Name())
 		testutil.RequireDBClientSemconv(t, span,
 			"PING",
 			"ping",
@@ -60,7 +60,7 @@ func TestDBClient(t *testing.T) {
 		f.Run("dbclient", "-op=exec")
 
 		span := f.RequireSingleSpan()
-		require.Equal(t, "INSERT", span.Name())
+		require.Equal(t, "INSERT testdb", span.Name())
 		testutil.RequireDBClientSemconv(t, span,
 			"INSERT",
 			"INSERT INTO users (name, email) VALUES (?, ?)",
@@ -75,7 +75,7 @@ func TestDBClient(t *testing.T) {
 		f.Run("dbclient", "-op=query")
 
 		span := f.RequireSingleSpan()
-		require.Equal(t, "SELECT", span.Name())
+		require.Equal(t, "SELECT testdb", span.Name())
 		testutil.RequireDBClientSemconv(t, span,
 			"SELECT",
 			"SELECT id, name FROM users WHERE name = ?",
@@ -95,7 +95,7 @@ func TestDBClient(t *testing.T) {
 
 		// Find the query span from stmt.QueryContext
 		stmtSpan := testutil.RequireSpan(t, f.Traces(), testutil.IsClient)
-		require.Equal(t, "SELECT", stmtSpan.Name())
+		require.Equal(t, "SELECT testdb", stmtSpan.Name())
 	})
 
 	t.Run("TxStmtContext", func(t *testing.T) {
@@ -109,7 +109,7 @@ func TestDBClient(t *testing.T) {
 			testutil.IsClient,
 			testutil.HasAttribute(string(semconv.DBOperationNameKey), "SELECT"),
 		)
-		require.Equal(t, "SELECT", stmtSpan.Name())
+		require.Equal(t, "SELECT testdb", stmtSpan.Name())
 		testutil.RequireDBClientSemconv(t, stmtSpan,
 			"SELECT",
 			"SELECT id FROM users WHERE name = ?",
@@ -137,7 +137,7 @@ func TestDBClient(t *testing.T) {
 			testutil.IsClient,
 			testutil.HasAttribute(string(semconv.DBQueryTextKey), connQuery),
 		)
-		require.Equal(t, "SELECT", querySpan.Name())
+		require.Equal(t, "SELECT inventory", querySpan.Name())
 		testutil.RequireDBClientSemconv(t, querySpan,
 			"SELECT", connQuery,
 			"127.0.0.1", 3306,
@@ -149,7 +149,7 @@ func TestDBClient(t *testing.T) {
 			testutil.IsClient,
 			testutil.HasAttribute(string(semconv.DBQueryTextKey), stmtQuery),
 		)
-		require.Equal(t, "SELECT", stmtSpan.Name())
+		require.Equal(t, "SELECT inventory", stmtSpan.Name())
 		testutil.RequireDBClientSemconv(t, stmtSpan,
 			"SELECT", stmtQuery,
 			"127.0.0.1", 3306,
@@ -170,19 +170,19 @@ func TestDBClient(t *testing.T) {
 			testutil.IsClient,
 			testutil.HasAttribute("db.operation.name", "START"),
 		)
-		require.Equal(t, "START", beginSpan.Name())
+		require.Equal(t, "START testdb", beginSpan.Name())
 
 		execSpan := testutil.RequireSpan(t, f.Traces(),
 			testutil.IsClient,
 			testutil.HasAttribute("db.operation.name", "INSERT"),
 		)
-		require.Equal(t, "INSERT", execSpan.Name())
+		require.Equal(t, "INSERT testdb", execSpan.Name())
 
 		commitSpan := testutil.RequireSpan(t, f.Traces(),
 			testutil.IsClient,
 			testutil.HasAttribute("db.operation.name", "COMMIT"),
 		)
-		require.Equal(t, "COMMIT", commitSpan.Name())
+		require.Equal(t, "COMMIT testdb", commitSpan.Name())
 
 		// Regression for #1187: Commit must land in the same trace as BeginTx,
 		// not get orphaned onto its own trace by starting from
@@ -207,7 +207,7 @@ func TestDBClient(t *testing.T) {
 			testutil.IsClient,
 			testutil.HasAttribute("db.operation.name", "ROLLBACK"),
 		)
-		require.Equal(t, "ROLLBACK", rollbackSpan.Name())
+		require.Equal(t, "ROLLBACK testdb", rollbackSpan.Name())
 
 		// Regression for #1187: same fix as Commit, via the same txContext
 		// helper, but exercised independently so a change that fixes one and
@@ -226,7 +226,7 @@ func TestDBClient(t *testing.T) {
 
 		// Exactly one span: the failed START TRANSACTION span.
 		span := f.RequireSingleSpan()
-		require.Equal(t, "START", span.Name())
+		require.Equal(t, "START testdb", span.Name())
 
 		// The span status must be Error to reflect the failed BeginTx.
 		require.Equal(t, ptrace.StatusCodeError, span.Status().Code(),

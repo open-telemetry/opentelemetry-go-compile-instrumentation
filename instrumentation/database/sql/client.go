@@ -206,7 +206,7 @@ func beforePingContextInstrumentation(ictx hook.HookContext, db *sql.DB, ctx con
 	if db == nil {
 		return
 	}
-	instrumentStart(ictx, ctx, "ping", "ping", db.Endpoint, db.DriverName, db.DSN, db.DbName)
+	instrumentStart(ictx, ctx, "ping", db.Endpoint, db.DriverName, db.DSN, db.DbName)
 }
 
 func afterPingContextInstrumentation(ictx hook.HookContext, err error) {
@@ -251,7 +251,7 @@ func beforeExecContextInstrumentation(
 	if db == nil {
 		return
 	}
-	instrumentStart(ictx, ctx, "exec", query, db.Endpoint, db.DriverName, db.DSN, db.DbName, args...)
+	instrumentStart(ictx, ctx, query, db.Endpoint, db.DriverName, db.DSN, db.DbName, args...)
 }
 
 func afterExecContextInstrumentation(ictx hook.HookContext, result sql.Result, err error) {
@@ -271,7 +271,7 @@ func beforeQueryContextInstrumentation(
 	if db == nil {
 		return
 	}
-	instrumentStart(ictx, ctx, "query", query, db.Endpoint, db.DriverName, db.DSN, db.DbName, args...)
+	instrumentStart(ictx, ctx, query, db.Endpoint, db.DriverName, db.DSN, db.DbName, args...)
 }
 
 func afterQueryContextInstrumentation(ictx hook.HookContext, rows *sql.Rows, err error) {
@@ -285,7 +285,7 @@ func beforeTxInstrumentation(ictx hook.HookContext, db *sql.DB, ctx context.Cont
 	if db == nil {
 		return
 	}
-	instrumentStart(ictx, ctx, "begin", "START TRANSACTION", db.Endpoint, db.DriverName, db.DSN, db.DbName)
+	instrumentStart(ictx, ctx, "START TRANSACTION", db.Endpoint, db.DriverName, db.DSN, db.DbName)
 }
 
 func afterTxInstrumentation(ictx hook.HookContext, tx *sql.Tx, err error) {
@@ -359,7 +359,7 @@ func beforeConnPingContextInstrumentation(ictx hook.HookContext, conn *sql.Conn,
 	if conn == nil {
 		return
 	}
-	instrumentStart(ictx, ctx, "ping", "ping", conn.Endpoint, conn.DriverName, conn.DSN, conn.DbName)
+	instrumentStart(ictx, ctx, "ping", conn.Endpoint, conn.DriverName, conn.DSN, conn.DbName)
 }
 
 func afterConnPingContextInstrumentation(ictx hook.HookContext, err error) {
@@ -404,7 +404,7 @@ func beforeConnExecContextInstrumentation(
 	if conn == nil {
 		return
 	}
-	instrumentStart(ictx, ctx, "exec", query, conn.Endpoint, conn.DriverName, conn.DSN, conn.DbName, args...)
+	instrumentStart(ictx, ctx, query, conn.Endpoint, conn.DriverName, conn.DSN, conn.DbName, args...)
 }
 
 func afterConnExecContextInstrumentation(ictx hook.HookContext, result sql.Result, err error) {
@@ -424,7 +424,7 @@ func beforeConnQueryContextInstrumentation(
 	if conn == nil {
 		return
 	}
-	instrumentStart(ictx, ctx, "query", query, conn.Endpoint, conn.DriverName, conn.DSN, conn.DbName, args...)
+	instrumentStart(ictx, ctx, query, conn.Endpoint, conn.DriverName, conn.DSN, conn.DbName, args...)
 }
 
 func afterConnQueryContextInstrumentation(ictx hook.HookContext, rows *sql.Rows, err error) {
@@ -438,7 +438,7 @@ func beforeConnTxInstrumentation(ictx hook.HookContext, conn *sql.Conn, ctx cont
 	if conn == nil {
 		return
 	}
-	instrumentStart(ictx, ctx, "start", "START TRANSACTION", conn.Endpoint, conn.DriverName, conn.DSN, conn.DbName)
+	instrumentStart(ictx, ctx, "START TRANSACTION", conn.Endpoint, conn.DriverName, conn.DSN, conn.DbName)
 }
 
 func afterConnTxInstrumentation(ictx hook.HookContext, tx *sql.Tx, err error) {
@@ -512,7 +512,7 @@ func beforeTxExecContextInstrumentation(
 	if tx == nil {
 		return
 	}
-	instrumentStart(ictx, ctx, "exec", query, tx.Endpoint, tx.DriverName, tx.DSN, tx.DbName, args...)
+	instrumentStart(ictx, ctx, query, tx.Endpoint, tx.DriverName, tx.DSN, tx.DbName, args...)
 }
 
 func afterTxExecContextInstrumentation(ictx hook.HookContext, result sql.Result, err error) {
@@ -532,7 +532,7 @@ func beforeTxQueryContextInstrumentation(
 	if tx == nil {
 		return
 	}
-	instrumentStart(ictx, ctx, "query", query, tx.Endpoint, tx.DriverName, tx.DSN, tx.DbName, args...)
+	instrumentStart(ictx, ctx, query, tx.Endpoint, tx.DriverName, tx.DSN, tx.DbName, args...)
 }
 
 func afterTxQueryContextInstrumentation(ictx hook.HookContext, rows *sql.Rows, err error) {
@@ -546,7 +546,7 @@ func beforeTxCommitInstrumentation(ictx hook.HookContext, tx *sql.Tx) {
 	if tx == nil {
 		return
 	}
-	instrumentStart(ictx, txContext(tx), "commit", "COMMIT", tx.Endpoint, tx.DriverName, tx.DSN, tx.DbName)
+	instrumentStart(ictx, txContext(tx), "COMMIT", tx.Endpoint, tx.DriverName, tx.DSN, tx.DbName)
 }
 
 func afterTxCommitInstrumentation(ictx hook.HookContext, err error) {
@@ -560,7 +560,7 @@ func beforeTxRollbackInstrumentation(ictx hook.HookContext, tx *sql.Tx) {
 	if tx == nil {
 		return
 	}
-	instrumentStart(ictx, txContext(tx), "rollback", "ROLLBACK", tx.Endpoint, tx.DriverName, tx.DSN, tx.DbName)
+	instrumentStart(ictx, txContext(tx), "ROLLBACK", tx.Endpoint, tx.DriverName, tx.DSN, tx.DbName)
 }
 
 // txContext returns the context BeginTx was originally called with, so that
@@ -594,7 +594,7 @@ func beforeStmtExecContextInstrumentation(
 	if stmt.Data != nil {
 		sql1, endpoint, driverName, dsn, dbName = stmt.Data["sql"], stmt.Data["endpoint"], stmt.Data["driver"], stmt.DSN, stmt.Data["dbName"]
 	}
-	instrumentStart(ictx, ctx, "exec", sql1, endpoint, driverName, dsn, dbName, args...)
+	instrumentStart(ictx, ctx, sql1, endpoint, driverName, dsn, dbName, args...)
 }
 
 func afterStmtExecContextInstrumentation(ictx hook.HookContext, result sql.Result, err error) {
@@ -617,7 +617,7 @@ func beforeStmtQueryContextInstrumentation(
 	if stmt.Data != nil {
 		sql1, endpoint, driverName, dsn, dbName = stmt.Data["sql"], stmt.Data["endpoint"], stmt.Data["driver"], stmt.DSN, stmt.Data["dbName"]
 	}
-	instrumentStart(ictx, ctx, "query", sql1, endpoint, driverName, dsn, dbName, args...)
+	instrumentStart(ictx, ctx, sql1, endpoint, driverName, dsn, dbName, args...)
 }
 
 func afterStmtQueryContextInstrumentation(ictx hook.HookContext, rows *sql.Rows, err error) {
@@ -627,7 +627,7 @@ func afterStmtQueryContextInstrumentation(ictx hook.HookContext, rows *sql.Rows,
 func instrumentStart(
 	ictx hook.HookContext,
 	ctx context.Context,
-	spanName, query, endpoint, driverName, dsn, dbName string,
+	query, endpoint, driverName, dsn, dbName string,
 	args ...interface{},
 ) {
 	if !clientEnabler.Enable() {
@@ -649,7 +649,7 @@ func instrumentStart(
 
 	// Start span
 	spanCtx, span := tracer.Start(ctx,
-		req.OpType,
+		semconv.SpanName(req),
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(attrs...),
 	)

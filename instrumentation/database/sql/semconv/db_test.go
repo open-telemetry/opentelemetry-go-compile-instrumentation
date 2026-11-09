@@ -282,6 +282,45 @@ func TestOperationName(t *testing.T) {
 	}
 }
 
+func TestSpanName(t *testing.T) {
+	tests := []struct {
+		name string
+		req  DatabaseSqlRequest
+		want string
+	}{
+		{
+			name: "operation and namespace",
+			req:  DatabaseSqlRequest{OpType: "SELECT", DbName: "shop", DriverName: "mysql"},
+			want: "SELECT shop",
+		},
+		{
+			name: "operation only",
+			req:  DatabaseSqlRequest{OpType: "INSERT", DriverName: "postgres"},
+			want: "INSERT",
+		},
+		{
+			name: "namespace only",
+			req:  DatabaseSqlRequest{DbName: "shop", DriverName: "mysql"},
+			want: "shop",
+		},
+		{
+			name: "neither falls back to the database system",
+			req:  DatabaseSqlRequest{DriverName: "postgres"},
+			want: "postgresql",
+		},
+		{
+			name: "unknown driver",
+			req:  DatabaseSqlRequest{DriverName: "custom"},
+			want: "other_sql",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, SpanName(tt.req))
+		})
+	}
+}
+
 func TestDbClientRequestTraceAttrs_ContainsExpectedKeys(t *testing.T) {
 	req := DatabaseSqlRequest{
 		OpType:     "query",
