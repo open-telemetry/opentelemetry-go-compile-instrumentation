@@ -1953,6 +1953,95 @@ func TestExtractBuildFlags_DashPrefixedValue(t *testing.T) {
 	assert.Equal(t, []string{"-tags", "-race"}, extractBuildFlags(subcmdTest, []string{"-tags", "-race", "./pkg"}))
 }
 
+func TestAbsChangeDir(t *testing.T) {
+	t.Chdir(t.TempDir())
+	wd, wdErr := os.Getwd()
+	require.NoError(t, wdErr)
+	app := filepath.Join(wd, "app")
+	require.NoError(t, os.MkdirAll(app, 0o755))
+	tests := []struct {
+		name       string
+		subcommand string
+		args       []string
+		want       []string
+	}{
+		{
+			"separate value",
+			subcmdBuild,
+			[]string{"-C", "app", "-tags", "x", "."},
+			[]string{"-C", app, "-tags", "x", "."},
+		},
+		{"double dash", subcmdBuild, []string{"--C", "app", "."}, []string{"--C", app, "."}},
+		{"joined value", subcmdBuild, []string{"-C=app", "."}, []string{"-C=" + app, "."}},
+		{"joined double dash", subcmdBuild, []string{"--C=app", "."}, []string{"--C=" + app, "."}},
+		{"absolute kept", subcmdBuild, []string{"-C", app, "."}, []string{"-C", app, "."}},
+		{"go test", subcmdTest, []string{"-C", "app", "-run", "TestX", "."}, []string{"-C", app, "-run", "TestX", "."}},
+		{"tags value -C", subcmdBuild, []string{"-tags", "-C", "."}, []string{"-tags", "-C", "."}},
+		{"tags value -C=dir", subcmdBuild, []string{"-tags", "-C=other", "."}, []string{"-tags", "-C=other", "."}},
+		{"test flag value -C", subcmdTest, []string{"-run", "-C", "."}, []string{"-run", "-C", "."}},
+		{"missing value left to go", subcmdBuild, []string{"-C"}, []string{"-C"}},
+		{"no args", subcmdBuild, nil, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := absChangeDir(tt.subcommand, tt.args)
+			require.NoError(t, err)
+			requireArgsNameDir(t, app, tt.want, got)
+		})
+	}
+
+	t.Run("does not modify its input", func(t *testing.T) {
+		args := []string{"-C", "app", "."}
+		_, err := absChangeDir(subcmdBuild, args)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"-C", "app", "."}, args)
+	})
+
+	t.Run("forwarded flags load packages from another directory", func(t *testing.T) {
+		// The toolexec processes load packages with the forwarded flags, in
+		// a working directory other than the one go build -C ran in.
+		goMod := []byte("module example.com/app\n\ngo 1.26\n")
+		require.NoError(t, os.WriteFile(filepath.Join(app, "go.mod"), goMod, 0o644))
+		args, err := absChangeDir(subcmdBuild, []string{"-C", "app", "."})
+		require.NoError(t, err)
+		flags := extractBuildFlags(subcmdBuild, args)
+		t.Chdir(t.TempDir())
+		archives, err := pkgload.ResolveExportFiles(t.Context(), "sync/atomic", flags...)
+		require.NoError(t, err)
+		assert.Contains(t, archives, "sync/atomic")
+	})
+
+	t.Run("forwarded flags carry the absolute directory", func(t *testing.T) {
+		args, err := absChangeDir(subcmdBuild, []string{"-C", "app", "-tags", "x", "."})
+		require.NoError(t, err)
+		requireArgsNameDir(t, app, []string{"-C", app, "-tags", "x"}, extractBuildFlags(subcmdBuild, args))
+	})
+}
+
+// requireArgsNameDir checks got against want. An element of want that ends
+// with dir matches any absolute path to the same directory: on Windows,
+// os.Getwd and filepath.Abs can spell one directory differently, such as the
+// short name RUNNER~1 and the long name of a user's temp directory.
+func requireArgsNameDir(t *testing.T, dir string, want, got []string) {
+	t.Helper()
+	require.Len(t, got, len(want), "args: %v", got)
+	wantInfo, err := os.Stat(dir)
+	require.NoError(t, err)
+	for i, w := range want {
+		prefix, isDir := strings.CutSuffix(w, dir)
+		if !isDir {
+			require.Equal(t, w, got[i], "args: %v", got)
+			continue
+		}
+		gotDir, ok := strings.CutPrefix(got[i], prefix)
+		require.True(t, ok, "arg %q does not start with %q", got[i], prefix)
+		require.True(t, filepath.IsAbs(gotDir), "arg %q is not absolute", got[i])
+		gotInfo, statErr := os.Stat(gotDir)
+		require.NoError(t, statErr)
+		require.True(t, os.SameFile(wantInfo, gotInfo), "arg %q is not %q", got[i], dir)
+	}
+}
+
 func TestToolexecBuildArgs_RuntimeFileCompiled(t *testing.T) {
 	t.Chdir(t.TempDir())
 	require.NoError(t, os.WriteFile(otelcRuntimeFile, []byte("package main\nconst runtimeMarker = 42\n"), 0o644))

@@ -726,6 +726,34 @@ func nestedCoverFlags(goflags, forwarded []string) []string {
 	return []string{coverPkgWork}
 }
 
+// absChangeDir returns args with a relative -C directory made absolute. The
+// toolexec processes run in other directories, so they would resolve a
+// relative -C against the wrong one when they load packages. It relies on
+// classifyArgs so that a value of another flag, such as -tags -C, is left alone.
+func absChangeDir(subcommand string, args []string) ([]string, error) {
+	result := slices.Clone(args)
+	for _, a := range classifyArgs(subcommand, args) {
+		if a.FlagName != "-C" || a.Value == "" {
+			continue
+		}
+		prefix := ""
+		switch {
+		case a.Kind == ArgBuildFlagValue:
+		case a.Kind == ArgBuildFlag && a.HasValue:
+			name, _, _ := strings.Cut(a.Raw, "=")
+			prefix = name + "="
+		default:
+			continue
+		}
+		dir, err := filepath.Abs(a.Value)
+		if err != nil {
+			return nil, ex.Wrapf(err, "resolving -C directory %s", a.Value)
+		}
+		result[a.Index] = prefix + dir
+	}
+	return result, nil
+}
+
 // toolexecInsertArg builds the -toolexec=... argument for execPath. Split out
 // from buildWithToolexec so the error path (reachable only when execPath
 // contains both quote characters) is testable without depending on
@@ -846,7 +874,11 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 	// This ensures `go list` resolves archives matching the current build
 	subcommand := args[0]
 	restArgs := args[1:]
-	buildFlags := extractBuildFlags(subcommand, restArgs)
+	forwardArgs, err := absChangeDir(subcommand, restArgs)
+	if err != nil {
+		return err
+	}
+	buildFlags := extractBuildFlags(subcommand, forwardArgs)
 	if vendored {
 		buildFlags = rewriteModVendor(subcommand, buildFlags)
 	}
