@@ -139,6 +139,7 @@ The following libraries are automatically instrumented:
 | `github.com/apache/cassandra-gocql-driver/v2` | Cassandra DB spans |
 | `github.com/olivere/elastic/v7` | Elasticsearch DB spans |
 | `github.com/opensearch-project/opensearch-go/v5` | OpenSearch DB spans |
+| `github.com/ClickHouse/clickhouse-go/v2` | ClickHouse DB spans (native API) |
 
 ## Learn More
 
