@@ -593,6 +593,45 @@ func (g *GenStruct[T]) Reset() error { return nil }
 	assert.Equal(t, "T", afterIndex.Index.(*dst.Ident).Name)
 }
 
+func TestCollectArgumentsNamesBlankReceiverTypeParams(t *testing.T) {
+	typeParam := func(idx int) string { return fmt.Sprintf("%s_%s_%d", ignoredTypeParam, testHash, idx) }
+	tests := []struct {
+		name     string
+		src      string
+		recvType string
+		args     []string
+	}{
+		{
+			name:     "pointer receiver with one blank type parameter",
+			src:      "package main\ntype S[T any] struct{}\nfunc (s *S[_]) F() {}",
+			recvType: "*S[" + typeParam(0) + "]",
+			args:     []string{"s"},
+		},
+		{
+			name:     "unnamed receiver with a blank type parameter",
+			src:      "package main\ntype S[T any] struct{}\nfunc (S[_]) F() {}",
+			recvType: "S[" + typeParam(0) + "]",
+			args:     []string{syntheticParam(1)},
+		},
+		{
+			name:     "named and blank type parameters",
+			src:      "package main\ntype M[K comparable, V any] struct{}\nfunc (m M[K, _]) F() {}",
+			recvType: "M[K, " + typeParam(0) + "]",
+			args:     []string{"m"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			funcDecl := parseFunc(t, tt.src)
+			args := collectArguments(funcDecl, testHash)
+			assert.Equal(t, tt.args, args)
+			recvType, err := ast.RenderExpr(funcDecl.Recv.List[0].Type)
+			require.NoError(t, err)
+			assert.Equal(t, tt.recvType, recvType)
+		})
+	}
+}
+
 func TestCreateTJumpIfMultipleGenericReceiverTypeArgs(t *testing.T) {
 	file, funcDecl := parseFileFunc(t, `package main
 type GenStruct[K comparable, V any] struct{}
