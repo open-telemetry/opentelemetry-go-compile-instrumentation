@@ -106,8 +106,8 @@ func rejectIotaCascade(root *dst.File, spec *dst.ValueSpec, identifier string) e
 		}
 		var cascaded []string
 		for i := specIdx + 1; i < len(genDecl.Specs); i++ {
-			sibling, ok := genDecl.Specs[i].(*dst.ValueSpec)
-			if !ok || len(sibling.Values) > 0 {
+			sibling, isValueSpec := genDecl.Specs[i].(*dst.ValueSpec)
+			if !isValueSpec || len(sibling.Values) > 0 {
 				break
 			}
 			for _, name := range sibling.Names {
