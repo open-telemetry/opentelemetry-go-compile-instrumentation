@@ -14,6 +14,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/setup"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -85,27 +86,7 @@ func main() {
 			&commandToolexec,
 			&commandVersion,
 		},
-		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
-			// In drop-in mode (otelc is the GOFLAGS -toolexec tool) the go
-			// children otelc spawns would inherit the flag and recurse, so
-			// strip it process-wide; commands that need toolexec re-add it.
-			if goflags := os.Getenv("GOFLAGS"); goflags != "" {
-				if stripped := util.StripToolexecFromGoflags(goflags); stripped != goflags {
-					if err := os.Setenv("GOFLAGS", stripped); err != nil {
-						return ctx, ex.Wrapf(err, "stripping -toolexec from GOFLAGS")
-					}
-				}
-			}
-			ctx, err := initLogger(ctx, cmd)
-			if err != nil {
-				return ctx, err
-			}
-			ctx, err = initProfiling(ctx, cmd)
-			if err != nil {
-				return ctx, err
-			}
-			return initStats(ctx, cmd)
-		},
+		Before: initRoot,
 		After: func(ctx context.Context, cmd *cli.Command) error {
 			return ex.Join(stopProfiling(ctx, cmd), closeLogger(ctx))
 		},
@@ -118,6 +99,43 @@ func main() {
 	if err != nil {
 		ex.Fatal(err)
 	}
+}
+
+// initRoot prepares the process before any subcommand runs.
+func initRoot(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+	var err error
+	for _, step := range []cli.BeforeFunc{initGoflags, initLogger, initProfiling, initStats} {
+		if ctx, err = step(ctx, cmd); err != nil {
+			return ctx, err
+		}
+	}
+	return ctx, nil
+}
+
+// initGoflags removes the GOFLAGS entries that the go commands otelc spawns
+// must not inherit, process-wide.
+//
+// In drop-in mode (otelc is the GOFLAGS -toolexec tool) the go children would
+// inherit -toolexec and recurse; commands that need toolexec re-add it.
+//
+// A -json entry would make them print JSON where otelc reads text: the build
+// plan would be empty and go list -f would fail. `otelc go` re-adds -json to
+// the build it runs, recorded in the returned context.
+func initGoflags(ctx context.Context, _ *cli.Command) (context.Context, error) {
+	goflags := os.Getenv("GOFLAGS")
+	if goflags == "" {
+		return ctx, nil
+	}
+	stripped, jsonOutput := util.StripJSONFromGoflags(util.StripToolexecFromGoflags(goflags))
+	if jsonOutput {
+		ctx = setup.ContextWithJSONOutput(ctx)
+	}
+	if stripped != goflags {
+		if err := os.Setenv("GOFLAGS", stripped); err != nil {
+			return ctx, ex.Wrapf(err, "stripping -toolexec and -json from GOFLAGS")
+		}
+	}
+	return ctx, nil
 }
 
 func initLogger(ctx context.Context, cmd *cli.Command) (context.Context, error) {
