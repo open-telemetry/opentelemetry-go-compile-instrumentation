@@ -653,7 +653,7 @@ func (imp *exportImporter) Import(path string) (*types.Package, error) {
 
 // ImportFrom implements types.ImporterFrom.
 func (imp *exportImporter) ImportFrom(path, _ string, _ types.ImportMode) (*types.Package, error) {
-	if path == "unsafe" {
+	if path == unsafePackageName {
 		return types.Unsafe, nil
 	}
 	if pkg, ok := imp.packages[path]; ok && pkg.Complete() {
@@ -900,13 +900,33 @@ func hasEscapingControlFlow(stmt dst.Stmt) bool {
 func hasMultipleCalls(stmt dst.Stmt) bool {
 	calls := 0
 	dst.Inspect(stmt, func(n dst.Node) bool {
-		switch n.(type) {
+		switch node := n.(type) {
 		case *dst.FuncLit:
 			return false
 		case *dst.CallExpr:
-			calls++
+			// A type conversion such as []byte(s) or map[string]int(m) parses
+			// as a CallExpr but is never a hookable call, so it must not count
+			// toward the limit.
+			if !isSyntacticConversion(node) {
+				calls++
+			}
 		}
 		return true
 	})
 	return calls > 1
+}
+
+// isSyntacticConversion reports whether call is unambiguously a type
+// conversion rather than a function call, based on syntax alone. A conversion
+// whose target type is a named identifier (for example string(b) or int(x)) is
+// indistinguishable from a call without type information and is not detected
+// here.
+func isSyntacticConversion(call *dst.CallExpr) bool {
+	switch call.Fun.(type) {
+	case *dst.ArrayType, *dst.MapType, *dst.ChanType,
+		*dst.StructType, *dst.InterfaceType, *dst.FuncType:
+		return true
+	default:
+		return false
+	}
 }

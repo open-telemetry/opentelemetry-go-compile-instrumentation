@@ -40,6 +40,9 @@ type setupPhase struct {
 	// fileImportsCache caches discovered source imports for add_file rules during setup.
 	fileImportsCache map[string][]string
 	testMode         bool
+	// testPackages holds the test variants and test binaries of a go test
+	// build, which buildPackages leaves out.
+	testPackages []*packages.Package
 }
 
 func (sp *setupPhase) getBuildContext() *gobuild.Context {
@@ -116,6 +119,10 @@ const (
 	// flagGcflags is forwarded to `go list` only with a package pattern; see
 	// forwardedValueFlag.
 	flagGcflags = "-gcflags"
+	// flagCover and flagCoverpkg select the packages a build collects
+	// coverage for; see nestedCoverFlags.
+	flagCover    = "-cover"
+	flagCoverpkg = "-coverpkg"
 )
 
 func lastFileTargetIndex(subcommand string, args []string) int {
@@ -331,6 +338,7 @@ func (sp *setupPhase) generateRuntimePerPackage(
 	if err != nil {
 		return err
 	}
+	scope := sp.newRuntimeScope(ctx, pkgs, matched, imports)
 
 	for _, pkg := range pkgs {
 		pkgDir := pkgload.PackageDir(pkg)
@@ -347,13 +355,19 @@ func (sp *setupPhase) generateRuntimePerPackage(
 			}
 		}
 
+		pkgMatched := runtimeRuleSets{pkg: matched}
+		if scope != nil {
+			pkgMatched = scope.ruleSets(pkg, importPath)
+		}
+
 		// Introduce additional hook code by generating otelc.runtime.go
-		if err = sp.addDeps(ctx, matched, runtimePackage{
+		if err = sp.addDeps(ctx, pkgMatched.pkg, runtimePackage{
 			dir:             pkgDir,
 			importPath:      importPath,
 			debugPath:       pkg.PkgPath,
 			name:            pkg.Name,
 			importedByHooks: importedByHooks,
+			testRuleSets:    pkgMatched.test,
 			testMode:        sp.testMode,
 			fileTarget:      pkg.PkgPath == pkgload.CommandLineArgumentsPackage,
 		}); err != nil {
@@ -418,7 +432,13 @@ func (sp *setupPhase) matchAllDeps(
 	moduleDirs []string,
 	buildFlags []string,
 ) ([]*rule.InstRuleSet, error) {
-	matched, err := sp.matchDeps(ctx, deps, moduleDirs)
+	// Prepare rules once for both the initial and injected dependencies.
+	idx, err := sp.loadRuleIndex(ctx, moduleDirs)
+	if err != nil {
+		return nil, ex.Wrapf(err, "loading hook rules")
+	}
+
+	matched, err := sp.matchDeps(ctx, deps, idx)
 	if err != nil {
 		return nil, ex.Wrapf(err, "matching dependencies to hook rules")
 	}
@@ -432,15 +452,15 @@ func (sp *setupPhase) matchAllDeps(
 	// The hook packages the pass above selected get blank-imported into the
 	// application below, which compiles their dependencies too. The build plan
 	// never saw those, so match them now.
-	injected, err := sp.matchInjectedDeps(ctx, matched, deps, moduleDirs, buildFlags)
+	injected, err := sp.matchInjectedDeps(ctx, matched, deps, idx, buildFlags)
 	if err != nil {
 		return nil, err
 	}
+	// matchDeps already gives every batch a stable order, and the batches
+	// are concatenated in a fixed sequence, so the combined slice is
+	// deterministic without re-sorting it here. Re-sorting would re-encode
+	// every set that shares a ModulePath a second time.
 	matched = append(matched, injected...)
-	err = sortMatchedRuleSets(matched)
-	if err != nil {
-		return nil, ex.Wrapf(err, "sorting matched rules")
-	}
 	return matched, nil
 }
 
@@ -510,6 +530,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	// table, because they carry imports that only _test.go files use.
 	sp.buildPackages = buildPkgs
 	sp.resolvedNames = pkgload.CollectPackageNames(allPkgs)
+	sp.testPackages = testPackages(buildPkgs, allPkgs)
 
 	// Find the module directories for the build packages
 	moduleDirs, findModErr := pkgload.FindModuleDirs(ctx, buildPkgs)
@@ -674,6 +695,37 @@ func forwardedValueFlag(classified []ClassifiedArg, i int) []string {
 	return tokens
 }
 
+// coverPkgWork selects the packages of the main modules for coverage, as
+// cmd/go does when -cover is given without -coverpkg.
+const coverPkgWork = "-coverpkg=work"
+
+// nestedCoverFlags returns the flags that make a nested `go list -export`
+// select the same packages for coverage as the build. Without -coverpkg,
+// cmd/go covers the main module packages and the packages named on its command
+// line. The nested command names the added import, so it would cover that
+// import, which the build did not, and the link fails with a fingerprint
+// mismatch. goflags are the GOFLAGS tokens and forwarded the flags that
+// extractBuildFlags returned; a forwarded flag overrides GOFLAGS.
+func nestedCoverFlags(goflags, forwarded []string) []string {
+	cover, coverPkg := false, false
+	for _, tok := range slices.Concat(goflags, forwarded) {
+		name, value, hasValue := strings.Cut(util.UnquoteGoflagsToken(tok), "=")
+		switch flagName(name) {
+		case flagCover:
+			cover = !hasValue
+			if hasValue {
+				cover, _ = strconv.ParseBool(value)
+			}
+		case flagCoverpkg:
+			coverPkg = true
+		}
+	}
+	if !cover || coverPkg {
+		return nil
+	}
+	return []string{coverPkgWork}
+}
+
 // toolexecInsertArg builds the -toolexec=... argument for execPath. Split out
 // from buildWithToolexec so the error path (reachable only when execPath
 // contains both quote characters) is testable without depending on
@@ -798,6 +850,7 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 	if vendored {
 		buildFlags = rewriteModVendor(subcommand, buildFlags)
 	}
+	buildFlags = append(buildFlags, nestedCoverFlags(util.SplitGoflags(os.Getenv("GOFLAGS")), buildFlags)...)
 	if len(buildFlags) > 0 {
 		encoded := util.EncodeBuildFlags(buildFlags)
 		env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelcBuildFlags, encoded))

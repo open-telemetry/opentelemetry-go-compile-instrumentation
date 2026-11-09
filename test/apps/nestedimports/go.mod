@@ -3,7 +3,6 @@ module go.opentelemetry.io/otelc/test/apps/nestedimports
 go 1.26.0
 
 replace (
-	go.opentelemetry.io/otelc/pkg => ../../../pkg
 	go.opentelemetry.io/otelc/pkg/runtime => ../../../pkg/runtime
 	go.opentelemetry.io/otelc/test/apps/nestedimports/instrumentation => ./instrumentation
 )
