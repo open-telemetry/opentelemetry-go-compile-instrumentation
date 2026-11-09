@@ -123,9 +123,6 @@ func injectedDeps(
 		return nil, nil
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, packagesLoadTimeout)
-	defer cancel()
-
 	pkgs, err := pkgload.LoadPackages(
 		ctx,
 		packages.NeedName|packages.NeedFiles|packages.NeedImports|packages.NeedDeps,
