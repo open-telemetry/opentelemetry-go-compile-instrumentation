@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -26,6 +27,19 @@ import (
 // lock. The wait itself is unbounded: it ends when the holder finishes or
 // the caller cancels (Ctrl-C), and a log line makes the waiting visible.
 const buildLockRetryInterval = 200 * time.Millisecond
+
+// lockWaitHintAfter is how long an invocation that no parent started waits
+// for a lock before it prints a hint about nested invocations. It is a
+// variable so tests can shorten it.
+//
+//nolint:gochecknoglobals // test seam
+var lockWaitHintAfter = 10 * time.Second
+
+// lockWaitOutput receives the messages about lock waits. It is a variable so
+// tests can read them.
+//
+//nolint:gochecknoglobals // test seam
+var lockWaitOutput io.Writer = os.Stderr
 
 // workDirLockPath returns the path of the advisory lock file of the work dir.
 // The lock lives next to .otelc-build, not inside it: cleanup removes the
@@ -221,8 +235,7 @@ func acquireBuildLocksUnder(ctx context.Context, paths, parentLocks []string) (f
 		}
 	}
 	for _, path := range paths {
-		holds := append(slices.Clone(parentLocks), acquired...)
-		release, ok, err := acquireLockFile(ctx, path, holds)
+		release, ok, err := acquireLockFile(ctx, path, parentLocks, acquired)
 		if err != nil {
 			releaseAll()
 			return nil, nil, err
@@ -237,17 +250,16 @@ func acquireBuildLocksUnder(ctx context.Context, paths, parentLocks []string) (f
 
 // acquireLockFile waits until it holds the lock file at path. It reports
 // false, and takes nothing, when the directory of path does not exist: there
-// is nothing to protect there. holds are the locks that the invocation and
-// its parents already hold. While they hold some, other invocations can see
-// the wait, and the wait fails when it would deadlock (see lock_deadlock.go).
+// is nothing to protect there. parentLocks are the locks that parent otelc
+// invocations hold, and taken are the locks that the invocation already
+// took.
 // Each attempt opens the path afresh and verifies it still names the locked
 // file; the holder removes the file on release so a stale handle must be
 // detected and retried rather than treated as a win.
-func acquireLockFile(ctx context.Context, path string, holds []string) (func(), bool, error) {
+func acquireLockFile(ctx context.Context, path string, parentLocks, taken []string) (func(), bool, error) {
 	logger := util.LoggerFromContext(ctx)
 
-	parent, statErr := os.Stat(filepath.Dir(path))
-	if statErr != nil || !parent.IsDir() {
+	if !isDir(filepath.Dir(path)) {
 		logger.DebugContext(ctx,
 			"lock dir does not exist; nothing to lock", "path", path)
 		return nil, false, nil
@@ -267,20 +279,37 @@ func acquireLockFile(ctx context.Context, path string, holds []string) (func(), 
 		return releaseFunc(ctx, lock), true, nil
 	}
 
-	_, _ = fmt.Fprintf(os.Stderr,
+	_, _ = fmt.Fprintf(lockWaitOutput,
 		"otelc: another invocation holds the build lock; waiting for it to finish (lock: %s)\n",
 		path,
 	)
+	return waitForLockFile(ctx, path, parentLocks, taken)
+}
 
+// isDir reports whether path is an existing directory.
+func isDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+// waitForLockFile retries the lock file at path until it holds it. While the
+// invocation or its parents hold locks, other invocations can see the wait,
+// and the wait fails when it would deadlock (see lock_deadlock.go).
+func waitForLockFile(ctx context.Context, path string, parentLocks, taken []string) (func(), bool, error) {
 	// A lock that a parent holds is freed only when the parent ends. A child
 	// that shares the work dir of its parent waits for it, as it always has.
-	checkDeadlock := len(holds) > 0 && !slices.Contains(holds, path)
+	holds := append(slices.Clone(parentLocks), taken...)
+	checkDeadlock := len(holds) > 0 && !slices.Contains(parentLocks, path)
+	// An invocation started under another otelc command that did not get its
+	// environment looks like one that no parent started.
+	hint := len(parentLocks) == 0
+	waitStart := time.Now()
 	var self waitRecord
 	if checkDeadlock {
 		var unregister func()
 		self, unregister = registerWait(ctx, path, holds)
 		defer unregister()
-		if err = deadlockError(ctx, self); err != nil {
+		if err := deadlockError(ctx, self); err != nil {
 			return nil, false, err
 		}
 	}
@@ -292,7 +321,7 @@ func acquireLockFile(ctx context.Context, path string, holds []string) (func(), 
 		case <-ctx.Done():
 			return nil, false, ex.Wrapf(ctx.Err(), "waiting for build lock %s", path)
 		case <-ticker.C:
-			lock, acquired, _, err = tryAcquire(path)
+			lock, acquired, _, err := tryAcquire(path)
 			if err != nil {
 				return nil, false, err
 			}
@@ -306,6 +335,14 @@ func acquireLockFile(ctx context.Context, path string, holds []string) (func(), 
 				if err = deadlockError(ctx, self); err != nil {
 					return nil, false, err
 				}
+			}
+			if hint && time.Since(waitStart) >= lockWaitHintAfter {
+				hint = false
+				_, _ = fmt.Fprintf(lockWaitOutput,
+					"otelc: still waiting for build lock %s. An otelc command started under another otelc "+
+						"command, for example from a test, must get the %s environment variable of that "+
+						"command, or it can wait for it forever\n",
+					path, util.EnvOtelcHeldBuildLocks)
 			}
 		}
 	}

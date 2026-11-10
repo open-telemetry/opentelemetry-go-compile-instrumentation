@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -428,5 +429,50 @@ func TestCleanupWaitsForModuleLock(t *testing.T) {
 		require.NoError(t, err)
 	case <-time.After(5 * time.Second):
 		t.Fatal("cleanup never got the module lock after its holder ended")
+	}
+}
+
+func TestAcquireBuildLockHintsAfterLongWait(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		parentLocks []string
+		wantHint    bool
+	}{
+		{name: "invocation that no parent started", wantHint: true},
+		{name: "nested invocation", parentLocks: []string{"parent.lock"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lockTestDir(t)
+			lock := lockPathIn(t.TempDir())
+			release, _, err := acquireBuildLocksUnder(t.Context(), []string{lock}, nil)
+			require.NoError(t, err)
+
+			origAfter, origOutput := lockWaitHintAfter, lockWaitOutput
+			var output bytes.Buffer
+			lockWaitHintAfter, lockWaitOutput = 2*buildLockRetryInterval, &output
+			t.Cleanup(func() { lockWaitHintAfter, lockWaitOutput = origAfter, origOutput })
+
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			done := make(chan error, 1)
+			go func() {
+				release2, _, err2 := acquireBuildLocksUnder(ctx, []string{lock}, tc.parentLocks)
+				if err2 == nil {
+					release2()
+				}
+				done <- err2
+			}()
+			time.Sleep(5 * buildLockRetryInterval)
+			release()
+			require.NoError(t, <-done)
+
+			out := output.String()
+			if tc.wantHint {
+				assert.Contains(t, out, "still waiting for build lock "+lock)
+				assert.Contains(t, out, util.EnvOtelcHeldBuildLocks)
+			} else {
+				assert.NotContains(t, out, "still waiting")
+			}
+		})
 	}
 }
