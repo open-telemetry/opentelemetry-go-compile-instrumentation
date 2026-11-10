@@ -617,7 +617,7 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 		fooDir := filepath.Join(tmp, "foo")
 		writeInstrumentationModule(t, fooDir, "example.com/foo", true, nil)
 
-		rules, moduleRoots, err := loadRulesFromToolFilesWithModuleRoots(t.Context(), []string{rootTool}, util.Version)
+		rules, moduleRoots, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
 		require.NoError(t, err)
 		require.Len(t, rules, 1)
 		require.Equal(t, "dummyrule", rules[0].GetName())
@@ -635,7 +635,7 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 		})
 		writeInstrumentationModule(t, filepath.Join(tmp, "bar"), "example.com/bar", true, nil)
 
-		rules, moduleRoots, err := loadRulesFromToolFilesWithModuleRoots(t.Context(), []string{rootTool}, util.Version)
+		rules, moduleRoots, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
 		require.NoError(t, err)
 		require.Len(t, rules, 1)
 		require.Equal(t, "dummyrule", rules[0].GetName())
@@ -654,7 +654,7 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 		writeInstrumentationModule(t, filepath.Join(tmp, "foo"), "example.com/foo", true, nil)
 		writeInstrumentationModule(t, filepath.Join(tmp, "bar"), "example.com/bar", true, nil)
 
-		rules, moduleRoots, err := loadRulesFromToolFilesWithModuleRoots(t.Context(), []string{rootTool}, util.Version)
+		rules, moduleRoots, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
 		require.NoError(t, err)
 		require.Len(t, rules, 2)
 		require.Equal(t, "dummyrule", rules[0].GetName())
@@ -684,7 +684,7 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 
 			rootTool := writeOverlapRootModule(t, tmp, fooDir, "example.com/foo", "example.com/foo/sub")
 
-			rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
+			rules, _, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
 			require.NoError(t, err)
 			require.ElementsMatch(t, []string{"dummyrule", "subrule"}, ruleNames(rules))
 		})
@@ -700,7 +700,7 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 		// The sub-package comes first in the tool file this time.
 		rootTool := writeOverlapRootModule(t, tmp, fooDir, "example.com/foo/sub", "example.com/foo")
 
-		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
+		rules, _, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
 		require.NoError(t, err)
 		require.ElementsMatch(t, []string{"dummyrule", "subrule"}, ruleNames(rules))
 	})
@@ -716,7 +716,7 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 		writeInstrumentationModule(t, filepath.Join(tmp, "notinstrumentation"), "example.com/notinstrumentation",
 			false, nil)
 
-		_, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
+		_, _, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
 		require.ErrorIs(t, err, errNotInstrumentation)
 	})
 }
@@ -2635,7 +2635,7 @@ func TestLoadRulesFromToolFilesBrokenFile(t *testing.T) {
 			writeInstrumentationModule(t, fooDir, "example.com/foo", false, nil)
 			tc.write(t, filepath.Join(fooDir, "broken.otelc.yml"))
 
-			_, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, otelcVersion)
+			_, _, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, otelcVersion)
 			require.Error(t, err)
 			if tc.readErr {
 				require.ErrorContains(t, err, "reading ")

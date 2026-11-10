@@ -497,15 +497,6 @@ func loadRulesFromToolFiles(
 	ctx context.Context,
 	toolFiles []string,
 	otelcVersion string,
-) ([]rule.InstRule, error) {
-	rules, _, err := loadRulesFromToolFilesWithModuleRoots(ctx, toolFiles, otelcVersion)
-	return rules, err
-}
-
-func loadRulesFromToolFilesWithModuleRoots(
-	ctx context.Context,
-	toolFiles []string,
-	otelcVersion string,
 ) ([]rule.InstRule, map[rule.InstRule]string, error) {
 	ruleSet := make([]rule.InstRule, 0)
 	ruleModuleRoots := make(map[rule.InstRule]string)
@@ -599,7 +590,7 @@ func (sp *setupPhase) loadRules(ctx context.Context, moduleDirs []string) ([]rul
 	}
 	if len(toolFiles) > 0 {
 		sp.Debug("rules source: tool files", "toolFiles", toolFiles)
-		rules, moduleRoots, loadErr := loadRulesFromToolFilesWithModuleRoots(ctx, toolFiles, util.Version)
+		rules, moduleRoots, loadErr := loadRulesFromToolFiles(ctx, toolFiles, util.Version)
 		if loadErr != nil {
 			return nil, loadErr
 		}
