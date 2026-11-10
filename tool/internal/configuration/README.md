@@ -72,6 +72,28 @@ Resolving configuration metadata does not enable instrumentation or load user
 configuration values. Runtime environment-source precedence belongs to that
 separate loading step.
 
+## Application configuration validation
+
+`otelc --instrumentation-config <path>` reads one application configuration at
+setup. It does not search for a default file, and repeated uses of the flag are
+rejected. `otelconf/x` v0.27.0 parses the SDK model and selected
+instrumentation options; its environment substitutions are resolved during
+setup. Declared runtime environment overrides remain a separate follow-up.
+
+The application must use `file_format` major version 1 and a minor version no
+newer than the pinned OpenTelemetry Configuration v1.2.0 schema. The
+`instrumentation/development` subtree is checked against the pinned upstream
+schema before its values are compared with selected instrumentation metadata.
+Selected fields omitted by the pinned `otelconf/x` model are rejected rather
+than silently discarded. This parser/schema compatibility boundary must be
+revisited when either pin changes.
+
+Values declared by selected module metadata are validated and returned in a
+normalized map for the later embedding phase. Configuration for unselected
+options is warned about and ignored. If a configured option cannot be
+validated while a selected module lacks metadata, setup reports the missing
+module roots. Configuration never changes instrumentation selection.
+
 ## Metadata discovery during setup
 
 Setup only considers metadata belonging to instrumentation modules whose rules
@@ -84,3 +106,11 @@ Missing metadata is not a setup error by itself. Setup returns resolved
 definitions and selected module roots without metadata to the application
 configuration validator, which can report a missing definition only when a
 supplied option needs one. Discovery does not select or enable instrumentation.
+
+When configuration includes an option that cannot be matched to selected
+metadata while one or more selected modules lack `metadata.yaml`, validation
+fails conservatively and names the missing module roots. A Go configuration
+group is considered selected when selected metadata declares at least one
+`go.<group>.*` option. Unknown options within such a group fail validation;
+other Go groups are warned about and ignored as unselected. Group ownership is
+derived from metadata paths rather than inferred from a Go module path.

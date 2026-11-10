@@ -5,6 +5,7 @@ package setup
 
 import (
 	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -86,6 +87,61 @@ func (sp *setupPhase) validateSelectedConfigurationMetadata(
 		len(resolved),
 	)
 	return result, nil
+}
+
+func (sp *setupPhase) loadApplicationConfiguration() error {
+	sp.applicationConfiguration = configuration.ApplicationConfiguration{}
+	if sp.instrumentationConfigPath == "" {
+		return nil
+	}
+	data, err := os.ReadFile(sp.instrumentationConfigPath)
+	if err != nil {
+		return ex.Wrapf(err, "read application configuration %s", sp.instrumentationConfigPath)
+	}
+	application, err := configuration.ParseApplicationConfiguration(data, sp.instrumentationConfigPath)
+	if err != nil {
+		return ex.Wrapf(err, "parse application configuration")
+	}
+	sp.applicationConfiguration = application
+	return nil
+}
+
+func (sp *setupPhase) validateAndStoreApplicationConfiguration() error {
+	sp.validatedApplicationConfig = configuration.ValidatedApplicationConfiguration{}
+	if sp.instrumentationConfigPath == "" {
+		return nil
+	}
+	if sp.applicationConfiguration.Document == nil {
+		return ex.New("application configuration was not loaded before setup validation")
+	}
+	validated, err := configuration.ValidateApplicationOptions(
+		sp.applicationConfiguration,
+		sp.configurationMetadata.Definitions,
+		sp.configurationMetadata.ModulesWithoutMetadata,
+	)
+	if err != nil {
+		return ex.Wrapf(err, "validate application instrumentation configuration")
+	}
+	for _, warning := range validated.Warnings {
+		_, _ = fmt.Fprintf(
+			os.Stderr,
+			"Warning: %s:%d:%d: %s (%s)\n",
+			warning.Location.File,
+			warning.Location.Line,
+			warning.Location.Column,
+			warning.Message,
+			warning.Path,
+		)
+		sp.Warn(
+			warning.Message,
+			"configuration", warning.Path,
+			"file", warning.Location.File,
+			"line", warning.Location.Line,
+		)
+	}
+	sp.validatedApplicationConfig = validated
+	sp.Info("Validated application instrumentation configuration", "options", len(validated.Values))
+	return nil
 }
 
 func (sp *setupPhase) selectedConfigurationModuleRoots(matched []*rule.InstRuleSet) []string {
