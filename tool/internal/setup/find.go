@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"golang.org/x/mod/module"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/util"
@@ -26,6 +29,10 @@ type Dependency struct {
 	Version    string
 	Sources    []string
 	CgoFiles   map[string]string
+	// IsTest reports whether the compile is part of a test binary. It is read
+	// from the compile command, because the generated _testmain.go does not
+	// exist yet when the build plan is listed and so is not in Sources.
+	IsTest bool
 }
 
 func (d *Dependency) String() string {
@@ -119,10 +126,12 @@ func listBuildPlan(ctx context.Context, subcommand string, cmdArgs []string) ([]
 	logger.InfoContext(ctx, "go build command", "args", args)
 
 	cmd := execCommandContext(ctx, "go", args...)
-	// This is a little anti-intuitive as the error message is not printed to
-	// the stderr, instead it is printed to the stdout, only the build tool
-	// knows the reason why.
-	cmd.Stdout = os.Stdout
+	// The plan is on stderr. Stdout is kept out of the user's output: go test
+	// writes a "[no test files]" line there for each package without tests,
+	// and the real run writes it again. Some failures, such as a test setup
+	// failure, are reported on stdout, so it is kept for the error.
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
 	cmd.Stderr = buildPlanLog
 	// @@Note that dir should not be set, as the dry build should be run in the
 	// same directory as the original build command
@@ -131,7 +140,7 @@ func listBuildPlan(ctx context.Context, subcommand string, cmdArgs []string) ([]
 	if err != nil {
 		// Read the build plan log to see what went wrong
 		logContent, _ := os.ReadFile(util.GetBuildTemp(buildPlanLogName))
-		return nil, ex.Wrapf(err, "failed to run build plan: \n%s", string(logContent))
+		return nil, ex.Wrapf(err, "failed to run build plan: \n%s%s", string(logContent), stdout.String())
 	}
 
 	// Find compile commands from build plan log
@@ -172,7 +181,11 @@ func findModVersion(path string) string {
 	if version == "" {
 		return ""
 	}
-	return version[1 : len(version)-1]
+	raw := version[1 : len(version)-1]
+	if unescaped, err := module.UnescapeVersion(raw); err == nil {
+		return unescaped
+	}
+	return raw
 }
 
 // findGoSources extracts Go source files from compile command arguments,
@@ -184,6 +197,7 @@ func findGoSources(ctx context.Context, args []string, cgoObjDirs map[string]str
 		ImportPath: util.FindFlagValue(args, "-p"),
 		Sources:    make([]string, 0),
 		CgoFiles:   make(map[string]string),
+		IsTest:     util.IsTestBuild(args),
 	}
 	util.Assert(dep.ImportPath != "", "import path is empty")
 
@@ -238,6 +252,10 @@ func findDeps(ctx context.Context, subcommand string, cmdArgs []string) ([]*Depe
 		deps       []*Dependency
 		cgoObjDirs = make(map[string]string)
 		currentDir string
+		// A package can be compiled more than once with the same sources,
+		// e.g. once with and once without a PGO profile when only some of the
+		// main packages have a default.pgo. Keep one of them.
+		seen = make(map[string]bool)
 	)
 
 	for _, cmd := range buildPlan {
@@ -252,6 +270,11 @@ func findDeps(ctx context.Context, subcommand string, cmdArgs []string) ([]*Depe
 			if err1 != nil {
 				return nil, err1
 			}
+			key := dep.ImportPath + "\x00" + strings.Join(dep.Sources, "\x00")
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
 			deps = append(deps, dep)
 			logger.InfoContext(ctx, "Found dependency", "dep", dep)
 		} else if util.IsCgoCommand(cmd) && currentDir != "" {

@@ -116,6 +116,7 @@ func collectArguments(funcDecl *dst.FuncDecl, hash string) []string {
 	args := make([]string, 0)
 	next := syntheticNamer(funcDecl, hash)
 	if ast.HasReceiver(funcDecl) {
+		nameBlankReceiverTypeParams(funcDecl.Recv.List[0].Type, next)
 		if recv := funcDecl.Recv.List[0]; recv.Names != nil {
 			// Named receiver, e.g. func (r R) F() {} or func (_ R) F() {}
 			receiver := recv.Names[0].Name
@@ -154,6 +155,28 @@ func collectArguments(funcDecl *dst.FuncDecl, hash string) []string {
 		}
 	}
 	return args
+}
+
+// nameBlankReceiverTypeParams gives each blank type parameter of a generic
+// receiver, such as the _ in func (s *Set[_]) Len() int, a generated name.
+// The trampolines declare the receiver's type parameters again and the jump
+// passes them as type arguments, but _ cannot be used as a type.
+func nameBlankReceiverTypeParams(recvType dst.Expr, next func(prefix string) string) {
+	if star, ok := recvType.(*dst.StarExpr); ok {
+		recvType = star.X
+	}
+	var indices []dst.Expr
+	switch t := recvType.(type) {
+	case *dst.IndexExpr:
+		indices = []dst.Expr{t.Index}
+	case *dst.IndexListExpr:
+		indices = t.Indices
+	}
+	for _, index := range indices {
+		if ident, ok := index.(*dst.Ident); ok && ident.Name == ast.IdentIgnore {
+			ident.Name = next(ignoredTypeParam)
+		}
+	}
 }
 
 func createTrampArgs(names []string) []dst.Expr {
@@ -200,7 +223,7 @@ func createTJumpIf(file *dst.File, t *rule.InstFuncRule, funcDecl *dst.FuncDecl,
 	return tjump
 }
 
-func (ip *instrumentPhase) insertToFunc(funcDecl *dst.FuncDecl, tjump *dst.IfStmt) {
+func insertToFunc(funcDecl *dst.FuncDecl, tjump *dst.IfStmt) {
 	found := false
 	if len(funcDecl.Body.List) > 0 {
 		firstStmt := funcDecl.Body.List[0]
@@ -214,33 +237,8 @@ func (ip *instrumentPhase) insertToFunc(funcDecl *dst.FuncDecl, tjump *dst.IfStm
 		}
 	}
 	if !found {
-		// Tag the trampoline-jump-if with a special line directive so that
-		// debugger can show the correct line number
-		tjump.Decs.Before = dst.NewLine
-		tjump.Decs.Start.Append("//line <generated>:1")
-		pos := ip.parser.FindPosition(funcDecl.Body)
-		if len(funcDecl.Body.List) > 0 {
-			// It does happens because we may insert raw code snippets at the
-			// function entry. These dynamically generated nodes do not have
-			// corresponding node positions. We need to keep looking downward
-			// until we find a node that contains position information, and then
-			// annotate it with a line directive.
-			for _, stmt := range funcDecl.Body.List {
-				pos = ip.parser.FindPosition(stmt)
-				if !pos.IsValid() {
-					continue
-				}
-				tag := fmt.Sprintf("//line %s", pos.String())
-				stmt.Decorations().Before = dst.NewLine
-				stmt.Decorations().Start.Append(tag)
-			}
-		} else {
-			tag := fmt.Sprintf("//line %s", pos.String())
-			empty := ast.EmptyStmt()
-			empty.Decs.Before = dst.NewLine
-			empty.Decs.Start.Append(tag)
-			funcDecl.Body.List = append(funcDecl.Body.List, empty)
-		}
+		// The line directive pass marks the trampoline-jump-if as generated
+		// code and restores the position of the original code after it.
 		funcDecl.Body.List = append([]dst.Stmt{tjump}, funcDecl.Body.List...)
 	}
 }
@@ -280,7 +278,7 @@ func (ip *instrumentPhase) insertTJump(t *rule.InstFuncRule, funcDecl *dst.FuncD
 
 	// Find if there is already a trampoline-jump-if, insert new tjump if so,
 	// otherwise prepend to block body.
-	ip.insertToFunc(funcDecl, tjump)
+	insertToFunc(funcDecl, tjump)
 
 	// Trampoline-jump-if ultimately jumps to the trampoline function, which
 	// typically has the following form
@@ -334,10 +332,11 @@ func (ip *instrumentPhase) writeGlobals(pkgName string) error {
 	}
 	ip.addCompileArg(path)
 	ip.keepForDebug(path)
+	ip.writeGlobalsDiffForDebug(path, ip.globalsContributors)
 	return nil
 }
 
-func (ip *instrumentPhase) writeInstrumented(root *dst.File, oldFile string) error {
+func (ip *instrumentPhase) writeInstrumented(root *dst.File, oldFile string, changes []ruleChange) error {
 	// Write the instrumented AST to the new file in the working directory
 	newFile := filepath.Join(ip.workDir, filepath.Base(oldFile))
 	if strings.HasSuffix(oldFile, ".cgo1.go") {
@@ -353,6 +352,7 @@ func (ip *instrumentPhase) writeInstrumented(root *dst.File, oldFile string) err
 		return ex.Wrapf(err, "writing instrumented file %s", newFile)
 	}
 	ip.keepForDebug(newFile)
+	ip.writeDiffForDebug(oldFile, newFile, changes)
 
 	// Replace the original file with the new file in the compile command
 	replace := false

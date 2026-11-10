@@ -11,7 +11,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"golang.org/x/tools/go/packages"
 
@@ -77,8 +76,6 @@ func findToolFiles(moduleDirs []string) ([]string, error) {
 	return toolFiles, nil
 }
 
-const packagesLoadTimeout = 30 * time.Second
-
 // resolveInstrumentationConfigs resolves instrumentation configs for the given import paths.
 //
 //nolint:nilnil // nil, nil when no imports are specified
@@ -90,9 +87,6 @@ func resolveInstrumentationConfigs(
 	if len(importPaths) == 0 {
 		return nil, nil
 	}
-
-	ctx, cancel := context.WithTimeout(ctx, packagesLoadTimeout)
-	defer cancel()
 
 	pkgs, loadErr := packages.Load(&packages.Config{
 		Mode:    packages.NeedFiles | packages.NeedModule | packages.NeedName,
@@ -120,12 +114,12 @@ func resolveInstrumentationConfigs(
 		}
 
 		modDir := pkg.Module.Dir
-		// Prefer the directory of a real Go file. A tools-only instrumentation
-		// package (its only .go file carries //go:build tools) has no buildable Go
-		// files, so packages.Load reports "build constraints exclude all Go files"
-		// and GoFiles is empty; fall back to deriving the dir from the module path +
-		// import-path suffix (correct even under replace directives). The walk only
-		// needs the directory, not a compilable package.
+		// A tools-only instrumentation package (its only .go file carries
+		// //go:build tools) has no buildable Go files, so packages.Load reports
+		// "build constraints exclude all Go files" and PackageDir returns the
+		// directory from go list. If that is empty too, derive the dir from the
+		// module path + import-path suffix (correct even under replace
+		// directives). The walk only needs the directory, not a compilable package.
 		pkgDir := pkgload.PackageDir(pkg)
 		if pkgDir == "" {
 			pkgDir = filepath.Join(modDir, filepath.FromSlash(strings.TrimPrefix(importPath, pkg.Module.Path)))

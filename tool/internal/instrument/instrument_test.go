@@ -58,6 +58,8 @@ const (
 	buildID            = "foo/bar"
 	compiledOutput     = "_pkg_.a"
 	goldenExt          = ".golden"
+	// goldenWorkDir replaces the temporary directory in golden files.
+	goldenWorkDir      = "/golden/work"
 	invalidReceiver    = "invalid-receiver"
 	invalidReceiverMsg = "can not find function"
 )
@@ -87,7 +89,7 @@ func runTest(t *testing.T, testName string) {
 	// source_test.go (a test build — a file the Go toolchain only compiles
 	// under `go test`). The chosen name is preserved into the temp dir so the
 	// compiled unit is genuinely a _test.go file, which is what is_test gates
-	// on. This mirrors setup.isTestBuild: test-ness is a source-set property,
+	// on. This mirrors util.IsTestBuild: test-ness is a source-set property,
 	// not an import-path suffix.
 	srcName, compiledName := sourceFileName, mainGoFileName
 	if testSrc := filepath.Join(testdataDir, goldenDir, testName, sourceTestFileName); util.PathExists(testSrc) {
@@ -110,7 +112,7 @@ func runTest(t *testing.T, testName string) {
 		importPath:   importPath,
 		isTest:       isTest,
 	})
-	writeMatchedJSON(ruleSet)
+	writeMatchedJSON(ruleSet, testName)
 
 	testcaseDir := filepath.Join(testdataDir, goldenDir, testName)
 	helpers := buildTestcaseHelpers(ctx, t, testcaseDir)
@@ -174,6 +176,7 @@ func loadRulesYAML(t *testing.T, p loadRulesParams) *rule.InstRuleSet {
 		// the default "main" fixtures but differ for a deep-path glob fixture.
 		PackageName:    sourceTree.Name.Name,
 		ModulePath:     p.importPath,
+		IsTest:         p.isTest,
 		FuncRules:      make(map[string][]*rule.InstFuncRule),
 		StructRules:    make(map[string][]*rule.InstStructRule),
 		RawRules:       make(map[string][]*rule.InstRawRule),
@@ -321,11 +324,18 @@ func fileFilterMatches(t *testing.T, def *rule.FilterDef, isTest bool, tree *dst
 	}
 }
 
-func writeMatchedJSON(ruleSet *rule.InstRuleSet) {
+func writeMatchedJSON(ruleSet *rule.InstRuleSet, testName string) {
 	// Before writing we want to ensure r.ResolvedPath is set
 	// otherwise ip.instrument() would not know where to look for files.
 	for _, r := range ruleSet.AllFuncRules() {
-		if r.Path != "" {
+		switch r.Path {
+		case "":
+		case testdataDir:
+			// A func rule with the shared testdata path keeps its hooks in the
+			// test case's own hook.go. Hooks are only looked up in the files of
+			// the resolved directory, so resolve to that directory.
+			r.ResolvedPath = filepath.Join(testdataDir, goldenDir, testName)
+		default:
 			r.ResolvedPath = r.Path
 		}
 	}
@@ -490,6 +500,10 @@ func verifyGoldenFiles(t *testing.T, tempDir, testName string) {
 		// The dave/dst stringifier occasionally introduces CRLF on Windows.
 		// We normalize the generated string to LF before comparing to the .gitattributes LF golden file.
 		actualNorm := strings.ReplaceAll(string(actualBytes), "\r\n", "\n")
+		// Line directives hold the absolute path of the original file, which
+		// is in the temporary directory. Replace it so the golden files are
+		// the same on all machines.
+		actualNorm = strings.ReplaceAll(actualNorm, tempDir, goldenWorkDir)
 		golden.Assert(t, actualNorm, goldenPath)
 	}
 }

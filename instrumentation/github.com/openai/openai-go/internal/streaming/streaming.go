@@ -20,7 +20,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/semconv/v1.37.0"
+	otelsemconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -266,7 +266,7 @@ func (r *StreamingReader) finalize(flush bool, err error) func() {
 		r.span.SetStatus(codes.Error, "stream aborted")
 		if hardErr {
 			r.span.RecordError(err)
-			r.span.SetAttributes(semconv.ErrorType(err))
+			r.span.SetAttributes(otelsemconv.ErrorType(err))
 		}
 	}
 	r.span.SetAttributes(

@@ -180,12 +180,36 @@ func ResolveExportFiles(ctx context.Context, importPath string, buildFlags ...st
 	return result, nil
 }
 
-// CollectPackageNames walks pkgs and their transitive imports, mapping
-// each import path to its declared package name. Load pkgs with
-// packages.NeedImports and packages.NeedDeps, or the walk finds no
-// imports to collect.
-func CollectPackageNames(pkgs []*packages.Package) map[string]string {
-	result := make(map[string]string)
+// ResolveExportFilesBatch resolves several import paths with one packages.Load
+// call. It returns importPath -> exportFile for every requested package that
+// loaded cleanly and for all their transitive dependencies. Load failures are
+// reported per requested import path in failed, so a caller can treat one
+// unresolvable candidate as non-fatal while keeping the rest.
+func ResolveExportFilesBatch(
+	ctx context.Context,
+	importPaths []string,
+	buildFlags ...string,
+) (map[string]string, map[string]error, error) {
+	if len(importPaths) == 0 {
+		return map[string]string{}, nil, nil
+	}
+
+	mode := packages.NeedName | packages.NeedImports | packages.NeedDeps | packages.NeedExportFile
+	pkgs, err := LoadPackages(ctx, mode, buildFlags, false, importPaths...)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(pkgs) == 0 {
+		return nil, nil, ex.Newf("no packages found for %v", importPaths)
+	}
+
+	requested := make(map[string]bool, len(importPaths))
+	for _, path := range importPaths {
+		requested[path] = true
+	}
+
+	resolved := make(map[string]string)
+	failed := make(map[string]error)
 	visited := make(map[string]bool)
 
 	var walk func(pkg *packages.Package)
@@ -194,11 +218,9 @@ func CollectPackageNames(pkgs []*packages.Package) map[string]string {
 			return
 		}
 		visited[pkg.PkgPath] = true
-
-		if pkg.Name != "" {
-			result[pkg.PkgPath] = pkg.Name
+		if len(pkg.Errors) == 0 && pkg.ExportFile != "" {
+			resolved[pkg.PkgPath] = pkg.ExportFile
 		}
-
 		for _, dep := range pkg.Imports {
 			walk(dep)
 		}
@@ -206,16 +228,45 @@ func CollectPackageNames(pkgs []*packages.Package) map[string]string {
 
 	for _, pkg := range pkgs {
 		walk(pkg)
+		if !requested[pkg.PkgPath] {
+			continue
+		}
+		if len(pkg.Errors) > 0 {
+			failed[pkg.PkgPath] = pkg.Errors[0]
+		} else if _, ok := resolved[pkg.PkgPath]; !ok {
+			failed[pkg.PkgPath] = ex.Newf("package %q has no export file", pkg.PkgPath)
+		}
 	}
 
+	return resolved, failed, nil
+}
+
+// CollectPackageNames walks pkgs and their transitive imports, mapping
+// each import path to its declared package name. Load pkgs with
+// packages.NeedImports and packages.NeedDeps, or the walk finds no
+// imports to collect.
+//
+// The walk visits each package once, not each import path once. A test
+// variant such as "p [p.test]" has the same PkgPath as p, but it also has
+// the imports of p's _test.go files.
+func CollectPackageNames(pkgs []*packages.Package) map[string]string {
+	result := make(map[string]string)
+	packages.Visit(pkgs, nil, func(pkg *packages.Package) {
+		if pkg.Name != "" {
+			result[pkg.PkgPath] = pkg.Name
+		}
+	})
 	return result
 }
 
+// PackageDir returns the directory of pkg. A package with only _test.go files
+// has no GoFiles, so PackageDir falls back to the directory that go list
+// reports. Load pkg with packages.NeedFiles, or that directory is empty.
 func PackageDir(pkg *packages.Package) string {
 	if len(pkg.GoFiles) > 0 {
 		return filepath.Dir(pkg.GoFiles[0])
 	}
-	return ""
+	return pkg.Dir
 }
 
 // ResolveModule returns the module for a given package directory.
@@ -262,16 +313,15 @@ func FindModuleDirs(ctx context.Context, pkgs []*packages.Package) ([]string, er
 			continue
 		}
 
-		pkgDir := PackageDir(pkg)
-		if pkgDir == "" {
-			logger.WarnContext(ctx, "skipping package without Go files", "package", pkg.PkgPath)
-			continue
-		}
-
 		var moduleDir string
 		if pkg.Module != nil {
 			moduleDir = pkg.Module.Dir
 		} else {
+			pkgDir := PackageDir(pkg)
+			if pkgDir == "" {
+				return nil, ex.Newf("cannot find the directory of package %s", pkg.PkgPath)
+			}
+
 			modDir, err := resolveModuleDir(ctx, pkgDir)
 			if err != nil {
 				return nil, err

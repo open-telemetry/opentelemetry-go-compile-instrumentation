@@ -3,17 +3,17 @@
 
 package main
 
+//line /<generated>:1
 import _ "unsafe"
 
+//line /golden/work/main.go:6
 func Unnamed(_ignoredParam_604682800_0 int, _ignoredParam_604682800_1 float32) {
-	//line <generated>:1
-	if OtelBeforeTrampoline_Unnamed604682800(&_ignoredParam_604682800_0, &_ignoredParam_604682800_1); false {
+	/*line /<generated>:1*/ if OtelBeforeTrampoline_Unnamed604682800(&_ignoredParam_604682800_0, &_ignoredParam_604682800_1); false {
 	} else {
-	}
-	//line main.go:6:28
+	} /*line /golden/work/main.go:5*/
 }
 
-//line <generated>:1
+//line /<generated>:1
 type HookContextImpl604682800 struct {
 	params      []interface{}
 	returnVals  []interface{}
@@ -111,11 +111,11 @@ func OtelBeforeTrampoline_Unnamed604682800(param0 *int, param1 *float32) (hookCo
 	hookContext.params = []interface{}{param0, param1}
 	hookContext.funcName = "Unnamed"
 	hookContext.packageName = "main"
-	if H13Before != nil {
-		H13Before(hookContext, *param0, *param1)
+	if otelc_hook_2633298448_H13Before != nil {
+		otelc_hook_2633298448_H13Before(hookContext, *param0, *param1)
 	}
 	return hookContext, hookContext.skipCall
 }
 
-//go:linkname H13Before testdata/golden/unnamed-param.H13Before
-func H13Before(hookContext HookContext, param0 int, param1 float32)
+//go:linkname otelc_hook_2633298448_H13Before testdata/golden/unnamed-param.H13Before
+func otelc_hook_2633298448_H13Before(hookContext HookContext, param0 int, param1 float32)

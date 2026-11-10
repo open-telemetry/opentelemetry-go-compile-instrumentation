@@ -4,6 +4,7 @@
 package ast
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -355,6 +356,217 @@ func Foo() {}
 	require.NoError(t, err)
 	require.Len(t, matches, 1)
 	assert.Equal(t, []DirectiveArg{{Key: "tag", Value: "first"}}, matches[0].Args)
+}
+
+func TestFindFuncsByDirective_FuncLiterals(t *testing.T) {
+	src := `package p
+
+type T struct{ F func() }
+
+//otelc:span tag:var
+var a = func() {}
+
+var (
+	//otelc:span tag:spec
+	b = func() {}
+)
+
+var c =
+	//otelc:span tag:value
+	func() {}
+
+func run(f func()) { f() }
+
+func r() func() {
+	//otelc:span tag:return
+	return func() {}
+}
+
+func main() {
+	//otelc:span tag:define
+	d := func() {}
+	//otelc:span tag:local-var
+	var e = func() {}
+	//otelc:span tag:assign
+	d = func() {}
+	run(
+		//otelc:span tag:argument
+		func() {},
+	)
+	//otelc:span tag:go
+	go func() {}()
+	//otelc:span tag:defer
+	defer func() {}()
+	//otelc:span tag:call
+	func() {}()
+	//otelc:span tag:call-result
+	n := func() int { return 1 }()
+	_ = T{
+		//otelc:span tag:field
+		F: func() {},
+	}
+	_ = []func(){
+		//otelc:span tag:element
+		func() {},
+	}
+	ch := make(chan func(), 1)
+	//otelc:span tag:send
+	ch <- func() {}
+	//otelc:span tag:paren
+	p := (func() {})
+	//otelc:span tag:paren-call
+	defer (func() {})()
+	_, _, _, _ = d, e, n, p
+}
+`
+	path := writeGoTempFile(t, src)
+	tree, err := ParseFileFast(path)
+	require.NoError(t, err)
+
+	matches, err := FindFuncsByDirective(tree, "otelc:span")
+	require.NoError(t, err)
+
+	tags := make([]string, 0, len(matches))
+	for _, m := range matches {
+		assert.Nil(t, m.Func)
+		require.NotNil(t, m.Lit)
+		require.Len(t, m.Args, 1)
+		tags = append(tags, m.Args[0].Value)
+	}
+	assert.Equal(t, []string{
+		"var", "spec", "value", "return", "define", "local-var", "assign", "argument",
+		"go", "defer", "call", "call-result", "field", "element", "send",
+		"paren", "paren-call",
+	}, tags)
+	assert.Empty(t, FindStrayDirectives(tree, "otelc:span"))
+}
+
+func TestFindFuncsByDirective_NestedFuncLiterals(t *testing.T) {
+	src := `package p
+
+//otelc:span tag:outer
+func outer() {
+	//otelc:span tag:inner
+	inner := func() {
+		plain := func() {}
+		plain()
+	}
+	inner()
+
+	//otelc:span tag:statement
+	twice :=
+		//otelc:span tag:literal
+		func() {}
+	twice()
+}
+`
+	path := writeGoTempFile(t, src)
+	tree, err := ParseFileFast(path)
+	require.NoError(t, err)
+
+	matches, err := FindFuncsByDirective(tree, "otelc:span")
+	require.NoError(t, err)
+	require.Len(t, matches, 3)
+
+	assert.Equal(t, "outer", matches[0].Func.Name.Name)
+	assert.Nil(t, matches[0].Lit)
+	assert.Nil(t, matches[0].Enclosing)
+	assert.Equal(t, []DirectiveArg{{Key: "tag", Value: "outer"}}, matches[0].Args)
+
+	require.NotNil(t, matches[1].Lit)
+	assert.Same(t, matches[0].Func, matches[1].Enclosing)
+	assert.Equal(t, []DirectiveArg{{Key: "tag", Value: "inner"}}, matches[1].Args)
+
+	// The literal is annotated twice and returned once, with the arguments of
+	// the first directive.
+	require.NotNil(t, matches[2].Lit)
+	assert.Same(t, matches[0].Func, matches[2].Enclosing)
+	assert.Equal(t, []DirectiveArg{{Key: "tag", Value: "statement"}}, matches[2].Args)
+	assert.NotSame(t, matches[1].Lit, matches[2].Lit)
+}
+
+func TestFindFuncsByDirective_PackageLevelFuncLitEnclosingIsDecl(t *testing.T) {
+	src := `package p
+
+//otelc:span
+var handler = func() {}
+`
+	path := writeGoTempFile(t, src)
+	tree, err := ParseFileFast(path)
+	require.NoError(t, err)
+
+	matches, err := FindFuncsByDirective(tree, "otelc:span")
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	require.NotNil(t, matches[0].Lit)
+	assert.IsType(t, &dst.GenDecl{}, matches[0].Enclosing)
+	assert.Same(t, tree.Decls[0], matches[0].Enclosing)
+}
+
+func TestFindFuncsByDirective_FuncLitParseArgsError(t *testing.T) {
+	src := `package p
+
+func main() {
+	//otelc:span nocolon
+	f := func() {}
+	f()
+}
+`
+	path := writeGoTempFile(t, src)
+	tree, err := ParseFileFast(path)
+	require.NoError(t, err)
+
+	matches, err := FindFuncsByDirective(tree, "otelc:span")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "func literal")
+	assert.Nil(t, matches)
+}
+
+func TestFindStrayDirectives(t *testing.T) {
+	src := `//otelc:span
+package p
+
+//otelc:span
+type T struct{}
+
+//otelc:span
+var v = 1
+
+func run(f func()) { f() }
+
+//otelc:span
+func Foo() {
+	//otelc:span
+	run(func() {})
+
+	f := func() {} //otelc:span
+	f()
+
+	//otelc:span
+	value := 1
+	println(value)
+
+	//otelc:span
+	g := func() {}
+	g()
+}
+`
+	path := writeGoTempFile(t, src)
+	tree, err := ParseFileFast(path)
+	require.NoError(t, err)
+
+	stray := FindStrayDirectives(tree, "otelc:span")
+	kinds := make([]string, 0, len(stray))
+	for _, n := range stray {
+		kinds = append(kinds, fmt.Sprintf("%T", n))
+	}
+	assert.Equal(t, []string{
+		"*dst.GenDecl",    // type T
+		"*dst.GenDecl",    // var v = 1
+		"*dst.ExprStmt",   // run(func() {})
+		"*dst.AssignStmt", // trailing directive
+		"*dst.AssignStmt", // value := 1
+	}, kinds)
 }
 
 func writeGoTempFile(t *testing.T, src string) string {

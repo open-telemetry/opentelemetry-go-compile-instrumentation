@@ -100,7 +100,15 @@ infrastructure/
 │   │   ├── http-load-test.js      # HTTP load test
 │   │   └── grpc-load-test.js      # gRPC load test
 │   └── README.md                   # Detailed usage guide
-└── kubernetes/                     # Future Kubernetes deployment
+└── kubernetes/                     # Kubernetes manifests and deployment guide
+```
+
+## Kubernetes Deployment
+
+The observability backends can also be deployed to Kubernetes with Kustomize. See the [Kubernetes deployment guide](./kubernetes/README.md).
+
+```bash
+kubectl apply -k demo/infrastructure/kubernetes
 ```
 
 ## Quick Start
@@ -331,13 +339,12 @@ ports:
 ## Next Steps
 
 - Explore [Docker Compose documentation](./docker-compose/README.md) for detailed configuration
-- Review [gRPC demo](../grpc/README.md) for application-level instrumentation
+- Review [gRPC demo](../app/grpc/README.md) for application-level instrumentation
 - Customize dashboards for your specific metrics
 - Add persistent storage for production-like testing
 
 ## Future Enhancements
 
-- Kubernetes deployment configurations (in `kubernetes/` directory)
 - Additional demo applications (HTTP, database interactions)
 - Alerting rules and notification channels
 - Log aggregation with Loki

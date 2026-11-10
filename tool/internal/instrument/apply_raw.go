@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/dave/dst"
@@ -26,6 +28,7 @@ const (
 	// Blank named returns get their own prefix; sharing ignoredParam with a blank
 	// param or receiver would collide, since both live in the same scope.
 	ignoredRetValName = "_ignoredRetVal"
+	ignoredTypeParam  = "_ignoredTypeParam"
 )
 
 // renameReturnValues assigns referenceable names to funcDecl's unnamed return
@@ -56,8 +59,11 @@ func renameReturnValues(funcDecl *dst.FuncDecl) {
 // importAliases maps a use site's local identifier to its real import
 // path, for {{.FuncArgumentOfType}} and {{.FuncReturnOfType}}. Passing
 // nil forces those template functions to guess the package name, even
-// when the real name is known.
-func renderRawCode(raw string, decl *dst.FuncDecl, importAliases map[string]string, hash string) (string, error) {
+// when the real name is known. typeInfo is for the ThatImplements helpers,
+// and nil makes them match the type name only.
+func renderRawCode(
+	raw string, decl *dst.FuncDecl, importAliases map[string]string, hash string, typeInfo *funcTypes,
+) (string, error) {
 	if !strings.Contains(raw, "{{") {
 		return raw, nil
 	}
@@ -65,7 +71,9 @@ func renderRawCode(raw string, decl *dst.FuncDecl, importAliases map[string]stri
 	if err != nil {
 		return "", err
 	}
-	return tmpl.Execute(renderingFuncTemplateData{newFuncTemplateData(decl, nil, importAliases, hash)})
+	data := newFuncTemplateData(decl, nil, importAliases, hash)
+	data.typeInfo = typeInfo
+	return tmpl.Execute(renderingFuncTemplateData{data})
 }
 
 type insertPos struct {
@@ -73,18 +81,28 @@ type insertPos struct {
 	placement string
 }
 
+// rawInsertion bundles the statements to insert, the position to insert them
+// at, and the alias overrides guarding that position, keeping
+// insertRawAtPattern's parameter count within the linter's limit.
+type rawInsertion struct {
+	pos            insertPos
+	stmts          []dst.Stmt
+	aliasOverrides map[string]string
+}
+
 func insertRawAtPattern(
 	ctx context.Context,
 	decl *dst.FuncDecl,
 	restorer *decorator.Restorer,
-	pos insertPos,
-	stmts []dst.Stmt,
-) bool {
+	insertion rawInsertion,
+) (bool, error) {
+	pos, stmts, aliasOverrides := insertion.pos, insertion.stmts, insertion.aliasOverrides
 	inserted := false
+	var shadowErr error
 	logger := util.LoggerFromContext(ctx)
 
 	dstutil.Apply(decl.Body, func(cursor *dstutil.Cursor) bool {
-		if inserted {
+		if inserted || shadowErr != nil {
 			return false
 		}
 
@@ -108,6 +126,12 @@ func insertRawAtPattern(
 			return true
 		}
 
+		// The raw code is injected at stmt, so a local bound between the
+		// function body and stmt would shadow the rewritten qualifiers there.
+		if shadowErr = checkAliasOverrideShadowingAt(aliasOverrides, decl, stmt); shadowErr != nil {
+			return false
+		}
+
 		switch pos.placement {
 		default: // default to "before"
 			for _, s := range stmts {
@@ -123,15 +147,16 @@ func insertRawAtPattern(
 		return false
 	}, nil)
 
-	return inserted
+	return inserted, shadowErr
 }
 
-// rawAliasContext bundles the file's import aliases and the rule-import
-// overrides insertRaw needs, keeping insertRaw's parameter count within the
-// linter's limit.
+// rawAliasContext bundles the file's import aliases, the rule-import
+// overrides and the file's type information that insertRaw needs, keeping
+// insertRaw's parameter count within the linter's limit.
 type rawAliasContext struct {
 	imports   map[string]string
 	overrides map[string]string
+	typeInfo  *funcTypes
 }
 
 func insertRaw(
@@ -147,7 +172,7 @@ func insertRaw(
 	// Rename the unnamed return values so that the raw code can reference them
 	renameReturnValues(decl)
 
-	raw, err := renderRawCode(r.Raw, decl, aliases.imports, r.Identity())
+	raw, err := renderRawCode(r.Raw, decl, aliases.imports, r.Identity(), aliases.typeInfo)
 	if err != nil {
 		return ex.Wrapf(err, "rendering template for func %s", decl.Name.Name)
 	}
@@ -180,7 +205,14 @@ func insertRaw(
 			placement: r.Placement,
 		}
 
-		inserted := insertRawAtPattern(ctx, decl, restorer, pos, stmts)
+		inserted, insertErr := insertRawAtPattern(ctx, decl, restorer, rawInsertion{
+			pos:            pos,
+			stmts:          stmts,
+			aliasOverrides: aliases.overrides,
+		})
+		if insertErr != nil {
+			return insertErr
+		}
 		if !inserted {
 			return ex.Newf("no statement matches the pattern %s", r.Pattern)
 		}
@@ -205,12 +237,25 @@ func (ip *instrumentPhase) applyRawRule(ctx context.Context, rule *rule.InstRawR
 		return ex.Newf("can not find function %s", rule.Func)
 	}
 
+	// De-duplicate injection for the same application on this *dst.FuncDecl.
+	// Identity() omits Pattern, Placement, and Imports (those do not change
+	// template names), so the key includes them. The map is keyed by the
+	// target function so a package with several func init() declarations
+	// still injects into each one.
+	key := rawRuleDedupKey(rule)
+	if seen := ip.appliedRawIdentities[funcDecl]; seen != nil {
+		if _, dup := seen[key]; dup {
+			ip.Debug("Skipping duplicate raw rule", "rule", rule.Name, "func", rule.Func)
+			return nil
+		}
+	}
+
 	importAliases, aliasOverrides := ip.resolveImportOverrides(root, rule.Imports)
 	if err = checkAliasOverrideShadowing(aliasOverrides, funcDecl); err != nil {
 		return err
 	}
 
-	aliases := rawAliasContext{imports: importAliases, overrides: aliasOverrides}
+	aliases := rawAliasContext{imports: importAliases, overrides: aliasOverrides, typeInfo: ip.fileTypes()}
 	if err = insertRaw(ctx, rule, funcDecl, root, aliases); err != nil {
 		return err
 	}
@@ -219,6 +264,44 @@ func (ip *instrumentPhase) applyRawRule(ctx context.Context, rule *rule.InstRawR
 	if err = ip.addRuleImports(ctx, root, usedRuleImports(root, rule.Imports, aliasOverrides), rule.Name); err != nil {
 		return err
 	}
+	if ip.appliedRawIdentities == nil {
+		ip.appliedRawIdentities = make(map[*dst.FuncDecl]map[string]struct{})
+	}
+	if ip.appliedRawIdentities[funcDecl] == nil {
+		ip.appliedRawIdentities[funcDecl] = make(map[string]struct{})
+	}
+	ip.appliedRawIdentities[funcDecl][key] = struct{}{}
 	ip.Info("Apply raw rule", "rule", rule)
 	return nil
+}
+
+// rawRuleDedupKey identifies one inject_code application. Identity() covers
+// target, version, func, recv, and raw; Pattern, Placement, and Imports are
+// appended so the same snippet can be applied at different match sites.
+func rawRuleDedupKey(r *rule.InstRawRule) string {
+	placement := r.Placement
+	if placement == "" {
+		placement = "before"
+	}
+	return enc(r.Identity()) + enc(r.Pattern) + enc(placement) + enc(rawRuleImportsKey(r.Imports))
+}
+
+func rawRuleImportsKey(imports map[string]string) string {
+	if len(imports) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(imports))
+	for k := range imports {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys)+len(keys))
+	for _, k := range keys {
+		parts = append(parts, enc(k), enc(imports[k]))
+	}
+	return strings.Join(parts, "")
+}
+
+func enc(s string) string {
+	return strconv.Itoa(len(s)) + ":" + s
 }

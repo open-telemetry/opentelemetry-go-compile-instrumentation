@@ -123,7 +123,7 @@ func normalizeWhere(common, where map[string]any) (map[string]any, error) {
 		switch key {
 		case selFunc, selRecv, selStruct, selStructLiteral, selFunctionCall, selMethodCall, selDirective,
 			selKind, selIdentifier, selSignature, selSignatureContains, selResult, selLastResult, selParam,
-			selPattern, selPlacement:
+			selParamImplements, selResultImplements, selLastResultImplements, selPattern, selPlacement:
 			common[key] = value
 		case whereFile:
 			if _, ok := value.(map[string]any); !ok {

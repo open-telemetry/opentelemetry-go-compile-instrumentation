@@ -8,12 +8,18 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"go/build"
+	"go/parser"
+	"go/token"
+	"io/fs"
 	"log/slog"
 	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,11 +29,15 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/imports"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
 type instrumentPhase struct {
 	logger *slog.Logger
+	// buildContext evaluates build constraints (GOOS, GOARCH, etc.) for file rules.
+	// If nil, defaults to &build.Default.
+	buildContext *build.Context
 	// The working directory during compilation
 	workDir string
 	// The importcfg configuration
@@ -62,6 +72,18 @@ type instrumentPhase struct {
 	// whole package because HookContext declarations accumulate into one globals
 	// file across all instrumented source files.
 	appliedFuncIdentities map[string]struct{}
+	// Local //go:linkname stub names already emitted in this package. Hook
+	// stubs are named from the hook path and function (see hookLinkName), so
+	// the same hook used in two files is declared once and both trampolines
+	// call that name.
+	emittedHookDecls map[string]struct{}
+	// Raw-rule applications already performed during this package's
+	// instrumentation, keyed by the target *dst.FuncDecl. The inner key is
+	// rawRuleDedupKey (Identity plus Pattern, Placement, and Imports).
+	// Scoped to the function, not the package, because inject_code inserts
+	// into a specific function body; a package may have several func init()
+	// declarations across files, each of which must receive the injection.
+	appliedRawIdentities map[*dst.FuncDecl]map[string]struct{}
 	// importNames maps an import path to a package name, resolved
 	// during setup instead of guessed from the import path. importNames
 	// has no entries when the table is unavailable, such as after an
@@ -78,6 +100,9 @@ type instrumentPhase struct {
 	// methodCallInfo is built lazily by ensureMethodCallInfo.
 	methodCallInfo       *methodCallPackageInfo
 	methodCallInfoLoaded bool
+	// Rules whose application required globals, recorded in application order
+	// so writeGlobals can attribute the generated globals file to its contributors.
+	globalsContributors []string
 }
 
 func (ip *instrumentPhase) Info(msg string, args ...any)  { ip.logger.Info(msg, args...) }
@@ -85,16 +110,30 @@ func (ip *instrumentPhase) Error(msg string, args ...any) { ip.logger.Error(msg,
 func (ip *instrumentPhase) Warn(msg string, args ...any)  { ip.logger.Warn(msg, args...) }
 func (ip *instrumentPhase) Debug(msg string, args ...any) { ip.logger.Debug(msg, args...) }
 
+func (ip *instrumentPhase) getBuildContext() *build.Context {
+	if ip.buildContext != nil {
+		return ip.buildContext
+	}
+	// The go command does not forward -tags to the compiler, so start from
+	// build.Default and apply the tags the user passed to the build.
+	bctx := build.Default
+	bctx.BuildTags = util.ActiveBuildTags()
+	ip.buildContext = &bctx
+	return ip.buildContext
+}
+
+// debugArtifactDir returns the directory under .otelc-build holding this
+// package's debug artifacts (.otelc-build/debug/<escaped-package>/).
+func (ip *instrumentPhase) debugArtifactDir() string {
+	modPath := util.FindFlagValue(ip.compileArgs, "-p")
+	pkgDir := util.EscapePackagePath(modPath)
+	return util.GetBuildTemp(filepath.Join("debug", pkgDir))
+}
+
 // keepForDebug keeps the the file to .otelc-build directory for debugging
 func (ip *instrumentPhase) keepForDebug(name string) {
-	escape := func(s string) string {
-		dirName := strings.ReplaceAll(s, "/", "_")
-		dirName = strings.ReplaceAll(dirName, ".", "_")
-		return dirName
-	}
-	modPath := util.FindFlagValue(ip.compileArgs, "-p")
-	dest := filepath.Join("debug", escape(modPath), filepath.Base(name))
-	err := util.CopyFile(name, util.GetBuildTemp(dest))
+	dest := filepath.Join(ip.debugArtifactDir(), filepath.Base(name))
+	err := util.CopyFile(name, dest)
 	if err != nil { // error is tolerable here as this is only for debugging
 		ip.Warn("failed to save modified file", "dest", dest, "error", err)
 	}
@@ -108,6 +147,43 @@ func stripCompleteFlag(args []string) []string {
 		}
 	}
 	return args
+}
+
+// resolvePackageName reads the package clause from the compile command's own
+// sources. Setup's build-plan dry run lists no readable source for the
+// go-test-generated main, so setup leaves the rule set unnamed and this method
+// recovers it (see #1348). Returns an empty name if the command lists no
+// readable Go file.
+func (ip *instrumentPhase) resolvePackageName() (string, error) {
+	for _, arg := range ip.compileArgs {
+		if !util.IsGoFile(arg) || !util.PathExists(arg) {
+			continue
+		}
+		name, err := ast.ParsePackageName(arg)
+		if err != nil {
+			return "", ex.Wrapf(err, "parsing package clause from %s", arg)
+		}
+		return name, nil
+	}
+	return "", nil
+}
+
+// ensurePackageName fills in a rule set that setup left unnamed. It must run
+// before instrument(), because file rules need the name and compileArgs still
+// holds only the original sources at that point.
+func (ip *instrumentPhase) ensurePackageName(matched *rule.InstRuleSet) error {
+	if matched.PackageName != "" {
+		return nil
+	}
+	name, err := ip.resolvePackageName()
+	if err != nil {
+		return err
+	}
+	if name != "" {
+		matched.SetPackageName(name)
+		ip.Debug("Resolved package name from compile command", "package", name)
+	}
+	return nil
 }
 
 func interceptCompile(ctx context.Context, args []string) ([]string, error) {
@@ -151,6 +227,10 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 	// Check if the current compile command matches the rules.
 	matched := ip.match(allSet, args)
 	if !matched.IsEmpty() {
+		if err = ip.ensurePackageName(matched); err != nil {
+			return nil, err
+		}
+
 		ip.Info("Instrument package", "rules", matched, "args", args)
 		// Okay, this package should be instrumented.
 		err = ip.instrument(ctx, matched)
@@ -179,9 +259,13 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 		ip.importConfig.PackageFile = make(map[string]string)
 	}
 
+	pgoFlags, pgoErr := ip.pgoBuildFlags()
+	if pgoErr != nil {
+		return pgoErr
+	}
 	var updated bool
 	for _, importPath := range newImports {
-		if importPath == "unsafe" || importPath == "C" {
+		if importPath == unsafePackageName || importPath == "C" {
 			// unsafe is built-in, C is the cgo pseudo-package; neither has an archive file
 			continue
 		}
@@ -196,7 +280,7 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 			return err
 		}
 		// Resolve package archive location, passing build flags to match the current build context
-		buildFlags := util.GetBuildFlags()
+		buildFlags := append(util.GetBuildFlags(), pgoFlags...)
 		archives, err := pkgload.ResolveExportFiles(ctx, importPath, buildFlags...)
 		restore()
 		if err != nil {
@@ -229,6 +313,43 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 	}
 
 	return nil
+}
+
+// pgoBuildFlags returns the -pgo flag that makes a nested go list compile the
+// added imports with the profile whose path storePGOProfile recorded during
+// setup, when this compile uses one.
+func (ip *instrumentPhase) pgoBuildFlags() ([]string, error) {
+	return pgoBuildFlagsFor(ip.compileArgs)
+}
+
+// pgoBuildFlagsFor returns the -pgo flag that makes a nested go list compile
+// the added imports of the command in args with the profile whose path
+// storePGOProfile recorded during setup, when that command uses one. Without
+// it the nested build compiles them unprofiled, and the link rejects the
+// mix of export data with a fingerprint mismatch.
+//
+// A compile command decides from -pgoprofile, which the toolchain adds
+// exactly when it profiles that compile. A link command never carries
+// -pgoprofile: the profile shapes compile actions, not the link. Link-side
+// resolution therefore follows the profile setup recorded, which setup
+// rewrites before every build, empty when the build uses none.
+func pgoBuildFlagsFor(args []string) ([]string, error) {
+	if !util.IsLinkCommandWithArgs(args) && util.FindFlagValue(args, "-pgoprofile") == "" {
+		return nil, nil
+	}
+	f := util.GetPGOProfileFile()
+	profilePath, err := os.ReadFile(f)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, ex.Wrapf(err, "failed to read PGO profile from file %s", f)
+	}
+	if len(profilePath) == 0 {
+		return nil, nil
+	}
+	// go/packages passes -pgo=off; a later -pgo flag overrides it.
+	return []string{"-pgo=" + string(profilePath)}, nil
 }
 
 // resolution is a compile waiting on a nested build to resolve an import a rule
@@ -340,12 +461,36 @@ func trackAddedImports(packages map[string]string) error {
 	return nil
 }
 
+// addedImportFiles returns the per-process import tracking files written during
+// compilation. It scans the build temp directory instead of globbing so that a
+// workspace whose path contains glob meta-characters (for example square
+// brackets) still resolves its files.
+func addedImportFiles() ([]string, error) {
+	dir := util.GetBuildTempDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, ex.Wrapf(err, "reading build temp directory %q", dir)
+	}
+
+	files := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasPrefix(name, "added_imports.") || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		files = append(files, filepath.Join(dir, name))
+	}
+	return files, nil
+}
+
 // CleanupImportTrackingFiles removes import tracking files from previous builds.
 // Should be called at the start of a new build to clean up stale files from prior runs.
 // This is exported for use by the setup phase.
 func CleanupImportTrackingFiles() {
-	pattern := util.GetAddedImportsPattern()
-	files, err := filepath.Glob(pattern)
+	files, err := addedImportFiles()
 	if err != nil {
 		return
 	}
@@ -355,15 +500,22 @@ func CleanupImportTrackingFiles() {
 	}
 }
 
+// CleanupDebugArtifacts removes debug artifacts from previous builds.
+// Should be called at the start of a build under debug mode to clean up
+// stale diffs and debug files from prior runs.
+// This is exported for use by the setup phase.
+func CleanupDebugArtifacts() error {
+	return os.RemoveAll(util.GetBuildTemp("debug"))
+}
+
 // loadAddedImports discovers and merges all per-process import tracking files.
 func loadAddedImports(ctx context.Context) (map[string]string, error) {
 	logger := util.LoggerFromContext(ctx)
-	pattern := util.GetAddedImportsPattern()
 
 	// Find all per-process import files
-	files, err := filepath.Glob(pattern)
+	files, err := addedImportFiles()
 	if err != nil {
-		return nil, ex.Wrapf(err, "globbing import files")
+		return nil, err
 	}
 
 	if len(files) == 0 {
@@ -419,16 +571,13 @@ func interceptLink(ctx context.Context, args []string) ([]string, error) {
 		return args, nil
 	}
 
-	// Load imports that were added during compilation
+	// Load imports that were added during compilation. A failure is not
+	// fatal: matched.json still says which imports rules add, and
+	// resolveRuleAddedImports recovers them below.
 	addedImports, err := loadAddedImports(ctx)
 	if err != nil {
 		logger.WarnContext(ctx, "failed to load added imports for link phase", "error", err)
-		return args, nil // Non-fatal, proceed with original args
-	}
-
-	if len(addedImports) == 0 {
-		// No imports were added during compilation
-		return args, nil
+		addedImports = nil
 	}
 
 	// Parse the link importcfg
@@ -451,6 +600,18 @@ func interceptLink(ctx context.Context, args []string) ([]string, error) {
 		}
 	}
 
+	// The merge above depends on a side effect of compile actions that a
+	// build cache hit skips: a cached compile writes no tracking file, so on
+	// a warm GOCACHE the link misses the imports rules added to the cached
+	// packages. matched.json survives that, because setup rewrites it
+	// deterministically before every build, so recover the imports from it
+	// and resolve whatever the link does not list yet.
+	ruleUpdated, err := resolveRuleAddedImports(ctx, args, &linkConfig)
+	if err != nil {
+		return nil, err
+	}
+	updated = updated || ruleUpdated
+
 	if !updated {
 		return args, nil
 	}
@@ -466,6 +627,340 @@ func interceptLink(ctx context.Context, args []string) ([]string, error) {
 	// Cleanup happens at the start of the next build via CleanupImportTrackingFiles.
 
 	return args, nil
+}
+
+// resolveRuleAddedImports completes the link importcfg with the imports that
+// instrumentation rules can add, resolved the same way the compile phase
+// resolves them: a nested go list -export that shares the build cache keys.
+// It reports whether the import config changed.
+func resolveRuleAddedImports(ctx context.Context, linkArgs []string, linkConfig *imports.ImportConfig) (bool, error) {
+	pgoFlags, err := pgoBuildFlagsFor(linkArgs)
+	if err != nil {
+		return false, err
+	}
+	buildFlags := append(util.GetBuildFlags(), pgoFlags...)
+	ruleImports := parseLinkRuleImports(ctx, linkArgs)
+	var updated bool
+	// One pass sees only the rule sets whose targets the importcfg lists
+	// already. A pass that adds a package makes another set reachable: an
+	// add_file on A imports B, and a matched rule on B imports C, which joins
+	// the link only after B does. Repeat until a pass adds nothing. Every
+	// adding pass grows the importcfg, so the rule-added candidates bound the
+	// loop. A chain of d hops needs d passes that each add one level plus one
+	// pass that adds nothing, and the compile side accepts at most
+	// maxResolutionChain hops: enterNestedResolution fails only past that
+	// many chain entries. The one extra pass makes the link accept exactly
+	// the chains the compile accepted, so a link that still exhausts the
+	// loop follows a chain no compile accepted.
+	for range maxResolutionChain + 1 {
+		pass, passErr := resolveRuleAddedImportsPass(ctx, ruleImports, buildFlags, linkConfig)
+		if passErr != nil {
+			return updated, passErr
+		}
+		if !pass {
+			return updated, nil
+		}
+		updated = true
+	}
+	return updated, ex.Newf(
+		"rules add imports nested deeper than %d",
+		maxResolutionChain,
+	)
+}
+
+// resolveRuleAddedImportsPass resolves one round of rule-added imports the
+// link importcfg does not list yet and reports whether it added any.
+// ruleImports holds the candidates parsed once per link, so a pass pays
+// only the missing-check and the nested load, never the matched.json read
+// and the add_file source parses again.
+func resolveRuleAddedImportsPass(
+	ctx context.Context,
+	ruleImports *linkRuleImports,
+	buildFlags []string,
+	linkConfig *imports.ImportConfig,
+) (bool, error) {
+	candidates := ruleImports.candidates(linkConfig)
+	if len(candidates) == 0 {
+		return false, nil
+	}
+
+	logger := util.LoggerFromContext(ctx)
+	missing := make([]string, 0, len(candidates))
+	for path := range candidates {
+		if path == unsafePackageName || path == "C" {
+			// unsafe is built-in, C is the cgo pseudo-package; neither has an archive file
+			continue
+		}
+		if _, exists := linkConfig.PackageFile[path]; !exists {
+			missing = append(missing, path)
+		}
+	}
+	if len(missing) == 0 {
+		return false, nil
+	}
+	// Sorting keeps the go list output and the importcfg edits stable.
+	slices.Sort(missing)
+
+	archives, failed, err := pkgload.ResolveExportFilesBatch(ctx, missing, buildFlags...)
+	if err != nil {
+		return false, err
+	}
+	for path, loadErr := range failed {
+		// A candidate the rules declare but that this build never compiles can
+		// be unresolvable, for example a hook package that only builds on
+		// another platform. Skip it: the link fails with go's own error when
+		// the import was genuinely needed.
+		logger.WarnContext(ctx, "skipping unresolvable rule-added import for the link",
+			"import", path, "error", loadErr)
+	}
+
+	var updated bool
+	for pkg, archive := range archives {
+		if _, exists := linkConfig.PackageFile[pkg]; exists {
+			continue
+		}
+		logger.DebugContext(ctx, "Adding rule-added package to link importcfg", "package", pkg, "archive", archive)
+		linkConfig.PackageFile[pkg] = archive
+		updated = true
+	}
+	return updated, nil
+}
+
+// linkRuleImports holds the rule-added import candidates of one link,
+// parsed once: matched.json's rule sets with the imports each of them can
+// add to its target package's compile, plus the names a main rule set's
+// rules give the linked binary. Every recovery pass filters the result
+// against the importcfg it runs with, so an extra pass pays only the
+// missing-check and the nested load, never the matched.json read, the
+// unmarshal, and the add_file source parses again.
+type linkRuleImports struct {
+	// binary is the name go gives the binary the link builds; empty when
+	// the command names no output.
+	binary string
+	// namedBinary reports whether some main rule set names binary.
+	namedBinary bool
+	// sets holds one entry per rule set in matched.json.
+	sets []linkRuleSet
+}
+
+// linkRuleSet is one rule set's parsed contribution to a link.
+type linkRuleSet struct {
+	// modulePath is the package the set instrumented; "main" for every
+	// main package, which all compile with -p main.
+	modulePath string
+	// imports are the paths the set's rules can add to its target's
+	// compile: the imports the rules declare plus those of the add_file
+	// sources they insert.
+	imports map[string]struct{}
+	// dirs are the names of the source directories the set's rules name
+	// as their targets; only a main set names the linked binary this way.
+	dirs map[string]struct{}
+}
+
+// parseLinkRuleImports reads matched.json, which setup wrote before the
+// build, and collects the import paths instrumentation rules can add to a
+// package's compile: the imports every rule declares, plus the imports of
+// the source files add_file rules insert. The answer never depends on a
+// compile running, which is what keeps a warm build cache recoverable.
+func parseLinkRuleImports(ctx context.Context, linkArgs []string) *linkRuleImports {
+	logger := util.LoggerFromContext(ctx)
+
+	content, err := os.ReadFile(util.GetMatchedRuleFile())
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			logger.WarnContext(ctx, "failed to read matched rules for link imports", "error", err)
+		}
+		return &linkRuleImports{}
+	}
+	var sets []*rule.InstRuleSet
+	if err = json.Unmarshal(content, &sets); err != nil {
+		logger.WarnContext(ctx, "failed to parse matched rules for link imports", "error", err)
+		return &linkRuleImports{}
+	}
+
+	// The same constraint context the compile phase applies: build.Default
+	// with the tags the user passed to the build, so add_file sources the
+	// active constraints exclude are skipped exactly as the compile skips
+	// them. See instrumentPhase.getBuildContext.
+	bctx := build.Default
+	bctx.BuildTags = util.ActiveBuildTags()
+
+	parsed := &linkRuleImports{binary: linkedBinaryName(linkArgs)}
+	for _, set := range sets {
+		entry := linkRuleSet{modulePath: set.ModulePath}
+		entry.imports = make(map[string]struct{})
+		collectRuleSetImports(ctx, &bctx, entry.imports, set)
+		if set.ModulePath == "main" {
+			entry.dirs = mainSetPackageDirs(set)
+			if _, named := entry.dirs[parsed.binary]; named {
+				parsed.namedBinary = true
+			}
+		}
+		parsed.sets = append(parsed.sets, entry)
+	}
+	return parsed
+}
+
+// candidates returns the rule-added imports of the rule sets whose target
+// packages take part in the link described by linkConfig: a link importcfg
+// lists every package the binary links, so the imports of another binary's
+// rules are never resolved for this one. Main packages are the exception:
+// no link importcfg lists the path "main", so a main set is kept by the
+// binary name below instead. The result stays a superset of what the link
+// needs: a rule can declare an import the build never uses, and
+// resolveRuleAddedImports skips unresolvable candidates.
+func (l *linkRuleImports) candidates(linkConfig *imports.ImportConfig) map[string]struct{} {
+	paths := make(map[string]struct{})
+	for _, set := range l.sets {
+		if _, linked := linkConfig.PackageFile[set.modulePath]; linked {
+			maps.Copy(paths, set.imports)
+			continue
+		}
+		if set.modulePath != "main" {
+			// The target package takes no part in this link: another binary's
+			// rules, or a package this build never compiled.
+			continue
+		}
+		// Every main package compiles with -p main, so its rule set carries
+		// the path "main", which no link importcfg lists; the importcfg
+		// names the linked root by its import path instead.
+
+		// The link -o output name closes that gap: go names a binary after the
+		// last element of its main package's import path, with a ".test" suffix
+		// for test binaries, and that element is also the directory the set's
+		// matched rules name. Keep only the sets of the linked binary. A set
+		// that names no source, such as one with only file rules or the
+		// generated test main's, applies to every main package, so it stays.
+		// When no set names the binary, the -o name is custom or names a
+		// package whose directory differs from the last element of its import
+		// path, and every main set stays so recovery never drops an import the
+		// link needs.
+		if l.namedBinary && len(set.dirs) > 0 {
+			if _, named := set.dirs[l.binary]; !named {
+				continue
+			}
+		}
+		maps.Copy(paths, set.imports)
+	}
+	return paths
+}
+
+// collectRuleSetImports adds to paths every import a rule set can add to
+// its target package's compile: the imports each rule declares, plus the
+// imports of the source files the set's add_file rules insert.
+func collectRuleSetImports(ctx context.Context, bctx *build.Context, paths map[string]struct{}, set *rule.InstRuleSet) {
+	addImportsOf(paths, set.RawRules)
+	addImportsOf(paths, set.FuncRules)
+	addImportsOf(paths, set.StructRules)
+	addImportsOf(paths, set.CallRules)
+	addImportsOf(paths, set.LitRules)
+	addImportsOf(paths, set.DirectiveRules)
+	addImportsOf(paths, set.DeclRules)
+	for _, fileRule := range set.FileRules {
+		for _, path := range fileRuleImports(ctx, bctx, fileRule) {
+			paths[path] = struct{}{}
+		}
+	}
+}
+
+// linkedBinaryName returns the name go gives the binary a link builds: the
+// base of the link -o value with the ".exe" suffix Windows adds and the
+// ".test" suffix go appends to test binaries removed. go derives the name
+// from the last element of the linked main package's import path. An empty
+// result means the command names no output.
+func linkedBinaryName(linkArgs []string) string {
+	out := util.FindFlagValue(linkArgs, "-o")
+	if out == "" {
+		return ""
+	}
+	name := strings.TrimSuffix(filepath.Base(out), ".exe")
+	return strings.TrimSuffix(name, ".test")
+}
+
+// mainSetPackageDirs returns the names of the directories a main rule set's
+// rules name as their target's source files. Setup keys every precisely
+// matched rule by its target package's source file, so the directory of
+// those files is the main package the set instrumented. A set that names no
+// source, such as one with only file rules, applies to every main package
+// and yields no name.
+func mainSetPackageDirs(set *rule.InstRuleSet) map[string]struct{} {
+	dirs := make(map[string]struct{})
+	addSourceDirs(dirs, set.RawRules)
+	addSourceDirs(dirs, set.FuncRules)
+	addSourceDirs(dirs, set.StructRules)
+	addSourceDirs(dirs, set.CallRules)
+	addSourceDirs(dirs, set.LitRules)
+	addSourceDirs(dirs, set.DirectiveRules)
+	addSourceDirs(dirs, set.DeclRules)
+	return dirs
+}
+
+// addSourceDirs adds to dirs the directory name of every file a file-keyed
+// rule map keys its rules by.
+func addSourceDirs[T any](dirs map[string]struct{}, rules map[string][]T) {
+	for file := range rules {
+		dirs[filepath.Base(filepath.Dir(file))] = struct{}{}
+	}
+}
+
+// addImportsOf adds the declared imports of every rule in a file-keyed rule
+// map. It is generic because every rule kind embeds InstBaseRule and promotes
+// its Base accessor.
+func addImportsOf[T interface{ Base() *rule.InstBaseRule }](
+	paths map[string]struct{},
+	rules map[string][]T,
+) {
+	for _, fileRules := range rules {
+		for _, r := range fileRules {
+			for _, path := range r.Base().Imports {
+				paths[path] = struct{}{}
+			}
+		}
+	}
+}
+
+// fileRuleImports returns the import paths an add_file rule's source declares.
+// The source joins a target package's compile only through toolexec, so its
+// imports are as invisible to go's build graph as the imports rules declare.
+// The source must satisfy the active build constraints, the same check the
+// compile applies: a source the constraints exclude is never added to a
+// compile, so its imports are not candidates either. An "ignore" tag counts
+// as satisfied, because otelc compiles files ordinary builds ignore.
+func fileRuleImports(ctx context.Context, bctx *build.Context, fileRule *rule.InstFileRule) []string {
+	if fileRule.ResolvedPath == "" {
+		return nil
+	}
+	file := filepath.Join(fileRule.ResolvedPath, fileRule.File)
+	src, err := os.ReadFile(file)
+	if err != nil {
+		util.LoggerFromContext(ctx).WarnContext(ctx,
+			"failed to read add_file rule source for link imports", "file", file, "error", err)
+		return nil
+	}
+	match, err := ast.MatchFileConstraints(bctx, fileRule.ResolvedPath, fileRule.File, src)
+	if err != nil {
+		util.LoggerFromContext(ctx).WarnContext(ctx,
+			"failed to match add_file rule constraints for link imports", "file", file, "error", err)
+		return nil
+	}
+	if !match {
+		return nil
+	}
+	parsed, err := parser.ParseFile(token.NewFileSet(), file, src, parser.ImportsOnly)
+	if err != nil {
+		util.LoggerFromContext(ctx).WarnContext(ctx,
+			"failed to parse add_file rule source for link imports", "file", file, "error", err)
+		return nil
+	}
+	paths := make([]string, 0, len(parsed.Imports))
+	for _, imp := range parsed.Imports {
+		path, unquoteErr := strconv.Unquote(imp.Path.Value)
+		if unquoteErr != nil {
+			continue
+		}
+		paths = append(paths, path)
+	}
+	return paths
 }
 
 const vetToolName = "vet"
@@ -496,8 +991,16 @@ func interceptVet(ctx context.Context, args []string) ([]string, error) {
 		return nil, ex.Wrapf(err, "parsing vet config")
 	}
 
+	// A config without GoFiles has no source list to rewrite, so leave the
+	// command alone rather than failing the build. Indexing a missing key
+	// yields a nil RawMessage, which Unmarshal reports as malformed JSON.
+	raw, ok := config["GoFiles"]
+	if !ok {
+		return args, nil
+	}
+
 	var goFiles []string
-	if err = json.Unmarshal(config["GoFiles"], &goFiles); err != nil {
+	if err = json.Unmarshal(raw, &goFiles); err != nil {
 		return nil, ex.Wrapf(err, "parsing GoFiles from vet config")
 	}
 
@@ -566,6 +1069,11 @@ func toolVersionLine(line, rulesHash string) string {
 func markedToolVersion(rawOutput string) string {
 	var rulesHash string
 	if content, err := os.ReadFile(util.GetMatchedRuleFile()); err == nil {
+		// Build tags decide which add_file rule files apply, so a tagged build
+		// must not reuse artifacts compiled without those tags.
+		if tags := util.ActiveBuildTags(); len(tags) > 0 {
+			content = append(content, "\ntags="+strings.Join(tags, ",")...)
+		}
 		sum := sha256.Sum256(content)
 		rulesHash = hex.EncodeToString(sum[:8])
 	}
@@ -599,6 +1107,10 @@ func interceptToolVersion(ctx context.Context, args []string) error {
 // a rule added. Those invocations instrument compiles and run every other
 // command unchanged.
 func Toolexec(ctx context.Context, args []string, nested bool) error {
+	if len(args) == 0 {
+		return ex.New("no tool command specified")
+	}
+
 	// Use slice-based detection to correctly handle tool paths with spaces
 	// (common on Windows, e.g., "C:\Program Files\Go\pkg\tool\...")
 
@@ -607,7 +1119,7 @@ func Toolexec(ctx context.Context, args []string, nested bool) error {
 	// appended so instrumented artifacts never share cache entries with plain
 	// builds; instrumentation changes compile output without changing any
 	// input go hashes.
-	if len(args) == 2 && args[1] == "-V=full" {
+	if len(args) == 2 && args[1] == "-V=full" { //nolint:gosec // false positive: args[1] is guarded by len(args) == 2
 		return interceptToolVersion(ctx, args)
 	}
 
@@ -700,8 +1212,13 @@ var executablePath = os.Executable
 // EnableNestedToolexec points GOFLAGS at this executable in nested mode, so go
 // commands this process spawns (e.g. `go list -export`) run through otelc,
 // instrument compiles the same way and share this build's cache keys. Any
-// existing -toolexec was stripped at startup. Must only be called from the
-// real otelc binary, since os.Executable is what nested go commands will run.
+// existing -toolexec was stripped at startup, so every toolexec invocation
+// calls it, nested ones too. Must only be called from the real otelc binary,
+// since os.Executable is what nested go commands will run.
+//
+// A -gcflags value without a package pattern applies only to a go command's
+// command-line packages. The outer build applied it to its targets, whereas
+// nested `go list -export` targets the added import, so strip such values here.
 //
 // Nested mode assumes its go commands are `go list -export` spawned from
 // updateImportConfig: those run compile (instrumented), asm, cgo, and pack,
@@ -717,7 +1234,7 @@ func EnableNestedToolexec() error {
 	if err != nil {
 		return err
 	}
-	goflags := strings.TrimSpace(os.Getenv("GOFLAGS") + " " + toolexecFlag)
+	goflags := strings.TrimSpace(util.StripUnpatternedGcflagsFromGoflags(os.Getenv("GOFLAGS")) + " " + toolexecFlag)
 	if err = os.Setenv("GOFLAGS", goflags); err != nil {
 		return ex.Wrapf(err, "setting GOFLAGS for nested go commands")
 	}

@@ -270,6 +270,10 @@ func TestOperationName(t *testing.T) {
 		{name: "whitespace only", query: " \t\n ", want: ""},
 		{name: "single token", query: "ping", want: "PING"},
 		{name: "start transaction", query: "START TRANSACTION", want: "START"},
+		{name: "newline after first token", query: "SELECT\n* FROM users", want: "SELECT"},
+		{name: "tab after first token", query: "SELECT\t* FROM users", want: "SELECT"},
+		{name: "repeated spaces after first token", query: "SELECT   * FROM users", want: "SELECT"},
+		{name: "trailing whitespace", query: "COMMIT  \n", want: "COMMIT"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -308,5 +312,82 @@ func TestDbClientRequestTraceAttrs_ContainsExpectedKeys(t *testing.T) {
 
 	for _, key := range expectedKeys {
 		assert.True(t, keySet[key], "expected key %s not found in attributes", key)
+	}
+}
+
+func TestDbClientRequestTraceAttrs_DoesNotGrowWhenPortPresent(t *testing.T) {
+	attrs := DbClientRequestTraceAttrs(DatabaseSqlRequest{
+		OpType:     "SELECT",
+		Sql:        "SELECT * FROM users WHERE id=?",
+		Endpoint:   "127.0.0.1:3306",
+		DriverName: "mysql",
+		DbName:     "testdb",
+	})
+
+	require.Len(t, attrs, 7)
+	assert.Equal(t, 7, cap(attrs),
+		"a 5-element literal that then appends server.port and db.system.name grows the slice")
+}
+
+func TestDbClientRequestTraceAttrs_DoesNotGrowWithoutPort(t *testing.T) {
+	attrs := DbClientRequestTraceAttrs(DatabaseSqlRequest{
+		OpType:     "SELECT",
+		Sql:        "SELECT * FROM users WHERE id=?",
+		Endpoint:   "127.0.0.1",
+		DriverName: "postgres",
+		DbName:     "testdb",
+	})
+
+	require.Len(t, attrs, 6)
+	assert.Equal(t, 7, cap(attrs),
+		"a 5-element literal that then appends db.system.name grows the slice")
+}
+
+func BenchmarkOperationName(b *testing.B) {
+	// A statement long enough that splitting it into every token shows up.
+	query := "SELECT u.id, u.name, u.email, o.total FROM users u " +
+		"JOIN orders o ON o.user_id = u.id WHERE u.name = ? AND o.total > ? " +
+		"ORDER BY o.total DESC LIMIT 10"
+
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = OperationName(query)
+	}
+}
+
+func BenchmarkDbClientRequestTraceAttrs(b *testing.B) {
+	tests := []struct {
+		name string
+		req  DatabaseSqlRequest
+	}{
+		{
+			name: "with_port",
+			req: DatabaseSqlRequest{
+				OpType:     "SELECT",
+				Sql:        "SELECT id, name FROM users WHERE name = ?",
+				Endpoint:   "127.0.0.1:3306",
+				DriverName: "mysql",
+				DbName:     "testdb",
+			},
+		},
+		{
+			name: "without_port",
+			req: DatabaseSqlRequest{
+				OpType:     "SELECT",
+				Sql:        "SELECT id, name FROM users WHERE name = ?",
+				Endpoint:   "127.0.0.1",
+				DriverName: "postgres",
+				DbName:     "testdb",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = DbClientRequestTraceAttrs(tt.req)
+			}
+		})
 	}
 }

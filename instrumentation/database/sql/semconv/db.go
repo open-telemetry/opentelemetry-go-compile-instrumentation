@@ -7,6 +7,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"go.opentelemetry.io/otel/attribute"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
@@ -29,8 +30,12 @@ func OperationName(query string) string {
 	if trimmed == "" {
 		return ""
 	}
-	fields := strings.Fields(trimmed)
-	return strings.ToUpper(fields[0])
+	// Only the first token is wanted, so cut at the first space rather than
+	// splitting the whole statement into a slice of every token in it.
+	if i := strings.IndexFunc(trimmed, unicode.IsSpace); i != -1 {
+		trimmed = trimmed[:i]
+	}
+	return strings.ToUpper(trimmed)
 }
 
 func DbClientRequestTraceAttrs(req DatabaseSqlRequest) []attribute.KeyValue {
@@ -39,13 +44,17 @@ func DbClientRequestTraceAttrs(req DatabaseSqlRequest) []attribute.KeyValue {
 		host = req.Endpoint
 	}
 
-	attrs := []attribute.KeyValue{
+	// Five attributes are always set, and at most two more are appended below
+	// (the port and the database system), so size the slice for all seven up
+	// front and skip the regrowth.
+	attrs := make([]attribute.KeyValue, 0, 7)
+	attrs = append(attrs,
 		semconv.DBOperationName(req.OpType),
 		semconv.DBNamespace(req.DbName),
 		semconv.ServerAddress(host),
 		semconv.NetworkTransportTCP,
 		semconv.DBQueryText(req.Sql),
-	}
+	)
 
 	if err == nil {
 		if port, convErr := strconv.Atoi(portStr); convErr == nil && port > 0 {

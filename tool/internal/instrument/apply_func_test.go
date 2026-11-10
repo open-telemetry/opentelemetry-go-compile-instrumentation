@@ -24,6 +24,7 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 func TestApplyFuncRuleSignatureFilterMismatchIsLookupMiss(t *testing.T) {
@@ -592,6 +593,45 @@ func (g *GenStruct[T]) Reset() error { return nil }
 	assert.Equal(t, "T", afterIndex.Index.(*dst.Ident).Name)
 }
 
+func TestCollectArgumentsNamesBlankReceiverTypeParams(t *testing.T) {
+	typeParam := func(idx int) string { return fmt.Sprintf("%s_%s_%d", ignoredTypeParam, testHash, idx) }
+	tests := []struct {
+		name     string
+		src      string
+		recvType string
+		args     []string
+	}{
+		{
+			name:     "pointer receiver with one blank type parameter",
+			src:      "package main\ntype S[T any] struct{}\nfunc (s *S[_]) F() {}",
+			recvType: "*S[" + typeParam(0) + "]",
+			args:     []string{"s"},
+		},
+		{
+			name:     "unnamed receiver with a blank type parameter",
+			src:      "package main\ntype S[T any] struct{}\nfunc (S[_]) F() {}",
+			recvType: "S[" + typeParam(0) + "]",
+			args:     []string{syntheticParam(1)},
+		},
+		{
+			name:     "named and blank type parameters",
+			src:      "package main\ntype M[K comparable, V any] struct{}\nfunc (m M[K, _]) F() {}",
+			recvType: "M[K, " + typeParam(0) + "]",
+			args:     []string{"m"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			funcDecl := parseFunc(t, tt.src)
+			args := collectArguments(funcDecl, testHash)
+			assert.Equal(t, tt.args, args)
+			recvType, err := ast.RenderExpr(funcDecl.Recv.List[0].Type)
+			require.NoError(t, err)
+			assert.Equal(t, tt.recvType, recvType)
+		})
+	}
+}
+
 func TestCreateTJumpIfMultipleGenericReceiverTypeArgs(t *testing.T) {
 	file, funcDecl := parseFileFunc(t, `package main
 type GenStruct[K comparable, V any] struct{}
@@ -709,4 +749,26 @@ func TestInstrumentFile_ApplyIgnoredCallSitesErrorIsWrapped(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "applying //otelc:ignore call sites")
+}
+
+func TestWriteInstrumentedDebugCopiesSourceWithDiff(t *testing.T) {
+	buildDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, buildDir)
+	t.Setenv(util.EnvOtelcDebug, "1")
+	original := filepath.Join(t.TempDir(), "source.go")
+	require.NoError(t, os.WriteFile(original, []byte("package main\n\nvar X = 1\n"), 0o644))
+	root, err := ast.NewAstParser().ParseSource("package main\n\nvar X = 2\n")
+	require.NoError(t, err)
+	ip := newTestPhase()
+	ip.workDir = t.TempDir()
+	ip.compileArgs = []string{"-p", "example.com/app", original}
+	require.NoError(t, ip.writeInstrumented(root, original, nil))
+	debugFile := util.GetBuildTemp(filepath.Join("debug", "example_com_app", "source.go"))
+	content, err := os.ReadFile(debugFile)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "var X = 2")
+	content, err = os.ReadFile(debugFile + ".diff")
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "-var X = 1")
+	assert.Contains(t, string(content), "+var X = 2")
 }
