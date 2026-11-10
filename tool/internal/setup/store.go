@@ -206,6 +206,11 @@ func (sp *setupPhase) storePGOProfile() error {
 // those packages still invalidates the cached compiles. Setup fails when the
 // hash cannot be computed: an incomplete hash would let a warm build reuse a
 // compile made against an older injected package.
+//
+// The hash reads the files on disk, so it misses two inputs of the compile: a
+// file replaced through -overlay, where only the overlay's backing file
+// changed, and cgo settings such as CGO_CFLAGS that change what an injected
+// cgo package exports. Neither is common for the packages rules inject.
 func (sp *setupPhase) storeInjectedHash(ctx context.Context, matched []*rule.InstRuleSet) error {
 	hash, err := sp.injectedHash(ctx, matched)
 	if err != nil {
