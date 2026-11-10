@@ -256,13 +256,15 @@ scripts or Git hooks. It checks the current
 base, head, branch, and fork permission before pushing a descendant commit.
 An expected-head lease rejects concurrent branch updates.
 
-The publisher uses the repository App for repository and fork branches when
+The publisher uses the repository App for branches in this repository when
 `OTELBOT_GO_COMPILE_INSTRUMENTATION_CLIENT_ID` and
-`OTELBOT_GO_COMPILE_INSTRUMENTATION_PRIVATE_KEY` are configured. A fork author
-must allow edits from maintainers.
+`OTELBOT_GO_COMPILE_INSTRUMENTATION_PRIVATE_KEY` are configured. Fork branches
+use the `OTELC_BUNDLE_PUSH_TOKEN` environment token, because GitHub does not let
+an App write workflow files to a fork. A fork author must allow edits from
+maintainers.
 
-The `OTELC_BUNDLE_PUSH_TOKEN` environment token is the fallback when the App
-is not configured. To use the fallback, an administrator must:
+The `OTELC_BUNDLE_PUSH_TOKEN` environment token also serves repository branches
+when the App is not configured. To use the fallback, an administrator must:
 
 1. Create the `bundle-publisher` environment.
 2. Restrict its deployment branch rules to the `main` branch only. For
