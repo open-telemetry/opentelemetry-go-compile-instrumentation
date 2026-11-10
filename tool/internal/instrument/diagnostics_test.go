@@ -4,9 +4,12 @@
 package instrument
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -155,4 +158,86 @@ func TestInstrumentMatchDiagnosticsApplicationOutcome(t *testing.T) {
 			require.Equal(t, tt.matched, row.Matched)
 		})
 	}
+}
+
+func TestInstrumentMatchDiagnosticsFunctionIgnoreAndRawRules(t *testing.T) {
+	base := rule.InstBaseRule{Name: "candidate"}
+	tests := []struct {
+		name    string
+		source  string
+		r       rule.InstRule
+		wantErr bool
+		reason  string
+	}{
+		{
+			"function-level ignore",
+			"package p\n\n//otelc:ignore\nfunc F(x int) {}\n",
+			&rule.InstFuncRule{InstBaseRule: base, Func: "F"}, false, "ignored",
+		},
+		{
+			"raw rule function not found",
+			"package p\n\nfunc F(x int) {}\n",
+			&rule.InstRawRule{InstBaseRule: base, Func: "Missing", Raw: "println()"}, true, "function_not_found",
+		},
+		{
+			"raw rule signature mismatch",
+			"package p\n\nfunc F(x int) {}\n",
+			&rule.InstRawRule{
+				InstBaseRule: base, Func: "F", Raw: "println()",
+				Signature: &rule.FuncSignature{Args: []string{"string"}},
+			},
+			true, "signature_mismatch",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+			t.Setenv(util.EnvOtelcDebug, "true")
+			ip := newTestPhase()
+			ip.parser = ast.NewAstParser()
+			root, err := ip.parser.ParseSource(tt.source)
+			require.NoError(t, err)
+			ip.compileArgs = []string{"-p", "example.com/p"}
+			ip.diagnosticSource = "source.go"
+			result, _, err := ip.applyRulesCapturingDiffs(t.Context(), []rule.InstRule{tt.r}, root)
+			if tt.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				require.False(t, result.modified)
+			}
+
+			data, err := os.ReadFile(filepath.Join(ip.debugArtifactDir(), "source.go.matches.jsonl"))
+			require.NoError(t, err)
+			// One record per rule: the ignored func rule is not reported again
+			// as applied.
+			require.Equal(t, 1, strings.Count(string(data), "\n"))
+			var row struct {
+				Reason  string `json:"reason"`
+				Matched bool   `json:"matched"`
+			}
+			require.NoError(t, json.Unmarshal(data, &row))
+			require.Equal(t, tt.reason, row.Reason)
+			require.False(t, row.Matched)
+		})
+	}
+}
+
+// A diagnostics write failure is a warning: debug output must never fail the
+// build.
+func TestInstrumentMatchDiagnosticsWriteFailure(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	t.Setenv(util.EnvOtelcDebug, "true")
+	var logs bytes.Buffer
+	ip := &instrumentPhase{
+		logger:           slog.New(slog.NewTextHandler(&logs, nil)),
+		compileArgs:      []string{"-p", "example.com/p"},
+		diagnosticSource: "source.go",
+	}
+	dir := ip.debugArtifactDir()
+	require.NoError(t, os.MkdirAll(filepath.Dir(dir), 0o755))
+	require.NoError(t, os.WriteFile(dir, nil, 0o600))
+
+	ip.reportDecision(&rule.InstFuncRule{InstBaseRule: rule.InstBaseRule{Name: "candidate"}}, "ignored")
+	require.Contains(t, logs.String(), "failed to write rule diagnostics")
 }

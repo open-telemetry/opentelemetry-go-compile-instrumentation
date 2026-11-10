@@ -4,7 +4,9 @@
 package setup
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -100,4 +102,27 @@ func TestMatchDiagnosticsDisabled(t *testing.T) {
 			require.NoDirExists(t, setupDebugDir(dep.ImportPath))
 		})
 	}
+}
+
+// A diagnostics write failure is a warning: debug output must never fail the
+// build.
+func TestMatchDiagnosticsWriteFailure(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	t.Setenv(util.EnvOtelcDebug, "1")
+	source := writeGoSource(t, "source.go", "package p; func F(x int) {}")
+	dep := &Dependency{ImportPath: "example.com/p", Version: "v1.0.0", Sources: []string{source}}
+	dir := setupDebugDir(dep.ImportPath)
+	require.NoError(t, os.MkdirAll(filepath.Dir(dir), 0o755))
+	require.NoError(t, os.WriteFile(dir, nil, 0o600))
+
+	var logs bytes.Buffer
+	sp := &setupPhase{logger: slog.New(slog.NewTextHandler(&logs, nil))}
+	r := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "candidate", Target: rule.NewTarget(dep.ImportPath)},
+		Func:         "Missing",
+	}
+	set, err := sp.runMatch(t.Context(), dep, map[string][]rule.InstRule{dep.ImportPath: {r}}, nil)
+	require.NoError(t, err)
+	require.True(t, set.IsEmpty())
+	require.Contains(t, logs.String(), "failed to write rule diagnostics")
 }
