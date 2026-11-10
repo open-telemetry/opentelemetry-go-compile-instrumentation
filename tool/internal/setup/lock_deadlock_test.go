@@ -124,8 +124,30 @@ func TestAcquireBuildLockDeadlockFailsLatestWait(t *testing.T) {
 	// wait below. It is the one to fail, so the wait below goes on.
 	holdTestWait(t, writeTestWait(t, m.lockA, time.Now().Add(time.Hour), m.lockB))
 
-	t.Setenv(util.EnvOtelcHeldBuildLocks, m.lockA)
-	assertWaitsFor(t, m.releaseB, []string{m.lockB})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		release, _, err := acquireBuildLocksUnder(ctx, []string{m.lockB}, []string{m.lockA})
+		if err == nil {
+			release()
+		}
+		done <- err
+	}()
+
+	// The wait must also go on past its next search for a cycle.
+	select {
+	case err := <-done:
+		t.Fatalf("the wait that started first must go on, got %v", err)
+	case <-time.After((deadlockCheckTicks + 2) * buildLockRetryInterval):
+	}
+	m.releaseB()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the wait never got the lock after its holder ended")
+	}
 }
 
 func TestAcquireBuildLockIgnoresLeftoverWaitFile(t *testing.T) {
