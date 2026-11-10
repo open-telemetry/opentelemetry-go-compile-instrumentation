@@ -5,6 +5,7 @@ package setup
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -12,7 +13,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -132,9 +132,27 @@ func moduleLockDirs(ctx context.Context, dir string) []string {
 	return dirs
 }
 
-// envPathList returns the paths in the environment variable key.
+// envPathList returns the paths in the environment variable key, a JSON
+// array of strings. A path can contain any character, including the list
+// separator of the OS. It returns nil when the variable is not set or is not
+// valid.
 func envPathList(key string) []string {
-	return filepath.SplitList(os.Getenv(key))
+	value := os.Getenv(key)
+	if value == "" {
+		return nil
+	}
+	var paths []string
+	if err := json.Unmarshal([]byte(value), &paths); err != nil {
+		return nil
+	}
+	return paths
+}
+
+// encodePathList returns paths in the format that envPathList reads.
+func encodePathList(paths []string) string {
+	// Marshaling a slice of strings cannot fail.
+	data, _ := json.Marshal(paths)
+	return string(data)
 }
 
 // nestedBuildEnv returns the environment entries that tell otelc
@@ -144,10 +162,9 @@ func nestedBuildEnv(ctx context.Context) []string {
 	held, _ := ctx.Value(buildLockHeldKey{}).([]string)
 	locks := append(envPathList(util.EnvOtelcHeldBuildLocks), held...)
 	workDirs := append(envPathList(util.EnvOtelcParentWorkDirs), canonicalDir(util.GetOtelcWorkDir()))
-	sep := string(os.PathListSeparator)
 	return []string{
-		util.EnvOtelcHeldBuildLocks + "=" + strings.Join(locks, sep),
-		util.EnvOtelcParentWorkDirs + "=" + strings.Join(workDirs, sep),
+		util.EnvOtelcHeldBuildLocks + "=" + encodePathList(locks),
+		util.EnvOtelcParentWorkDirs + "=" + encodePathList(workDirs),
 	}
 }
 

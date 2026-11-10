@@ -348,7 +348,7 @@ func TestAcquireBuildLockNestedWorkDirIsParentModuleRoot(t *testing.T) {
 
 func TestAcquireBuildLockNestedSiblingsExclude(t *testing.T) {
 	moduleDir := lockTestModule(t)
-	t.Setenv(util.EnvOtelcHeldBuildLocks, lockPathIn(moduleDir))
+	t.Setenv(util.EnvOtelcHeldBuildLocks, encodePathList([]string{lockPathIn(moduleDir)}))
 
 	// Two children of the same parent edit the same go.mod, so they still
 	// exclude each other.
@@ -363,15 +363,43 @@ func TestAcquireBuildLockNestedSiblingsExclude(t *testing.T) {
 func TestNestedBuildEnv(t *testing.T) {
 	workDir := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, workDir)
-	t.Setenv(util.EnvOtelcHeldBuildLocks, "a")
-	t.Setenv(util.EnvOtelcParentWorkDirs, "w")
+	t.Setenv(util.EnvOtelcHeldBuildLocks, `["a"]`)
+	t.Setenv(util.EnvOtelcParentWorkDirs, `["w"]`)
 	ctx := contextWithBuildLockHeld(t.Context(), []string{"b", "c"})
 
-	sep := string(os.PathListSeparator)
 	assert.Equal(t, []string{
-		util.EnvOtelcHeldBuildLocks + "=a" + sep + "b" + sep + "c",
-		util.EnvOtelcParentWorkDirs + "=w" + sep + canonicalDir(workDir),
+		util.EnvOtelcHeldBuildLocks + `=["a","b","c"]`,
+		util.EnvOtelcParentWorkDirs + "=" + encodePathList([]string{"w", canonicalDir(workDir)}),
 	}, nestedBuildEnv(ctx))
+}
+
+func TestNestedBuildEnvKeepsPathsWithListSeparator(t *testing.T) {
+	// A module whose path contains the list separator of the OS.
+	moduleDir := filepath.Join(t.TempDir(), "a"+string(os.PathListSeparator)+"b")
+	require.NoError(t, os.MkdirAll(filepath.Join(moduleDir, "cmd", "app"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(moduleDir, "go.mod"), []byte("module m\n\ngo 1.25.0\n"), 0o644))
+	t.Chdir(filepath.Join(moduleDir, "cmd", "app"))
+	t.Setenv("GOWORK", "off")
+	clearNestedBuildEnv(t)
+	t.Setenv(util.EnvOtelcWorkDir, moduleDir)
+
+	err := withBuildLock(t.Context(), "", func(ctx context.Context) error {
+		setNestedBuildEnv(ctx, t)
+		assert.Equal(t, []string{lockPathIn(moduleDir)}, envPathList(util.EnvOtelcHeldBuildLocks))
+		assert.Equal(t, []string{canonicalDir(moduleDir)}, envPathList(util.EnvOtelcParentWorkDirs))
+
+		// A child with its own work dir sees that its parent holds the module
+		// lock, so it takes a numbered lock instead of waiting for its parent.
+		t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+		assert.Contains(t, buildLockPaths(ctx, ""), lockPathIn(moduleDir)+".1")
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+func TestEnvPathListIgnoresInvalidValue(t *testing.T) {
+	t.Setenv(util.EnvOtelcHeldBuildLocks, "a"+string(os.PathListSeparator)+"b")
+	assert.Nil(t, envPathList(util.EnvOtelcHeldBuildLocks))
 }
 
 func TestCleanupWaitsForModuleLock(t *testing.T) {

@@ -28,7 +28,7 @@ const (
 	// command otelc itself ran (e.g. `go list -export`).
 	EnvOtelcNestedToolexec = "OTELC_NESTED_TOOLEXEC"
 	// EnvOtelcHeldBuildLocks lists the build lock files that a parent otelc
-	// invocation holds, separated by os.PathListSeparator. otelc sets it for
+	// invocation holds, as a JSON array of paths. otelc sets it for
 	// the go command it runs, so an otelc invocation started under that
 	// command (for example from a test) does not wait for its own parent.
 	EnvOtelcHeldBuildLocks = "OTELC_HELD_BUILD_LOCKS"

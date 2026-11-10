@@ -157,7 +157,7 @@ func TestAcquireBuildLockIgnoresLeftoverWaitFile(t *testing.T) {
 	// A process that ended left a wait file that would close a cycle.
 	leftover := writeTestWait(t, m.lockA, time.Now().Add(-time.Hour), m.lockB)
 
-	t.Setenv(util.EnvOtelcHeldBuildLocks, m.lockA)
+	t.Setenv(util.EnvOtelcHeldBuildLocks, encodePathList([]string{m.lockA}))
 	assertWaitsFor(t, m.releaseB, []string{m.lockB})
 	assert.NoFileExists(t, leftover, "a wait file that no process holds must be removed")
 }
@@ -167,7 +167,7 @@ func TestAcquireBuildLockFindsDeadlockWhileWaiting(t *testing.T) {
 	defer m.releaseA()
 	defer m.releaseB()
 
-	t.Setenv(util.EnvOtelcHeldBuildLocks, m.lockA)
+	t.Setenv(util.EnvOtelcHeldBuildLocks, encodePathList([]string{m.lockA}))
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	done := make(chan error, 1)

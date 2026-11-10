@@ -324,8 +324,9 @@ func TestBuildWithToolexec(t *testing.T) {
 		ctx := contextWithBuildLockHeld(t.Context(), []string{"held.lock"})
 		got := runBuildWithToolexecContext(ctx, t, []string{"go", "test", "."}, false)
 
-		assert.Contains(t, got.env, util.EnvOtelcHeldBuildLocks+"=held.lock")
-		assert.Contains(t, got.env, util.EnvOtelcParentWorkDirs+"="+canonicalDir(util.GetOtelcWorkDir()))
+		assert.Contains(t, got.env, util.EnvOtelcHeldBuildLocks+`=["held.lock"]`)
+		assert.Contains(t, got.env,
+			util.EnvOtelcParentWorkDirs+"="+encodePathList([]string{canonicalDir(util.GetOtelcWorkDir())}))
 	})
 
 	t.Run("keeps the work directory when the root debug flag is set", func(t *testing.T) {
