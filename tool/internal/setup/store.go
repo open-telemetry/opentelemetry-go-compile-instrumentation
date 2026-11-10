@@ -203,18 +203,13 @@ func (sp *setupPhase) storePGOProfile() error {
 // go computes the action ID of a compile from the package as written, so a
 // package that only a rule's imports or add_file source bring in never reaches
 // it. markedToolVersion folds this hash into the tool ID, so a change in one of
-// those packages still invalidates the cached compiles. It always writes the
-// file, so a hash recorded by an earlier setup never applies to a later build.
+// those packages still invalidates the cached compiles. Setup fails when the
+// hash cannot be computed: an incomplete hash would let a warm build reuse a
+// compile made against an older injected package.
 func (sp *setupPhase) storeInjectedHash(ctx context.Context, matched []*rule.InstRuleSet) error {
 	hash, err := sp.injectedHash(ctx, matched)
 	if err != nil {
-		// Like matchInjectedDeps, the build still runs, but a warm build can
-		// then reuse a compile made against an older injected package.
-		_, _ = fmt.Fprintf(os.Stderr,
-			"Warning: could not hash the packages otelc injects into the build; "+
-				"a warm build may not pick up changes to them: %v\n", err)
-		sp.Warn("could not hash the packages otelc injects into the build", "error", err)
-		hash = ""
+		return ex.Wrapf(err, "hashing the packages otelc injects into the build")
 	}
 	f := util.GetInjectedHashFile()
 	if err = util.WriteFileAtomic(f, []byte(hash)); err != nil {
@@ -295,11 +290,20 @@ func appendRuleImports[T interface{ Base() *rule.InstBaseRule }](
 // the tool ID covers it.
 func hashPackages(w io.Writer, goroot string, pkgs []*packages.Package) error {
 	var all []*packages.Package
+	var loadErr error
 	packages.Visit(pkgs, nil, func(pkg *packages.Package) {
+		// packages.Load reports a package it could not fully load in
+		// pkg.Errors, with files or dependencies missing from the hash.
+		if len(pkg.Errors) > 0 && loadErr == nil {
+			loadErr = ex.Newf("loading package %q: %v", pkg.PkgPath, pkg.Errors[0])
+		}
 		if !isStdPackage(pkg, goroot) {
 			all = append(all, pkg)
 		}
 	})
+	if loadErr != nil {
+		return loadErr
+	}
 	slices.SortFunc(all, func(a, b *packages.Package) int { return strings.Compare(a.PkgPath, b.PkgPath) })
 	for _, pkg := range all {
 		if mod := pkg.Module; mod != nil {

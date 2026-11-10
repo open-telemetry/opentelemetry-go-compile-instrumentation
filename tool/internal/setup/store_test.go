@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -387,6 +388,25 @@ func TestSetupPhaseInjectedHash(t *testing.T) {
 	assert.NotEqual(t, second, hash())
 }
 
+func TestStoreInjectedHashFailsOnLoadError(t *testing.T) {
+	modDir := t.TempDir()
+	goMod := []byte("module example.com/m\n\ngo 1.25.0\n")
+	require.NoError(t, os.WriteFile(filepath.Join(modDir, "go.mod"), goMod, 0o644))
+	t.Chdir(modDir)
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	require.NoError(t, os.MkdirAll(filepath.Join(workDir, util.BuildTempDir), 0o755))
+
+	set := rule.NewInstRuleSet("example.com/m/dep")
+	set.AddCallRule(fakeSrcFile("dep.go"), &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Imports: map[string]string{"missing": "example.com/m/missing"}},
+	})
+
+	err := newTestSetupPhase().storeInjectedHash(t.Context(), []*rule.InstRuleSet{set})
+	require.ErrorContains(t, err, "example.com/m/missing")
+	assert.NoFileExists(t, util.GetInjectedHashFile(), "an incomplete hash must not be stored")
+}
+
 func TestHashPackages(t *testing.T) {
 	goroot := t.TempDir()
 	hashOf := func(pkgs ...*packages.Package) string {
@@ -465,4 +485,12 @@ func TestHashPackages(t *testing.T) {
 	before := hashOf(local)
 	require.NoError(t, os.WriteFile(file, []byte("package local\n\nconst X = 1\n"), 0o644))
 	assert.NotEqual(t, before, hashOf(local))
+
+	// A dependency that failed to load may be missing files, so it fails the hash.
+	broken := &packages.Package{PkgPath: "example.com/broken", Errors: []packages.Error{{Msg: "no Go files"}}}
+	withBroken := &packages.Package{
+		PkgPath: "example.com/top",
+		Imports: map[string]*packages.Package{"example.com/broken": broken},
+	}
+	require.ErrorContains(t, hashPackages(io.Discard, goroot, []*packages.Package{withBroken}), "example.com/broken")
 }
