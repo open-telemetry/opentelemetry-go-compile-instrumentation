@@ -192,3 +192,19 @@ func TestAcquireBuildLockWithoutHeldLocksWritesNoWaitFile(t *testing.T) {
 	release()
 	require.NoError(t, <-done)
 }
+
+func TestAcquireBuildLockRemovesLeftoverWaitFiles(t *testing.T) {
+	lockTestDir(t)
+	lock := lockPathIn(t.TempDir())
+	// A process that was killed while it waited left its wait file.
+	leftover := writeTestWait(t, lock, time.Now())
+	// An invocation that still waits keeps its wait file.
+	_, unregister := registerWait(t.Context(), lock, []string{lockPathIn(t.TempDir())})
+	defer unregister()
+
+	release, _, err := acquireBuildLocksUnder(t.Context(), []string{lock}, nil)
+	require.NoError(t, err)
+	defer release()
+	assert.NoFileExists(t, leftover, "taking a lock must remove the wait files that no process holds")
+	assert.Len(t, waitFilesIn(t, filepath.Dir(lock)), 1, "taking a lock must keep the wait files of live waits")
+}

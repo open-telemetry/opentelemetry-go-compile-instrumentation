@@ -246,6 +246,7 @@ func acquireLockFile(ctx context.Context, path string, holds []string) (func(), 
 				"found an existing lock file that no process holds (left by a crashed or finished run); reusing it",
 				"path", path)
 		}
+		removeLeftoverWaits(ctx, path)
 		return releaseFunc(ctx, lock), true, nil
 	}
 
@@ -279,6 +280,7 @@ func acquireLockFile(ctx context.Context, path string, holds []string) (func(), 
 				return nil, false, err
 			}
 			if acquired {
+				removeLeftoverWaits(ctx, path)
 				return releaseFunc(ctx, lock), true, nil
 			}
 			// A cycle can also close after the wait started, when a lock

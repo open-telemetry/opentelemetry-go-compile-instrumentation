@@ -98,20 +98,28 @@ func writeWaitFile(path, content string) error {
 	return nil
 }
 
-// waitsFor returns the records of the invocations that wait for lock.
-func waitsFor(ctx context.Context, lock string) []waitRecord {
+// waitFilePaths returns the paths of the wait files of lock.
+func waitFilePaths(lock string) []string {
 	dir := filepath.Dir(lock)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
 	}
 	prefix := filepath.Base(lock) + waitFileInfix
-	var records []waitRecord
+	var paths []string
 	for _, entry := range entries {
-		if !strings.HasPrefix(entry.Name(), prefix) {
-			continue
+		if strings.HasPrefix(entry.Name(), prefix) {
+			paths = append(paths, filepath.Join(dir, entry.Name()))
 		}
-		if record, ok := readWaitFile(ctx, filepath.Join(dir, entry.Name())); ok {
+	}
+	return paths
+}
+
+// waitsFor returns the records of the invocations that wait for lock.
+func waitsFor(ctx context.Context, lock string) []waitRecord {
+	var records []waitRecord
+	for _, path := range waitFilePaths(lock) {
+		if record, ok := readWaitFile(ctx, path); ok {
 			record.lock = lock
 			records = append(records, record)
 		}
@@ -119,15 +127,33 @@ func waitsFor(ctx context.Context, lock string) []waitRecord {
 	return records
 }
 
-// readWaitFile reads the wait file at path. It reports false when no process
-// holds the file, and then removes it, or when the file is not complete yet.
-func readWaitFile(ctx context.Context, path string) (waitRecord, bool) {
+// removeLeftoverWaits removes the wait files of lock that no process holds. A
+// process that ends while it waits, for example when it is killed, leaves its
+// wait file behind.
+func removeLeftoverWaits(ctx context.Context, lock string) {
+	for _, path := range waitFilePaths(lock) {
+		waitFileHeld(ctx, path)
+	}
+}
+
+// waitFileHeld reports whether a process holds the wait file at path. It
+// removes the file when no process holds it.
+func waitFileHeld(ctx context.Context, path string) bool {
 	flk, acquired, _, err := tryAcquire(path)
 	if err != nil {
-		return waitRecord{}, false
+		return false
 	}
 	if acquired {
 		releaseFunc(ctx, flk)()
+		return false
+	}
+	return true
+}
+
+// readWaitFile reads the wait file at path. It reports false when no process
+// holds the file, and then removes it, or when the file is not complete yet.
+func readWaitFile(ctx context.Context, path string) (waitRecord, bool) {
+	if !waitFileHeld(ctx, path) {
 		return waitRecord{}, false
 	}
 	f, err := os.Open(path)
