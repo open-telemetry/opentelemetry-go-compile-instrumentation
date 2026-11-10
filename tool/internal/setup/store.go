@@ -285,7 +285,8 @@ func appendRuleImports[T interface{ Base() *rule.InstBaseRule }](
 // module version, since the module cache never changes under a version. Any
 // other package, from the main module, a local replace, GOPATH or a vendor
 // directory (which has a version from vendor/modules.txt but no module Dir),
-// is written as the content of its files. A standard library package, one with no module
+// is written as the go version of its module and the content of its files.
+// A standard library package, one with no module
 // whose files all lie under goroot/src, is skipped: the toolchain version in
 // the tool ID covers it.
 func hashPackages(w io.Writer, goroot string, pkgs []*packages.Package) error {
@@ -306,6 +307,7 @@ func hashPackages(w io.Writer, goroot string, pkgs []*packages.Package) error {
 	}
 	slices.SortFunc(all, func(a, b *packages.Package) int { return strings.Compare(a.PkgPath, b.PkgPath) })
 	for _, pkg := range all {
+		var goVersion string
 		if mod := pkg.Module; mod != nil {
 			if mod.Replace != nil {
 				mod = mod.Replace
@@ -314,8 +316,11 @@ func hashPackages(w io.Writer, goroot string, pkgs []*packages.Package) error {
 				_, _ = fmt.Fprintf(w, "%s %s@%s\n", pkg.PkgPath, mod.Path, mod.Version)
 				continue
 			}
+			goVersion = mod.GoVersion
 		}
-		_, _ = fmt.Fprintf(w, "%s\n", pkg.PkgPath)
+		// The go directive of the module sets the language version, which can
+		// change what the same files compile to (loop variable scope, for one).
+		_, _ = fmt.Fprintf(w, "%s go=%s\n", pkg.PkgPath, goVersion)
 		for _, file := range slices.Sorted(slices.Values(packageFiles(pkg))) {
 			if err := hashFile(w, file); err != nil {
 				return err

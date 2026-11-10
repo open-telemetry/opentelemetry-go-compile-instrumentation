@@ -385,7 +385,11 @@ func TestSetupPhaseInjectedHash(t *testing.T) {
 	assert.NotEqual(t, first, second)
 
 	writeFile("hooks/added.go", "//go:build ignore\n\npackage hooks\n\nvar _ = 1\n")
-	assert.NotEqual(t, second, hash())
+	third := hash()
+	assert.NotEqual(t, second, third)
+
+	writeFile("go.mod", "module example.com/m\n\ngo 1.24.0\n")
+	assert.NotEqual(t, third, hash(), "a change of the go directive alone must change the hash")
 }
 
 func TestStoreInjectedHashFailsOnLoadError(t *testing.T) {
@@ -484,6 +488,11 @@ func TestHashPackages(t *testing.T) {
 	}
 	before := hashOf(local)
 	require.NoError(t, os.WriteFile(file, []byte("package local\n\nconst X = 1\n"), 0o644))
+	assert.NotEqual(t, before, hashOf(local))
+
+	// The go directive of a local module can change behavior with the same files.
+	before = hashOf(local)
+	local.Module.Replace.GoVersion = "1.21"
 	assert.NotEqual(t, before, hashOf(local))
 
 	// A dependency that failed to load may be missing files, so it fails the hash.
