@@ -6,6 +6,7 @@ package pkgload
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 
@@ -478,6 +479,27 @@ func TestModuleAndWorkFile(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, workFile)
 	})
+	t.Run("fails when go env fails", func(t *testing.T) {
+		fakeGoOnPath(t, "exit 1")
+		_, _, err := ModuleAndWorkFile(t.Context(), t.TempDir())
+		require.ErrorContains(t, err, "running go env GOMOD GOWORK")
+	})
+	t.Run("fails when go env prints one line", func(t *testing.T) {
+		fakeGoOnPath(t, "printf '/m/go.mod'")
+		_, _, err := ModuleAndWorkFile(t.Context(), t.TempDir())
+		require.ErrorContains(t, err, "unexpected output from go env GOMOD GOWORK")
+	})
+}
+
+// fakeGoOnPath makes a shell script with body the only go command on PATH.
+func fakeGoOnPath(t *testing.T, body string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake go command is a shell script")
+	}
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go"), []byte("#!/bin/sh\n"+body+"\n"), 0o755))
+	t.Setenv("PATH", dir)
 }
 
 func TestFindModuleDirs(t *testing.T) {
