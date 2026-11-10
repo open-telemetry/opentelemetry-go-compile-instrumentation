@@ -238,6 +238,15 @@ the instrumentation. See [Adding a New Instrumentation Hook](instrument-guide.md
 parameters or return values (`SetParam`, `SetReturnVal`) cannot be used. The type parameters
 are not available to the injected code.
 
+**Package initialization order.** A hook can run before its own package's variable
+initializers and `init()` functions, when the instrumented function is called during
+package initialization (for example from a driver's `init()`). The hook package is only
+imported from package `main`, so Go does not order it before the target package. A hook
+that uses state set up at initialization time panics, and the trampoline prints
+`failed to exec Before hook` or `failed to exec After hook` while the build and the tests
+still pass. Hooks must create such state on first use. See
+[Adding a New Instrumentation Hook](instrument-guide.md#limitations).
+
 **Goroutine-local storage scope.** Some instrumentation uses goroutine-local storage (GLS)
 to propagate trace context across boundaries that do not pass `context.Context`. GLS state
 is scoped to the goroutine that wrote it: spans started in a goroutine spawned from the

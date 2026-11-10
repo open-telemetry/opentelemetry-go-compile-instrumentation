@@ -9,9 +9,11 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/urfave/cli/v3"
+	"go.opentelemetry.io/otelc/tool/internal/setup"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -217,6 +219,107 @@ func TestInitLoggerToolexecWorkDir(t *testing.T) {
 		}
 		if got := os.Getenv(util.EnvOtelcWorkDir); got != workDir {
 			t.Fatalf("expected %s=%q, got %q", util.EnvOtelcWorkDir, workDir, got)
+		}
+	})
+}
+
+func TestInitGoflags(t *testing.T) {
+	tests := []struct {
+		name       string
+		goflags    string
+		expected   string
+		jsonOutput bool
+	}{
+		{name: "unset", goflags: "", expected: ""},
+		{name: "nothing to strip", goflags: "-mod=mod", expected: "-mod=mod"},
+		{name: "toolexec", goflags: "-mod=mod '-toolexec=otelc toolexec'", expected: "-mod=mod"},
+		{name: "json", goflags: "-json -mod=mod", expected: "-mod=mod", jsonOutput: true},
+		{name: "json turned off", goflags: "-json=false", expected: ""},
+		{
+			name:       "toolexec and json",
+			goflags:    "-toolexec=otelc -json -race",
+			expected:   "-race",
+			jsonOutput: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("GOFLAGS", tt.goflags)
+
+			ctx, err := initGoflags(t.Context(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := os.Getenv("GOFLAGS"); got != tt.expected {
+				t.Errorf("GOFLAGS = %q, want %q", got, tt.expected)
+			}
+			if got := setup.JSONOutputFromContext(ctx); got != tt.jsonOutput {
+				t.Errorf("JSONOutputFromContext = %v, want %v", got, tt.jsonOutput)
+			}
+		})
+	}
+}
+
+func TestInitRoot(t *testing.T) {
+	run := func(t *testing.T, args ...string) (context.Context, error) {
+		t.Helper()
+		// CI can set the profiling variables for the whole run; keep this
+		// test independent of them so it never starts a profile.
+		t.Setenv(envProfilePath, "")
+		t.Setenv(envEnabledProfiles, "")
+
+		ctxCh := make(chan context.Context, 1)
+		app := &cli.Command{
+			Name:  "otelc",
+			Flags: rootFlags(),
+			Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+				ctx, err := initRoot(ctx, cmd)
+				if err != nil {
+					// After does not run when Before fails. Close the log
+					// file here so the temp dir can be removed on Windows.
+					_ = closeLogger(ctx)
+				}
+				return ctx, err
+			},
+			Action: func(ctx context.Context, _ *cli.Command) error {
+				ctxCh <- ctx
+				return nil
+			},
+			After: func(ctx context.Context, _ *cli.Command) error {
+				return closeLogger(ctx)
+			},
+		}
+		err := app.Run(t.Context(), append([]string{"otelc", "--" + flagWorkDir, t.TempDir()}, args...))
+		if err != nil {
+			return nil, err
+		}
+		return <-ctxCh, nil
+	}
+
+	t.Run("strips GOFLAGS and records json output", func(t *testing.T) {
+		t.Setenv("GOFLAGS", "-json -mod=mod")
+		t.Setenv(util.EnvOtelcWorkDir, "")
+
+		ctx, err := run(t)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := os.Getenv("GOFLAGS"); got != "-mod=mod" {
+			t.Errorf("GOFLAGS = %q, want %q", got, "-mod=mod")
+		}
+		if !setup.JSONOutputFromContext(ctx) {
+			t.Error("JSONOutputFromContext = false, want true")
+		}
+	})
+
+	t.Run("reports a profiling error", func(t *testing.T) {
+		t.Setenv("GOFLAGS", "")
+		t.Setenv(util.EnvOtelcWorkDir, "")
+
+		_, err := run(t, "--profile", "cpu")
+		if err == nil || !strings.Contains(err.Error(), "--profile-path is required") {
+			t.Fatalf("err = %v, want the --profile-path error", err)
 		}
 	})
 }
