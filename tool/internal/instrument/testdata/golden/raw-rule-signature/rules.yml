@@ -1,0 +1,15 @@
+add_raw_code:
+  target: main
+  where:
+    func: Func1
+    signature:
+      args: [string, int]
+      returns: [float32, error]
+    param: string
+    result: error
+    last_result: error
+    signature_contains:
+      args: [string]
+  do:
+    - inject_code:
+        raw: "_ = 123"
