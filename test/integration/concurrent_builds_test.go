@@ -6,12 +6,15 @@
 package test
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -20,6 +23,84 @@ import (
 )
 
 const concurrentBuildsGoMod = "module example.com/concurrentbuilds\n\ngo 1.25.0\n"
+
+// envCrossModuleOtelc gives the tests of the cross-module test modules the
+// path of the otelc binary.
+const envCrossModuleOtelc = "OTELC_CROSS_MODULE_TEST_OTELC"
+
+// crossModuleTestSource is a test in module %[1]s that runs an otelc build
+// of the cmd/app package of the sibling module %[2]s.
+const crossModuleTestSource = `// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package %[1]s
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"testing"
+)
+
+func TestBuildOtherModule(t *testing.T) {
+	cmd := exec.CommandContext(t.Context(), os.Getenv("` + envCrossModuleOtelc + `"),
+		"--work-dir", t.TempDir(), "go", "build", "-o", filepath.Join(t.TempDir(), "app"), "./cmd/app")
+	cmd.Dir = filepath.Join("..", "%[2]s")
+	out, err := cmd.CombinedOutput()
+	t.Logf("otelc build of module %[2]s:\n%%s", out)
+	if err != nil {
+		t.Fatalf("otelc build of module %[2]s failed: %%v", err)
+	}
+}
+`
+
+// TestNestedBuildsAcrossModules runs otelc go test in two modules at the same
+// time. A test in each module runs an otelc build of the other module, so each
+// nested build needs the module that the other otelc go test is testing.
+func TestNestedBuildsAcrossModules(t *testing.T) {
+	otelcPath, err := testutil.OtelcPath()
+	require.NoError(t, err)
+	otelcPath, err = filepath.Abs(otelcPath)
+	require.NoError(t, err)
+
+	root := t.TempDir()
+	modules := []string{"a", "b"}
+	for i, name := range modules {
+		dir := filepath.Join(root, name)
+		writeTestFile(t, dir, "go.mod", fmt.Sprintf("module example.com/%s\n\ngo 1.25.0\n", name))
+		writeTestFile(t, dir, filepath.Join("cmd", "app", "main.go"), `// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+import "net/http"
+
+func main() { _, _ = http.Get("http://127.0.0.1:1/") }
+`)
+		writeTestFile(t, dir, name+"_test.go", fmt.Sprintf(crossModuleTestSource, name, modules[1-i]))
+	}
+
+	// The go test -timeout ends a deadlocked run; the context is a backstop.
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	defer cancel()
+	env := append(os.Environ(), "GOWORK=off", envCrossModuleOtelc+"="+otelcPath)
+	cmds := make([]*exec.Cmd, 0, len(modules))
+	for _, name := range modules {
+		cmd := exec.CommandContext(ctx, otelcPath, "go", "test", "-count=1", "-timeout=2m", "-v", ".")
+		cmd.Dir = filepath.Join(root, name)
+		cmd.Env = env
+		cmd.WaitDelay = 10 * time.Second
+		cmds = append(cmds, cmd)
+	}
+	runConcurrently(t, cmds)
+
+	for _, name := range modules {
+		goMod, readErr := os.ReadFile(filepath.Join(root, name, "go.mod"))
+		require.NoError(t, readErr)
+		assert.Equal(t, fmt.Sprintf("module example.com/%s\n\ngo 1.25.0\n", name), string(goMod),
+			"go.mod of module %s must be restored", name)
+	}
+}
 
 // TestConcurrentBuildsInOneModule runs otelc builds of one module at the same
 // time, each with its own work dir. They all edit the go.mod of the module,
@@ -96,7 +177,12 @@ func runConcurrently(t *testing.T, cmds []*exec.Cmd) []string {
 	}
 	wg.Wait()
 	for i, cmd := range cmds {
-		require.NoError(t, errs[i], "%s failed:\n%s", cmd.String(), outputs[i])
+		if errs[i] != nil {
+			t.Errorf("%s in %s failed: %v\n%s", cmd.String(), cmd.Dir, errs[i], outputs[i])
+		}
+	}
+	if t.Failed() {
+		t.FailNow()
 	}
 	return outputs
 }
