@@ -192,17 +192,20 @@ func matchedModuleConfigurationRules(moduleRoot string) (*rule.InstRuleSet, *rul
 }
 
 func TestSelectedConfigurationModuleRootsDeduplicatesAndSorts(t *testing.T) {
-	setZ, ruleZ1 := matchedModuleConfigurationRules("/z/module")
-	setA, ruleA := matchedModuleConfigurationRules("/a/module")
-	setZAgain, ruleZ2 := matchedModuleConfigurationRules("/z/module")
+	root := t.TempDir()
+	zModule := filepath.Join(root, "z", "module")
+	aModule := filepath.Join(root, "a", "module")
+	setZ, ruleZ1 := matchedModuleConfigurationRules(zModule)
+	setA, ruleA := matchedModuleConfigurationRules(aModule)
+	setZAgain, ruleZ2 := matchedModuleConfigurationRules(zModule)
 	sp := newTestSetupPhase()
-	sp.recordRuleModuleRoot(ruleZ1, "/z/module")
-	sp.recordRuleModuleRoot(ruleA, "/a/module")
-	sp.recordRuleModuleRoot(ruleZ2, "/z/module")
+	sp.recordRuleModuleRoot(ruleZ1, zModule)
+	sp.recordRuleModuleRoot(ruleA, aModule)
+	sp.recordRuleModuleRoot(ruleZ2, zModule)
 
 	got := sp.selectedConfigurationModuleRoots([]*rule.InstRuleSet{setZ, nil, setA, setZAgain})
 
-	assert.Equal(t, []string{"/a/module", "/z/module"}, got)
+	assert.Equal(t, []string{aModule, zModule}, got)
 }
 
 func TestMatchedRuleTypesRetainModuleOwnershipOutsideRules(t *testing.T) {
