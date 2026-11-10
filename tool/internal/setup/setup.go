@@ -43,13 +43,18 @@ type setupPhase struct {
 
 	// fileImportsCache caches discovered source imports for add_file rules during setup.
 	fileImportsCache map[string][]string
-	testMode         bool
 	// testPackages holds the test variants and test binaries of a go test
 	// build, which buildPackages leaves out.
 	testPackages []*packages.Package
+	// instrumentationConfigPath is the one explicit behavior-configuration
+	// source for this setup invocation; it is empty when the flag is omitted.
+	instrumentationConfigPath string
+	applicationConfiguration  configuration.ApplicationConfiguration
 	// configurationMetadata is the setup-time handoff to application config
 	// validation, including selected modules that have no metadata file.
-	configurationMetadata selectedConfigurationMetadata
+	configurationMetadata      selectedConfigurationMetadata
+	validatedApplicationConfig configuration.ValidatedApplicationConfiguration
+	testMode                   bool
 	// ruleModuleRoots keeps instrumentation rule ownership outside the rules
 	// themselves so setup can resolve module-local metadata for matched rules.
 	ruleModuleRoots map[rule.InstRule]string
@@ -116,6 +121,10 @@ const (
 	vendorDirName = "vendor"
 	flagMod       = "-mod"
 )
+
+// FlagInstrumentationConfig selects the application behavior configuration
+// file consumed during setup.
+const FlagInstrumentationConfig = "instrumentation-config"
 
 // Go command flags that the argument scanners treat specially.
 const (
@@ -551,6 +560,15 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		pgo:        pgoValue(subcommand, args),
 		testMode:   subcommand == subcmdTest,
 	}
+	if path := cmd.String(FlagInstrumentationConfig); path != "" {
+		sp.instrumentationConfigPath, err = filepath.Abs(path)
+		if err != nil {
+			return ex.Wrapf(err, "resolve application configuration path %q", path)
+		}
+	}
+	if err = sp.loadApplicationConfiguration(); err != nil {
+		return err
+	}
 
 	// Introduce additional hook code by generating otelc.runtime.go
 	// Use GetPackage to determine the build target directory
@@ -602,6 +620,9 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	if err = sp.validateAndStoreSelectedConfigurationMetadata(matched); err != nil {
+		return err
+	}
+	if err = sp.validateAndStoreApplicationConfiguration(); err != nil {
 		return err
 	}
 

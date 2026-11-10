@@ -46,6 +46,34 @@ OTEL_GO_DISABLED_INSTRUMENTATIONS=nethttp ./myapp
 > compiled in, use `otel.instrumentation.go` (see
 > [External Configuration Sources](external-configuration.md)).
 
+## Application behavior configuration
+
+`--instrumentation-config` selects one application configuration file for
+build-time validation. It must appear before the `go` subcommand:
+
+```sh
+otelc --instrumentation-config ./instrumentation.yaml go build .
+```
+
+The file uses the OpenTelemetry `instrumentation/development` configuration
+model and `file_format` 1.x supported by otelc's pinned schema. `otelc` parses
+the SDK model with pinned `otelconf/x` and validates selected instrumentation
+options against the upstream schema and module metadata. `${ENV}` substitutions
+in the file resolve during setup; declared process-start overrides remain a
+separate runtime concern. Selected fields not represented by the pinned parser
+are rejected rather than silently discarded; unselected blocks are warned
+about and ignored.
+
+The file does not select or enable instrumentation. Configuration for
+unselected instrumentation is warned about and ignored. Selected modules
+without `metadata.yaml` are reported when the supplied configuration cannot be
+validated without their metadata.
+
+There is no implicit configuration-file discovery. Supplying the flag more than
+once is an error; conflicting file sources are never resolved by precedence.
+See the [configuration metadata reference](../tool/internal/configuration/README.md)
+for the supported metadata fields and shared catalog.
+
 ## Rule Sources and Precedence
 
 `otelc` resolves rules from the following sources, in priority order (highest first):

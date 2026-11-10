@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
+	"go.opentelemetry.io/otelc/tool/internal/setup"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -61,4 +62,44 @@ func TestCommandToolexecNestedKeepsToolexec(t *testing.T) {
 	tokens := util.SplitGoflags(os.Getenv("GOFLAGS"))
 	assert.Contains(t, tokens, "-mod=mod")
 	assert.Contains(t, tokens, wantToken)
+}
+
+func TestInstrumentationConfigFlagRejectsMultipleSources(t *testing.T) {
+	var output bytes.Buffer
+	version := commandVersion
+	version.Before = nil
+	version.After = nil
+	app := &cli.Command{
+		Name:     "otelc",
+		Flags:    rootFlags(),
+		Commands: []*cli.Command{&version},
+		Writer:   &output,
+	}
+	err := app.Run(context.Background(), []string{
+		"otelc",
+		"--instrumentation-config", "first.yaml",
+		"--instrumentation-config", "second.yaml",
+		"version",
+	})
+	require.ErrorContains(t, err, "can't duplicate this flag")
+}
+
+func TestInstrumentationConfigFlagIsAvailableToSetup(t *testing.T) {
+	var got string
+	setupCommand := &cli.Command{
+		Name: "setup",
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			got = cmd.String(setup.FlagInstrumentationConfig)
+			return nil
+		},
+	}
+	app := &cli.Command{
+		Name:     "otelc",
+		Flags:    rootFlags(),
+		Commands: []*cli.Command{setupCommand},
+	}
+	require.NoError(t, app.Run(context.Background(), []string{
+		"otelc", "--instrumentation-config", "instrumentation.yaml", "setup",
+	}))
+	assert.Equal(t, "instrumentation.yaml", got)
 }

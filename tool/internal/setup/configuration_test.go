@@ -136,6 +136,102 @@ func TestValidateAndStoreSelectedConfigurationMetadataReturnsValidationError(t *
 	assert.Empty(t, sp.configurationMetadata.Definitions)
 }
 
+func TestValidateAndStoreApplicationConfiguration(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "instrumentation.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(`file_format: "1.2"
+instrumentation/development:
+  general:
+    http:
+      client:
+        request_captured_headers: [x-request-id]
+`), 0o600))
+
+	sp := newTestSetupPhase()
+	sp.instrumentationConfigPath = configPath
+	sp.configurationMetadata.Definitions = []configuration.Entry{{
+		Name: "general.http.client.request_captured_headers",
+		Type: "list",
+	}}
+
+	require.NoError(t, sp.loadApplicationConfiguration())
+	require.NoError(t, sp.validateAndStoreApplicationConfiguration())
+	assert.Equal(
+		t,
+		[]any{"x-request-id"},
+		sp.validatedApplicationConfig.Values["general.http.client.request_captured_headers"],
+	)
+}
+
+func TestValidateAndStoreApplicationConfigurationWithoutFlag(t *testing.T) {
+	sp := newTestSetupPhase()
+
+	require.NoError(t, sp.validateAndStoreApplicationConfiguration())
+	assert.Empty(t, sp.validatedApplicationConfig.Values)
+}
+
+func TestValidateAndStoreApplicationConfigurationReportsReadError(t *testing.T) {
+	sp := newTestSetupPhase()
+	sp.instrumentationConfigPath = filepath.Join(t.TempDir(), "missing.yaml")
+
+	err := sp.loadApplicationConfiguration()
+
+	require.ErrorContains(t, err, "read application configuration")
+}
+
+func TestValidateAndStoreApplicationConfigurationRequiresMissingMetadata(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "instrumentation.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(`file_format: "1.2"
+instrumentation/development:
+  general:
+    http:
+      client:
+        request_captured_headers: [x-request-id]
+`), 0o600))
+	sp := newTestSetupPhase()
+	sp.instrumentationConfigPath = configPath
+	sp.configurationMetadata.ModulesWithoutMetadata = []string{"/instrumentation/net/http/client"}
+	require.NoError(t, sp.loadApplicationConfiguration())
+
+	err := sp.validateAndStoreApplicationConfiguration()
+
+	require.ErrorContains(t, err, "selected instrumentation modules lack metadata.yaml")
+	require.ErrorContains(t, err, "/instrumentation/net/http/client")
+}
+
+func TestLoadApplicationConfigurationReportsParseErrorsBeforeMetadataDiscovery(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "instrumentation.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte("file_format: [\n"), 0o600))
+	sp := newTestSetupPhase()
+	sp.instrumentationConfigPath = configPath
+
+	err := sp.loadApplicationConfiguration()
+
+	require.ErrorContains(t, err, "parse application configuration")
+	assert.Empty(t, sp.applicationConfiguration.Instrumentation)
+}
+
+func TestModuleRootForPackage(t *testing.T) {
+	moduleDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(moduleDir, "go.mod"), []byte("module example.com/test\n"), 0o644))
+	packageDir := filepath.Join(moduleDir, "nested", "hooks")
+	require.NoError(t, os.MkdirAll(packageDir, 0o755))
+
+	got, err := moduleRootForPackage(packageDir)
+
+	require.NoError(t, err)
+	assert.Equal(t, moduleDir, got)
+
+	withoutModuleDir := t.TempDir()
+	withoutModulePackage := filepath.Join(withoutModuleDir, "nested", "hooks")
+	require.NoError(t, os.MkdirAll(withoutModulePackage, 0o755))
+	_, err = moduleRootForPackage(withoutModulePackage)
+	require.ErrorContains(t, err, "no parent go.mod found")
+
+	notDirectory := filepath.Join(t.TempDir(), "file")
+	require.NoError(t, os.WriteFile(notDirectory, []byte("not a directory"), 0o644))
+	_, err = moduleRootForPackage(filepath.Join(notDirectory, "nested"))
+	require.Error(t, err)
+}
 func TestValidateSelectedConfigurationMetadataForNestedInRepoModules(t *testing.T) {
 	instrumentationRoot, err := filepath.Abs(filepath.Join("testdata", "instrumentation"))
 	require.NoError(t, err)
