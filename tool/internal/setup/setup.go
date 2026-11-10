@@ -43,6 +43,12 @@ type setupPhase struct {
 	// testPackages holds the test variants and test binaries of a go test
 	// build, which buildPackages leaves out.
 	testPackages []*packages.Package
+	// configurationMetadata is the setup-time handoff to application config
+	// validation, including selected modules that have no metadata file.
+	configurationMetadata selectedConfigurationMetadata
+	// ruleModuleRoots keeps instrumentation rule ownership outside the rules
+	// themselves so setup can resolve module-local metadata for matched rules.
+	ruleModuleRoots map[rule.InstRule]string
 }
 
 func (sp *setupPhase) getBuildContext() *gobuild.Context {
@@ -464,6 +470,22 @@ func (sp *setupPhase) matchAllDeps(
 	return matched, nil
 }
 
+func (sp *setupPhase) recordRuleModuleRoot(instRule rule.InstRule, moduleRoot string) {
+	if sp.ruleModuleRoots == nil {
+		sp.ruleModuleRoots = make(map[rule.InstRule]string)
+	}
+	sp.ruleModuleRoots[instRule] = moduleRoot
+}
+
+func (sp *setupPhase) validateAndStoreSelectedConfigurationMetadata(matched []*rule.InstRuleSet) error {
+	metadata, err := sp.validateSelectedConfigurationMetadata(matched)
+	if err != nil {
+		return ex.Wrapf(err, "validating selected instrumentation configuration metadata")
+	}
+	sp.configurationMetadata = metadata
+	return nil
+}
+
 func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	// Since Setup can be invoked in different contexts (i.e, via `otelc setup` or as part of `otelc go build`),
 	// we need to handle the arguments accordingly. If the command is `go build` or `go install`, we should trim the first argument
@@ -569,8 +591,8 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	if err = sp.validateSelectedConfigurationMetadata(matched); err != nil {
-		return ex.Wrapf(err, "validating selected instrumentation configuration metadata")
+	if err = sp.validateAndStoreSelectedConfigurationMetadata(matched); err != nil {
+		return err
 	}
 
 	sp.warnIfNoInstrumentationMatched(matched)

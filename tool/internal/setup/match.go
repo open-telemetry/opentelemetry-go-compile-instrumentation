@@ -498,7 +498,17 @@ func loadRulesFromToolFiles(
 	toolFiles []string,
 	otelcVersion string,
 ) ([]rule.InstRule, error) {
+	rules, _, err := loadRulesFromToolFilesWithModuleRoots(ctx, toolFiles, otelcVersion)
+	return rules, err
+}
+
+func loadRulesFromToolFilesWithModuleRoots(
+	ctx context.Context,
+	toolFiles []string,
+	otelcVersion string,
+) ([]rule.InstRule, map[rule.InstRule]string, error) {
 	ruleSet := make([]rule.InstRule, 0)
+	ruleModuleRoots := make(map[rule.InstRule]string)
 	// Two imports can find the same rule file. For example, the walk of the
 	// directory of "a/b" also finds the rule files of the sub-package "a/b/c".
 	// Load each rule file only one time.
@@ -523,16 +533,18 @@ func loadRulesFromToolFiles(
 			if parseErr != nil {
 				return false, parseErr
 			}
-
+			for _, r := range rules {
+				ruleModuleRoots[r] = v.Config.ModuleDir
+			}
 			ruleSet = append(ruleSet, rules...)
 		}
 		return true, nil
 	})
 	if walkErr != nil {
-		return nil, walkErr
+		return nil, nil, walkErr
 	}
 
-	return ruleSet, nil
+	return ruleSet, ruleModuleRoots, nil
 }
 
 // ruleFileKey returns a key that identifies the rule file at path. Different
@@ -587,7 +599,14 @@ func (sp *setupPhase) loadRules(ctx context.Context, moduleDirs []string) ([]rul
 	}
 	if len(toolFiles) > 0 {
 		sp.Debug("rules source: tool files", "toolFiles", toolFiles)
-		return loadRulesFromToolFiles(ctx, toolFiles, util.Version)
+		rules, moduleRoots, loadErr := loadRulesFromToolFilesWithModuleRoots(ctx, toolFiles, util.Version)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		for instRule, moduleRoot := range moduleRoots {
+			sp.recordRuleModuleRoot(instRule, moduleRoot)
+		}
+		return rules, nil
 	}
 
 	// No tool files generated? Currently this part is un-reachable because
