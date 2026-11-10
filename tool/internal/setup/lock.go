@@ -190,6 +190,12 @@ func withBuildLock(ctx context.Context, dir string, fn func(context.Context) err
 // function that releases them in reverse order, along with the paths it took.
 // On error, it releases the locks it already took.
 func acquireBuildLocks(ctx context.Context, paths []string) (func(), []string, error) {
+	return acquireBuildLocksUnder(ctx, paths, envPathList(util.EnvOtelcHeldBuildLocks))
+}
+
+// acquireBuildLocksUnder is acquireBuildLocks for an invocation whose parent
+// otelc invocations hold the lock files in parentLocks.
+func acquireBuildLocksUnder(ctx context.Context, paths, parentLocks []string) (func(), []string, error) {
 	var releases []func()
 	var acquired []string
 	releaseAll := func() {
@@ -198,7 +204,8 @@ func acquireBuildLocks(ctx context.Context, paths []string) (func(), []string, e
 		}
 	}
 	for _, path := range paths {
-		release, ok, err := acquireLockFile(ctx, path)
+		holds := append(slices.Clone(parentLocks), acquired...)
+		release, ok, err := acquireLockFile(ctx, path, holds)
 		if err != nil {
 			releaseAll()
 			return nil, nil, err
@@ -213,11 +220,13 @@ func acquireBuildLocks(ctx context.Context, paths []string) (func(), []string, e
 
 // acquireLockFile waits until it holds the lock file at path. It reports
 // false, and takes nothing, when the directory of path does not exist: there
-// is nothing to protect there.
+// is nothing to protect there. holds are the locks that the invocation and
+// its parents already hold. While they hold some, other invocations can see
+// the wait, and the wait fails when it would deadlock (see lock_deadlock.go).
 // Each attempt opens the path afresh and verifies it still names the locked
 // file; the holder removes the file on release so a stale handle must be
 // detected and retried rather than treated as a win.
-func acquireLockFile(ctx context.Context, path string) (func(), bool, error) {
+func acquireLockFile(ctx context.Context, path string, holds []string) (func(), bool, error) {
 	logger := util.LoggerFromContext(ctx)
 
 	parent, statErr := os.Stat(filepath.Dir(path))
@@ -245,9 +254,22 @@ func acquireLockFile(ctx context.Context, path string) (func(), bool, error) {
 		path,
 	)
 
+	// A lock that a parent holds is freed only when the parent ends. A child
+	// that shares the work dir of its parent waits for it, as it always has.
+	checkDeadlock := len(holds) > 0 && !slices.Contains(holds, path)
+	var self waitRecord
+	if checkDeadlock {
+		var unregister func()
+		self, unregister = registerWait(ctx, path, holds)
+		defer unregister()
+		if err = deadlockError(ctx, self); err != nil {
+			return nil, false, err
+		}
+	}
+
 	ticker := time.NewTicker(buildLockRetryInterval)
 	defer ticker.Stop()
-	for {
+	for tick := 1; ; tick++ {
 		select {
 		case <-ctx.Done():
 			return nil, false, ex.Wrapf(ctx.Err(), "waiting for build lock %s", path)
@@ -258,6 +280,13 @@ func acquireLockFile(ctx context.Context, path string) (func(), bool, error) {
 			}
 			if acquired {
 				return releaseFunc(ctx, lock), true, nil
+			}
+			// A cycle can also close after the wait started, when a lock
+			// changes hands.
+			if checkDeadlock && tick%deadlockCheckTicks == 0 {
+				if err = deadlockError(ctx, self); err != nil {
+					return nil, false, err
+				}
 			}
 		}
 	}

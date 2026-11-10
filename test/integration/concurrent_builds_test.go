@@ -56,7 +56,9 @@ func TestBuildOtherModule(t *testing.T) {
 
 // TestNestedBuildsAcrossModules runs otelc go test in two modules at the same
 // time. A test in each module runs an otelc build of the other module, so each
-// nested build needs the module that the other otelc go test is testing.
+// nested build waits for the module that the other otelc go test holds. One of
+// the nested builds must fail with a deadlock error, so that the other one
+// goes on, instead of both waiting until the test timeout.
 func TestNestedBuildsAcrossModules(t *testing.T) {
 	otelcPath, err := testutil.OtelcPath()
 	require.NoError(t, err)
@@ -92,7 +94,17 @@ func main() { _, _ = http.Get("http://127.0.0.1:1/") }
 		cmd.WaitDelay = 10 * time.Second
 		cmds = append(cmds, cmd)
 	}
-	runConcurrently(t, cmds)
+	outputs, errs := startConcurrently(cmds)
+
+	var failed []string
+	for i, name := range modules {
+		if errs[i] != nil {
+			failed = append(failed, name)
+			assert.Contains(t, outputs[i], "would deadlock",
+				"otelc go test in module %s must fail only with the deadlock error:\n%s", name, outputs[i])
+		}
+	}
+	assert.Len(t, failed, 1, "exactly one otelc go test must fail:\n%s", strings.Join(outputs, "\n"))
 
 	for _, name := range modules {
 		goMod, readErr := os.ReadFile(filepath.Join(root, name, "go.mod"))
@@ -162,10 +174,9 @@ func main() { _, _ = http.Get("http://127.0.0.1:1/") }
 	return moduleDir
 }
 
-// runConcurrently runs cmds at the same time and returns their combined
-// output. It fails the test if one of them fails.
-func runConcurrently(t *testing.T, cmds []*exec.Cmd) []string {
-	t.Helper()
+// startConcurrently runs cmds at the same time and returns their combined
+// output and errors.
+func startConcurrently(cmds []*exec.Cmd) ([]string, []error) {
 	outputs := make([]string, len(cmds))
 	errs := make([]error, len(cmds))
 	var wg sync.WaitGroup
@@ -176,6 +187,14 @@ func runConcurrently(t *testing.T, cmds []*exec.Cmd) []string {
 		})
 	}
 	wg.Wait()
+	return outputs, errs
+}
+
+// runConcurrently runs cmds at the same time and returns their combined
+// output. It fails the test if one of them fails.
+func runConcurrently(t *testing.T, cmds []*exec.Cmd) []string {
+	t.Helper()
+	outputs, errs := startConcurrently(cmds)
 	for i, cmd := range cmds {
 		if errs[i] != nil {
 			t.Errorf("%s in %s failed: %v\n%s", cmd.String(), cmd.Dir, errs[i], outputs[i])
