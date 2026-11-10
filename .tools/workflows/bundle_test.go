@@ -540,7 +540,7 @@ func TestPublisherCredentialSteps(t *testing.T) {
 	if job == nil {
 		t.Fatal("missing protected publisher job")
 	}
-	var credentials, appToken, identity *actionlint.Step
+	var credentials, appToken, identity, commit *actionlint.Step
 	for _, step := range job.Steps {
 		switch {
 		case step.ID != nil && step.ID.Value == "credentials":
@@ -549,16 +549,24 @@ func TestPublisherCredentialSteps(t *testing.T) {
 			appToken = step
 		case step.ID != nil && step.ID.Value == "identity":
 			identity = step
+		case step.Name != nil && step.Name.Value == "Commit and push":
+			commit = step
 		}
 	}
 	if credentials == nil || appToken == nil || identity == nil {
 		t.Fatalf("missing steps: credentials=%v app-token=%v identity=%v", credentials != nil, appToken != nil, identity != nil)
 	}
+	if commit == nil {
+		t.Fatal("missing Commit and push step")
+	}
 	assertSingleCall(t, credentials, "credentials")
-	for _, key := range []string{"CLIENT_ID", "PRIVATE_KEY", "IS_CROSS_REPOSITORY"} {
+	for _, key := range []string{"CLIENT_ID", "PRIVATE_KEY"} {
 		if _, ok := envValue(credentials, key); !ok {
 			t.Errorf("the credentials step does not set %s", key)
 		}
+	}
+	if _, ok := envValue(credentials, "IS_CROSS_REPOSITORY"); ok {
+		t.Error("the credentials step must not set IS_CROSS_REPOSITORY")
 	}
 	if appToken.If == nil || strings.TrimSpace(appToken.If.Value) != "steps.credentials.outputs.use_app == 'true'" {
 		t.Error("the App token must follow the credentials decision")
@@ -567,6 +575,19 @@ func TestPublisherCredentialSteps(t *testing.T) {
 	for _, key := range []string{"APP_SLUG", "GH_TOKEN"} {
 		if _, ok := envValue(identity, key); !ok {
 			t.Errorf("the identity step does not set %s", key)
+		}
+	}
+	wantToken := "${{ steps.app-token.outputs.token || secrets.OTELC_BUNDLE_PUSH_TOKEN }}"
+	for _, tc := range []struct {
+		name string
+		step *actionlint.Step
+	}{
+		{"identity", identity},
+		{"Commit and push", commit},
+	} {
+		token, ok := envValue(tc.step, "GH_TOKEN")
+		if !ok || strings.Join(strings.Fields(token), " ") != wantToken {
+			t.Errorf("the %s token must prefer the App token with the environment token as fallback", tc.name)
 		}
 	}
 	first := slices.IndexFunc(job.Steps, callsTool)
