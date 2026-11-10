@@ -350,9 +350,11 @@ func interfaceTypeName(t *dst.InterfaceType) string {
 }
 
 // baseTypeName normalizes a type expression for signature matching by stripping
-// package qualifiers and the outermost pointer while preserving composite type
-// constructors, so trampoline and hook parameter types can be compared directly.
-// Examples: *pkg.Type → Type, []int → []int, ...string → ...string
+// package qualifiers while preserving pointers and composite type constructors,
+// so hook parameter types can be compared with the target's. Pointers are kept
+// because the hook is linked to a declaration typed after the target (see
+// addHookDecl): a hook that drops or adds a pointer would be handed a value of
+// the wrong layout. Examples: *pkg.Type is *Type, []*int is []*int.
 func baseTypeName(expr dst.Expr) string {
 	switch t := expr.(type) {
 	case *dst.Ident:
@@ -361,7 +363,7 @@ func baseTypeName(expr dst.Expr) string {
 		}
 		return t.Name
 	case *dst.StarExpr:
-		return baseTypeName(t.X)
+		return "*" + baseTypeName(t.X)
 	case *dst.SelectorExpr:
 		return t.Sel.Name
 	case *dst.ArrayType:
@@ -385,6 +387,17 @@ func baseTypeName(expr dst.Expr) string {
 	default:
 		return ""
 	}
+}
+
+// trampParamTypeName normalizes the type of a trampoline parameter for
+// comparison with a hook parameter. The trampoline takes each target parameter
+// by pointer (see buildTrampSignature), so that one pointer is not part of the
+// type the hook receives.
+func trampParamTypeName(expr dst.Expr) string {
+	if star, ok := expr.(*dst.StarExpr); ok {
+		return baseTypeName(star.X)
+	}
+	return baseTypeName(expr)
 }
 
 // indexListType builds a normalized name for a generic type instantiation
@@ -509,7 +522,7 @@ func (ip *instrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, targetParams *d
 	// All params must match (first is HookContext, rest are dereferenced)
 	// (interface{} or any in hook accepts any type, used for generics)
 	for i, trampField := range afterTrampParams.List {
-		trampBase := baseTypeName(trampField.Type)
+		trampBase := trampParamTypeName(trampField.Type)
 		hookBase := baseTypeName(afterHookParams.List[i].Type)
 		if !matchBaseType(trampBase, hookBase) {
 			return ex.Newf("hook func param %d type mismatch, expected %s, got %s",
@@ -555,7 +568,7 @@ func (ip *instrumentPhase) checkBeforeHookDecl(hookFunc *dst.FuncDecl, targetPar
 				return err
 			}
 		}
-		trampBase := baseTypeName(trampField.Type)
+		trampBase := trampParamTypeName(trampField.Type)
 		hookBase := baseTypeName(hookType)
 		if !matchBaseType(trampBase, hookBase) {
 			return ex.Newf("hook func param %d type mismatch, expected %s, got %s",
