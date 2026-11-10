@@ -81,6 +81,11 @@ func canonicalDir(dir string) string {
 // that child. A child that uses the work dir of a parent keeps the work dir
 // lock, and fails while the parent holds it: it would overwrite the parent's
 // .otelc-build.
+//
+// A child does not take its locks in the same order as other invocations,
+// because its parent already holds some of them. A child and an unrelated
+// invocation that share a --work-dir can then wait for each other, and one of
+// them fails with a deadlock error (see lock_deadlock.go).
 func buildLockPaths(ctx context.Context, dir string) []string {
 	held := envPathList(util.EnvOtelcHeldBuildLocks)
 
