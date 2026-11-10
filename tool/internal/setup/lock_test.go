@@ -373,3 +373,32 @@ func TestNestedBuildEnv(t *testing.T) {
 		util.EnvOtelcParentWorkDirs + "=w" + sep + canonicalDir(workDir),
 	}, nestedBuildEnv(ctx))
 }
+
+func TestCleanupWaitsForModuleLock(t *testing.T) {
+	moduleDir := lockTestModule(t)
+	// The work dir is not the module root, so the module has a lock of its own.
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+
+	// A build of the module with another work dir holds the module lock.
+	release, _, err := acquireBuildLocks(t.Context(), []string{lockPathIn(moduleDir)})
+	require.NoError(t, err)
+
+	// Cleanup restores the go.mod of the module, so it must wait for that
+	// build.
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- Cleanup(ctx, false) }()
+	select {
+	case err = <-done:
+		t.Fatalf("cleanup must wait for the module lock, got %v", err)
+	case <-time.After(3 * buildLockRetryInterval):
+	}
+	release()
+	select {
+	case err = <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("cleanup never got the module lock after its holder ended")
+	}
+}
