@@ -15,7 +15,22 @@ import (
 	"github.com/gofrs/flock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"go.opentelemetry.io/otelc/tool/util"
 )
+
+func TestBuildLockPathsWithoutGoEnv(t *testing.T) {
+	lockTestModule(t)
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	// When go env fails, the invocation still takes the work dir lock.
+	goDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(goDir, "go"), []byte("#!/bin/sh\nexit 1\n"), 0o755))
+	t.Setenv("PATH", goDir)
+
+	assert.Equal(t, []string{lockPathIn(workDir)}, buildLockPaths(t.Context(), ""))
+}
 
 func TestIsTransientLockFileError(t *testing.T) {
 	// POSIX has no sharing violations: nothing is transient, every open or
@@ -27,7 +42,7 @@ func TestIsTransientLockFileError(t *testing.T) {
 func TestTryAcquireStaleLockCleanup(t *testing.T) {
 	lockTestDir(t)
 	tmpDir := t.TempDir()
-	path := buildLockPath()
+	path := workDirLockPath()
 
 	// 1. Verify lockFileIsCurrent returns false for stale lock handles
 	lockA := flock.New(path)

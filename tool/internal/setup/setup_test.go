@@ -272,6 +272,16 @@ type toolexecInvocation struct {
 
 func runBuildWithToolexec(t *testing.T, args []string, vendored bool) toolexecInvocation {
 	t.Helper()
+	return runBuildWithToolexecContext(t.Context(), t, args, vendored)
+}
+
+func runBuildWithToolexecContext(
+	ctx context.Context,
+	t *testing.T,
+	args []string,
+	vendored bool,
+) toolexecInvocation {
+	t.Helper()
 
 	dir := t.TempDir()
 	t.Chdir(dir)
@@ -298,7 +308,7 @@ func runBuildWithToolexec(t *testing.T, args []string, vendored bool) toolexecIn
 		Flags:    []cli.Flag{&cli.BoolFlag{Name: "debug"}},
 		Commands: []*cli.Command{goCmd},
 	}
-	require.NoError(t, cmd.Run(t.Context(), append([]string{"otelc"}, args...)))
+	require.NoError(t, cmd.Run(ctx, append([]string{"otelc"}, args...)))
 	return got
 }
 
@@ -312,6 +322,15 @@ func TestBuildWithToolexec(t *testing.T) {
 		assert.NotContains(t, got.argv, "-work")
 		assert.Contains(t, strings.Join(got.argv, " "), "-toolexec=")
 		assert.Contains(t, strings.Join(got.env, "\n"), util.EnvOtelcWorkDir+"=")
+	})
+
+	t.Run("tells nested otelc invocations which locks and work dir it holds", func(t *testing.T) {
+		clearNestedBuildEnv(t)
+		ctx := contextWithBuildLockHeld(t.Context(), []string{"held.lock"})
+		got := runBuildWithToolexecContext(ctx, t, []string{"go", "test", "."}, false)
+
+		assert.Contains(t, got.env, util.EnvOtelcHeldBuildLocks+"=held.lock")
+		assert.Contains(t, got.env, util.EnvOtelcParentWorkDirs+"="+canonicalDir(util.GetOtelcWorkDir()))
 	})
 
 	t.Run("keeps the work directory when the root debug flag is set", func(t *testing.T) {
@@ -1452,6 +1471,32 @@ func TestAddBuildFlags(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, addBuildFlags(tt.args, "-work", "-toolexec=x"))
+		})
+	}
+}
+
+func TestLeadingDirFlag(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		dir  string
+		n    int
+	}{
+		{name: "no args", args: nil},
+		{name: "without change directory", args: []string{"."}},
+		{name: "change directory after another flag", args: []string{"-v", "-C", "app", "."}},
+		{name: "separate change directory without a value", args: []string{"-C"}},
+		{name: "separate change directory", args: []string{"-C", "app", "."}, dir: "app", n: 2},
+		{name: "joined change directory", args: []string{"-C=app", "."}, dir: "app", n: 1},
+		{name: "separate double-dash change directory", args: []string{"--C", "app", "."}, dir: "app", n: 2},
+		{name: "joined double-dash change directory", args: []string{"--C=app", "."}, dir: "app", n: 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir, n := leadingDirFlag(tt.args)
+			assert.Equal(t, tt.dir, dir)
+			assert.Equal(t, tt.n, n)
 		})
 	}
 }

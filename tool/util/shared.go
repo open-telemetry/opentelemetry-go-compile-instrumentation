@@ -32,6 +32,10 @@ const (
 	// the go command it runs, so an otelc invocation started under that
 	// command (for example from a test) does not wait for its own parent.
 	EnvOtelcHeldBuildLocks = "OTELC_HELD_BUILD_LOCKS"
+	// EnvOtelcParentWorkDirs lists the work dirs of the parent otelc
+	// invocations, in the format of EnvOtelcHeldBuildLocks. An otelc
+	// invocation that uses one of them waits for that parent.
+	EnvOtelcParentWorkDirs = "OTELC_PARENT_WORK_DIRS"
 	// EnvOtelcNestedResolving lists, outermost first, the compiles waiting on
 	// a nested build to resolve an import a rule added, as comma-separated
 	// "package>added import" entries. Import paths cannot contain "," or ">",

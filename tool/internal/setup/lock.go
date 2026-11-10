@@ -27,24 +27,31 @@ import (
 // the caller cancels (Ctrl-C), and a log line makes the waiting visible.
 const buildLockRetryInterval = 200 * time.Millisecond
 
-// buildLockPath returns the path of the advisory lock file of the work dir.
+// workDirLockPath returns the path of the advisory lock file of the work dir.
 // The lock lives next to .otelc-build, not inside it: cleanup removes the
 // directory while holding the lock, and Windows cannot delete an open file.
-func buildLockPath() string {
+func workDirLockPath() string {
 	return lockPathIn(util.GetOtelcWorkDir())
 }
 
 // lockPathIn returns the path of the advisory lock file in dir.
-// EvalSymlinks canonicalizes the path so /tmp/x and /private/tmp/x share one lock.
 func lockPathIn(dir string) string {
+	return filepath.Join(canonicalDir(dir), util.BuildLockFile)
+}
+
+// canonicalDir resolves the symlinks in dir, so /tmp/x and /private/tmp/x
+// share one lock. It returns dir unchanged when dir does not exist.
+func canonicalDir(dir string) string {
 	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
-		dir = resolved
+		return resolved
 	}
-	return filepath.Join(dir, util.BuildLockFile)
+	return dir
 }
 
 // buildLockPaths returns the lock files an invocation takes, sorted so that
-// invocations sharing some of them always take them in the same order.
+// invocations sharing some of them always take them in the same order. dir
+// is the directory of the go command, from its -C flag, or empty for the
+// current directory.
 //
 // The work dir lock protects .otelc-build. The module and workspace locks
 // protect go.mod, go.sum, the tool file and go.work.sum, which setup edits
@@ -52,29 +59,24 @@ func lockPathIn(dir string) string {
 // different directories of one module, or with different --work-dir values.
 // When the work dir is the module root, both are the same file.
 //
-// A module or workspace lock that a parent otelc invocation holds is
-// replaced by a numbered sibling. An invocation started under the parent's
-// go command, for example from a test, then does not wait for its parent,
-// which waits for it, but it still excludes the other invocations started
-// under the same parent. The work dir lock is never replaced: a child that
-// shares the work dir of its parent would overwrite the parent's
-// .otelc-build, so it keeps waiting for the parent.
-func buildLockPaths(ctx context.Context) []string {
-	logger := util.LoggerFromContext(ctx)
-	held := inheritedBuildLocks()
+// A lock that a parent otelc invocation holds is replaced by a numbered
+// sibling. An invocation started under the parent's go command, for example
+// from a test, then does not wait for its parent, which waits for it, but it
+// still excludes the other invocations started under the same parent. A
+// child's descendants take higher numbers, and the other children wait for
+// that child. A child that uses the work dir of a parent keeps the work dir
+// lock: it would overwrite the parent's .otelc-build, so it waits for the
+// parent.
+func buildLockPaths(ctx context.Context, dir string) []string {
+	held := envPathList(util.EnvOtelcHeldBuildLocks)
 
-	paths := []string{buildLockPath()}
-	for _, dir := range moduleLockDirs(ctx) {
-		base := lockPathIn(dir)
-		path := base
-		for i := 1; slices.Contains(held, path); i++ {
-			path = base + "." + strconv.Itoa(i)
-		}
-		if path != base {
-			logger.DebugContext(ctx,
-				"a parent otelc invocation holds the build lock; taking a nested lock",
-				"held", base, "path", path)
-		}
+	workDirLock := workDirLockPath()
+	if !slices.Contains(envPathList(util.EnvOtelcParentWorkDirs), canonicalDir(util.GetOtelcWorkDir())) {
+		workDirLock = unheldLockPath(ctx, workDirLock, held)
+	}
+	paths := []string{workDirLock}
+	for _, lockDir := range moduleLockDirs(ctx, dir) {
+		path := unheldLockPath(ctx, lockPathIn(lockDir), held)
 		if !slices.Contains(paths, path) {
 			paths = append(paths, path)
 		}
@@ -83,18 +85,39 @@ func buildLockPaths(ctx context.Context) []string {
 	return paths
 }
 
-// moduleLockDirs returns the directories that hold the files setup edits for
-// a build started in the current directory: the main module and, in
-// workspace mode, the directory of go.work. It returns nil when it cannot
-// resolve them, so the invocation still takes the work dir lock.
-func moduleLockDirs(ctx context.Context) []string {
-	logger := util.LoggerFromContext(ctx)
-	cwd, err := os.Getwd()
-	if err != nil {
-		logger.WarnContext(ctx, "failed to get the working directory; locking only the work dir", "error", err)
-		return nil
+// unheldLockPath returns base, or the first numbered sibling of base that no
+// parent otelc invocation holds.
+func unheldLockPath(ctx context.Context, base string, held []string) string {
+	path := base
+	for i := 1; slices.Contains(held, path); i++ {
+		path = base + "." + strconv.Itoa(i)
 	}
-	moduleDir, workFile, err := pkgload.ModuleAndWorkFile(ctx, cwd)
+	if path != base {
+		util.LoggerFromContext(ctx).DebugContext(ctx,
+			"a parent otelc invocation holds the build lock; taking a nested lock",
+			"held", base, "path", path)
+	}
+	return path
+}
+
+// moduleLockDirs returns the directories that hold the files setup edits for
+// a go command run in dir, or in the current directory when dir is empty:
+// the main module and, in workspace mode, the directory of go.work. It
+// returns nil when it cannot resolve them, so the invocation still takes the
+// work dir lock.
+// It locks only the main module: a workspace build that edits another
+// module's go.mod shares no lock with a GOWORK=off build of that module.
+func moduleLockDirs(ctx context.Context, dir string) []string {
+	logger := util.LoggerFromContext(ctx)
+	if dir == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			logger.WarnContext(ctx, "failed to get the working directory; locking only the work dir", "error", err)
+			return nil
+		}
+		dir = cwd
+	}
+	moduleDir, workFile, err := pkgload.ModuleAndWorkFile(ctx, dir)
 	if err != nil {
 		logger.WarnContext(ctx, "failed to resolve the main module; locking only the work dir", "error", err)
 		return nil
@@ -109,18 +132,23 @@ func moduleLockDirs(ctx context.Context) []string {
 	return dirs
 }
 
-// inheritedBuildLocks returns the lock files that parent otelc invocations hold.
-func inheritedBuildLocks() []string {
-	return filepath.SplitList(os.Getenv(util.EnvOtelcHeldBuildLocks))
+// envPathList returns the paths in the environment variable key.
+func envPathList(key string) []string {
+	return filepath.SplitList(os.Getenv(key))
 }
 
-// heldBuildLocksEnv returns the util.EnvOtelcHeldBuildLocks entry for the
-// environment of a go command run under ctx: the lock files of the parent
-// invocations and the ones ctx holds.
-func heldBuildLocksEnv(ctx context.Context) string {
-	paths, _ := ctx.Value(buildLockHeldKey{}).([]string)
-	all := append(inheritedBuildLocks(), paths...)
-	return util.EnvOtelcHeldBuildLocks + "=" + strings.Join(all, string(os.PathListSeparator))
+// nestedBuildEnv returns the environment entries that tell otelc
+// invocations started under a go command run under ctx which lock files
+// their parents hold and which work dirs their parents use.
+func nestedBuildEnv(ctx context.Context) []string {
+	held, _ := ctx.Value(buildLockHeldKey{}).([]string)
+	locks := append(envPathList(util.EnvOtelcHeldBuildLocks), held...)
+	workDirs := append(envPathList(util.EnvOtelcParentWorkDirs), canonicalDir(util.GetOtelcWorkDir()))
+	sep := string(os.PathListSeparator)
+	return []string{
+		util.EnvOtelcHeldBuildLocks + "=" + strings.Join(locks, sep),
+		util.EnvOtelcParentWorkDirs + "=" + strings.Join(workDirs, sep),
+	}
 }
 
 // buildLockHeldKey marks a context whose call chain already holds the
@@ -139,27 +167,23 @@ func buildLockHeld(ctx context.Context) bool {
 
 // withBuildLock runs fn under the build lock, marking the context so nested
 // entry points reuse the outer lock instead of deadlocking against themselves.
+// The lock serializes otelc invocations that mutate the module. Without it,
+// concurrent runs race on go.mod/go.sum and .otelc-build/ and a second
+// invocation can snapshot already-mutated state as its "original".
+// dir is the directory of the go command, from its -C flag, or empty for
+// the current directory.
 // fn must receive the context withBuildLock provides — a fresh context drops
 // the held marker and causes the nested call to hang indefinitely.
-func withBuildLock(ctx context.Context, fn func(context.Context) error) error {
+func withBuildLock(ctx context.Context, dir string, fn func(context.Context) error) error {
 	if buildLockHeld(ctx) {
 		return fn(ctx)
 	}
-	release, held, err := acquireBuildLocks(ctx, buildLockPaths(ctx))
+	release, held, err := acquireBuildLocks(ctx, buildLockPaths(ctx, dir))
 	if err != nil {
 		return err
 	}
 	defer release()
 	return fn(contextWithBuildLockHeld(ctx, held))
-}
-
-// acquireBuildLock serializes otelc invocations that mutate the module.
-// Without it, concurrent runs race on go.mod/go.sum and .otelc-build/ and
-// a second invocation can snapshot already-mutated state as its "original".
-// The returned release function must be called (deferred) by the caller.
-func acquireBuildLock(ctx context.Context) (func(), error) {
-	release, _, err := acquireBuildLocks(ctx, buildLockPaths(ctx))
-	return release, err
 }
 
 // acquireBuildLocks takes the lock files in paths, in order, and returns a
