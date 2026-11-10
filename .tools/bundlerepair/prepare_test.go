@@ -256,23 +256,23 @@ func TestPrepareAutomaticAcceptsEditsDisabledInSameRepository(t *testing.T) {
 	}
 }
 
-// TestPublisherCredentialSelection. Fork branches use the environment token,
-// because GitHub does not let an App write workflow files to a fork.
+// Go test TestPublisherCredentialSelection. Fork branches use the
+// environment token, because GitHub does not let an App write workflow files
+// to a fork.
 func TestCredentials(t *testing.T) {
-	const repo = "open-telemetry/opentelemetry-go-compile-instrumentation"
 	tests := []struct {
 		name, headRepo, client, key, want string
 	}{
-		{"same repository with both App credentials", repo, "client", "test-key", "true"},
+		{"same repository with both App credentials", testRepo, "client", "test-key", "true"},
 		{"fork with both App credentials", "contributor/fork", "client", "test-key", "false"},
-		{"same repository with an empty client ID", repo, "", "test-key", "false"},
-		{"same repository with an empty private key", repo, "client", "", "false"},
+		{"same repository with an empty client ID", testRepo, "", "test-key", "false"},
+		{"same repository with an empty private key", testRepo, "client", "", "false"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			output := filepath.Join(t.TempDir(), "outputs")
 			env := map[string]string{
-				"REPO": repo, "HEAD_REPO_FULL": tt.headRepo,
+				"REPO": testRepo, "HEAD_REPO_FULL": tt.headRepo,
 				"CLIENT_ID": tt.client, "PRIVATE_KEY": tt.key, "GITHUB_OUTPUT": output,
 			}
 			code, out := runApp(t, env, "credentials")
@@ -295,7 +295,6 @@ func TestCredentials(t *testing.T) {
 
 // The old step ran under set -u, so a variable that the decision reaches must be set.
 func TestCredentialsRequiresReachedVariables(t *testing.T) {
-	const repo = "open-telemetry/opentelemetry-go-compile-instrumentation"
 	tests := []struct {
 		name    string
 		env     map[string]string
@@ -304,25 +303,31 @@ func TestCredentialsRequiresReachedVariables(t *testing.T) {
 	}{
 		{
 			"repo unset",
-			map[string]string{"HEAD_REPO_FULL": repo, "CLIENT_ID": "c", "PRIVATE_KEY": "k"},
+			map[string]string{"HEAD_REPO_FULL": testRepo, "CLIENT_ID": "c", "PRIVATE_KEY": "k"},
 			true,
 			"",
 		},
 		{
 			"head repo unset",
-			map[string]string{"REPO": repo, "CLIENT_ID": "c", "PRIVATE_KEY": "k"},
+			map[string]string{"REPO": testRepo, "CLIENT_ID": "c", "PRIVATE_KEY": "k"},
 			true,
 			"",
 		},
 		{
 			"fork stops before the App credentials",
-			map[string]string{"REPO": repo, "HEAD_REPO_FULL": "contributor/fork"},
+			map[string]string{"REPO": testRepo, "HEAD_REPO_FULL": "contributor/fork"},
 			false,
 			"false",
 		},
 		{
 			"same repository with the client unset",
-			map[string]string{"REPO": repo, "HEAD_REPO_FULL": repo, "PRIVATE_KEY": "k"},
+			map[string]string{"REPO": testRepo, "HEAD_REPO_FULL": testRepo, "PRIVATE_KEY": "k"},
+			true,
+			"",
+		},
+		{
+			"same repository with the private key unset",
+			map[string]string{"REPO": testRepo, "HEAD_REPO_FULL": testRepo, "CLIENT_ID": "c"},
 			true,
 			"",
 		},
@@ -348,9 +353,8 @@ func TestCredentialsRequiresReachedVariables(t *testing.T) {
 }
 
 func TestCredentialsNeedsOutputFile(t *testing.T) {
-	const repo = "open-telemetry/opentelemetry-go-compile-instrumentation"
 	env := map[string]string{
-		"REPO": repo, "HEAD_REPO_FULL": repo, "CLIENT_ID": "c", "PRIVATE_KEY": "k",
+		"REPO": testRepo, "HEAD_REPO_FULL": testRepo, "CLIENT_ID": "c", "PRIVATE_KEY": "k",
 	}
 	if code, _ := runApp(t, env, "credentials"); code != exitFailure {
 		t.Errorf("exit code = %d", code)
