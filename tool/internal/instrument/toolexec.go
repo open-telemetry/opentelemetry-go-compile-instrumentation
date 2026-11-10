@@ -101,6 +101,11 @@ type instrumentPhase struct {
 	// buildUsesIgnoreDirective is true when some package in this build has a
 	// //otelc:ignore comment above a call, found during setup.
 	buildUsesIgnoreDirective bool
+	// resolveExportFiles looks up go list -export files for type-checking;
+	// nil means pkgload.ResolveExportFilesBatch. Tests replace it.
+	resolveExportFiles func(
+		ctx context.Context, importPaths []string, buildFlags ...string,
+	) (map[string]string, map[string]error, error)
 	// methodCallInfo is built lazily by ensureMethodCallInfo.
 	methodCallInfo       *methodCallPackageInfo
 	methodCallInfoLoaded bool
@@ -1225,8 +1230,9 @@ var executablePath = os.Executable
 // nested `go list -export` targets the added import, so strip such values here.
 //
 // Nested mode assumes its go commands are `go list -export` spawned from
-// updateImportConfig: those run compile (instrumented), asm, cgo, and pack,
-// and answer -V=full probes, but never link or vet. A new go command spawned
+// updateImportConfig or exportDataFiles: those run compile (instrumented),
+// asm, cgo, pack, and from Go 1.28 export (passed through), and answer
+// -V=full probes, but never link or vet. A new go command spawned
 // during the instrumentation phase must be audited for the tools it runs
 // before it can rely on nested mode.
 func EnableNestedToolexec() error {

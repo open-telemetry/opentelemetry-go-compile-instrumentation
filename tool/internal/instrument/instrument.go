@@ -226,7 +226,7 @@ func (ip *instrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSe
 	// Run the type-check once, before any file in the package is rewritten,
 	// and only when a rule needs it.
 	if rsetHasMethodCallRule(rset) || rsetUsesImplements(rset) {
-		ip.ensureMethodCallInfo()
+		ip.ensureMethodCallInfo(ctx)
 	}
 
 	file2rules, files := groupRules(ip.workDir, rset)
