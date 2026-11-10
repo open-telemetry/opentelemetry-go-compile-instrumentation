@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 func TestVendoringActive(t *testing.T) {
@@ -49,6 +51,74 @@ func TestVendoringActive(t *testing.T) {
 		// -mod=mod is forbidden in workspace mode, so a leftover vendor/modules.txt
 		// must not make this report true.
 		assert.False(t, vendoringActive(t.Context(), root))
+	})
+}
+
+func TestBuildDir(t *testing.T) {
+	tests := []struct {
+		name       string
+		subcommand string
+		args       []string
+		want       string
+	}{
+		{"no -C", subcmdBuild, []string{"-o", "out", "."}, ""},
+		{"separate value", subcmdBuild, []string{"-C", "app", "."}, "app"},
+		{"joined value", subcmdBuild, []string{"-C=app", "."}, "app"},
+		{"double dash", subcmdBuild, []string{"--C", "app", "."}, "app"},
+		{"go test", subcmdTest, []string{"-C", "app", "-run", "TestX", "."}, "app"},
+		{"value of another flag", subcmdBuild, []string{"-tags", "-C", "."}, ""},
+		{"test binary argument", subcmdTest, []string{".", "-args", "-C", "app"}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, buildDir(tt.subcommand, tt.args))
+		})
+	}
+}
+
+// TestPrepareVendoredBuildInBuildDir checks that vendoring is detected in the
+// directory the go command builds in, which is neither the otelc work
+// directory nor, with -C, the current directory.
+func TestPrepareVendoredBuildInBuildDir(t *testing.T) {
+	// -mod=mod is forbidden in a workspace, so a stray ambient go.work would
+	// otherwise hide the vendor directory.
+	t.Setenv("GOWORK", "off")
+
+	writeVendoredModule := func(t *testing.T, dir string) {
+		t.Helper()
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "vendor"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module m\n\ngo 1.25.0\n"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "vendor", "modules.txt"), []byte(""), 0o644))
+	}
+
+	t.Run("relative -C directory", func(t *testing.T) {
+		root := t.TempDir()
+		writeVendoredModule(t, filepath.Join(root, "app"))
+		t.Chdir(root)
+		t.Setenv(util.EnvOtelcWorkDir, root)
+		t.Setenv("GOFLAGS", "")
+
+		args := []string{"-C", "app", "-mod=vendor", "."}
+		got, err := prepareVendoredBuild(t.Context(), discardLogger(), subcmdBuild, args)
+		require.NoError(t, err)
+
+		assert.Equal(t, []string{"-C", "app", "-mod=mod", "."}, got)
+		assert.Equal(t, modMod, os.Getenv("GOFLAGS"))
+	})
+
+	t.Run("work dir outside the module", func(t *testing.T) {
+		module := t.TempDir()
+		writeVendoredModule(t, module)
+		t.Chdir(module)
+		t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+		t.Setenv("GOFLAGS", "")
+
+		args := []string{"-mod=vendor", "."}
+		got, err := prepareVendoredBuild(t.Context(), discardLogger(), subcmdBuild, args)
+		require.NoError(t, err)
+
+		assert.Equal(t, []string{"-mod=mod", "."}, got)
+		assert.Equal(t, modMod, os.Getenv("GOFLAGS"))
 	})
 }
 

@@ -12,19 +12,35 @@ import (
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
-// vendoringActive reports whether the main module vendors its dependencies. It
-// resolves the module via a single go env GOMOD/GOWORK call rather than
-// `go list`, which would fail the vendor consistency check while go.mod is
-// mid-edit, then checks for vendor/modules.txt. Returns false in workspace
-// mode: Go forbids -mod=mod there, so forcing it would turn a build that
-// worked into a hard failure.
-func vendoringActive(ctx context.Context, workDir string) bool {
+// buildDir returns the directory that the go command runs a build with args
+// in: the -C directory when args set one, or else "", which runs a command in
+// the current directory. A relative -C directory resolves against the current
+// directory, for the go command and for exec.Cmd.Dir alike. The otelc work
+// directory is not that directory, because --work-dir can point anywhere.
+func buildDir(subcommand string, args []string) string {
+	dir := ""
+	for _, a := range classifyArgs(subcommand, args) {
+		if a.FlagName == "-C" && (a.Kind == ArgBuildFlag || a.Kind == ArgBuildFlagValue) && a.Value != "" {
+			dir = a.Value
+		}
+	}
+	return dir
+}
+
+// vendoringActive reports whether the main module of a build in dir vendors
+// its dependencies. dir is the directory the go command builds in, see
+// buildDir. It resolves the module via a single go env GOMOD/GOWORK call
+// rather than `go list`, which would fail the vendor consistency check while
+// go.mod is mid-edit, then checks for vendor/modules.txt. Returns false in
+// workspace mode: Go forbids -mod=mod there, so forcing it would turn a build
+// that worked into a hard failure.
+func vendoringActive(ctx context.Context, dir string) bool {
 	logger := util.LoggerFromContext(ctx)
 
-	root, workspace, err := pkgload.ModuleAndWorkspace(ctx, workDir)
+	root, workspace, err := pkgload.ModuleAndWorkspace(ctx, dir)
 	if err != nil {
 		logger.WarnContext(ctx, "failed to resolve module/workspace state; building as non-vendored",
-			"dir", workDir, "error", err)
+			"dir", dir, "error", err)
 		return false
 	}
 	if workspace {
