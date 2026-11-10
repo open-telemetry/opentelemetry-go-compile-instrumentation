@@ -26,6 +26,11 @@
     "target": "github.com/gofiber/fiber/v2"
   },
   {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/gorilla/mux",
+    "target": "github.com/gorilla/mux",
+    "versionRange": "v1.8.0"
+  },
+  {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/labstack/echo/v4",
     "target": "github.com/labstack/echo/v4",
     "versionRange": "v4.2.0"

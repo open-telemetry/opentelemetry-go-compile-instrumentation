@@ -432,6 +432,23 @@ func HTTPServerRoute(route string) attribute.KeyValue {
 	return defaultHTTPServer.Route(route)
 }
 
+type routedKey struct{}
+
+// ContextWithRouted returns a copy of ctx in which MarkRouted sets *routed.
+func ContextWithRouted(ctx context.Context, routed *bool) context.Context {
+	return context.WithValue(ctx, routedKey{}, routed)
+}
+
+// MarkRouted records that a router (mux, gin) routed the server request whose
+// context is ctx, whether or not a route matched. The router names the span
+// itself, so the net/http server hook must not replace that with the less
+// specific pattern of a ServeMux the router is mounted under.
+func MarkRouted(ctx context.Context) {
+	if p, ok := ctx.Value(routedKey{}).(*bool); ok {
+		*p = true
+	}
+}
+
 // HTTPServerSpanName returns the span name for an HTTP server request.
 // Unknown methods use "HTTP" so names stay low-cardinality and match semconv.
 func HTTPServerSpanName(method, route string) string {

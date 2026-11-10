@@ -54,6 +54,7 @@ func BeforeNext(ictx hook.HookContext, c *gin.Context) {
 	} else {
 		c.Set(nextDepthKey, 1)
 	}
+	httpsemconv.MarkRouted(c.Request.Context())
 
 	route := c.FullPath()
 	if route == "" {

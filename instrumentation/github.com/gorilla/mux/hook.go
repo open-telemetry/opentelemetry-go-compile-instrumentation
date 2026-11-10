@@ -1,0 +1,61 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package server
+
+import (
+	"net/http"
+
+	"github.com/gorilla/mux"
+	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
+	"go.opentelemetry.io/otel/trace"
+
+	httpsemconv "go.opentelemetry.io/otelc/instrumentation/net/http/semconv"
+	"go.opentelemetry.io/otelc/pkg/hook"
+	"go.opentelemetry.io/otelc/pkg/runtime"
+)
+
+// AfterMatch runs after (*Router).Match. The after hook sees only the bool
+// return. Params are fixed: 0 is the *Router, 1 is *http.Request, 2 is
+// *mux.RouteMatch.
+//
+// The bool is the match result. Return when it is false even if Route is
+// set and MatchErr is nil. A leftover or custom Route on a failed Match
+// must not receive http.route.
+//
+// Match returns true for a custom NotFoundHandler or MethodNotAllowedHandler
+// as well as for a real route. Those cases set MatchErr (ErrNotFound /
+// ErrMethodMismatch) and must not receive http.route — same as a 404/405
+// that used mux's default handlers.
+func AfterMatch(ictx hook.HookContext, ok bool) {
+	if !enabled() || ictx == nil {
+		return
+	}
+
+	req, _ := ictx.GetParam(requestIndex).(*http.Request)
+	if req == nil {
+		return
+	}
+	// Mux routed this request even on a 404/405, so a ServeMux pattern
+	// above it must not name the span.
+	httpsemconv.MarkRouted(req.Context())
+
+	match, _ := ictx.GetParam(matchIndex).(*mux.RouteMatch)
+	if !ok || match == nil || match.MatchErr != nil || match.Route == nil {
+		return
+	}
+
+	route, err := match.Route.GetPathTemplate()
+	if err != nil || route == "" {
+		return
+	}
+
+	span := trace.SpanFromContext(req.Context())
+	if !span.IsRecording() {
+		return
+	}
+
+	span.SetName(httpsemconv.HTTPServerSpanName(req.Method, route))
+	span.SetAttributes(semconv.HTTPRoute(route))
+	runtime.Logger().Debug("mux route resolved", "route", route)
+}

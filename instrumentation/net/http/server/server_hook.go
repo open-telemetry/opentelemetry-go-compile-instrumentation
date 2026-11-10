@@ -67,6 +67,8 @@ var serverEnabler = netHttpServerEnabler{}
 type hookData struct {
 	span  trace.Span
 	start time.Time
+	// routed is set by a router hook through semconv.MarkRouted.
+	routed bool
 }
 
 func BeforeServeHTTP(ictx hook.HookContext, recv interface{}, w http.ResponseWriter, r *http.Request) {
@@ -84,8 +86,11 @@ func BeforeServeHTTP(ictx hook.HookContext, recv interface{}, w http.ResponseWri
 			"remote_addr", r.RemoteAddr)
 	}
 
+	data := &hookData{}
+
 	// Extract trace context from incoming request headers
 	ctx := propagator.Extract(r.Context(), propagation.HeaderCarrier(r.Header))
+	ctx = semconv.ContextWithRouted(ctx, &data.routed)
 
 	// Get trace attributes from semconv
 	attrs := semconv.HTTPServerRequestTraceAttrs("", r)
@@ -112,10 +117,9 @@ func BeforeServeHTTP(ictx hook.HookContext, recv interface{}, w http.ResponseWri
 	ictx.SetParam(requestIndex, newReq)
 
 	// Store data for after hook
-	ictx.SetData(&hookData{
-		span:  span,
-		start: time.Now(),
-	})
+	data.span = span
+	data.start = time.Now()
+	ictx.SetData(data)
 }
 
 func AfterServeHTTP(ictx hook.HookContext) {
@@ -128,8 +132,9 @@ func AfterServeHTTP(ictx hook.HookContext) {
 	defer span.End()
 
 	// ServeMux fills in r.Pattern on the same request after the span was created.
-	// Stays empty for routers that name the span themselves (gin, chi).
-	if r, ok := ictx.GetParam(requestIndex).(*http.Request); ok && r != nil && span.IsRecording() {
+	// A router mounted under it (mux, gin) has already named the span, or left
+	// it unnamed on a 404/405, and r.Pattern must not replace that.
+	if r, _ := ictx.GetParam(requestIndex).(*http.Request); r != nil && !data.routed && span.IsRecording() {
 		if route := semconv.HTTPRoute(r.Pattern); route != "" {
 			span.SetName(semconv.HTTPServerSpanName(r.Method, route))
 			span.SetAttributes(semconv.HTTPServerRoute(route))
