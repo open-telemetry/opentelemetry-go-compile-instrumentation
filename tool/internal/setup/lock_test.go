@@ -301,19 +301,21 @@ func TestAcquireBuildLockNestedDoesNotWaitForParent(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestAcquireBuildLockNestedSharedWorkDirWaits(t *testing.T) {
+func TestAcquireBuildLockNestedSharedWorkDirFails(t *testing.T) {
 	moduleDir := lockTestModule(t)
 	t.Setenv(util.EnvOtelcWorkDir, moduleDir)
 
 	err := withBuildLock(t.Context(), "", func(ctx context.Context) error {
 		// A child that uses the work dir of its parent would overwrite the
-		// parent's .otelc-build, so it must keep waiting for the parent.
+		// parent's .otelc-build, and the parent waits for it, so it must fail
+		// instead of waiting for the parent.
 		setNestedBuildEnv(ctx, t)
 
-		waitCtx, cancel := context.WithTimeout(ctx, 3*buildLockRetryInterval)
+		waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 		_, _, err := acquireBuildLocks(waitCtx, buildLockPaths(ctx, ""))
-		require.Error(t, err, "a child sharing the parent's work dir must wait for the parent")
+		require.ErrorContains(t, err, "--work-dir")
+		assert.NotErrorIs(t, err, context.DeadlineExceeded, "a child sharing the parent's work dir must not wait")
 		return nil
 	})
 	require.NoError(t, err)

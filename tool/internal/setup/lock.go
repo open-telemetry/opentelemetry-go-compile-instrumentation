@@ -79,8 +79,8 @@ func canonicalDir(dir string) string {
 // still excludes the other invocations started under the same parent. A
 // child's descendants take higher numbers, and the other children wait for
 // that child. A child that uses the work dir of a parent keeps the work dir
-// lock: it would overwrite the parent's .otelc-build, so it waits for the
-// parent.
+// lock, and fails while the parent holds it: it would overwrite the parent's
+// .otelc-build.
 func buildLockPaths(ctx context.Context, dir string) []string {
 	held := envPathList(util.EnvOtelcHeldBuildLocks)
 
@@ -279,6 +279,15 @@ func acquireLockFile(ctx context.Context, path string, parentLocks, taken []stri
 		return releaseFunc(ctx, lock), true, nil
 	}
 
+	// A lock that a parent holds is freed only when the parent ends, and the
+	// parent waits for this invocation. It is the work dir lock of a child
+	// that uses the work dir of its parent.
+	if slices.Contains(parentLocks, path) {
+		return nil, false, ex.Newf("build lock %s is held by a parent otelc invocation that waits for this one: "+
+			"an otelc command started under another otelc command, for example from a test, "+
+			"must use a work dir of its own (--work-dir)", path)
+	}
+
 	_, _ = fmt.Fprintf(lockWaitOutput,
 		"otelc: another invocation holds the build lock; waiting for it to finish (lock: %s)\n",
 		path,
@@ -296,10 +305,8 @@ func isDir(path string) bool {
 // invocation or its parents hold locks, other invocations can see the wait,
 // and the wait fails when it would deadlock (see lock_deadlock.go).
 func waitForLockFile(ctx context.Context, path string, parentLocks, taken []string) (func(), bool, error) {
-	// A lock that a parent holds is freed only when the parent ends. A child
-	// that shares the work dir of its parent waits for it, as it always has.
 	holds := append(slices.Clone(parentLocks), taken...)
-	checkDeadlock := len(holds) > 0 && !slices.Contains(parentLocks, path)
+	checkDeadlock := len(holds) > 0
 	// An invocation started under another otelc command that did not get its
 	// environment looks like one that no parent started.
 	hint := len(parentLocks) == 0

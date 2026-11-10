@@ -34,7 +34,8 @@ const (
 	EnvOtelcHeldBuildLocks = "OTELC_HELD_BUILD_LOCKS"
 	// EnvOtelcParentWorkDirs lists the work dirs of the parent otelc
 	// invocations, in the format of EnvOtelcHeldBuildLocks. An otelc
-	// invocation that uses one of them waits for that parent.
+	// invocation that uses one of them fails, because it would overwrite the
+	// .otelc-build of that parent.
 	EnvOtelcParentWorkDirs = "OTELC_PARENT_WORK_DIRS"
 	// EnvOtelcNestedResolving lists, outermost first, the compiles waiting on
 	// a nested build to resolve an import a rule added, as comma-separated
