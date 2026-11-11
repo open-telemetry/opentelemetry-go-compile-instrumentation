@@ -19,8 +19,10 @@ import (
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
-type Entry = manifest.Entry
-type Manifest = manifest.Manifest
+type (
+	Entry    = manifest.Entry
+	Manifest = manifest.Manifest
+)
 
 type yamlRule struct {
 	Target       rule.Target `yaml:"target"`
