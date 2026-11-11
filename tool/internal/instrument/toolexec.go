@@ -285,7 +285,7 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 			return
 		}
 		ip.Info("rule-added import resolution",
-			"phase", "compile",
+			"resolve_phase", "compile",
 			"candidates", candidates,
 			"memo_hits", memoHits,
 			"go_list_calls", goListCalls,
@@ -712,7 +712,7 @@ func resolveRuleAddedImports(ctx context.Context, linkArgs []string, linkConfig 
 			return
 		}
 		util.LoggerFromContext(ctx).InfoContext(ctx, "rule-added import resolution",
-			"phase", "link",
+			"resolve_phase", "link",
 			"candidates", lr.candidates,
 			"memo_hits", lr.memoHits,
 			"go_list_calls", lr.goListCalls,
