@@ -59,8 +59,10 @@ func TestBuildOtherModule(t *testing.T) {
 // nested build waits for the module that the other otelc go test holds. One of
 // the nested builds must fail with a deadlock error, so that the other one
 // goes on, instead of both waiting until the test timeout.
+//
+// The test does not run in parallel: its builds run one after another, and
+// the load of other tests makes them take longer than the timeouts below.
 func TestNestedBuildsAcrossModules(t *testing.T) {
-	t.Parallel()
 	otelcPath, err := testutil.OtelcPath()
 	require.NoError(t, err)
 	otelcPath, err = filepath.Abs(otelcPath)
@@ -84,12 +86,12 @@ func main() { _, _ = http.Get("http://127.0.0.1:1/") }
 	}
 
 	// The go test -timeout ends a deadlocked run; the context is a backstop.
-	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	defer cancel()
 	env := append(os.Environ(), "GOWORK=off", envCrossModuleOtelc+"="+otelcPath)
 	cmds := make([]*exec.Cmd, 0, len(modules))
 	for _, name := range modules {
-		cmd := exec.CommandContext(ctx, otelcPath, "go", "test", "-count=1", "-timeout=4m", "-v", ".")
+		cmd := exec.CommandContext(ctx, otelcPath, "go", "test", "-count=1", "-timeout=2m", "-v", ".")
 		cmd.Dir = filepath.Join(root, name)
 		cmd.Env = env
 		cmd.WaitDelay = 10 * time.Second
