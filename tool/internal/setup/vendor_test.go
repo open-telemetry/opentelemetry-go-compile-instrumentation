@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/urfave/cli/v3"
 
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -40,6 +41,11 @@ func TestVendoringActive(t *testing.T) {
 	})
 	t.Run("no module", func(t *testing.T) {
 		assert.False(t, vendoringActive(t.Context(), t.TempDir()))
+	})
+	t.Run("build directory does not exist", func(t *testing.T) {
+		// go env cannot start in a missing directory, so the lookup fails and
+		// the build is treated as not vendored.
+		assert.False(t, vendoringActive(t.Context(), filepath.Join(t.TempDir(), "missing")))
 	})
 	t.Run("vendor present but in a workspace", func(t *testing.T) {
 		root := writeVendoredModule(t)
@@ -348,4 +354,27 @@ func TestRewriteModVendor(t *testing.T) {
 			assert.Equal(t, tt.want, rewriteModVendor(subcmd, tt.args))
 		})
 	}
+}
+
+func TestSetupLockedForcesModuleModeForVendoredBuildDir(t *testing.T) {
+	// -mod=mod is forbidden in a workspace, so a stray ambient go.work would
+	// otherwise hide the vendor directory.
+	t.Setenv("GOWORK", "off")
+
+	root := t.TempDir()
+	app := filepath.Join(root, "app")
+	require.NoError(t, os.MkdirAll(filepath.Join(app, "vendor"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(app, "go.mod"), []byte("module m\n\ngo 1.25.0\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(app, "vendor", "modules.txt"), []byte(""), 0o644))
+	t.Chdir(root)
+	t.Setenv(util.EnvOtelcWorkDir, root)
+	t.Setenv("GOFLAGS", "")
+
+	// The package does not exist, so setup stops right after the vendor
+	// check, before it edits any files.
+	cmd := &cli.Command{Name: "go", SkipFlagParsing: true, Action: setupLocked}
+	err := cmd.Run(t.Context(), []string{"go", "build", "-C", "app", "./missing"})
+	require.Error(t, err)
+
+	assert.Equal(t, modMod, os.Getenv("GOFLAGS"))
 }
