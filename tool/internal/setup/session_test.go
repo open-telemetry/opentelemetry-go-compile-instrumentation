@@ -42,7 +42,7 @@ func TestResolutionScopeTracksModuleFiles(t *testing.T) {
 
 	scope := func() string {
 		t.Helper()
-		require.NoError(t, writeResolutionScope(t.Context(), []string{modDir}))
+		require.NoError(t, writeResolutionScope(t.Context(), modDir, []string{modDir}))
 		content, err := os.ReadFile(util.GetResolutionScopeFile())
 		require.NoError(t, err)
 		return string(content)
@@ -73,7 +73,7 @@ func TestResolutionScopeTracksImplicitWorkspace(t *testing.T) {
 
 	scope := func() string {
 		t.Helper()
-		require.NoError(t, writeResolutionScope(t.Context(), []string{modDir}))
+		require.NoError(t, writeResolutionScope(t.Context(), modDir, []string{modDir}))
 		content, err := os.ReadFile(util.GetResolutionScopeFile())
 		require.NoError(t, err)
 		return string(content)
@@ -94,4 +94,46 @@ func TestResolutionScopeTracksImplicitWorkspace(t *testing.T) {
 
 	mustWriteFile(t, filepath.Join(root, "go.work.sum"), "example.com/x v1.0.0 h1:abc=\n")
 	assert.NotEqual(t, inWorkspace, scope(), "an edited go.work.sum changes the scope")
+}
+
+// TestResolutionScopeFollowsBuildDirectory covers one module built from two
+// child directories with their own go.work: the module root resolves no
+// workspace, so only the build directory tells the two builds apart.
+func TestResolutionScopeFollowsBuildDirectory(t *testing.T) {
+	t.Setenv("GOWORK", "")
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	t.Setenv(util.EnvOtelcSessionDir, t.TempDir())
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	modDir := t.TempDir()
+	mustWriteFile(t, filepath.Join(modDir, "go.mod"), "module example.com/scope\n\ngo 1.24\n")
+	for _, sub := range []string{"a", "b"} {
+		mustWriteFile(t, filepath.Join(modDir, sub, "go.work"),
+			"go 1.24\n\nuse ..\n\nreplace example.com/dep => ../dep"+sub+"\n")
+	}
+
+	scope := func(buildDir string) string {
+		t.Helper()
+		require.NoError(t, writeResolutionScope(t.Context(), buildDir, []string{modDir}))
+		content, err := os.ReadFile(util.GetResolutionScopeFile())
+		require.NoError(t, err)
+		return string(content)
+	}
+	assert.NotEqual(t, scope(filepath.Join(modDir, "a")), scope(filepath.Join(modDir, "b")),
+		"builds run from directories with different go.work files must not share a scope")
+}
+
+func TestBuildCommandDir(t *testing.T) {
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+	dir, err := buildCommandDir(nil)
+	require.NoError(t, err)
+	assert.Equal(t, wd, dir)
+
+	other := t.TempDir()
+	dir, err = buildCommandDir([]string{"-tags=x", "-C", other})
+	require.NoError(t, err)
+	assert.Equal(t, other, dir)
+	dir, err = buildCommandDir([]string{"-C=" + other})
+	require.NoError(t, err)
+	assert.Equal(t, other, dir)
 }

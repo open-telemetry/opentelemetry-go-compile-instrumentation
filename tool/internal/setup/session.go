@@ -41,8 +41,11 @@ func sessionEnv(env []string) []string {
 // otelc version, the matched rules, the module files of moduleDirs after
 // setup's edits, the go.work and go.work.sum each module directory actually
 // resolves (an implicit workspace in a parent directory included), and the
-// build environment. Builds with any other input never share memo entries.
-func writeResolutionScope(ctx context.Context, moduleDirs []string) error {
+// build environment. buildDir is the directory the go command of the build
+// runs in (its -C directory, else the current directory), not otelc's work
+// directory: go picks an implicit go.work from there, so it is resolved too.
+// Builds with any other input never share memo entries.
+func writeResolutionScope(ctx context.Context, buildDir string, moduleDirs []string) error {
 	// The files of a module directory whose content decides which
 	// dependency versions a build resolves.
 	moduleFiles := []string{"go.mod", "go.sum", "go.work", "go.work.sum"}
@@ -59,18 +62,27 @@ func writeResolutionScope(ctx context.Context, moduleDirs []string) error {
 		_, _ = h.Write([]byte(path + "=" + hex.EncodeToString(sum[:]) + "\x00"))
 	}
 	_, _ = h.Write([]byte("otelc=" + util.Version + "\x00rules=" + instrument.RulesDigest() + "\x00"))
-	for _, dir := range moduleDirs {
-		for _, name := range moduleFiles {
-			hashFile(filepath.Join(dir, name))
-		}
+	hashWorkspace := func(label, dir string) error {
 		goWork, err := resolvedGoWork(ctx, dir)
 		if err != nil {
 			return err
 		}
-		_, _ = h.Write([]byte(dir + ":gowork=" + goWork + "\x00"))
-		if goWork != "" && goWork != "off" {
+		_, _ = h.Write([]byte(label + ":gowork=" + goWork + "\x00"))
+		if goWork != "" && goWork != goWorkOff {
 			hashFile(goWork)
 			hashFile(goWork + ".sum")
+		}
+		return nil
+	}
+	if err := hashWorkspace("build", buildDir); err != nil {
+		return err
+	}
+	for _, dir := range moduleDirs {
+		for _, name := range moduleFiles {
+			hashFile(filepath.Join(dir, name))
+		}
+		if err := hashWorkspace(dir, dir); err != nil {
+			return err
 		}
 	}
 	for _, name := range envVars {
@@ -94,4 +106,30 @@ func resolvedGoWork(ctx context.Context, dir string) (string, error) {
 		return "", ex.Wrapf(err, "running go env GOWORK in %s", dir)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// buildCommandDir returns the directory the build's go command runs in: the
+// last -C value of buildFlags made absolute, else the current directory.
+func buildCommandDir(buildFlags []string) (string, error) {
+	dir := ""
+	for i, flag := range buildFlags {
+		switch {
+		case flag == "-C" && i+1 < len(buildFlags):
+			dir = buildFlags[i+1]
+		case strings.HasPrefix(flag, "-C="):
+			dir = strings.TrimPrefix(flag, "-C=")
+		}
+	}
+	if dir == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return "", ex.Wrapf(err, "getting the build directory")
+		}
+		return wd, nil
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", ex.Wrapf(err, "resolving -C directory %s", dir)
+	}
+	return abs, nil
 }
