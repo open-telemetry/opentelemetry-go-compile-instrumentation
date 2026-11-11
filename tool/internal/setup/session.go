@@ -4,29 +4,18 @@
 package setup
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/instrument"
 	"go.opentelemetry.io/otelc/tool/util"
 )
-
-// scopeEnvVars are the environment variables that change what a nested
-// `go list -export` resolves, so they are part of the resolution scope.
-//
-//nolint:gochecknoglobals // read-only lookup table
-var scopeEnvVars = []string{
-	"GOOS", "GOARCH", "CGO_ENABLED", "GOEXPERIMENT", "GOFLAGS", "GOTOOLCHAIN", "GOWORK",
-}
-
-// scopeModuleFiles are the files of a module directory whose content decides
-// which dependency versions a build resolves.
-//
-//nolint:gochecknoglobals // read-only lookup table
-var scopeModuleFiles = []string{"go.mod", "go.sum", "go.work", "go.work.sum"}
 
 // cleanupOwnedSession removes the session directory of a build that owns its
 // session: one that inherits none from an outer otelc build. An inherited
@@ -50,22 +39,41 @@ func sessionEnv(env []string) []string {
 
 // writeResolutionScope records the digest that scopes the export memo: the
 // otelc version, the matched rules, the module files of moduleDirs after
-// setup's edits, and the build environment. Builds with any other input
-// never share memo entries.
-func writeResolutionScope(moduleDirs []string) error {
+// setup's edits, the go.work and go.work.sum each module directory actually
+// resolves (an implicit workspace in a parent directory included), and the
+// build environment. Builds with any other input never share memo entries.
+func writeResolutionScope(ctx context.Context, moduleDirs []string) error {
+	// The files of a module directory whose content decides which
+	// dependency versions a build resolves.
+	moduleFiles := []string{"go.mod", "go.sum", "go.work", "go.work.sum"}
+	// The environment variables that change what a nested go list resolves.
+	envVars := []string{"GOOS", "GOARCH", "CGO_ENABLED", "GOEXPERIMENT", "GOFLAGS", "GOTOOLCHAIN", "GOWORK"}
+
 	h := sha256.New()
+	hashFile := func(path string) {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return
+		}
+		sum := sha256.Sum256(content)
+		_, _ = h.Write([]byte(path + "=" + hex.EncodeToString(sum[:]) + "\x00"))
+	}
 	_, _ = h.Write([]byte("otelc=" + util.Version + "\x00rules=" + instrument.RulesDigest() + "\x00"))
 	for _, dir := range moduleDirs {
-		for _, name := range scopeModuleFiles {
-			content, err := os.ReadFile(filepath.Join(dir, name))
-			if err != nil {
-				continue
-			}
-			sum := sha256.Sum256(content)
-			_, _ = h.Write([]byte(filepath.Join(dir, name) + "=" + hex.EncodeToString(sum[:]) + "\x00"))
+		for _, name := range moduleFiles {
+			hashFile(filepath.Join(dir, name))
+		}
+		goWork, err := resolvedGoWork(ctx, dir)
+		if err != nil {
+			return err
+		}
+		_, _ = h.Write([]byte(dir + ":gowork=" + goWork + "\x00"))
+		if goWork != "" && goWork != "off" {
+			hashFile(goWork)
+			hashFile(goWork + ".sum")
 		}
 	}
-	for _, name := range scopeEnvVars {
+	for _, name := range envVars {
 		_, _ = h.Write([]byte(name + "=" + os.Getenv(name) + "\x00"))
 	}
 	f := util.GetResolutionScopeFile()
@@ -73,4 +81,17 @@ func writeResolutionScope(moduleDirs []string) error {
 		return ex.Wrapf(err, "failed to write resolution scope to file %s", f)
 	}
 	return nil
+}
+
+// resolvedGoWork returns the go.work file go resolves for dir: the GOWORK
+// value or the nearest go.work above dir, "off" when workspaces are
+// disabled, or "" when none applies.
+func resolvedGoWork(ctx context.Context, dir string) (string, error) {
+	cmd := exec.CommandContext(ctx, "go", "env", "GOWORK")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", ex.Wrapf(err, "running go env GOWORK in %s", dir)
+	}
+	return strings.TrimSpace(string(out)), nil
 }

@@ -103,6 +103,9 @@ type instrumentPhase struct {
 	resolveExportFiles func(
 		ctx context.Context, importPaths []string, buildFlags ...string,
 	) (map[string]string, map[string]error, error)
+	// resolveAddedImport resolves the export files of an import a rule added
+	// to the compile; nil means pkgload.ResolveExportFiles. Tests replace it.
+	resolveAddedImport func(ctx context.Context, importPath string, buildFlags ...string) (map[string]string, error)
 	// methodCallInfo is built lazily by ensureMethodCallInfo.
 	methodCallInfo       *methodCallPackageInfo
 	methodCallInfoLoaded bool
@@ -253,12 +256,6 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 	return ip.compileArgs, nil
 }
 
-// resolveCompileExportFiles resolves an import a rule added to a compile. It
-// is a variable so tests can count and fake the nested go list.
-//
-//nolint:gochecknoglobals // test seam
-var resolveCompileExportFiles = pkgload.ResolveExportFiles
-
 // updateImportConfig updates the importcfg file with new imports that were added during instrumentation.
 func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports map[string]string) error {
 	if ip.importConfigPath == "" {
@@ -318,7 +315,7 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 				return err
 			}
 			goListCalls++
-			archives, err = resolveCompileExportFiles(ctx, importPath, buildFlags...)
+			archives, err = ip.compileExportFiles(ctx, importPath, buildFlags...)
 			restore()
 			if err != nil {
 				return ex.Wrapf(err, "resolving %q", importPath)
@@ -352,6 +349,16 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 	}
 
 	return nil
+}
+
+// compileExportFiles resolves an import a rule added to this compile.
+func (ip *instrumentPhase) compileExportFiles(
+	ctx context.Context, importPath string, buildFlags ...string,
+) (map[string]string, error) {
+	if ip.resolveAddedImport != nil {
+		return ip.resolveAddedImport(ctx, importPath, buildFlags...)
+	}
+	return pkgload.ResolveExportFiles(ctx, importPath, buildFlags...)
 }
 
 // pgoBuildFlags returns the -pgo flag that makes a nested go list compile the
@@ -668,15 +675,16 @@ func interceptLink(ctx context.Context, args []string) ([]string, error) {
 	return args, nil
 }
 
-// resolveExportClosures resolves rule-added imports for the link. It is a
-// variable so tests can count and fake the nested go list.
-//
-//nolint:gochecknoglobals // test seam
-var resolveExportClosures = pkgload.ResolveExportClosures
+// exportClosureResolver resolves the export closures of rule-added imports;
+// pkgload.ResolveExportClosures in production.
+type exportClosureResolver func(
+	ctx context.Context, roots []string, buildFlags ...string,
+) (map[string]map[string]string, map[string]error, error)
 
 // linkResolution carries the state of one link's rule-added import recovery
 // across its passes.
 type linkResolution struct {
+	resolve    exportClosureResolver
 	memo       *session.Memo
 	buildFlags []string
 	// failed holds the candidates already found unresolvable during this
@@ -695,6 +703,17 @@ type linkResolution struct {
 // same session that needs the same imports reads them instead of running go
 // list again. It reports whether the import config changed.
 func resolveRuleAddedImports(ctx context.Context, linkArgs []string, linkConfig *imports.ImportConfig) (bool, error) {
+	return resolveRuleAddedImportsWith(ctx, linkArgs, linkConfig, pkgload.ResolveExportClosures)
+}
+
+// resolveRuleAddedImportsWith is resolveRuleAddedImports with the nested
+// go list supplied by resolve.
+func resolveRuleAddedImportsWith(
+	ctx context.Context,
+	linkArgs []string,
+	linkConfig *imports.ImportConfig,
+	resolve exportClosureResolver,
+) (bool, error) {
 	pgoFlags, err := pgoBuildFlagsFor(linkArgs)
 	if err != nil {
 		return false, err
@@ -702,6 +721,7 @@ func resolveRuleAddedImports(ctx context.Context, linkArgs []string, linkConfig 
 	buildFlags := append(util.GetBuildFlags(), pgoFlags...)
 	ruleImports := parseLinkRuleImports(ctx, linkArgs)
 	lr := &linkResolution{
+		resolve:    resolve,
 		memo:       session.Open(buildFlags),
 		buildFlags: buildFlags,
 		failed:     make(map[string]bool),
@@ -862,7 +882,7 @@ func (lr *linkResolution) resolveMisses(
 	var resolveFailed map[string]error
 	err = session.WithLoadSlot(ctx, func(ctx context.Context) error {
 		var loadErr error
-		resolved, resolveFailed, loadErr = resolveExportClosures(ctx, misses, lr.buildFlags...)
+		resolved, resolveFailed, loadErr = lr.resolve(ctx, misses, lr.buildFlags...)
 		return loadErr
 	})
 	lr.goListCalls++
