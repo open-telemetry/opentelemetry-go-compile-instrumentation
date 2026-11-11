@@ -361,6 +361,13 @@ func TestAcquireBuildLockNestedSiblingsExclude(t *testing.T) {
 
 	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
 	assertWaitsFor(t, release, buildLockPaths(t.Context(), ""))
+
+	// A grandchild whose ancestors hold the module lock and its first
+	// numbered sibling takes the next one instead of waiting for its parent.
+	t.Setenv(util.EnvOtelcHeldBuildLocks, encodePathList(
+		[]string{lockPathIn(moduleDir), lockPathIn(moduleDir) + ".1"}))
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	assert.Contains(t, buildLockPaths(t.Context(), ""), lockPathIn(moduleDir)+".2")
 }
 
 func TestNestedBuildEnv(t *testing.T) {
