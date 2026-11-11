@@ -333,6 +333,22 @@ func ensureOtelcRequire(moduleDir, version string) (bool, error) {
 	return true, nil
 }
 
+const (
+	// otelInitInstModule sets up the OTel SDK in package main.
+	otelInitInstModule = "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/init"
+	// otelTraceInstModule hooks the OTel trace API package.
+	otelTraceInstModule = "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/trace"
+	// otelSDKTraceInstModule hooks the OTel SDK trace package.
+	otelSDKTraceInstModule = "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/sdk/trace"
+)
+
+// otelInitCompanionInstModules returns the instrumentation modules to pin
+// with the init module. The otel module is not listed: any code that calls
+// otel.SetTracerProvider imports the otel package, so the dep match pins it.
+func otelInitCompanionInstModules() []string {
+	return []string{otelTraceInstModule, otelSDKTraceInstModule}
+}
+
 func matchInstrumentationImports(
 	deps []*Dependency,
 	ruleset map[string][]yamlRule,
@@ -364,6 +380,18 @@ func matchInstrumentationImports(
 					continue
 				}
 
+				imports[modPath] = true
+			}
+		}
+	}
+
+	// The init module links pkg/runtime, which links the trace API and the
+	// SDK trace package. The SDK hook stores new spans in GLS, and the trace
+	// hook reads GLS in SpanFromContext, so pin both with init for apps that
+	// do not import them (#1712). Only a module with rules is pinned.
+	if imports[otelInitInstModule] {
+		for _, modPath := range otelInitCompanionInstModules() {
+			if _, ok := ruleset[modPath]; ok {
 				imports[modPath] = true
 			}
 		}

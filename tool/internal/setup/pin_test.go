@@ -652,6 +652,161 @@ func TestMatchInstrumentationImports(t *testing.T) {
 	}
 }
 
+// bundledRuleset loads the rule set that otelc ships with, from the
+// instrumentation tree at the repository root.
+func bundledRuleset(t *testing.T) map[string][]yamlRule {
+	t.Helper()
+	ruleset, err := loadMinimalRules(
+		t.Context(),
+		filepath.Join("..", "..", "..", "instrumentation"),
+		util.Version,
+	)
+	require.NoError(t, err)
+	return ruleset
+}
+
+// TestMatchInstrumentationImports_PinsOTelCompanionRules reproduces #1712.
+// The init module links pkg/runtime, which links the trace API and the SDK
+// trace package. Those rules must therefore be pinned even when the
+// application's own dependencies never name them.
+func TestMatchInstrumentationImports_PinsOTelCompanionRules(t *testing.T) {
+	// The application imports no OTel package.
+	t.Run("app imports no OTel package", func(t *testing.T) {
+		deps := []*Dependency{
+			{ImportPath: "net/http", Version: ""},
+			{ImportPath: "database/sql", Version: ""},
+			{ImportPath: "main", Version: ""},
+		}
+
+		imports := matchInstrumentationImports(deps, bundledRuleset(t), nil)
+
+		require.True(t, imports[otelInitInstModule],
+			"init module should be pinned for package main")
+		require.True(t, imports[otelTraceInstModule],
+			"trace rules must be pinned: otelc links the trace API package "+
+				"even when the app does not import it")
+		require.True(t, imports[otelSDKTraceInstModule],
+			"sdk/trace rules must be pinned: otelc links the SDK trace package "+
+				"even when the app does not import it")
+	})
+
+	// The application imports only the OTel API, not the SDK. findDeps lists
+	// every package that the app compiles, so the otel module is pinned by its
+	// own dep match. The SDK trace companion is still needed.
+	t.Run("app imports only the OTel API", func(t *testing.T) {
+		deps := []*Dependency{
+			{ImportPath: "go.opentelemetry.io/otel", Version: "v1.46.0"},
+			{ImportPath: "go.opentelemetry.io/otel/trace", Version: "v1.46.0"},
+			{ImportPath: "main", Version: ""},
+		}
+
+		imports := matchInstrumentationImports(deps, bundledRuleset(t), nil)
+
+		// The otel module is not in the companion list. It is pinned by the
+		// app's own dependency, not by the init companion.
+		const otelInstModule = "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel"
+
+		require.True(t, imports[otelInitInstModule],
+			"init module should be pinned for package main")
+		require.True(t, imports[otelInstModule],
+			"the otel module must be pinned by the app's own dependency")
+		require.True(t, imports[otelSDKTraceInstModule],
+			"sdk/trace rules must be pinned: otelc links the SDK trace package "+
+				"even when the app does not import it")
+	})
+}
+
+// TestMatchInstrumentationImports_SDKDepVersionGate checks the interaction
+// between the sdk/trace rule version gate and the companion selection.
+func TestMatchInstrumentationImports_SDKDepVersionGate(t *testing.T) {
+	depsWithSDK := func(sdkVersion string) []*Dependency {
+		return []*Dependency{
+			{ImportPath: "go.opentelemetry.io/otel", Version: "v1.46.0"},
+			{ImportPath: "go.opentelemetry.io/otel/trace", Version: "v1.46.0"},
+			{ImportPath: "go.opentelemetry.io/otel/sdk/trace", Version: sdkVersion},
+			{ImportPath: "main", Version: ""},
+		}
+	}
+
+	// The app depends on the SDK below the v1.44.0 rule floor, so the dep
+	// match does not select the module. The companion still pins it, because
+	// init raises the SDK to the version that pkg/runtime requires.
+	t.Run("below the rule floor", func(t *testing.T) {
+		imports := matchInstrumentationImports(depsWithSDK("v1.40.0"), bundledRuleset(t), nil)
+
+		require.True(t, imports[otelSDKTraceInstModule],
+			"the companion must pin the sdk/trace module when the app SDK dep is below the rule floor")
+	})
+
+	// An unresolved SDK version makes the dep match record a skip. The
+	// companion pins the module, so pin must not warn about the skip.
+	t.Run("unresolved version", func(t *testing.T) {
+		var warnings []string
+		warn := func(msg string, _ ...any) {
+			warnings = append(warnings, msg)
+		}
+
+		imports := matchInstrumentationImports(depsWithSDK(""), bundledRuleset(t), warn)
+
+		require.True(t, imports[otelSDKTraceInstModule],
+			"the companion must pin the sdk/trace module when the app SDK version is unresolved")
+		require.Empty(t, warnings,
+			"pin must not warn about an unresolved SDK version when the companion pins the module")
+	})
+}
+
+// TestMatchInstrumentationImports_NoOTelCompanionWithoutInit verifies that
+// the companion modules are only selected through the init module. Init
+// is missing when the build has no main package, or when its rules are not
+// in the ruleset.
+func TestMatchInstrumentationImports_NoOTelCompanionWithoutInit(t *testing.T) {
+	deps := []*Dependency{
+		{ImportPath: "go.opentelemetry.io/otel", Version: "v1.46.0"},
+		{ImportPath: "go.opentelemetry.io/otel/trace", Version: "v1.46.0"},
+		{ImportPath: "net/http", Version: ""},
+		{ImportPath: "main", Version: ""},
+	}
+
+	t.Run("deps without a main package", func(t *testing.T) {
+		imports := matchInstrumentationImports(deps[:3], bundledRuleset(t), nil)
+
+		require.False(t, imports[otelInitInstModule])
+		require.NotEmpty(t, imports,
+			"the otel and net/http rules must still match without package main")
+		require.False(t, imports[otelSDKTraceInstModule],
+			"sdk/trace companion must not be pinned without the init module")
+	})
+
+	t.Run("no init module in the ruleset", func(t *testing.T) {
+		ruleset := bundledRuleset(t)
+		delete(ruleset, otelInitInstModule)
+
+		imports := matchInstrumentationImports(deps, ruleset, nil)
+
+		require.False(t, imports[otelInitInstModule])
+		require.NotEmpty(t, imports,
+			"the otel and net/http rules must still match without init")
+		require.False(t, imports[otelSDKTraceInstModule],
+			"the sdk/trace companion must not be pinned without the init module")
+	})
+
+	// A companion without rules would add a dangling tool file import. Each
+	// companion is pinned only when its module carries rules.
+	const instPrefix = "go.opentelemetry.io/otelc/instrumentation/"
+	for _, modPath := range otelInitCompanionInstModules() {
+		t.Run("no "+strings.TrimPrefix(modPath, instPrefix)+" module in the ruleset", func(t *testing.T) {
+			ruleset := bundledRuleset(t)
+			delete(ruleset, modPath)
+
+			imports := matchInstrumentationImports(deps, ruleset, nil)
+
+			require.True(t, imports[otelInitInstModule])
+			require.False(t, imports[modPath],
+				"a ruleset without the module must not add a dangling tool file import")
+		})
+	}
+}
+
 func TestMatchInstrumentationImports_WarnsOnUnresolvedVersion(t *testing.T) {
 	t.Run("warns when instrumentation is fully skipped", func(t *testing.T) {
 		deps := []*Dependency{{
