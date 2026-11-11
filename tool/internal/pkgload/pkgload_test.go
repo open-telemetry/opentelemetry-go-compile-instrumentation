@@ -125,6 +125,9 @@ func TestGOROOT(t *testing.T) {
 
 	_, err = GOROOT(t.Context(), []string{"-C"})
 	require.ErrorContains(t, err, "missing value for -C")
+
+	_, err = GOROOT(t.Context(), []string{"-C", filepath.Join(t.TempDir(), "missing")})
+	require.ErrorContains(t, err, "go env GOROOT")
 }
 
 func TestResolvePackageName(t *testing.T) {

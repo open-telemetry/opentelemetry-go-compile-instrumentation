@@ -340,6 +340,10 @@ func TestSetupPhaseInjectedHash(t *testing.T) {
 
 	writeFile("go.mod", "module example.com/m\n\ngo 1.24.0\n")
 	assert.NotEqual(t, third, hash(), "a change of the go directive alone must change the hash")
+
+	require.NoError(t, os.Remove(filepath.Join(modDir, "hooks", "added.go")))
+	_, err := sp.injectedHash(t.Context(), matched)
+	require.ErrorContains(t, err, "added.go", "a missing add_file source must fail the hash")
 }
 
 func TestStoreInjectedHashFailsOnLoadError(t *testing.T) {
@@ -452,4 +456,8 @@ func TestHashPackages(t *testing.T) {
 		Imports: map[string]*packages.Package{"example.com/broken": broken},
 	}
 	require.ErrorContains(t, hashPackages(io.Discard, goroot, []*packages.Package{withBroken}), "example.com/broken")
+
+	// A file hashed by content must be readable.
+	gone := &packages.Package{PkgPath: "example.com/gone", GoFiles: []string{filepath.Join(t.TempDir(), "gone.go")}}
+	require.ErrorContains(t, hashPackages(io.Discard, goroot, []*packages.Package{gone}), "gone.go")
 }
