@@ -431,7 +431,7 @@ func resolveImportPath(ctx context.Context, buildFlags []string, pkgDir string) 
 // under the build lock; when invoked from GoBuild the surrounding lock is
 // reused via the context marker instead of re-acquired.
 func Setup(ctx context.Context, cmd *cli.Command) error {
-	return withBuildLock(ctx, func(ctx context.Context) error {
+	return withBuildLock(ctx, commandBuildDir(cmd), func(ctx context.Context) error {
 		return setupLocked(ctx, cmd)
 	})
 }
@@ -808,18 +808,41 @@ func toolexecInsertArg(execPath string) (string, error) {
 	return insert, nil
 }
 
+// leadingDirFlag returns the value of a leading -C flag, which the go command
+// requires to be the first flag on its command line, and the number of
+// arguments the flag takes. It returns "" and 0 when args do not start with -C.
+func leadingDirFlag(args []string) (string, int) {
+	// A separate -C takes two arguments: the flag and its value.
+	const separateFlagArgs = 2
+	if len(args) == 0 {
+		return "", 0
+	}
+	switch {
+	case (args[0] == "-C" || args[0] == "--C") && len(args) > 1:
+		return args[1], separateFlagArgs
+	case strings.HasPrefix(args[0], "-C="):
+		return strings.TrimPrefix(args[0], "-C="), 1
+	case strings.HasPrefix(args[0], "--C="):
+		return strings.TrimPrefix(args[0], "--C="), 1
+	}
+	return "", 0
+}
+
+// commandBuildDir returns the -C directory of the go command that cmd runs
+// (otelc go) or prepares (otelc setup), or "" when it has none.
+func commandBuildDir(cmd *cli.Command) string {
+	args := cmd.Args().Slice()
+	if cmd.Name == "go" {
+		args = cmd.Args().Tail()
+	}
+	dir, _ := leadingDirFlag(args)
+	return dir
+}
+
 // addBuildFlags inserts flags after a leading -C, which the go command requires
 // to be the first flag on its command line.
 func addBuildFlags(args []string, flags ...string) []string {
-	insertAt := 0
-	if len(args) > 0 {
-		switch {
-		case (args[0] == "-C" || args[0] == "--C") && len(args) > 1:
-			insertAt = 2
-		case strings.HasPrefix(args[0], "-C=") || strings.HasPrefix(args[0], "--C="):
-			insertAt = 1
-		}
-	}
+	_, insertAt := leadingDirFlag(args)
 
 	result := make([]string, 0, len(args)+len(flags))
 	result = append(result, args[:insertAt]...)
@@ -929,6 +952,9 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 	pwd := util.GetOtelcWorkDir()
 	util.Assert(pwd != "", "invalid working directory")
 	env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelcWorkDir, pwd))
+	// Tell otelc invocations started under the go command (for example from
+	// a test) which build locks and work dir this invocation holds.
+	env = append(env, nestedBuildEnv(ctx)...)
 
 	// Extract and forward build flags that affect the build context
 	// This ensures `go list` resolves archives matching the current build
@@ -975,7 +1001,7 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 
 	// Serialize with other otelc invocations in this module before touching
 	// any shared state (tracking files, go.mod, .otelc-build contents).
-	return withBuildLock(ctx, func(ctx context.Context) error {
+	return withBuildLock(ctx, commandBuildDir(cmd), func(ctx context.Context) error {
 		return runGoBuild(ctx, cmd)
 	})
 }
