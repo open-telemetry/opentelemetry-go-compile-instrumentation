@@ -30,13 +30,25 @@ type HookContext interface {
 	// stores nil for an interface-typed parameter, and resets a non-nilable
 	// parameter (e.g. int or a struct) to its zero value.
 	SetParam(idx int, val interface{})
-	// Number of original function return values
+	// Number of original function return values. Always 0 unless an After
+	// hook populates the return values: a Before hook always observes 0.
 	GetReturnValCount() int
-	// Get the original function return value at index idx
+	// Get the original function return value at index idx. Return values are
+	// only captured after the target function runs, so this is only meaningful
+	// in an After hook; when an After hook is configured, calling it from a
+	// Before hook is unsupported. When the rule has no After hook, a
+	// non-generic target returns nil; on a generic target, each slot whose
+	// type is a type parameter panics, and every other slot returns nil.
 	GetReturnVal(idx int) interface{}
-	// Change the original function return value at index idx. Passing a nil val
-	// stores nil for an interface-typed return value, and resets a non-nilable
-	// return value (e.g. int or a struct) to its zero value.
+	// Change the original function return value at index idx. Return values
+	// are only captured after the target function runs, so this is only
+	// meaningful in an After hook; when an After hook is configured, calling
+	// it from a Before hook is unsupported. When the rule has no After hook,
+	// this is a no-op on a non-generic target; on a generic target, each slot
+	// whose type is a type parameter panics, and every other slot is a
+	// no-op. Passing a nil val stores nil for an interface-typed return value,
+	// and resets a non-nilable return value (e.g. int or a struct) to its
+	// zero value.
 	SetReturnVal(idx int, val interface{})
 	// Get the original function name
 	GetFuncName() string

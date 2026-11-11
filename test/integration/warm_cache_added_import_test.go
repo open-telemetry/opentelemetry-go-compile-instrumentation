@@ -339,12 +339,12 @@ import (
 )
 
 // main records a CPU profile in which extra.Note is the dominant cost. The
-// loop does no allocation and no timing calls, so the samples land on Note
-// instead of on the runtime. It runs for a fixed duration rather than a
-// fixed iteration count: profiling samples at 100 Hz, and a count tuned
-// against one machine's CPU speed collects fewer samples, and can thin out
-// until the top node flips between Note and the loop, on a faster one. Three
-// seconds holds a comfortable sample count on any machine this test runs on.
+// inner loop does no allocation and no timing calls, so the samples land on
+// Note instead of on the runtime. Profiling samples at 100 Hz, so the run
+// is bounded by time, not by an iteration count: a fixed count finishes in
+// about 200ms on a fast runner, and the handful of samples it leaves can
+// miss Note entirely. The clock is read once per batch of 1e7 calls, so it
+// costs a negligible share of the samples.
 func main() {
 	f, err := os.Create(os.Args[1])
 	if err != nil {
@@ -353,9 +353,8 @@ func main() {
 	if err := pprof.StartCPUProfile(f); err != nil {
 		panic(err)
 	}
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		for i := 0; i < 1000000; i++ {
+	for start := time.Now(); time.Since(start) < time.Second; {
+		for range 10_000_000 {
 			_ = extra.Note()
 		}
 	}
@@ -451,8 +450,16 @@ func assertNoteInliningPremise(t *testing.T, extraDir, profile string) {
 	}
 
 	const noteInline = "can inline Note"
-	assert.NotContains(t, build("-gcflags=-m=2", "."), noteInline,
-		"an unprofiled compile inlines Note, so profiled and unprofiled extra no longer differ and the warm subtest proves nothing")
-	assert.Contains(t, build("-pgo="+profile, "-gcflags=-m=2", "."), noteInline,
-		"a profiled compile no longer inlines Note, so profiled and unprofiled extra no longer differ and the warm subtest proves nothing")
+	assert.NotContains(
+		t,
+		build("-gcflags=-m=2", "."),
+		noteInline,
+		"an unprofiled compile inlines Note, so profiled and unprofiled extra no longer differ and the warm subtest proves nothing",
+	)
+	assert.Contains(
+		t,
+		build("-pgo="+profile, "-gcflags=-m=2", "."),
+		noteInline,
+		"a profiled compile no longer inlines Note, so profiled and unprofiled extra no longer differ and the warm subtest proves nothing",
+	)
 }

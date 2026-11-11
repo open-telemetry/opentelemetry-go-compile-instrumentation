@@ -405,6 +405,9 @@ func (ip *instrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFun
 	// matches it. The func rule then contributes no instrumented function, so it
 	// must not force a globals file to be written for the package.
 	if ast.FuncLeadHasDirective(funcDecl, util.DirectiveIgnore) {
+		if DiffDebugEnabled() {
+			ip.reportDecision(rule, "ignored")
+		}
 		ip.Debug("Skip func rule due to //otelc:ignore", "func", rule.Func, "rule", rule.Name)
 		return false, nil
 	}

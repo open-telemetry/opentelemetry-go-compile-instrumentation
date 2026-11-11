@@ -1,3 +1,5 @@
+version: "v1.2.0"
+
 gocql_newsession:
   target: github.com/apache/cassandra-gocql-driver/v2
   version: v2.0.0
