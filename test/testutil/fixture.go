@@ -122,6 +122,7 @@ func (f *TestFixture) CollectorURL() string {
 }
 
 // Server represents a running server process.
+// Note: Cmd.Wait() is managed internally by Server; tests must not call Cmd.Wait() directly.
 type Server struct {
 	t        *testing.T
 	appPath  string
@@ -133,21 +134,18 @@ type Server struct {
 	*exec.Cmd
 }
 
-// Stop requests a graceful shutdown by closing stdin and waits for the process to exit
-// within defaultShutdownTimeout. It fails the test if graceful shutdown times out or if
-// the process exits with an error.
+// Stop requests a graceful shutdown and waits for the process to exit within defaultShutdownTimeout.
+// If stdin was initialized (via -stdin-shutdown), it closes stdin; otherwise it signals the process.
+// It fails the test if graceful shutdown times out or if the process exits with an error.
 func (s *Server) Stop() {
-	s.t.Helper()
-	s.stop(defaultShutdownTimeout)
-}
-
-func (s *Server) stop(timeout time.Duration) {
 	s.t.Helper()
 	s.stopOnce.Do(func() {
 		if s.stdin != nil {
 			if err := s.stdin.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
 				s.t.Logf("closing stdin for %s: %v", s.appPath, err)
 			}
+		} else if s.Cmd.Process != nil {
+			_ = s.Cmd.Process.Signal(os.Interrupt)
 		}
 
 		select {
@@ -155,16 +153,23 @@ func (s *Server) stop(timeout time.Duration) {
 			if err != nil {
 				s.t.Fatalf("app %s exited with error: %v\napp output:\n%s", s.appPath, err, s.output)
 			}
-		case <-time.After(timeout):
+		case <-time.After(defaultShutdownTimeout):
+			var killErr error
 			if s.Cmd.Process != nil {
-				_ = s.Cmd.Process.Kill()
+				killErr = s.Cmd.Process.Kill()
 			}
-			// Reap the process after forced termination so the wait goroutine exits cleanly.
 			select {
 			case <-s.done:
+				if killErr != nil && !errors.Is(killErr, os.ErrProcessDone) {
+					s.t.Fatalf("app %s timed out after %v waiting for graceful shutdown (kill error: %v)\napp output:\n%s",
+						s.appPath, defaultShutdownTimeout, killErr, s.output)
+				}
+				s.t.Fatalf("app %s timed out after %v waiting for graceful shutdown\napp output:\n%s",
+					s.appPath, defaultShutdownTimeout, s.output)
 			case <-time.After(5 * time.Second):
+				s.t.Fatalf("app %s timed out after %v waiting for graceful shutdown; process reaping did not complete (kill error: %v)\napp output:\n%s",
+					s.appPath, defaultShutdownTimeout, killErr, s.output)
 			}
-			s.t.Fatalf("app %s timed out after %v waiting for graceful shutdown\napp output:\n%s", s.appPath, timeout, s.output)
 		}
 	})
 }
@@ -175,13 +180,14 @@ func (s *Server) cleanup() {
 		if s.stdin != nil {
 			_ = s.stdin.Close()
 		}
+		var killErr error
 		if s.Cmd.Process != nil {
-			_ = s.Cmd.Process.Kill()
+			killErr = s.Cmd.Process.Kill()
 		}
-		// Drain done channel to ensure subprocess is reaped and goroutine exits.
 		select {
 		case <-s.done:
 		case <-time.After(5 * time.Second):
+			s.t.Logf("app %s process reaping did not complete during cleanup (kill error: %v)", s.appPath, killErr)
 		}
 	})
 	if s.t.Failed() && s.output.Len() > 0 {

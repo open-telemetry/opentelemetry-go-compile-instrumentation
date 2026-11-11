@@ -4,7 +4,6 @@
 package runtime
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -32,29 +31,6 @@ const (
 
 	urlPathKey = attribute.Key("url.path")
 )
-
-type errUnsupportedSampler string
-
-func (e errUnsupportedSampler) Error() string {
-	return "unsupported sampler: " + string(e)
-}
-
-var (
-	errNegativeTraceIDRatio       = errors.New("invalid trace ID ratio: less than 0.0")
-	errGreaterThanOneTraceIDRatio = errors.New("invalid trace ID ratio: greater than 1.0")
-)
-
-type samplerArgParseError struct {
-	parseErr error
-}
-
-func (e samplerArgParseError) Error() string {
-	return "parsing sampler argument: " + e.parseErr.Error()
-}
-
-func (e samplerArgParseError) Unwrap() error {
-	return e.parseErr
-}
 
 // parseExcludedPaths parses a comma-separated list of paths into a set.
 // It trims whitespace around entries and ignores empty entries.
@@ -184,17 +160,17 @@ func newFilteringSamplerFromEnv() sdktrace.Sampler {
 // It avoids calling otel.Handle(err) directly because sdktrace.NewTracerProvider will also inspect
 // the environment during applyTracerProviderEnvConfigs and invoke otel.Handle(err) once.
 func sdkSamplerFromEnv() sdktrace.Sampler {
-	sampler, _ := samplerFromEnv()
+	sampler := samplerFromEnv()
 	if sampler == nil {
 		return sdktrace.ParentBased(sdktrace.AlwaysSample())
 	}
 	return sampler
 }
 
-func samplerFromEnv() (sdktrace.Sampler, error) {
+func samplerFromEnv() sdktrace.Sampler {
 	sampler := strings.ToLower(strings.TrimSpace(os.Getenv(tracesSamplerKey)))
 	if sampler == "" {
-		return nil, nil
+		return nil
 	}
 
 	samplerArg := strings.TrimSpace(os.Getenv(tracesSamplerArgKey))
@@ -202,40 +178,32 @@ func samplerFromEnv() (sdktrace.Sampler, error) {
 
 	switch sampler {
 	case samplerAlwaysOn:
-		return sdktrace.AlwaysSample(), nil
+		return sdktrace.AlwaysSample()
 	case samplerAlwaysOff:
-		return sdktrace.NeverSample(), nil
+		return sdktrace.NeverSample()
 	case samplerTraceIDRatio:
 		if !hasSamplerArg {
-			return sdktrace.TraceIDRatioBased(1.0), nil
+			return sdktrace.TraceIDRatioBased(1.0)
 		}
 		return parseTraceIDRatio(samplerArg)
 	case samplerParentBasedAlwaysOn:
-		return sdktrace.ParentBased(sdktrace.AlwaysSample()), nil
+		return sdktrace.ParentBased(sdktrace.AlwaysSample())
 	case samplerParentBasedAlwaysOff:
-		return sdktrace.ParentBased(sdktrace.NeverSample()), nil
+		return sdktrace.ParentBased(sdktrace.NeverSample())
 	case samplerParentBasedTraceIDRatio:
 		if !hasSamplerArg {
-			return sdktrace.ParentBased(sdktrace.TraceIDRatioBased(1.0)), nil
+			return sdktrace.ParentBased(sdktrace.TraceIDRatioBased(1.0))
 		}
-		ratio, err := parseTraceIDRatio(samplerArg)
-		return sdktrace.ParentBased(ratio), err
+		return sdktrace.ParentBased(parseTraceIDRatio(samplerArg))
 	default:
-		return nil, errUnsupportedSampler(sampler)
+		return nil
 	}
 }
 
-func parseTraceIDRatio(arg string) (sdktrace.Sampler, error) {
+func parseTraceIDRatio(arg string) sdktrace.Sampler {
 	v, err := strconv.ParseFloat(arg, 64)
-	if err != nil {
-		return sdktrace.TraceIDRatioBased(1.0), samplerArgParseError{err}
+	if err != nil || v < 0.0 || v > 1.0 {
+		return sdktrace.TraceIDRatioBased(1.0)
 	}
-	if v < 0.0 {
-		return sdktrace.TraceIDRatioBased(1.0), errNegativeTraceIDRatio
-	}
-	if v > 1.0 {
-		return sdktrace.TraceIDRatioBased(1.0), errGreaterThanOneTraceIDRatio
-	}
-
-	return sdktrace.TraceIDRatioBased(v), nil
+	return sdktrace.TraceIDRatioBased(v)
 }

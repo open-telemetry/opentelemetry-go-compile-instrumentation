@@ -17,6 +17,34 @@ import (
 	"go.opentelemetry.io/otelc/test/testutil"
 )
 
+func setFilteringEnv(f *testutil.TestFixture, dropRootClient, excludedPaths string) {
+	f.SetEnv("OTEL_GO_DROP_ROOT_CLIENT_PRODUCER", dropRootClient)
+	f.SetEnv("OTEL_GO_EXCLUDED_SERVER_PATHS", excludedPaths)
+	f.SetEnv("OTEL_TRACES_SAMPLER", "always_on")
+	f.SetEnv("OTEL_TRACES_SAMPLER_ARG", "")
+}
+
+func startHTTPServerDBClient(t *testing.T, f *testutil.TestFixture) (*testutil.Server, string) {
+	t.Helper()
+	port := testutil.FreePort(t)
+	server := f.Start("httpserverdbclient", fmt.Sprintf("-front-port=%d", port), "-stdin-shutdown")
+	testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", port))
+	return server, fmt.Sprintf("http://127.0.0.1:%d", port)
+}
+
+func getHTTP(t *testing.T, url string) string {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return string(body)
+}
+
 func TestRootFiltering(t *testing.T) {
 	// Built sequentially once to verify that runtime configuration works
 	// without rebuilding the instrumented binary across all test scenarios.
@@ -25,25 +53,11 @@ func TestRootFiltering(t *testing.T) {
 
 	t.Run("ExcludedServerPath_SuppressesRootAndDescendant", func(t *testing.T) {
 		f := testutil.NewTestFixture(t)
-		f.SetEnv("OTEL_GO_EXCLUDED_SERVER_PATHS", "/healthz,/readyz")
-		f.SetEnv("OTEL_GO_DROP_ROOT_CLIENT_PRODUCER", "false")
-		f.SetEnv("OTEL_TRACES_SAMPLER", "always_on")
-		f.SetEnv("OTEL_TRACES_SAMPLER_ARG", "")
+		setFilteringEnv(f, "false", "/healthz,/readyz")
 
-		port := testutil.FreePort(t)
-		server := f.Start("httpserverdbclient", fmt.Sprintf("-front-port=%d", port), "-stdin-shutdown")
-		testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", port))
-
-		healthURL := fmt.Sprintf("http://127.0.0.1:%d/healthz", port)
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, healthURL, nil)
-		require.NoError(t, err)
-		resp, err := http.DefaultClient.Do(req)
-		require.NoError(t, err)
-		defer resp.Body.Close()
-		require.Equal(t, http.StatusOK, resp.StatusCode)
-		body, err := io.ReadAll(resp.Body)
-		require.NoError(t, err)
-		require.Equal(t, "ok", string(body), "database query in /healthz must execute successfully")
+		server, baseURL := startHTTPServerDBClient(t, f)
+		body := getHTTP(t, baseURL+"/healthz")
+		require.Equal(t, "ok", body, "database query in /healthz must execute successfully")
 
 		// Graceful shutdown waits for in-flight requests and their instrumentation after-hooks
 		// to complete. Under the configured SimpleSpanProcessor, completed spans are synchronously
@@ -56,22 +70,10 @@ func TestRootFiltering(t *testing.T) {
 
 	t.Run("OrdinaryServerPath_ExportsServerAndDescendant", func(t *testing.T) {
 		f := testutil.NewTestFixture(t)
-		f.SetEnv("OTEL_GO_EXCLUDED_SERVER_PATHS", "/healthz,/readyz")
-		f.SetEnv("OTEL_GO_DROP_ROOT_CLIENT_PRODUCER", "false")
-		f.SetEnv("OTEL_TRACES_SAMPLER", "always_on")
-		f.SetEnv("OTEL_TRACES_SAMPLER_ARG", "")
+		setFilteringEnv(f, "false", "/healthz,/readyz")
 
-		port := testutil.FreePort(t)
-		server := f.Start("httpserverdbclient", fmt.Sprintf("-front-port=%d", port), "-stdin-shutdown")
-		testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", port))
-
-		helloURL := fmt.Sprintf("http://127.0.0.1:%d/hello", port)
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, helloURL, nil)
-		require.NoError(t, err)
-		resp, err := http.DefaultClient.Do(req)
-		require.NoError(t, err)
-		defer resp.Body.Close()
-		require.Equal(t, http.StatusOK, resp.StatusCode)
+		server, baseURL := startHTTPServerDBClient(t, f)
+		getHTTP(t, baseURL+"/hello")
 
 		f.WaitForSpans(2)
 		server.Stop()
@@ -94,32 +96,11 @@ func TestRootFiltering(t *testing.T) {
 
 	t.Run("MixedRequests_OnlyOrdinaryPathExported", func(t *testing.T) {
 		f := testutil.NewTestFixture(t)
-		f.SetEnv("OTEL_GO_EXCLUDED_SERVER_PATHS", "/healthz,/readyz")
-		f.SetEnv("OTEL_GO_DROP_ROOT_CLIENT_PRODUCER", "false")
-		f.SetEnv("OTEL_TRACES_SAMPLER", "always_on")
-		f.SetEnv("OTEL_TRACES_SAMPLER_ARG", "")
+		setFilteringEnv(f, "false", "/healthz,/readyz")
 
-		port := testutil.FreePort(t)
-		server := f.Start("httpserverdbclient", fmt.Sprintf("-front-port=%d", port), "-stdin-shutdown")
-		testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", port))
-
-		// 1. Excluded request
-		healthURL := fmt.Sprintf("http://127.0.0.1:%d/healthz", port)
-		hReq, err := http.NewRequestWithContext(t.Context(), http.MethodGet, healthURL, nil)
-		require.NoError(t, err)
-		hResp, err := http.DefaultClient.Do(hReq)
-		require.NoError(t, err)
-		defer hResp.Body.Close()
-		require.Equal(t, http.StatusOK, hResp.StatusCode)
-
-		// 2. Ordinary request
-		helloURL := fmt.Sprintf("http://127.0.0.1:%d/hello", port)
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, helloURL, nil)
-		require.NoError(t, err)
-		resp, err := http.DefaultClient.Do(req)
-		require.NoError(t, err)
-		defer resp.Body.Close()
-		require.Equal(t, http.StatusOK, resp.StatusCode)
+		server, baseURL := startHTTPServerDBClient(t, f)
+		getHTTP(t, baseURL+"/healthz")
+		getHTTP(t, baseURL+"/hello")
 
 		f.WaitForSpans(2)
 		server.Stop()
@@ -132,10 +113,7 @@ func TestRootFiltering(t *testing.T) {
 
 	t.Run("ParentlessClientSuppressed", func(t *testing.T) {
 		f := testutil.NewTestFixture(t)
-		f.SetEnv("OTEL_GO_DROP_ROOT_CLIENT_PRODUCER", "true")
-		f.SetEnv("OTEL_GO_EXCLUDED_SERVER_PATHS", "")
-		f.SetEnv("OTEL_TRACES_SAMPLER", "always_on")
-		f.SetEnv("OTEL_TRACES_SAMPLER_ARG", "")
+		setFilteringEnv(f, "true", "")
 
 		// Run parentless database ping to process completion.
 		f.Run("dbclient", "-op=ping")
@@ -147,22 +125,10 @@ func TestRootFiltering(t *testing.T) {
 	t.Run("FilteringDisabledBehaviorUnchanged", func(t *testing.T) {
 		t.Run("ServerAndDescendantRecorded", func(t *testing.T) {
 			f := testutil.NewTestFixture(t)
-			f.SetEnv("OTEL_GO_DROP_ROOT_CLIENT_PRODUCER", "")
-			f.SetEnv("OTEL_GO_EXCLUDED_SERVER_PATHS", "")
-			f.SetEnv("OTEL_TRACES_SAMPLER", "always_on")
-			f.SetEnv("OTEL_TRACES_SAMPLER_ARG", "")
+			setFilteringEnv(f, "", "")
 
-			port := testutil.FreePort(t)
-			server := f.Start("httpserverdbclient", fmt.Sprintf("-front-port=%d", port), "-stdin-shutdown")
-			testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", port))
-
-			healthURL := fmt.Sprintf("http://127.0.0.1:%d/healthz", port)
-			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, healthURL, nil)
-			require.NoError(t, err)
-			resp, err := http.DefaultClient.Do(req)
-			require.NoError(t, err)
-			defer resp.Body.Close()
-			require.Equal(t, http.StatusOK, resp.StatusCode)
+			server, baseURL := startHTTPServerDBClient(t, f)
+			getHTTP(t, baseURL+"/healthz")
 
 			f.WaitForSpans(2)
 			server.Stop()
@@ -182,10 +148,7 @@ func TestRootFiltering(t *testing.T) {
 
 		t.Run("ParentlessClientRecorded", func(t *testing.T) {
 			f := testutil.NewTestFixture(t)
-			f.SetEnv("OTEL_GO_DROP_ROOT_CLIENT_PRODUCER", "")
-			f.SetEnv("OTEL_GO_EXCLUDED_SERVER_PATHS", "")
-			f.SetEnv("OTEL_TRACES_SAMPLER", "always_on")
-			f.SetEnv("OTEL_TRACES_SAMPLER_ARG", "")
+			setFilteringEnv(f, "", "")
 
 			f.Run("dbclient", "-op=ping")
 

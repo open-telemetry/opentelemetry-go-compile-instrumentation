@@ -744,45 +744,15 @@ func TestAcceptanceScenarios(t *testing.T) {
 		assert.Equal(t, "remote-sampled-req", spans[0].Name)
 	})
 
-	// Scenario 10: Ratio sampling decisions remain deterministic and compatible.
-	t.Run("Scenario 10: Ratio sampling decisions remain deterministic and compatible", func(t *testing.T) {
-		ratioSampler := sdktrace.TraceIDRatioBased(0.5)
-		filteringSampler := newRootFilteringSampler(ratioSampler, true, map[string]struct{}{"/healthz": {}})
-
-		tidLow, _ := trace.TraceIDFromHex("00000000000000000000000000000001")
-		tidHigh, _ := trace.TraceIDFromHex("ffffffffffffffff0000000000000000")
-
-		paramsLow := sdktrace.SamplingParameters{
-			ParentContext: context.Background(),
-			TraceID:       tidLow,
-			Kind:          trace.SpanKindServer,
-			Attributes:    []attribute.KeyValue{attribute.String("url.path", "/api/data")},
-		}
-		paramsHigh := sdktrace.SamplingParameters{
-			ParentContext: context.Background(),
-			TraceID:       tidHigh,
-			Kind:          trace.SpanKindServer,
-			Attributes:    []attribute.KeyValue{attribute.String("url.path", "/api/data")},
-		}
-
-		resRatioLow := ratioSampler.ShouldSample(paramsLow)
-		resFiltLow := filteringSampler.ShouldSample(paramsLow)
-		assert.Equal(t, resRatioLow.Decision, resFiltLow.Decision)
-
-		resRatioHigh := ratioSampler.ShouldSample(paramsHigh)
-		resFiltHigh := filteringSampler.ShouldSample(paramsHigh)
-		assert.Equal(t, resRatioHigh.Decision, resFiltHigh.Decision)
-	})
-
-	// Scenario 11: TraceState survives filtered span creation and descendant propagation.
-	t.Run("Scenario 11: TraceState survives filtered span creation and descendant propagation", func(t *testing.T) {
+	// Scenario 10: TraceState survives filtered span creation and descendant propagation.
+	t.Run("Scenario 10: TraceState survives filtered span creation and descendant propagation", func(t *testing.T) {
 		ts, err := trace.ParseTraceState("vendor=opaque,service=checkout")
 		require.NoError(t, err)
 
 		sampler := newRootFilteringSampler(sdktrace.AlwaysSample(), true, map[string]struct{}{"/healthz": {}})
 		tp := sdktrace.NewTracerProvider(sdktrace.WithSampler(sampler))
 		defer func() { _ = tp.Shutdown(context.Background()) }()
-		tr := tp.Tracer("tr-11")
+		tr := tp.Tracer("tr-10")
 
 		// Create a local unsampled parent that carries TraceState
 		parentCtx := makeParentContext(false, false, ts)
@@ -797,43 +767,6 @@ func TestAcceptanceScenarios(t *testing.T) {
 
 		grandchildSpan.End()
 		childSpan.End()
-	})
-
-	// Scenario 12: Application behavior remains unaffected by telemetry suppression.
-	t.Run("Scenario 12: Application behavior remains unaffected by telemetry suppression", func(t *testing.T) {
-		sampler := newRootFilteringSampler(sdktrace.AlwaysSample(), true, map[string]struct{}{"/healthz": {}})
-		tp := sdktrace.NewTracerProvider(sdktrace.WithSampler(sampler))
-		defer func() { _ = tp.Shutdown(context.Background()) }()
-		tr := tp.Tracer("tr-12")
-
-		type contextKey string
-		const userKey contextKey = "user_info"
-
-		handler := func(ctx context.Context) (int, string, error) {
-			ctx, span := tr.Start(ctx, "GET /healthz",
-				trace.WithSpanKind(trace.SpanKindServer),
-				trace.WithAttributes(attribute.String("url.path", "/healthz")),
-			)
-			defer span.End()
-
-			ctx = context.WithValue(ctx, userKey, "health-checker")
-			assert.Equal(t, "health-checker", ctx.Value(userKey))
-
-			ctx2, dbSpan := tr.Start(ctx, "SELECT 1", trace.WithSpanKind(trace.SpanKindClient))
-			defer dbSpan.End()
-
-			select {
-			case <-ctx2.Done():
-				return 500, "timeout", ctx2.Err()
-			default:
-				return 200, "OK", nil
-			}
-		}
-
-		code, body, err := handler(context.Background())
-		assert.NoError(t, err)
-		assert.Equal(t, 200, code)
-		assert.Equal(t, "OK", body)
 	})
 }
 

@@ -5,6 +5,7 @@ package testutil
 
 import (
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -143,10 +144,21 @@ func Run(t *testing.T, appsDir, app string, env []string, args ...string) string
 	return string(out)
 }
 
+// hasStdinShutdown reports whether -stdin-shutdown is specified in args.
+func hasStdinShutdown(args []string) bool {
+	for _, arg := range args {
+		if arg == "-stdin-shutdown" {
+			return true
+		}
+	}
+	return false
+}
+
 // Start starts the application but does not wait for it to complete. If env
 // is nil, the parent process env is used. Stdout and stderr are captured and
 // logged when the test fails, so that app crashes are visible in CI output.
-// The returned Server provides graceful shutdown via Stop and log synchronization.
+// The returned Server manages the process lifecycle and provides graceful shutdown via Stop.
+// Note: Cmd.Wait() is managed by Server; tests must not invoke Cmd.Wait() directly.
 func Start(t *testing.T, appsDir, app string, env []string, args ...string) *Server {
 	t.Helper()
 	appName := "./" + appBinName
@@ -161,8 +173,14 @@ func Start(t *testing.T, appsDir, app string, env []string, args ...string) *Ser
 	appDir := filepath.Join(appsDir, app)
 	cmd := newCmd(t.Context(), appDir, env, append([]string{appName}, args...)...)
 
-	stdin, err := cmd.StdinPipe()
-	require.NoError(t, err)
+	// An open stdin pipe is created only when -stdin-shutdown is explicitly requested,
+	// leaving default stdin behavior (EOF) intact for all other test applications.
+	var stdin io.WriteCloser
+	if hasStdinShutdown(args) {
+		var err error
+		stdin, err = cmd.StdinPipe()
+		require.NoError(t, err)
+	}
 
 	out := &AppOutput{}
 	cmd.Stdout = out

@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -74,10 +75,9 @@ func main() {
 
 	if *stdinShutdown {
 		go func() {
-			var buf [1]byte
-			if _, err := os.Stdin.Read(buf[:]); err != nil || buf[0] != 0 {
-				stop()
-			}
+			// Read until stdin is closed (EOF) before requesting shutdown.
+			_, _ = io.Copy(io.Discard, os.Stdin)
+			stop()
 		}()
 	}
 
