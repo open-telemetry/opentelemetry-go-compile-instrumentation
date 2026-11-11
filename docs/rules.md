@@ -64,7 +64,7 @@ A rule file may also declare the minimum `otelc` version required to read it via
 reserved top-level `version` key:
 
 ```yaml
-version: "v1.1.0"
+version: "v1.2.0"
 
 rule_name:
   target: <package import path>
@@ -78,21 +78,14 @@ minimum version declared by those files. Files without a top-level `version` are
 treated as requiring `v1.0.0` and produce a warning.
 
 > [!NOTE]
-> Published instrumentation rule files — including the rules bundled with `otelc`
-> under `instrumentation/` — must not use the top-level `version` key until the
-> first released `otelc` that supports it is part of the supported consumer
-> baseline. Currently supported released `otelc` versions parse every top-level
-> key as a rule and reject a scalar `version` entry. Unversioned rule files
-> remain the compatible baseline.
->
-> For the same reason, published rules must restrict themselves to features the
-> currently supported released `otelc` versions understand. An unversioned file
-> is always processed by those compilers — while it must still parse on them,
-> there is no way to gate it on a newer `otelc` — so a rule relying on newer
-> functionality would fail at rule-processing time rather than at a clean
-> version check. Once a `version`-aware release is part of the supported
-> baseline, rule files that need newer functionality should declare it with the
-> top-level `version` key; files that remain compatible may stay unversioned.
+> `otelc` v1.2.0 is the first release that supports the top-level `version` key.
+> Earlier releases parse every top-level key as a rule and reject a scalar
+> `version` entry, so they cannot read a file that declares it; those releases
+> use the instrumentation rules bundled with them instead. Published
+> instrumentation rule files — including the rules bundled with `otelc` under
+> `instrumentation/` — declare `version: "v1.2.0"`. A rule file that relies on
+> functionality added in a later `otelc` release should declare that release as
+> its minimum version.
 
 ### Top-level fields
 

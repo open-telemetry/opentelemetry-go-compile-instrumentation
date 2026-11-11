@@ -98,10 +98,8 @@ version: "v1.1.0"
 }
 
 func TestParseLegacyFilePreservesRules(t *testing.T) {
-	// Published instrumentation rule files must not carry the reserved
-	// top-level "version" key until a released otelc supports it. An
-	// unversioned file is the legacy baseline: it parses to LegacyVersion and
-	// its entries are returned unchanged.
+	// An unversioned file is the legacy baseline: it parses to LegacyVersion
+	// and its entries are returned unchanged.
 	doc, err := ParseFile([]byte(`server_hook:
   target: net/http
   where:

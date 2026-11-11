@@ -121,11 +121,11 @@ Rule files are discovered in the **package directory** (not the module root), an
 skips any subdirectory that contains its own `go.mod` — so sub-modules are not accidentally
 included. The rule schema is documented in [Instrumentation Rules](rules.md).
 
-A rule file may declare its minimum required `otelc` version with the reserved
+Each rule file should declare its minimum required `otelc` version with the reserved
 top-level `version` key:
 
 ```yaml
-version: "v1.1.0"
+version: "v1.2.0"
 
 my_rule:
   target: example.com/package
@@ -138,10 +138,9 @@ files supplied through `--rules` self-contained. An unversioned file is treated 
 requiring `v1.0.0` and produces a warning.
 
 > [!NOTE]
-> Do not set the top-level `version` key in published instrumentation packages yet.
-> Currently supported released `otelc` versions parse every top-level key as a rule
-> and fail on a scalar `version` entry. The key may be adopted once a released
-> `otelc` supporting it is part of the supported consumer baseline.
+> `otelc` v1.2.0 is the first release that supports the top-level `version` key, so
+> `v1.2.0` is the lowest meaningful value. Earlier releases parse every top-level key
+> as a rule and fail on a scalar `version` entry.
 
 ## Discovery and Resolution Protocol
 

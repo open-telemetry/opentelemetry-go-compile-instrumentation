@@ -1388,12 +1388,11 @@ func TestParseRuleFile(t *testing.T) {
 	})
 }
 
-func TestPublishedRuleFilesCompatibleWithReleasedOtelc(t *testing.T) {
-	// Released otelc versions (v1.0.1, v1.1.0) parse rule files by
-	// unmarshalling the whole document into map[string]map[string]any, so a
-	// scalar top-level key such as the file-level "version" metadata breaks
-	// them. Published instrumentation rule files must therefore stay on the
-	// legacy format until a released otelc understands that metadata.
+func TestPublishedRuleFilesDeclareMinimumOtelcVersion(t *testing.T) {
+	// otelc v1.2.0 is the first release that parses the top-level "version"
+	// key. Older releases ship their own bundled instrumentation, so every
+	// published rule file declares v1.2.0 as its minimum otelc version.
+	const minimumVersion = "v1.2.0"
 	instRoot := filepath.Join("..", "..", "..", "instrumentation")
 
 	var ruleFiles []string
@@ -1413,14 +1412,12 @@ func TestPublishedRuleFilesCompatibleWithReleasedOtelc(t *testing.T) {
 		data, readErr := os.ReadFile(path)
 		require.NoError(t, readErr)
 
-		var legacyRules map[string]map[string]any
-		require.NoError(t, yaml.Unmarshal(data, &legacyRules),
-			"published rule file %s must be readable by released otelc parsers", path)
-
 		doc, parseErr := rule.ParseFile(data)
 		require.NoError(t, parseErr, path)
-		assert.True(t, doc.Legacy,
-			"published rule file %s must not declare a minimum otelc version", path)
+		assert.False(t, doc.Legacy,
+			"published rule file %s must declare a minimum otelc version", path)
+		assert.Equal(t, minimumVersion, doc.MinimumVersion,
+			"published rule file %s must declare version %q", path, minimumVersion)
 	}
 }
 
