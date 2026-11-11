@@ -42,6 +42,17 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("frontend querying database"))
 	})
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		rows, err := db.QueryContext(r.Context(), "SELECT 1")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
 
 	server := &http.Server{
 		Addr:    fmt.Sprintf(":%d", *frontPort),
