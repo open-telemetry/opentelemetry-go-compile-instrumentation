@@ -330,12 +330,15 @@ func TestOnDelete_TombstoneForwardsWrappedObject(t *testing.T) {
 // stubObjectKinds wraps a real ObjectKinds implementation with a call
 // counter, so tests can assert the underlying registry scan actually ran
 // (or didn't run again), not just that the returned values look right.
-func stubObjectKinds(t *testing.T, real func(runtime.Object) ([]schema.GroupVersionKind, bool, error)) (stub func(runtime.Object) ([]schema.GroupVersionKind, bool, error), calls *int) {
+func stubObjectKinds(
+	t *testing.T,
+	delegate func(runtime.Object) ([]schema.GroupVersionKind, bool, error),
+) (func(runtime.Object) ([]schema.GroupVersionKind, bool, error), *int) {
 	t.Helper()
 	n := 0
 	return func(obj runtime.Object) ([]schema.GroupVersionKind, bool, error) {
 		n++
-		return real(obj)
+		return delegate(obj)
 	}, &n
 }
 
@@ -432,7 +435,12 @@ func TestLookupGVK_UnstructuredObjectsDoNotCollide(t *testing.T) {
 	assert.Equal(t, "Widget", widgetResult.kind)
 	assert.Equal(t, "Gadget", gadgetResult.kind)
 	assert.Equal(t, widgetResult, widgetAgain, "repeated lookups on the same object must agree")
-	assert.NotEqual(t, widgetResult, gadgetResult, "two different CRDs sharing the unstructured.Unstructured Go type must not collide")
+	assert.NotEqual(
+		t,
+		widgetResult,
+		gadgetResult,
+		"two different CRDs sharing the unstructured.Unstructured Go type must not collide",
+	)
 }
 
 // TestLookupGVK_UnstructuredEmptyGVK covers an unstructured object with no
