@@ -25,14 +25,31 @@ import (
 //		raw: "println(\"Hello, World!\")"
 //		pattern: "^name := getName\\(\\)$"
 //		placement: before|after
+//
+// Optional signature sub-filters narrow matching beyond name and receiver,
+// using the same fields and semantics as InstFuncRule:
+//
+//	signature:
+//	  args: [context.Context, string]
+//	  returns: [error]
+//	signature_contains:
+//	  args: [context.Context]
+//	result: error
+//	last_result: error
+//	param: context.Context
 type InstRawRule struct {
 	InstBaseRule `yaml:",inline"`
 
-	Func      string `json:"func"                yaml:"func"`
-	Recv      string `json:"recv"                yaml:"recv"`
-	Raw       string `json:"raw"                 yaml:"raw"`
-	Pattern   string `json:"pattern,omitempty"   yaml:"pattern,omitempty"`
-	Placement string `json:"placement,omitempty" yaml:"placement,omitempty"`
+	Func              string         `json:"func"                         yaml:"func"`
+	Recv              string         `json:"recv"                         yaml:"recv"`
+	Raw               string         `json:"raw"                          yaml:"raw"`
+	Pattern           string         `json:"pattern,omitempty"            yaml:"pattern,omitempty"`
+	Placement         string         `json:"placement,omitempty"          yaml:"placement,omitempty"`
+	Signature         *FuncSignature `json:"signature,omitempty"          yaml:"signature"`
+	SignatureContains *FuncSignature `json:"signature_contains,omitempty" yaml:"signature_contains"`
+	Result            string         `json:"result,omitempty"             yaml:"result"`
+	LastResult        string         `json:"last_result,omitempty"        yaml:"last_result"`
+	Param             string         `json:"param,omitempty"              yaml:"param"`
 }
 
 // NewInstRawRule loads and validates an InstRawRule from YAML data.
