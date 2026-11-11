@@ -257,6 +257,12 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 	return ip.compileArgs, nil
 }
 
+// resolveCompileExportFiles resolves an import a rule added to a compile. It
+// is a variable so tests can count and fake the nested go list.
+//
+//nolint:gochecknoglobals // test seam
+var resolveCompileExportFiles = pkgload.ResolveExportFiles
+
 // updateImportConfig updates the importcfg file with new imports that were added during instrumentation.
 func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports map[string]string) error {
 	if ip.importConfigPath == "" {
@@ -273,6 +279,23 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 	if pgoErr != nil {
 		return pgoErr
 	}
+	// Resolve package archive location, passing build flags to match the current build context
+	buildFlags := append(util.GetBuildFlags(), pgoFlags...)
+	memo := session.Open(buildFlags)
+	var candidates, memoHits, goListCalls int
+	start := time.Now()
+	defer func() {
+		if candidates == 0 || os.Getenv(util.EnvOtelcStats) == "" {
+			return
+		}
+		ip.Info("rule-added import resolution",
+			"phase", "compile",
+			"candidates", candidates,
+			"memo_hits", memoHits,
+			"go_list_calls", goListCalls,
+			"duration", time.Since(start),
+		)
+	}()
 	var updated bool
 	for _, importPath := range newImports {
 		if importPath == unsafePackageName || importPath == "C" {
@@ -284,17 +307,27 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 			// Already have this import
 			continue
 		}
+		candidates++
 
-		restore, err := ip.enterNestedResolution(importPath)
-		if err != nil {
-			return err
-		}
-		// Resolve package archive location, passing build flags to match the current build context
-		buildFlags := append(util.GetBuildFlags(), pgoFlags...)
-		archives, err := pkgload.ResolveExportFiles(ctx, importPath, buildFlags...)
-		restore()
-		if err != nil {
-			return ex.Wrapf(err, "resolving %q", importPath)
+		// A memo entry exists only after a resolution of this import
+		// succeeded, so skipping the chain check on a hit cannot hide a
+		// cycle. No single-flight lock here: this compile may run under a
+		// link that holds it.
+		archives, _, hit := memo.Lookup(importPath, ip.importConfig.PackageFile)
+		if hit && archives != nil {
+			memoHits++
+		} else {
+			restore, err := ip.enterNestedResolution(importPath)
+			if err != nil {
+				return err
+			}
+			goListCalls++
+			archives, err = resolveCompileExportFiles(ctx, importPath, buildFlags...)
+			restore()
+			if err != nil {
+				return ex.Wrapf(err, "resolving %q", importPath)
+			}
+			memo.Store(importPath, archives, nil)
 		}
 
 		for pkg, archive := range archives {

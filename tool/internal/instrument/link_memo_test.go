@@ -6,6 +6,7 @@ package instrument
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -154,4 +155,40 @@ func TestLinkResolutionWithoutSessionResolvesEveryLink(t *testing.T) {
 		require.NoError(t, err)
 	}
 	assert.Equal(t, 2, resolver.calls)
+}
+
+func TestCompileResolutionReusesMemo(t *testing.T) {
+	setupLinkMemo(t)
+	archiveDir := t.TempDir()
+	calls := 0
+	prev := resolveCompileExportFiles
+	resolveCompileExportFiles = func(_ context.Context, importPath string, _ ...string) (map[string]string, error) {
+		calls++
+		archive := filepath.Join(archiveDir, "extra.a")
+		if err := os.WriteFile(archive, []byte(importPath), 0o644); err != nil {
+			return nil, err
+		}
+		return map[string]string{importPath: archive}, nil
+	}
+	t.Cleanup(func() { resolveCompileExportFiles = prev })
+
+	compile := func() string {
+		cfgPath := filepath.Join(t.TempDir(), "importcfg")
+		require.NoError(t, os.WriteFile(cfgPath, []byte("packagefile context=/unused/context.a\n"), 0o644))
+		ip := &instrumentPhase{
+			logger:           slog.Default(),
+			importConfigPath: cfgPath,
+			importConfig:     imports.ImportConfig{PackageFile: map[string]string{"context": "/unused/context.a"}},
+		}
+		require.NoError(t, ip.updateImportConfig(t.Context(), map[string]string{"extra": "example.com/extra"}))
+		content, err := os.ReadFile(cfgPath)
+		require.NoError(t, err)
+		return string(content)
+	}
+
+	first := compile()
+	second := compile()
+	assert.Equal(t, 1, calls, "the second compile must read the memo instead of running go list")
+	assert.Equal(t, first, second)
+	assert.Contains(t, second, "packagefile example.com/extra=")
 }
