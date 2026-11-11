@@ -30,6 +30,7 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/imports"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/internal/session"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -634,10 +635,32 @@ func interceptLink(ctx context.Context, args []string) ([]string, error) {
 	return args, nil
 }
 
+// resolveExportClosures resolves rule-added imports for the link. It is a
+// variable so tests can count and fake the nested go list.
+//
+//nolint:gochecknoglobals // test seam
+var resolveExportClosures = pkgload.ResolveExportClosures
+
+// linkResolution carries the state of one link's rule-added import recovery
+// across its passes.
+type linkResolution struct {
+	memo       *session.Memo
+	buildFlags []string
+	// failed holds the candidates already found unresolvable during this
+	// link, so later passes never list them again.
+	failed map[string]bool
+	// Counters for the OTELC_STATS line.
+	candidates  int
+	memoHits    int
+	goListCalls int
+}
+
 // resolveRuleAddedImports completes the link importcfg with the imports that
 // instrumentation rules can add, resolved the same way the compile phase
 // resolves them: a nested go list -export that shares the build cache keys.
-// It reports whether the import config changed.
+// Resolved closures go to the session's export memo, so another link of the
+// same session that needs the same imports reads them instead of running go
+// list again. It reports whether the import config changed.
 func resolveRuleAddedImports(ctx context.Context, linkArgs []string, linkConfig *imports.ImportConfig) (bool, error) {
 	pgoFlags, err := pgoBuildFlagsFor(linkArgs)
 	if err != nil {
@@ -645,6 +668,25 @@ func resolveRuleAddedImports(ctx context.Context, linkArgs []string, linkConfig 
 	}
 	buildFlags := append(util.GetBuildFlags(), pgoFlags...)
 	ruleImports := parseLinkRuleImports(ctx, linkArgs)
+	lr := &linkResolution{
+		memo:       session.Open(buildFlags),
+		buildFlags: buildFlags,
+		failed:     make(map[string]bool),
+	}
+	start := time.Now()
+	defer func() {
+		if os.Getenv(util.EnvOtelcStats) == "" {
+			return
+		}
+		util.LoggerFromContext(ctx).InfoContext(ctx, "rule-added import resolution",
+			"phase", "link",
+			"candidates", lr.candidates,
+			"memo_hits", lr.memoHits,
+			"go_list_calls", lr.goListCalls,
+			"failed", len(lr.failed),
+			"duration", time.Since(start),
+		)
+	}()
 	var updated bool
 	// One pass sees only the rule sets whose targets the importcfg lists
 	// already. A pass that adds a package makes another set reachable: an
@@ -658,7 +700,7 @@ func resolveRuleAddedImports(ctx context.Context, linkArgs []string, linkConfig 
 	// the chains the compile accepted, so a link that still exhausts the
 	// loop follows a chain no compile accepted.
 	for range maxResolutionChain + 1 {
-		pass, passErr := resolveRuleAddedImportsPass(ctx, ruleImports, buildFlags, linkConfig)
+		pass, passErr := lr.pass(ctx, ruleImports, linkConfig)
 		if passErr != nil {
 			return updated, passErr
 		}
@@ -673,15 +715,13 @@ func resolveRuleAddedImports(ctx context.Context, linkArgs []string, linkConfig 
 	)
 }
 
-// resolveRuleAddedImportsPass resolves one round of rule-added imports the
-// link importcfg does not list yet and reports whether it added any.
-// ruleImports holds the candidates parsed once per link, so a pass pays
-// only the missing-check and the nested load, never the matched.json read
-// and the add_file source parses again.
-func resolveRuleAddedImportsPass(
+// pass resolves one round of rule-added imports the link importcfg does not
+// list yet and reports whether it added any. ruleImports holds the candidates
+// parsed once per link, so a pass pays only the missing-check, the memo
+// lookups and, for what the memo lacks, one nested load.
+func (lr *linkResolution) pass(
 	ctx context.Context,
 	ruleImports *linkRuleImports,
-	buildFlags []string,
 	linkConfig *imports.ImportConfig,
 ) (bool, error) {
 	candidates := ruleImports.candidates(linkConfig)
@@ -689,27 +729,33 @@ func resolveRuleAddedImportsPass(
 		return false, nil
 	}
 
-	logger := util.LoggerFromContext(ctx)
 	missing := make([]string, 0, len(candidates))
 	for path := range candidates {
 		if path == unsafePackageName || path == "C" {
 			// unsafe is built-in, C is the cgo pseudo-package; neither has an archive file
 			continue
 		}
-		if _, exists := linkConfig.PackageFile[path]; !exists {
+		if _, exists := linkConfig.PackageFile[path]; !exists && !lr.failed[path] {
 			missing = append(missing, path)
 		}
 	}
 	if len(missing) == 0 {
 		return false, nil
 	}
+	lr.candidates += len(missing)
 	// Sorting keeps the go list output and the importcfg edits stable.
 	slices.Sort(missing)
 
-	archives, failed, err := pkgload.ResolveExportFilesBatch(ctx, missing, buildFlags...)
-	if err != nil {
-		return false, err
+	closures := make(map[string]map[string]string, len(missing))
+	failed := make(map[string]error)
+	misses := lr.lookup(missing, linkConfig, closures, failed)
+	if len(misses) > 0 {
+		if err := lr.resolveMisses(ctx, misses, linkConfig, closures, failed); err != nil {
+			return false, err
+		}
 	}
+
+	logger := util.LoggerFromContext(ctx)
 	for path, loadErr := range failed {
 		// A candidate the rules declare but that this build never compiles can
 		// be unresolvable, for example a hook package that only builds on
@@ -717,18 +763,91 @@ func resolveRuleAddedImportsPass(
 		// the import was genuinely needed.
 		logger.WarnContext(ctx, "skipping unresolvable rule-added import for the link",
 			"import", path, "error", loadErr)
+		lr.failed[path] = true
 	}
 
 	var updated bool
-	for pkg, archive := range archives {
-		if _, exists := linkConfig.PackageFile[pkg]; exists {
-			continue
+	for _, root := range missing {
+		for pkg, archive := range closures[root] {
+			if _, exists := linkConfig.PackageFile[pkg]; exists {
+				continue
+			}
+			logger.DebugContext(ctx, "Adding rule-added package to link importcfg", "package", pkg, "archive", archive)
+			linkConfig.PackageFile[pkg] = archive
+			updated = true
 		}
-		logger.DebugContext(ctx, "Adding rule-added package to link importcfg", "package", pkg, "archive", archive)
-		linkConfig.PackageFile[pkg] = archive
-		updated = true
 	}
 	return updated, nil
+}
+
+// lookup fills closures and failed from the memo and returns the roots the
+// memo cannot answer.
+func (lr *linkResolution) lookup(
+	roots []string,
+	linkConfig *imports.ImportConfig,
+	closures map[string]map[string]string,
+	failed map[string]error,
+) []string {
+	var misses []string
+	for _, root := range roots {
+		closure, failure, ok := lr.memo.Lookup(root, linkConfig.PackageFile)
+		switch {
+		case !ok:
+			misses = append(misses, root)
+			continue
+		case failure != "":
+			failed[root] = errors.New(failure)
+		default:
+			closures[root] = closure
+		}
+		lr.memoHits++
+	}
+	return misses
+}
+
+// resolveMisses resolves the roots the memo could not answer with one nested
+// go list, under the memo's single-flight lock so concurrent links of the
+// session resolve each root once, and stores the results.
+func (lr *linkResolution) resolveMisses(
+	ctx context.Context,
+	misses []string,
+	linkConfig *imports.ImportConfig,
+	closures map[string]map[string]string,
+	failed map[string]error,
+) error {
+	release, err := lr.memo.Lock(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	// Another link may have resolved them while this one waited.
+	misses = lr.lookup(misses, linkConfig, closures, failed)
+	if len(misses) == 0 {
+		return nil
+	}
+	var resolved map[string]map[string]string
+	var resolveFailed map[string]error
+	err = session.WithLoadSlot(ctx, func(ctx context.Context) error {
+		var loadErr error
+		resolved, resolveFailed, loadErr = resolveExportClosures(ctx, misses, lr.buildFlags...)
+		return loadErr
+	})
+	lr.goListCalls++
+	if err != nil {
+		return err
+	}
+	for _, root := range misses {
+		if loadErr, bad := resolveFailed[root]; bad {
+			failed[root] = loadErr
+			lr.memo.Store(root, nil, loadErr)
+			continue
+		}
+		if closure, ok := resolved[root]; ok {
+			closures[root] = closure
+			lr.memo.Store(root, closure, nil)
+		}
+	}
+	return nil
 }
 
 // linkRuleImports holds the rule-added import candidates of one link,
@@ -1072,17 +1191,24 @@ func toolVersionLine(line, rulesHash string) string {
 // reports in its place: the version with an otelc marker, plus the current
 // matched-rules hash when one exists.
 func markedToolVersion(rawOutput string) string {
-	var rulesHash string
-	if content, err := os.ReadFile(util.GetMatchedRuleFile()); err == nil {
-		// Build tags decide which add_file rule files apply, so a tagged build
-		// must not reuse artifacts compiled without those tags.
-		if tags := util.ActiveBuildTags(); len(tags) > 0 {
-			content = append(content, "\ntags="+strings.Join(tags, ",")...)
-		}
-		sum := sha256.Sum256(content)
-		rulesHash = hex.EncodeToString(sum[:8])
+	return toolVersionLine(strings.TrimSpace(rawOutput), RulesDigest())
+}
+
+// RulesDigest returns a short hash of the matched rules setup stored plus the
+// active build tags, or "" when no matched rules exist. It feeds the tool ID
+// otelc reports and the export memo's resolution scope.
+func RulesDigest() string {
+	content, err := os.ReadFile(util.GetMatchedRuleFile())
+	if err != nil {
+		return ""
 	}
-	return toolVersionLine(strings.TrimSpace(rawOutput), rulesHash)
+	// Build tags decide which add_file rule files apply, so a tagged build
+	// must not reuse artifacts compiled without those tags.
+	if tags := util.ActiveBuildTags(); len(tags) > 0 {
+		content = append(content, "\ntags="+strings.Join(tags, ",")...)
+	}
+	sum := sha256.Sum256(content)
+	return hex.EncodeToString(sum[:8])
 }
 
 // interceptToolVersion handles the `tool -V=full` probe go uses to compute
