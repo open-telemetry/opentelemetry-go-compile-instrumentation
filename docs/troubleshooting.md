@@ -258,10 +258,10 @@ Without `--debug`, Go removes the directory as usual.
 
 ## Common Errors
 
-### `no command provided. Only 'go build', 'go install' and 'go test' are supported`
+### `no command provided. Only 'go build', 'go install', 'go run' and 'go test' are supported`
 
 `otelc go` was called without a subcommand, or with a subcommand other than `build`,
-`install`, or `test`. Only these three are supported.
+`install`, `run`, or `test`. Only these four are supported.
 
 ### `rule %q has no recognised selector`
 

@@ -39,6 +39,14 @@ No manual code changes required.
    go tool otelc go build -o myapp .
    ```
 
+   `otelc go install`, `otelc go run` and `otelc go test` work the same way. With
+   `otelc go run`, the arguments after the package go to the program, as with
+   `go run`, and `go.mod` is restored after the program exits:
+
+   ```bash
+   ./otelc go run . -addr :8080
+   ```
+
 ## Using `go build` Directly (toolexec drop-in)
 
 Instead of wrapping the build with `otelc go build`, you can keep using the

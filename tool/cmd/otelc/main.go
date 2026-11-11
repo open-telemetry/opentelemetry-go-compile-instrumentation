@@ -125,7 +125,7 @@ func main() {
 
 	err := app.Run(ctx, os.Args)
 	if err = reportedErr(err, deadlineCause); err != nil {
-		ex.Fatal(err)
+		exit(err)
 	}
 }
 
@@ -138,6 +138,16 @@ func reportedErr(runErr, deadlineCause error) error {
 		return deadlineCause
 	}
 	return runErr
+}
+
+// exit ends otelc after a failed command. When `otelc go run` fails, the go
+// command has already reported why, so otelc exits with its status and prints
+// nothing more, as go run does.
+func exit(err error) {
+	if exitErr, ok := errors.AsType[*setup.ExitCodeError](err); ok {
+		os.Exit(exitErr.Code)
+	}
+	ex.Fatal(err)
 }
 
 // initRoot prepares the process before any subcommand runs.
