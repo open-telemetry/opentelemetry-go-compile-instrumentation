@@ -782,3 +782,33 @@ func TestResolveExportFilesBatch_NoPackages(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no packages found")
 }
+
+func TestResolveExportClosures_PerRootClosures(t *testing.T) {
+	writeBatchFixture(t)
+
+	closures, failed, err := ResolveExportClosures(t.Context(),
+		[]string{"example.com/batch/a", "example.com/batch/c", "example.invalid/nonexistent"})
+
+	require.NoError(t, err)
+	require.Contains(t, failed, "example.invalid/nonexistent")
+	assert.NotContains(t, closures, "example.invalid/nonexistent")
+	require.Contains(t, closures, "example.com/batch/a")
+	require.Contains(t, closures, "example.com/batch/c")
+	// Each root carries its own closure: a's closure holds a and b, not c.
+	assert.Contains(t, closures["example.com/batch/a"], "example.com/batch/a")
+	assert.Contains(t, closures["example.com/batch/a"], "example.com/batch/b")
+	assert.NotContains(t, closures["example.com/batch/a"], "example.com/batch/c")
+	assert.Contains(t, closures["example.com/batch/c"], "example.com/batch/c")
+	assert.NotContains(t, closures["example.com/batch/c"], "example.com/batch/a")
+
+	union, _, err := ResolveExportFilesBatch(t.Context(),
+		[]string{"example.com/batch/a", "example.com/batch/c"})
+	require.NoError(t, err)
+	merged := map[string]string{}
+	for _, root := range []string{"example.com/batch/a", "example.com/batch/c"} {
+		for k, v := range closures[root] {
+			merged[k] = v
+		}
+	}
+	assert.Equal(t, union, merged)
+}
