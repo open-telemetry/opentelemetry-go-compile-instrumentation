@@ -504,6 +504,8 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	if cmd.Name == "go" {
 		subcommand = cmd.Args().First() // build / install / test
 		args = cmd.Args().Tail()        // trim the subcommand
+	} else if err := cleanupOwnedSession(); err != nil {
+		return ex.Wrapf(err, "cleaning the session directory")
 	} else if err := cleanupDebugArtifacts(); err != nil {
 		// Clean up debug artifacts from previous runs for standalone `otelc setup`,
 		// as it prepares the environment for a subsequent toolexec build.
@@ -616,7 +618,10 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	if err = sp.store(matched); err != nil {
 		return err
 	}
-	return sp.storeInjectedHash(ctx, matched)
+	if err = sp.storeInjectedHash(ctx, matched); err != nil {
+		return err
+	}
+	return writeResolutionScope(moduleDirs)
 }
 
 // warnIfNoInstrumentationMatched reports the combined result. An individual
@@ -958,6 +963,7 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 	// Tell otelc invocations started under the go command (for example from
 	// a test) which build locks and work dir this invocation holds.
 	env = append(env, nestedBuildEnv(ctx)...)
+	env = sessionEnv(env)
 
 	// Extract and forward build flags that affect the build context
 	// This ensures `go list` resolves archives matching the current build
@@ -1016,6 +1022,9 @@ func runGoBuild(ctx context.Context, cmd *cli.Command) error {
 	// Clean up import tracking files from previous builds at the start
 	// to prevent stale data from affecting this build.
 	instrument.CleanupImportTrackingFiles()
+	if err := cleanupOwnedSession(); err != nil {
+		return ex.Wrapf(err, "cleaning the session directory")
+	}
 	if err := cleanupDebugArtifacts(); err != nil {
 		return ex.Wrapf(err, "cleaning debug artifacts")
 	}
