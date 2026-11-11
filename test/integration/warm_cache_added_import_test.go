@@ -333,15 +333,18 @@ package main
 import (
 	"os"
 	"runtime/pprof"
+	"time"
 
 	"example.com/warmcache/extra"
 )
 
 // main records a CPU profile in which extra.Note is the dominant cost. The
 // loop does no allocation and no timing calls, so the samples land on Note
-// instead of on the runtime. The count is the smallest that keeps Note
-// dominant: profiling samples at 100 Hz, and at 3e7 iterations and below
-// the samples thin out until the top node flips between Note and the loop.
+// instead of on the runtime. It runs for a fixed duration rather than a
+// fixed iteration count: profiling samples at 100 Hz, and a count tuned
+// against one machine's CPU speed collects fewer samples, and can thin out
+// until the top node flips between Note and the loop, on a faster one. Three
+// seconds holds a comfortable sample count on any machine this test runs on.
 func main() {
 	f, err := os.Create(os.Args[1])
 	if err != nil {
@@ -350,8 +353,11 @@ func main() {
 	if err := pprof.StartCPUProfile(f); err != nil {
 		panic(err)
 	}
-	for i := 0; i < 100000000; i++ {
-		_ = extra.Note()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		for i := 0; i < 1000000; i++ {
+			_ = extra.Note()
+		}
 	}
 	pprof.StopCPUProfile()
 	if err := f.Close(); err != nil {
