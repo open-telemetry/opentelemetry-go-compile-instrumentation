@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -125,10 +126,12 @@ func listBuildPlan(ctx context.Context, subcommand string, cmdArgs []string) ([]
 	logger.InfoContext(ctx, "go build command", "args", args)
 
 	cmd := execCommandContext(ctx, "go", args...)
-	// This is a little anti-intuitive as the error message is not printed to
-	// the stderr, instead it is printed to the stdout, only the build tool
-	// knows the reason why.
-	cmd.Stdout = os.Stdout
+	// The plan is on stderr. Stdout is kept out of the user's output: go test
+	// writes a "[no test files]" line there for each package without tests,
+	// and the real run writes it again. Some failures, such as a test setup
+	// failure, are reported on stdout, so it is kept for the error.
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
 	cmd.Stderr = buildPlanLog
 	// @@Note that dir should not be set, as the dry build should be run in the
 	// same directory as the original build command
@@ -137,7 +140,7 @@ func listBuildPlan(ctx context.Context, subcommand string, cmdArgs []string) ([]
 	if err != nil {
 		// Read the build plan log to see what went wrong
 		logContent, _ := os.ReadFile(util.GetBuildTemp(buildPlanLogName))
-		return nil, ex.Wrapf(err, "failed to run build plan: \n%s", string(logContent))
+		return nil, ex.Wrapf(err, "failed to run build plan: \n%s%s", string(logContent), stdout.String())
 	}
 
 	// Find compile commands from build plan log

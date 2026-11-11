@@ -16,7 +16,7 @@ endif
         build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
         lint/action lint/makefile lint/license-header lint/license-header/fix lint/dockerfile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
         ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed check-api-sync check-golden-files check-test-file-naming \
-        test-unit/update-golden test-unit/tool test-unit/pkg test-unit/instrumentation test-unit/demo test-unit/helper \
+        test-unit/update-golden test-unit/race test-unit/tool test-unit/pkg test-unit/instrumentation test-unit/demo test-unit/helper \
         test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage test-unit/instrumentation/coverage \
         check-coverage test-integration/coverage test-e2e/coverage test-latestlibrun test-versionmatrix \
         weaver-install tidy/test-apps \
@@ -38,6 +38,8 @@ GO_VERSION = 1.26
 INTEGRATION_TEST_RUN ?= .
 TOOL_COVERAGE_THRESHOLD ?= 68
 PKG_COVERAGE_THRESHOLD ?= 70
+RACE ?= 0
+RACE_FLAG := $(if $(filter 1 true,$(RACE)),-race,)
 
 # Modules/apps scanned by govulncheck for known Go CVEs (tool version pinned in
 # .tools/go.mod, Renovate-managed like every other .tools binary).
@@ -99,7 +101,7 @@ $(BUNDLE): $(wildcard $(TOOLS_DIR)/bundle/*.go) $(TOOLS_DIR)/bundle/go.mod | $(T
 	cd $(TOOLS_DIR)/bundle && GOWORK=off go build -o $@
 
 EMBEDMD = $(TOOLS)/embedmd
-$(EMBEDMD): PACKAGE=github.com/campoy/embedmd
+$(EMBEDMD): PACKAGE=github.com/campoy/embedmd/v2
 
 CHECKMAKE = $(TOOLS)/checkmake
 $(CHECKMAKE): PACKAGE=github.com/checkmake/checkmake/cmd/checkmake
@@ -214,9 +216,12 @@ package: ## Package the instrumentation code into binary
 		exit 1; \
 	fi
 	@trap 'rm -rf $(INST_BUNDLE_PKG_TMP) $(INST_BUNDLE_INST_TMP)' EXIT
-	@cp -r pkg $(INST_BUNDLE_PKG_TMP)
+	@mkdir -p $(INST_BUNDLE_PKG_TMP)
+	@cp -r pkg/runtime $(INST_BUNDLE_PKG_TMP)/runtime
+	@cp -r pkg/netutil $(INST_BUNDLE_PKG_TMP)/netutil
 	@cp -r instrumentation $(INST_BUNDLE_INST_TMP)
-	@(cd $(INST_BUNDLE_PKG_TMP) && go mod tidy)
+	@(cd $(INST_BUNDLE_PKG_TMP)/runtime && go mod tidy)
+	@(cd $(INST_BUNDLE_PKG_TMP)/netutil && go mod tidy)
 	@(cd $(INST_BUNDLE_INST_TMP) && go mod tidy)
 	@mkdir -p tool/data/
 	@$(MAKE) $(BUNDLE)
@@ -555,6 +560,9 @@ test-bundle-workflows: ## Test the bundle repair tool and check the repair workf
 
 test-unit: test-unit/tool test-unit/pkg test-unit/instrumentation test-unit/demo test-unit/helper ## Run all unit tests (tool + pkg + demo + test helpers)
 
+test-unit/race: ## Run all unit tests with the Go race detector enabled
+	$(MAKE) test-unit RACE=1
+
 .ONESHELL:
 test-unit/update-golden: ## Run unit tests and update golden files
 test-unit/update-golden: package
@@ -569,7 +577,7 @@ test-unit/update-golden: package
 test-unit/tool: build package $(GOTESTFMT) ## Run unit tests for tool modules only
 	@echo "Running tool unit tests..."
 	set -euo pipefail
-	go test -json -v -shuffle=on -timeout=5m -count=1 ./tool/... 2>&1 | tee ./gotest-unit-tool.log
+	go test $(RACE_FLAG) -json -v -shuffle=on -timeout=5m -count=1 ./tool/... 2>&1 | tee ./gotest-unit-tool.log
 
 .ONESHELL:
 test-unit/pkg: package ## Run unit tests for pkg modules only
@@ -584,7 +592,7 @@ test-unit/pkg: package ## Run unit tests for pkg modules only
     	fi; \
 		echo "Testing $$moddir..."; \
 		(cd "$$moddir" && go mod tidy); \
-		go test -C "$$moddir" -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee -a ./gotest-unit-pkg.log; \
+		go test -C "$$moddir" $(RACE_FLAG) -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee -a ./gotest-unit-pkg.log; \
 	done
 
 # Notes on test-unit/instrumentation implementation:
@@ -609,20 +617,20 @@ test-unit/instrumentation: package ## Run unit tests for instrumentation modules
 		fi; \
 		echo "Testing $$moddir..."; \
 		(cd "$$moddir" && go mod tidy); \
-		go test -C "$$moddir" -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee -a ./gotest-unit-instrumentation.log; \
+		go test -C "$$moddir" $(RACE_FLAG) -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee -a ./gotest-unit-instrumentation.log; \
 	done
 	# database/sql: root package references otelc-injected fields on database/sql
 	# types and cannot be built uninstrumented. dsnparse/semconv do not.
 	echo "Testing instrumentation/database/sql (dsnparse, semconv)..."
 	(cd instrumentation/database/sql && go mod tidy)
-	go test -C instrumentation/database/sql -v -shuffle=on -timeout=5m -count=1 ./dsnparse/... ./semconv/... 2>&1 | tee -a ./gotest-unit-instrumentation.log
+	go test -C instrumentation/database/sql $(RACE_FLAG) -v -shuffle=on -timeout=5m -count=1 ./dsnparse/... ./semconv/... 2>&1 | tee -a ./gotest-unit-instrumentation.log
 
 .ONESHELL:
 test-unit/helper: ## Run unit tests for test helper packages
 	@echo "Running test helper unit tests..."
 	set -euo pipefail
 	rm -f ./gotest-unit-helper.log
-	go test -C "test" -v -shuffle=on -timeout=5m -count=1 ./testutil/... 2>&1 | tee ./gotest-unit-helper.log
+	go test -C "test" $(RACE_FLAG) -v -shuffle=on -timeout=5m -count=1 ./testutil/... 2>&1 | tee ./gotest-unit-helper.log
 
 .ONESHELL:
 test-unit/demo: ## Run unit tests for demo applications
@@ -637,7 +645,7 @@ test-unit/demo: ## Run unit tests for demo applications
 		fi; \
 		echo "Testing $$moddir..."; \
 		(cd "$$moddir" && go mod tidy); \
-		go test -C "$$moddir" -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee -a ./gotest-unit-demo.log; \
+		go test -C "$$moddir" $(RACE_FLAG) -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee -a ./gotest-unit-demo.log; \
 	done
 
 
@@ -794,7 +802,7 @@ crosslink: $(CROSSLINK) ## Update intra-repository dependencies in all go module
 	@# Clean .otel-build directories before generating go.work to avoid parsing generated go.mod
 	@find . -type d -name ".otel-build" -exec rm -rf {} + 2>/dev/null || true
 	@echo "Updating intra-repository dependencies in all go modules" \
-		&& $(CROSSLINK) --root=$(CURDIR)
+		&& $(CROSSLINK) --root=$(CURDIR) --exclude=go.opentelemetry.io/otelc/pkg --skip=go.opentelemetry.io/otelc/pkg
 
 .PHONY: go-work
 go-work: $(CROSSLINK) ## Generate go.work file for local development
@@ -806,6 +814,7 @@ go-work: $(CROSSLINK) ## Generate go.work file for local development
 	@# (e.g. old monolithic genproto vs. split genproto/googleapis/rpc).
 	@go work edit -dropuse ./.tools
 	@go work edit -dropuse ./.github/tools
+	@go work edit -dropuse ./pkg
 	@echo "go.work file generated successfully"
 
 .PHONY: go-mod-tidy

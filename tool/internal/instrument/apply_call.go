@@ -4,12 +4,14 @@
 package instrument
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	goast "go/ast"
 	"go/parser"
 	"go/token"
 	"go/types"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,14 +33,14 @@ import (
 func (ip *instrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRule, root *dst.File) (bool, error) {
 	importAliases, aliasOverrides := ip.resolveImportOverrides(root, r.Imports)
 
-	appendModified, err := ip.applyCallAppendArgs(r, root, importAliases, aliasOverrides)
+	appendModified, err := ip.applyCallAppendArgs(ctx, r, root, importAliases, aliasOverrides)
 	if err != nil {
 		return false, err
 	}
 
 	replaceModified := false
 	if r.Replace != "" {
-		replaceModified, err = ip.applyCallReplace(r, root, importAliases, aliasOverrides)
+		replaceModified, err = ip.applyCallReplace(ctx, r, root, importAliases, aliasOverrides)
 		if err != nil {
 			return false, err
 		}
@@ -88,6 +90,7 @@ func walkCallsWithEnclosingFunc(root *dst.File, fn func(call *dst.CallExpr, encl
 // A //otelc:ignore comment above a matching call's enclosing statement opts
 // that one call site out and leaves every other matching call site wrapped.
 func (ip *instrumentPhase) applyCallReplace(
+	ctx context.Context,
 	r *rule.InstCallRule,
 	root *dst.File,
 	importAliases map[string]string,
@@ -97,6 +100,7 @@ func (ip *instrumentPhase) applyCallReplace(
 	if err != nil {
 		return false, err
 	}
+	tmpl.typeInfo = ip.fileTypes()
 
 	stmts := ast.CallEnclosingStmts(root)
 
@@ -105,7 +109,7 @@ func (ip *instrumentPhase) applyCallReplace(
 	replacements := make(map[*dst.CallExpr]dst.Expr)
 	var wrapError error
 	walkCallsWithEnclosingFunc(root, func(call *dst.CallExpr, enclosing *dst.FuncDecl) bool {
-		if !ip.matchesRule(call, r, importAliases) {
+		if !ip.matchesRule(ctx, call, r, importAliases) {
 			return true
 		}
 		if ast.HasLeadingDirective(stmts[call], util.DirectiveIgnore) {
@@ -204,6 +208,7 @@ func isGoOrDeferCall(stmt dst.Stmt, call *dst.CallExpr) bool {
 // statement opts that one call site out and leaves every other matching call
 // site appended.
 func (ip *instrumentPhase) applyCallAppendArgs(
+	ctx context.Context,
 	r *rule.InstCallRule,
 	root *dst.File,
 	importAliases map[string]string,
@@ -222,7 +227,7 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 	var matchingCalls []*dst.CallExpr
 	var shadowErr error
 	walkCallsWithEnclosingFunc(root, func(call *dst.CallExpr, enclosing *dst.FuncDecl) bool {
-		if !ip.matchesRule(call, r, importAliases) {
+		if !ip.matchesRule(ctx, call, r, importAliases) {
 			return true
 		}
 		if ast.HasLeadingDirective(stmts[call], util.DirectiveIgnore) {
@@ -363,22 +368,27 @@ func matchesCallRule(call *dst.CallExpr, r *rule.InstCallRule, importAliases map
 }
 
 // matchesRule dispatches by selector: function_call or method_call.
-func (ip *instrumentPhase) matchesRule(call *dst.CallExpr, r *rule.InstCallRule, importAliases map[string]string) bool {
+func (ip *instrumentPhase) matchesRule(
+	ctx context.Context,
+	call *dst.CallExpr,
+	r *rule.InstCallRule,
+	importAliases map[string]string,
+) bool {
 	if r.MethodCall != "" {
-		return ip.matchesMethodCallRule(call, r)
+		return ip.matchesMethodCallRule(ctx, call, r)
 	}
 	return matchesCallRule(call, r, importAliases)
 }
 
 // matchesMethodCallRule ensures that files that never mention the method
 // name skip type-checking entirely.
-func (ip *instrumentPhase) matchesMethodCallRule(call *dst.CallExpr, r *rule.InstCallRule) bool {
+func (ip *instrumentPhase) matchesMethodCallRule(ctx context.Context, call *dst.CallExpr, r *rule.InstCallRule) bool {
 	sel, ok := call.Fun.(*dst.SelectorExpr)
 	if !ok || sel.Sel.Name != r.FuncName {
 		return false
 	}
 
-	info := ip.ensureMethodCallInfo()
+	info := ip.ensureMethodCallInfo(ctx)
 	if info == nil {
 		return false
 	}
@@ -415,8 +425,9 @@ func (ip *instrumentPhase) logUnresolvedMethodCall(
 	ip.Debug("method_call: call could not be resolved to a receiver type, rule will not match", args...)
 }
 
-// ensureMethodCallInfo type-checks the package at most once.
-func (ip *instrumentPhase) ensureMethodCallInfo() *methodCallPackageInfo {
+// ensureMethodCallInfo type-checks the package at most once. It must run
+// before any file of the package is rewritten.
+func (ip *instrumentPhase) ensureMethodCallInfo(ctx context.Context) *methodCallPackageInfo {
 	if ip.methodCallInfoLoaded {
 		return ip.methodCallInfo
 	}
@@ -424,9 +435,17 @@ func (ip *instrumentPhase) ensureMethodCallInfo() *methodCallPackageInfo {
 
 	pkgPath := util.FindFlagValue(ip.compileArgs, "-p")
 	files := packageSourceFiles(ip.compileArgs)
-	info, err := checkPackageForMethodCalls(pkgPath, files, ip.importConfig)
+	exportFiles, err := ip.exportDataFiles(ctx)
+	var info *methodCallPackageInfo
+	if err == nil {
+		info, err = checkPackageForMethodCalls(pkgPath, files, imports.ImportConfig{
+			PackageFile: exportFiles,
+			ImportMap:   ip.importConfig.ImportMap,
+		})
+	}
 	if err != nil {
-		ip.Warn("method_call type-checking failed; method_call rules will not match in this package",
+		ip.Warn("type-checking failed; method_call rules will not match in this package, "+
+			"and *_implements selectors and ThatImplements helpers will match the type name only",
 			"package", pkgPath, "error", err)
 		return nil
 	}
@@ -435,10 +454,21 @@ func (ip *instrumentPhase) ensureMethodCallInfo() *methodCallPackageInfo {
 	return ip.methodCallInfo
 }
 
-// packageSourceFiles returns the compile command's source files
+// packageSourceFiles returns the compile command's source files. The value of
+// -p is skipped, since an import path such as github.com/nats-io/nats.go also
+// ends in .go.
 func packageSourceFiles(compileArgs []string) []string {
 	var files []string
+	afterP := false
 	for _, arg := range compileArgs {
+		if afterP {
+			afterP = false
+			continue
+		}
+		if arg == "-p" {
+			afterP = true
+			continue
+		}
 		if strings.HasPrefix(arg, "-") || !util.IsGoFile(arg) {
 			continue
 		}
@@ -460,9 +490,13 @@ type methodCallPosition struct {
 }
 
 // methodCallPackageInfo is the result of type-checking one package for
-// method_call matching.
+// method_call matching and for the *_implements selectors and the
+// ThatImplements template helpers.
 type methodCallPackageInfo struct {
 	selByPos       map[methodCallPosition]*types.Selection
+	sigByPos       map[methodCallPosition]*types.Signature // keyed by the position of the func keyword
+	pkg            *types.Package
+	importer       *exportImporter
 	firstTypeError error
 }
 
@@ -484,6 +518,8 @@ func checkPackageForMethodCalls(
 
 	info := &types.Info{
 		Selections: make(map[*goast.SelectorExpr]*types.Selection),
+		Defs:       make(map[*goast.Ident]types.Object),
+		Types:      make(map[goast.Expr]types.TypeAndValue),
 	}
 	var firstTypeError error
 	// Sizes is nil, so go/types uses SizesFor("gc", "amd64") — unsafe sizing
@@ -491,25 +527,57 @@ func checkPackageForMethodCalls(
 	// surface as type errors, which degrade method_call matching, never break
 	// the build. Set Sizes explicitly if the setup phase learns the target
 	// GOARCH.
+	importer := newExportImporter(fset, cfg.PackageFile, cfg.ImportMap)
 	tcfg := &types.Config{
-		Importer: newExportImporter(fset, cfg.PackageFile, cfg.ImportMap),
+		Importer: importer,
 		Error: func(err error) {
 			if firstTypeError == nil {
 				firstTypeError = err
 			}
 		},
 	}
-	_, _ = tcfg.Check(pkgPath, fset, astFiles, info)
+	pkg, _ := tcfg.Check(pkgPath, fset, astFiles, info)
 
 	pi := &methodCallPackageInfo{
 		selByPos:       make(map[methodCallPosition]*types.Selection, len(info.Selections)),
+		sigByPos:       make(map[methodCallPosition]*types.Signature),
+		pkg:            pkg,
+		importer:       importer,
 		firstTypeError: firstTypeError,
 	}
 	for sel, selection := range info.Selections {
 		pos := fset.Position(sel.Sel.Pos())
 		pi.selByPos[methodCallPosition{file: pos.Filename, line: pos.Line, col: pos.Column}] = selection
 	}
+	for _, astFile := range astFiles {
+		goast.Inspect(astFile, func(node goast.Node) bool {
+			if typ, sig := funcSignature(node, info); sig != nil {
+				pos := fset.Position(typ.Pos())
+				pi.sigByPos[methodCallPosition{file: pos.Filename, line: pos.Line, col: pos.Column}] = sig
+			}
+			return true
+		})
+	}
 	return pi, nil
+}
+
+// funcSignature returns the type of node and its signature when node is a
+// function declaration or a function literal.
+func funcSignature(node goast.Node, info *types.Info) (*goast.FuncType, *types.Signature) {
+	switch n := node.(type) {
+	case *goast.FuncDecl:
+		fn, _ := info.Defs[n.Name].(*types.Func)
+		if fn == nil {
+			return nil, nil
+		}
+		sig, _ := fn.Type().(*types.Signature)
+		return n.Type, sig
+	case *goast.FuncLit:
+		sig, _ := info.TypeOf(n).(*types.Signature)
+		return n.Type, sig
+	default:
+		return nil, nil
+	}
 }
 
 // parseForTypeCheck records position filenames as filepath.Base(path)
@@ -577,18 +645,22 @@ func (pi *methodCallPackageInfo) methodReceiver(file string, line, col int) (str
 	return named.Obj().Pkg().Path(), recvType, true
 }
 
-// exportImporter reads a dependency's own compiled .a file.
+// archiveMagic starts every compiler archive (.a) file.
+const archiveMagic = "!<arch>\n"
+
+// exportImporter reads a dependency's export data: the compiled .a file from
+// -importcfg, or the file go list -export names.
 type exportImporter struct {
 	fset      *token.FileSet
-	archives  map[string]string // import path -> .a file, from -importcfg
+	files     map[string]string // import path -> export data file
 	importMap map[string]string // source import path -> its resolved/vendored path, from -importcfg
 	packages  map[string]*types.Package
 }
 
-func newExportImporter(fset *token.FileSet, archives, importMap map[string]string) *exportImporter {
+func newExportImporter(fset *token.FileSet, files, importMap map[string]string) *exportImporter {
 	return &exportImporter{
 		fset:      fset,
-		archives:  archives,
+		files:     files,
 		importMap: importMap,
 		packages:  make(map[string]*types.Package),
 	}
@@ -601,7 +673,7 @@ func (imp *exportImporter) Import(path string) (*types.Package, error) {
 
 // ImportFrom implements types.ImporterFrom.
 func (imp *exportImporter) ImportFrom(path, _ string, _ types.ImportMode) (*types.Package, error) {
-	if path == "unsafe" {
+	if path == unsafePackageName {
 		return types.Unsafe, nil
 	}
 	if pkg, ok := imp.packages[path]; ok && pkg.Complete() {
@@ -609,31 +681,38 @@ func (imp *exportImporter) ImportFrom(path, _ string, _ types.ImportMode) (*type
 	}
 
 	resolvedPath := path
-	archive, ok := imp.archives[path]
+	file, ok := imp.files[path]
 	if !ok {
 		if mapped, mappedOk := imp.importMap[path]; mappedOk {
-			archive, ok = imp.archives[mapped]
+			file, ok = imp.files[mapped]
 			resolvedPath = mapped
 		}
 	}
 	if !ok {
-		return nil, ex.Newf("no archive for import path %q in -importcfg", path)
+		return nil, ex.Newf("no export data for import path %q", path)
 	}
 
-	f, err := os.Open(archive)
+	f, err := os.Open(file)
 	if err != nil {
-		return nil, ex.Wrapf(err, "opening archive for %q", path)
+		return nil, ex.Wrapf(err, "opening export data for %q", path)
 	}
 	defer f.Close()
 
-	r, err := gcexportdata.NewReader(f) //nolint:staticcheck // no replacement exists yet ahead of Go 1.29
-	if err != nil {
-		return nil, ex.Wrapf(err, "reading export data section for %q from %s", path, archive)
+	// go list -export files (cmd/export, Go 1.28+) are export data as is.
+	// Only compiler archives need the export data section located first.
+	br := bufio.NewReader(f)
+	var r io.Reader = br
+	if head, _ := br.Peek(len(archiveMagic)); string(head) == archiveMagic {
+		//nolint:staticcheck // -importcfg compiler archives before Go 1.28; delete when min Go >= 1.28
+		r, err = gcexportdata.NewReader(r)
+		if err != nil {
+			return nil, ex.Wrapf(err, "reading export data section for %q from %s", path, file)
+		}
 	}
 
 	pkg, err := gcexportdata.Read(r, imp.fset, imp.packages, resolvedPath)
 	if err != nil {
-		return nil, ex.Wrapf(err, "decoding export data for %q from %s", path, archive)
+		return nil, ex.Wrapf(err, "decoding export data for %q from %s", path, file)
 	}
 	imp.packages[path] = pkg
 	return pkg, nil
@@ -848,13 +927,33 @@ func hasEscapingControlFlow(stmt dst.Stmt) bool {
 func hasMultipleCalls(stmt dst.Stmt) bool {
 	calls := 0
 	dst.Inspect(stmt, func(n dst.Node) bool {
-		switch n.(type) {
+		switch node := n.(type) {
 		case *dst.FuncLit:
 			return false
 		case *dst.CallExpr:
-			calls++
+			// A type conversion such as []byte(s) or map[string]int(m) parses
+			// as a CallExpr but is never a hookable call, so it must not count
+			// toward the limit.
+			if !isSyntacticConversion(node) {
+				calls++
+			}
 		}
 		return true
 	})
 	return calls > 1
+}
+
+// isSyntacticConversion reports whether call is unambiguously a type
+// conversion rather than a function call, based on syntax alone. A conversion
+// whose target type is a named identifier (for example string(b) or int(x)) is
+// indistinguishable from a call without type information and is not detected
+// here.
+func isSyntacticConversion(call *dst.CallExpr) bool {
+	switch call.Fun.(type) {
+	case *dst.ArrayType, *dst.MapType, *dst.ChanType,
+		*dst.StructType, *dst.InterfaceType, *dst.FuncType:
+		return true
+	default:
+		return false
+	}
 }

@@ -61,6 +61,110 @@ func TestGetHookFuncPropagatesParseError(t *testing.T) {
 	require.Error(t, err)
 }
 
+// writeHookFiles writes each name -> content pair under dir, creating
+// subdirectories as needed.
+func writeHookFiles(t *testing.T, dir string, files map[string]string) {
+	t.Helper()
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	}
+}
+
+func TestFindHookFileOnlyReadsPackageDir(t *testing.T) {
+	tests := []struct {
+		name  string
+		files map[string]string
+	}{
+		{
+			// A nested v2 package declares a hook of the same name with another
+			// signature, and its directory sorts before the real hook file.
+			name: "nested package",
+			files: map[string]string{
+				"zz_hook.go": "package hook\n\nfunc BeforeA(n int) {}\n",
+				"v2/hook.go": "package hook\n\nfunc BeforeA(s string) {}\n",
+				"v2/go.mod":  "module example.com/hook/v2\n",
+			},
+		},
+		{
+			// A fixture under testdata is not part of the package and does not
+			// parse.
+			name: "testdata",
+			files: map[string]string{
+				"zz_hook.go":         "package hook\n\nfunc BeforeA(n int) {}\n",
+				"testdata/broken.go": "not valid go",
+			},
+		},
+		{
+			// The go command never builds a test file or a file starting with
+			// "_" into the package.
+			name: "ignored files",
+			files: map[string]string{
+				"hook_test.go": "package hook_test\n\nfunc BeforeA(s string) {}\n",
+				"_hook.go":     "package hook\n\nfunc BeforeA(s string) {}\n",
+				"zz_hook.go":   "package hook\n\nfunc BeforeA(n int) {}\n",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeHookFiles(t, dir, tt.files)
+
+			ip := &instrumentPhase{}
+			r := &rule.InstFuncRule{Before: "BeforeA", ResolvedPath: dir}
+			file, decl, err := ip.findHookFile(r, r.Before)
+			require.NoError(t, err)
+			require.NotNil(t, decl)
+			assert.Equal(t, filepath.Join(dir, "zz_hook.go"), file)
+		})
+	}
+
+	t.Run("missing directory", func(t *testing.T) {
+		missing := filepath.Join(t.TempDir(), "missing")
+		ip := &instrumentPhase{}
+		r := &rule.InstFuncRule{Before: "BeforeA", ResolvedPath: missing}
+		_, _, err := ip.findHookFile(r, r.Before)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "reading hook directory")
+	})
+}
+
+func TestGetHookFuncFindsHooksInSeparateFiles(t *testing.T) {
+	dir := t.TempDir()
+	writeHookFiles(t, dir, map[string]string{
+		"after.go":  "package hook\n\nfunc AfterA(err error) {}\n",
+		"before.go": "package hook\n\nfunc BeforeA(n int) {}\n",
+	})
+
+	ip := &instrumentPhase{}
+	r := &rule.InstFuncRule{Before: "BeforeA", After: "AfterA", ResolvedPath: dir}
+
+	before, err := ip.getHookFunc(r, true)
+	require.NoError(t, err)
+	assert.Equal(t, "BeforeA", before.Name.Name)
+
+	after, err := ip.getHookFunc(r, false)
+	require.NoError(t, err)
+	assert.Equal(t, "AfterA", after.Name.Name)
+}
+
+func TestGetHookFuncReportsMissingHook(t *testing.T) {
+	dir := t.TempDir()
+	writeHookFiles(t, dir, map[string]string{
+		"hook.go": "package hook\n\nfunc BeforeA(n int) {}\n",
+	})
+
+	ip := &instrumentPhase{}
+	r := &rule.InstFuncRule{Func: "Target", Before: "BeforeA", After: "AfterA", ResolvedPath: dir}
+
+	_, err := ip.getHookFunc(r, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no hook AfterA found for Target")
+}
+
 func TestMaterializeTemplateClonesIndependently(t *testing.T) {
 	ip1 := &instrumentPhase{target: &dst.File{}}
 	require.NoError(t, ip1.materializeTemplate())
@@ -505,7 +609,7 @@ func H1Before(ctx hook.HookContext, p1 struct{ Age int }) {}`,
 				ip.afterTrampFunc = trampFunc
 			}
 
-			err := ip.checkHookDecl(hookFunc, tt.before)
+			err := ip.checkHookDecl(hookFunc, nil, tt.before)
 
 			if tt.expectError {
 				require.Error(t, err)
@@ -517,6 +621,156 @@ func H1Before(ctx hook.HookContext, p1 struct{ Age int }) {}`,
 			}
 		})
 	}
+}
+
+// TestCheckHookDeclVariadicAny covers the variadic forms accepted and rejected
+// for issue #1601: ...any must work for a variadic whose element type the hook
+// cannot name, while plain any must be rejected for a variadic of a concrete
+// type (a type-parameter variadic receives the whole slice instead). An
+// any-element slice and an any-element variadic are interchangeable.
+func TestCheckHookDeclVariadicAny(t *testing.T) {
+	tests := []struct {
+		name      string
+		targetSrc string
+		hookSrc   string
+		errorMsg  string
+	}{
+		{
+			name: "valid - ...any for variadic of unnameable element type",
+			targetSrc: `package main
+type options struct{ name string }
+func New(id int, opts ...func(*options)) string { return "" }`,
+			hookSrc: `package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, id int, opts ...any) {}`,
+		},
+		{
+			name: "valid - ...any for variadic of a type parameter",
+			targetSrc: `package main
+func New[T any](id int, opts ...T) string { return "" }`,
+			hookSrc: `package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, id int, opts ...any) {}`,
+		},
+		{
+			name: "valid - plain any for variadic of a type parameter",
+			targetSrc: `package main
+func New[T any](id int, opts ...T) string { return "" }`,
+			hookSrc: `package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, id int, opts any) {}`,
+		},
+		{
+			name: "valid - []any for variadic of any",
+			targetSrc: `package main
+func New(id int, opts ...any) string { return "" }`,
+			hookSrc: `package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, id int, opts []any) {}`,
+		},
+		{
+			name: "valid - ...any for non-variadic slice of any",
+			targetSrc: `package main
+func New(id int, opts []any) string { return "" }`,
+			hookSrc: `package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, id int, opts ...any) {}`,
+		},
+		{
+			name: "invalid - plain any for variadic",
+			targetSrc: `package main
+func New(id int, opts ...string) string { return "" }`,
+			hookSrc: `package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, id int, opts any) {}`,
+			errorMsg: "use ...any instead of any",
+		},
+		{
+			name: "invalid - plain any for variadic of any",
+			targetSrc: `package main
+func New(id int, opts ...any) string { return "" }`,
+			hookSrc: `package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, id int, opts any) {}`,
+			errorMsg: "use ...any instead of any",
+		},
+		{
+			name: "invalid - []any for variadic",
+			targetSrc: `package main
+func New(id int, opts ...string) string { return "" }`,
+			hookSrc: `package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, id int, opts []any) {}`,
+			errorMsg: "use ...any instead of []any",
+		},
+		{
+			name: "invalid - ...any for non-variadic slice",
+			targetSrc: `package main
+func New(id int, opts []string) string { return "" }`,
+			hookSrc: `package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1Before(ctx hook.HookContext, id int, opts ...any) {}`,
+			errorMsg: "use any instead of ...any",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			targetFunc := parseFunc(t, tt.targetSrc)
+			hookFunc := parseFunc(t, tt.hookSrc)
+
+			ip := &instrumentPhase{targetFunc: targetFunc}
+			ip.beforeTrampFunc = &dst.FuncDecl{
+				Name: ast.Ident("OtelBeforeTrampoline"),
+				Type: &dst.FuncType{},
+			}
+			ip.buildTrampSignature(true)
+
+			err := ip.checkHookDecl(hookFunc, findTargetParamType(targetFunc), true)
+			if tt.errorMsg == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errorMsg)
+		})
+	}
+}
+
+func TestNeedsAnySliceConversion(t *testing.T) {
+	tests := []struct {
+		name       string
+		targetType string
+		hookType   string
+		want       bool
+	}{
+		{name: "concrete variadic and ...any", targetType: "...func(*options)", hookType: "...any", want: true},
+		{
+			name:       "concrete variadic and ...interface{}",
+			targetType: "...func(*options)",
+			hookType:   "...interface{}",
+			want:       true,
+		},
+		{name: "any variadic and ...any", targetType: "...any", hookType: "...any", want: false},
+		{name: "exact variadic", targetType: "...string", hookType: "...string", want: false},
+		{name: "non-variadic target", targetType: "[]string", hookType: "...any", want: false},
+		{name: "non-variadic hook", targetType: "...string", hookType: "[]any", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			targetType := parseType(t, tt.targetType)
+			hookType := parseType(t, tt.hookType)
+			assert.Equal(t, tt.want, needsAnySliceConversion(targetType, hookType))
+		})
+	}
+}
+
+// parseType parses a standalone type expression by wrapping it in a parameter.
+func parseType(t *testing.T, typeSrc string) dst.Expr {
+	t.Helper()
+	field := parseFunc(t, "package main\nfunc F(p "+typeSrc+") {}").Type.Params.List[0]
+	return field.Type
 }
 
 // genHookContext mirrors the HookContextImpl the trampoline generates for a

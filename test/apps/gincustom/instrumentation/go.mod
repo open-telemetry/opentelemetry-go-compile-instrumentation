@@ -6,7 +6,6 @@ replace (
 	go.opentelemetry.io/otelc/instrumentation => ../../../../instrumentation
 	go.opentelemetry.io/otelc/instrumentation/net/http/client => ../../../../instrumentation/net/http/client
 	go.opentelemetry.io/otelc/instrumentation/net/http/server => ../../../../instrumentation/net/http/server
-	go.opentelemetry.io/otelc/pkg => ../../../../pkg
 	go.opentelemetry.io/otelc/pkg/runtime => ../../../../pkg/runtime
 )
 
@@ -15,7 +14,7 @@ require (
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
 	go.opentelemetry.io/otelc/instrumentation/net/http/server v0.0.0-00010101000000-000000000000
-	go.opentelemetry.io/otelc/pkg v0.0.0-00010101000000-000000000000
+	go.opentelemetry.io/otelc/pkg v0.1.0
 )
 
 require (

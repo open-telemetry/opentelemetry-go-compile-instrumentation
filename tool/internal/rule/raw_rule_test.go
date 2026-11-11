@@ -125,6 +125,56 @@ raw: "println({{ .FuncArgument 0 }})"
 			yaml:    "target: main\nfunc: Bar\nraw: \"println({{ FuncArgument 0 )\"",
 			wantErr: true,
 		},
+		{
+			name:   "rule with exact signature",
+			ruleID: "raw-sig",
+			yaml: `
+target: main
+func: Bar
+raw: println()
+signature:
+  args: [context.Context, string]
+  returns: [error]
+`,
+			check: func(t *testing.T, r *InstRawRule) {
+				require.NotNil(t, r.Signature)
+				assert.Equal(t, []string{"context.Context", "string"}, r.Signature.Args)
+				assert.Equal(t, []string{"error"}, r.Signature.Returns)
+			},
+		},
+		{
+			name:   "rule with signature_contains",
+			ruleID: "raw-sig-contains",
+			yaml: `
+target: main
+func: Bar
+raw: println()
+signature_contains:
+  args: [context.Context]
+`,
+			check: func(t *testing.T, r *InstRawRule) {
+				require.NotNil(t, r.SignatureContains)
+				assert.Equal(t, []string{"context.Context"}, r.SignatureContains.Args)
+				assert.Nil(t, r.SignatureContains.Returns)
+			},
+		},
+		{
+			name:   "rule with result last_result and param",
+			ruleID: "raw-scalar-filters",
+			yaml: `
+target: main
+func: Bar
+raw: println()
+result: error
+last_result: error
+param: context.Context
+`,
+			check: func(t *testing.T, r *InstRawRule) {
+				assert.Equal(t, "error", r.Result)
+				assert.Equal(t, "error", r.LastResult)
+				assert.Equal(t, "context.Context", r.Param)
+			},
+		},
 	}
 
 	for _, tt := range tests {

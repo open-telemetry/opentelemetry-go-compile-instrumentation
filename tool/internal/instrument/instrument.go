@@ -215,10 +215,10 @@ func (ip *instrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSe
 			return ex.Wrapf(err, "applying file rule %s to package %s", rule.Name, rset.PackageName)
 		}
 	}
-	// Run the method_call type-check once, before any file in the package is
-	// rewritten.
-	if rsetHasMethodCallRule(rset) {
-		ip.ensureMethodCallInfo()
+	// Run the type-check once, before any file in the package is rewritten,
+	// and only when a rule needs it.
+	if rsetHasMethodCallRule(rset) || rsetUsesImplements(rset) {
+		ip.ensureMethodCallInfo(ctx)
 	}
 
 	file2rules, files := groupRules(ip.workDir, rset)
