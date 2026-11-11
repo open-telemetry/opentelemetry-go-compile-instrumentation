@@ -496,6 +496,25 @@ func (sp *setupPhase) recordRuleModuleRoot(instRule rule.InstRule, moduleRoot st
 	sp.ruleModuleRoots[instRule] = moduleRoot
 }
 
+func (sp *setupPhase) setInstrumentationConfigPath(path string) error {
+	if path == "" {
+		return nil
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return ex.Wrapf(err, "resolve application configuration path %q", path)
+	}
+	sp.instrumentationConfigPath = absolute
+	return nil
+}
+
+func (sp *setupPhase) loadConfiguredApplication(path string) error {
+	if err := sp.setInstrumentationConfigPath(path); err != nil {
+		return err
+	}
+	return sp.loadApplicationConfiguration()
+}
+
 func (sp *setupPhase) validateAndStoreSelectedConfigurationMetadata(matched []*rule.InstRuleSet) error {
 	metadata, err := sp.validateSelectedConfigurationMetadata(matched, configuration.CatalogDefinitions)
 	if err != nil {
@@ -560,13 +579,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		pgo:        pgoValue(subcommand, args),
 		testMode:   subcommand == subcmdTest,
 	}
-	if path := cmd.String(FlagInstrumentationConfig); path != "" {
-		sp.instrumentationConfigPath, err = filepath.Abs(path)
-		if err != nil {
-			return ex.Wrapf(err, "resolve application configuration path %q", path)
-		}
-	}
-	if err = sp.loadApplicationConfiguration(); err != nil {
+	if err := sp.loadConfiguredApplication(cmd.String(FlagInstrumentationConfig)); err != nil {
 		return err
 	}
 

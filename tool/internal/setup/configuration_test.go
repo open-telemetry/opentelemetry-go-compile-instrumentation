@@ -232,6 +232,7 @@ func TestModuleRootForPackage(t *testing.T) {
 	_, err = moduleRootForPackage(filepath.Join(notDirectory, "nested"))
 	require.Error(t, err)
 }
+
 func TestValidateSelectedConfigurationMetadataForNestedInRepoModules(t *testing.T) {
 	instrumentationRoot, err := filepath.Abs(filepath.Join("testdata", "instrumentation"))
 	require.NoError(t, err)

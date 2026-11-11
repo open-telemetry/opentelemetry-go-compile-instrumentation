@@ -536,6 +536,56 @@ func TestMultipleRuleFiles(t *testing.T) {
 	require.Equal(t, "h1", rules[0].GetName())
 }
 
+func TestLoadCustomRulesRecordsModuleOwnership(t *testing.T) {
+	for _, source := range []string{"rules flag", "OTELC_RULES"} {
+		t.Run(source, func(t *testing.T) {
+			moduleRoot := t.TempDir()
+			require.NoError(t, os.WriteFile(
+				filepath.Join(moduleRoot, "go.mod"),
+				[]byte("module example.com/custom\n\ngo 1.26\n"),
+				0o644,
+			))
+			ruleFile := filepath.Join(moduleRoot, "rules.otelc.yaml")
+			require.NoError(t, os.WriteFile(ruleFile, []byte(`custom:
+  target: main
+  file: hook.go
+  path: example.com/custom
+`), 0o644))
+
+			t.Setenv(util.EnvOtelcRules, "")
+			sp := newTestSetupPhase()
+			if source == "OTELC_RULES" {
+				t.Setenv(util.EnvOtelcRules, ruleFile)
+			} else {
+				sp.ruleConfig = ruleFile
+			}
+
+			rules, err := sp.loadRules(t.Context(), nil)
+			require.NoError(t, err)
+			require.Len(t, rules, 1)
+			assert.Equal(t, moduleRoot, sp.ruleModuleRoots[rules[0]])
+			matched := rule.NewInstRuleSet("example.com/app")
+			matched.AddFileRule(rules[0].(*rule.InstFileRule))
+			assert.Equal(t, []string{moduleRoot}, sp.selectedConfigurationModuleRoots([]*rule.InstRuleSet{matched}))
+		})
+	}
+}
+
+func TestLoadCustomRulesWithApplicationConfigurationRequiresModuleOwnership(t *testing.T) {
+	ruleFile := writeCustomRules(t, "rules.otelc.yaml", `custom:
+  target: main
+  file: hook.go
+  path: example.com/custom
+`)
+
+	sp := newTestSetupPhase()
+	sp.ruleConfig = ruleFile
+	sp.instrumentationConfigPath = filepath.Join(t.TempDir(), "instrumentation.yaml")
+
+	_, err := sp.loadRules(t.Context(), nil)
+	require.ErrorContains(t, err, "custom rule \"custom\" is not located inside a Go module")
+}
+
 func TestLoadRules_InvalidVersionRange(t *testing.T) {
 	content := `broken:
   target: main

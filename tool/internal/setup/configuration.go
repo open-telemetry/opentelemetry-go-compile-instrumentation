@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/configuration"
@@ -157,4 +158,55 @@ func (sp *setupPhase) selectedConfigurationModuleRoots(matched []*rule.InstRuleS
 		}
 	}
 	return slices.Sorted(maps.Keys(moduleRoots))
+}
+
+// moduleRootForPackage returns the root directory of the module that owns the
+// package in packageDir. In vendor/, go mod vendor does not copy dependency
+// go.mod files, so the owning module comes from vendor/modules.txt.
+func moduleRootForPackage(packageDir string) (string, error) {
+	for dir := filepath.Clean(packageDir); ; dir = filepath.Dir(dir) {
+		_, err := os.Stat(filepath.Join(dir, goModFileName))
+		switch {
+		case err == nil:
+			return dir, nil
+		case !errors.Is(err, os.ErrNotExist):
+			return "", err
+		}
+		if filepath.Base(dir) == vendorDirName {
+			return vendorOwnerModuleRoot(dir, packageDir)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", ex.New("no parent go.mod found")
+		}
+	}
+}
+
+// vendorOwnerModuleRoot returns the directory of the module that owns the
+// package in packageDir, using the module that lists it in vendor/modules.txt.
+func vendorOwnerModuleRoot(vendorDir, packageDir string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(vendorDir, "modules.txt"))
+	if err != nil {
+		return "", ex.Wrapf(err, "reading the vendor/modules.txt that has package %s", packageDir)
+	}
+	rel, err := filepath.Rel(vendorDir, packageDir)
+	if err != nil {
+		return "", ex.Wrapf(err, "locating package %s in %s", packageDir, vendorDir)
+	}
+	pkgPath := filepath.ToSlash(rel)
+	modulePath := ""
+	for line := range strings.SplitSeq(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if moduleLine, ok := strings.CutPrefix(line, "# "); ok {
+			fields := strings.Fields(moduleLine)
+			if len(fields) > 0 {
+				modulePath = fields[0]
+			}
+			continue
+		}
+		if line == pkgPath {
+			return filepath.Join(vendorDir, filepath.FromSlash(modulePath)), nil
+		}
+	}
+	return "", ex.Newf("no module of vendor/modules.txt owns package %s", packageDir)
 }
