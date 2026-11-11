@@ -185,6 +185,18 @@ func TestTypeNameMatches(t *testing.T) {
 			node:    &dst.FuncType{},
 			want:    false,
 		},
+		{
+			name:    "variadic type does not match element type",
+			typeStr: "string",
+			node:    &dst.Ellipsis{Elt: &dst.Ident{Name: "string"}},
+			want:    false,
+		},
+		{
+			name:    "pointer to slice does not match element type",
+			typeStr: "byte",
+			node:    &dst.StarExpr{X: &dst.ArrayType{Elt: &dst.Ident{Name: "byte"}}},
+			want:    false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -707,6 +719,9 @@ func TestFieldListContainsType(t *testing.T) {
 	assert.True(t, mustContains(t, fields, "error"))
 	assert.False(t, mustContains(t, fields, "int"))
 	assert.False(t, mustContains(t, fields, "io.Reader"))
+	// "Contains" is list-level: []byte is not byte, and map[string]string is
+	// not matched by looking inside the map.
+	assert.False(t, mustContains(t, fields, "byte"))
 	assert.False(t, mustContains(t, nil, "error"))
 	assert.False(t, mustContains(t, &dst.FieldList{}, "error"))
 

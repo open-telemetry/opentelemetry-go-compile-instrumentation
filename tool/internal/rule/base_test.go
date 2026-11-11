@@ -4,12 +4,14 @@
 package rule
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 func TestInstBaseRuleAccessors(t *testing.T) {
@@ -26,6 +28,9 @@ func TestInstBaseRuleAccessors(t *testing.T) {
 	assert.Equal(t, "example.com/pkg", base.GetTarget().String())
 	assert.Equal(t, "v1.0.0,v2.0.0", base.GetVersion())
 	assert.Same(t, where, base.GetWhere())
+	assert.Same(t, base, base.Base())
+	funcRule := &InstFuncRule{InstBaseRule: *base}
+	assert.Same(t, &funcRule.InstBaseRule, funcRule.Base(), "a rule kind reaches its own embedded base")
 
 	// InstBaseRule satisfies the InstRule interface.
 	var _ InstRule = base
@@ -119,6 +124,10 @@ func TestInstRuleSetAllRulesEmpty(t *testing.T) {
 	irs := NewInstRuleSet("m")
 	assert.Empty(t, irs.AllFuncRules())
 	assert.Empty(t, irs.AllStructRules())
+	assert.Empty(t, collectAllRules(irs))
+
+	var nilSet *InstRuleSet
+	assert.Empty(t, collectAllRules(nilSet))
 }
 
 func TestInstRuleSetSetters(t *testing.T) {
@@ -182,4 +191,85 @@ func TestInstRuleSetAllRulesStableOrder(t *testing.T) {
 		require.Equal(t, wantFuncs, gotFuncs, "AllFuncRules order must not depend on map iteration")
 		require.Equal(t, wantStructs, gotStructs, "AllStructRules order must not depend on map iteration")
 	}
+}
+
+func TestInstRuleSetAllRulesIncludesEveryKindInStableOrder(t *testing.T) {
+	dir := t.TempDir()
+	fileA := filepath.Join(dir, "a.go")
+	fileB := filepath.Join(dir, "b.go")
+	rawA := &InstRawRule{Raw: "a"}
+	rawB := &InstRawRule{Raw: "b"}
+	funcRule := &InstFuncRule{Func: "f"}
+	structRule := &InstStructRule{Struct: "s"}
+	callRule := &InstCallRule{}
+	litRule := &InstLitRule{}
+	directiveRule := &InstDirectiveRule{}
+	declRule := &InstDeclRule{}
+	fileRule := &InstFileRule{}
+
+	irs := NewInstRuleSet("example.com/mod")
+	irs.AddRawRule(fileB, rawB)
+	irs.AddRawRule(fileA, rawA)
+	irs.AddFuncRule(fileA, funcRule)
+	irs.AddStructRule(fileA, structRule)
+	irs.AddCallRule(fileA, callRule)
+	irs.AddLitRule(fileA, litRule)
+	irs.AddDirectiveRule(fileA, directiveRule)
+	irs.AddDeclRule(fileA, declRule)
+	irs.AddFileRule(fileRule)
+
+	want := []InstRule{
+		rawA,
+		rawB,
+		funcRule,
+		structRule,
+		callRule,
+		litRule,
+		directiveRule,
+		declRule,
+		fileRule,
+	}
+	assert.Equal(t, want, collectAllRules(irs))
+
+	for stopAfter := 1; stopAfter <= len(want); stopAfter++ {
+		t.Run(fmt.Sprintf("stop after rule %d", stopAfter), func(t *testing.T) {
+			var got []InstRule
+			for r := range irs.AllRules() {
+				got = append(got, r)
+				if len(got) == stopAfter {
+					break
+				}
+			}
+			assert.Equal(t, want[:stopAfter], got)
+		})
+	}
+}
+
+func collectAllRules(irs *InstRuleSet) []InstRule {
+	var result []InstRule
+	for rule := range irs.AllRules() {
+		result = append(result, rule)
+	}
+	return result
+}
+
+func TestInstRuleSetIsInternal(t *testing.T) {
+	var nilSet *InstRuleSet
+	assert.False(t, nilSet.IsInternal())
+
+	emptySet := NewInstRuleSet("example.com/mod")
+	assert.False(t, emptySet.IsInternal())
+
+	internalFileSet := NewInstRuleSet("runtime")
+	internalFileSet.AddFileRule(&InstFileRule{Path: util.InternalPath})
+	assert.True(t, internalFileSet.IsInternal())
+
+	file := filepath.Join(t.TempDir(), "file.go")
+	internalFuncSet := NewInstRuleSet("runtime")
+	internalFuncSet.AddFuncRule(file, &InstFuncRule{Path: util.InternalPath})
+	assert.True(t, internalFuncSet.IsInternal())
+
+	externalSet := NewInstRuleSet("example.com/mod")
+	externalSet.AddFileRule(&InstFileRule{Path: "example.com/hooks"})
+	assert.False(t, externalSet.IsInternal())
 }

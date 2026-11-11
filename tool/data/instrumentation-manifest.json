@@ -120,6 +120,10 @@
     "target": "main"
   },
   {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/init",
+    "target": "os/signal"
+  },
+  {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/sdk/trace",
     "target": "go.opentelemetry.io/otel/sdk/trace",
     "versionRange": "v1.44.0"
@@ -166,9 +170,5 @@
   {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/net/http/server",
     "target": "net/http"
-  },
-  {
-    "modulePath": "go.opentelemetry.io/otelc/instrumentation/runtime",
-    "target": "runtime"
   }
 ]

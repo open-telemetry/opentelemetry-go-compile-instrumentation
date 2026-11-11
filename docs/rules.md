@@ -46,7 +46,7 @@ Every rule file declares the minimum `otelc` version required to read it. The re
 top-level `version` key is followed by map entries whose keys are rule names:
 
 ```yaml
-version: "v1.0.0"
+version: "v1.2.0"
 
 rule_name:
   target: <package pattern or list>   # required
@@ -68,6 +68,16 @@ The file-level `version` is a released `otelc` semantic version. Each rule's nes
 rule applies. When a package contains multiple rule files, `otelc` enforces the highest
 minimum version declared by those files. Legacy files without a top-level `version` are
 treated as requiring `v1.0.0` and produce a warning.
+
+> [!NOTE]
+> `otelc` v1.2.0 is the first release that supports the top-level `version` key.
+> Earlier releases parse every top-level key as a rule and reject a scalar
+> `version` entry, so they cannot read a file that declares it; those releases
+> use the instrumentation rules bundled with them instead. Published
+> instrumentation rule files — including the rules bundled with `otelc` under
+> `instrumentation/` — declare `version: "v1.2.0"`. A rule file that relies on
+> functionality added in a later `otelc` release should declare that release as
+> its minimum version.
 
 ### Top-level fields
 
@@ -520,7 +530,7 @@ The tool automatically reads the hook source file and ensures all of its imports
 
 #### Signature Sub-Filters
 
-By default the rule matches any function with the given name (and optional receiver). Eight optional sub-filters, placed under `where` alongside `func`, can narrow the match further by inspecting the function's parameter and result types. All specified sub-filters must match (AND logic); omitting a sub-filter places no constraint on that aspect of the signature.
+By default the rule matches any function with the given name (and optional receiver). Eight optional sub-filters, placed under `where` alongside `func`, can narrow the match further by inspecting the function's parameter and result types. All specified sub-filters must match (AND logic); omitting a sub-filter places no constraint on that aspect of the signature. The same sub-filters apply to `inject_code` rules.
 
 | Field | Type | Semantics |
 | --- | --- | --- |
@@ -542,7 +552,7 @@ Type names follow the form `[*][pkg.]Name`, for example `error`, `context.Contex
 
 > **Note on scalar filter semantics:** `result`, `last_result`, and `param` perform an exact type-name match. For example, `result: error` matches functions that literally return the `error` type, but not functions that return a concrete type (e.g. `*MyError`) that happens to implement `error`. Use `result_implements`, `last_result_implements`, and `param_implements` to also match such types; see [Matching by interface](#matching-by-interface).
 >
-> **Unsupported type expressions:** Complex type expressions — `chan`, `func`, `map`, slice (`[]T`), and non-empty interface literals — cannot be matched by type-name filters. If a parameter or return value uses one of these forms, the filter will never match it.
+> **Unsupported type expressions:** Complex type expressions — `chan`, `func`, `map`, slice (`[]T`), and non-empty interface literals — cannot be matched by type-name filters. If a parameter or return value uses one of these forms, the filter will never match it (it is skipped, not a fatal error). `signature_contains` applies to the list of parameter and result types, not to types nested inside composites: `args: [string]` matches a `string` argument, not `[]string` or `chan string`.
 
 **Example — match only functions with a specific signature:**
 
@@ -694,6 +704,7 @@ This rule injects a string of raw Go code at the beginning of a target function.
 
 - `func` (string, required): The name of the target function.
 - `recv` (string, optional): The receiver type for a method.
+- `signature`, `signature_contains`, `param`, `result`, `last_result` (optional): The same signature sub-filters as [Function Hook Rule](#signature-sub-filters). They narrow the match to functions whose parameter and result types satisfy the filter. A filter that does not match leaves the function uninstrumented.
 - `pattern` (string, optional): The position within the function where the raw code should be injected. By default, the code is injected at the start of the function body. If provided, the value must be a valid regular expression.
 
   The pattern is matched against the canonical gofmt representation for each statement in the function body (not always the exact original source formatting). The injected code is placed immediately before/after the first statement that matches the pattern.

@@ -16,7 +16,7 @@ at compile-time. Zero code changes required!
 - **GenAI Semantic Conventions**: Follows OpenTelemetry GenAI semantic conventions for AI/LLM observability
 - **Request Attribute Extraction**: Captures model, temperature, top_p, top_k, and max_tokens
 - **Response Metadata**: Records response ID, model, finish reasons, and token usage
-- **Cache Usage Tracking**: Records Anthropic-specific prompt cache metrics (input_tokens, cache_read, cache_creation)
+- **Cache Usage Tracking**: Records prompt cache reads (shared with the openai-go instrumentation) and the Anthropic-specific cache creation count
 - **Provider Detection**: Automatically detects the API provider from the request URL
 - **HTTP Suppression**: Prevents duplicate spans by suppressing the generic `net/http` client instrumentation for instrumented requests
 
@@ -89,7 +89,7 @@ This instrumentation emits spans following the
 | `gen_ai.usage.input_tokens` | Input token count | `150` |
 | `gen_ai.usage.output_tokens` | Output token count | `42` |
 | `gen_ai.usage.total_tokens` | Total token count | `192` |
-| `gen_ai.usage.cache_read.input_tokens` | Cache read tokens (Anthropic-specific) | `50` |
+| `gen_ai.usage.cache_read.input_tokens` | Cache read tokens (shared, declared in `registry.otelc.gen_ai`) | `50` |
 | `gen_ai.usage.cache_creation.input_tokens` | Cache creation tokens (Anthropic-specific) | `30` |
 | `server.address` | GenAI server hostname or IP address | `"api.anthropic.com"` |
 | `server.port` | GenAI server port, including default ports | `443` |

@@ -131,7 +131,7 @@ func isTestAliasBoolFlag(name string) bool {
 // isBuildContextFlagWithValue reports whether name affects the build context and takes a value.
 func isBuildContextFlagWithValue(name string) bool {
 	switch name {
-	case "-C", "-overlay", "-tags", "-mod", "-modfile", flagGcflags:
+	case "-C", "-overlay", "-tags", "-mod", "-modfile", flagGcflags, "-covermode", flagCoverpkg:
 		return true
 	default:
 		return false
