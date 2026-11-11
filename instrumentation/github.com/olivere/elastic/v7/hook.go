@@ -16,11 +16,17 @@
 // suppresses net/http client spans so the datastore hop is not duplicated
 // as a generic GET/POST. The host is chosen inside PerformRequest after
 // this hook runs, so this span does not set server.address or url.full.
+//
+// Bulk and mget spans carry db.operation.batch.size, counted from the body
+// that BulkService and MgetService pass to PerformRequest. A Get of a
+// missing document (404 with "found":false) is not recorded as an error,
+// the same way olivere's Exists ignores 404.
 package v7
 
 import (
 	"context"
 	"errors"
+	"net/http"
 	"net/url"
 	"slices"
 	"strconv"
@@ -46,6 +52,10 @@ const (
 	// otelc matches BeforePerformRequest's remaining params to the target
 	// at inject time, so a signature change fails the instrumented build.
 	ctxParamIndex = 1
+
+	opGet  = "get"
+	opBulk = "bulk"
+	opMget = "mget"
 )
 
 var (
@@ -74,6 +84,7 @@ func initInstrumentation() {
 
 type hookData struct {
 	span         trace.Span
+	operation    string
 	ignoreErrors []int
 }
 
@@ -100,6 +111,7 @@ func BeforePerformRequest(
 		Path:      opt.Path,
 		Operation: operation,
 		Index:     index,
+		BatchSize: batchSize(operation, opt.Body),
 	}
 	ctx, span := tracer.Start(ctx,
 		esemconv.SpanName(operation, index),
@@ -108,7 +120,7 @@ func BeforePerformRequest(
 	)
 	ctx = runtime.SuppressHTTPClientInstrumentation(ctx)
 	ictx.SetParam(ctxParamIndex, ctx)
-	ictx.SetData(&hookData{span: span, ignoreErrors: opt.IgnoreErrors})
+	ictx.SetData(&hookData{span: span, operation: operation, ignoreErrors: opt.IgnoreErrors})
 
 	logger.Debug("BeforePerformRequest",
 		"method", opt.Method,
@@ -134,11 +146,13 @@ func AfterPerformRequest(ictx hook.HookContext, resp *elastic.Response, err erro
 	}
 
 	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
 		var esErr *elastic.Error
 		if errors.As(err, &esErr) && esErr.Status > 0 {
 			status = esErr.Status
+		}
+		if !isDocNotFound(data.operation, esErr) {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 		}
 		logger.Debug("AfterPerformRequest error", "error", err)
 	} else if status >= 400 && !slices.Contains(data.ignoreErrors, status) {
@@ -148,6 +162,55 @@ func AfterPerformRequest(ictx hook.HookContext, resp *elastic.Response, err erro
 	if status > 0 {
 		span.SetAttributes(semconv.DBResponseStatusCode(strconv.Itoa(status)))
 	}
+}
+
+// isDocNotFound reports whether esErr is Elasticsearch's answer to a Get of
+// a missing document: status 404 with a {"found":false} body, which olivere
+// turns into an Error without details. Callers handle it with
+// elastic.IsNotFound, and Exists ignores the same 404. A 404 with details,
+// such as index_not_found_exception, is still an error.
+func isDocNotFound(operation string, esErr *elastic.Error) bool {
+	return operation == opGet && esErr != nil &&
+		esErr.Status == http.StatusNotFound && esErr.Details == nil
+}
+
+// batchSize returns the number of operations in a bulk or mget request, or
+// 0 when the body is not the shape BulkService or MgetService sends.
+func batchSize(operation string, body any) int {
+	switch operation {
+	case opBulk:
+		if s, ok := body.(string); ok {
+			return countBulkActions(s)
+		}
+	case opMget:
+		if m, ok := body.(map[string]any); ok {
+			if docs, isSlice := m["docs"].([]any); isSlice {
+				return len(docs)
+			}
+		}
+	}
+	return 0
+}
+
+// countBulkActions counts the actions in an NDJSON bulk body. Each action
+// line is followed by one source line, except for delete. The scan does not
+// allocate or decode JSON.
+func countBulkActions(body string) int {
+	n := 0
+	expectSource := false
+	for line := range strings.Lines(body) {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if expectSource {
+			expectSource = false
+			continue
+		}
+		n++
+		expectSource = !strings.HasPrefix(line, `{"delete"`)
+	}
+	return n
 }
 
 // parseElasticPath extracts the Elasticsearch operation and target index from
@@ -235,7 +298,7 @@ func docOperation(method string, segs []string) string {
 	}
 	switch method {
 	case "GET", "HEAD":
-		return "get"
+		return opGet
 	case "DELETE":
 		return "delete"
 	default:
@@ -278,7 +341,7 @@ func methodFallback(method string) string {
 	case "DELETE":
 		return "delete"
 	case "GET":
-		return "get"
+		return opGet
 	case "POST":
 		return "index"
 	case "":
@@ -293,12 +356,12 @@ func methodFallback(method string) string {
 var knownActions = map[string]string{
 	"search":          "search",
 	"msearch":         "msearch",
-	"bulk":            "bulk",
+	"bulk":            opBulk,
 	"count":           "count",
 	"update":          "update",
 	"update_by_query": "update_by_query",
 	"delete_by_query": "delete_by_query",
-	"mget":            "mget",
+	"mget":            opMget,
 	"refresh":         "refresh",
 	"flush":           "flush",
 	"mapping":         "mapping",

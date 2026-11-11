@@ -73,8 +73,35 @@ func TestClientTraceAttrs_OmitsEmptyOptional(t *testing.T) {
 	_, hasIndex := got["db.collection.name"]
 	_, hasMethod := got["http.request.method"]
 	_, hasPath := got["url.path"]
+	_, hasBatch := got["db.operation.batch.size"]
 	assert.False(t, hasOp)
+	assert.False(t, hasBatch)
 	assert.False(t, hasIndex)
 	assert.False(t, hasMethod)
 	assert.False(t, hasPath)
+}
+
+func TestClientTraceAttrs_BatchSize(t *testing.T) {
+	tests := []struct {
+		size    int
+		want    int64
+		present bool
+	}{
+		{size: 0},
+		{size: 1},
+		{size: 2, want: 2, present: true},
+		{size: 50, want: 50, present: true},
+	}
+	for _, tt := range tests {
+		attrs := ClientTraceAttrs(Request{Operation: "bulk", BatchSize: tt.size})
+		got := make(map[string]any, len(attrs))
+		for _, a := range attrs {
+			got[string(a.Key)] = a.Value.AsInterface()
+		}
+		v, ok := got["db.operation.batch.size"]
+		assert.Equal(t, tt.present, ok, "size=%d", tt.size)
+		if tt.present {
+			assert.Equal(t, tt.want, v)
+		}
+	}
 }

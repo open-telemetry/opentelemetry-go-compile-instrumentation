@@ -17,6 +17,8 @@ type Request struct {
 	Path      string
 	Operation string
 	Index     string
+	// BatchSize is the number of operations in a bulk or mget request.
+	BatchSize int
 }
 
 // SpanName returns the client span name: "{operation} {index}", or one of
@@ -47,6 +49,10 @@ func ClientTraceAttrs(req Request) []attribute.KeyValue {
 	}
 	if index := strings.TrimSpace(req.Index); index != "" {
 		attrs = append(attrs, semconv.DBCollectionName(index))
+	}
+	// Semconv: a batch has two or more operations, so the size is never 1.
+	if req.BatchSize > 1 {
+		attrs = append(attrs, semconv.DBOperationBatchSize(req.BatchSize))
 	}
 	if method := strings.ToUpper(strings.TrimSpace(req.Method)); method != "" {
 		attrs = append(attrs, semconv.HTTPRequestMethodKey.String(method))
