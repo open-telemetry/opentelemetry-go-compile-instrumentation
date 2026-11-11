@@ -71,3 +71,16 @@ and omit a terminal `/development` marker if the property actually has one.
 Resolving configuration metadata does not enable instrumentation or load user
 configuration values. Runtime environment-source precedence belongs to that
 separate loading step.
+
+## Metadata discovery during setup
+
+Setup only considers metadata belonging to instrumentation modules whose rules
+matched the build. It reads `metadata.yaml` from the directory containing each
+matched module's `go.mod`; it does not search parent directories. This also
+works when an external module is downloaded independently to the module cache.
+Each selected module is read once, and equivalent definitions are deduplicated.
+
+Missing metadata is not a setup error by itself. Setup returns resolved
+definitions and selected module roots without metadata to the application
+configuration validator, which can report a missing definition only when a
+supplied option needs one. Discovery does not select or enable instrumentation.

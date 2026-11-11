@@ -1,5 +1,13 @@
 version: "v1.0.0"
 
+wrap_nested_calls:
+  target: main
+  where:
+    function_call: strings.TrimSpace
+  do:
+    - wrap_call:
+        replace: 'recordNestedCall({{ . }})'
+
 hook_helloworld:
   target: main
   where:

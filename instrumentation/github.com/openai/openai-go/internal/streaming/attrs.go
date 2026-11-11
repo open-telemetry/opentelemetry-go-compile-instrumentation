@@ -20,4 +20,10 @@ const (
 	genAIUsageOutputTokensKey        = attribute.Key("gen_ai.usage.output_tokens")
 	genAIUsageTotalTokensKey         = attribute.Key("gen_ai.usage.total_tokens")
 	genAIResponseTimeToFirstTokenKey = attribute.Key("gen_ai.response.time_to_first_token")
+
+	// genAIUsageCacheReadInputTokensKey reports prompt tokens served from
+	// OpenAI's automatic prompt cache. OpenAI already counts these inside
+	// prompt_tokens, so it is a breakdown of the input count and must not be
+	// added to it.
+	genAIUsageCacheReadInputTokensKey = attribute.Key("gen_ai.usage.cache_read.input_tokens")
 )

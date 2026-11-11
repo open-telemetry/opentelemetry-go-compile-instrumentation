@@ -5,6 +5,7 @@ package rule
 
 import (
 	"fmt"
+	"iter"
 	"maps"
 	"path/filepath"
 	"slices"
@@ -202,6 +203,30 @@ func (irs *InstRuleSet) AddFileRule(rule *InstFileRule) {
 	irs.FileRules = append(irs.FileRules, rule)
 }
 
+// AllRules returns every rule in the set in a stable order. Rule maps are
+// traversed by sorted source file, with rule kinds visited in a fixed order.
+func (irs *InstRuleSet) AllRules() iter.Seq[InstRule] {
+	return func(yield func(InstRule) bool) {
+		if irs == nil {
+			return
+		}
+		if !yieldRuleMap(irs.RawRules, yield) ||
+			!yieldRuleMap(irs.FuncRules, yield) ||
+			!yieldRuleMap(irs.StructRules, yield) ||
+			!yieldRuleMap(irs.CallRules, yield) ||
+			!yieldRuleMap(irs.LitRules, yield) ||
+			!yieldRuleMap(irs.DirectiveRules, yield) ||
+			!yieldRuleMap(irs.DeclRules, yield) {
+			return
+		}
+		for _, r := range irs.FileRules {
+			if !yield(r) {
+				return
+			}
+		}
+	}
+}
+
 func (irs *InstRuleSet) SetPackageName(name string) {
 	util.Assert(name != "", "package name is empty")
 	irs.PackageName = name
@@ -224,6 +249,15 @@ func allRules[T InstRule](rulesByFile map[string][]T) []T {
 		rules = append(rules, rulesByFile[file]...)
 	}
 	return rules
+}
+
+func yieldRuleMap[T InstRule](rulesByFile map[string][]T, yield func(InstRule) bool) bool {
+	for _, r := range allRules(rulesByFile) {
+		if !yield(r) {
+			return false
+		}
+	}
+	return true
 }
 
 // AllFuncRules returns all function rules from the rule set as a flat slice,

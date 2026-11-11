@@ -153,6 +153,7 @@ jobs:
         id: credentials
         env:
           CLIENT_ID: ${{ vars.OTELBOT_GO_COMPILE_INSTRUMENTATION_CLIENT_ID }}
+          HEAD_REPO_FULL: ${{ inputs.head_repo_full }}
           PRIVATE_KEY: >-
             ${{ secrets.OTELBOT_GO_COMPILE_INSTRUMENTATION_PRIVATE_KEY }}
         run: |

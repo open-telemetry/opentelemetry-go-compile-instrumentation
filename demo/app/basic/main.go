@@ -16,6 +16,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"strings"
 	"time"
 	"unsafe"
 
@@ -100,6 +101,8 @@ func AutoDetect() {}
 
 func (MyStruct) Unnamed(int, float32) {}
 
+func recordNestedCall(value string) string { return "[" + value + "]" }
+
 func main() {
 	ctx := &traceContext{
 		traceID: "123",
@@ -143,4 +146,6 @@ func main() {
 
 	AutoDetect()
 	MyStruct{}.Unnamed(42, 2.7)
+	// Both calls must be wrapped, including the call inside the argument.
+	fmt.Println("Nested call wrappers:", strings.TrimSpace(strings.TrimSpace(" x ")))
 }
