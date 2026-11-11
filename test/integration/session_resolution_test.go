@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -261,4 +262,110 @@ func TestInnerB(t *testing.T) { build(t) }
 		total += n
 	}
 	assert.LessOrEqual(t, total, 1, "inner builds of one outer session must share the resolution:\n%s", out)
+}
+
+// TestSessionSeparatesSubdirectoryWorkspaces covers one module built from
+// two child directories, each with its own go.work that replaces the
+// rule-added dependency differently. GOWORK is unset, so go picks the
+// workspace from the directory the build runs in, not from the module root.
+// Both builds share one session, and each must link its own replacement.
+func TestSessionSeparatesSubdirectoryWorkspaces(t *testing.T) {
+	otelcPath, err := testutil.OtelcPath()
+	require.NoError(t, err)
+	otelcPath, err = filepath.Abs(otelcPath)
+	require.NoError(t, err)
+
+	root := t.TempDir()
+	modDir := filepath.Join(root, "m")
+	for _, v := range []string{"A", "B"} {
+		dir := "dep" + v
+		writeTestFile(t, root, filepath.Join(dir, "go.mod"), "module example.com/ws/dep\n\ngo 1.25.0\n")
+		writeTestFile(t, root, filepath.Join(dir, "dep.go"), `// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package dep
+
+import "fmt"
+
+// Note reports which replacement the build linked.
+func Note() string {
+	fmt.Println("dep: replacement `+v+`")
+	return "note"
+}
+`)
+		writeTestFile(t, modDir, filepath.Join(strings.ToLower(v), "go.work"),
+			"go 1.25.0\n\nuse ..\n\nreplace example.com/ws/dep => ../../"+dir+"\n")
+	}
+	writeTestFile(t, modDir, "go.mod", `module example.com/ws
+
+go 1.25.0
+
+require example.com/ws/dep v0.0.0
+
+replace example.com/ws/dep => ../depA
+`)
+	writeTestFile(t, modDir, filepath.Join("inner", "inner.go"), `// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package inner
+
+import "strings"
+
+func Work() string { return strings.ToUpper("work") }
+`)
+	writeTestFile(t, modDir, "main.go", `// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+import (
+	"fmt"
+
+	"example.com/ws/inner"
+)
+
+func main() { fmt.Println("ws: " + inner.Work()) }
+`)
+	rules := filepath.Join(modDir, "rules.yml")
+	writeTestFile(t, modDir, "rules.yml", `inner_wrap_call:
+  target: example.com/ws/inner
+  where:
+    function_call: strings.ToUpper
+  do:
+    - wrap_call:
+        replace: '(func() string { dep.Note(); return {{ . }} })()'
+  imports:
+    dep: example.com/ws/dep
+`)
+
+	// Each build gets its own GOCACHE: an import a rule adds is not part of
+	// go's cache key for the compile it is added to, so a shared GOCACHE
+	// would hand one workspace's instrumented compile to the other no
+	// matter what the session does.
+	env := append(preparedBuildBaseEnvironment(),
+		"OTELC_RULES="+rules,
+		"OTELC_STATS=1",
+		"OTELC_SESSION_DIR="+filepath.Join(t.TempDir(), "session"),
+	)
+	scopes := map[string]string{}
+	for _, v := range []string{"A", "B"} {
+		buildDir := filepath.Join(modDir, strings.ToLower(v))
+		workDir := t.TempDir()
+		bin := filepath.Join(workDir, "app")
+		cmd := exec.CommandContext(t.Context(), otelcPath, "--work-dir", workDir,
+			"go", "build", "-o", bin, "example.com/ws")
+		cmd.Dir = buildDir
+		cmd.Env = append(append([]string{}, env...), "GOCACHE="+filepath.Join(t.TempDir(), "gocache"))
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "otelc go build in %s failed:\n%s", buildDir, out)
+		run, err := exec.CommandContext(t.Context(), bin).CombinedOutput()
+		require.NoError(t, err, "%s", run)
+		assert.Contains(t, string(run), "dep: replacement "+v,
+			"the build in %s linked another workspace's replacement", buildDir)
+		scope, err := os.ReadFile(filepath.Join(workDir, ".otelc-build", "resolution_scope"))
+		require.NoError(t, err)
+		scopes[v] = string(scope)
+		t.Logf("build in %s: scope %s, output %q", buildDir, scope, strings.TrimSpace(string(run)))
+	}
+	assert.NotEqual(t, scopes["A"], scopes["B"], "builds in different workspaces must not share a scope")
 }

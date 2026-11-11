@@ -618,7 +618,11 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	if err = sp.storeInjectedHash(ctx, matched); err != nil {
 		return err
 	}
-	return writeResolutionScope(ctx, moduleDirs)
+	buildDir, err := buildCommandDir(sp.buildFlags)
+	if err != nil {
+		return err
+	}
+	return writeResolutionScope(ctx, buildDir, moduleDirs)
 }
 
 // warnIfNoInstrumentationMatched reports the combined result. An individual
