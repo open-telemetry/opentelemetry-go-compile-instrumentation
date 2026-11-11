@@ -28,6 +28,7 @@ func TestRootFiltering(t *testing.T) {
 		f.SetEnv("OTEL_GO_EXCLUDED_SERVER_PATHS", "/healthz,/readyz")
 		f.SetEnv("OTEL_GO_DROP_ROOT_CLIENT_PRODUCER", "false")
 		f.SetEnv("OTEL_TRACES_SAMPLER", "always_on")
+		f.SetEnv("OTEL_TRACES_SAMPLER_ARG", "")
 
 		port := testutil.FreePort(t)
 		server := f.Start("httpserverdbclient", fmt.Sprintf("-front-port=%d", port), "-stdin-shutdown")
@@ -57,6 +58,8 @@ func TestRootFiltering(t *testing.T) {
 		f := testutil.NewTestFixture(t)
 		f.SetEnv("OTEL_GO_EXCLUDED_SERVER_PATHS", "/healthz,/readyz")
 		f.SetEnv("OTEL_GO_DROP_ROOT_CLIENT_PRODUCER", "false")
+		f.SetEnv("OTEL_TRACES_SAMPLER", "always_on")
+		f.SetEnv("OTEL_TRACES_SAMPLER_ARG", "")
 
 		port := testutil.FreePort(t)
 		server := f.Start("httpserverdbclient", fmt.Sprintf("-front-port=%d", port), "-stdin-shutdown")
@@ -93,6 +96,8 @@ func TestRootFiltering(t *testing.T) {
 		f := testutil.NewTestFixture(t)
 		f.SetEnv("OTEL_GO_EXCLUDED_SERVER_PATHS", "/healthz,/readyz")
 		f.SetEnv("OTEL_GO_DROP_ROOT_CLIENT_PRODUCER", "false")
+		f.SetEnv("OTEL_TRACES_SAMPLER", "always_on")
+		f.SetEnv("OTEL_TRACES_SAMPLER_ARG", "")
 
 		port := testutil.FreePort(t)
 		server := f.Start("httpserverdbclient", fmt.Sprintf("-front-port=%d", port), "-stdin-shutdown")
@@ -129,6 +134,8 @@ func TestRootFiltering(t *testing.T) {
 		f := testutil.NewTestFixture(t)
 		f.SetEnv("OTEL_GO_DROP_ROOT_CLIENT_PRODUCER", "true")
 		f.SetEnv("OTEL_GO_EXCLUDED_SERVER_PATHS", "")
+		f.SetEnv("OTEL_TRACES_SAMPLER", "always_on")
+		f.SetEnv("OTEL_TRACES_SAMPLER_ARG", "")
 
 		// Run parentless database ping to process completion.
 		f.Run("dbclient", "-op=ping")
@@ -140,6 +147,10 @@ func TestRootFiltering(t *testing.T) {
 	t.Run("FilteringDisabledBehaviorUnchanged", func(t *testing.T) {
 		t.Run("ServerAndDescendantRecorded", func(t *testing.T) {
 			f := testutil.NewTestFixture(t)
+			f.SetEnv("OTEL_GO_DROP_ROOT_CLIENT_PRODUCER", "")
+			f.SetEnv("OTEL_GO_EXCLUDED_SERVER_PATHS", "")
+			f.SetEnv("OTEL_TRACES_SAMPLER", "always_on")
+			f.SetEnv("OTEL_TRACES_SAMPLER_ARG", "")
 
 			port := testutil.FreePort(t)
 			server := f.Start("httpserverdbclient", fmt.Sprintf("-front-port=%d", port), "-stdin-shutdown")
@@ -171,6 +182,10 @@ func TestRootFiltering(t *testing.T) {
 
 		t.Run("ParentlessClientRecorded", func(t *testing.T) {
 			f := testutil.NewTestFixture(t)
+			f.SetEnv("OTEL_GO_DROP_ROOT_CLIENT_PRODUCER", "")
+			f.SetEnv("OTEL_GO_EXCLUDED_SERVER_PATHS", "")
+			f.SetEnv("OTEL_TRACES_SAMPLER", "always_on")
+			f.SetEnv("OTEL_TRACES_SAMPLER_ARG", "")
 
 			f.Run("dbclient", "-op=ping")
 

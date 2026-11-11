@@ -5,7 +5,6 @@ package testutil
 
 import (
 	"context"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -147,10 +146,8 @@ func Run(t *testing.T, appsDir, app string, env []string, args ...string) string
 // Start starts the application but does not wait for it to complete. If env
 // is nil, the parent process env is used. Stdout and stderr are captured and
 // logged when the test fails, so that app crashes are visible in CI output.
-// The returned AppOutput also lets a test block until the app logs a given
-// string, so tests can synchronise on the app reaching a known point.
-// The returned io.WriteCloser provides access to stdin for graceful shutdown.
-func Start(t *testing.T, appsDir, app string, env []string, args ...string) (*exec.Cmd, *AppOutput, io.WriteCloser, *bool) {
+// The returned Server provides graceful shutdown via Stop and log synchronization.
+func Start(t *testing.T, appsDir, app string, env []string, args ...string) *Server {
 	t.Helper()
 	appName := "./" + appBinName
 	if util.IsWindows() {
@@ -171,20 +168,24 @@ func Start(t *testing.T, appsDir, app string, env []string, args ...string) (*ex
 	cmd.Stdout = out
 	cmd.Stderr = out
 
-	var stopped bool
 	require.NoError(t, cmd.Start())
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	srv := &Server{
+		t:       t,
+		appPath: app,
+		output:  out,
+		stdin:   stdin,
+		Cmd:     cmd,
+		done:    done,
+	}
 	t.Cleanup(func() {
-		if !stopped && cmd.Process != nil {
-			if stdin != nil {
-				_ = stdin.Close()
-			}
-			_ = cmd.Process.Kill()
-			_ = cmd.Wait() // ensure all output is flushed
-		}
-		if t.Failed() && out.Len() > 0 {
-			t.Logf("app output:\n%s", out)
-		}
+		srv.cleanup()
 	})
 
-	return cmd, out, stdin, &stopped
+	return srv
 }
