@@ -56,14 +56,14 @@ const (
 	SessionOff = "off"
 	// SessionTempDir is the build temp entry an owning build uses as its
 	// session directory.
-	SessionTempDir = "session"
-	BuildTempDir            = ".otelc-build"
-	BuildLockFile           = BuildTempDir + ".lock"
-	OtelcRoot               = "go.opentelemetry.io/otelc"
-	OtelcPkgRoot            = OtelcRoot + "/pkg"
-	OtelcInstRoot           = OtelcRoot + "/instrumentation"
-	OtelcToolCmdRoot        = OtelcRoot + "/tool/cmd/otelc"
-	OtelcToolExe            = "otelc"
+	SessionTempDir   = "session"
+	BuildTempDir     = ".otelc-build"
+	BuildLockFile    = BuildTempDir + ".lock"
+	OtelcRoot        = "go.opentelemetry.io/otelc"
+	OtelcPkgRoot     = OtelcRoot + "/pkg"
+	OtelcInstRoot    = OtelcRoot + "/instrumentation"
+	OtelcToolCmdRoot = OtelcRoot + "/tool/cmd/otelc"
+	OtelcToolExe     = "otelc"
 	// InternalPath is a sentinel Path value for compiler-internal rules and
 	// synthetic files (e.g. runtime GLS context propagation) injected directly
 	// by otelc rather than loaded from an external Go package.

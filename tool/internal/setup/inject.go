@@ -122,9 +122,14 @@ func injectedDeps(
 	known map[string]bool,
 	buildFlags []string,
 ) ([]*Dependency, error) {
-	return injectedDepsFrom(ctx, hookPaths, known, func(ctx context.Context, paths []string) ([]*packages.Package, error) {
-		return loadGraphPackages(ctx, buildFlags, paths)
-	})
+	return injectedDepsFrom(
+		ctx,
+		hookPaths,
+		known,
+		func(ctx context.Context, paths []string) ([]*packages.Package, error) {
+			return loadGraphPackages(ctx, buildFlags, paths)
+		},
+	)
 }
 
 // injectedDepsFrom is injectedDeps with the package graph from load.
