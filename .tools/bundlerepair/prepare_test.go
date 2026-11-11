@@ -74,7 +74,6 @@ func TestPrepareCapturesLiveBase(t *testing.T) {
 			want := []string{
 				"authorized=true", "pr_number=1", "base_ref=main", "base_sha=" + baseSHA,
 				"head_ref=contribution", "head_repo_full=test/fork", "head_sha=" + headSHA,
-				"is_cross_repository=true",
 			}
 			if got := fx.lines(t); !slices.Equal(got, want) {
 				t.Errorf("outputs = %q, want %q", got, want)
@@ -83,7 +82,7 @@ func TestPrepareCapturesLiveBase(t *testing.T) {
 	}
 }
 
-func TestPrepareSameRepositoryIsNotCrossRepository(t *testing.T) {
+func TestPrepareSameRepository(t *testing.T) {
 	fx := newPrepFixture(t, false)
 	fx.setPull(func(p map[string]any) {
 		p["head"] = map[string]any{"sha": headSHA, "ref": "feature/x", "repo": map[string]any{"full_name": testRepo}}
@@ -92,7 +91,7 @@ func TestPrepareSameRepositoryIsNotCrossRepository(t *testing.T) {
 		t.Fatalf("exit code = %d: %s", code, out.stderr)
 	}
 	got := fx.lines(t)
-	if !slices.Contains(got, "is_cross_repository=false") || !slices.Contains(got, "head_ref=feature/x") {
+	if !slices.Contains(got, "head_repo_full="+testRepo) || !slices.Contains(got, "head_ref=feature/x") {
 		t.Errorf("outputs = %q", got)
 	}
 }
@@ -257,25 +256,21 @@ func TestPrepareAutomaticAcceptsEditsDisabledInSameRepository(t *testing.T) {
 	}
 }
 
-// Go test TestPublisherCredentialSelection.
+// Go test TestPublisherCredentialSelection. Fork branches use the App too.
 func TestCredentials(t *testing.T) {
 	tests := []struct {
-		name, client, key, fork, want string
+		name, client, key, want string
 	}{
-		{"missing both", "", "", "false", "false"},
-		{"missing key", "client", "", "false", "false"},
-		{"missing client", "", "test-key", "false", "false"},
-		{"complete App", "client", "test-key", "false", "true"},
-		{"fork", "client", "test-key", "true", "false"},
-		{"unset cross-repository flag", "client", "test-key", "", "false"},
-		{"unexpected cross-repository flag", "client", "test-key", "False", "false"},
-		{"fork needs no client or key", "", "", "true", "false"},
+		{"missing both", "", "", "false"},
+		{"missing key", "client", "", "false"},
+		{"missing client", "", "test-key", "false"},
+		{"complete App", "client", "test-key", "true"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			output := filepath.Join(t.TempDir(), "outputs")
 			env := map[string]string{
-				"CLIENT_ID": tt.client, "PRIVATE_KEY": tt.key, "IS_CROSS_REPOSITORY": tt.fork, "GITHUB_OUTPUT": output,
+				"CLIENT_ID": tt.client, "PRIVATE_KEY": tt.key, "GITHUB_OUTPUT": output,
 			}
 			code, out := runApp(t, env, "credentials")
 			if code != 0 {
@@ -303,13 +298,11 @@ func TestCredentialsRequiresReachedVariables(t *testing.T) {
 		wantErr bool
 		want    string
 	}{
-		{"flag unset", map[string]string{"CLIENT_ID": "c", "PRIVATE_KEY": "k"}, true, ""},
-		{"client unset", map[string]string{"IS_CROSS_REPOSITORY": "false", "PRIVATE_KEY": "k"}, true, ""},
-		{"key unset", map[string]string{"IS_CROSS_REPOSITORY": "false", "CLIENT_ID": "c"}, true, ""},
-		{"fork stops before the client", map[string]string{"IS_CROSS_REPOSITORY": "true"}, false, "false"},
+		{"client unset", map[string]string{"PRIVATE_KEY": "k"}, true, ""},
+		{"key unset", map[string]string{"CLIENT_ID": "c"}, true, ""},
 		{
 			"empty client stops before the key",
-			map[string]string{"IS_CROSS_REPOSITORY": "false", "CLIENT_ID": ""},
+			map[string]string{"CLIENT_ID": ""},
 			false,
 			"false",
 		},
@@ -335,7 +328,8 @@ func TestCredentialsRequiresReachedVariables(t *testing.T) {
 }
 
 func TestCredentialsNeedsOutputFile(t *testing.T) {
-	if code, _ := runApp(t, map[string]string{"IS_CROSS_REPOSITORY": "false"}, "credentials"); code != exitFailure {
+	env := map[string]string{"CLIENT_ID": "c", "PRIVATE_KEY": "k"}
+	if code, _ := runApp(t, env, "credentials"); code != exitFailure {
 		t.Errorf("exit code = %d", code)
 	}
 	if code, _ := runApp(t, nil, "credentials", "extra"); code != exitFailure {
@@ -365,8 +359,8 @@ func TestIdentityMissingToken(t *testing.T) {
 		t.Fatalf("exit code = %d", code)
 	}
 	wantOut := "::error::Missing publisher token in bundle-publisher.\n" +
-		"Configure OTELC_BUNDLE_PUSH_TOKEN as an environment secret.\n" +
-		"The App remains supported for repository branches.\n"
+		"Configure the OTELBOT_GO_COMPILE_INSTRUMENTATION_* App credentials\n" +
+		"or OTELC_BUNDLE_PUSH_TOKEN as an environment secret.\n"
 	if out.stdout != wantOut {
 		t.Errorf("stdout = %q, want %q", out.stdout, wantOut)
 	}
