@@ -16,6 +16,7 @@ import (
 	"golang.org/x/mod/module"
 
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/session"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -243,7 +244,12 @@ func findGoSources(ctx context.Context, args []string, cgoObjDirs map[string]str
 func findDeps(ctx context.Context, subcommand string, cmdArgs []string) ([]*Dependency, error) {
 	logger := util.LoggerFromContext(ctx)
 
-	buildPlan, err := listBuildPlan(ctx, subcommand, cmdArgs)
+	var buildPlan []string
+	err := session.WithLoadSlot(ctx, func(ctx context.Context) error {
+		var planErr error
+		buildPlan, planErr = listBuildPlan(ctx, subcommand, cmdArgs)
+		return planErr
+	})
 	if err != nil {
 		return nil, err
 	}

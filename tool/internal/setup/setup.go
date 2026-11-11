@@ -21,6 +21,7 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/instrument"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/internal/session"
 	"go.opentelemetry.io/otelc/tool/util"
 	"golang.org/x/tools/go/packages"
 )
@@ -43,6 +44,8 @@ type setupPhase struct {
 	// testPackages holds the test variants and test binaries of a go test
 	// build, which buildPackages leaves out.
 	testPackages []*packages.Package
+	// graph caches the package graph loads setup shares between phases.
+	graph packageGraph
 }
 
 func (sp *setupPhase) getBuildContext() *gobuild.Context {
@@ -189,30 +192,24 @@ func loadBuildPackages(
 	}
 	buildFlags := extractBuildFlags(subcommand, args)
 
-	var (
-		pkgs    []*packages.Package
-		loadErr error
-	)
-	switch {
-	case len(fileTargets) > 0:
-		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, buildFlags, tests, fileTargets...)
-		if loadErr != nil {
-			return nil, nil, loadErr
+	var pkgs []*packages.Package
+	loadErr := session.WithLoadSlot(ctx, func(ctx context.Context) error {
+		var err error
+		switch {
+		case len(fileTargets) > 0:
+			pkgs, err = pkgload.LoadPackages(ctx, mode, buildFlags, tests, fileTargets...)
+			if err == nil && len(pkgs) > 1 {
+				err = ex.New("multiple packages found for file targets")
+			}
+		case len(pkgTargets) > 0:
+			pkgs, err = pkgload.LoadPackages(ctx, mode, buildFlags, tests, pkgTargets...)
+		default:
+			pkgs, err = pkgload.LoadPackages(ctx, mode, buildFlags, tests, ".")
 		}
-
-		if len(pkgs) > 1 {
-			return nil, nil, ex.New("multiple packages found for file targets")
-		}
-	case len(pkgTargets) > 0:
-		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, buildFlags, tests, pkgTargets...)
-		if loadErr != nil {
-			return nil, nil, loadErr
-		}
-	default:
-		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, buildFlags, tests, ".")
-		if loadErr != nil {
-			return nil, nil, loadErr
-		}
+		return err
+	})
+	if loadErr != nil {
+		return nil, nil, loadErr
 	}
 
 	// A test load sets ForTest on every test package it adds. The synthesized
@@ -1012,13 +1009,7 @@ func (sp *setupPhase) hookImports(
 		return map[string]map[string]bool{}, nil
 	}
 
-	pkgs, err := pkgload.LoadPackages(
-		ctx,
-		packages.NeedName|packages.NeedImports|packages.NeedDeps,
-		sp.buildFlags,
-		false,
-		hookPaths...,
-	)
+	pkgs, err := sp.loadGraph(ctx, sp.buildFlags, hookPaths)
 	if err != nil {
 		return nil, ex.Wrapf(err, "loading hook packages to find their imports")
 	}
