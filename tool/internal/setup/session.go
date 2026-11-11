@@ -109,15 +109,22 @@ func resolvedGoWork(ctx context.Context, dir string) (string, error) {
 }
 
 // buildCommandDir returns the directory the build's go command runs in: the
-// last -C value of buildFlags made absolute, else the current directory.
+// value of the last change-directory flag in buildFlags (-C dir, -C=dir,
+// --C dir, or --C=dir) made absolute, else the current directory. The flags
+// are classified first, so a value that merely looks like a change-directory
+// flag, such as the one in -tags -C=x, is never taken for one.
 func buildCommandDir(buildFlags []string) (string, error) {
 	dir := ""
-	for i, flag := range buildFlags {
+	classified := classifyArgs(subcmdBuild, buildFlags)
+	for i, a := range classified {
+		if a.Kind != ArgBuildFlag || a.FlagName != "-C" {
+			continue
+		}
 		switch {
-		case flag == "-C" && i+1 < len(buildFlags):
-			dir = buildFlags[i+1]
-		case strings.HasPrefix(flag, "-C="):
-			dir = strings.TrimPrefix(flag, "-C=")
+		case a.HasValue:
+			dir = a.Value
+		case i+1 < len(classified) && classified[i+1].Kind == ArgBuildFlagValue:
+			dir = classified[i+1].Raw
 		}
 	}
 	if dir == "" {
