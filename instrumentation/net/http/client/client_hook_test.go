@@ -88,6 +88,45 @@ func TestBeforeRoundTrip(t *testing.T) {
 			expectSpan: false,
 		},
 		{
+			name: "request under an otelhttp client span is skipped",
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+			},
+			setupRequest: func() *http.Request {
+				ctx, _ := otel.Tracer(otelhttpScope).Start(context.Background(), "GET",
+					trace.WithSpanKind(trace.SpanKindClient))
+				req, _ := http.NewRequestWithContext(ctx, "GET", "http://example.com/path", nil)
+				return req
+			},
+			expectSpan: false,
+		},
+		{
+			name: "request under an otelhttp span of another kind creates span",
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+			},
+			setupRequest: func() *http.Request {
+				ctx, _ := otel.Tracer(otelhttpScope).Start(context.Background(), "GET /",
+					trace.WithSpanKind(trace.SpanKindServer))
+				req, _ := http.NewRequestWithContext(ctx, "GET", "http://example.com/path", nil)
+				return req
+			},
+			expectSpan: true,
+		},
+		{
+			name: "request under another client span creates span",
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+			},
+			setupRequest: func() *http.Request {
+				ctx, _ := otel.Tracer("linodego").Start(context.Background(), "linodego.GetInstance",
+					trace.WithSpanKind(trace.SpanKindClient))
+				req, _ := http.NewRequestWithContext(ctx, "GET", "http://example.com/path", nil)
+				return req
+			},
+			expectSpan: true,
+		},
+		{
 			name: "POST request",
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
