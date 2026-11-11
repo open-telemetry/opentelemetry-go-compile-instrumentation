@@ -833,7 +833,7 @@ func (lr *linkResolution) lookup(
 			misses = append(misses, root)
 			continue
 		case failure != "":
-			failed[root] = errors.New(failure)
+			failed[root] = ex.New(failure)
 		default:
 			closures[root] = closure
 		}

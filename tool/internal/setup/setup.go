@@ -204,19 +204,19 @@ func loadBuildPackages(
 
 	var pkgs []*packages.Package
 	loadErr := session.WithLoadSlot(ctx, func(ctx context.Context) error {
-		var err error
+		var targetErr error
 		switch {
 		case len(fileTargets) > 0:
-			pkgs, err = pkgload.LoadPackages(ctx, mode, buildFlags, tests, fileTargets...)
-			if err == nil && len(pkgs) > 1 {
-				err = ex.New("multiple packages found for file targets")
+			pkgs, targetErr = pkgload.LoadPackages(ctx, mode, buildFlags, tests, fileTargets...)
+			if targetErr == nil && len(pkgs) > 1 {
+				targetErr = ex.New("multiple packages found for file targets")
 			}
 		case len(pkgTargets) > 0:
-			pkgs, err = pkgload.LoadPackages(ctx, mode, buildFlags, tests, pkgTargets...)
+			pkgs, targetErr = pkgload.LoadPackages(ctx, mode, buildFlags, tests, pkgTargets...)
 		default:
-			pkgs, err = pkgload.LoadPackages(ctx, mode, buildFlags, tests, ".")
+			pkgs, targetErr = pkgload.LoadPackages(ctx, mode, buildFlags, tests, ".")
 		}
-		return err
+		return targetErr
 	})
 	if loadErr != nil {
 		return nil, nil, loadErr
@@ -501,8 +501,8 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	if cmd.Name == "go" {
 		subcommand = cmd.Args().First() // build / install / test
 		args = cmd.Args().Tail()        // trim the subcommand
-	} else if err := cleanupOwnedSession(); err != nil {
-		return ex.Wrapf(err, "cleaning the session directory")
+	} else if cleanErr := cleanupOwnedSession(); cleanErr != nil {
+		return ex.Wrapf(cleanErr, "cleaning the session directory")
 	} else if err := cleanupDebugArtifacts(); err != nil {
 		// Clean up debug artifacts from previous runs for standalone `otelc setup`,
 		// as it prepares the environment for a subsequent toolexec build.

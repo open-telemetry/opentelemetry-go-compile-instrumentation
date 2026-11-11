@@ -20,14 +20,13 @@ import (
 )
 
 // setupSession points this process at a fresh work dir and session, records
-// scope as the resolution scope, and returns the work dir.
-func setupSession(t *testing.T, scope string) string {
+// "scope1" as the resolution scope.
+func setupSession(t *testing.T) {
 	t.Helper()
 	workDir := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, workDir)
 	t.Setenv(util.EnvOtelcSessionDir, filepath.Join(t.TempDir(), "session"))
-	writeScope(t, scope)
-	return workDir
+	writeScope(t, "scope1")
 }
 
 func writeScope(t *testing.T, scope string) {
@@ -45,7 +44,7 @@ func archive(t *testing.T, name string) string {
 }
 
 func TestMemoHitAndMiss(t *testing.T) {
-	setupSession(t, "scope1")
+	setupSession(t)
 	m := Open([]string{"-tags=x"})
 	require.NotNil(t, m)
 
@@ -62,7 +61,7 @@ func TestMemoHitAndMiss(t *testing.T) {
 }
 
 func TestMemoSeparatesScopesAndFlags(t *testing.T) {
-	setupSession(t, "scope1")
+	setupSession(t)
 	Open(nil).Store("example.com/a", map[string]string{"example.com/a": archive(t, "a")}, nil)
 
 	_, _, ok := Open([]string{"-tags=y"}).Lookup("example.com/a", nil)
@@ -74,7 +73,7 @@ func TestMemoSeparatesScopesAndFlags(t *testing.T) {
 }
 
 func TestMemoPGOProfileContentIsPartOfFlags(t *testing.T) {
-	setupSession(t, "scope1")
+	setupSession(t)
 	profile := filepath.Join(t.TempDir(), "default.pgo")
 	require.NoError(t, os.WriteFile(profile, []byte("v1"), 0o644))
 	flags := []string{"-pgo=" + profile}
@@ -89,7 +88,7 @@ func TestMemoPGOProfileContentIsPartOfFlags(t *testing.T) {
 }
 
 func TestMemoRejectsStaleArchive(t *testing.T) {
-	setupSession(t, "scope1")
+	setupSession(t)
 	a := archive(t, "a")
 	Open(nil).Store("example.com/a", map[string]string{"example.com/a": a}, nil)
 	require.NoError(t, os.Remove(a))
@@ -99,7 +98,7 @@ func TestMemoRejectsStaleArchive(t *testing.T) {
 }
 
 func TestMemoRejectsOverlapMismatch(t *testing.T) {
-	setupSession(t, "scope1")
+	setupSession(t)
 	closure := map[string]string{"example.com/a": archive(t, "a"), "fmt": archive(t, "fmt")}
 	Open(nil).Store("example.com/a", closure, nil)
 
@@ -114,7 +113,7 @@ func TestMemoRejectsOverlapMismatch(t *testing.T) {
 }
 
 func TestMemoNegativeEntry(t *testing.T) {
-	setupSession(t, "scope1")
+	setupSession(t)
 	Open(nil).Store("example.com/bad", nil, errors.New("no such package"))
 
 	_, failed, ok := Open(nil).Lookup("example.com/bad", nil)
@@ -123,7 +122,7 @@ func TestMemoNegativeEntry(t *testing.T) {
 }
 
 func TestMemoDisabled(t *testing.T) {
-	setupSession(t, "scope1")
+	setupSession(t)
 	t.Setenv(util.EnvOtelcSessionDir, util.SessionOff)
 	assert.Nil(t, Open(nil))
 
@@ -138,7 +137,7 @@ func TestMemoDisabled(t *testing.T) {
 }
 
 func TestMemoConcurrentWriters(t *testing.T) {
-	setupSession(t, "scope1")
+	setupSession(t)
 	closure := map[string]string{"example.com/a": archive(t, "a")}
 	var wg sync.WaitGroup
 	for range 16 {
@@ -157,14 +156,15 @@ func TestMemoConcurrentWriters(t *testing.T) {
 }
 
 func TestMemoLockSerializes(t *testing.T) {
-	setupSession(t, "scope1")
+	setupSession(t)
 	m := Open(nil)
 	var inside, overlaps atomic.Int32
 	var wg sync.WaitGroup
 	for range 8 {
 		wg.Go(func() {
 			release, err := m.Lock(t.Context())
-			if !assert.NoError(t, err) {
+			if err != nil {
+				t.Error(err)
 				return
 			}
 			if inside.Add(1) > 1 {
@@ -180,7 +180,7 @@ func TestMemoLockSerializes(t *testing.T) {
 }
 
 func TestMemoLockCanceled(t *testing.T) {
-	setupSession(t, "scope1")
+	setupSession(t)
 	m := Open(nil)
 	release, err := m.Lock(t.Context())
 	require.NoError(t, err)

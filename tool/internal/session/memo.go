@@ -18,6 +18,9 @@ import (
 // exportsDir is the session subdirectory that holds the export memo.
 const exportsDir = "exports"
 
+// maxLockNameLen bounds the length of the scope part of a lock file name.
+const maxLockNameLen = 32
+
 // Memo caches, per root import path, the closure of export files a nested
 // `go list -export` resolved for it, so concurrent and repeated builds of one
 // session stop resolving the same rule-added imports again. Entries are keyed
@@ -61,12 +64,12 @@ func Open(buildFlags []string) *Memo {
 func flagsDigest(buildFlags []string) string {
 	h := sha256.New()
 	for _, flag := range buildFlags {
-		h.Write([]byte(flag))
-		h.Write([]byte{0})
+		_, _ = h.Write([]byte(flag))
+		_, _ = h.Write([]byte{0})
 		if profile, ok := strings.CutPrefix(flag, "-pgo="); ok && profile != "off" && profile != "auto" {
 			if content, err := os.ReadFile(profile); err == nil {
 				sum := sha256.Sum256(content)
-				h.Write(sum[:])
+				_, _ = h.Write(sum[:])
 			}
 		}
 	}
@@ -159,5 +162,5 @@ func (m *Memo) Lock(ctx context.Context) (func(), error) {
 	if m == nil {
 		return func() {}, nil
 	}
-	return lockPath(ctx, filepath.Join(m.dir, m.scope[:min(len(m.scope), 32)]+".lock"), nil)
+	return lockPath(ctx, filepath.Join(m.dir, m.scope[:min(len(m.scope), maxLockNameLen)]+".lock"), nil)
 }

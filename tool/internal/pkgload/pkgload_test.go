@@ -4,6 +4,7 @@
 package pkgload
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -806,9 +807,7 @@ func TestResolveExportClosures_PerRootClosures(t *testing.T) {
 	require.NoError(t, err)
 	merged := map[string]string{}
 	for _, root := range []string{"example.com/batch/a", "example.com/batch/c"} {
-		for k, v := range closures[root] {
-			merged[k] = v
-		}
+		maps.Copy(merged, closures[root])
 	}
 	assert.Equal(t, union, merged)
 }
