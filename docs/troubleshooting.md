@@ -193,6 +193,29 @@ showing all source modifications and source additions introduced into the Go com
 otelc --stats go build .
 ```
 
+With `--stats`, each link also logs a `rule-added import resolution` line. It
+shows how many imports that rules add the link had to find (`candidates`), how
+many it read from the session memo (`memo_hits`), and how many `go list -export`
+runs it needed (`go_list_calls`).
+
+### Sessions: `OTELC_SESSION_DIR` and `OTELC_MAX_PARALLEL_LOADS`
+
+An `otelc go build`, `go install`, or `go test` owns a session directory,
+`.otelc-build/session`. Every otelc process under that build uses it, including
+`otelc go build` commands that a test binary runs. The session keeps the export
+files that links found for imports that rules add, so other builds in the same
+session do not run `go list -export` again. A new outer build removes the old
+session.
+
+- `OTELC_SESSION_DIR=<dir>` makes builds use `<dir>` as their session. otelc
+  sets it for the processes it starts, so you rarely need to set it.
+- `OTELC_SESSION_DIR=off` turns the session off. Use it if a test changes
+  library sources between nested otelc builds that run under one outer build.
+- `OTELC_MAX_PARALLEL_LOADS=<n>` limits how many large package loads the otelc
+  processes of one session run at the same time. The default is the number of
+  CPUs. `0` removes the limit. There is no time limit: a load waits until a
+  slot is free.
+
 ### `otelc version --verbose`
 
 Prints the tool version, build commit, and build time:
