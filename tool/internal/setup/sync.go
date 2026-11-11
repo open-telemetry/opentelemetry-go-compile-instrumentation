@@ -232,6 +232,24 @@ func discoverNestedModuleReplaces(dir string) (map[string]string, error) {
 	return nested, nil
 }
 
+func discoverNestedModuleReplacesOrError(dir string) (map[string]string, error) {
+	nested, err := discoverNestedModuleReplaces(dir)
+	if err != nil {
+		return nil, ex.Wrapf(err, "discovering nested modules under %s", dir)
+	}
+	return nested, nil
+}
+
+func addPkgModuleReplaces(replaces map[string]string, pkgDir string) error {
+	replaces[util.OtelcPkgRoot] = pkgDir
+	nested, err := discoverNestedModuleReplacesOrError(pkgDir)
+	if err != nil {
+		return err
+	}
+	maps.Copy(replaces, nested)
+	return nil
+}
+
 func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) error {
 	if len(modPaths) == 0 {
 		return nil
@@ -291,18 +309,20 @@ func syncDepsFromSource(ctx context.Context, modPaths map[string]bool, moduleDir
 		walkDirs[filepath.Dir(dir)] = true
 	}
 	for _, dir := range slices.Sorted(maps.Keys(walkDirs)) {
-		nested, nestedErr := discoverNestedModuleReplaces(dir)
+		nested, nestedErr := discoverNestedModuleReplacesOrError(dir)
 		if nestedErr != nil {
-			return ex.Wrapf(nestedErr, "discovering nested modules under %s", dir)
+			return nestedErr
 		}
 		maps.Copy(replaces, nested)
 	}
 
-	// Add replace directive for special pkg module
+	// Add replace directives for the special pkg module and its nested helpers.
 	// TODO: Since we haven't published the instrumentation packages yet,
 	// we need to add the replace directive to the local path.
 	// Once the instrumentation packages are published, we can remove this.
-	replaces[util.OtelcPkgRoot] = pkgDir
+	if err = addPkgModuleReplaces(replaces, pkgDir); err != nil {
+		return err
+	}
 
 	// Add replace directive for special runtime module
 	// runtime module initializes the OpenTelemetry SDK. It is required by all

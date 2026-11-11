@@ -347,6 +347,14 @@ func TestSyncDeps_WithMods(t *testing.T) {
 go 1.21
 `
 	tempDir, repositoryDir, goModPath := setupSyncDepsTest(t, goMod, []string{"net/http/client"})
+	netutilDir := filepath.Join(repositoryDir, "pkg", "netutil")
+	require.NoError(t, os.MkdirAll(netutilDir, 0o755))
+	netutilModule := util.OtelcPkgRoot + "/netutil"
+	require.NoError(t, os.WriteFile(
+		filepath.Join(netutilDir, "go.mod"),
+		[]byte("module "+netutilModule+"\ngo 1.21\n"),
+		0o644,
+	))
 	require.NoError(t, syncDepsFromSource(
 		t.Context(), map[string]bool{util.OtelcInstRoot + "/net/http/client": true}, tempDir, repositoryDir,
 	))
@@ -359,6 +367,8 @@ go 1.21
 		"replace "+util.OtelcPkgRoot+" => "+filepath.Join(repositoryDir, "pkg"))
 	assert.Contains(t, got,
 		"replace "+util.OtelcPkgRoot+"/runtime => "+filepath.Join(repositoryDir, "pkg", "runtime"))
+	assert.Contains(t, got,
+		"replace "+netutilModule+" => "+netutilDir)
 	assert.Contains(t, got,
 		"replace "+util.OtelcInstRoot+" => "+filepath.Join(repositoryDir, "instrumentation"))
 	assert.Contains(
