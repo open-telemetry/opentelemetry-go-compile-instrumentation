@@ -8,6 +8,8 @@ on:
       - '**/go.sum'
       - 'Makefile'
       - '.github/workflows/govulncheck.yaml'
+      - 'scripts/govulncheck-allow.sh'
+      - 'scripts/govulncheck-allow_test.sh'
   schedule:
     # Weekly, so newly-disclosed CVEs in unchanged dependencies are still caught.
     - cron: '0 6 * * 1'
@@ -49,6 +51,10 @@ jobs:
   # than one in tooling. Uses govulncheck -mode=binary after otelc go build so
   # //go:build ignore sources and field-injection modules (e.g. database/sql)
   # are included — source scans of instrumentation/ miss both.
+  # echoserver uses echo v4.16.3. The upstream advisories list this version as fixed.
+  # The Go vulnerability database still marks every echo v4 release as affected.
+  # scripts/govulncheck-allow.sh ignores GO-2026-6872 and GO-2026-6875 for this app.
+  # After vuln.go.dev lists v4.16.3 as fixed, delete this ignore. See issue 1744.
   govulncheck-instrumentation:
     name: govulncheck (instrumentation)
     runs-on: ubuntu-latest

@@ -499,9 +499,14 @@ govulncheck: $(GOVULNCHECK) ## Scan core modules (root, pkg) for known Go vulner
 # Build each integration test app with otelc, then scan the resulting binary.
 # Binary mode sees injected instrumentation (including //go:build ignore sources
 # and field-injection modules like database/sql) that source mode cannot analyze.
+# echoserver uses echo v4.16.3. The upstream advisories list this version as fixed.
+# The Go vulnerability database still marks every echo v4 release as affected.
+# scripts/govulncheck-allow.sh ignores GO-2026-6872 and GO-2026-6875 for this app.
+# After vuln.go.dev lists v4.16.3 as fixed, delete this ignore. See issue 1744.
 .ONESHELL:
 govulncheck/instrumentation: $(GOVULNCHECK) build ## Scan instrumented test apps (binary mode) for known Go vulnerabilities
 	@echo "Running govulncheck -mode=binary across $(words $(GOVULNCHECK_TEST_APPS)) instrumented test apps..."
+	@$(CURDIR)/scripts/govulncheck-allow_test.sh || exit 1
 	@set -uo pipefail
 	@status=0
 	@app_bin=app$(EXT)
@@ -516,9 +521,18 @@ govulncheck/instrumentation: $(GOVULNCHECK) build ## Scan instrumented test apps
 			continue; \
 		fi; \
 		echo "==> govulncheck -mode=binary $$app"; \
-		if ! "$(GOVULNCHECK)" -mode=binary "$$appdir/$$app_bin"; then \
-			status=1; \
+		vuln_log=$$(mktemp); \
+		if "$(GOVULNCHECK)" -mode=binary "$$appdir/$$app_bin" >"$$vuln_log" 2>&1; then \
+			cat "$$vuln_log"; \
+		else \
+			cat "$$vuln_log"; \
+			if "$(CURDIR)/scripts/govulncheck-allow.sh" "$$app" <"$$vuln_log"; then \
+				echo "govulncheck/instrumentation: ignored GO-2026-6872 and GO-2026-6875 for echoserver. vuln.go.dev still marks echo v4.16.3 as affected. See issue 1744."; \
+			else \
+				status=1; \
+			fi; \
 		fi; \
+		rm -f "$$vuln_log"; \
 		rm -f "$$appdir/$$app_bin"; \
 		(cd "$$appdir" && "$$otelc" cleanup) || true; \
 	done; \
