@@ -46,14 +46,14 @@ const (
 	SessionOff = "off"
 	// SessionTempDir is the build temp entry an owning build uses as its
 	// session directory.
-	SessionTempDir = "session"
-	BuildTempDir            = ".otelc-build"
-	BuildLockFile           = BuildTempDir + ".lock"
-	OtelcRoot               = "go.opentelemetry.io/otelc"
-	OtelcPkgRoot            = OtelcRoot + "/pkg"
-	OtelcInstRoot           = OtelcRoot + "/instrumentation"
-	OtelcToolCmdRoot        = OtelcRoot + "/tool/cmd/otelc"
-	OtelcToolExe            = "otelc"
+	SessionTempDir   = "session"
+	BuildTempDir     = ".otelc-build"
+	BuildLockFile    = BuildTempDir + ".lock"
+	OtelcRoot        = "go.opentelemetry.io/otelc"
+	OtelcPkgRoot     = OtelcRoot + "/pkg"
+	OtelcInstRoot    = OtelcRoot + "/instrumentation"
+	OtelcToolCmdRoot = OtelcRoot + "/tool/cmd/otelc"
+	OtelcToolExe     = "otelc"
 )
 
 // DirectiveIgnore and DirectiveInstrument live in util, not ast or rule. ast

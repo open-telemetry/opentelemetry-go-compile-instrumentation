@@ -28,11 +28,11 @@ type packageGraph struct {
 	flags []string
 	roots map[string]*packages.Package
 	// load replaces the package load in tests.
-	load func(ctx context.Context, flags []string, paths []string) ([]*packages.Package, error)
+	load func(ctx context.Context, flags, paths []string) ([]*packages.Package, error)
 }
 
 // loadGraphPackages loads paths under a session load slot.
-func loadGraphPackages(ctx context.Context, flags []string, paths []string) ([]*packages.Package, error) {
+func loadGraphPackages(ctx context.Context, flags, paths []string) ([]*packages.Package, error) {
 	var pkgs []*packages.Package
 	err := session.WithLoadSlot(ctx, func(ctx context.Context) error {
 		var loadErr error
@@ -52,7 +52,7 @@ func (sp *setupPhase) graphLoader(flags []string) graphLoader {
 
 // loadGraph returns the graph roots for paths, loading only the paths no
 // earlier call loaded with the same flags.
-func (sp *setupPhase) loadGraph(ctx context.Context, flags []string, paths []string) ([]*packages.Package, error) {
+func (sp *setupPhase) loadGraph(ctx context.Context, flags, paths []string) ([]*packages.Package, error) {
 	g := &sp.graph
 	if g.roots == nil || !slices.Equal(g.flags, flags) {
 		g.flags = slices.Clone(flags)
