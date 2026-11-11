@@ -5,8 +5,6 @@ package runtime
 
 import (
 	_ "embed"
-	"os"
-	"path/filepath"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
@@ -55,32 +53,28 @@ func RawRule() *rule.InstRawRule {
 }
 
 // FileRule returns the InstFileRule that injects runtime_gls.go into stdlib runtime.
-func FileRule(resolvedPath string) *rule.InstFileRule {
+// ResolvedPath is intentionally empty so matched.json contains no work-dir paths.
+func FileRule() *rule.InstFileRule {
 	return &rule.InstFileRule{
 		InstBaseRule: rule.InstBaseRule{
 			Name:   "gls_linker",
 			Target: rule.NewTarget(TargetRuntime),
 		},
-		File:         GLSFileName,
-		Path:         util.InternalPath,
-		ResolvedPath: resolvedPath,
+		File: GLSFileName,
+		Path: util.InternalPath,
 	}
 }
 
-// MaterializeGLSSource writes the embedded runtime_gls.go to targetDir.
-func MaterializeGLSSource(targetDir string) error {
-	if err := os.MkdirAll(targetDir, 0o755); err != nil {
-		return ex.Wrapf(err, "creating directory for embedded runtime GLS: %s", targetDir)
+// ReadInternalFile returns the embedded source bytes for an internal runtime file.
+func ReadInternalFile(name string) ([]byte, error) {
+	if name == GLSFileName {
+		return RuntimeGLSSource, nil
 	}
-	targetPath := filepath.Join(targetDir, GLSFileName)
-	if err := util.WriteFileAtomic(targetPath, RuntimeGLSSource); err != nil {
-		return ex.Wrapf(err, "writing embedded %s to %s", GLSFileName, targetPath)
-	}
-	return nil
+	return nil, ex.Newf("unknown internal runtime file %q", name)
 }
 
 // BuildRuleSet creates the matched rule set for stdlib runtime.
-func BuildRuleSet(runtime2File, procFile, glsDir string) *rule.InstRuleSet {
+func BuildRuleSet(runtime2File, procFile string) *rule.InstRuleSet {
 	rset := rule.NewInstRuleSet(TargetRuntime)
 	rset.PackageName = TargetRuntime
 	rset.IsTest = false
@@ -91,9 +85,7 @@ func BuildRuleSet(runtime2File, procFile, glsDir string) *rule.InstRuleSet {
 	if procFile != "" {
 		rset.AddRawRule(procFile, RawRule())
 	}
-	if glsDir != "" {
-		rset.AddFileRule(FileRule(glsDir))
-	}
+	rset.AddFileRule(FileRule())
 
 	return rset
 }

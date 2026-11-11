@@ -22,9 +22,7 @@ func TestMatchRuntimeGLS_NoRuntimeDep(t *testing.T) {
 		{ImportPath: "example.com/other"},
 	}
 
-	sets, err := matchRuntimeGLS(deps)
-	require.NoError(t, err)
-	assert.Nil(t, sets)
+	assert.Nil(t, matchRuntimeGLS(deps))
 }
 
 func TestMatchRuntimeGLS_WithRuntimeDep(t *testing.T) {
@@ -47,8 +45,7 @@ func TestMatchRuntimeGLS_WithRuntimeDep(t *testing.T) {
 		},
 	}
 
-	sets, err := matchRuntimeGLS(deps)
-	require.NoError(t, err)
+	sets := matchRuntimeGLS(deps)
 	require.Len(t, sets, 1)
 
 	rset := sets[0]
@@ -63,18 +60,41 @@ func TestMatchRuntimeGLS_WithRuntimeDep(t *testing.T) {
 
 	require.Len(t, rset.FileRules, 1)
 	assert.Equal(t, toolruntime.GLSFileName, rset.FileRules[0].File)
-	assert.Equal(t, util.GetBuildTemp("runtime"), rset.FileRules[0].ResolvedPath)
+	assert.Equal(t, util.InternalPath, rset.FileRules[0].Path)
+	assert.Empty(t, rset.FileRules[0].ResolvedPath)
+}
 
-	// Verify that runtime_gls.go was materialized to disk
-	materializedFile := filepath.Join(util.GetBuildTemp("runtime"), toolruntime.GLSFileName)
-	assert.True(t, util.PathExists(materializedFile))
+func TestMatchRuntimeGLS_StoreIsWorkDirIndependent(t *testing.T) {
+	mockRuntimeDir := t.TempDir()
+	runtime2File := filepath.Join(mockRuntimeDir, "runtime2.go")
+	procFile := filepath.Join(mockRuntimeDir, "proc.go")
+	deps := []*Dependency{{
+		ImportPath: toolruntime.TargetRuntime,
+		Sources:    []string{runtime2File, procFile},
+	}}
+
+	storeInWorkDir := func(wd string) []byte {
+		t.Helper()
+		t.Setenv(util.EnvOtelcWorkDir, wd)
+		require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+		sets := matchRuntimeGLS(deps)
+		require.NoError(t, resolveRulePaths(t.Context(), sets, nil))
+		require.NoError(t, newTestSetupPhase().store(sets))
+		data, err := os.ReadFile(util.GetMatchedRuleFile())
+		require.NoError(t, err)
+		return data
+	}
+
+	matchedA := storeInWorkDir(t.TempDir())
+	matchedB := storeInWorkDir(t.TempDir())
+	assert.Equal(t, matchedA, matchedB)
 }
 
 func TestWarnIfNoInstrumentationMatched_RuntimeOnly(t *testing.T) {
 	var logs bytes.Buffer
 	sp := &setupPhase{logger: slog.New(slog.NewTextHandler(&logs, nil))}
 
-	runtimeSet := toolruntime.BuildRuleSet("", "", t.TempDir())
+	runtimeSet := toolruntime.BuildRuleSet("", "")
 	sp.warnIfNoInstrumentationMatched([]*rule.InstRuleSet{runtimeSet})
 
 	assert.Contains(t, logs.String(), "no instrumentation rules matched any dependencies")
@@ -84,7 +104,7 @@ func TestWarnIfNoInstrumentationMatched_WithLibraryRules(t *testing.T) {
 	var logs bytes.Buffer
 	sp := &setupPhase{logger: slog.New(slog.NewTextHandler(&logs, nil))}
 
-	runtimeSet := toolruntime.BuildRuleSet("", "", t.TempDir())
+	runtimeSet := toolruntime.BuildRuleSet("", "")
 	libSet := rule.NewInstRuleSet("example.com/lib")
 	libSet.AddFileRule(&rule.InstFileRule{Path: "example.com/lib/hooks", File: "hook.go"})
 	sp.warnIfNoInstrumentationMatched([]*rule.InstRuleSet{runtimeSet, libSet})

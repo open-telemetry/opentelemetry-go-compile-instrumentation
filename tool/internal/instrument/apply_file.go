@@ -13,8 +13,35 @@ import (
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	toolruntime "go.opentelemetry.io/otelc/tool/internal/runtime"
 	"go.opentelemetry.io/otelc/tool/util"
 )
+
+type fileRuleSource struct {
+	data  []byte
+	dir   string
+	label string
+}
+
+func readFileRuleSource(r *rule.InstFileRule) (fileRuleSource, error) {
+	if r.Path == util.InternalPath {
+		data, err := toolruntime.ReadInternalFile(r.File)
+		if err != nil {
+			return fileRuleSource{}, err
+		}
+		return fileRuleSource{data: data, label: r.File}, nil
+	}
+	file := filepath.Join(r.ResolvedPath, r.File)
+	if !util.PathExists(file) {
+		return fileRuleSource{}, ex.Newf("file %s not found in %s", r.File, r.ResolvedPath)
+	}
+	// Keep processing in-memory to avoid mutating shared temp rule files.
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return fileRuleSource{}, ex.Wrapf(err, "reading rule source file %s", file)
+	}
+	return fileRuleSource{data: data, dir: r.ResolvedPath, label: file}, nil
+}
 
 func (ip *instrumentPhase) applyFileRule(ctx context.Context, rule *rule.InstFileRule, pkgName string) error {
 	if pkgName == "" {
@@ -22,34 +49,27 @@ func (ip *instrumentPhase) applyFileRule(ctx context.Context, rule *rule.InstFil
 			rule.Name, rule.File)
 	}
 
-	file := filepath.Join(rule.ResolvedPath, rule.File)
-	if !util.PathExists(file) {
-		return ex.Newf("file %s not found in %s", rule.File, rule.ResolvedPath)
-	}
-
-	// Parse the new file into AST nodes and modify it as needed.
-	// Keep processing in-memory to avoid mutating shared temp rule files.
-	data, err := os.ReadFile(file)
+	src, err := readFileRuleSource(rule)
 	if err != nil {
-		return ex.Wrapf(err, "reading rule source file %s", file)
+		return err
 	}
 
 	// Evaluate build constraints before adding the file to compilation.
 	// go tool compile compiles all explicit CLI arguments unconditionally,
 	// so we must skip files whose build constraints do not match the target platform.
-	match, err := ast.MatchFileConstraints(ip.getBuildContext(), rule.ResolvedPath, rule.File, data)
+	match, err := ast.MatchFileConstraints(ip.getBuildContext(), src.dir, rule.File, src.data)
 	if err != nil {
-		return ex.Wrapf(err, "matching build constraints for %s", file)
+		return ex.Wrapf(err, "matching build constraints for %s", src.label)
 	}
 	if !match {
 		ip.Debug("File rule build constraints not satisfied; skipping", "rule", rule.Name, "file", rule.File)
 		return nil
 	}
 
-	strippedSource := ast.StripBuildIgnoreTag(string(data))
+	strippedSource := ast.StripBuildIgnoreTag(string(src.data))
 	root, err := ast.NewAstParser().ParseSource(strippedSource)
 	if err != nil {
-		return ex.Wrapf(err, "parsing rule source file %s", file)
+		return ex.Wrapf(err, "parsing rule source file %s", src.label)
 	}
 	// Always rename the package name to the target package name
 	root.Name.Name = pkgName

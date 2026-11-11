@@ -1139,6 +1139,15 @@ func TestMarkedToolVersion(t *testing.T) {
 		assert.NotEqual(t, untagged, tagged)
 		assert.NotEqual(t, tagged, otherTag)
 	})
+
+	t.Run("embedded GLS change invalidates the rules hash", func(t *testing.T) {
+		content := []byte(`[{"module_path":"main"}]`)
+
+		base := rulesDigest(content, nil, []byte("gls-v1"))
+		diffGLS := rulesDigest(content, nil, []byte("gls-v2"))
+
+		assert.NotEqual(t, base, diffGLS)
+	})
 }
 
 func TestEnableNestedToolexec(t *testing.T) {

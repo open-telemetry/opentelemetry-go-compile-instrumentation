@@ -8,14 +8,13 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	toolruntime "go.opentelemetry.io/otelc/tool/internal/runtime"
-	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // matchRuntimeGLS builds the matched InstRuleSet for standard library runtime
-// when runtime is present in deps. It writes the embedded runtime_gls.go into
-// the build temp directory and attaches struct rules (for runtime.g in runtime2.go),
-// raw rules (for runtime.newproc1 in proc.go), and file rules (for runtime_gls.go).
-func matchRuntimeGLS(deps []*Dependency) ([]*rule.InstRuleSet, error) {
+// when runtime is present in deps. It attaches struct rules (for runtime.g in
+// runtime2.go), raw rules (for runtime.newproc1 in proc.go), and an internal
+// file rule (for runtime_gls.go) read from embedded sources during instrumentation.
+func matchRuntimeGLS(deps []*Dependency) []*rule.InstRuleSet {
 	var runtimeDep *Dependency
 	for _, dep := range deps {
 		if dep.ImportPath == toolruntime.TargetRuntime {
@@ -24,12 +23,7 @@ func matchRuntimeGLS(deps []*Dependency) ([]*rule.InstRuleSet, error) {
 		}
 	}
 	if runtimeDep == nil {
-		return nil, nil
-	}
-
-	glsDir := util.GetBuildTemp("runtime")
-	if err := toolruntime.MaterializeGLSSource(glsDir); err != nil {
-		return nil, err
+		return nil
 	}
 
 	var runtime2File, procFile string
@@ -41,6 +35,5 @@ func matchRuntimeGLS(deps []*Dependency) ([]*rule.InstRuleSet, error) {
 			procFile = src
 		}
 	}
-	rset := toolruntime.BuildRuleSet(runtime2File, procFile, glsDir)
-	return []*rule.InstRuleSet{rset}, nil
+	return []*rule.InstRuleSet{toolruntime.BuildRuleSet(runtime2File, procFile)}
 }
