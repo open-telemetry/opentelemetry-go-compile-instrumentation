@@ -27,7 +27,7 @@ func TestMockHookContext_ConstructorAndGetters(t *testing.T) {
 		t.Errorf("expected initial ParamCount to be 2, got %d", ctx.GetParamCount())
 	}
 	if ctx.GetParam(0) != "arg1" || ctx.GetParam(1) != "arg2" {
-		t.Errorf("unexpected initial parameters")
+		t.Error("unexpected initial parameters")
 	}
 
 	// SkipCall flags
@@ -79,43 +79,43 @@ func TestMockHookContext_KeyData_NonMapData(t *testing.T) {
 
 	// 1. Initial state (nil data)
 	if mock.GetKeyData("foo") != nil {
-		t.Errorf("expected GetKeyData to return nil for uninitialized data")
+		t.Error("expected GetKeyData to return nil for uninitialized data")
 	}
 	if mock.HasKeyData("foo") {
-		t.Errorf("expected HasKeyData to return false for uninitialized data")
+		t.Error("expected HasKeyData to return false for uninitialized data")
 	}
 
 	// 2. Set custom non-map data (struct)
 	state := customState{field: "bar"}
 	mock.SetData(state)
 	if !reflect.DeepEqual(mock.GetData(), state) {
-		t.Errorf("expected GetData to return stored customState")
+		t.Error("expected GetData to return stored customState")
 	}
 
 	// Calling GetKeyData / HasKeyData on struct data should not panic
 	if mock.GetKeyData("foo") != nil {
-		t.Errorf("expected GetKeyData to return nil when data is a struct")
+		t.Error("expected GetKeyData to return nil when data is a struct")
 	}
 	if mock.HasKeyData("foo") {
-		t.Errorf("expected HasKeyData to return false when data is a struct")
+		t.Error("expected HasKeyData to return false when data is a struct")
 	}
 
 	// Calling SetKeyData should gracefully re-initialize data map
 	mock.SetKeyData("k1", "v1")
 	if !mock.HasKeyData("k1") {
-		t.Errorf("expected HasKeyData('k1') to return true after SetKeyData")
+		t.Error("expected HasKeyData('k1') to return true after SetKeyData")
 	}
 	if mock.GetKeyData("k1") != "v1" {
-		t.Errorf("expected GetKeyData('k1') to return 'v1'")
+		t.Error("expected GetKeyData('k1') to return 'v1'")
 	}
 
 	// 3. Set primitive non-map data (string)
 	mock.SetData("primitive string")
 	if mock.GetKeyData("k1") != nil {
-		t.Errorf("expected GetKeyData to return nil when data is a string")
+		t.Error("expected GetKeyData to return nil when data is a string")
 	}
 	if mock.HasKeyData("k1") {
-		t.Errorf("expected HasKeyData to return false when data is a string")
+		t.Error("expected HasKeyData to return false when data is a string")
 	}
 }
 
@@ -128,13 +128,13 @@ func TestMockHookContext_ParamOperationsAndBounds(t *testing.T) {
 
 	// Out-of-bounds and negative index lookups
 	if ctx.GetParam(-1) != nil {
-		t.Errorf("expected GetParam(-1) to be nil")
+		t.Error("expected GetParam(-1) to be nil")
 	}
 	if ctx.GetParam(0) != nil {
-		t.Errorf("expected GetParam(0) to be nil")
+		t.Error("expected GetParam(0) to be nil")
 	}
 	if ctx.GetParam(5) != nil {
-		t.Errorf("expected GetParam(5) to be nil")
+		t.Error("expected GetParam(5) to be nil")
 	}
 
 	// Setting param with slice auto-expansion
@@ -161,13 +161,13 @@ func TestMockHookContext_ReturnValOperationsAndBounds(t *testing.T) {
 
 	// Out-of-bounds and negative index lookups
 	if ctx.GetReturnVal(-1) != nil {
-		t.Errorf("expected GetReturnVal(-1) to be nil")
+		t.Error("expected GetReturnVal(-1) to be nil")
 	}
 	if ctx.GetReturnVal(0) != nil {
-		t.Errorf("expected GetReturnVal(0) to be nil")
+		t.Error("expected GetReturnVal(0) to be nil")
 	}
 	if ctx.GetReturnVal(5) != nil {
-		t.Errorf("expected GetReturnVal(5) to be nil")
+		t.Error("expected GetReturnVal(5) to be nil")
 	}
 
 	// Setting return value with slice auto-expansion
