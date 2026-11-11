@@ -60,6 +60,7 @@ func TestBuildOtherModule(t *testing.T) {
 // the nested builds must fail with a deadlock error, so that the other one
 // goes on, instead of both waiting until the test timeout.
 func TestNestedBuildsAcrossModules(t *testing.T) {
+	t.Parallel()
 	otelcPath, err := testutil.OtelcPath()
 	require.NoError(t, err)
 	otelcPath, err = filepath.Abs(otelcPath)
@@ -83,12 +84,12 @@ func main() { _, _ = http.Get("http://127.0.0.1:1/") }
 	}
 
 	// The go test -timeout ends a deadlocked run; the context is a backstop.
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Minute)
 	defer cancel()
 	env := append(os.Environ(), "GOWORK=off", envCrossModuleOtelc+"="+otelcPath)
 	cmds := make([]*exec.Cmd, 0, len(modules))
 	for _, name := range modules {
-		cmd := exec.CommandContext(ctx, otelcPath, "go", "test", "-count=1", "-timeout=2m", "-v", ".")
+		cmd := exec.CommandContext(ctx, otelcPath, "go", "test", "-count=1", "-timeout=4m", "-v", ".")
 		cmd.Dir = filepath.Join(root, name)
 		cmd.Env = env
 		cmd.WaitDelay = 10 * time.Second
@@ -118,6 +119,7 @@ func main() { _, _ = http.Get("http://127.0.0.1:1/") }
 // time, each with its own work dir. They all edit the go.mod of the module,
 // so they must wait for each other and leave go.mod as it was.
 func TestConcurrentBuildsInOneModule(t *testing.T) {
+	t.Parallel()
 	otelcPath, err := testutil.OtelcPath()
 	require.NoError(t, err)
 	otelcPath, err = filepath.Abs(otelcPath)
@@ -127,6 +129,7 @@ func TestConcurrentBuildsInOneModule(t *testing.T) {
 	env := append(os.Environ(), "GOWORK=off")
 
 	t.Run("from different package dirs", func(t *testing.T) {
+		t.Parallel()
 		moduleDir := concurrentBuildsModule(t, apps)
 		// The default work dir of each build is the directory it starts in.
 		cmds := make([]*exec.Cmd, 0, len(apps))
@@ -140,6 +143,7 @@ func TestConcurrentBuildsInOneModule(t *testing.T) {
 	})
 
 	t.Run("with -C and separate work dirs", func(t *testing.T) {
+		t.Parallel()
 		moduleDir := concurrentBuildsModule(t, apps)
 		outside := t.TempDir()
 		cmds := make([]*exec.Cmd, 0, len(apps))
