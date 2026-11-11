@@ -27,38 +27,10 @@ import (
 // to absolute filesystem paths.
 func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDirs []string) error {
 	dirs := normalizeModuleDirs(moduleDirs)
-
-	var pending []string
-	for _, ruleset := range matched {
-		for _, fileRule := range ruleset.FileRules {
-			pending = append(pending, fileRule.Path)
-		}
-		for _, funcRule := range ruleset.AllFuncRules() {
-			pending = append(pending, funcRule.Path)
-		}
-	}
-	slices.Sort(pending)
-	pending = slices.Compact(pending)
+	pending := collectPendingRulePaths(matched)
 
 	resolved := make(map[string]string, len(pending))
 	var lastErr error
-
-	// findPackage returns the single package in pkgs matching importPath, nil if
-	// none matched (the caller retries it against the next module dir), or an
-	// error if importPath ambiguously matched more than one package.
-	findPackage := func(pkgs []*packages.Package, importPath string) (*packages.Package, error) {
-		var found *packages.Package
-		for _, pkg := range pkgs {
-			if pkg.PkgPath != importPath || len(pkg.Errors) > 0 || pkg.Dir == "" {
-				continue
-			}
-			if found != nil {
-				return nil, ex.Newf("import path %q resolved to multiple packages", importPath)
-			}
-			found = pkg
-		}
-		return found, nil
-	}
 
 	for _, moduleDir := range dirs {
 		if len(pending) == 0 {
@@ -77,7 +49,7 @@ func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDi
 
 		next := pending[:0]
 		for _, p := range pending {
-			pkg, err := findPackage(pkgs, p)
+			pkg, err := findMatchingPackage(pkgs, p)
 			switch {
 			case err != nil:
 				return err
@@ -94,76 +66,64 @@ func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDi
 		return ex.Wrapf(lastErr, "failed to resolve import path %q", pending[0])
 	}
 
-	for _, ruleset := range matched {
-		for _, fileRule := range ruleset.FileRules {
-			fileRule.ResolvedPath = resolved[fileRule.Path]
-		}
-		for _, funcRule := range ruleset.AllFuncRules() {
-			funcRule.ResolvedPath = resolved[funcRule.Path]
-		}
-	}
-
+	assignResolvedPaths(matched, resolved)
 	return nil
 }
 
-// ignoreDirectiveSupportModule is the hook package that provides the
-// suppression functions (SuppressHooks/UnsuppressHooks/HooksSuppressed)
-// every trampoline in the build calls into once any package uses
-// //otelc:ignore. See ensureIgnoreDirectiveSupport.
-const ignoreDirectiveSupportModule = util.OtelcInstRoot + "/runtime"
-
-// ensureIgnoreDirectiveSupport fails fast, before any compiling starts, when
-// the build uses //otelc:ignore but does not load instrumentation/runtime.
-//
-// A rule set's ModulePath is the target package the rules apply to (e.g.
-// "runtime" for the standard library package instrumentation/runtime
-// rewrites), not the module that supplies the rule's hook code, so it can't
-// be used to tell whether instrumentation/runtime itself is part of this
-// build. What can is the Path on the matched rules: any func or file rule
-// contributed by instrumentation/runtime carries its import path there,
-// since that's where the compiler looks up the hook or injected file it
-// names. See #1550.
-func ensureIgnoreDirectiveSupport(matched []*rule.InstRuleSet) error {
-	usesIgnoreDirective := false
-	for _, ruleset := range matched {
-		if len(ruleset.IgnoredCallFiles) > 0 {
-			usesIgnoreDirective = true
-			break
-		}
-	}
-	if !usesIgnoreDirective {
-		return nil
-	}
-
+func collectPendingRulePaths(matched []*rule.InstRuleSet) []string {
+	var pending []string
 	for _, ruleset := range matched {
 		for _, fileRule := range ruleset.FileRules {
-			if fileRule.Path == ignoreDirectiveSupportModule {
-				return nil
+			if fileRule.Path != util.InternalPath {
+				pending = append(pending, fileRule.Path)
 			}
 		}
 		for _, funcRule := range ruleset.AllFuncRules() {
-			if funcRule.Path == ignoreDirectiveSupportModule {
-				return nil
+			if funcRule.Path != util.InternalPath {
+				pending = append(pending, funcRule.Path)
 			}
 		}
 	}
+	slices.Sort(pending)
+	return slices.Compact(pending)
+}
 
-	return ex.Newf(
-		"//otelc:ignore is used in this build, but %s is not part of it; "+
-			"add `_ %q` to otel.instrumentation.go so the trampolines %s guards "+
-			"have the suppression support they need",
-		ignoreDirectiveSupportModule, ignoreDirectiveSupportModule, util.DirectiveIgnore,
-	)
+func assignResolvedPaths(matched []*rule.InstRuleSet, resolved map[string]string) {
+	for _, ruleset := range matched {
+		for _, fileRule := range ruleset.FileRules {
+			if fileRule.Path != util.InternalPath {
+				fileRule.ResolvedPath = resolved[fileRule.Path]
+			}
+		}
+		for _, funcRule := range ruleset.AllFuncRules() {
+			if funcRule.Path != util.InternalPath {
+				funcRule.ResolvedPath = resolved[funcRule.Path]
+			}
+		}
+	}
+}
+
+// findMatchingPackage returns the single package in pkgs matching importPath, nil if
+// none matched (the caller retries it against the next module dir), or an
+// error if importPath ambiguously matched more than one package.
+func findMatchingPackage(pkgs []*packages.Package, importPath string) (*packages.Package, error) {
+	var found *packages.Package
+	for _, pkg := range pkgs {
+		if pkg.PkgPath != importPath || len(pkg.Errors) > 0 || pkg.Dir == "" {
+			continue
+		}
+		if found != nil {
+			return nil, ex.Newf("import path %q resolved to multiple packages", importPath)
+		}
+		found = pkg
+	}
+	return found, nil
 }
 
 // store stores the matched rules to the file.
 // It's the pair of the InstrumentPhase.load.
 // Rule paths must already be resolved via resolveRulePaths.
 func (sp *setupPhase) store(matched []*rule.InstRuleSet) error {
-	if err := ensureIgnoreDirectiveSupport(matched); err != nil {
-		return err
-	}
-
 	bs, err := json.Marshal(matched)
 	if err != nil {
 		return ex.Wrapf(err, "failed to marshal rules to JSON")

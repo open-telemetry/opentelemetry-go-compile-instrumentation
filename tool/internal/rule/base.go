@@ -157,6 +157,25 @@ func (irs *InstRuleSet) IsEmpty() bool {
 			len(irs.IgnoredCallFiles) == 0)
 }
 
+// IsInternal reports whether the rule set consists of compiler-internal
+// rules (such as runtime GLS context propagation) rather than external instrumentation.
+func (irs *InstRuleSet) IsInternal() bool {
+	if irs == nil || irs.IsEmpty() {
+		return false
+	}
+	for _, fr := range irs.FileRules {
+		if fr.Path == util.InternalPath {
+			return true
+		}
+	}
+	for _, fr := range irs.AllFuncRules() {
+		if fr.Path == util.InternalPath {
+			return true
+		}
+	}
+	return false
+}
+
 // AddRule is a generic method that adds any type of rule to the appropriate map.
 // It works with any rule type that implements the InstRule interface.
 func addRule[T InstRule](file string, rule T, rulesMap map[string][]T) {

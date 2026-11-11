@@ -266,7 +266,7 @@ At runtime:
 
 ##### 1) Runtime GLS accessors
 
-`instrumentation/runtime/runtime_gls.go` provides low-level accessors:
+`tool/internal/runtime/runtime_gls.go` (embedded into `otelc`) provides low-level accessors:
 
 - `GetTraceContextFromGLS()`
 - `SetTraceContextToGLS(interface{})`
