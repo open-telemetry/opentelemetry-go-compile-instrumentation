@@ -229,6 +229,38 @@ func TestFileRules(t *testing.T) {
 	}
 }
 
+func TestFileRules_InjectCodeKeepsSignatureFilters(t *testing.T) {
+	file, err := ParseFile([]byte(`rule:
+  target: example.com/pkg
+  where:
+    func: Process
+    signature:
+      args: [context.Context]
+    signature_contains:
+      args: [context.Context]
+    param: context.Context
+    result: error
+    last_result: error
+  do:
+    - inject_code:
+        raw: _ = 0
+`))
+	require.NoError(t, err)
+
+	rules, err := file.Rules()
+	require.NoError(t, err)
+	require.Len(t, rules, 1)
+	raw, ok := rules[0].(*InstRawRule)
+	require.True(t, ok)
+	require.NotNil(t, raw.Signature)
+	assert.Equal(t, []string{"context.Context"}, raw.Signature.Args)
+	require.NotNil(t, raw.SignatureContains)
+	assert.Equal(t, []string{"context.Context"}, raw.SignatureContains.Args)
+	assert.Equal(t, "context.Context", raw.Param)
+	assert.Equal(t, "error", raw.Result)
+	assert.Equal(t, "error", raw.LastResult)
+}
+
 func TestFileRulesDecodeError(t *testing.T) {
 	var node yaml.Node
 	require.NoError(t, yaml.Unmarshal([]byte("- value"), &node))

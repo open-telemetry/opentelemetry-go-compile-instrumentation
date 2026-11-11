@@ -999,6 +999,35 @@ func Run() {}
 	assert.Contains(t, err.Error(), "can not find function Missing")
 }
 
+func TestApplyRawRule_SignatureMismatch(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Process(s string) {}
+`)
+	doc, err := rule.ParseFile([]byte(`
+raw_with_signature:
+  target: main
+  where:
+    func: Process
+    signature:
+      args: [context.Context]
+  do:
+    - inject_code:
+        raw: 'println("injected")'
+`))
+	require.NoError(t, err)
+	rules, err := doc.Rules()
+	require.NoError(t, err)
+	require.Len(t, rules, 1)
+	raw, ok := rules[0].(*rule.InstRawRule)
+	require.True(t, ok)
+
+	err = newTestPhase().applyRawRule(context.Background(), raw, root)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "can not find function Process")
+}
+
 func TestApplyRawRule_InsertRawErrorPropagates(t *testing.T) {
 	root := parseFile(t, `package main
 
