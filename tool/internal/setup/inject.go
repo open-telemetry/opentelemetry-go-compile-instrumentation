@@ -17,7 +17,6 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
-	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -123,17 +122,23 @@ func injectedDeps(
 	known map[string]bool,
 	buildFlags []string,
 ) ([]*Dependency, error) {
+	return injectedDepsFrom(ctx, hookPaths, known, func(ctx context.Context, paths []string) ([]*packages.Package, error) {
+		return loadGraphPackages(ctx, buildFlags, paths)
+	})
+}
+
+// injectedDepsFrom is injectedDeps with the package graph from load.
+func injectedDepsFrom(
+	ctx context.Context,
+	hookPaths []string,
+	known map[string]bool,
+	load graphLoader,
+) ([]*Dependency, error) {
 	if len(hookPaths) == 0 {
 		return nil, nil
 	}
 
-	pkgs, err := pkgload.LoadPackages(
-		ctx,
-		packages.NeedName|packages.NeedFiles|packages.NeedImports|packages.NeedDeps,
-		buildFlags,
-		false,
-		hookPaths...,
-	)
+	pkgs, err := load(ctx, hookPaths)
 	if err != nil {
 		return nil, ex.Wrapf(err, "loading hook packages to complete the build plan")
 	}
@@ -241,7 +246,7 @@ func (sp *setupPhase) matchInjectedDeps(
 
 	pass := injectionPass{
 		load: func(ctx context.Context, hookPaths []string, known map[string]bool) ([]*Dependency, error) {
-			injected, err := injectedDeps(ctx, hookPaths, known, buildFlags)
+			injected, err := injectedDepsFrom(ctx, hookPaths, known, sp.graphLoader(buildFlags))
 			if err != nil {
 				// Completing the plan is an improvement on it, not a
 				// precondition for building, so a closure that will not resolve
