@@ -416,6 +416,266 @@ func TestRemoveAfterTrampolineDecl(t *testing.T) {
 	assert.Nil(t, ast.FindFuncDeclWithoutRecv(targetFile, afterFuncName))
 }
 
+func TestEmptyUnusedHookContextMethods(t *testing.T) {
+	funcSrc := `package main
+	func testFunc(param1 string) {}`
+	targetFunc := parseFunc(t, funcSrc)
+	tjump := &tJump{
+		target: targetFunc,
+		rule: &rule.InstFuncRule{
+			Func:   targetFunc.Name.Name,
+			Before: "beforeHook",
+		},
+	}
+	structName := trampolineHookContextImplType + tjump.rule.Identity()
+	fileSrc := fmt.Sprintf(`package main
+	type %[1]s struct{}
+	func (c *%[1]s) GetReturnVal(idx int) interface{} {
+		switch idx {
+		}
+		return nil
+	}
+	func (c *%[1]s) SetReturnVal(idx int, val interface{}) {
+		switch idx {
+		}
+	}
+	func (c *%[1]s) GetReturnValCount() int { return len(c.returnVals) }
+	func (c *%[1]s) GetParamCount() int     { return len(c.params) }`, structName)
+	targetFile, err := ast.NewAstParser().ParseSource(fileSrc)
+	require.NoError(t, err)
+
+	err = emptyUnusedHookContextMethods(targetFile, tjump)
+	require.NoError(t, err)
+
+	// The three return-value methods keep satisfying HookContext but no
+	// longer reference returnVals, since it's never populated without an
+	// After hook. For a target with return values, an in-range idx into the
+	// unoptimized GetReturnVal/SetReturnVal indexes into the nil returnVals
+	// slice and panics with "index out of range"; this empties the bodies to
+	// nil/no-op/0 instead, fixing that crash rather than preserving any
+	// pre-existing behavior.
+	getReturnVal := findMethodDecl(t, targetFile, structName, "GetReturnVal")
+	retStmt, ok := getReturnVal.Body.List[0].(*dst.ReturnStmt)
+	require.True(t, ok, "GetReturnVal body should be a single return statement")
+	require.Len(t, retStmt.Results, 1)
+	ident, isNil := retStmt.Results[0].(*dst.Ident)
+	assert.True(t, isNil, "GetReturnVal should return nil")
+	assert.Equal(t, ast.IdentNil, ident.Name)
+
+	setReturnVal := findMethodDecl(t, targetFile, structName, "SetReturnVal")
+	assert.Empty(t, setReturnVal.Body.List, "SetReturnVal should be a no-op")
+
+	getReturnValCount := findMethodDecl(t, targetFile, structName, "GetReturnValCount")
+	countRetStmt, ok := getReturnValCount.Body.List[0].(*dst.ReturnStmt)
+	require.True(t, ok, "GetReturnValCount body should be a single return statement")
+	require.Len(t, countRetStmt.Results, 1)
+	countLit, isLit := countRetStmt.Results[0].(*dst.BasicLit)
+	require.True(t, isLit)
+	assert.Equal(t, "0", countLit.Value)
+
+	// GetParamCount is unrelated to the After-hook removal and must be left
+	// untouched.
+	getParamCount := findMethodDecl(t, targetFile, structName, "GetParamCount")
+	_, stillAReturn := getParamCount.Body.List[0].(*dst.ReturnStmt)
+	assert.True(t, stillAReturn)
+}
+
+// findMethodDecl locates the method named methodName on a pointer receiver of
+// type structName within root, failing the test if it's not found.
+func findMethodDecl(t *testing.T, root *dst.File, structName, methodName string) *dst.FuncDecl {
+	t.Helper()
+	for _, decl := range root.Decls {
+		funcDecl, ok := decl.(*dst.FuncDecl)
+		if !ok || !ast.HasReceiver(funcDecl) {
+			continue
+		}
+		starExpr, ok := funcDecl.Recv.List[0].Type.(*dst.StarExpr)
+		if !ok {
+			continue
+		}
+		recvIdent, ok := starExpr.X.(*dst.Ident)
+		if !ok || recvIdent.Name != structName || funcDecl.Name.Name != methodName {
+			continue
+		}
+		return funcDecl
+	}
+	require.Fail(t, fmt.Sprintf("method %s on %s not found", methodName, structName))
+	return nil
+}
+
+func TestEmptyUnusedHookContextMethods_MissingMethod(t *testing.T) {
+	funcSrc := `package main
+	func testFunc(param1 string) {}`
+	targetFunc := parseFunc(t, funcSrc)
+	tjump := &tJump{
+		target: targetFunc,
+		rule: &rule.InstFuncRule{
+			Func:   targetFunc.Name.Name,
+			Before: "beforeHook",
+		},
+	}
+	structName := trampolineHookContextImplType + tjump.rule.Identity()
+	// Only two of the three expected methods are present.
+	fileSrc := fmt.Sprintf(`package main
+	type %[1]s struct{}
+	func (c *%[1]s) GetReturnVal(idx int) interface{} { return nil }
+	func (c *%[1]s) SetReturnVal(idx int, val interface{}) {}`, structName)
+	targetFile, err := ast.NewAstParser().ParseSource(fileSrc)
+	require.NoError(t, err)
+
+	err = emptyUnusedHookContextMethods(targetFile, tjump)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), structName)
+	assert.Contains(t, err.Error(), "found 2, expected 3")
+}
+
+func TestEmptyUnusedHookContextMethods_GenericTarget(t *testing.T) {
+	funcSrc := `package main
+	func testFunc[T any](param1 T) (T, error) {}`
+	targetFunc := parseFunc(t, funcSrc)
+	tjump := &tJump{
+		target: targetFunc,
+		rule: &rule.InstFuncRule{
+			Func:   targetFunc.Name.Name,
+			Before: "beforeHook",
+		},
+	}
+	structName := trampolineHookContextImplType + tjump.rule.Identity()
+	// Real generic output keeps all three methods, mirroring what
+	// rewriteHookContextMethods generates for a (T, error) result list: the
+	// type-parameter slot panics, the concrete slot reads/writes
+	// c.returnVals, and GetReturnValCount keeps its template body.
+	fileSrc := fmt.Sprintf(`package main
+	func testFunc[T any](param1 T) (T, error) {}
+	type %[1]s struct{}
+	func (c *%[1]s) GetReturnVal(idx int) interface{} {
+		switch idx {
+		case 0:
+			panic("GetReturnVal is unsupported for generic return value at index 0")
+		case 1:
+			return *(c.returnVals[1].(*error))
+		}
+		return nil
+	}
+	func (c *%[1]s) SetReturnVal(idx int, val interface{}) {
+		switch idx {
+		case 0:
+			panic("SetReturnVal is unsupported for generic return value at index 0")
+		case 1:
+			*(c.returnVals[1].(*error)) = val.(error)
+		}
+	}
+	func (c *%[1]s) GetReturnValCount() int { return len(c.returnVals) }
+	func (c *%[1]s) GetParamCount() int     { return len(c.params) }`, structName)
+	targetFile, err := ast.NewAstParser().ParseSource(fileSrc)
+	require.NoError(t, err)
+
+	err = emptyUnusedHookContextMethods(targetFile, tjump)
+	require.NoError(t, err)
+
+	// GetReturnVal keeps the type-parameter panic clause, drops the
+	// concrete-slot clause that would index into the never-populated nil
+	// returnVals slice, and keeps the trailing return nil so the remaining
+	// non-generic slots return nil instead of panicking.
+	getReturnVal := findMethodDecl(t, targetFile, structName, "GetReturnVal")
+	getRetValSwitch, ok := getReturnVal.Body.List[0].(*dst.SwitchStmt)
+	require.True(t, ok, "GetReturnVal body should still start with the type switch")
+	require.Len(t, getRetValSwitch.Body.List, 1, "only the panic case clause should remain")
+	assertCasePanics(t, getRetValSwitch.Body.List[0])
+	retStmt, ok := getReturnVal.Body.List[1].(*dst.ReturnStmt)
+	require.True(t, ok, "GetReturnVal should keep the trailing return nil")
+	require.Len(t, retStmt.Results, 1)
+	ident, isNil := retStmt.Results[0].(*dst.Ident)
+	assert.True(t, isNil, "trailing statement should return nil")
+	assert.Equal(t, ast.IdentNil, ident.Name)
+
+	// SetReturnVal keeps the type-parameter panic clause and drops the
+	// concrete-slot clause: a non-matching idx now falls through the switch,
+	// making it a no-op.
+	setReturnVal := findMethodDecl(t, targetFile, structName, "SetReturnVal")
+	setRetValSwitch, ok := setReturnVal.Body.List[0].(*dst.SwitchStmt)
+	require.True(t, ok, "SetReturnVal body should still start with the type switch")
+	require.Len(t, setRetValSwitch.Body.List, 1, "only the panic case clause should remain")
+	assertCasePanics(t, setRetValSwitch.Body.List[0])
+
+	// GetReturnValCount returns 0 for generic targets too, since returnVals
+	// is never populated without an After hook.
+	getReturnValCount := findMethodDecl(t, targetFile, structName, "GetReturnValCount")
+	countRetStmt, ok := getReturnValCount.Body.List[0].(*dst.ReturnStmt)
+	require.True(t, ok, "GetReturnValCount body should be a single return statement")
+	require.Len(t, countRetStmt.Results, 1)
+	countLit, isLit := countRetStmt.Results[0].(*dst.BasicLit)
+	require.True(t, isLit)
+	assert.Equal(t, "0", countLit.Value)
+
+	// GetParamCount is unrelated to the After-hook removal and must be left
+	// untouched.
+	getParamCount := findMethodDecl(t, targetFile, structName, "GetParamCount")
+	_, stillAReturn := getParamCount.Body.List[0].(*dst.ReturnStmt)
+	assert.True(t, stillAReturn)
+}
+
+// assertCasePanics asserts that stmt is a switch case clause whose body is
+// exactly one panic call, the shape rewriteReturnValMethods emits for
+// type-parameter slots.
+func assertCasePanics(t *testing.T, stmt dst.Stmt) {
+	t.Helper()
+	caseClause, ok := stmt.(*dst.CaseClause)
+	require.True(t, ok, "expected a case clause")
+	require.Len(t, caseClause.Body, 1, "panic case clause should have a single statement")
+	exprStmt, ok := caseClause.Body[0].(*dst.ExprStmt)
+	require.True(t, ok, "panic case clause body should be an expression statement")
+	call, ok := exprStmt.X.(*dst.CallExpr)
+	require.True(t, ok, "panic case clause body should be a call")
+	callIdent, ok := call.Fun.(*dst.Ident)
+	require.True(t, ok, "panic case clause should call panic")
+	assert.Equal(t, "panic", callIdent.Name)
+}
+
+// TestIsPanicClause exercises isPanicClause directly against the clause
+// shapes dropConcreteSlotClauses can encounter in a generic target's
+// GetReturnVal/SetReturnVal switch: the type-parameter panic clause kept as
+// is; a bare return, the shape GetReturnVal's concrete-slot clauses take;
+// an expression statement that isn't a call (a channel receive stands in
+// for SetReturnVal's assignment-shaped concrete-slot clauses, since a bare
+// assignment doesn't parse as an *dst.ExprStmt at all and would otherwise
+// exercise the same branch as the bare return above); and a clause with
+// more than one statement, which no current codegen path produces but
+// which the body-length guard must still reject correctly.
+func TestIsPanicClause(t *testing.T) {
+	funcDecl := parseFunc(t, `
+		package main
+
+		func f(idx int, ch chan int) {
+			switch idx {
+			case 0:
+				panic("unsupported")
+			case 1:
+				return
+			case 2:
+				<-ch
+			case 3:
+				foo()
+				bar()
+			}
+		}
+	`)
+	switchStmt, ok := funcDecl.Body.List[0].(*dst.SwitchStmt)
+	require.True(t, ok, "test fixture should parse to a switch statement")
+	require.Len(t, switchStmt.Body.List, 4)
+
+	caseClause := func(i int) *dst.CaseClause {
+		clause, isClause := switchStmt.Body.List[i].(*dst.CaseClause)
+		require.True(t, isClause)
+		return clause
+	}
+
+	assert.True(t, isPanicClause(caseClause(0)), "a single panic call is a panic clause")
+	assert.False(t, isPanicClause(caseClause(1)), "a bare return is not a panic clause")
+	assert.False(t, isPanicClause(caseClause(2)), "a non-call expression statement is not a panic clause")
+	assert.False(t, isPanicClause(caseClause(3)), "more than one statement is not a panic clause")
+}
+
 func TestFlattenTJump(t *testing.T) {
 	tests := []struct {
 		name          string
