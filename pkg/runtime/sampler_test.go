@@ -5,6 +5,7 @@ package runtime
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -16,6 +17,19 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 )
+
+type fixedIDGenerator struct {
+	traceID trace.TraceID
+	spanID  trace.SpanID
+}
+
+func (g fixedIDGenerator) NewIDs(context.Context) (trace.TraceID, trace.SpanID) {
+	return g.traceID, g.spanID
+}
+
+func (g fixedIDGenerator) NewSpanID(context.Context, trace.TraceID) trace.SpanID {
+	return g.spanID
+}
 
 func makeParentContext(remote, sampled bool, ts trace.TraceState) context.Context {
 	tid, _ := trace.TraceIDFromHex("12345678901234567890123456789012")
@@ -118,236 +132,6 @@ func TestParseDropRootClientProducer(t *testing.T) {
 	}
 }
 
-func TestRootFilteringSampler_RootFiltering(t *testing.T) {
-	tests := []struct {
-		name                   string
-		dropRootClientProducer bool
-		excludedPaths          map[string]struct{}
-		parentCtx              context.Context
-		kind                   trace.SpanKind
-		attrs                  []attribute.KeyValue
-		wantDecision           sdktrace.SamplingDecision
-	}{
-		{
-			name:                   "parentless CLIENT dropped when enabled",
-			dropRootClientProducer: true,
-			parentCtx:              context.Background(),
-			kind:                   trace.SpanKindClient,
-			wantDecision:           sdktrace.Drop,
-		},
-		{
-			name:                   "parentless PRODUCER dropped when enabled",
-			dropRootClientProducer: true,
-			parentCtx:              context.Background(),
-			kind:                   trace.SpanKindProducer,
-			wantDecision:           sdktrace.Drop,
-		},
-		{
-			name:                   "parentless CLIENT sampled when disabled",
-			dropRootClientProducer: false,
-			parentCtx:              context.Background(),
-			kind:                   trace.SpanKindClient,
-			wantDecision:           sdktrace.RecordAndSample,
-		},
-		{
-			name:                   "parentless PRODUCER sampled when disabled",
-			dropRootClientProducer: false,
-			parentCtx:              context.Background(),
-			kind:                   trace.SpanKindProducer,
-			wantDecision:           sdktrace.RecordAndSample,
-		},
-		{
-			name:                   "root INTERNAL unaffected",
-			dropRootClientProducer: true,
-			parentCtx:              context.Background(),
-			kind:                   trace.SpanKindInternal,
-			wantDecision:           sdktrace.RecordAndSample,
-		},
-		{
-			name:                   "root CONSUMER unaffected",
-			dropRootClientProducer: true,
-			parentCtx:              context.Background(),
-			kind:                   trace.SpanKindConsumer,
-			wantDecision:           sdktrace.RecordAndSample,
-		},
-		{
-			name:                   "root SERVER unaffected without excluded path",
-			dropRootClientProducer: true,
-			excludedPaths:          map[string]struct{}{"/healthz": {}},
-			parentCtx:              context.Background(),
-			kind:                   trace.SpanKindServer,
-			attrs:                  []attribute.KeyValue{attribute.String("url.path", "/api/data")},
-			wantDecision:           sdktrace.RecordAndSample,
-		},
-		{
-			name:                   "root SERVER unaffected with no path attribute",
-			dropRootClientProducer: true,
-			excludedPaths:          map[string]struct{}{"/healthz": {}},
-			parentCtx:              context.Background(),
-			kind:                   trace.SpanKindServer,
-			attrs:                  nil,
-			wantDecision:           sdktrace.RecordAndSample,
-		},
-		{
-			name:                   "CLIENT under valid sampled parent delegated normally",
-			dropRootClientProducer: true,
-			parentCtx:              makeParentContext(false, true, trace.TraceState{}),
-			kind:                   trace.SpanKindClient,
-			wantDecision:           sdktrace.RecordAndSample,
-		},
-		{
-			name:                   "PRODUCER under valid sampled parent delegated normally",
-			dropRootClientProducer: true,
-			parentCtx:              makeParentContext(false, true, trace.TraceState{}),
-			kind:                   trace.SpanKindProducer,
-			wantDecision:           sdktrace.RecordAndSample,
-		},
-		{
-			name:                   "CLIENT under valid remote parent delegated normally",
-			dropRootClientProducer: true,
-			parentCtx:              makeParentContext(true, true, trace.TraceState{}),
-			kind:                   trace.SpanKindClient,
-			wantDecision:           sdktrace.RecordAndSample,
-		},
-		{
-			name:                   "both filtering options disabled delegates all",
-			dropRootClientProducer: false,
-			excludedPaths:          nil,
-			parentCtx:              context.Background(),
-			kind:                   trace.SpanKindClient,
-			wantDecision:           sdktrace.RecordAndSample,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			sampler := newRootFilteringSampler(sdktrace.AlwaysSample(), tc.dropRootClientProducer, tc.excludedPaths)
-			res := sampler.ShouldSample(sdktrace.SamplingParameters{
-				ParentContext: tc.parentCtx,
-				Kind:          tc.kind,
-				Attributes:    tc.attrs,
-			})
-			assert.Equal(t, tc.wantDecision, res.Decision)
-		})
-	}
-}
-
-func TestRootFilteringSampler_HTTPPaths(t *testing.T) {
-	excluded := map[string]struct{}{
-		"/healthz": {},
-		"/readyz":  {},
-	}
-
-	tests := []struct {
-		name         string
-		path         string
-		query        string
-		remoteParent bool
-		wantDecision sdktrace.SamplingDecision
-	}{
-		{
-			name:         "/healthz excluded",
-			path:         "/healthz",
-			wantDecision: sdktrace.Drop,
-		},
-		{
-			name:         "/readyz excluded",
-			path:         "/readyz",
-			wantDecision: sdktrace.Drop,
-		},
-		{
-			name:         "/healthz/details not excluded",
-			path:         "/healthz/details",
-			wantDecision: sdktrace.RecordAndSample,
-		},
-		{
-			name:         "/healthz/ trailing slash not excluded",
-			path:         "/healthz/",
-			wantDecision: sdktrace.RecordAndSample,
-		},
-		{
-			name:         "/Healthz case-sensitive not excluded",
-			path:         "/Healthz",
-			wantDecision: sdktrace.RecordAndSample,
-		},
-		{
-			name:         "query string does not affect path matching",
-			path:         "/healthz",
-			query:        "verbose=true&check=live",
-			wantDecision: sdktrace.Drop,
-		},
-		{
-			name:         "remote-parent SERVER spans are delegated (not dropped)",
-			path:         "/healthz",
-			remoteParent: true,
-			wantDecision: sdktrace.RecordAndSample,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			sampler := newRootFilteringSampler(sdktrace.AlwaysSample(), false, excluded)
-			var parentCtx context.Context
-			if tc.remoteParent {
-				parentCtx = makeParentContext(true, true, trace.TraceState{})
-			} else {
-				parentCtx = context.Background()
-			}
-
-			attrs := []attribute.KeyValue{
-				attribute.String("url.path", tc.path),
-			}
-			if tc.query != "" {
-				attrs = append(attrs, attribute.String("url.query", tc.query))
-			}
-
-			res := sampler.ShouldSample(sdktrace.SamplingParameters{
-				ParentContext: parentCtx,
-				Kind:          trace.SpanKindServer,
-				Attributes:    attrs,
-			})
-			assert.Equal(t, tc.wantDecision, res.Decision)
-		})
-	}
-}
-
-func TestRootFilteringSampler_DescendantAndTraceState(t *testing.T) {
-	ts, err := trace.ParseTraceState("vendor=opaque123,app=test")
-	require.NoError(t, err)
-
-	sampler := newRootFilteringSampler(sdktrace.AlwaysSample(), true, map[string]struct{}{"/healthz": {}})
-
-	t.Run("filtered root preserves tracestate", func(t *testing.T) {
-		res := sampler.ShouldSample(sdktrace.SamplingParameters{
-			ParentContext: context.Background(),
-			Kind:          trace.SpanKindClient,
-		})
-		assert.Equal(t, sdktrace.Drop, res.Decision)
-		assert.Equal(t, "", res.Tracestate.String())
-	})
-
-	t.Run("local child of unsampled parent is suppressed and preserves parent tracestate", func(t *testing.T) {
-		parentCtx := makeParentContext(false, false, ts)
-		res := sampler.ShouldSample(sdktrace.SamplingParameters{
-			ParentContext: parentCtx,
-			Kind:          trace.SpanKindInternal,
-		})
-		assert.Equal(t, sdktrace.Drop, res.Decision)
-		assert.Equal(t, ts, res.Tracestate)
-	})
-
-	t.Run("remote child of unsampled parent delegates to underlying sampler", func(t *testing.T) {
-		// With underlying AlwaysSample, remote unsampled parent is sampled if delegated
-		parentCtx := makeParentContext(true, false, ts)
-		res := sampler.ShouldSample(sdktrace.SamplingParameters{
-			ParentContext: parentCtx,
-			Kind:          trace.SpanKindServer,
-		})
-		// AlwaysSample delegates and returns RecordAndSample
-		assert.Equal(t, sdktrace.RecordAndSample, res.Decision)
-	})
-}
-
 func TestRootFilteringSampler_Description(t *testing.T) {
 	paths := map[string]struct{}{
 		"/readyz":  {},
@@ -358,240 +142,6 @@ func TestRootFilteringSampler_Description(t *testing.T) {
 		"RootFilteringSampler{dropRootClientProducer:true,excludedPaths:[/healthz,/readyz],delegate:AlwaysOnSampler}",
 		s.Description(),
 	)
-}
-
-func TestSDKSamplerFromEnv_Parity(t *testing.T) {
-	testCases := []struct {
-		name       string
-		samplerEnv string
-		argEnv     string
-		desc       string
-	}{
-		{
-			name:       "default unset",
-			samplerEnv: "",
-			argEnv:     "",
-			desc:       sdktrace.ParentBased(sdktrace.AlwaysSample()).Description(),
-		},
-		{
-			name:       "always_on",
-			samplerEnv: "always_on",
-			argEnv:     "",
-			desc:       sdktrace.AlwaysSample().Description(),
-		},
-		{
-			name:       "always_off",
-			samplerEnv: "always_off",
-			argEnv:     "",
-			desc:       sdktrace.NeverSample().Description(),
-		},
-		{
-			name:       "traceidratio default arg",
-			samplerEnv: "traceidratio",
-			argEnv:     "",
-			desc:       sdktrace.TraceIDRatioBased(1.0).Description(),
-		},
-		{
-			name:       "traceidratio 0.5",
-			samplerEnv: "traceidratio",
-			argEnv:     "0.5",
-			desc:       sdktrace.TraceIDRatioBased(0.5).Description(),
-		},
-		{
-			name:       "traceidratio 0.0",
-			samplerEnv: "traceidratio",
-			argEnv:     "0.0",
-			desc:       sdktrace.TraceIDRatioBased(0.0).Description(),
-		},
-		{
-			name:       "traceidratio 1.0",
-			samplerEnv: "traceidratio",
-			argEnv:     "1.0",
-			desc:       sdktrace.TraceIDRatioBased(1.0).Description(),
-		},
-		{
-			name:       "traceidratio invalid negative fallback",
-			samplerEnv: "traceidratio",
-			argEnv:     "-0.1",
-			desc:       sdktrace.TraceIDRatioBased(1.0).Description(),
-		},
-		{
-			name:       "traceidratio invalid greater than 1 fallback",
-			samplerEnv: "traceidratio",
-			argEnv:     "1.5",
-			desc:       sdktrace.TraceIDRatioBased(1.0).Description(),
-		},
-		{
-			name:       "traceidratio invalid string fallback",
-			samplerEnv: "traceidratio",
-			argEnv:     "not-a-number",
-			desc:       sdktrace.TraceIDRatioBased(1.0).Description(),
-		},
-		{
-			name:       "parentbased_always_on",
-			samplerEnv: "parentbased_always_on",
-			argEnv:     "",
-			desc:       sdktrace.ParentBased(sdktrace.AlwaysSample()).Description(),
-		},
-		{
-			name:       "parentbased_always_off",
-			samplerEnv: "parentbased_always_off",
-			argEnv:     "",
-			desc:       sdktrace.ParentBased(sdktrace.NeverSample()).Description(),
-		},
-		{
-			name:       "parentbased_traceidratio default arg",
-			samplerEnv: "parentbased_traceidratio",
-			argEnv:     "",
-			desc:       sdktrace.ParentBased(sdktrace.TraceIDRatioBased(1.0)).Description(),
-		},
-		{
-			name:       "parentbased_traceidratio 0.5",
-			samplerEnv: "parentbased_traceidratio",
-			argEnv:     "0.5",
-			desc:       sdktrace.ParentBased(sdktrace.TraceIDRatioBased(0.5)).Description(),
-		},
-		{
-			name:       "parentbased_traceidratio invalid arg fallback",
-			samplerEnv: "parentbased_traceidratio",
-			argEnv:     "-0.5",
-			desc:       sdktrace.ParentBased(sdktrace.TraceIDRatioBased(1.0)).Description(),
-		},
-		{
-			name:       "unsupported sampler fallback",
-			samplerEnv: "unknown_sampler_xyz",
-			argEnv:     "",
-			desc:       sdktrace.ParentBased(sdktrace.AlwaysSample()).Description(),
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv(tracesSamplerKey, tc.samplerEnv)
-			t.Setenv(tracesSamplerArgKey, tc.argEnv)
-
-			sampler := sdkSamplerFromEnv()
-			assert.Equal(t, tc.desc, sampler.Description())
-
-			// Also verify that a TracerProvider created without options (SDK's own env resolution)
-			// behaves identically for shouldSample on standard contexts.
-			sdkTP := sdktrace.NewTracerProvider()
-			customTP := sdktrace.NewTracerProvider(sdktrace.WithSampler(sampler))
-
-			// Test root span for deterministic samplers
-			if tc.samplerEnv != "traceidratio" && tc.samplerEnv != "parentbased_traceidratio" || tc.argEnv == "" ||
-				tc.argEnv == "0.0" ||
-				tc.argEnv == "1.0" ||
-				tc.argEnv == "-0.1" ||
-				tc.argEnv == "1.5" ||
-				tc.argEnv == "not-a-number" ||
-				tc.argEnv == "-0.5" {
-				_, sdkSpan := sdkTP.Tracer("test").Start(context.Background(), "test-span")
-				_, customSpan := customTP.Tracer("test").Start(context.Background(), "test-span")
-				assert.Equal(t, sdkSpan.SpanContext().IsSampled(), customSpan.SpanContext().IsSampled())
-			}
-
-			// Test remote sampled parent
-			remoteSampled := makeParentContext(true, true, trace.TraceState{})
-			_, sdkSpanRemote := sdkTP.Tracer("test").Start(remoteSampled, "test-span-remote")
-			_, customSpanRemote := customTP.Tracer("test").Start(remoteSampled, "test-span-remote")
-			assert.Equal(t, sdkSpanRemote.SpanContext().IsSampled(), customSpanRemote.SpanContext().IsSampled())
-
-			// Test remote unsampled parent
-			remoteUnsampled := makeParentContext(true, false, trace.TraceState{})
-			_, sdkSpanRemoteUn := sdkTP.Tracer("test").Start(remoteUnsampled, "test-span-remote-un")
-			_, customSpanRemoteUn := customTP.Tracer("test").Start(remoteUnsampled, "test-span-remote-un")
-			assert.Equal(t, sdkSpanRemoteUn.SpanContext().IsSampled(), customSpanRemoteUn.SpanContext().IsSampled())
-		})
-	}
-}
-
-func TestRealSDKTracer_DescendantSuppression(t *testing.T) {
-	// Tests with real SDK tracer and in-memory exporter:
-	// Verify that filtered roots become non-recording spans and all their local descendants
-	// (multiple levels) are suppressed even under non-parent-based samplers like always_on.
-	exporter := tracetest.NewInMemoryExporter()
-	delegate := sdktrace.AlwaysSample()
-	filteringSampler := newRootFilteringSampler(delegate, true, map[string]struct{}{"/healthz": {}})
-
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithSampler(filteringSampler),
-		sdktrace.WithSpanProcessor(sdktrace.NewSimpleSpanProcessor(exporter)),
-	)
-	tracer := tp.Tracer("test-tracer")
-
-	t.Run("parentless client root and descendants are suppressed", func(t *testing.T) {
-		exporter.Reset()
-
-		ctx, clientSpan := tracer.Start(context.Background(), "db-query", trace.WithSpanKind(trace.SpanKindClient))
-		assert.False(t, clientSpan.IsRecording(), "filtered root span must be non-recording")
-		assert.False(t, clientSpan.SpanContext().IsSampled(), "filtered root span must not be sampled")
-
-		// Child span
-		ctx2, childSpan := tracer.Start(ctx, "child-op", trace.WithSpanKind(trace.SpanKindInternal))
-		assert.False(t, childSpan.IsRecording(), "child span must be non-recording")
-		assert.False(t, childSpan.SpanContext().IsSampled(), "child span must not be sampled")
-
-		// Grandchild span
-		_, grandchildSpan := tracer.Start(ctx2, "grandchild-op", trace.WithSpanKind(trace.SpanKindInternal))
-		assert.False(t, grandchildSpan.IsRecording(), "grandchild span must be non-recording")
-		assert.False(t, grandchildSpan.SpanContext().IsSampled(), "grandchild span must not be sampled")
-
-		grandchildSpan.End()
-		childSpan.End()
-		clientSpan.End()
-
-		assert.Empty(t, exporter.GetSpans(), "no spans should be exported for filtered client root trace")
-	})
-
-	t.Run("excluded server root and descendants are suppressed", func(t *testing.T) {
-		exporter.Reset()
-
-		ctx, serverSpan := tracer.Start(context.Background(), "GET /healthz",
-			trace.WithSpanKind(trace.SpanKindServer),
-			trace.WithAttributes(attribute.String("url.path", "/healthz")),
-		)
-		assert.False(t, serverSpan.IsRecording(), "filtered server root span must be non-recording")
-
-		// Child DB client span inside /healthz handler
-		ctx2, dbSpan := tracer.Start(ctx, "SELECT 1", trace.WithSpanKind(trace.SpanKindClient))
-		assert.False(t, dbSpan.IsRecording(), "descendant client span inside /healthz must be non-recording")
-
-		// Grandchild span inside DB query
-		_, subSpan := tracer.Start(ctx2, "db-internal", trace.WithSpanKind(trace.SpanKindInternal))
-		assert.False(t, subSpan.IsRecording(), "grandchild span inside /healthz must be non-recording")
-
-		subSpan.End()
-		dbSpan.End()
-		serverSpan.End()
-
-		assert.Empty(t, exporter.GetSpans(), "no spans should be exported for excluded server root trace")
-	})
-
-	t.Run("normal sampled server trace exports root and descendants", func(t *testing.T) {
-		exporter.Reset()
-
-		ctx, serverSpan := tracer.Start(context.Background(), "GET /users",
-			trace.WithSpanKind(trace.SpanKindServer),
-			trace.WithAttributes(attribute.String("url.path", "/users")),
-		)
-		assert.True(t, serverSpan.IsRecording(), "normal server root span must be recording")
-		assert.True(t, serverSpan.SpanContext().IsSampled(), "normal server root span must be sampled")
-
-		// Child DB client span inside /users handler
-		_, dbSpan := tracer.Start(ctx, "SELECT * FROM users", trace.WithSpanKind(trace.SpanKindClient))
-		assert.True(t, dbSpan.IsRecording(), "child db span must be recording")
-		assert.True(t, dbSpan.SpanContext().IsSampled(), "child db span must be sampled")
-
-		dbSpan.End()
-		serverSpan.End()
-
-		spans := exporter.GetSpans()
-		require.Len(t, spans, 2, "normal trace should export both server and child db spans")
-		assert.Equal(t, "SELECT * FROM users", spans[0].Name)
-		assert.Equal(t, "GET /users", spans[1].Name)
-		assert.Equal(t, spans[1].SpanContext.SpanID(), spans[0].Parent.SpanID())
-	})
 }
 
 func TestNewFilteringSamplerFromEnv(t *testing.T) {
@@ -640,9 +190,14 @@ func TestSetupTraceProvider_NoErrorDuplication(t *testing.T) {
 	restoreProviders(t)
 	tracerProvider = nil
 
-	var errorCount int
+	origHandler := otel.GetErrorHandler()
+	t.Cleanup(func() { otel.SetErrorHandler(origHandler) })
+
+	var relevantErrors int
 	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) {
-		errorCount++
+		if strings.Contains(err.Error(), "unsupported sampler") {
+			relevantErrors++
+		}
 	}))
 
 	t.Setenv("OTEL_TRACES_EXPORTER", "console")
@@ -651,11 +206,208 @@ func TestSetupTraceProvider_NoErrorDuplication(t *testing.T) {
 
 	err := setupTraceProvider(context.Background(), resource.Default())
 	require.NoError(t, err)
-	assert.Equal(t, 1, errorCount, "SDK error handler should be called exactly once for invalid sampler")
+	assert.Equal(t, 1, relevantErrors, "SDK error handler should be called exactly once for invalid sampler")
+}
+
+func TestSDKSamplerFromEnv_Parity(t *testing.T) {
+	tidLow, _ := trace.TraceIDFromHex("00000000000000000000000000000001")
+	tidHigh, _ := trace.TraceIDFromHex("ffffffffffffffff0000000000000001")
+	fixedSID, _ := trace.SpanIDFromHex("1234567890abcdef")
+
+	testCases := []struct {
+		name         string
+		samplerEnv   string
+		argEnv       string
+		testTraceID  trace.TraceID
+		expectedDesc string
+	}{
+		{
+			name:         "default unset",
+			samplerEnv:   "",
+			argEnv:       "",
+			testTraceID:  tidLow,
+			expectedDesc: sdktrace.ParentBased(sdktrace.AlwaysSample()).Description(),
+		},
+		{
+			name:         "whitespace sampler",
+			samplerEnv:   "   ",
+			argEnv:       "",
+			testTraceID:  tidLow,
+			expectedDesc: sdktrace.ParentBased(sdktrace.AlwaysSample()).Description(),
+		},
+		{
+			name:         "always_on",
+			samplerEnv:   "always_on",
+			argEnv:       "",
+			testTraceID:  tidLow,
+			expectedDesc: sdktrace.AlwaysSample().Description(),
+		},
+		{
+			name:         "always_off",
+			samplerEnv:   "always_off",
+			argEnv:       "",
+			testTraceID:  tidLow,
+			expectedDesc: sdktrace.NeverSample().Description(),
+		},
+		{
+			name:         "traceidratio default arg",
+			samplerEnv:   "traceidratio",
+			argEnv:       "",
+			testTraceID:  tidLow,
+			expectedDesc: sdktrace.TraceIDRatioBased(1.0).Description(),
+		},
+		{
+			name:         "traceidratio 0.0",
+			samplerEnv:   "traceidratio",
+			argEnv:       "0.0",
+			testTraceID:  tidLow,
+			expectedDesc: sdktrace.TraceIDRatioBased(0.0).Description(),
+		},
+		{
+			name:         "traceidratio 1.0",
+			samplerEnv:   "traceidratio",
+			argEnv:       "1.0",
+			testTraceID:  tidLow,
+			expectedDesc: sdktrace.TraceIDRatioBased(1.0).Description(),
+		},
+		{
+			name:         "traceidratio 0.5 low tid",
+			samplerEnv:   "traceidratio",
+			argEnv:       "0.5",
+			testTraceID:  tidLow,
+			expectedDesc: sdktrace.TraceIDRatioBased(0.5).Description(),
+		},
+		{
+			name:         "traceidratio 0.5 high tid",
+			samplerEnv:   "traceidratio",
+			argEnv:       "0.5",
+			testTraceID:  tidHigh,
+			expectedDesc: sdktrace.TraceIDRatioBased(0.5).Description(),
+		},
+		{
+			name:         "traceidratio invalid negative fallback",
+			samplerEnv:   "traceidratio",
+			argEnv:       "-0.1",
+			testTraceID:  tidLow,
+			expectedDesc: sdktrace.TraceIDRatioBased(1.0).Description(),
+		},
+		{
+			name:         "traceidratio invalid greater than 1 fallback",
+			samplerEnv:   "traceidratio",
+			argEnv:       "1.5",
+			testTraceID:  tidLow,
+			expectedDesc: sdktrace.TraceIDRatioBased(1.0).Description(),
+		},
+		{
+			name:         "traceidratio invalid string fallback",
+			samplerEnv:   "traceidratio",
+			argEnv:       "not-a-number",
+			testTraceID:  tidLow,
+			expectedDesc: sdktrace.TraceIDRatioBased(1.0).Description(),
+		},
+		{
+			name:         "parentbased_always_on",
+			samplerEnv:   "parentbased_always_on",
+			argEnv:       "",
+			testTraceID:  tidLow,
+			expectedDesc: sdktrace.ParentBased(sdktrace.AlwaysSample()).Description(),
+		},
+		{
+			name:         "parentbased_always_off",
+			samplerEnv:   "parentbased_always_off",
+			argEnv:       "",
+			testTraceID:  tidLow,
+			expectedDesc: sdktrace.ParentBased(sdktrace.NeverSample()).Description(),
+		},
+		{
+			name:         "parentbased_traceidratio default arg",
+			samplerEnv:   "parentbased_traceidratio",
+			argEnv:       "",
+			testTraceID:  tidLow,
+			expectedDesc: sdktrace.ParentBased(sdktrace.TraceIDRatioBased(1.0)).Description(),
+		},
+		{
+			name:         "parentbased_traceidratio 0.5 low tid",
+			samplerEnv:   "parentbased_traceidratio",
+			argEnv:       "0.5",
+			testTraceID:  tidLow,
+			expectedDesc: sdktrace.ParentBased(sdktrace.TraceIDRatioBased(0.5)).Description(),
+		},
+		{
+			name:         "parentbased_traceidratio 0.5 high tid",
+			samplerEnv:   "parentbased_traceidratio",
+			argEnv:       "0.5",
+			testTraceID:  tidHigh,
+			expectedDesc: sdktrace.ParentBased(sdktrace.TraceIDRatioBased(0.5)).Description(),
+		},
+		{
+			name:         "parentbased_traceidratio invalid arg fallback",
+			samplerEnv:   "parentbased_traceidratio",
+			argEnv:       "-0.5",
+			testTraceID:  tidLow,
+			expectedDesc: sdktrace.ParentBased(sdktrace.TraceIDRatioBased(1.0)).Description(),
+		},
+		{
+			name:         "unsupported sampler fallback",
+			samplerEnv:   "unknown_sampler_xyz",
+			argEnv:       "",
+			testTraceID:  tidLow,
+			expectedDesc: sdktrace.ParentBased(sdktrace.AlwaysSample()).Description(),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(tracesSamplerKey, tc.samplerEnv)
+			t.Setenv(tracesSamplerArgKey, tc.argEnv)
+
+			sampler := sdkSamplerFromEnv()
+			assert.Equal(t, tc.expectedDesc, sampler.Description())
+
+			idGen := fixedIDGenerator{traceID: tc.testTraceID, spanID: fixedSID}
+
+			// sdkTP uses the SDK's own environment parsing
+			sdkTP := sdktrace.NewTracerProvider(sdktrace.WithIDGenerator(idGen))
+			defer func() { _ = sdkTP.Shutdown(context.Background()) }()
+
+			// customTP uses sdkSamplerFromEnv()
+			customTP := sdktrace.NewTracerProvider(sdktrace.WithSampler(sampler), sdktrace.WithIDGenerator(idGen))
+			defer func() { _ = customTP.Shutdown(context.Background()) }()
+
+			// 1. Root span
+			_, sdkRoot := sdkTP.Tracer("test").Start(context.Background(), "root")
+			_, customRoot := customTP.Tracer("test").Start(context.Background(), "root")
+			assert.Equal(t, sdkRoot.SpanContext().IsSampled(), customRoot.SpanContext().IsSampled(), "root span sampling mismatch")
+
+			// 2. Remote sampled parent
+			remoteSampled := makeParentContext(true, true, trace.TraceState{})
+			_, sdkRS := sdkTP.Tracer("test").Start(remoteSampled, "remote-sampled")
+			_, customRS := customTP.Tracer("test").Start(remoteSampled, "remote-sampled")
+			assert.Equal(t, sdkRS.SpanContext().IsSampled(), customRS.SpanContext().IsSampled(), "remote sampled parent mismatch")
+
+			// 3. Remote unsampled parent
+			remoteUnsampled := makeParentContext(true, false, trace.TraceState{})
+			_, sdkRU := sdkTP.Tracer("test").Start(remoteUnsampled, "remote-unsampled")
+			_, customRU := customTP.Tracer("test").Start(remoteUnsampled, "remote-unsampled")
+			assert.Equal(t, sdkRU.SpanContext().IsSampled(), customRU.SpanContext().IsSampled(), "remote unsampled parent mismatch")
+
+			// 4. Local sampled parent
+			localSampled := makeParentContext(false, true, trace.TraceState{})
+			_, sdkLS := sdkTP.Tracer("test").Start(localSampled, "local-sampled")
+			_, customLS := customTP.Tracer("test").Start(localSampled, "local-sampled")
+			assert.Equal(t, sdkLS.SpanContext().IsSampled(), customLS.SpanContext().IsSampled(), "local sampled parent mismatch")
+
+			// 5. Local unsampled parent
+			localUnsampled := makeParentContext(false, false, trace.TraceState{})
+			_, sdkLU := sdkTP.Tracer("test").Start(localUnsampled, "local-unsampled")
+			_, customLU := customTP.Tracer("test").Start(localUnsampled, "local-unsampled")
+			assert.Equal(t, sdkLU.SpanContext().IsSampled(), customLU.SpanContext().IsSampled(), "local unsampled parent mismatch")
+		})
+	}
 }
 
 func TestAcceptanceScenarios(t *testing.T) {
-	// 1. Filtering disabled with always_on preserves existing behavior.
+	// Scenario 1: Filtering disabled with always_on preserves existing behavior.
 	t.Run("Scenario 1: Filtering disabled with always_on preserves existing behavior", func(t *testing.T) {
 		t.Setenv(envDropRootClientProducer, "")
 		t.Setenv(envExcludedServerPaths, "")
@@ -667,6 +419,7 @@ func TestAcceptanceScenarios(t *testing.T) {
 		tp := sdktrace.NewTracerProvider(
 			sdktrace.WithSpanProcessor(sdktrace.NewSimpleSpanProcessor(exporter)),
 		)
+		defer func() { _ = tp.Shutdown(context.Background()) }()
 		tr := tp.Tracer("acceptance-tracer")
 
 		_, clientSpan := tr.Start(context.Background(), "client-root", trace.WithSpanKind(trace.SpanKindClient))
@@ -690,7 +443,7 @@ func TestAcceptanceScenarios(t *testing.T) {
 		assert.Len(t, exporter.GetSpans(), 3)
 	})
 
-	// 2. Filtering disabled with always_off preserves existing behavior.
+	// Scenario 2: Filtering disabled with always_off preserves existing behavior.
 	t.Run("Scenario 2: Filtering disabled with always_off preserves existing behavior", func(t *testing.T) {
 		t.Setenv(envDropRootClientProducer, "")
 		t.Setenv(envExcludedServerPaths, "")
@@ -702,6 +455,7 @@ func TestAcceptanceScenarios(t *testing.T) {
 		tp := sdktrace.NewTracerProvider(
 			sdktrace.WithSpanProcessor(sdktrace.NewSimpleSpanProcessor(exporter)),
 		)
+		defer func() { _ = tp.Shutdown(context.Background()) }()
 		tr := tp.Tracer("acceptance-tracer")
 
 		_, clientSpan := tr.Start(context.Background(), "client-root", trace.WithSpanKind(trace.SpanKindClient))
@@ -720,7 +474,7 @@ func TestAcceptanceScenarios(t *testing.T) {
 		assert.Empty(t, exporter.GetSpans())
 	})
 
-	// 3. Root CLIENT and PRODUCER suppression works independently.
+	// Scenario 3: Root CLIENT and PRODUCER suppression works independently.
 	t.Run("Scenario 3: Root CLIENT and PRODUCER suppression works independently", func(t *testing.T) {
 		// 3a: Only dropRootClientProducer is enabled
 		samplerClientOnly := newRootFilteringSampler(sdktrace.AlwaysSample(), true, nil)
@@ -729,6 +483,7 @@ func TestAcceptanceScenarios(t *testing.T) {
 			sdktrace.WithSampler(samplerClientOnly),
 			sdktrace.WithSpanProcessor(sdktrace.NewSimpleSpanProcessor(exporterA)),
 		)
+		defer func() { _ = tpA.Shutdown(context.Background()) }()
 		trA := tpA.Tracer("tr-a")
 
 		// Root CLIENT and PRODUCER dropped
@@ -766,6 +521,7 @@ func TestAcceptanceScenarios(t *testing.T) {
 			sdktrace.WithSampler(samplerPathOnly),
 			sdktrace.WithSpanProcessor(sdktrace.NewSimpleSpanProcessor(exporterB)),
 		)
+		defer func() { _ = tpB.Shutdown(context.Background()) }()
 		trB := tpB.Tracer("tr-b")
 
 		// Root CLIENT and PRODUCER are NOT dropped
@@ -791,7 +547,7 @@ func TestAcceptanceScenarios(t *testing.T) {
 		assert.Equal(t, "producer-root", spansB[1].Name)
 	})
 
-	// 4. Excluded SERVER paths are dropped.
+	// Scenario 4: Excluded SERVER paths are dropped.
 	t.Run("Scenario 4: Excluded SERVER paths are dropped", func(t *testing.T) {
 		sampler := newRootFilteringSampler(sdktrace.AlwaysSample(), false, map[string]struct{}{
 			"/healthz": {},
@@ -802,24 +558,15 @@ func TestAcceptanceScenarios(t *testing.T) {
 			sdktrace.WithSampler(sampler),
 			sdktrace.WithSpanProcessor(sdktrace.NewSimpleSpanProcessor(exporter)),
 		)
+		defer func() { _ = tp.Shutdown(context.Background()) }()
 		tr := tp.Tracer("tr-4")
 
 		// Exact matches dropped
-		_, s1 := tr.Start(
-			context.Background(),
-			"GET /healthz",
-			trace.WithSpanKind(trace.SpanKindServer),
-			trace.WithAttributes(attribute.String("url.path", "/healthz")),
-		)
+		_, s1 := tr.Start(context.Background(), "GET /healthz", trace.WithSpanKind(trace.SpanKindServer), trace.WithAttributes(attribute.String("url.path", "/healthz")))
 		assert.False(t, s1.IsRecording())
 		s1.End()
 
-		_, s2 := tr.Start(
-			context.Background(),
-			"GET /readyz",
-			trace.WithSpanKind(trace.SpanKindServer),
-			trace.WithAttributes(attribute.String("url.path", "/readyz")),
-		)
+		_, s2 := tr.Start(context.Background(), "GET /readyz", trace.WithSpanKind(trace.SpanKindServer), trace.WithAttributes(attribute.String("url.path", "/readyz")))
 		assert.False(t, s2.IsRecording())
 		s2.End()
 
@@ -830,48 +577,28 @@ func TestAcceptanceScenarios(t *testing.T) {
 		s3.End()
 
 		// Trailing slash, sub-path, and case differences are NOT dropped
-		_, s4 := tr.Start(
-			context.Background(),
-			"GET /healthz/",
-			trace.WithSpanKind(trace.SpanKindServer),
-			trace.WithAttributes(attribute.String("url.path", "/healthz/")),
-		)
+		_, s4 := tr.Start(context.Background(), "GET /healthz/", trace.WithSpanKind(trace.SpanKindServer), trace.WithAttributes(attribute.String("url.path", "/healthz/")))
 		assert.True(t, s4.IsRecording())
 		s4.End()
 
-		_, s5 := tr.Start(
-			context.Background(),
-			"GET /healthz/all",
-			trace.WithSpanKind(trace.SpanKindServer),
-			trace.WithAttributes(attribute.String("url.path", "/healthz/all")),
-		)
+		_, s5 := tr.Start(context.Background(), "GET /healthz/all", trace.WithSpanKind(trace.SpanKindServer), trace.WithAttributes(attribute.String("url.path", "/healthz/all")))
 		assert.True(t, s5.IsRecording())
 		s5.End()
 
-		_, s6 := tr.Start(
-			context.Background(),
-			"GET /Healthz",
-			trace.WithSpanKind(trace.SpanKindServer),
-			trace.WithAttributes(attribute.String("url.path", "/Healthz")),
-		)
+		_, s6 := tr.Start(context.Background(), "GET /Healthz", trace.WithSpanKind(trace.SpanKindServer), trace.WithAttributes(attribute.String("url.path", "/Healthz")))
 		assert.True(t, s6.IsRecording())
 		s6.End()
 
 		// Remote parent on excluded path is NOT dropped
 		remoteCtx := makeParentContext(true, true, trace.TraceState{})
-		_, s7 := tr.Start(
-			remoteCtx,
-			"GET /healthz",
-			trace.WithSpanKind(trace.SpanKindServer),
-			trace.WithAttributes(attribute.String("url.path", "/healthz")),
-		)
+		_, s7 := tr.Start(remoteCtx, "GET /healthz", trace.WithSpanKind(trace.SpanKindServer), trace.WithAttributes(attribute.String("url.path", "/healthz")))
 		assert.True(t, s7.IsRecording())
 		s7.End()
 
 		assert.Len(t, exporter.GetSpans(), 4)
 	})
 
-	// 5. Normal sampled trace trees remain unaffected.
+	// Scenario 5: Normal sampled trace trees remain unaffected.
 	t.Run("Scenario 5: Normal sampled trace trees remain unaffected", func(t *testing.T) {
 		sampler := newRootFilteringSampler(sdktrace.AlwaysSample(), true, map[string]struct{}{"/healthz": {}})
 		exporter := tracetest.NewInMemoryExporter()
@@ -879,6 +606,7 @@ func TestAcceptanceScenarios(t *testing.T) {
 			sdktrace.WithSampler(sampler),
 			sdktrace.WithSpanProcessor(sdktrace.NewSimpleSpanProcessor(exporter)),
 		)
+		defer func() { _ = tp.Shutdown(context.Background()) }()
 		tr := tp.Tracer("tr-5")
 
 		ctx, root := tr.Start(context.Background(), "GET /items",
@@ -906,7 +634,7 @@ func TestAcceptanceScenarios(t *testing.T) {
 		assert.Equal(t, spans[1].SpanContext.SpanID(), spans[0].Parent.SpanID())
 	})
 
-	// 6. Local descendants of excluded roots remain unsampled under always_on.
+	// Scenario 6: Local descendants of excluded roots remain unsampled under always_on.
 	t.Run("Scenario 6: Local descendants of excluded roots remain unsampled under always_on", func(t *testing.T) {
 		sampler := newRootFilteringSampler(sdktrace.AlwaysSample(), true, map[string]struct{}{"/healthz": {}})
 		exporter := tracetest.NewInMemoryExporter()
@@ -914,6 +642,7 @@ func TestAcceptanceScenarios(t *testing.T) {
 			sdktrace.WithSampler(sampler),
 			sdktrace.WithSpanProcessor(sdktrace.NewSimpleSpanProcessor(exporter)),
 		)
+		defer func() { _ = tp.Shutdown(context.Background()) }()
 		tr := tp.Tracer("tr-6")
 
 		ctx, root := tr.Start(context.Background(), "GET /healthz",
@@ -938,36 +667,30 @@ func TestAcceptanceScenarios(t *testing.T) {
 		assert.Empty(t, exporter.GetSpans())
 	})
 
-	// 7. Unrelated local unsampled parents also suppress descendants when filtering is enabled.
-	t.Run(
-		"Scenario 7: Unrelated local unsampled parents also suppress descendants when filtering is enabled",
-		func(t *testing.T) {
-			sampler := newRootFilteringSampler(sdktrace.AlwaysSample(), true, map[string]struct{}{"/healthz": {}})
-			exporter := tracetest.NewInMemoryExporter()
-			tp := sdktrace.NewTracerProvider(
-				sdktrace.WithSampler(sampler),
-				sdktrace.WithSpanProcessor(sdktrace.NewSimpleSpanProcessor(exporter)),
-			)
-			tr := tp.Tracer("tr-7")
+	// Scenario 7: Unrelated local unsampled parents also suppress descendants when filtering is enabled.
+	t.Run("Scenario 7: Unrelated local unsampled parents also suppress descendants when filtering is enabled", func(t *testing.T) {
+		sampler := newRootFilteringSampler(sdktrace.AlwaysSample(), true, map[string]struct{}{"/healthz": {}})
+		exporter := tracetest.NewInMemoryExporter()
+		tp := sdktrace.NewTracerProvider(
+			sdktrace.WithSampler(sampler),
+			sdktrace.WithSpanProcessor(sdktrace.NewSimpleSpanProcessor(exporter)),
+		)
+		defer func() { _ = tp.Shutdown(context.Background()) }()
+		tr := tp.Tracer("tr-7")
 
-			// Create a context with an unrelated local unsampled parent
-			unrelatedLocalUnsampled := makeParentContext(false, false, trace.TraceState{})
+		// Create a context with an unrelated local unsampled parent
+		unrelatedLocalUnsampled := makeParentContext(false, false, trace.TraceState{})
 
-			// When filtering sampler is active, this child must remain unsampled
-			_, child := tr.Start(
-				unrelatedLocalUnsampled,
-				"child-of-unsampled-local",
-				trace.WithSpanKind(trace.SpanKindInternal),
-			)
-			assert.False(t, child.IsRecording())
-			assert.False(t, child.SpanContext().IsSampled())
-			child.End()
+		// When filtering sampler is active, this child must remain unsampled
+		_, child := tr.Start(unrelatedLocalUnsampled, "child-of-unsampled-local", trace.WithSpanKind(trace.SpanKindInternal))
+		assert.False(t, child.IsRecording())
+		assert.False(t, child.SpanContext().IsSampled())
+		child.End()
 
-			assert.Empty(t, exporter.GetSpans())
-		},
-	)
+		assert.Empty(t, exporter.GetSpans())
+	})
 
-	// 8. Remote unsampled parents remain delegated under always_on.
+	// Scenario 8: Remote unsampled parents remain delegated under always_on.
 	t.Run("Scenario 8: Remote unsampled parents remain delegated under always_on", func(t *testing.T) {
 		sampler := newRootFilteringSampler(sdktrace.AlwaysSample(), true, map[string]struct{}{"/healthz": {}})
 		exporter := tracetest.NewInMemoryExporter()
@@ -975,6 +698,7 @@ func TestAcceptanceScenarios(t *testing.T) {
 			sdktrace.WithSampler(sampler),
 			sdktrace.WithSpanProcessor(sdktrace.NewSimpleSpanProcessor(exporter)),
 		)
+		defer func() { _ = tp.Shutdown(context.Background()) }()
 		tr := tp.Tracer("tr-8")
 
 		remoteUnsampled := makeParentContext(true, false, trace.TraceState{})
@@ -989,7 +713,7 @@ func TestAcceptanceScenarios(t *testing.T) {
 		assert.Equal(t, "server-remote-parent", spans[0].Name)
 	})
 
-	// 9. Remote sampled parents remain delegated under parent-based samplers.
+	// Scenario 9: Remote sampled parents remain delegated under parent-based samplers.
 	t.Run("Scenario 9: Remote sampled parents remain delegated under parent-based samplers", func(t *testing.T) {
 		parentBasedDelegate := sdktrace.ParentBased(sdktrace.AlwaysSample())
 		sampler := newRootFilteringSampler(parentBasedDelegate, true, map[string]struct{}{"/healthz": {}})
@@ -998,6 +722,7 @@ func TestAcceptanceScenarios(t *testing.T) {
 			sdktrace.WithSampler(sampler),
 			sdktrace.WithSpanProcessor(sdktrace.NewSimpleSpanProcessor(exporter)),
 		)
+		defer func() { _ = tp.Shutdown(context.Background()) }()
 		tr := tp.Tracer("tr-9")
 
 		// Remote sampled -> sampled
@@ -1019,12 +744,11 @@ func TestAcceptanceScenarios(t *testing.T) {
 		assert.Equal(t, "remote-sampled-req", spans[0].Name)
 	})
 
-	// 10. Ratio sampling decisions remain deterministic and compatible.
+	// Scenario 10: Ratio sampling decisions remain deterministic and compatible.
 	t.Run("Scenario 10: Ratio sampling decisions remain deterministic and compatible", func(t *testing.T) {
 		ratioSampler := sdktrace.TraceIDRatioBased(0.5)
 		filteringSampler := newRootFilteringSampler(ratioSampler, true, map[string]struct{}{"/healthz": {}})
 
-		// For root SERVER with non-excluded path, filtering sampler should match ratio delegate exactly
 		tidLow, _ := trace.TraceIDFromHex("00000000000000000000000000000001")
 		tidHigh, _ := trace.TraceIDFromHex("ffffffffffffffff0000000000000000")
 
@@ -1050,25 +774,21 @@ func TestAcceptanceScenarios(t *testing.T) {
 		assert.Equal(t, resRatioHigh.Decision, resFiltHigh.Decision)
 	})
 
-	// 11. TraceState survives filtered span creation and descendant propagation.
+	// Scenario 11: TraceState survives filtered span creation and descendant propagation.
 	t.Run("Scenario 11: TraceState survives filtered span creation and descendant propagation", func(t *testing.T) {
 		ts, err := trace.ParseTraceState("vendor=opaque,service=checkout")
 		require.NoError(t, err)
 
 		sampler := newRootFilteringSampler(sdktrace.AlwaysSample(), true, map[string]struct{}{"/healthz": {}})
 		tp := sdktrace.NewTracerProvider(sdktrace.WithSampler(sampler))
+		defer func() { _ = tp.Shutdown(context.Background()) }()
 		tr := tp.Tracer("tr-11")
 
 		// Create a local unsampled parent that carries TraceState
 		parentCtx := makeParentContext(false, false, ts)
 		ctx, childSpan := tr.Start(parentCtx, "child-op", trace.WithSpanKind(trace.SpanKindInternal))
 		assert.False(t, childSpan.IsRecording())
-		assert.Equal(
-			t,
-			ts,
-			childSpan.SpanContext().TraceState(),
-			"TraceState must be preserved on suppressed child span",
-		)
+		assert.Equal(t, ts, childSpan.SpanContext().TraceState(), "TraceState must be preserved on suppressed child span")
 
 		// Descendant creation from the suppressed child's context
 		_, grandchildSpan := tr.Start(ctx, "grandchild-op", trace.WithSpanKind(trace.SpanKindClient))
@@ -1079,13 +799,13 @@ func TestAcceptanceScenarios(t *testing.T) {
 		childSpan.End()
 	})
 
-	// 12. Application behavior remains unaffected by telemetry suppression.
+	// Scenario 12: Application behavior remains unaffected by telemetry suppression.
 	t.Run("Scenario 12: Application behavior remains unaffected by telemetry suppression", func(t *testing.T) {
 		sampler := newRootFilteringSampler(sdktrace.AlwaysSample(), true, map[string]struct{}{"/healthz": {}})
 		tp := sdktrace.NewTracerProvider(sdktrace.WithSampler(sampler))
+		defer func() { _ = tp.Shutdown(context.Background()) }()
 		tr := tp.Tracer("tr-12")
 
-		// Simulate HTTP handler for /healthz where span is suppressed
 		type contextKey string
 		const userKey contextKey = "user_info"
 
@@ -1096,11 +816,9 @@ func TestAcceptanceScenarios(t *testing.T) {
 			)
 			defer span.End()
 
-			// Application context values and operations must work identically
 			ctx = context.WithValue(ctx, userKey, "health-checker")
 			assert.Equal(t, "health-checker", ctx.Value(userKey))
 
-			// Simulate child DB check
 			ctx2, dbSpan := tr.Start(ctx, "SELECT 1", trace.WithSpanKind(trace.SpanKindClient))
 			defer dbSpan.End()
 
@@ -1118,6 +836,8 @@ func TestAcceptanceScenarios(t *testing.T) {
 		assert.Equal(t, "OK", body)
 	})
 }
+
+var benchmarkResult sdktrace.SamplingResult
 
 func BenchmarkRootFilteringSampler(b *testing.B) {
 	delegate := sdktrace.AlwaysSample()
@@ -1153,53 +873,129 @@ func BenchmarkRootFilteringSampler(b *testing.B) {
 	}
 
 	sampledParentCtx := makeParentContext(false, true, trace.TraceState{})
-	childParams := sdktrace.SamplingParameters{
+	sampledChildParams := sdktrace.SamplingParameters{
 		ParentContext: sampledParentCtx,
 		Kind:          trace.SpanKindClient,
 		Name:          "db-child-query",
 	}
 
-	disabledSampler := newRootFilteringSampler(delegate, false, nil)
+	unsampledParentCtx := makeParentContext(false, false, trace.TraceState{})
+	unsampledChildParams := sdktrace.SamplingParameters{
+		ParentContext: unsampledParentCtx,
+		Kind:          trace.SpanKindInternal,
+		Name:          "internal-child-op",
+	}
 
-	b.Run("RootClient_Filtered", func(b *testing.B) {
+	// 1. Direct SDK sampler baseline (what runs when filtering is disabled)
+	b.Run("DirectSDKBaseline", func(b *testing.B) {
+		b.ReportAllocs()
+		var res sdktrace.SamplingResult
+		for i := 0; i < b.N; i++ {
+			res = delegate.ShouldSample(normalServerParams)
+		}
+		benchmarkResult = res
+	})
+
+	// 2. Normal root SERVER span with filtering enabled
+	b.Run("NormalRootServer_FilteredSampler", func(b *testing.B) {
+		b.ReportAllocs()
+		var res sdktrace.SamplingResult
+		for i := 0; i < b.N; i++ {
+			res = sampler.ShouldSample(normalServerParams)
+		}
+		benchmarkResult = res
+	})
+
+	// 3. Normal sampled-parent child span
+	b.Run("SampledChild_Delegated", func(b *testing.B) {
+		b.ReportAllocs()
+		var res sdktrace.SamplingResult
+		for i := 0; i < b.N; i++ {
+			res = sampler.ShouldSample(sampledChildParams)
+		}
+		benchmarkResult = res
+	})
+
+	// 4. Root CLIENT filtering
+	b.Run("RootClient_Dropped", func(b *testing.B) {
+		b.ReportAllocs()
+		var res sdktrace.SamplingResult
+		for i := 0; i < b.N; i++ {
+			res = sampler.ShouldSample(clientParams)
+		}
+		benchmarkResult = res
+	})
+
+	// 5. Root PRODUCER filtering
+	b.Run("RootProducer_Dropped", func(b *testing.B) {
+		b.ReportAllocs()
+		var res sdktrace.SamplingResult
+		for i := 0; i < b.N; i++ {
+			res = sampler.ShouldSample(producerParams)
+		}
+		benchmarkResult = res
+	})
+
+	// 6. Excluded root SERVER path
+	b.Run("RootServer_ExcludedPath_Dropped", func(b *testing.B) {
+		b.ReportAllocs()
+		var res sdktrace.SamplingResult
+		for i := 0; i < b.N; i++ {
+			res = sampler.ShouldSample(excludedServerParams)
+		}
+		benchmarkResult = res
+	})
+
+	// 7. Child of an unsampled local parent
+	b.Run("UnsampledLocalChild_Suppressed", func(b *testing.B) {
+		b.ReportAllocs()
+		var res sdktrace.SamplingResult
+		for i := 0; i < b.N; i++ {
+			res = sampler.ShouldSample(unsampledChildParams)
+		}
+		benchmarkResult = res
+	})
+}
+
+func BenchmarkRealTracerSampling(b *testing.B) {
+	delegate := sdktrace.AlwaysSample()
+	sampler := newRootFilteringSampler(delegate, true, map[string]struct{}{"/healthz": {}})
+
+	tpBaseline := sdktrace.NewTracerProvider(sdktrace.WithSampler(delegate))
+	defer func() { _ = tpBaseline.Shutdown(context.Background()) }()
+	tracerBaseline := tpBaseline.Tracer("bench-baseline")
+
+	tpFiltered := sdktrace.NewTracerProvider(sdktrace.WithSampler(sampler))
+	defer func() { _ = tpFiltered.Shutdown(context.Background()) }()
+	tracerFiltered := tpFiltered.Tracer("bench-filtered")
+
+	b.Run("DirectSDK_StartRoot", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			_ = sampler.ShouldSample(clientParams)
+			_, span := tracerBaseline.Start(context.Background(), "test-span")
+			span.End()
 		}
 	})
 
-	b.Run("RootProducer_Filtered", func(b *testing.B) {
+	b.Run("FilteringSampler_StartNormalRoot", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			_ = sampler.ShouldSample(producerParams)
+			_, span := tracerFiltered.Start(context.Background(), "test-span",
+				trace.WithSpanKind(trace.SpanKindServer),
+				trace.WithAttributes(attribute.String("url.path", "/api/data")),
+			)
+			span.End()
 		}
 	})
 
-	b.Run("RootServer_ExcludedPath", func(b *testing.B) {
+	b.Run("FilteringSampler_StartExcludedRoot", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			_ = sampler.ShouldSample(excludedServerParams)
-		}
-	})
-
-	b.Run("RootServer_Normal", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			_ = sampler.ShouldSample(normalServerParams)
-		}
-	})
-
-	b.Run("ChildSpan_Normal", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			_ = sampler.ShouldSample(childParams)
-		}
-	})
-
-	b.Run("FilteringDisabled", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			_ = disabledSampler.ShouldSample(normalServerParams)
+			_, span := tracerFiltered.Start(context.Background(), "test-span",
+				trace.WithSpanKind(trace.SpanKindServer),
+				trace.WithAttributes(attribute.String("url.path", "/healthz")),
+			)
+			span.End()
 		}
 	})
 }

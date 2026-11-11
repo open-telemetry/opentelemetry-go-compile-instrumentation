@@ -8,6 +8,7 @@ package test
 import (
 	"fmt"
 	"net/http"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -24,45 +25,55 @@ func TestRootFiltering(t *testing.T) {
 	testutil.Build(t, "", "httpserverdbclient", "go", "build", "-a")
 	testutil.Build(t, "", "dbclient", "go", "build", "-a", "-trimpath")
 
-	t.Run("ExcludedServerPathsAndDescendantSuppression", func(t *testing.T) {
+	t.Run("ExcludedServerPath_SuppressesRootAndDescendant", func(t *testing.T) {
 		f := testutil.NewTestFixture(t)
 		f.SetEnv("OTEL_GO_EXCLUDED_SERVER_PATHS", "/healthz,/readyz")
 		f.SetEnv("OTEL_GO_DROP_ROOT_CLIENT_PRODUCER", "true")
 
 		port := testutil.FreePort(t)
-		f.Start("httpserverdbclient", fmt.Sprintf("-front-port=%d", port))
+		server := f.Start("httpserverdbclient", fmt.Sprintf("-front-port=%d", port))
 		testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", port))
 
-		// 1. Excluded health-check request: executes successfully (200 OK)
-		// Its handler performs an internal DB query (SELECT 1). Both the root SERVER
-		// span and its local descendant CLIENT span must be suppressed.
 		healthURL := fmt.Sprintf("http://127.0.0.1:%d/healthz", port)
-		healthReq, err := http.NewRequestWithContext(t.Context(), http.MethodGet, healthURL, nil)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, healthURL, nil)
 		require.NoError(t, err)
-		healthResp, err := http.DefaultClient.Do(healthReq)
+		resp, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
-		defer healthResp.Body.Close()
-		require.Equal(t, http.StatusOK, healthResp.StatusCode)
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
 
-		// 2. Ordinary application request: must produce normal trace with Server and SQL Client spans.
+		// Graceful shutdown ensures all active requests, hooks, and exporter buffers
+		// are flushed to the collector before we assert on collected spans.
+		require.NoError(t, server.Cmd.Process.Signal(syscall.SIGTERM))
+		require.NoError(t, server.Cmd.Wait())
+
+		require.Empty(t, testutil.AllSpans(f.Traces()),
+			"excluded /healthz root SERVER span and descendant DB CLIENT span must not be exported")
+	})
+
+	t.Run("OrdinaryServerPath_ExportsServerAndDescendant", func(t *testing.T) {
+		f := testutil.NewTestFixture(t)
+		f.SetEnv("OTEL_GO_EXCLUDED_SERVER_PATHS", "/healthz,/readyz")
+		f.SetEnv("OTEL_GO_DROP_ROOT_CLIENT_PRODUCER", "true")
+
+		port := testutil.FreePort(t)
+		server := f.Start("httpserverdbclient", fmt.Sprintf("-front-port=%d", port))
+		testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", port))
+
 		helloURL := fmt.Sprintf("http://127.0.0.1:%d/hello", port)
-		helloReq, err := http.NewRequestWithContext(t.Context(), http.MethodGet, helloURL, nil)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, helloURL, nil)
 		require.NoError(t, err)
-		helloResp, err := http.DefaultClient.Do(helloReq)
+		resp, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
-		defer helloResp.Body.Close()
-		require.Equal(t, http.StatusOK, helloResp.StatusCode)
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
 
-		// Wait for the spans from the ordinary request.
 		f.WaitForSpans(2)
+		require.NoError(t, server.Cmd.Process.Signal(syscall.SIGTERM))
+		require.NoError(t, server.Cmd.Wait())
 
-		// Exactly 1 trace with 2 spans must be collected: only /hello and its DB query.
-		// If /healthz or its DB query were recorded, trace count or span count would be higher.
 		f.RequireTraceCount(1)
 		f.RequireSpansPerTrace(2)
-
-		spans := testutil.AllSpans(f.Traces())
-		require.Len(t, spans, 2)
 
 		serverSpan := testutil.RequireSpan(
 			t,
@@ -77,6 +88,43 @@ func TestRootFiltering(t *testing.T) {
 		require.True(t, serverSpan.ParentSpanID().IsEmpty())
 	})
 
+	t.Run("MixedRequests_OnlyOrdinaryPathExported", func(t *testing.T) {
+		f := testutil.NewTestFixture(t)
+		f.SetEnv("OTEL_GO_EXCLUDED_SERVER_PATHS", "/healthz,/readyz")
+		f.SetEnv("OTEL_GO_DROP_ROOT_CLIENT_PRODUCER", "true")
+
+		port := testutil.FreePort(t)
+		server := f.Start("httpserverdbclient", fmt.Sprintf("-front-port=%d", port))
+		testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", port))
+
+		// 1. Excluded request
+		healthURL := fmt.Sprintf("http://127.0.0.1:%d/healthz", port)
+		hReq, err := http.NewRequestWithContext(t.Context(), http.MethodGet, healthURL, nil)
+		require.NoError(t, err)
+		hResp, err := http.DefaultClient.Do(hReq)
+		require.NoError(t, err)
+		defer hResp.Body.Close()
+		require.Equal(t, http.StatusOK, hResp.StatusCode)
+
+		// 2. Ordinary request
+		helloURL := fmt.Sprintf("http://127.0.0.1:%d/hello", port)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, helloURL, nil)
+		require.NoError(t, err)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+
+		f.WaitForSpans(2)
+		require.NoError(t, server.Cmd.Process.Signal(syscall.SIGTERM))
+		require.NoError(t, server.Cmd.Wait())
+
+		f.RequireTraceCount(1)
+		f.RequireSpansPerTrace(2)
+		spans := testutil.AllSpans(f.Traces())
+		require.Len(t, spans, 2)
+	})
+
 	t.Run("ParentlessClientSuppressed", func(t *testing.T) {
 		f := testutil.NewTestFixture(t)
 		f.SetEnv("OTEL_GO_DROP_ROOT_CLIENT_PRODUCER", "true")
@@ -89,12 +137,11 @@ func TestRootFiltering(t *testing.T) {
 	})
 
 	t.Run("FilteringDisabledBehaviorUnchanged", func(t *testing.T) {
-		// When filtering options are not set, both /healthz and parentless client spans are recorded.
 		t.Run("ServerAndDescendantRecorded", func(t *testing.T) {
 			f := testutil.NewTestFixture(t)
 
 			port := testutil.FreePort(t)
-			f.Start("httpserverdbclient", fmt.Sprintf("-front-port=%d", port))
+			server := f.Start("httpserverdbclient", fmt.Sprintf("-front-port=%d", port))
 			testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", port))
 
 			healthURL := fmt.Sprintf("http://127.0.0.1:%d/healthz", port)
@@ -106,6 +153,9 @@ func TestRootFiltering(t *testing.T) {
 			require.Equal(t, http.StatusOK, resp.StatusCode)
 
 			f.WaitForSpans(2)
+			require.NoError(t, server.Cmd.Process.Signal(syscall.SIGTERM))
+			require.NoError(t, server.Cmd.Wait())
+
 			f.RequireTraceCount(1)
 			f.RequireSpansPerTrace(2)
 

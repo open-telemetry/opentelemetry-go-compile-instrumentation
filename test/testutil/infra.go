@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -69,11 +70,24 @@ func appsPath() (string, error) {
 	return filepath.Join(pwd, "..", "apps"), nil
 }
 
+var (
+	appBuildsMu sync.Mutex
+	appBuilds   = make(map[string]*appBuildState)
+)
+
+type appBuildState struct {
+	mu   sync.Mutex
+	refs int
+}
+
 // Build builds the application with the instrumentation tool. The built binary
 // is registered for cleanup via t.Cleanup. Standard test apps use
 // OTELC_TEST_GOCACHE/<app> as GOCACHE when OTELC_TEST_GOCACHE is set, and drop
 // -a so warm builds can reuse that per-app cache. Custom appsDir builds keep
 // the caller's arguments and environment unchanged.
+//
+// Concurrent builds of the same application binary path are synchronized, and cleanup
+// is deferred until all tests referencing the binary have finished.
 func Build(t *testing.T, appsDir, app string, args ...string) {
 	t.Helper()
 	otelc, err := OtelcPath()
@@ -110,16 +124,36 @@ func Build(t *testing.T, appsDir, app string, args ...string) {
 		require.NoError(t, err)
 	}
 	appDir := filepath.Join(appsDir, app)
+	appKey := filepath.Join(appDir, output)
 
-	cmd := newCmd(t.Context(), appDir, env, args...)
-	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, string(out))
+	appBuildsMu.Lock()
+	state, exists := appBuilds[appKey]
+	if !exists {
+		state = &appBuildState{}
+		appBuilds[appKey] = state
+	}
+	appBuildsMu.Unlock()
+
+	state.mu.Lock()
+	if state.refs == 0 {
+		cmd := newCmd(t.Context(), appDir, env, args...)
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, string(out))
+	}
+	state.refs++
+	state.mu.Unlock()
+
 	t.Cleanup(func() {
-		_ = os.Remove(filepath.Join(appDir, output))
-		_ = os.RemoveAll(filepath.Join(appDir, ".otelc-build"))
-		// Left behind only when the otelc subprocess was killed mid-run
-		// (release removes it on every normal exit).
-		_ = os.Remove(filepath.Join(appDir, ".otelc-build.lock"))
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		state.refs--
+		if state.refs == 0 {
+			_ = os.Remove(filepath.Join(appDir, output))
+			_ = os.RemoveAll(filepath.Join(appDir, ".otelc-build"))
+			// Left behind only when the otelc subprocess was killed mid-run
+			// (release removes it on every normal exit).
+			_ = os.Remove(filepath.Join(appDir, ".otelc-build.lock"))
+		}
 	})
 }
 

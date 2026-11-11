@@ -124,6 +124,13 @@ func newRootFilteringSampler(
 	}
 }
 
+func dropResult(psc trace.SpanContext) sdktrace.SamplingResult {
+	return sdktrace.SamplingResult{
+		Decision:   sdktrace.Drop,
+		Tracestate: psc.TraceState(),
+	}
+}
+
 func (s *rootFilteringSampler) ShouldSample(p sdktrace.SamplingParameters) sdktrace.SamplingResult {
 	var psc trace.SpanContext
 	if p.ParentContext != nil {
@@ -134,30 +141,21 @@ func (s *rootFilteringSampler) ShouldSample(p sdktrace.SamplingParameters) sdktr
 		// Descendant suppression: if the valid parent is local and unsampled,
 		// suppress this child span so descendants of dropped local roots are not recorded.
 		if !psc.IsRemote() && !psc.IsSampled() {
-			return sdktrace.SamplingResult{
-				Decision:   sdktrace.Drop,
-				Tracestate: psc.TraceState(),
-			}
+			return dropResult(psc)
 		}
 		return s.delegate.ShouldSample(p)
 	}
 
 	// This is a root span (no valid parent context).
 	if s.dropRootClientProducer && (p.Kind == trace.SpanKindClient || p.Kind == trace.SpanKindProducer) {
-		return sdktrace.SamplingResult{
-			Decision:   sdktrace.Drop,
-			Tracestate: psc.TraceState(),
-		}
+		return dropResult(psc)
 	}
 
 	if len(s.excludedPaths) > 0 && p.Kind == trace.SpanKindServer {
 		for _, attr := range p.Attributes {
 			if attr.Key == urlPathKey {
 				if _, ok := s.excludedPaths[attr.Value.AsString()]; ok {
-					return sdktrace.SamplingResult{
-						Decision:   sdktrace.Drop,
-						Tracestate: psc.TraceState(),
-					}
+					return dropResult(psc)
 				}
 			}
 		}
