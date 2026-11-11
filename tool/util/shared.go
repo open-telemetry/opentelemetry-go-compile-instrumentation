@@ -32,6 +32,21 @@ const (
 	// "package>added import" entries. Import paths cannot contain "," or ">",
 	// so the entries need no escaping.
 	EnvOtelcNestedResolving = "OTELC_NESTED_RESOLVING"
+	// EnvOtelcSessionDir names the session directory the outermost otelc
+	// build owns and every otelc process under it inherits: its toolexec
+	// processes, nested go commands, and nested otelc builds such as the
+	// ones a test binary runs. It holds the export memo and the load slots.
+	// SessionOff disables both.
+	EnvOtelcSessionDir = "OTELC_SESSION_DIR"
+	// EnvOtelcMaxParallelLoads bounds how many heavy package loads otelc
+	// processes of one session run at once. A positive integer sets the
+	// bound, 0 removes it, and anything else falls back to runtime.NumCPU().
+	EnvOtelcMaxParallelLoads = "OTELC_MAX_PARALLEL_LOADS"
+	// SessionOff is the EnvOtelcSessionDir value that disables the session.
+	SessionOff = "off"
+	// SessionTempDir is the build temp entry an owning build uses as its
+	// session directory.
+	SessionTempDir = "session"
 	BuildTempDir            = ".otelc-build"
 	BuildLockFile           = BuildTempDir + ".lock"
 	OtelcRoot               = "go.opentelemetry.io/otelc"
@@ -137,6 +152,30 @@ func GetBuildTempDir() string {
 // GetBuildTemp returns the path to the build temp directory $BUILD_TEMP/name
 func GetBuildTemp(name string) string {
 	return filepath.Join(GetOtelcWorkDir(), BuildTempDir, name)
+}
+
+// GetSessionDir returns the session directory of this otelc process: the
+// inherited EnvOtelcSessionDir value, else the build temp session directory.
+// It returns SessionOff when the session is disabled.
+func GetSessionDir() string {
+	if dir := os.Getenv(EnvOtelcSessionDir); dir != "" {
+		return dir
+	}
+	return GetBuildTemp(SessionTempDir)
+}
+
+// InheritedSession reports whether this process runs under a session an outer
+// otelc build owns, as opposed to one it owns itself or none at all.
+func InheritedSession() bool {
+	dir := os.Getenv(EnvOtelcSessionDir)
+	return dir != "" && dir != SessionOff
+}
+
+// GetResolutionScopeFile returns the path to the file in which setup records
+// the digest that scopes the export memo to this build's inputs.
+func GetResolutionScopeFile() string {
+	const resolutionScopeFile = "resolution_scope"
+	return GetBuildTemp(resolutionScopeFile)
 }
 
 // GetBuildFlags returns the build flags from OTELC_BUILD_FLAGS environment variable.
