@@ -36,10 +36,25 @@
   ],
   packageRules: [
     {
+      dependencyDashboardCategory: 'CI Tooling',
       matchCategories: [
         'ci',
       ],
+      matchUpdateTypes: [
+        'major',
+      ],
       dependencyDashboardApproval: true,
+    },
+    {
+      groupName: 'all ci dependencies',
+      groupSlug: 'all-ci deps',
+      matchCategories: [
+        'ci',
+      ],
+      matchUpdateTypes: [
+        '!major',
+      ],
+      schedule: '* 0-7 1 * *',
     },
     {
       groupName: 'all dependencies',
@@ -50,12 +65,26 @@
       matchUpdateTypes: [
         'patch',
         'minor',
-        'major',
         'digest',
       ],
       matchPackageNames: [
         '*',
       ],
+    },
+    {
+      groupName: 'all major docker dependencies',
+      matchCategories: [
+        'docker',
+      ],
+      matchUpdateTypes: [
+        'major',
+      ], 
+    },
+    {
+      matchManagers: [
+        'gomod',
+      ],
+      separateMultipleMajor: true,
     },
     {
       // This gates all major go updates into individual updates and will disappear
