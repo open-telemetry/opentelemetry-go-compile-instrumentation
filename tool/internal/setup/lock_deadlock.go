@@ -62,22 +62,30 @@ func registerWait(ctx context.Context, lock string, holds []string) (waitRecord,
 	// A reader can lock the file before this invocation does, and then
 	// removes it as left over. A new name avoids that file.
 	const attempts = 3
+	var lastErr error
 	for range attempts {
 		path := lock + waitFileInfix + rand.Text()
 		flk, acquired, _, err := tryAcquire(path)
-		if err != nil || !acquired {
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if !acquired {
+			lastErr = ex.Newf("could not lock wait file %s", path)
 			continue
 		}
 		release := releaseFunc(ctx, flk)
 		if err = writeWaitFile(path, content); err != nil {
+			lastErr = err
 			release()
 			continue
 		}
 		self.file = path
 		return self, release
 	}
-	util.LoggerFromContext(ctx).DebugContext(ctx,
-		"failed to write a wait file; other invocations cannot see this wait", "lock", lock)
+	util.LoggerFromContext(ctx).WarnContext(ctx,
+		"failed to write a wait file; other invocations cannot see this wait",
+		"lock", lock, "error", lastErr)
 	return self, func() {}
 }
 
