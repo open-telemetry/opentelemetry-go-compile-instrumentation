@@ -125,15 +125,36 @@ func TestResolutionScopeFollowsBuildDirectory(t *testing.T) {
 func TestBuildCommandDir(t *testing.T) {
 	wd, err := os.Getwd()
 	require.NoError(t, err)
-	dir, err := buildCommandDir(nil)
-	require.NoError(t, err)
-	assert.Equal(t, wd, dir)
+	dir1, dir2 := t.TempDir(), t.TempDir()
 
-	other := t.TempDir()
-	dir, err = buildCommandDir([]string{"-tags=x", "-C", other})
+	for _, tt := range []struct {
+		name  string
+		flags []string
+		want  string
+	}{
+		{name: "no change-dir uses cwd", flags: nil, want: wd},
+		{name: "no change-dir among other flags", flags: []string{"-tags=x", "-trimpath"}, want: wd},
+		{name: "separate -C", flags: []string{"-tags=x", "-C", dir1}, want: dir1},
+		{name: "joined -C=", flags: []string{"-C=" + dir1}, want: dir1},
+		{name: "separate --C", flags: []string{"--C", dir1}, want: dir1},
+		{name: "joined --C=", flags: []string{"--C=" + dir1}, want: dir1},
+		{name: "last change-dir wins", flags: []string{"-C", dir1, "--C=" + dir2}, want: dir2},
+		{name: "last change-dir wins reversed", flags: []string{"--C", dir2, "-C=" + dir1}, want: dir1},
+		{name: "-tags value -C=other is not a change-dir", flags: []string{"-tags", "-C=other"}, want: wd},
+		{name: "-tags value --C=other is not a change-dir", flags: []string{"-tags", "--C=other"}, want: wd},
+		{name: "-tags value -C is not a change-dir", flags: []string{"-tags", "-C", "-trimpath"}, want: wd},
+		{name: "-ldflags value starting with -C", flags: []string{"-ldflags", "-Cfoo", "-C", dir1}, want: dir1},
+		{name: "-gcflags value --C=x before a real -C", flags: []string{"-gcflags", "--C=x", "-C=" + dir2}, want: dir2},
+		{name: "-o value -C=other is not a change-dir", flags: []string{"-o", "-C=other"}, want: wd},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, dirErr := buildCommandDir(tt.flags)
+			require.NoError(t, dirErr)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+
+	rel, err := buildCommandDir([]string{"-C", "sub"})
 	require.NoError(t, err)
-	assert.Equal(t, other, dir)
-	dir, err = buildCommandDir([]string{"-C=" + other})
-	require.NoError(t, err)
-	assert.Equal(t, other, dir)
+	assert.Equal(t, filepath.Join(wd, "sub"), rel, "a relative change-dir is made absolute")
 }
