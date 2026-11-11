@@ -178,6 +178,12 @@ func AfterDialContext(ictx hook.HookContext, conn *grpc.ClientConn, err error) {
 type gRPCContextKey struct{}
 
 type gRPCContext struct {
+	// span is the span TagRPC started. grpc-go chains TagRPC across all
+	// registered stats handlers and this handler runs first, so a later
+	// handler (for example otelgrpc) can put a different span on the context
+	// that HandleRPC receives. HandleRPC must end the span this handler owns,
+	// not the innermost one.
+	span          trace.Span
 	inMessages    int64
 	outMessages   int64
 	metricAttrs   []attribute.KeyValue
@@ -213,6 +219,7 @@ func (h *clientStatsHandler) TagRPC(ctx context.Context, info *stats.RPCTagInfo)
 
 	// Store gRPC context for metrics
 	gctx := &gRPCContext{
+		span:          trace.SpanFromContext(ctx),
 		metricAttrs:   attrs,
 		metricAttrSet: attribute.NewSet(attrs...),
 	}
@@ -230,7 +237,8 @@ func (h *clientStatsHandler) HandleRPC(ctx context.Context, rs stats.RPCStats) {
 		return
 	}
 
-	span := trace.SpanFromContext(ctx)
+	// End the span TagRPC started, not the span of a chained handler.
+	span := gctx.span
 
 	switch rs := rs.(type) {
 	case *stats.Begin:

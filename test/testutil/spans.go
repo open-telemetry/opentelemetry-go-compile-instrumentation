@@ -38,6 +38,25 @@ func Attrs(s ptrace.Span) map[string]any {
 	return m
 }
 
+// RequireNoDanglingParents fails if any exported span names a parent that was
+// never exported. A span that instrumentation starts but never ends shows up
+// as such a parent.
+func RequireNoDanglingParents(t *testing.T, td ptrace.Traces) {
+	t.Helper()
+	spans := AllSpans(td)
+	exported := make(map[string]bool, len(spans))
+	for _, s := range spans {
+		exported[s.SpanID().String()] = true
+	}
+	for _, s := range spans {
+		if s.ParentSpanID().IsEmpty() {
+			continue
+		}
+		require.True(t, exported[s.ParentSpanID().String()],
+			"span %q has parent %s that was never exported", s.Name(), s.ParentSpanID())
+	}
+}
+
 // SpanMatcher is a predicate for filtering spans.
 type SpanMatcher func(ptrace.Span) bool
 
