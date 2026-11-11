@@ -112,10 +112,7 @@ func (m *Memo) Lookup(root string, importcfg map[string]string) (map[string]stri
 			}
 			continue
 		}
-		// An archive the build compiled itself lives in its own $WORK as
-		// _pkg_.a, under a name that never matches the build cache file go
-		// list reports for the same compile, so it cannot be compared.
-		if listed != archive && filepath.Base(listed) != "_pkg_.a" {
+		if listed != archive {
 			return nil, "", false
 		}
 	}
