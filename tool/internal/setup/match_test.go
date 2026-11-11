@@ -614,12 +614,14 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 		rootTool := writeInstrumentationModule(t, tmp, "example.com/root", false, map[string]string{
 			"example.com/foo": filepath.Join(tmp, "foo"),
 		})
-		writeInstrumentationModule(t, filepath.Join(tmp, "foo"), "example.com/foo", true, nil)
+		fooDir := filepath.Join(tmp, "foo")
+		writeInstrumentationModule(t, fooDir, "example.com/foo", true, nil)
 
-		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
+		rules, moduleRoots, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
 		require.NoError(t, err)
 		require.Len(t, rules, 1)
 		require.Equal(t, "dummyrule", rules[0].GetName())
+		assert.Equal(t, fooDir, moduleRoots[rules[0]])
 	})
 
 	t.Run("loads nested tool files recursively", func(t *testing.T) {
@@ -633,10 +635,11 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 		})
 		writeInstrumentationModule(t, filepath.Join(tmp, "bar"), "example.com/bar", true, nil)
 
-		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
+		rules, moduleRoots, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
 		require.NoError(t, err)
 		require.Len(t, rules, 1)
 		require.Equal(t, "dummyrule", rules[0].GetName())
+		assert.Equal(t, filepath.Join(tmp, "bar"), moduleRoots[rules[0]])
 	})
 
 	t.Run("duplicate rule names from different packages are preserved", func(t *testing.T) {
@@ -651,11 +654,14 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 		writeInstrumentationModule(t, filepath.Join(tmp, "foo"), "example.com/foo", true, nil)
 		writeInstrumentationModule(t, filepath.Join(tmp, "bar"), "example.com/bar", true, nil)
 
-		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
+		rules, moduleRoots, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
 		require.NoError(t, err)
 		require.Len(t, rules, 2)
 		require.Equal(t, "dummyrule", rules[0].GetName())
 		require.Equal(t, "dummyrule", rules[1].GetName())
+		assert.ElementsMatch(t, []string{filepath.Join(tmp, "foo"), filepath.Join(tmp, "bar")}, []string{
+			moduleRoots[rules[0]], moduleRoots[rules[1]],
+		})
 	})
 
 	// When the root tool file imports a package and one of its sub-packages,
@@ -678,7 +684,7 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 
 			rootTool := writeOverlapRootModule(t, tmp, fooDir, "example.com/foo", "example.com/foo/sub")
 
-			rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
+			rules, _, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
 			require.NoError(t, err)
 			require.ElementsMatch(t, []string{"dummyrule", "subrule"}, ruleNames(rules))
 		})
@@ -694,7 +700,7 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 		// The sub-package comes first in the tool file this time.
 		rootTool := writeOverlapRootModule(t, tmp, fooDir, "example.com/foo/sub", "example.com/foo")
 
-		rules, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
+		rules, _, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
 		require.NoError(t, err)
 		require.ElementsMatch(t, []string{"dummyrule", "subrule"}, ruleNames(rules))
 	})
@@ -710,7 +716,7 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 		writeInstrumentationModule(t, filepath.Join(tmp, "notinstrumentation"), "example.com/notinstrumentation",
 			false, nil)
 
-		_, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
+		_, _, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
 		require.ErrorIs(t, err, errNotInstrumentation)
 	})
 }
@@ -2662,7 +2668,7 @@ func TestLoadRulesFromToolFilesBrokenFile(t *testing.T) {
 			writeInstrumentationModule(t, fooDir, "example.com/foo", false, nil)
 			tc.write(t, filepath.Join(fooDir, "broken.otelc.yml"))
 
-			_, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, otelcVersion)
+			_, _, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, otelcVersion)
 			require.Error(t, err)
 			if tc.readErr {
 				require.ErrorContains(t, err, "reading ")
