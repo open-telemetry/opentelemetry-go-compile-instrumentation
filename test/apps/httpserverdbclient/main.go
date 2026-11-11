@@ -65,9 +65,17 @@ func main() {
 		}
 	}()
 
-	// Wait for shutdown signal
+	// Wait for shutdown via stdin close/input or OS interrupt/SIGTERM.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	go func() {
+		var buf [1]byte
+		if _, err := os.Stdin.Read(buf[:]); err != nil || buf[0] != 0 {
+			stop()
+		}
+	}()
+
 	<-ctx.Done()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

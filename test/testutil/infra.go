@@ -5,10 +5,10 @@ package testutil
 
 import (
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -70,24 +70,11 @@ func appsPath() (string, error) {
 	return filepath.Join(pwd, "..", "apps"), nil
 }
 
-var (
-	appBuildsMu sync.Mutex
-	appBuilds   = make(map[string]*appBuildState)
-)
-
-type appBuildState struct {
-	mu   sync.Mutex
-	refs int
-}
-
 // Build builds the application with the instrumentation tool. The built binary
 // is registered for cleanup via t.Cleanup. Standard test apps use
 // OTELC_TEST_GOCACHE/<app> as GOCACHE when OTELC_TEST_GOCACHE is set, and drop
 // -a so warm builds can reuse that per-app cache. Custom appsDir builds keep
 // the caller's arguments and environment unchanged.
-//
-// Concurrent builds of the same application binary path are synchronized, and cleanup
-// is deferred until all tests referencing the binary have finished.
 func Build(t *testing.T, appsDir, app string, args ...string) {
 	t.Helper()
 	otelc, err := OtelcPath()
@@ -124,36 +111,16 @@ func Build(t *testing.T, appsDir, app string, args ...string) {
 		require.NoError(t, err)
 	}
 	appDir := filepath.Join(appsDir, app)
-	appKey := filepath.Join(appDir, output)
 
-	appBuildsMu.Lock()
-	state, exists := appBuilds[appKey]
-	if !exists {
-		state = &appBuildState{}
-		appBuilds[appKey] = state
-	}
-	appBuildsMu.Unlock()
-
-	state.mu.Lock()
-	if state.refs == 0 {
-		cmd := newCmd(t.Context(), appDir, env, args...)
-		out, err := cmd.CombinedOutput()
-		require.NoError(t, err, string(out))
-	}
-	state.refs++
-	state.mu.Unlock()
-
+	cmd := newCmd(t.Context(), appDir, env, args...)
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(out))
 	t.Cleanup(func() {
-		state.mu.Lock()
-		defer state.mu.Unlock()
-		state.refs--
-		if state.refs == 0 {
-			_ = os.Remove(filepath.Join(appDir, output))
-			_ = os.RemoveAll(filepath.Join(appDir, ".otelc-build"))
-			// Left behind only when the otelc subprocess was killed mid-run
-			// (release removes it on every normal exit).
-			_ = os.Remove(filepath.Join(appDir, ".otelc-build.lock"))
-		}
+		_ = os.Remove(filepath.Join(appDir, output))
+		_ = os.RemoveAll(filepath.Join(appDir, ".otelc-build"))
+		// Left behind only when the otelc subprocess was killed mid-run
+		// (release removes it on every normal exit).
+		_ = os.Remove(filepath.Join(appDir, ".otelc-build.lock"))
 	})
 }
 
@@ -182,7 +149,8 @@ func Run(t *testing.T, appsDir, app string, env []string, args ...string) string
 // logged when the test fails, so that app crashes are visible in CI output.
 // The returned AppOutput also lets a test block until the app logs a given
 // string, so tests can synchronise on the app reaching a known point.
-func Start(t *testing.T, appsDir, app string, env []string, args ...string) (*exec.Cmd, *AppOutput) {
+// The returned io.WriteCloser provides access to stdin for graceful shutdown.
+func Start(t *testing.T, appsDir, app string, env []string, args ...string) (*exec.Cmd, *AppOutput, io.WriteCloser) {
 	t.Helper()
 	appName := "./" + appBinName
 	if util.IsWindows() {
@@ -196,12 +164,18 @@ func Start(t *testing.T, appsDir, app string, env []string, args ...string) (*ex
 	appDir := filepath.Join(appsDir, app)
 	cmd := newCmd(t.Context(), appDir, env, append([]string{appName}, args...)...)
 
+	stdin, err := cmd.StdinPipe()
+	require.NoError(t, err)
+
 	out := &AppOutput{}
 	cmd.Stdout = out
 	cmd.Stderr = out
 
 	require.NoError(t, cmd.Start())
 	t.Cleanup(func() {
+		if stdin != nil {
+			_ = stdin.Close()
+		}
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
 			_ = cmd.Wait() // ensure all output is flushed
@@ -211,5 +185,5 @@ func Start(t *testing.T, appsDir, app string, env []string, args ...string) (*ex
 		}
 	})
 
-	return cmd, out
+	return cmd, out, stdin
 }

@@ -7,8 +7,8 @@ package test
 
 import (
 	"fmt"
+	"io"
 	"net/http"
-	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -18,9 +18,7 @@ import (
 )
 
 func TestRootFiltering(t *testing.T) {
-	t.Parallel()
-
-	// Build both applications once to verify that runtime configuration works
+	// Built sequentially once to verify that runtime configuration works
 	// without rebuilding the instrumented binary across all test scenarios.
 	testutil.Build(t, "", "httpserverdbclient", "go", "build", "-a")
 	testutil.Build(t, "", "dbclient", "go", "build", "-a", "-trimpath")
@@ -41,11 +39,13 @@ func TestRootFiltering(t *testing.T) {
 		require.NoError(t, err)
 		defer resp.Body.Close()
 		require.Equal(t, http.StatusOK, resp.StatusCode)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		require.Equal(t, "ok", string(body), "database query in /healthz must execute successfully")
 
-		// Graceful shutdown ensures all active requests, hooks, and exporter buffers
-		// are flushed to the collector before we assert on collected spans.
-		require.NoError(t, server.Cmd.Process.Signal(syscall.SIGTERM))
-		require.NoError(t, server.Cmd.Wait())
+		// Graceful cross-platform shutdown finishes active requests, after-hooks,
+		// and flushes exporter buffers before collector assertions.
+		server.Stop()
 
 		require.Empty(t, testutil.AllSpans(f.Traces()),
 			"excluded /healthz root SERVER span and descendant DB CLIENT span must not be exported")
@@ -69,8 +69,7 @@ func TestRootFiltering(t *testing.T) {
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 
 		f.WaitForSpans(2)
-		require.NoError(t, server.Cmd.Process.Signal(syscall.SIGTERM))
-		require.NoError(t, server.Cmd.Wait())
+		server.Stop()
 
 		f.RequireTraceCount(1)
 		f.RequireSpansPerTrace(2)
@@ -116,8 +115,7 @@ func TestRootFiltering(t *testing.T) {
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 
 		f.WaitForSpans(2)
-		require.NoError(t, server.Cmd.Process.Signal(syscall.SIGTERM))
-		require.NoError(t, server.Cmd.Wait())
+		server.Stop()
 
 		f.RequireTraceCount(1)
 		f.RequireSpansPerTrace(2)
@@ -153,8 +151,7 @@ func TestRootFiltering(t *testing.T) {
 			require.Equal(t, http.StatusOK, resp.StatusCode)
 
 			f.WaitForSpans(2)
-			require.NoError(t, server.Cmd.Process.Signal(syscall.SIGTERM))
-			require.NoError(t, server.Cmd.Wait())
+			server.Stop()
 
 			f.RequireTraceCount(1)
 			f.RequireSpansPerTrace(2)

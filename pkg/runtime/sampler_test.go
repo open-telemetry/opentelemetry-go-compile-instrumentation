@@ -969,32 +969,58 @@ func BenchmarkRealTracerSampling(b *testing.B) {
 	defer func() { _ = tpFiltered.Shutdown(context.Background()) }()
 	tracerFiltered := tpFiltered.Tracer("bench-filtered")
 
-	b.Run("DirectSDK_StartRoot", func(b *testing.B) {
+	normalServerOpts := []trace.SpanStartOption{
+		trace.WithSpanKind(trace.SpanKindServer),
+		trace.WithAttributes(attribute.String("url.path", "/api/data")),
+	}
+	excludedServerOpts := []trace.SpanStartOption{
+		trace.WithSpanKind(trace.SpanKindServer),
+		trace.WithAttributes(attribute.String("url.path", "/healthz")),
+	}
+	childOpts := []trace.SpanStartOption{
+		trace.WithSpanKind(trace.SpanKindClient),
+	}
+
+	ctx := context.Background()
+	ctxWithParent, parentSpan := tracerBaseline.Start(ctx, "parent-span")
+	defer parentSpan.End()
+
+	b.Run("DirectSDK_StartNormalRootServer", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			_, span := tracerBaseline.Start(context.Background(), "test-span")
+			_, span := tracerBaseline.Start(ctx, "test-span", normalServerOpts...)
 			span.End()
 		}
 	})
 
-	b.Run("FilteringSampler_StartNormalRoot", func(b *testing.B) {
+	b.Run("FilteringSampler_StartNormalRootServer", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			_, span := tracerFiltered.Start(context.Background(), "test-span",
-				trace.WithSpanKind(trace.SpanKindServer),
-				trace.WithAttributes(attribute.String("url.path", "/api/data")),
-			)
+			_, span := tracerFiltered.Start(ctx, "test-span", normalServerOpts...)
 			span.End()
 		}
 	})
 
-	b.Run("FilteringSampler_StartExcludedRoot", func(b *testing.B) {
+	b.Run("FilteringSampler_StartExcludedRootServer", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			_, span := tracerFiltered.Start(context.Background(), "test-span",
-				trace.WithSpanKind(trace.SpanKindServer),
-				trace.WithAttributes(attribute.String("url.path", "/healthz")),
-			)
+			_, span := tracerFiltered.Start(ctx, "test-span", excludedServerOpts...)
+			span.End()
+		}
+	})
+
+	b.Run("DirectSDK_StartChildSpan", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_, span := tracerBaseline.Start(ctxWithParent, "child-span", childOpts...)
+			span.End()
+		}
+	})
+
+	b.Run("FilteringSampler_StartChildSpan", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_, span := tracerFiltered.Start(ctxWithParent, "child-span", childOpts...)
 			span.End()
 		}
 	})
