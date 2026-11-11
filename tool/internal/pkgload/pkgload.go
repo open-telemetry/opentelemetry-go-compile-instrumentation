@@ -139,8 +139,7 @@ func ResolveExportFiles(ctx context.Context, importPath string, buildFlags ...st
 		return nil, err
 	}
 	if loadErr, ok := failed[importPath]; ok {
-		var pkgErr packages.Error
-		if errors.As(loadErr, &pkgErr) {
+		if _, isPkgErr := errors.AsType[packages.Error](loadErr); isPkgErr {
 			return nil, ex.Newf("loading package %q: %v", importPath, loadErr)
 		}
 		return nil, ex.Newf("package %q not found or has no export file", importPath)

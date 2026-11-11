@@ -76,7 +76,7 @@ func setupLinkMemo(t *testing.T, adds ...string) {
 	}})
 }
 
-func newLinkConfig() *imports.ImportConfig {
+func freshLinkConfig() *imports.ImportConfig {
 	return &imports.ImportConfig{PackageFile: map[string]string{"example.com/app/dep": "/unused/dep.a"}}
 }
 
@@ -85,11 +85,11 @@ func TestLinkResolutionReusesMemoAcrossLinks(t *testing.T) {
 	resolver := &countingResolver{dir: t.TempDir()}
 	resolver.install(t)
 
-	first := newLinkConfig()
+	first := freshLinkConfig()
 	updated, err := resolveRuleAddedImports(t.Context(), nil, first)
 	require.NoError(t, err)
 	assert.True(t, updated)
-	second := newLinkConfig()
+	second := freshLinkConfig()
 	updated, err = resolveRuleAddedImports(t.Context(), nil, second)
 	require.NoError(t, err)
 	assert.True(t, updated)
@@ -104,12 +104,12 @@ func TestLinkResolutionReResolvesStaleMemoEntry(t *testing.T) {
 	resolver := &countingResolver{dir: t.TempDir()}
 	resolver.install(t)
 
-	cfg := newLinkConfig()
+	cfg := freshLinkConfig()
 	_, err := resolveRuleAddedImports(t.Context(), nil, cfg)
 	require.NoError(t, err)
 	require.NoError(t, os.Remove(cfg.PackageFile["example.com/extra"]))
 
-	_, err = resolveRuleAddedImports(t.Context(), nil, newLinkConfig())
+	_, err = resolveRuleAddedImports(t.Context(), nil, freshLinkConfig())
 	require.NoError(t, err)
 	assert.Equal(t, 2, resolver.calls, "an entry whose archive is gone must be resolved again")
 }
@@ -119,14 +119,14 @@ func TestLinkResolutionListsFailedCandidateOnce(t *testing.T) {
 	resolver := &countingResolver{dir: t.TempDir(), bad: map[string]bool{"example.invalid/bad": true}}
 	resolver.install(t)
 
-	cfg := newLinkConfig()
+	cfg := freshLinkConfig()
 	_, err := resolveRuleAddedImports(t.Context(), nil, cfg)
 	require.NoError(t, err)
 	require.Equal(t, 1, resolver.calls)
 	assert.NotContains(t, cfg.PackageFile, "example.invalid/bad")
 
 	// A later link reads the failure from the memo too.
-	_, err = resolveRuleAddedImports(t.Context(), nil, newLinkConfig())
+	_, err = resolveRuleAddedImports(t.Context(), nil, freshLinkConfig())
 	require.NoError(t, err)
 	assert.Equal(t, 1, resolver.calls)
 }
@@ -136,7 +136,7 @@ func TestLinkResolutionSkipsGoListWhenNothingIsMissing(t *testing.T) {
 	resolver := &countingResolver{dir: t.TempDir()}
 	resolver.install(t)
 
-	cfg := newLinkConfig()
+	cfg := freshLinkConfig()
 	cfg.PackageFile["example.com/extra"] = "/unused/extra.a"
 	updated, err := resolveRuleAddedImports(t.Context(), nil, cfg)
 	require.NoError(t, err)
@@ -151,7 +151,7 @@ func TestLinkResolutionWithoutSessionResolvesEveryLink(t *testing.T) {
 	resolver.install(t)
 
 	for range 2 {
-		_, err := resolveRuleAddedImports(t.Context(), nil, newLinkConfig())
+		_, err := resolveRuleAddedImports(t.Context(), nil, freshLinkConfig())
 		require.NoError(t, err)
 	}
 	assert.Equal(t, 2, resolver.calls)

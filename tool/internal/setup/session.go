@@ -54,7 +54,7 @@ func sessionEnv(env []string) []string {
 // never share memo entries.
 func writeResolutionScope(moduleDirs []string) error {
 	h := sha256.New()
-	h.Write([]byte("otelc=" + util.Version + "\x00rules=" + instrument.RulesDigest() + "\x00"))
+	_, _ = h.Write([]byte("otelc=" + util.Version + "\x00rules=" + instrument.RulesDigest() + "\x00"))
 	for _, dir := range moduleDirs {
 		for _, name := range scopeModuleFiles {
 			content, err := os.ReadFile(filepath.Join(dir, name))
@@ -62,11 +62,11 @@ func writeResolutionScope(moduleDirs []string) error {
 				continue
 			}
 			sum := sha256.Sum256(content)
-			h.Write([]byte(filepath.Join(dir, name) + "=" + hex.EncodeToString(sum[:]) + "\x00"))
+			_, _ = h.Write([]byte(filepath.Join(dir, name) + "=" + hex.EncodeToString(sum[:]) + "\x00"))
 		}
 	}
 	for _, name := range scopeEnvVars {
-		h.Write([]byte(name + "=" + os.Getenv(name) + "\x00"))
+		_, _ = h.Write([]byte(name + "=" + os.Getenv(name) + "\x00"))
 	}
 	f := util.GetResolutionScopeFile()
 	if err := util.WriteFileAtomic(f, []byte(hex.EncodeToString(h.Sum(nil))[:32])); err != nil {
