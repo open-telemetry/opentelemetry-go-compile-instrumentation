@@ -569,6 +569,10 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
+	if err = sp.checkRuleImportCycles(ctx, matched, allPkgs); err != nil {
+		return err
+	}
+
 	if err = sp.validateSelectedConfigurationMetadata(matched); err != nil {
 		return ex.Wrapf(err, "validating selected instrumentation configuration metadata")
 	}
