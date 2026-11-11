@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/urfave/cli/v3"
@@ -26,6 +27,8 @@ import (
 )
 
 type setupPhase struct {
+	decisionMu    *sync.Mutex
+	decision      func(source string, r rule.InstRule, reason string)
 	logger        *slog.Logger
 	ruleConfig    string
 	buildPackages []*packages.Package

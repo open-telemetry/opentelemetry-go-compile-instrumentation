@@ -21,6 +21,7 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/instrument"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -79,6 +80,8 @@ func (sp *setupPhase) matchGlobRules(
 	var seen map[rule.InstRule]bool
 	for _, gr := range globRules {
 		if !gr.target.Matches(dep.ImportPath, sp.rootModulePaths) {
+			// Not reported: like an exact target for another package, a glob
+			// that misses this dependency never makes the rule a candidate.
 			continue
 		}
 		if matched == nil {
@@ -139,6 +142,7 @@ func (sp *setupPhase) runMatch(
 	exactRules map[string][]rule.InstRule,
 	globRules []targetRule,
 ) (*rule.InstRuleSet, error) {
+	sp = sp.withMatchDiagnostics(dep)
 	set := rule.NewInstRuleSet(dep.ImportPath)
 	set.IsTest = dep.IsTest
 
@@ -171,6 +175,7 @@ func (sp *setupPhase) runMatch(
 	filteredRules := make([]rule.InstRule, 0, len(relevantRules))
 	for _, r := range relevantRules {
 		if !matchVersion(dep, r) {
+			sp.reportDecision("", r, "version_mismatch")
 			if unresolvedVersionSkip(dep.Version, r.GetVersion()) {
 				// Per-rule: setup drops individual rules, so each skip is actionable.
 				warnUnresolvedVersionSkip(sp.Warn, dep.ImportPath, r.GetVersion(),
@@ -188,6 +193,7 @@ func (sp *setupPhase) runMatch(
 		// If the rule is a file rule, it is always applicable
 		if fr, ok := r.(*rule.InstFileRule); ok {
 			set.AddFileRule(fr)
+			sp.reportDecision("", r, "")
 			sp.Info("Match file rule", "rule", fr, "dep", dep)
 			continue
 		}
@@ -232,6 +238,9 @@ func (sp *setupPhase) preciseMatching(
 	set *rule.InstRuleSet,
 ) (*rule.InstRuleSet, error) {
 	if len(dep.Sources) == 0 {
+		for _, r := range rules {
+			sp.reportDecision("", r, "no_source_files")
+		}
 		return set, nil
 	}
 
@@ -293,6 +302,7 @@ func (sp *setupPhase) preciseMatching(
 			// Evaluate the where filter if one is defined for this rule.
 			// A nil filter means the rule applies to all files unconditionally.
 			if rf.where != nil && !rf.where.Match(&mctx) {
+				sp.reportDecision(source, rf.rule, "where_mismatch")
 				continue
 			}
 			if err = sp.matchOneRule(tree, source, rf.rule, set, dep); err != nil {
@@ -333,9 +343,15 @@ func (sp *setupPhase) matchOneRule(
 	set *rule.InstRuleSet,
 	dep *Dependency,
 ) error {
+	reason := ""
+
+	var rejection *string
+	if sp.decision != nil {
+		rejection = &reason
+	}
 	switch rt := r.(type) {
 	case *rule.InstFuncRule:
-		_, ok, err := ast.FindFuncDecl(tree, rt, sp.resolvedNames)
+		_, ok, err := ast.FindFuncDeclReporting(tree, rt, sp.resolvedNames, rejection)
 		if err != nil {
 			return err
 		}
@@ -345,12 +361,14 @@ func (sp *setupPhase) matchOneRule(
 		}
 	case *rule.InstStructRule:
 		structType := ast.FindStructType(tree, rt.Struct)
+		reason = "struct_not_found"
 		if structType != nil {
+			reason = ""
 			set.AddStructRule(source, rt)
 			sp.Info("Match struct rule", "rule", rt, "dep", dep)
 		}
 	case *rule.InstRawRule:
-		_, ok, err := ast.FindFuncDecl(tree, rt, sp.resolvedNames)
+		_, ok, err := ast.FindFuncDeclReporting(tree, rt, sp.resolvedNames, rejection)
 		if err != nil {
 			return err
 		}
@@ -372,12 +390,16 @@ func (sp *setupPhase) matchOneRule(
 		set.AddLitRule(source, rt)
 		sp.Info("Match literal rule", "rule", rt, "dep", dep)
 	case *rule.InstDirectiveRule:
+		reason = "directive_not_found"
 		if ast.FileHasDirective(tree, rt.Directive) {
+			reason = ""
 			set.AddDirectiveRule(source, rt)
 			sp.Info("Match directive rule", "rule", rt, "dep", dep)
 		}
 	case *rule.InstDeclRule:
+		reason = "declaration_not_found"
 		if ast.FindNamedDecl(tree, rt.Identifier, rt.Kind) != nil {
+			reason = ""
 			set.AddDeclRule(source, rt)
 			sp.Info("Match decl rule", "rule", rt, "dep", dep)
 		}
@@ -386,6 +408,7 @@ func (sp *setupPhase) matchOneRule(
 	default:
 		util.ShouldNotReachHere()
 	}
+	sp.reportDecision(source, r, reason)
 	return nil
 }
 
@@ -652,6 +675,9 @@ func (sp *setupPhase) matchDeps(
 ) ([]*rule.InstRuleSet, error) {
 	if idx.isEmpty() {
 		return nil, nil
+	}
+	if instrument.DiffDebugEnabled() && sp.decisionMu == nil {
+		sp.decisionMu = &sync.Mutex{}
 	}
 
 	exactRules := idx.exactRules
