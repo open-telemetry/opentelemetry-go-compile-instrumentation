@@ -536,7 +536,8 @@ func TestPublisherEnvironmentTokenRouting(t *testing.T) {
 // The App path: the tool decides whether to use the App, and the App token
 // step follows that output. The identity step reports the token owner.
 func TestPublisherCredentialSteps(t *testing.T) {
-	job := loadWorkflow(t, "regenerate-bundle-worker.yaml").Jobs["push_update"]
+	workflow := loadWorkflow(t, "regenerate-bundle-worker.yaml")
+	job := workflow.Jobs["push_update"]
 	if job == nil {
 		t.Fatal("missing protected publisher job")
 	}
@@ -564,6 +565,15 @@ func TestPublisherCredentialSteps(t *testing.T) {
 		if _, ok := envValue(credentials, key); !ok {
 			t.Errorf("the credentials step does not set %s", key)
 		}
+	}
+	headRepo, ok := envValue(credentials, "HEAD_REPO_FULL")
+	if !ok || strings.Join(strings.Fields(headRepo), " ") != "${{ inputs.head_repo_full }}" {
+		t.Errorf("the credentials step must pass the head repository, got %q", headRepo)
+	}
+	if workflow.Env == nil || workflow.Env.Vars["repo"] == nil || workflow.Env.Vars["repo"].Value == nil {
+		t.Error("the workflow env does not set REPO")
+	} else if got := workflow.Env.Vars["repo"].Value.Value; got != "${{ github.repository }}" {
+		t.Errorf("workflow env REPO = %q, want %q", got, "${{ github.repository }}")
 	}
 	if _, ok := envValue(credentials, "IS_CROSS_REPOSITORY"); ok {
 		t.Error("the credentials step must not set IS_CROSS_REPOSITORY")
