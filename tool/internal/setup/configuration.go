@@ -30,12 +30,6 @@ type selectedConfigurationMetadata struct {
 // whether it is needed.
 func (sp *setupPhase) validateSelectedConfigurationMetadata(
 	matched []*rule.InstRuleSet,
-) (selectedConfigurationMetadata, error) {
-	return sp.validateSelectedConfigurationMetadataWithCatalog(matched, configuration.CatalogDefinitions)
-}
-
-func (sp *setupPhase) validateSelectedConfigurationMetadataWithCatalog(
-	matched []*rule.InstRuleSet,
 	loadCatalog func() (map[string]configuration.Entry, error),
 ) (selectedConfigurationMetadata, error) {
 	sortedModuleRoots := sp.selectedConfigurationModuleRoots(matched)

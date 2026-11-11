@@ -18,6 +18,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/configuration"
 	"go.opentelemetry.io/otelc/tool/internal/instrument"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
@@ -478,7 +479,7 @@ func (sp *setupPhase) recordRuleModuleRoot(instRule rule.InstRule, moduleRoot st
 }
 
 func (sp *setupPhase) validateAndStoreSelectedConfigurationMetadata(matched []*rule.InstRuleSet) error {
-	metadata, err := sp.validateSelectedConfigurationMetadata(matched)
+	metadata, err := sp.validateSelectedConfigurationMetadata(matched, configuration.CatalogDefinitions)
 	if err != nil {
 		return ex.Wrapf(err, "validating selected instrumentation configuration metadata")
 	}

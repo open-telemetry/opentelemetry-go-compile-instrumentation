@@ -27,7 +27,7 @@ func TestValidateSelectedConfigurationMetadata(t *testing.T) {
 	matched := matchedConfigurationRules(module)
 	sp := setupPhaseForConfigurationModule(matched, module.dir)
 
-	result, err := sp.validateSelectedConfigurationMetadata(matched)
+	result, err := sp.validateSelectedConfigurationMetadata(matched, configuration.CatalogDefinitions)
 	require.NoError(t, err)
 	require.Len(t, result.Definitions, 1)
 	assert.Empty(t, result.ModulesWithoutMetadata)
@@ -40,7 +40,9 @@ func TestValidateSelectedConfigurationMetadataUnknownReference(t *testing.T) {
 `)
 	matched := matchedConfigurationRules(module)
 
-	_, err := setupPhaseForConfigurationModule(matched, module.dir).validateSelectedConfigurationMetadata(matched)
+	_, err := setupPhaseForConfigurationModule(matched, module.dir).validateSelectedConfigurationMetadata(
+		matched, configuration.CatalogDefinitions,
+	)
 	require.ErrorContains(t, err, `unknown configuration ref "missing.definition"`)
 	require.ErrorContains(t, err, filepath.Join(module.dir, "metadata.yaml"))
 }
@@ -53,7 +55,7 @@ func TestValidateSelectedConfigurationMetadataSkipsUnselectedModules(t *testing.
 	matched := matchedConfigurationRules(selected)
 	sp := setupPhaseForConfigurationModule(matched, selected.dir)
 	assert.Equal(t, []string{selected.dir}, sp.selectedConfigurationModuleRoots(matched))
-	result, err := sp.validateSelectedConfigurationMetadata(matched)
+	result, err := sp.validateSelectedConfigurationMetadata(matched, configuration.CatalogDefinitions)
 	require.NoError(t, err)
 	assert.Equal(t, []string{selected.dir}, result.ModulesWithoutMetadata)
 }
@@ -63,7 +65,9 @@ func TestValidateSelectedConfigurationMetadataReportsMetadataReadErrors(t *testi
 	require.NoError(t, os.Mkdir(filepath.Join(module.dir, instrumentationMetadataFilename), 0o755))
 	matched := matchedConfigurationRules(module)
 
-	_, err := setupPhaseForConfigurationModule(matched, module.dir).validateSelectedConfigurationMetadata(matched)
+	_, err := setupPhaseForConfigurationModule(matched, module.dir).validateSelectedConfigurationMetadata(
+		matched, configuration.CatalogDefinitions,
+	)
 
 	require.ErrorContains(t, err, "read selected instrumentation metadata")
 }
@@ -72,7 +76,9 @@ func TestValidateSelectedConfigurationMetadataReportsParseErrors(t *testing.T) {
 	module := makeConfigurationModule(t, "example.com/instrumentation", "configurations: [\n")
 	matched := matchedConfigurationRules(module)
 
-	_, err := setupPhaseForConfigurationModule(matched, module.dir).validateSelectedConfigurationMetadata(matched)
+	_, err := setupPhaseForConfigurationModule(matched, module.dir).validateSelectedConfigurationMetadata(
+		matched, configuration.CatalogDefinitions,
+	)
 
 	require.ErrorContains(t, err, filepath.Join(module.dir, instrumentationMetadataFilename))
 	require.ErrorContains(t, err, "parse")
@@ -86,7 +92,7 @@ func TestValidateSelectedConfigurationMetadataReportsCatalogLoadErrors(t *testin
 		return nil, errors.New("catalog unavailable")
 	}
 
-	_, err := sp.validateSelectedConfigurationMetadataWithCatalog(matched, loadCatalog)
+	_, err := sp.validateSelectedConfigurationMetadata(matched, loadCatalog)
 
 	require.ErrorContains(t, err, "load pinned configuration catalog")
 	require.ErrorContains(t, err, "catalog unavailable")
@@ -97,7 +103,9 @@ func TestValidateSelectedConfigurationMetadataFileDisappearsAfterDiscovery(t *te
 	matched := matchedConfigurationRules(module)
 	require.NoError(t, os.Remove(filepath.Join(module.dir, instrumentationMetadataFilename)))
 
-	result, err := setupPhaseForConfigurationModule(matched, module.dir).validateSelectedConfigurationMetadata(matched)
+	result, err := setupPhaseForConfigurationModule(matched, module.dir).validateSelectedConfigurationMetadata(
+		matched, configuration.CatalogDefinitions,
+	)
 
 	require.NoError(t, err)
 	assert.Empty(t, result.Definitions)
@@ -107,7 +115,9 @@ func TestValidateSelectedConfigurationMetadataFileDisappearsAfterDiscovery(t *te
 func TestValidateSelectedConfigurationMetadataWithNoMatchedHooks(t *testing.T) {
 	sp := newTestSetupPhase()
 
-	result, err := sp.validateSelectedConfigurationMetadata([]*rule.InstRuleSet{nil})
+	result, err := sp.validateSelectedConfigurationMetadata(
+		[]*rule.InstRuleSet{nil}, configuration.CatalogDefinitions,
+	)
 
 	require.NoError(t, err)
 	assert.Empty(t, result.Definitions)
@@ -139,13 +149,15 @@ func TestValidateSelectedConfigurationMetadataForNestedInRepoModules(t *testing.
 	sp.recordRuleModuleRoot(consumerRule, consumerRoot)
 	sp.recordRuleModuleRoot(producerRule, producerRoot)
 
-	consumerResult, err := sp.validateSelectedConfigurationMetadata([]*rule.InstRuleSet{consumerRules})
+	consumerResult, err := sp.validateSelectedConfigurationMetadata(
+		[]*rule.InstRuleSet{consumerRules}, configuration.CatalogDefinitions,
+	)
 	require.NoError(t, err)
 	require.Len(t, consumerResult.Definitions, 1)
 	assert.Empty(t, consumerResult.ModulesWithoutMetadata)
 
 	combinedResult, err := sp.validateSelectedConfigurationMetadata(
-		[]*rule.InstRuleSet{consumerRules, producerRules},
+		[]*rule.InstRuleSet{consumerRules, producerRules}, configuration.CatalogDefinitions,
 	)
 	require.NoError(t, err)
 	require.Len(
@@ -178,7 +190,9 @@ func TestValidateSelectedConfigurationMetadataDoesNotUseParentMetadata(t *testin
 	sp := newTestSetupPhase()
 	sp.recordRuleModuleRoot(instRule, moduleRoot)
 
-	result, err := sp.validateSelectedConfigurationMetadata([]*rule.InstRuleSet{rules})
+	result, err := sp.validateSelectedConfigurationMetadata(
+		[]*rule.InstRuleSet{rules}, configuration.CatalogDefinitions,
+	)
 	require.NoError(t, err)
 	assert.Empty(t, result.Definitions)
 	assert.Equal(t, []string{moduleRoot}, result.ModulesWithoutMetadata)
@@ -235,7 +249,9 @@ func TestMatchedRuleTypesRetainModuleOwnershipOutsideRules(t *testing.T) {
 	for instRule := range set.AllRules() {
 		sp.recordRuleModuleRoot(instRule, moduleRoot)
 	}
-	result, err := sp.validateSelectedConfigurationMetadata([]*rule.InstRuleSet{set})
+	result, err := sp.validateSelectedConfigurationMetadata(
+		[]*rule.InstRuleSet{set}, configuration.CatalogDefinitions,
+	)
 	require.NoError(t, err)
 	assert.Equal(t, []string{moduleRoot}, result.ModulesWithoutMetadata)
 }
