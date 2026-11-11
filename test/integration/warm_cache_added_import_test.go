@@ -378,8 +378,8 @@ func main() {
 		gen := exec.CommandContext(t.Context(), "go", "run", "./profilegen", profile)
 		gen.Dir = appDir
 		gen.Env = append(preparedBuildBaseEnvironment(), "GOWORK=off")
-		out, err := gen.CombinedOutput()
-		require.NoError(t, err, "recording the CPU profile failed:\n%s", out)
+		out, recErr := gen.CombinedOutput()
+		require.NoError(t, recErr, "recording the CPU profile failed:\n%s", out)
 	}
 	profiledCompile := func() string {
 		return compileExtraDiagnostics(t, extraDir, "-pgo="+profile)

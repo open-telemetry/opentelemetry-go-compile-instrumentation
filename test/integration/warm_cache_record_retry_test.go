@@ -47,7 +47,11 @@ func TestRecordUntilNoteHot(t *testing.T) {
 			assert.Equal(t, tt.wantAttempts, compiles, "every recording is checked by one profiled compile")
 			assert.Len(t, logs, tt.wantLogs)
 			if tt.wantLogs > 0 {
-				assert.Contains(t, logs[len(logs)-1], fmt.Sprintf("recording %d/%d did not make Note hot", tt.wantLogs, maxNoteRecordings))
+				assert.Contains(
+					t,
+					logs[len(logs)-1],
+					fmt.Sprintf("recording %d/%d did not make Note hot", tt.wantLogs, maxNoteRecordings),
+				)
 			}
 		})
 	}
