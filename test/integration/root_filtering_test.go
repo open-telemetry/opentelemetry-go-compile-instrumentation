@@ -26,10 +26,11 @@ func TestRootFiltering(t *testing.T) {
 	t.Run("ExcludedServerPath_SuppressesRootAndDescendant", func(t *testing.T) {
 		f := testutil.NewTestFixture(t)
 		f.SetEnv("OTEL_GO_EXCLUDED_SERVER_PATHS", "/healthz,/readyz")
-		f.SetEnv("OTEL_GO_DROP_ROOT_CLIENT_PRODUCER", "true")
+		f.SetEnv("OTEL_GO_DROP_ROOT_CLIENT_PRODUCER", "false")
+		f.SetEnv("OTEL_TRACES_SAMPLER", "always_on")
 
 		port := testutil.FreePort(t)
-		server := f.Start("httpserverdbclient", fmt.Sprintf("-front-port=%d", port))
+		server := f.Start("httpserverdbclient", fmt.Sprintf("-front-port=%d", port), "-stdin-shutdown")
 		testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", port))
 
 		healthURL := fmt.Sprintf("http://127.0.0.1:%d/healthz", port)
@@ -43,8 +44,9 @@ func TestRootFiltering(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "ok", string(body), "database query in /healthz must execute successfully")
 
-		// Graceful cross-platform shutdown finishes active requests, after-hooks,
-		// and flushes exporter buffers before collector assertions.
+		// Graceful shutdown waits for in-flight requests and their instrumentation after-hooks
+		// to complete. Under the configured SimpleSpanProcessor, completed spans are synchronously
+		// exported before the server shuts down.
 		server.Stop()
 
 		require.Empty(t, testutil.AllSpans(f.Traces()),
@@ -54,10 +56,10 @@ func TestRootFiltering(t *testing.T) {
 	t.Run("OrdinaryServerPath_ExportsServerAndDescendant", func(t *testing.T) {
 		f := testutil.NewTestFixture(t)
 		f.SetEnv("OTEL_GO_EXCLUDED_SERVER_PATHS", "/healthz,/readyz")
-		f.SetEnv("OTEL_GO_DROP_ROOT_CLIENT_PRODUCER", "true")
+		f.SetEnv("OTEL_GO_DROP_ROOT_CLIENT_PRODUCER", "false")
 
 		port := testutil.FreePort(t)
-		server := f.Start("httpserverdbclient", fmt.Sprintf("-front-port=%d", port))
+		server := f.Start("httpserverdbclient", fmt.Sprintf("-front-port=%d", port), "-stdin-shutdown")
 		testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", port))
 
 		helloURL := fmt.Sprintf("http://127.0.0.1:%d/hello", port)
@@ -90,10 +92,10 @@ func TestRootFiltering(t *testing.T) {
 	t.Run("MixedRequests_OnlyOrdinaryPathExported", func(t *testing.T) {
 		f := testutil.NewTestFixture(t)
 		f.SetEnv("OTEL_GO_EXCLUDED_SERVER_PATHS", "/healthz,/readyz")
-		f.SetEnv("OTEL_GO_DROP_ROOT_CLIENT_PRODUCER", "true")
+		f.SetEnv("OTEL_GO_DROP_ROOT_CLIENT_PRODUCER", "false")
 
 		port := testutil.FreePort(t)
-		server := f.Start("httpserverdbclient", fmt.Sprintf("-front-port=%d", port))
+		server := f.Start("httpserverdbclient", fmt.Sprintf("-front-port=%d", port), "-stdin-shutdown")
 		testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", port))
 
 		// 1. Excluded request
@@ -126,6 +128,7 @@ func TestRootFiltering(t *testing.T) {
 	t.Run("ParentlessClientSuppressed", func(t *testing.T) {
 		f := testutil.NewTestFixture(t)
 		f.SetEnv("OTEL_GO_DROP_ROOT_CLIENT_PRODUCER", "true")
+		f.SetEnv("OTEL_GO_EXCLUDED_SERVER_PATHS", "")
 
 		// Run parentless database ping to process completion.
 		f.Run("dbclient", "-op=ping")
@@ -139,7 +142,7 @@ func TestRootFiltering(t *testing.T) {
 			f := testutil.NewTestFixture(t)
 
 			port := testutil.FreePort(t)
-			server := f.Start("httpserverdbclient", fmt.Sprintf("-front-port=%d", port))
+			server := f.Start("httpserverdbclient", fmt.Sprintf("-front-port=%d", port), "-stdin-shutdown")
 			testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", port))
 
 			healthURL := fmt.Sprintf("http://127.0.0.1:%d/healthz", port)

@@ -19,7 +19,10 @@ import (
 	_ "go.opentelemetry.io/otelc/test/shared/testdb"
 )
 
-var frontPort = flag.Int("front-port", 8080, "port for HTTP frontend")
+var (
+	frontPort     = flag.Int("front-port", 8080, "port for HTTP frontend")
+	stdinShutdown = flag.Bool("stdin-shutdown", false, "shut down gracefully when stdin is closed")
+)
 
 func main() {
 	flag.Parse()
@@ -65,16 +68,18 @@ func main() {
 		}
 	}()
 
-	// Wait for shutdown via stdin close/input or OS interrupt/SIGTERM.
+	// Wait for shutdown signal (or stdin close when opt-in enabled).
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	go func() {
-		var buf [1]byte
-		if _, err := os.Stdin.Read(buf[:]); err != nil || buf[0] != 0 {
-			stop()
-		}
-	}()
+	if *stdinShutdown {
+		go func() {
+			var buf [1]byte
+			if _, err := os.Stdin.Read(buf[:]); err != nil || buf[0] != 0 {
+				stop()
+			}
+		}()
+	}
 
 	<-ctx.Done()
 

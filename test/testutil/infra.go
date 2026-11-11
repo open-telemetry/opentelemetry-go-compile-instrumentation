@@ -150,7 +150,7 @@ func Run(t *testing.T, appsDir, app string, env []string, args ...string) string
 // The returned AppOutput also lets a test block until the app logs a given
 // string, so tests can synchronise on the app reaching a known point.
 // The returned io.WriteCloser provides access to stdin for graceful shutdown.
-func Start(t *testing.T, appsDir, app string, env []string, args ...string) (*exec.Cmd, *AppOutput, io.WriteCloser) {
+func Start(t *testing.T, appsDir, app string, env []string, args ...string) (*exec.Cmd, *AppOutput, io.WriteCloser, *bool) {
 	t.Helper()
 	appName := "./" + appBinName
 	if util.IsWindows() {
@@ -171,12 +171,13 @@ func Start(t *testing.T, appsDir, app string, env []string, args ...string) (*ex
 	cmd.Stdout = out
 	cmd.Stderr = out
 
+	var stopped bool
 	require.NoError(t, cmd.Start())
 	t.Cleanup(func() {
-		if stdin != nil {
-			_ = stdin.Close()
-		}
-		if cmd.Process != nil {
+		if !stopped && cmd.Process != nil {
+			if stdin != nil {
+				_ = stdin.Close()
+			}
 			_ = cmd.Process.Kill()
 			_ = cmd.Wait() // ensure all output is flushed
 		}
@@ -185,5 +186,5 @@ func Start(t *testing.T, appsDir, app string, env []string, args ...string) (*ex
 		}
 	})
 
-	return cmd, out, stdin
+	return cmd, out, stdin, &stopped
 }

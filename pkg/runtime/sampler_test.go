@@ -636,7 +636,7 @@ func TestAcceptanceScenarios(t *testing.T) {
 
 	// Scenario 6: Local descendants of excluded roots remain unsampled under always_on.
 	t.Run("Scenario 6: Local descendants of excluded roots remain unsampled under always_on", func(t *testing.T) {
-		sampler := newRootFilteringSampler(sdktrace.AlwaysSample(), true, map[string]struct{}{"/healthz": {}})
+		sampler := newRootFilteringSampler(sdktrace.AlwaysSample(), false, map[string]struct{}{"/healthz": {}})
 		exporter := tracetest.NewInMemoryExporter()
 		tp := sdktrace.NewTracerProvider(
 			sdktrace.WithSampler(sampler),

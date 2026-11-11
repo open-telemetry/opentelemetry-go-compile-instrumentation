@@ -5,6 +5,7 @@ package testutil
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -124,17 +125,29 @@ type Server struct {
 	appPath string
 	output  *AppOutput
 	stdin   io.WriteCloser
+	stopped *bool
 
 	*exec.Cmd
 }
 
 // Stop requests a graceful shutdown by closing stdin and waits for the process to exit.
+// It fails the test if closing stdin fails unexpectedly or if the process exits with an error.
 func (s *Server) Stop() {
 	s.t.Helper()
-	if s.stdin != nil {
-		_ = s.stdin.Close()
+	if s.stopped != nil && *s.stopped {
+		return
 	}
-	_ = s.Cmd.Wait()
+	if s.stopped != nil {
+		*s.stopped = true
+	}
+	if s.stdin != nil {
+		if err := s.stdin.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
+			s.t.Logf("closing stdin for %s: %v", s.appPath, err)
+		}
+	}
+	if err := s.Cmd.Wait(); err != nil {
+		s.t.Fatalf("app %s exited with error: %v\napp output:\n%s", s.appPath, err, s.output)
+	}
 }
 
 // WaitForLog blocks until the application has logged substr, failing the test
@@ -155,8 +168,8 @@ func (s *Server) WaitForLog(substr string) {
 // Start starts a test application from test/apps/. The binary is
 // expected to be built using Build.
 func (f *TestFixture) Start(appName string, args ...string) *Server {
-	cmd, out, stdin := Start(f.t, f.appsDir, appName, f.Env(), args...)
-	return &Server{t: f.t, appPath: appName, output: out, stdin: stdin, Cmd: cmd}
+	cmd, out, stdin, stopped := Start(f.t, f.appsDir, appName, f.Env(), args...)
+	return &Server{t: f.t, appPath: appName, output: out, stdin: stdin, stopped: stopped, Cmd: cmd}
 }
 
 // Run runs a application and returns its output. The binary is
