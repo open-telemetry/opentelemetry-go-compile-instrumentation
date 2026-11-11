@@ -1,3 +1,5 @@
+version: "v1.2.0"
+
 # Every stripe-go v81 API call — across all 200+ resource clients and the
 # client.API aggregate — funnels through requestWithRetriesAndTelemetry
 # on the backend. Hooking that one function covers the whole SDK and does

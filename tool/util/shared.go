@@ -39,6 +39,10 @@ const (
 	OtelcInstRoot           = OtelcRoot + "/instrumentation"
 	OtelcToolCmdRoot        = OtelcRoot + "/tool/cmd/otelc"
 	OtelcToolExe            = "otelc"
+	// InternalPath is a sentinel Path value for compiler-internal rules and
+	// synthetic files (e.g. runtime GLS context propagation) injected directly
+	// by otelc rather than loaded from an external Go package.
+	InternalPath = "<internal>"
 )
 
 // DirectiveIgnore and DirectiveInstrument live in util, not ast or rule. ast
