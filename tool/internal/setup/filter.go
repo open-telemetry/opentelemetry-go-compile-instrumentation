@@ -69,10 +69,34 @@ type matchContext struct {
 }
 
 func (c *matchContext) anyFile(pred func(*dst.File) bool) bool {
-	if c.Package == nil {
-		return pred(c.AST)
+	if c.Package != nil {
+		return slices.ContainsFunc(c.Package, pred)
 	}
-	return slices.ContainsFunc(c.Package, pred)
+	if c.AST == nil {
+		return false
+	}
+	return pred(c.AST)
+}
+
+// needsPackage reports whether evaluating f reads the package's parsed source
+// files. Only is_test (and an empty where, which builds no filter) can be
+// decided without them, so a file rule whose where is pure is_test skips
+// parsing the package into an AST.
+func needsPackage(f filter) bool {
+	switch v := f.(type) {
+	case *isTestFilter:
+		return false
+	case allOf:
+		return slices.ContainsFunc(v, needsPackage)
+	case oneOf:
+		return slices.ContainsFunc(v, needsPackage)
+	case *not:
+		return needsPackage(v.Inner)
+	default:
+		// funcFilter, structFilter, packageNameFilter, directiveFilter and any
+		// future leaf read the package; assume a parse is required.
+		return true
+	}
 }
 
 // --- Leaf filters ---

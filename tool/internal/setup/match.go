@@ -204,17 +204,17 @@ func (sp *setupPhase) matchFilteredRules(
 	preciseRules := make([]rule.InstRule, 0, len(filteredRules))
 	var trees []*dst.File
 	treesParsed := false
-	parseTrees := func() error {
+	parseTrees := func() ([]*dst.File, error) {
 		if treesParsed {
-			return nil
+			return trees, nil
 		}
 		var err error
 		trees, err = parsePackageSources(ctx, dep)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		treesParsed = true
-		return nil
+		return trees, nil
 	}
 	for _, r := range filteredRules {
 		if fr, ok := r.(*rule.InstFileRule); ok {
@@ -223,10 +223,7 @@ func (sp *setupPhase) matchFilteredRules(
 				sp.Info("Match file rule", "rule", fr, "dep", dep)
 				continue
 			}
-			if err := parseTrees(); err != nil {
-				return nil, err
-			}
-			applies, matchErr := fileRuleApplies(dep, fr, trees)
+			applies, matchErr := fileRuleApplies(dep, fr, parseTrees)
 			if matchErr != nil {
 				return nil, matchErr
 			}
@@ -245,7 +242,7 @@ func (sp *setupPhase) matchFilteredRules(
 
 	if len(preciseRules) == 0 {
 		if !set.IsEmpty() && len(dep.Sources) > 0 {
-			name, err := ast.ParsePackageName(dep.Sources[0])
+			name, err := packageNameForSet(dep, trees, treesParsed)
 			if err != nil {
 				return nil, err
 			}
@@ -256,11 +253,21 @@ func (sp *setupPhase) matchFilteredRules(
 	}
 
 	if !treesParsed {
-		if err := parseTrees(); err != nil {
+		if _, err := parseTrees(); err != nil {
 			return nil, err
 		}
 	}
 	return sp.preciseMatchingWithTrees(ctx, dep, preciseRules, set, trees)
+}
+
+// packageNameForSet returns the dependency's package-clause name. When a file
+// rule's where clause already parsed the package, it reads the clause from that
+// tree instead of reading the first source from disk again.
+func packageNameForSet(dep *Dependency, trees []*dst.File, treesParsed bool) (string, error) {
+	if treesParsed && len(trees) > 0 {
+		return trees[0].Name.Name, nil
+	}
+	return ast.ParsePackageName(dep.Sources[0])
 }
 
 func parsePackageSources(ctx context.Context, dep *Dependency) ([]*dst.File, error) {
@@ -280,8 +287,9 @@ func parsePackageSources(ctx context.Context, dep *Dependency) ([]*dst.File, err
 
 // fileRuleApplies reports whether a file rule's where clause holds for dep. The
 // rule adds one file to the whole package, so the clause is checked against the
-// package rather than each file on its own.
-func fileRuleApplies(dep *Dependency, fr *rule.InstFileRule, trees []*dst.File) (bool, error) {
+// package rather than each file on its own. parseTrees supplies the package AST
+// lazily: a pure is_test (or empty) where is decided without parsing it.
+func fileRuleApplies(dep *Dependency, fr *rule.InstFileRule, parseTrees func() ([]*dst.File, error)) (bool, error) {
 	where := fr.GetWhere()
 	if where == nil {
 		return true, nil
@@ -292,6 +300,12 @@ func fileRuleApplies(dep *Dependency, fr *rule.InstFileRule, trees []*dst.File) 
 	}
 	if f == nil {
 		return true, nil
+	}
+	var trees []*dst.File
+	if needsPackage(f) {
+		if trees, err = parseTrees(); err != nil {
+			return false, err
+		}
 	}
 	return f.Match(&matchContext{IsTest: dep.IsTest || util.IsTestBuild(dep.Sources), Package: trees}), nil
 }

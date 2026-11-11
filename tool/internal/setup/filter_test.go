@@ -847,3 +847,64 @@ func assertBuiltCombinator(t *testing.T, name string, got filter, want filterExp
 		assertBuiltFilter(t, name, gotNot.Inner, want.Children[0])
 	}
 }
+
+func TestNeedsPackage(t *testing.T) {
+	isTest := &isTestFilter{ShouldMatch: true}
+	fn := &funcFilter{Func: "Foo"}
+	st := &structFilter{Struct: "Bar"}
+	pkg := &packageNameFilter{Name: "baz"}
+	dir := &directiveFilter{Directive: "go:generate"}
+
+	tests := []struct {
+		name string
+		f    filter
+		want bool
+	}{
+		{"is_test only", isTest, false},
+		{"has_func", fn, true},
+		{"has_struct", st, true},
+		{"has_package", pkg, true},
+		{"has_directive", dir, true},
+		{"all-of is_test+is_test", allOf{isTest, isTest}, false},
+		{"all-of is_test+has_func", allOf{isTest, fn}, true},
+		{"empty all-of", allOf{}, false},
+		{"one-of is_test", oneOf{isTest}, false},
+		{"one-of has_struct", oneOf{st}, true},
+		{"not is_test", &not{Inner: isTest}, false},
+		{"not has_func", &not{Inner: fn}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := needsPackage(tc.f); got != tc.want {
+				t.Fatalf("needsPackage(%s) = %v, want %v", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMatchContext_AnyFileNilSafe(t *testing.T) {
+	// Both Package and AST nil: anyFile must not call pred with a nil file.
+	called := false
+	ctx := &matchContext{}
+	if ctx.anyFile(func(*dst.File) bool { called = true; return true }) {
+		t.Fatal("anyFile with no files = true, want false")
+	}
+	if called {
+		t.Fatal("anyFile invoked pred with a nil AST; want it skipped")
+	}
+
+	// AST set, Package nil: evaluates the single file.
+	ctx = &matchContext{AST: &dst.File{Name: &dst.Ident{Name: "pkg"}}}
+	if !ctx.anyFile(func(f *dst.File) bool { return f.Name.Name == "pkg" }) {
+		t.Fatal("anyFile(AST) = false, want true")
+	}
+
+	// Package set: evaluates across every file in the package.
+	ctx = &matchContext{Package: []*dst.File{
+		{Name: &dst.Ident{Name: "a"}},
+		{Name: &dst.Ident{Name: "b"}},
+	}}
+	if !ctx.anyFile(func(f *dst.File) bool { return f.Name.Name == "b" }) {
+		t.Fatal("anyFile(Package) = false, want true")
+	}
+}
