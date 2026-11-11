@@ -110,15 +110,18 @@ const (
 )
 
 type StreamingReader struct {
-	reader          io.ReadCloser
-	teeReader       io.Reader
-	logBuffer       *bytes.Buffer
-	lineBuffer      *bytes.Buffer
-	start           time.Time
-	first           time.Time
-	inputTokens     int64
-	outputTokens    int64
-	totalTokens     int64
+	reader       io.ReadCloser
+	teeReader    io.Reader
+	logBuffer    *bytes.Buffer
+	lineBuffer   *bytes.Buffer
+	start        time.Time
+	first        time.Time
+	inputTokens  int64
+	outputTokens int64
+	totalTokens  int64
+	// cacheReadTokens is part of inputTokens, not additional to it: OpenAI
+	// already counts cached prompt tokens inside prompt_tokens.
+	cacheReadTokens int64
 	id              string
 	responseModel   string
 	reasons         []string
@@ -245,6 +248,11 @@ func (r *StreamingReader) finalize(flush bool, err error) {
 	if !r.first.IsZero() {
 		firstTokenUs := r.first.Sub(r.start).Microseconds()
 		r.span.SetAttributes(genAIResponseTimeToFirstTokenKey.Int64(firstTokenUs))
+	}
+	// Recorded only when the request actually hit the cache, matching the
+	// non-streaming path and the anthropic-sdk-go instrumentation.
+	if r.cacheReadTokens > 0 {
+		r.span.SetAttributes(genAIUsageCacheReadInputTokensKey.Int64(r.cacheReadTokens))
 	}
 
 	r.recordCapturedContent()
@@ -387,9 +395,10 @@ func (r *StreamingReader) processChatChunk(payload []byte) {
 			} `json:"delta"`
 		} `json:"choices"`
 		Usage struct {
-			PromptTokens     int64 `json:"prompt_tokens"`
-			CompletionTokens int64 `json:"completion_tokens"`
-			TotalTokens      int64 `json:"total_tokens"`
+			PromptTokens        int64           `json:"prompt_tokens"`
+			CompletionTokens    int64           `json:"completion_tokens"`
+			TotalTokens         int64           `json:"total_tokens"`
+			PromptTokensDetails json.RawMessage `json:"prompt_tokens_details"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(payload, &chunk); err != nil {
@@ -410,6 +419,9 @@ func (r *StreamingReader) processChatChunk(payload []byte) {
 	}
 	if chunk.Usage.TotalTokens > 0 {
 		r.totalTokens = chunk.Usage.TotalTokens
+	}
+	if cached := cachedPromptTokens(chunk.Usage.PromptTokensDetails); cached > 0 {
+		r.cacheReadTokens = cached
 	}
 	for choicePosition, c := range chunk.Choices {
 		if c.FinishReason != "" {
@@ -431,9 +443,10 @@ func (r *StreamingReader) processCompletionChunk(payload []byte) {
 			Text         string `json:"text"`
 		} `json:"choices"`
 		Usage struct {
-			PromptTokens     int64 `json:"prompt_tokens"`
-			CompletionTokens int64 `json:"completion_tokens"`
-			TotalTokens      int64 `json:"total_tokens"`
+			PromptTokens        int64           `json:"prompt_tokens"`
+			CompletionTokens    int64           `json:"completion_tokens"`
+			TotalTokens         int64           `json:"total_tokens"`
+			PromptTokensDetails json.RawMessage `json:"prompt_tokens_details"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(payload, &chunk); err != nil {
@@ -455,6 +468,9 @@ func (r *StreamingReader) processCompletionChunk(payload []byte) {
 	if chunk.Usage.TotalTokens > 0 {
 		r.totalTokens = chunk.Usage.TotalTokens
 	}
+	if cached := cachedPromptTokens(chunk.Usage.PromptTokensDetails); cached > 0 {
+		r.cacheReadTokens = cached
+	}
 	for choicePosition, c := range chunk.Choices {
 		if c.FinishReason != "" {
 			r.reasons = append(r.reasons, c.FinishReason)
@@ -463,6 +479,20 @@ func (r *StreamingReader) processCompletionChunk(payload []byte) {
 			r.captureChunkContent(choiceIndex(c.Index, choicePosition), c.Text)
 		}
 	}
+}
+
+// cachedPromptTokens returns usage.prompt_tokens_details.cached_tokens, or 0
+// when the field is absent or malformed. It is decoded separately from the
+// rest of the chunk so that a malformed details object cannot drop the other
+// usage counts along with it.
+func cachedPromptTokens(details json.RawMessage) int64 {
+	var d struct {
+		CachedTokens int64 `json:"cached_tokens"`
+	}
+	if len(details) == 0 || json.Unmarshal(details, &d) != nil {
+		return 0
+	}
+	return d.CachedTokens
 }
 
 func choiceIndex(index *int, position int) int {
