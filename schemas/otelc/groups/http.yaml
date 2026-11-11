@@ -78,34 +78,6 @@ groups:
       - ref: server.port
       - ref: url.scheme
 
-  - id: metric.otelc.http.client.open_connections
-    type: metric
-    metric_name: http.client.open_connections
-    instrument: updowncounter
-    unit: "{connection}"
-    stability: development
-    brief: Number of outbound HTTP connections that are currently active or idle on the client.
-    attributes:
-      - ref: server.address
-      - ref: server.port
-      - ref: url.scheme
-      - ref: network.protocol.name
-      - ref: network.protocol.version
-
-  - id: metric.otelc.http.client.connection.duration
-    type: metric
-    metric_name: http.client.connection.duration
-    instrument: histogram
-    unit: s
-    stability: development
-    brief: The duration of the successfully established outbound HTTP connections.
-    attributes:
-      - ref: server.address
-      - ref: server.port
-      - ref: url.scheme
-      - ref: network.protocol.name
-      - ref: network.protocol.version
-
   - id: metric.otelc.http.server.request.body.size
     type: metric
     metric_name: http.server.request.body.size

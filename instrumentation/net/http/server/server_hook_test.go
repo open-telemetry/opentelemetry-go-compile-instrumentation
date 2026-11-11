@@ -7,14 +7,18 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
@@ -32,6 +36,123 @@ func setupTestTracer(t *testing.T) (*tracetest.SpanRecorder, *sdktrace.TracerPro
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
 	return sr, tp
+}
+
+func setupTestMeter(t *testing.T) *sdkmetric.ManualReader {
+	t.Helper()
+	reader := sdkmetric.NewManualReader()
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	otel.SetMeterProvider(provider)
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
+	return reader
+}
+
+func TestServeHTTPRecordsMetrics(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+	initOnce = sync.Once{}
+	setupTestTracer(t)
+	reader := setupTestMeter(t)
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/path", nil)
+	req.ContentLength = 12
+	ctx := hooktest.NewMockHookContext()
+	BeforeServeHTTP(ctx, nil, httptest.NewRecorder(), req)
+	w, ok := ctx.GetParam(responseWriterIndex).(http.ResponseWriter)
+	require.True(t, ok)
+	w.WriteHeader(http.StatusCreated)
+	_, err := w.Write([]byte("response"))
+	require.NoError(t, err)
+	AfterServeHTTP(ctx)
+
+	var got metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &got))
+	metrics := make(map[string]metricdata.Metrics)
+	for _, scope := range got.ScopeMetrics {
+		for _, metric := range scope.Metrics {
+			metrics[metric.Name] = metric
+		}
+	}
+
+	requestSize, ok := metrics["http.server.request.body.size"].Data.(metricdata.Histogram[int64])
+	require.True(t, ok)
+	require.Len(t, requestSize.DataPoints, 1)
+	assert.Equal(t, int64(12), requestSize.DataPoints[0].Sum)
+
+	responseSize, ok := metrics["http.server.response.body.size"].Data.(metricdata.Histogram[int64])
+	require.True(t, ok)
+	require.Len(t, responseSize.DataPoints, 1)
+	assert.Equal(t, int64(len("response")), responseSize.DataPoints[0].Sum)
+
+	duration, ok := metrics["http.server.request.duration"].Data.(metricdata.Histogram[float64])
+	require.True(t, ok)
+	require.Len(t, duration.DataPoints, 1)
+	assert.Equal(t, uint64(1), duration.DataPoints[0].Count)
+
+	active, ok := metrics["http.server.active_requests"].Data.(metricdata.Sum[int64])
+	require.True(t, ok)
+	require.Len(t, active.DataPoints, 1)
+	assert.Equal(t, int64(0), active.DataPoints[0].Value)
+}
+
+func TestServeHTTPRecordsResponseSizeForServeContent(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+	initOnce = sync.Once{}
+	setupTestTracer(t)
+	reader := setupTestMeter(t)
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/file", nil)
+	ctx := hooktest.NewMockHookContext()
+	// net/http's own writer implements io.ReaderFrom, so http.ServeContent
+	// writes the body through the wrapper's ReadFrom fast path, not Write.
+	BeforeServeHTTP(ctx, nil, &mockReaderFrom{ResponseWriter: httptest.NewRecorder()}, req)
+	w, ok := ctx.GetParam(responseWriterIndex).(http.ResponseWriter)
+	require.True(t, ok)
+	r, ok := ctx.GetParam(requestIndex).(*http.Request)
+	require.True(t, ok)
+	http.ServeContent(w, r, "file.txt", time.Time{}, strings.NewReader("file contents"))
+	AfterServeHTTP(ctx)
+
+	var got metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &got))
+	var responseSize metricdata.Histogram[int64]
+	for _, scope := range got.ScopeMetrics {
+		for _, metric := range scope.Metrics {
+			if metric.Name == "http.server.response.body.size" {
+				responseSize, ok = metric.Data.(metricdata.Histogram[int64])
+				require.True(t, ok)
+			}
+		}
+	}
+	require.Len(t, responseSize.DataPoints, 1)
+	assert.Equal(t, int64(len("file contents")), responseSize.DataPoints[0].Sum)
+}
+
+func TestServeHTTPRecordsNoResponseSizeForHEAD(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+	initOnce = sync.Once{}
+	setupTestTracer(t)
+	reader := setupTestMeter(t)
+
+	req := httptest.NewRequest(http.MethodHead, "http://example.com/path", nil)
+	ctx := hooktest.NewMockHookContext()
+	BeforeServeHTTP(ctx, nil, httptest.NewRecorder(), req)
+	w, ok := ctx.GetParam(responseWriterIndex).(http.ResponseWriter)
+	require.True(t, ok)
+	// net/http accepts and discards body writes for HEAD requests.
+	_, err := w.Write([]byte("response"))
+	require.NoError(t, err)
+	AfterServeHTTP(ctx)
+
+	var got metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &got))
+	var names []string
+	for _, scope := range got.ScopeMetrics {
+		for _, metric := range scope.Metrics {
+			names = append(names, metric.Name)
+		}
+	}
+	assert.Contains(t, names, "http.server.request.duration")
+	assert.NotContains(t, names, "http.server.response.body.size")
 }
 
 func TestBeforeServeHTTP(t *testing.T) {

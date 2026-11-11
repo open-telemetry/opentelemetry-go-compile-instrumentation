@@ -19,6 +19,8 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
@@ -35,6 +37,93 @@ func setupTestTracer(t *testing.T) (*tracetest.SpanRecorder, *sdktrace.TracerPro
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
 	return sr, tp
+}
+
+func setupTestMeter(t *testing.T) *sdkmetric.ManualReader {
+	t.Helper()
+	reader := sdkmetric.NewManualReader()
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	otel.SetMeterProvider(provider)
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
+	return reader
+}
+
+func TestRoundTripRecordsMetrics(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+	initOnce = sync.Once{}
+	setupTestTracer(t)
+	reader := setupTestMeter(t)
+
+	req, err := http.NewRequest(http.MethodPost, "http://example.com:8080/path", nil)
+	require.NoError(t, err)
+	req.ContentLength = 12
+	ctx := hooktest.NewMockHookContext()
+	BeforeRoundTrip(ctx, &http.Transport{}, req)
+	AfterRoundTrip(ctx, &http.Response{
+		StatusCode:    http.StatusCreated,
+		Proto:         "HTTP/2.0",
+		ContentLength: 34,
+		Request:       req,
+	}, nil)
+
+	var got metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &got))
+	metrics := make(map[string]metricdata.Metrics)
+	for _, scope := range got.ScopeMetrics {
+		for _, metric := range scope.Metrics {
+			metrics[metric.Name] = metric
+		}
+	}
+
+	requestSize, ok := metrics["http.client.request.body.size"].Data.(metricdata.Histogram[int64])
+	require.True(t, ok)
+	require.Len(t, requestSize.DataPoints, 1)
+	assert.Equal(t, int64(12), requestSize.DataPoints[0].Sum)
+
+	responseSize, ok := metrics["http.client.response.body.size"].Data.(metricdata.Histogram[int64])
+	require.True(t, ok)
+	require.Len(t, responseSize.DataPoints, 1)
+	assert.Equal(t, int64(34), responseSize.DataPoints[0].Sum)
+
+	duration, ok := metrics["http.client.request.duration"].Data.(metricdata.Histogram[float64])
+	require.True(t, ok)
+	require.Len(t, duration.DataPoints, 1)
+	assert.Equal(t, uint64(1), duration.DataPoints[0].Count)
+
+	active, ok := metrics["http.client.active_requests"].Data.(metricdata.Sum[int64])
+	require.True(t, ok)
+	require.Len(t, active.DataPoints, 1)
+	assert.Equal(t, int64(0), active.DataPoints[0].Value)
+}
+
+func TestRoundTripRecordsNoResponseSizeForHEAD(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+	initOnce = sync.Once{}
+	setupTestTracer(t)
+	reader := setupTestMeter(t)
+
+	req, err := http.NewRequest(http.MethodHead, "http://example.com:8080/path", nil)
+	require.NoError(t, err)
+	ctx := hooktest.NewMockHookContext()
+	BeforeRoundTrip(ctx, &http.Transport{}, req)
+	// A HEAD response advertises the size of the GET body but carries none.
+	AfterRoundTrip(ctx, &http.Response{
+		StatusCode:    http.StatusOK,
+		Proto:         "HTTP/1.1",
+		ContentLength: 34,
+		Request:       req,
+	}, nil)
+
+	var got metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &got))
+	var names []string
+	for _, scope := range got.ScopeMetrics {
+		for _, metric := range scope.Metrics {
+			names = append(names, metric.Name)
+		}
+	}
+	assert.Contains(t, names, "http.client.request.duration")
+	assert.NotContains(t, names, "http.client.response.body.size")
 }
 
 func TestBeforeRoundTrip(t *testing.T) {
