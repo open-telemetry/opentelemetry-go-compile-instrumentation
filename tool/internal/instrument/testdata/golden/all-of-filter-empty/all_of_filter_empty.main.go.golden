@@ -115,14 +115,10 @@ func OtelBeforeTrampoline_Open3522809524(param0 *string) (hookContext *HookConte
 			}
 		}
 	}()
-	hookContext = &HookContextImpl3522809524{}
-	hookContext.params = []interface{}{param0}
-	hookContext.funcName = "Open"
-	hookContext.packageName = "main"
 	if otelc_hook_589931152_BeforeOpen != nil {
-		otelc_hook_589931152_BeforeOpen(hookContext, *param0)
+		otelc_hook_589931152_BeforeOpen(nil, *param0)
 	}
-	return hookContext, hookContext.skipCall
+	return nil, false
 }
 
 func OtelAfterTrampoline_Open3522809524(hookContext HookContext, arg0 *error) {
@@ -138,9 +134,8 @@ func OtelAfterTrampoline_Open3522809524(hookContext HookContext, arg0 *error) {
 			}
 		}
 	}()
-	hookContext.(*HookContextImpl3522809524).returnVals = []interface{}{arg0}
 	if otelc_hook_589931152_AfterOpen != nil {
-		otelc_hook_589931152_AfterOpen(hookContext, *arg0)
+		otelc_hook_589931152_AfterOpen(nil, *arg0)
 	}
 }
 

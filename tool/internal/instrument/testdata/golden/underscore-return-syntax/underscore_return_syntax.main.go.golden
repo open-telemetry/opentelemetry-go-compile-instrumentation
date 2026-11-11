@@ -10,7 +10,7 @@ import _ "unsafe"
 func UnderscoreReturnFunc() (_ignoredRetVal_2035128499_0 int, _ignoredRetVal_2035128499_1 error) {
 	/*line /<generated>:1*/ if false {
 	} else {
-		defer OtelAfterTrampoline_UnderscoreReturnFunc2035128499(&HookContextImpl2035128499{params: []interface{}{}, returnVals: []interface{}{&_ignoredRetVal_2035128499_0, &_ignoredRetVal_2035128499_1}}, &_ignoredRetVal_2035128499_0, &_ignoredRetVal_2035128499_1)
+		defer OtelAfterTrampoline_UnderscoreReturnFunc2035128499(nil, &_ignoredRetVal_2035128499_0, &_ignoredRetVal_2035128499_1)
 	}
 	/*line /golden/work/main.go:7*/ return 0, nil
 }
@@ -110,9 +110,8 @@ func OtelAfterTrampoline_UnderscoreReturnFunc2035128499(hookContext HookContext,
 			}
 		}
 	}()
-	hookContext.(*HookContextImpl2035128499).returnVals = []interface{}{arg0, arg1}
 	if otelc_hook_3599636213_H12UnderscoreReturnAfter != nil {
-		otelc_hook_3599636213_H12UnderscoreReturnAfter(hookContext, *arg0, *arg1)
+		otelc_hook_3599636213_H12UnderscoreReturnAfter(nil, *arg0, *arg1)
 	}
 }
 

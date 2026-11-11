@@ -1,0 +1,43 @@
+BeforeOnly:
+  target: main
+  where:
+    func: BeforeOnly
+  do:
+    - inject_hooks:
+        before: UnusedBefore
+        path: testdata/golden/unused-context
+AfterOnly:
+  target: main
+  where:
+    func: AfterOnly
+  do:
+    - inject_hooks:
+        after: UnusedAfter
+        path: testdata/golden/unused-context
+BothUnused:
+  target: main
+  where:
+    func: BothUnused
+  do:
+    - inject_hooks:
+        before: UnusedBefore
+        after: UnusedAfter
+        path: testdata/golden/unused-context
+BeforeUses:
+  target: main
+  where:
+    func: BeforeUses
+  do:
+    - inject_hooks:
+        before: UsedBefore
+        after: UnusedAfter
+        path: testdata/golden/unused-context
+AfterUses:
+  target: main
+  where:
+    func: AfterUses
+  do:
+    - inject_hooks:
+        before: UnusedBefore
+        after: UsedAfter
+        path: testdata/golden/unused-context

@@ -190,3 +190,13 @@ hook_unnamed:
     - inject_hooks:
         before: UnnamedBefore
         path: "go.opentelemetry.io/otelc/demo/app/basic/instrumentation"
+
+unused_context:
+  target: main
+  where:
+    func: UnusedContext
+  do:
+    - inject_hooks:
+        before: UnusedContextBefore
+        after: UnusedContextAfter
+        path: go.opentelemetry.io/otelc/demo/app/basic/instrumentation

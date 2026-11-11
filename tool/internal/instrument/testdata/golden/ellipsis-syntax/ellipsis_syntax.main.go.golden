@@ -99,14 +99,10 @@ func OtelBeforeTrampoline_EllipsisFunc1782564695(param0 *[]string) (hookContext 
 			}
 		}
 	}()
-	hookContext = &HookContextImpl1782564695{}
-	hookContext.params = []interface{}{param0}
-	hookContext.funcName = "EllipsisFunc"
-	hookContext.packageName = "main"
 	if otelc_hook_2007357514_H9Before != nil {
-		otelc_hook_2007357514_H9Before(hookContext, *param0...)
+		otelc_hook_2007357514_H9Before(nil, *param0...)
 	}
-	return hookContext, hookContext.skipCall
+	return nil, false
 }
 
 //go:linkname otelc_hook_2007357514_H9Before testdata/golden/ellipsis-syntax.H9Before

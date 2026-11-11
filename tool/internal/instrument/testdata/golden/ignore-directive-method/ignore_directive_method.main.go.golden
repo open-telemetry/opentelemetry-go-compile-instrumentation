@@ -115,14 +115,10 @@ func OtelBeforeTrampoline_InstrumentedMethod3533141232(recv0 **T, param0 *string
 			}
 		}
 	}()
-	hookContext = &HookContextImpl3533141232{}
-	hookContext.params = []interface{}{recv0, param0}
-	hookContext.funcName = "InstrumentedMethod"
-	hookContext.packageName = "main"
 	if otelc_hook_2848419980_HBefore != nil {
-		otelc_hook_2848419980_HBefore(hookContext, *recv0, *param0)
+		otelc_hook_2848419980_HBefore(nil, *recv0, *param0)
 	}
-	return hookContext, hookContext.skipCall
+	return nil, false
 }
 
 func OtelAfterTrampoline_InstrumentedMethod3533141232(hookContext HookContext) {
@@ -138,9 +134,8 @@ func OtelAfterTrampoline_InstrumentedMethod3533141232(hookContext HookContext) {
 			}
 		}
 	}()
-	hookContext.(*HookContextImpl3533141232).returnVals = []interface{}{}
 	if otelc_hook_2848419980_HAfter != nil {
-		otelc_hook_2848419980_HAfter(hookContext)
+		otelc_hook_2848419980_HAfter(nil)
 	}
 }
 

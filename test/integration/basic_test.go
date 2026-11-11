@@ -24,6 +24,10 @@ func TestBasic(t *testing.T) {
 	testutil.Build(t, appsDir, "basic", "go", "build", "-a")
 	output := testutil.Run(t, appsDir, "basic", nil)
 	expect := []string{
+		"UnusedContext before: 41",
+		"UnusedContext after: 42",
+		"UnusedContext result: 42",
+		"failed to exec Before hook",
 		"Every2",
 		"Every3",
 		"MyStruct.Example",

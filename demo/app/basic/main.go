@@ -95,6 +95,7 @@ func AutoDetect() {}
 func (MyStruct) Unnamed(int, float32) {}
 
 func main() {
+	fmt.Printf("UnusedContext result: %d\n", UnusedContext(41))
 	ctx := &traceContext{
 		traceID: "123",
 		spanID:  "456",
@@ -136,3 +137,6 @@ func main() {
 	AutoDetect()
 	MyStruct{}.Unnamed(42, 2.7)
 }
+
+//go:noinline
+func UnusedContext(n int) int { return n + 1 }

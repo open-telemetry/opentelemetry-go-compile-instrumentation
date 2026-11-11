@@ -79,9 +79,10 @@ import (
 
 // tJump describes a trampoline-jump-if optimization candidate
 type tJump struct {
-	target *dst.FuncDecl      // Target function we are hooking on
-	ifStmt *dst.IfStmt        // Trampoline-jump-if statement
-	rule   *rule.InstFuncRule // Rule associated with the trampoline-jump-if
+	target        *dst.FuncDecl      // Target function we are hooking on
+	ifStmt        *dst.IfStmt        // Trampoline-jump-if statement
+	rule          *rule.InstFuncRule // Rule associated with the trampoline-jump-if
+	unusedContext bool               // Neither hook references its HookContext parameter
 }
 
 func mustTJump(ifStmt *dst.IfStmt) {
@@ -153,7 +154,10 @@ func newHookContextImpl(tjump *tJump) dst.Expr {
 
 func removeBeforeTrampolineCall(targetFile *dst.File, tjump *tJump) error {
 	// Construct HookContext on the fly and pass to After trampoline defer call
-	hookContextExpr := newHookContextImpl(tjump)
+	var hookContextExpr dst.Expr = ast.Nil()
+	if !tjump.unusedContext {
+		hookContextExpr = newHookContextImpl(tjump)
+	}
 	// Find defer call to After and replace its call context with new one
 	found := false
 	block := util.AssertType[*dst.BlockStmt](tjump.ifStmt.Else)
@@ -353,11 +357,37 @@ func stripTJumpLabel(tjump *tJump) {
 	ifStmt.Decs.If = nil
 }
 
+// omitUnusedContext marks tjump when no hook of its rule uses the hook
+// context, and removes building the context from the rule's trampolines.
+func (ip *instrumentPhase) omitUnusedContext(tjump *tJump) error {
+	usesContext, err := ip.ruleUsesContext(tjump.rule)
+	if err != nil {
+		return err
+	}
+	tjump.unusedContext = !usesContext
+	if !tjump.unusedContext {
+		return nil
+	}
+	for _, before := range []bool{true, false} {
+		name := makeName(tjump.rule, tjump.target, before)
+		for _, decl := range ip.target.Decls {
+			if fn, ok := decl.(*dst.FuncDecl); ok && fn.Name.Name == name {
+				omitTrampolineContext(fn, before)
+			}
+		}
+	}
+	return nil
+}
+
 func (ip *instrumentPhase) optimizeTJumps() error {
 	for _, tjump := range ip.tjumps {
 		mustTJump(tjump.ifStmt)
 		// Strip the trampoline-jump-if anchor label as no longer needed
 		stripTJumpLabel(tjump)
+
+		if err := ip.omitUnusedContext(tjump); err != nil {
+			return err
+		}
 
 		// No After hook present? Remove generated calls to After trampoline.
 		// Why we don't remove the whole else block of trampoline-jump-if? Well,

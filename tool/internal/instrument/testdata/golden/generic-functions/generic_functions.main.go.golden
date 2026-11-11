@@ -126,14 +126,10 @@ func OtelBeforeTrampoline_GenericFunc1523734358[T any](param0 *[]T, param1 *[]T)
 			}
 		}
 	}()
-	hookContext = &HookContextImpl1523734358{}
-	hookContext.params = []interface{}{param0, param1}
-	hookContext.funcName = "GenericFunc"
-	hookContext.packageName = "main"
 	if otelc_hook_3784484425_GenericFuncBefore != nil {
-		otelc_hook_3784484425_GenericFuncBefore(hookContext, *param0, *param1)
+		otelc_hook_3784484425_GenericFuncBefore(nil, *param0, *param1)
 	}
-	return hookContext, hookContext.skipCall
+	return nil, false
 }
 
 func OtelAfterTrampoline_GenericFunc1523734358[T any](hookContext HookContext, arg0 *[]T, arg1 *error) {
@@ -149,9 +145,8 @@ func OtelAfterTrampoline_GenericFunc1523734358[T any](hookContext HookContext, a
 			}
 		}
 	}()
-	hookContext.(*HookContextImpl1523734358).returnVals = []interface{}{arg0, arg1}
 	if otelc_hook_3784484425_GenericFuncAfter != nil {
-		otelc_hook_3784484425_GenericFuncAfter(hookContext, *arg0, *arg1)
+		otelc_hook_3784484425_GenericFuncAfter(nil, *arg0, *arg1)
 	}
 }
 
@@ -266,14 +261,10 @@ func OtelBeforeTrampoline_GenericMethod1139503255[T any](recv0 **GenStruct[T], p
 			}
 		}
 	}()
-	hookContext = &HookContextImpl1139503255{}
-	hookContext.params = []interface{}{recv0, param0, param1}
-	hookContext.funcName = "GenericMethod"
-	hookContext.packageName = "main"
 	if otelc_hook_3784484425_GenericMethodBefore != nil {
-		otelc_hook_3784484425_GenericMethodBefore(hookContext, *recv0, *param0, *param1)
+		otelc_hook_3784484425_GenericMethodBefore(nil, *recv0, *param0, *param1)
 	}
-	return hookContext, hookContext.skipCall
+	return nil, false
 }
 
 func OtelAfterTrampoline_GenericMethod1139503255[T any](hookContext HookContext, arg0 *T, arg1 *error) {
@@ -289,9 +280,8 @@ func OtelAfterTrampoline_GenericMethod1139503255[T any](hookContext HookContext,
 			}
 		}
 	}()
-	hookContext.(*HookContextImpl1139503255).returnVals = []interface{}{arg0, arg1}
 	if otelc_hook_3784484425_GenericMethodAfter != nil {
-		otelc_hook_3784484425_GenericMethodAfter(hookContext, *arg0, *arg1)
+		otelc_hook_3784484425_GenericMethodAfter(nil, *arg0, *arg1)
 	}
 }
 

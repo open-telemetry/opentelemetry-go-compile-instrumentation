@@ -157,3 +157,12 @@ func FunctionBBefore(ictx hook.HookContext, ctx context.Context) {
 func UnnamedBefore(ictx hook.HookContext, recv interface{}, arg1 int, arg2 float32) {
 	fmt.Printf("UnnamedBefore %v %v\n", arg1, arg2)
 }
+
+func UnusedContextBefore(_ hook.HookContext, n int) {
+	fmt.Printf("UnusedContext before: %d\n", n)
+	panic("unused context recovery")
+}
+
+func UnusedContextAfter(ctx hook.HookContext, n int) {
+	fmt.Printf("UnusedContext after: %d\n", n)
+}

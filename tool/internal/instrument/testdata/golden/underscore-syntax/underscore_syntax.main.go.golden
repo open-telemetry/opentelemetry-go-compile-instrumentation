@@ -107,14 +107,10 @@ func OtelBeforeTrampoline_UnderscoreFunc418572368(param0 *int, param1 *float32) 
 			}
 		}
 	}()
-	hookContext = &HookContextImpl418572368{}
-	hookContext.params = []interface{}{param0, param1}
-	hookContext.funcName = "UnderscoreFunc"
-	hookContext.packageName = "main"
 	if otelc_hook_4254536111_H10Before != nil {
-		otelc_hook_4254536111_H10Before(hookContext, *param0, *param1)
+		otelc_hook_4254536111_H10Before(nil, *param0, *param1)
 	}
-	return hookContext, hookContext.skipCall
+	return nil, false
 }
 
 //go:linkname otelc_hook_4254536111_H10Before testdata/golden/underscore-syntax.H10Before

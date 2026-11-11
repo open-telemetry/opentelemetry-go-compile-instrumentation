@@ -126,14 +126,10 @@ func OtelBeforeTrampoline_Handler4272340228(param0 *string, param1 *int) (hookCo
 			}
 		}
 	}()
-	hookContext = &HookContextImpl4272340228{}
-	hookContext.params = []interface{}{param0, param1}
-	hookContext.funcName = "Handler"
-	hookContext.packageName = "users"
 	if otelc_hook_3732310868_H1Before != nil {
-		otelc_hook_3732310868_H1Before(hookContext, *param0, *param1)
+		otelc_hook_3732310868_H1Before(nil, *param0, *param1)
 	}
-	return hookContext, hookContext.skipCall
+	return nil, false
 }
 
 func OtelAfterTrampoline_Handler4272340228(hookContext HookContext, arg0 *float32, arg1 *error) {
@@ -149,9 +145,8 @@ func OtelAfterTrampoline_Handler4272340228(hookContext HookContext, arg0 *float3
 			}
 		}
 	}()
-	hookContext.(*HookContextImpl4272340228).returnVals = []interface{}{arg0, arg1}
 	if otelc_hook_3732310868_H1After != nil {
-		otelc_hook_3732310868_H1After(hookContext, *arg0, *arg1)
+		otelc_hook_3732310868_H1After(nil, *arg0, *arg1)
 	}
 }
 
