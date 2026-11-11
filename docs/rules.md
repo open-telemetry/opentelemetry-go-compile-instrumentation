@@ -42,9 +42,12 @@ Rules are typically distributed as `*.otelc.yml` files within instrumentation pa
 
 ### Rule shape
 
-Every rule file is a YAML mapping whose keys are rule names:
+Every rule file declares the minimum `otelc` version required to read it. The reserved
+top-level `version` key is followed by map entries whose keys are rule names:
 
 ```yaml
+version: "v1.2.0"
+
 rule_name:
   target: <package pattern or list>   # required
   version: <version range>            # optional
@@ -60,21 +63,10 @@ rule_name:
   name: <explicit name>               # optional; defaults to YAML key
 ```
 
-A rule file may also declare the minimum `otelc` version required to read it via the
-reserved top-level `version` key:
-
-```yaml
-version: "v1.2.0"
-
-rule_name:
-  target: <package import path>
-  # ...
-```
-
 The file-level `version` is a released `otelc` semantic version. Each rule's nested
 `version` field is unrelated: it limits the versions of the target package to which that
 rule applies. When a package contains multiple rule files, `otelc` enforces the highest
-minimum version declared by those files. Files without a top-level `version` are
+minimum version declared by those files. Legacy files without a top-level `version` are
 treated as requiring `v1.0.0` and produce a warning.
 
 > [!NOTE]
