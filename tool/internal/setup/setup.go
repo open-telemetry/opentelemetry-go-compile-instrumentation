@@ -14,10 +14,12 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/urfave/cli/v3"
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/configuration"
 	"go.opentelemetry.io/otelc/tool/internal/instrument"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
@@ -26,6 +28,8 @@ import (
 )
 
 type setupPhase struct {
+	decisionMu    *sync.Mutex
+	decision      func(source string, r rule.InstRule, reason string)
 	logger        *slog.Logger
 	ruleConfig    string
 	buildPackages []*packages.Package
@@ -43,6 +47,12 @@ type setupPhase struct {
 	// testPackages holds the test variants and test binaries of a go test
 	// build, which buildPackages leaves out.
 	testPackages []*packages.Package
+	// configurationMetadata is the setup-time handoff to application config
+	// validation, including selected modules that have no metadata file.
+	configurationMetadata selectedConfigurationMetadata
+	// ruleModuleRoots keeps instrumentation rule ownership outside the rules
+	// themselves so setup can resolve module-local metadata for matched rules.
+	ruleModuleRoots map[rule.InstRule]string
 }
 
 func (sp *setupPhase) getBuildContext() *gobuild.Context {
@@ -461,7 +471,29 @@ func (sp *setupPhase) matchAllDeps(
 	// deterministic without re-sorting it here. Re-sorting would re-encode
 	// every set that shares a ModulePath a second time.
 	matched = append(matched, injected...)
+
+	runtimeSets, err := matchRuntimeGLS(deps)
+	if err != nil {
+		return nil, err
+	}
+	matched = append(matched, runtimeSets...)
 	return matched, nil
+}
+
+func (sp *setupPhase) recordRuleModuleRoot(instRule rule.InstRule, moduleRoot string) {
+	if sp.ruleModuleRoots == nil {
+		sp.ruleModuleRoots = make(map[rule.InstRule]string)
+	}
+	sp.ruleModuleRoots[instRule] = moduleRoot
+}
+
+func (sp *setupPhase) validateAndStoreSelectedConfigurationMetadata(matched []*rule.InstRuleSet) error {
+	metadata, err := sp.validateSelectedConfigurationMetadata(matched, configuration.CatalogDefinitions)
+	if err != nil {
+		return ex.Wrapf(err, "validating selected instrumentation configuration metadata")
+	}
+	sp.configurationMetadata = metadata
+	return nil
 }
 
 func setupLocked(ctx context.Context, cmd *cli.Command) error {
@@ -569,8 +601,8 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	if err = sp.validateSelectedConfigurationMetadata(matched); err != nil {
-		return ex.Wrapf(err, "validating selected instrumentation configuration metadata")
+	if err = sp.validateAndStoreSelectedConfigurationMetadata(matched); err != nil {
+		return err
 	}
 
 	sp.warnIfNoInstrumentationMatched(matched)
@@ -587,7 +619,14 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 // warnIfNoInstrumentationMatched reports the combined result. An individual
 // matching pass may legitimately find no instrumentation rules.
 func (sp *setupPhase) warnIfNoInstrumentationMatched(matched []*rule.InstRuleSet) {
-	if len(matched) == 0 {
+	hasNonInternal := false
+	for _, m := range matched {
+		if !m.IsInternal() {
+			hasNonInternal = true
+			break
+		}
+	}
+	if !hasNonInternal {
 		_, _ = fmt.Fprintf(os.Stderr, "Warning: no instrumentation will be applied\n")
 		sp.Warn("no instrumentation rules matched any dependencies")
 	}
