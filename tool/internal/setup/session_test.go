@@ -54,7 +54,13 @@ func TestResolutionScopeTracksModuleFiles(t *testing.T) {
 	assert.NotEqual(t, first, scope(), "an edited go.mod changes the scope")
 
 	second := scope()
-	t.Setenv("GOARCH", "arm64")
+	// Pick a GOARCH other than the one the environment may already set, as
+	// CI does on arm64 runners.
+	otherArch := "arm64"
+	if os.Getenv("GOARCH") == otherArch {
+		otherArch = "amd64"
+	}
+	t.Setenv("GOARCH", otherArch)
 	assert.NotEqual(t, second, scope(), "another GOARCH changes the scope")
 }
 
