@@ -194,22 +194,6 @@ func hookLinkName(path, fnName string) string {
 	return "otelc_hook_" + util.CRC32(path) + "_" + fnName
 }
 
-func isHookDefined(root *dst.File, rule *rule.InstFuncRule) bool {
-	if rule.Before != "" {
-		decl := ast.FindFuncDeclWithoutRecv(root, rule.Before)
-		if decl == nil {
-			return false
-		}
-	}
-	if rule.After != "" {
-		decl := ast.FindFuncDeclWithoutRecv(root, rule.After)
-		if decl == nil {
-			return false
-		}
-	}
-	return true
-}
-
 // parseHookFileCached parses file once per process and reuses the result
 // across every hook lookup that touches it, whether for the same func rule
 // looked up twice (createTrampoline and optimizeTJumps) or a different rule
@@ -229,13 +213,14 @@ func (ip *instrumentPhase) parseHookFileCached(file string) (*dst.File, error) {
 	return root, nil
 }
 
-// findHookFile locates the file in rule.ResolvedPath defining rule's hooks
-// and returns it already parsed, since the caller needs both. The hooks are
-// linked by the import path of rule.Path, so only the files the go command
-// compiles into that package are searched: a subdirectory is another package,
-// testdata is no package at all, and test files and files starting with "." or
-// "_" are never built into it.
-func (ip *instrumentPhase) findHookFile(rule *rule.InstFuncRule) (string, *dst.File, error) {
+// findHookFile locates the file in rule.ResolvedPath that declares the hook
+// function hookName and returns it with the declaration. The hooks are linked
+// by the import path of rule.Path, so only the files the go command compiles
+// into that package are searched: a subdirectory is another package, testdata
+// is no package at all, and test files and files starting with "." or "_" are
+// never built into it. Any of those files can declare the hook, so the before
+// and after hooks of one rule may live in different files.
+func (ip *instrumentPhase) findHookFile(rule *rule.InstFuncRule, hookName string) (string, *dst.FuncDecl, error) {
 	entries, err0 := os.ReadDir(rule.ResolvedPath)
 	if err0 != nil {
 		return "", nil, ex.Wrapf(err0, "reading hook directory %s", rule.ResolvedPath)
@@ -254,26 +239,17 @@ func (ip *instrumentPhase) findHookFile(rule *rule.InstFuncRule) (string, *dst.F
 		if err != nil {
 			return "", nil, err
 		}
-		if isHookDefined(root, rule) {
-			return file, root, nil
+		if decl := ast.FindFuncDeclWithoutRecv(root, hookName); decl != nil {
+			return file, decl, nil
 		}
 	}
-	return "", nil, ex.Newf("no hook {%s,%s} found for %s from %v",
-		rule.Before, rule.After, rule.Func, files)
+	return "", nil, ex.Newf("no hook %s found for %s from %v", hookName, rule.Func, files)
 }
 
 // getHookFunc resolves the Before/After hook function declaration for t.
 func (ip *instrumentPhase) getHookFunc(t *rule.InstFuncRule, before bool) (*dst.FuncDecl, error) {
-	file, root, err := ip.findHookFile(t)
-	if err != nil {
-		return nil, err
-	}
-	target := ast.FindFuncDeclWithoutRecv(root, getHookFuncName(t, before))
-	if target == nil {
-		return nil, ex.Newf("hook %s or %s not found from %s",
-			t.Before, t.After, file)
-	}
-	return target, nil
+	_, hookFunc, err := ip.findHookFile(t, getHookFuncName(t, before))
+	return hookFunc, err
 }
 
 func arrayTypeName(t *dst.ArrayType) string {
