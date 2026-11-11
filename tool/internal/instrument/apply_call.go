@@ -104,9 +104,13 @@ func (ip *instrumentPhase) applyCallReplace(
 
 	stmts := ast.CallEnclosingStmts(root)
 
-	// Pass 1: collect matching calls and pre-compute replacements to avoid
-	// re-matching the original call pointer inside its own wrapper.
-	replacements := make(map[*dst.CallExpr]dst.Expr)
+	// Match only original calls. Template-generated calls must not be matched
+	// again, even when a wrapper calls the same function as the target.
+	type candidate struct {
+		enclosing *dst.FuncDecl
+		site      callSite
+	}
+	candidates := make(map[*dst.CallExpr]candidate)
 	var wrapError error
 	walkCallsWithEnclosingFunc(root, func(call *dst.CallExpr, enclosing *dst.FuncDecl) bool {
 		if !ip.matchesRule(ctx, call, r, importAliases) {
@@ -120,13 +124,35 @@ func (ip *instrumentPhase) applyCallReplace(
 			wrapError = shadowErr
 			return false
 		}
-		site := callSite{
+		candidates[call] = candidate{enclosing: enclosing, site: callSite{
 			methodCall: r.MethodCall != "",
 			deferred:   isGoOrDeferCall(stmts[call], call),
 			clone:      ip.cloneWithPositions,
+		}}
+		return true
+	})
+	if wrapError != nil {
+		return false, wrapError
+	}
+	if len(candidates) == 0 {
+		return false, nil
+	}
+
+	// Wrap children before their parents. Compiling a template clones the
+	// original call (or its arguments/receiver), so precomputing an outer
+	// replacement would retain stale, uninstrumented copies of nested calls.
+	// A post-order walk also leaves generated replacements unvisited.
+	dstutil.Apply(root, nil, func(cursor *dstutil.Cursor) bool {
+		call, ok := cursor.Node().(*dst.CallExpr)
+		if !ok {
+			return true
 		}
-		wrapped, wrapErr := tmpl.compileExpression(call, site, enclosing, importAliases, aliasOverrides)
-		if wrapErr == nil && site.deferred {
+		match, found := candidates[call]
+		if !found {
+			return true
+		}
+		wrapped, wrapErr := tmpl.compileExpression(call, match.site, match.enclosing, importAliases, aliasOverrides)
+		if wrapErr == nil && match.site.deferred {
 			if _, isCall := wrapped.(*dst.CallExpr); !isCall {
 				wrapErr = ex.Newf("the template output is a %T, but the matched call is the call of a defer "+
 					"or go statement, which must be replaced with a call expression", wrapped)
@@ -136,31 +162,13 @@ func (ip *instrumentPhase) applyCallReplace(
 			wrapError = ip.withCallPosition(wrapErr, r, call)
 			return false
 		}
-		replacements[call] = ip.cloneWithPositions(wrapped)
+		cursor.Replace(ip.cloneWithPositions(wrapped))
 		return true
 	})
 
 	if wrapError != nil {
 		return false, wrapError
 	}
-
-	if len(replacements) == 0 {
-		return false, nil
-	}
-
-	// Pass 2: replace each matched call with its pre-computed expression.
-	dstutil.Apply(root, func(cursor *dstutil.Cursor) bool {
-		call, ok := cursor.Node().(*dst.CallExpr)
-		if !ok {
-			return true
-		}
-		replacement, found := replacements[call]
-		if !found {
-			return true
-		}
-		cursor.Replace(replacement)
-		return true
-	}, nil)
 
 	return true, nil
 }
