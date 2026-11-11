@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -108,6 +109,17 @@ func linkResolutionStats(t *testing.T, workDir string) (int, int) {
 	return hits, calls
 }
 
+// appBinary returns the path an app built into dir is written to and run
+// from: go build -o adds no ".exe" to the path it is given, and Windows
+// cannot run a file without it.
+func appBinary(dir string) string {
+	bin := filepath.Join(dir, "app")
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
+	return bin
+}
+
 type sessionHarness struct {
 	t         *testing.T
 	otelcPath string
@@ -137,7 +149,7 @@ func newSessionHarness(t *testing.T) *sessionHarness {
 func (h *sessionHarness) build(t *testing.T, extraEnv ...string) string {
 	t.Helper()
 	workDir := t.TempDir()
-	bin := filepath.Join(workDir, "app")
+	bin := appBinary(workDir)
 	cmd := exec.CommandContext(t.Context(), h.otelcPath, "--work-dir", workDir, "go", "build", "-o", bin, ".")
 	cmd.Dir = h.appDir
 	cmd.Env = append(append([]string{}, h.env...), extraEnv...)
@@ -218,6 +230,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"testing"
 )
 
@@ -230,6 +243,9 @@ func build(t *testing.T) {
 	}
 	workDir := t.TempDir()
 	bin := filepath.Join(workDir, "app")
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
 	cmd := exec.Command(os.Getenv("NESTED_OTELC"), "--work-dir", workDir, "go", "build", "-o", bin, ".")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("inner otelc build failed: %v\n%s", err, out)
@@ -351,7 +367,7 @@ func main() { fmt.Println("ws: " + inner.Work()) }
 	for _, v := range []string{"A", "B"} {
 		buildDir := filepath.Join(modDir, strings.ToLower(v))
 		workDir := t.TempDir()
-		bin := filepath.Join(workDir, "app")
+		bin := appBinary(workDir)
 		cmd := exec.CommandContext(t.Context(), otelcPath, "--work-dir", workDir,
 			"go", "build", "-o", bin, "example.com/ws")
 		cmd.Dir = buildDir
