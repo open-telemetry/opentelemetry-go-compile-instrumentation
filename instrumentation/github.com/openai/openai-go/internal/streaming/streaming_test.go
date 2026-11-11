@@ -744,3 +744,75 @@ func TestStreamingReader_AbortedStreamRecordsContent(t *testing.T) {
 	}
 	require.True(t, found, "expected the partial content event on an aborted stream")
 }
+
+func cacheTestOps() map[string]OperationType {
+	return map[string]OperationType{"chat": OpChat, "completion": OpCompletion}
+}
+
+// cacheStreamAttrs streams one content chunk followed by a separate terminal
+// usage chunk with an empty choices array, which is how OpenAI delivers usage
+// when stream_options.include_usage is set, and returns the span attributes.
+func cacheStreamAttrs(t *testing.T, op OperationType, usage string) []attribute.KeyValue {
+	t.Helper()
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	_, span := tp.Tracer("test").Start(t.Context(), "test-stream")
+
+	choice := `{"delta":{"content":"hi"},"finish_reason":"stop"}`
+	if op == OpCompletion {
+		choice = `{"text":"hi","finish_reason":"stop"}`
+	}
+	streamData := `data: {"id":"cache-1","model":"gpt-4o-mini","choices":[` + choice + "]}\n\n" +
+		`data: {"id":"cache-1","model":"gpt-4o-mini","choices":[],"usage":` + usage + "}\n\n" +
+		"data: [DONE]\n\n"
+
+	reader := NewStreamingReader(io.NopCloser(strings.NewReader(streamData)), span, time.Now(), op, false, 0)
+	_, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.NoError(t, reader.Close())
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	return spans[0].Attributes()
+}
+
+// TestStreamingReader_CacheReadTokens verifies that cached prompt tokens in the
+// terminal usage chunk are recorded for both chunk parsers, and that they are
+// not added to gen_ai.usage.input_tokens: OpenAI already counts them inside
+// prompt_tokens.
+func TestStreamingReader_CacheReadTokens(t *testing.T) {
+	for name, op := range cacheTestOps() {
+		t.Run(name, func(t *testing.T) {
+			attrs := cacheStreamAttrs(t, op,
+				`{"prompt_tokens":2048,"completion_tokens":64,"total_tokens":2112,`+
+					`"prompt_tokens_details":{"cached_tokens":1024}}`)
+			assertInt64Attribute(t, attrs, "gen_ai.usage.cache_read.input_tokens", 1024)
+			assertInt64Attribute(t, attrs, "gen_ai.usage.input_tokens", 2048)
+			assertInt64Attribute(t, attrs, "gen_ai.usage.total_tokens", 2112)
+		})
+	}
+}
+
+// TestStreamingReader_OmitsCacheReadTokens verifies the attribute is absent,
+// not recorded as zero, when the stream reports no cache hit, and that a
+// malformed details object does not drop the other usage counts.
+func TestStreamingReader_OmitsCacheReadTokens(t *testing.T) {
+	const counts = `"prompt_tokens":10,"completion_tokens":5,"total_tokens":15`
+	tests := []struct{ name, usage string }{
+		{"details absent", `{` + counts + `}`},
+		{"cached zero", `{` + counts + `,"prompt_tokens_details":{"cached_tokens":0}}`},
+		{"details malformed", `{` + counts + `,"prompt_tokens_details":{"cached_tokens":"many"}}`},
+	}
+	for name, op := range cacheTestOps() {
+		for _, tt := range tests {
+			t.Run(name+"/"+tt.name, func(t *testing.T) {
+				attrs := cacheStreamAttrs(t, op, tt.usage)
+				for _, attr := range attrs {
+					assert.NotEqual(t, "gen_ai.usage.cache_read.input_tokens", string(attr.Key))
+				}
+				assertInt64Attribute(t, attrs, "gen_ai.usage.input_tokens", 10)
+				assertInt64Attribute(t, attrs, "gen_ai.usage.total_tokens", 15)
+			})
+		}
+	}
+}

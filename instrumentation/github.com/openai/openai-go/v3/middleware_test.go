@@ -759,3 +759,104 @@ func TestReadBoundedBoundary(t *testing.T) {
 		})
 	}
 }
+
+const cacheReadTokensKey = "gen_ai.usage.cache_read.input_tokens"
+
+type cacheEndpoint struct {
+	name, url, respID string
+}
+
+// cacheEndpoints covers both response parsers: chat/completions goes through
+// parseChatResponse and the legacy completions endpoint through
+// parseCompletionResponse, which has its own copy of the cache handling.
+func cacheEndpoints() []cacheEndpoint {
+	return []cacheEndpoint{
+		{"chat", "http://api.openai.com/v1/chat/completions", "chatcmpl-1"},
+		{"completion", "http://api.openai.com/v1/completions", "cmpl-1"},
+	}
+}
+
+// spanAttrsForUsage runs one non-streaming call to url through the middleware
+// with the given usage JSON and returns the recorded span attributes.
+func spanAttrsForUsage(t *testing.T, url, respID, usage string) []attribute.KeyValue {
+	t.Helper()
+	sr := setupTestTracer(t)
+
+	req, _ := http.NewRequest(
+		http.MethodPost,
+		url,
+		io.NopCloser(bytes.NewReader([]byte(`{"model":"gpt-4o-mini"}`))),
+	)
+	respBody := `{"id":"` + respID + `","model":"gpt-4o-mini","choices":[{"finish_reason":"stop"}],"usage":` + usage + `}`
+	next := func(_ *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(respBody))),
+		}, nil
+	}
+
+	_, err := OtelMiddleware()(req, next)
+	require.NoError(t, err)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	return spans[0].Attributes()
+}
+
+// TestRecordsCacheReadTokens verifies the cached prompt tokens OpenAI reports
+// under usage.prompt_tokens_details are recorded, and - the important part -
+// that they are not added to gen_ai.usage.input_tokens. OpenAI already counts
+// cached tokens inside prompt_tokens, so folding them in the way the Anthropic
+// instrumentation does would double-count the cached portion.
+func TestRecordsCacheReadTokens(t *testing.T) {
+	for _, ep := range cacheEndpoints() {
+		t.Run(ep.name, func(t *testing.T) {
+			attrs := spanAttrsForUsage(t, ep.url, ep.respID,
+				`{"prompt_tokens":2048,"completion_tokens":64,"total_tokens":2112,`+
+					`"prompt_tokens_details":{"cached_tokens":1024}}`)
+
+			assertInt64Attribute(t, attrs, cacheReadTokensKey, 1024)
+			assertInt64Attribute(t, attrs, "gen_ai.usage.input_tokens", 2048)
+			assertInt64Attribute(t, attrs, "gen_ai.usage.total_tokens", 2112)
+		})
+	}
+}
+
+// TestOmitsCacheReadTokens verifies the attribute is absent rather than
+// recorded as zero when the request did not hit the cache, matching the
+// anthropic-sdk-go instrumentation, and that a malformed details object does
+// not drop the other usage attributes.
+func TestOmitsCacheReadTokens(t *testing.T) {
+	tests := []struct {
+		name  string
+		usage string
+	}{
+		{
+			name:  "details absent entirely",
+			usage: `{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30}`,
+		},
+		{
+			name: "details present but no cache hit",
+			usage: `{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30,` +
+				`"prompt_tokens_details":{"cached_tokens":0}}`,
+		},
+		{
+			name: "details malformed",
+			usage: `{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30,` +
+				`"prompt_tokens_details":{"cached_tokens":"many"}}`,
+		},
+	}
+
+	for _, ep := range cacheEndpoints() {
+		for _, tt := range tests {
+			t.Run(ep.name+"/"+tt.name, func(t *testing.T) {
+				attrs := spanAttrsForUsage(t, ep.url, ep.respID, tt.usage)
+
+				assertNoAttribute(t, attrs, cacheReadTokensKey)
+				assertInt64Attribute(t, attrs, "gen_ai.usage.input_tokens", 10)
+				assertInt64Attribute(t, attrs, "gen_ai.usage.total_tokens", 30)
+			})
+		}
+	}
+}
