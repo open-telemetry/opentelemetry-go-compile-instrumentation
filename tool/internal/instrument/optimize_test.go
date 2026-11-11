@@ -5,6 +5,7 @@ package instrument
 
 import (
 	"fmt"
+	"strconv"
 	"testing"
 
 	"github.com/dave/dst"
@@ -193,7 +194,7 @@ func TestNewHookContextImpl(t *testing.T) {
 				require.True(t, ok, "expression should be unary expression")
 				compositeLit, ok := unaryExpr.X.(*dst.CompositeLit)
 				require.True(t, ok, "expression should contain composite literal")
-				assert.Len(t, compositeLit.Elts, 2, "should have params and return values fields")
+				assert.Len(t, compositeLit.Elts, 4, "should have params, return values, funcName, and packageName")
 
 				// Verify params field has correct number of parameter addresses
 				paramsKV, ok := compositeLit.Elts[0].(*dst.KeyValueExpr)
@@ -271,8 +272,10 @@ func TestNewHookContextImpl(t *testing.T) {
 				},
 			}
 
-			expr := newHookContextImpl(tjump)
+			expr := newHookContextImpl(tjump, "main")
 			assert.NotNil(t, expr)
+			assertStringField(t, expr, trampolineFuncNameIdentifier, targetFunc.Name.Name)
+			assertStringField(t, expr, trampolinePackageNameIdentifier, "main")
 			if tt.validate != nil {
 				tt.validate(t, expr)
 			}
@@ -389,6 +392,31 @@ func TestRemoveBeforeTrampolineCall(t *testing.T) {
 
 	// Verify body contains empty statement
 	assert.Len(t, tjump.ifStmt.Body.List, 1)
+
+	elseBlock := tjump.ifStmt.Else.(*dst.BlockStmt)
+	deferStmt := elseBlock.List[0].(*dst.DeferStmt)
+	assertStringField(t, deferStmt.Call.Args[0], trampolineFuncNameIdentifier, "testFunc")
+	assertStringField(t, deferStmt.Call.Args[0], trampolinePackageNameIdentifier, "main")
+}
+
+func assertStringField(t *testing.T, expr dst.Expr, key, want string) {
+	t.Helper()
+	unary, ok := expr.(*dst.UnaryExpr)
+	require.True(t, ok)
+	lit, ok := unary.X.(*dst.CompositeLit)
+	require.True(t, ok)
+	for _, elt := range lit.Elts {
+		kv, ok := elt.(*dst.KeyValueExpr)
+		require.True(t, ok)
+		if kv.Key.(*dst.Ident).Name != key {
+			continue
+		}
+		basic, ok := kv.Value.(*dst.BasicLit)
+		require.True(t, ok)
+		assert.Equal(t, strconv.Quote(want), basic.Value)
+		return
+	}
+	t.Fatalf("missing field %s", key)
 }
 
 func TestRemoveAfterTrampolineDecl(t *testing.T) {
