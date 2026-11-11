@@ -46,7 +46,7 @@ Every rule file declares the minimum `otelc` version required to read it. The re
 top-level `version` key is followed by map entries whose keys are rule names:
 
 ```yaml
-version: "v1.0.0"
+version: "v1.2.0"
 
 rule_name:
   target: <package pattern or list>   # required
@@ -68,6 +68,16 @@ The file-level `version` is a released `otelc` semantic version. Each rule's nes
 rule applies. When a package contains multiple rule files, `otelc` enforces the highest
 minimum version declared by those files. Legacy files without a top-level `version` are
 treated as requiring `v1.0.0` and produce a warning.
+
+> [!NOTE]
+> `otelc` v1.2.0 is the first release that supports the top-level `version` key.
+> Earlier releases parse every top-level key as a rule and reject a scalar
+> `version` entry, so they cannot read a file that declares it; those releases
+> use the instrumentation rules bundled with them instead. Published
+> instrumentation rule files — including the rules bundled with `otelc` under
+> `instrumentation/` — declare `version: "v1.2.0"`. A rule file that relies on
+> functionality added in a later `otelc` release should declare that release as
+> its minimum version.
 
 ### Top-level fields
 
