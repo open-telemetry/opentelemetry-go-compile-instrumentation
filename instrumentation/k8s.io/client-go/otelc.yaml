@@ -1,4 +1,4 @@
-version: "v1.0.0"
+version: "v1.2.0"
 
 k8s_hook_processdeltas:
   target: k8s.io/client-go/tools/cache

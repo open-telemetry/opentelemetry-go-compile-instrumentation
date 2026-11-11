@@ -32,9 +32,8 @@ const (
 )
 
 // renameReturnValues assigns referenceable names to funcDecl's unnamed return
-// values. Raw and directive rules reference these by the resulting bare
-// "_unnamedRetValN" name in their injected code (e.g. the runtime
-// instrumentation's goroutine_propagate rule), so the naming here is a
+// values. Raw and directive rules can reference these by the resulting bare
+// "_unnamedRetValN" name in their injected code, so the naming here is a
 // stable, positional convention and intentionally not salted with a rule
 // hash the way collectReturnValues/collectArguments are for func rules.
 func renameReturnValues(funcDecl *dst.FuncDecl) {
@@ -229,11 +228,19 @@ func insertRaw(
 // of the function.
 func (ip *instrumentPhase) applyRawRule(ctx context.Context, rule *rule.InstRawRule, root *dst.File) error {
 	// Find the target function to be instrumented
-	funcDecl, ok, err := ast.FindFuncDecl(root, rule, ip.importNames)
+	var reason string
+	var rejection *string
+	if DiffDebugEnabled() {
+		rejection = &reason
+	}
+	funcDecl, ok, err := ast.FindFuncDeclReporting(root, rule, ip.importNames, rejection)
 	if err != nil {
 		return err
 	}
 	if !ok {
+		if rejection != nil {
+			ip.reportDecision(rule, reason)
+		}
 		return ex.Newf("can not find function %s", rule.Func)
 	}
 

@@ -13,6 +13,7 @@ import (
 	"go/types"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -3053,4 +3054,88 @@ func run(log *Logger) {
 
 		assert.Contains(t, renderFile(t, root), `log.Info("x")`)
 	})
+}
+
+func TestApplyCallRule_NestedCalls(t *testing.T) {
+	for _, tt := range []struct {
+		name, replacement, want string
+	}{
+		{"whole call", "traced({{ . }})", `traced(strings.TrimSpace(traced(strings.TrimSpace(" x "))))`},
+		{"call arguments", "traced({{ .CallArguments }})", `traced(traced(" x "))`},
+		{"matching wrapper", "strings.TrimSpace({{ . }})", `strings.TrimSpace(strings.TrimSpace(strings.TrimSpace(strings.TrimSpace(" x "))))`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := parseFile(t, `package main
+import "strings"
+var value = strings.TrimSpace(strings.TrimSpace(" x "))
+`)
+			r := &rule.InstCallRule{
+				InstBaseRule: rule.InstBaseRule{Name: "nested"},
+				FunctionCall: "strings.TrimSpace",
+				ImportPath:   "strings",
+				FuncName:     "TrimSpace",
+				Replace:      tt.replacement,
+			}
+			modified, err := newTestPhase().applyCallRule(t.Context(), r, root)
+			require.NoError(t, err)
+			require.True(t, modified)
+			assert.Contains(t, renderFile(t, root), tt.want)
+		})
+	}
+}
+
+func TestApplyCallRule_NestedMethodReceivers(t *testing.T) {
+	ip, root := setupMethodCallPhase(t, `package sample
+type Builder struct{}
+func (b Builder) Next() Builder { return b }
+func run() { var b Builder; _ = b.Next().Next().Next() }
+`)
+	r := methodCallRule("Builder", "Next", "traced({{ . }})")
+	modified, err := ip.applyCallRule(t.Context(), r, root)
+	require.NoError(t, err)
+	require.True(t, modified)
+	assert.Contains(t, renderFile(t, root), `traced(traced(traced(b.Next()).Next()).Next())`)
+	// Later rules must still resolve every original method through the clones.
+	r.Replace = "second({{ . }})"
+	_, err = ip.applyCallRule(t.Context(), r, root)
+	require.NoError(t, err)
+	assert.Contains(t, renderFile(t, root), `traced(second(traced(second(traced(second(b.Next())).Next())).Next()))`)
+}
+
+func TestApplyCallRule_NestedCallsRuntime(t *testing.T) {
+	root := parseFile(t, `package main
+import (
+	"fmt"
+	"strings"
+)
+var events []string
+func input() string { events = append(events, "input"); return " x " }
+func traced(s string) string { events = append(events, "trace"); return s }
+func run() {
+	defer strings.TrimSpace(strings.TrimSpace(input()))
+	events = append(events, "body")
+}
+func main() {
+	run()
+	fmt.Println(events)
+}
+`)
+	r := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "nested"},
+		FunctionCall: "strings.TrimSpace",
+		ImportPath:   "strings",
+		FuncName:     "TrimSpace",
+		Replace:      "strings.TrimSpace(traced({{ .CallArguments }}))",
+	}
+	modified, err := newTestPhase().applyCallRule(t.Context(), r, root)
+	require.NoError(t, err)
+	require.True(t, modified)
+	path := filepath.Join(t.TempDir(), "main.go")
+	require.NoError(t, os.WriteFile(path, []byte(renderFile(t, root)), 0o600))
+	cmd := exec.CommandContext(t.Context(), "go", "run", path)
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, "%s", output)
+	// Both original calls are instrumented once; the input is evaluated once.
+	// The arguments of a deferred call are evaluated before the body continues.
+	assert.Equal(t, "[input trace trace body]\n", strings.ReplaceAll(string(output), "\r\n", "\n"))
 }
