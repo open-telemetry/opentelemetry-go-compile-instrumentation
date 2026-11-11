@@ -317,6 +317,124 @@ func a() {
 `,
 		},
 		{
+			name: "statement in a switch case",
+			src: `package main
+
+func a(op string) {
+	switch op {
+	case "read":
+		println("x")
+	}
+}
+`,
+			pattern:        `^println\("x"\)$`,
+			expectInserted: true,
+			expected: `package main
+
+func a(op string) {
+	switch op {
+	case "read":
+		print("Hello, ")
+		print("World!")
+		println("x")
+	}
+}
+`,
+		},
+		{
+			name: "statement in a select case",
+			src: `package main
+
+func a(ch chan int) {
+	select {
+	case <-ch:
+		println("y")
+		println("x")
+	}
+}
+`,
+			pattern:        `^println\("y"\)$`,
+			placement:      "after",
+			expectInserted: true,
+			expected: `package main
+
+func a(ch chan int) {
+	select {
+	case <-ch:
+		println("y")
+		print("Hello, ")
+		print("World!")
+		println("x")
+	}
+}
+`,
+		},
+		{
+			name: "case clause is not a statement to insert beside",
+			src: `package main
+
+func a(op string) {
+	switch op {
+	case "read":
+		println("x")
+	}
+}
+`,
+			pattern:        `^case "read":`,
+			expectInserted: false,
+			expected: `package main
+
+func a(op string) {
+	switch op {
+	case "read":
+		println("x")
+	}
+}
+`,
+		},
+		{
+			name: "select communication is not a statement list entry",
+			src: `package main
+
+func a(ch chan int) {
+	select {
+	case v := <-ch:
+		println(v)
+	}
+}
+`,
+			pattern:        `^v := <-ch$`,
+			expectInserted: false,
+			expected: `package main
+
+func a(ch chan int) {
+	select {
+	case v := <-ch:
+		println(v)
+	}
+}
+`,
+		},
+		{
+			name: "if init statement is not a statement list entry",
+			src: `package main
+
+func a() {
+	if x := 1; x > 0 {
+	}
+}
+`,
+			pattern:        `^x := 1$`,
+			expectInserted: false,
+			expected: `package main
+
+func a() {
+	if x := 1; x > 0 {
+	}
+}
+`,
+		},
+		{
 			name: "empty block",
 			src: `package main
 
