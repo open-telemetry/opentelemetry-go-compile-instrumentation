@@ -38,7 +38,7 @@ func NewHTTPClient(meter metric.Meter) HTTPClient {
 
 	client.requestDuration, err = httpconv.NewClientRequestDuration(
 		meter,
-		metric.WithExplicitBucketBoundaries(requestDurationBucketBoundaries...),
+		metric.WithExplicitBucketBoundaries(requestDurationBucketBoundaries()...),
 	)
 	HandleErr(err)
 

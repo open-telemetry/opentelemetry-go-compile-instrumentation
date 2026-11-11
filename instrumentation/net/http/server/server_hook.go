@@ -35,7 +35,7 @@ var (
 	logger     = runtime.Logger()
 	tracer     trace.Tracer
 	propagator propagation.TextMapPropagator
-	metrics    httpsemconv.HTTPServer
+	metrics    httpsemconv.HTTPServer //nolint:gochecknoglobals // set once by initInstrumentation, like tracer and propagator
 	initOnce   sync.Once
 )
 
@@ -159,7 +159,7 @@ func AfterServeHTTP(ictx hook.HookContext) {
 	// ServeMux fills in r.Pattern on the same request after the span was created.
 	// Stays empty for routers that name the span themselves (gin, chi).
 	route := ""
-	if r, ok := ictx.GetParam(requestIndex).(*http.Request); ok && r != nil {
+	if r, _ := ictx.GetParam(requestIndex).(*http.Request); r != nil {
 		route = httpsemconv.HTTPRoute(r.Pattern)
 		if route != "" && span.IsRecording() {
 			span.SetName(httpsemconv.HTTPServerSpanName(r.Method, route))

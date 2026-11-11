@@ -49,7 +49,7 @@ func setupTestMeter(t *testing.T) *sdkmetric.ManualReader {
 
 func TestServeHTTPRecordsMetrics(t *testing.T) {
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
-	initOnce = *new(sync.Once)
+	initOnce = sync.Once{}
 	setupTestTracer(t)
 	reader := setupTestMeter(t)
 
@@ -96,7 +96,7 @@ func TestServeHTTPRecordsMetrics(t *testing.T) {
 
 func TestServeHTTPRecordsResponseSizeForServeContent(t *testing.T) {
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
-	initOnce = *new(sync.Once)
+	initOnce = sync.Once{}
 	setupTestTracer(t)
 	reader := setupTestMeter(t)
 
@@ -129,7 +129,7 @@ func TestServeHTTPRecordsResponseSizeForServeContent(t *testing.T) {
 
 func TestServeHTTPRecordsNoResponseSizeForHEAD(t *testing.T) {
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
-	initOnce = *new(sync.Once)
+	initOnce = sync.Once{}
 	setupTestTracer(t)
 	reader := setupTestMeter(t)
 

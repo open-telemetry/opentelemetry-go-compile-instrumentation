@@ -50,7 +50,7 @@ func setupTestMeter(t *testing.T) *sdkmetric.ManualReader {
 
 func TestRoundTripRecordsMetrics(t *testing.T) {
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
-	initOnce = *new(sync.Once)
+	initOnce = sync.Once{}
 	setupTestTracer(t)
 	reader := setupTestMeter(t)
 
@@ -98,7 +98,7 @@ func TestRoundTripRecordsMetrics(t *testing.T) {
 
 func TestRoundTripRecordsNoResponseSizeForHEAD(t *testing.T) {
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
-	initOnce = *new(sync.Once)
+	initOnce = sync.Once{}
 	setupTestTracer(t)
 	reader := setupTestMeter(t)
 

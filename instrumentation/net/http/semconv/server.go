@@ -52,7 +52,7 @@ func NewHTTPServer(meter metric.Meter) HTTPServer {
 
 	server.requestDuration, err = httpconv.NewServerRequestDuration(
 		meter,
-		metric.WithExplicitBucketBoundaries(requestDurationBucketBoundaries...),
+		metric.WithExplicitBucketBoundaries(requestDurationBucketBoundaries()...),
 	)
 	HandleErr(err)
 

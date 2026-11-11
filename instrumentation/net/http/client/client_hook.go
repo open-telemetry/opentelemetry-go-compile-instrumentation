@@ -36,7 +36,7 @@ var (
 	logger     = runtime.Logger()
 	tracer     trace.Tracer
 	propagator propagation.TextMapPropagator
-	metrics    httpsemconv.HTTPClient
+	metrics    httpsemconv.HTTPClient //nolint:gochecknoglobals // set once by initInstrumentation, like tracer and propagator
 	initOnce   sync.Once
 )
 
@@ -215,39 +215,46 @@ func AfterRoundTrip(ictx hook.HookContext, res *http.Response, err error) {
 		logger.Debug("AfterRoundTrip called with error", "error", err)
 	}
 
-	if req := data.req; req != nil {
-		statusCode := 0
-		responseSize := int64(0)
-		networkProtocol := req.Proto
-		metricAttrs := []attribute.KeyValue(nil)
-		if res != nil {
-			statusCode = res.StatusCode
-			// A HEAD response advertises the size of the GET body but carries none.
-			if req.Method != http.MethodHead {
-				responseSize = res.ContentLength
-			}
-			networkProtocol = res.Proto
-		}
-		if err != nil {
-			metricAttrs = append(metricAttrs, httpsemconv.HTTPClientErrorType(err))
-		} else if res != nil {
-			code, _ := httpsemconv.HTTPClientStatus(statusCode)
-			if code == codes.Error {
-				metricAttrs = append(
-					metricAttrs,
-					otelsemconv.ErrorTypeKey.String(strconv.Itoa(statusCode)),
-				)
-			}
-		}
-		metrics.RecordMetrics(
-			ctx,
-			req,
-			statusCode,
-			networkProtocol,
-			req.ContentLength,
-			responseSize,
-			time.Since(data.start).Seconds(),
-			metricAttrs,
-		)
+	recordMetrics(ctx, data, res, err)
+}
+
+// recordMetrics records the client metrics for a finished round trip.
+func recordMetrics(ctx context.Context, data *hookData, res *http.Response, err error) {
+	req := data.req
+	if req == nil {
+		return
 	}
+	statusCode := 0
+	responseSize := int64(0)
+	networkProtocol := req.Proto
+	metricAttrs := []attribute.KeyValue(nil)
+	if res != nil {
+		statusCode = res.StatusCode
+		// A HEAD response advertises the size of the GET body but carries none.
+		if req.Method != http.MethodHead {
+			responseSize = res.ContentLength
+		}
+		networkProtocol = res.Proto
+	}
+	if err != nil {
+		metricAttrs = append(metricAttrs, httpsemconv.HTTPClientErrorType(err))
+	} else if res != nil {
+		code, _ := httpsemconv.HTTPClientStatus(statusCode)
+		if code == codes.Error {
+			metricAttrs = append(
+				metricAttrs,
+				otelsemconv.ErrorTypeKey.String(strconv.Itoa(statusCode)),
+			)
+		}
+	}
+	metrics.RecordMetrics(
+		ctx,
+		req,
+		statusCode,
+		networkProtocol,
+		req.ContentLength,
+		responseSize,
+		time.Since(data.start).Seconds(),
+		metricAttrs,
+	)
 }
