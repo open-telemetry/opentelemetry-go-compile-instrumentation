@@ -19,7 +19,11 @@ import (
 var (
 	driverName = flag.String("driver", "testdb", "The database driver name")
 	dsn        = flag.String("dsn", "user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8", "The data source name")
-	op         = flag.String("op", "all", "The operation to perform: ping, exec, query, tx, tx-rollback, tx-fail, prepare, tx-stmt, conn, opendb, all")
+	op         = flag.String(
+		"op",
+		"all",
+		"The operation to perform: ping, exec, query, tx, tx-rollback, tx-fail, prepare, tx-stmt, conn, opendb, all",
+	)
 )
 
 func main() {
