@@ -23,7 +23,8 @@ const mainPackagePath = "main"
 type runtimeScope struct {
 	matched []*rule.InstRuleSet
 	// added maps each rule set to the packages its rules add to the build:
-	// hook packages, add_file source imports and imports entries.
+	// hook packages, add_file source imports, imports entries and
+	// requiredImports.
 	added [][]ruleImport
 	// deps maps each added package to the packages it depends on, itself
 	// included.
@@ -81,11 +82,13 @@ type ruleImport struct {
 
 // ruleSetAdditions returns the packages that the rules of rs add to the build.
 //
-// Hook packages and the imports of most rules come with the rule set. A call
-// rule or a literal rule only applies where its function is called or its type
-// is used, which setup cannot see: a rule with a "**" target is attached to
-// every package. Its imports therefore require the package of that function
-// or type, since a binary without it has nothing for the rule to rewrite.
+// Hook packages and the imports of most rules come with the rule set. A func
+// rule also brings in requiredImports, which otelc.runtime.go imports when it
+// declares func rule hooks. A call rule or a literal rule only applies where
+// its function is called or its type is used, which setup cannot see: a rule
+// with a "**" target is attached to every package. Its imports therefore
+// require the package of that function or type, since a binary without it has
+// nothing for the rule to rewrite.
 func (sp *setupPhase) ruleSetAdditions(rs *rule.InstRuleSet) []ruleImport {
 	seen := make(map[ruleImport]bool)
 	var imports []ruleImport
@@ -101,6 +104,11 @@ func (sp *setupPhase) ruleSetAdditions(rs *rule.InstRuleSet) []ruleImport {
 	}
 	for _, path := range sp.hookPackagePaths([]*rule.InstRuleSet{rs}) {
 		add(map[string]string{"": path}, "")
+	}
+	if len(rs.AllFuncRules()) > 0 {
+		for path := range requiredImports {
+			add(map[string]string{"": path}, "")
+		}
 	}
 	addRuleImports(rs.RawRules, add, func(r *rule.InstRawRule) (map[string]string, string) { return r.Imports, "" })
 	addRuleImports(rs.FuncRules, add, func(r *rule.InstFuncRule) (map[string]string, string) { return r.Imports, "" })

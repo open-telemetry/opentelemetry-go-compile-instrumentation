@@ -595,19 +595,24 @@ func (sp *setupPhase) loadRules(ctx context.Context, moduleDirs []string) ([]rul
 	return nil, nil
 }
 
-func (sp *setupPhase) matchDeps(
-	ctx context.Context,
-	deps []*Dependency,
-	moduleDirs []string,
-) ([]*rule.InstRuleSet, error) {
-	// Construct the set of default allRules by parsing embedded data
+type ruleIndex struct {
+	moduleDirs []string
+	exactRules map[string][]rule.InstRule
+	globRules  []targetRule
+}
+
+func (idx *ruleIndex) isEmpty() bool {
+	return idx == nil || (len(idx.exactRules) == 0 && len(idx.globRules) == 0)
+}
+
+func (sp *setupPhase) loadRuleIndex(ctx context.Context, moduleDirs []string) (*ruleIndex, error) {
 	allRules, err := sp.loadRules(ctx, moduleDirs)
 	if err != nil {
 		return nil, err
 	}
 	sp.Info("Found available rules", "rules", allRules)
 	if len(allRules) == 0 {
-		return nil, nil
+		return &ruleIndex{moduleDirs: moduleDirs}, nil
 	}
 
 	// Split rules into two matching tiers. Rules whose target is a single exact
@@ -637,6 +642,20 @@ func (sp *setupPhase) matchDeps(
 		}
 		globRules = append(globRules, targetRule{target: target, rule: r})
 	}
+	return &ruleIndex{moduleDirs: moduleDirs, exactRules: exactRules, globRules: globRules}, nil
+}
+
+func (sp *setupPhase) matchDeps(
+	ctx context.Context,
+	deps []*Dependency,
+	idx *ruleIndex,
+) ([]*rule.InstRuleSet, error) {
+	if idx.isEmpty() {
+		return nil, nil
+	}
+
+	exactRules := idx.exactRules
+	globRules := idx.globRules
 
 	// Match the default rules with the found dependencies
 	matched := make([]*rule.InstRuleSet, 0)
@@ -659,11 +678,10 @@ func (sp *setupPhase) matchDeps(
 		})
 	}
 
-	if err = g.Wait(); err != nil {
+	if err := g.Wait(); err != nil {
 		return nil, err
 	}
-	err = sortMatchedRuleSets(matched)
-	if err != nil {
+	if err := sortMatchedRuleSets(matched); err != nil {
 		return nil, err
 	}
 	return matched, nil
@@ -673,19 +691,30 @@ func (sp *setupPhase) matchDeps(
 // concurrent, so the order in which rule sets finish is not part of the build
 // input. ModulePath is the primary key; the encoded rule set breaks ties for
 // separate source variants of the same package (for example, test builds).
+// Only sets that share their ModulePath with another set need that tie key,
+// so the expensive encoding is skipped for the vast majority of sets.
 func sortMatchedRuleSets(matched []*rule.InstRuleSet) error {
+	count := make(map[string]int, len(matched))
+	for _, set := range matched {
+		count[set.ModulePath]++
+	}
+
 	type keyedRuleSet struct {
 		set *rule.InstRuleSet
-		key []byte
+		key []byte // non-nil only for sets that share their ModulePath
 	}
 
 	keyed := make([]keyedRuleSet, len(matched))
 	for i, set := range matched {
+		keyed[i] = keyedRuleSet{set: set}
+		if count[set.ModulePath] == 1 {
+			continue
+		}
 		key, err := json.Marshal(set)
 		if err != nil {
 			return ex.Wrapf(err, "failed to marshal matched rules for sorting")
 		}
-		keyed[i] = keyedRuleSet{set: set, key: key}
+		keyed[i].key = key
 	}
 
 	slices.SortStableFunc(keyed, func(a, b keyedRuleSet) int {
