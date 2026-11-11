@@ -26,17 +26,24 @@ import (
 const lockRetryInterval = 50 * time.Millisecond
 
 // tryLock makes one attempt to take the lock file at path. Session lock files
-// are never removed while the session lives, so a handle stays valid. An
-// error opening the file counts as "not acquired": Windows reports a sharing
-// violation while another process opens it, and the caller retries.
-func tryLock(path string) (*flock.Flock, bool) {
+// are never removed while the session lives, so a handle stays valid. It
+// reports contention as "not acquired" so the caller polls again, and returns
+// any other failure, such as an unwritable path, as an error.
+func tryLock(path string) (*flock.Flock, bool, error) {
 	lock := flock.New(path)
 	acquired, err := lock.TryLock()
-	if err != nil || !acquired {
+	if err != nil {
 		_ = lock.Close()
-		return nil, false
+		if isContention(err) {
+			return nil, false, nil
+		}
+		return nil, false, ex.Wrapf(err, "taking session lock %s", path)
 	}
-	return lock, true
+	if !acquired {
+		_ = lock.Close()
+		return nil, false, nil
+	}
+	return lock, true, nil
 }
 
 // lockPath takes the lock file at path, waiting without a deadline until it
@@ -45,7 +52,10 @@ func lockPath(ctx context.Context, path string, onWait func()) (func(), error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, ex.Wrapf(err, "creating lock directory for %s", path)
 	}
-	lock, ok := tryLock(path)
+	lock, ok, err := tryLock(path)
+	if err != nil {
+		return nil, err
+	}
 	if !ok {
 		if onWait != nil {
 			onWait()
@@ -57,7 +67,10 @@ func lockPath(ctx context.Context, path string, onWait func()) (func(), error) {
 			case <-ctx.Done():
 				return nil, ex.Wrapf(ctx.Err(), "waiting for session lock %s", path)
 			case <-ticker.C:
-				lock, ok = tryLock(path)
+				lock, ok, err = tryLock(path)
+				if err != nil {
+					return nil, err
+				}
 			}
 		}
 	}

@@ -105,10 +105,14 @@ func TestMemoRejectsOverlapMismatch(t *testing.T) {
 	_, _, ok := Open(nil).Lookup("example.com/a", map[string]string{"fmt": archive(t, "otherfmt")})
 	assert.False(t, ok, "an entry resolved against other deps must be a miss")
 
-	// An archive the build compiled itself cannot be compared, so it does
-	// not reject the entry.
+	// An archive the build compiled itself in its $WORK is compared like any
+	// other: a different path is a miss, even when it is named _pkg_.a.
 	_, _, ok = Open(nil).Lookup("example.com/a",
 		map[string]string{"fmt": filepath.Join(t.TempDir(), "b001", "_pkg_.a")})
+	assert.False(t, ok, "a differing _pkg_.a mapping must be a miss")
+
+	// The same archive the entry recorded is a hit.
+	_, _, ok = Open(nil).Lookup("example.com/a", map[string]string{"fmt": closure["fmt"]})
 	assert.True(t, ok)
 }
 

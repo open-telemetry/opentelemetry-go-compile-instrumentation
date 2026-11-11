@@ -76,7 +76,11 @@ func acquireSlot(ctx context.Context, dir string, n int) (func(), time.Duration,
 	defer ticker.Stop()
 	for {
 		for i := range n {
-			if lock, ok := tryLock(filepath.Join(dir, fmt.Sprintf("slot-%d.lock", i))); ok {
+			lock, ok, err := tryLock(filepath.Join(dir, fmt.Sprintf("slot-%d.lock", i)))
+			if err != nil {
+				return nil, 0, err
+			}
+			if ok {
 				return func() {
 					_ = lock.Unlock()
 					_ = lock.Close()
