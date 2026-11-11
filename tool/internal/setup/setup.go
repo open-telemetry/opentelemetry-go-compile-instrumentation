@@ -471,6 +471,12 @@ func (sp *setupPhase) matchAllDeps(
 	// deterministic without re-sorting it here. Re-sorting would re-encode
 	// every set that shares a ModulePath a second time.
 	matched = append(matched, injected...)
+
+	runtimeSets, err := matchRuntimeGLS(deps)
+	if err != nil {
+		return nil, err
+	}
+	matched = append(matched, runtimeSets...)
 	return matched, nil
 }
 
@@ -613,7 +619,14 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 // warnIfNoInstrumentationMatched reports the combined result. An individual
 // matching pass may legitimately find no instrumentation rules.
 func (sp *setupPhase) warnIfNoInstrumentationMatched(matched []*rule.InstRuleSet) {
-	if len(matched) == 0 {
+	hasNonInternal := false
+	for _, m := range matched {
+		if !m.IsInternal() {
+			hasNonInternal = true
+			break
+		}
+	}
+	if !hasNonInternal {
 		_, _ = fmt.Fprintf(os.Stderr, "Warning: no instrumentation will be applied\n")
 		sp.Warn("no instrumentation rules matched any dependencies")
 	}

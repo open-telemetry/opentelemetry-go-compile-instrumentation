@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 func TestInstBaseRuleAccessors(t *testing.T) {
@@ -250,4 +251,25 @@ func collectAllRules(irs *InstRuleSet) []InstRule {
 		result = append(result, rule)
 	}
 	return result
+}
+
+func TestInstRuleSetIsInternal(t *testing.T) {
+	var nilSet *InstRuleSet
+	assert.False(t, nilSet.IsInternal())
+
+	emptySet := NewInstRuleSet("example.com/mod")
+	assert.False(t, emptySet.IsInternal())
+
+	internalFileSet := NewInstRuleSet("runtime")
+	internalFileSet.AddFileRule(&InstFileRule{Path: util.InternalPath})
+	assert.True(t, internalFileSet.IsInternal())
+
+	file := filepath.Join(t.TempDir(), "file.go")
+	internalFuncSet := NewInstRuleSet("runtime")
+	internalFuncSet.AddFuncRule(file, &InstFuncRule{Path: util.InternalPath})
+	assert.True(t, internalFuncSet.IsInternal())
+
+	externalSet := NewInstRuleSet("example.com/mod")
+	externalSet.AddFileRule(&InstFileRule{Path: "example.com/hooks"})
+	assert.False(t, externalSet.IsInternal())
 }
