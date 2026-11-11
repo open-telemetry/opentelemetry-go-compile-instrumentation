@@ -215,11 +215,11 @@ func AfterRoundTrip(ictx hook.HookContext, res *http.Response, err error) {
 		logger.Debug("AfterRoundTrip called with error", "error", err)
 	}
 
-	recordMetrics(ctx, data, res, err)
+	recordRoundTripMetrics(ctx, data, res, err)
 }
 
-// recordMetrics records the client metrics for a finished round trip.
-func recordMetrics(ctx context.Context, data *hookData, res *http.Response, err error) {
+// recordRoundTripMetrics records the client metrics for a finished round trip.
+func recordRoundTripMetrics(ctx context.Context, data *hookData, res *http.Response, err error) {
 	req := data.req
 	if req == nil {
 		return
