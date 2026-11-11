@@ -164,3 +164,42 @@ func TestBuildCommandDir(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(wd, "sub"), rel, "a relative change-dir is made absolute")
 }
+
+func TestResolutionScopeErrors(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	modDir := t.TempDir()
+	mustWriteFile(t, filepath.Join(modDir, "go.mod"), "module example.com/scope\n\ngo 1.24\n")
+	missing := filepath.Join(t.TempDir(), "missing")
+
+	// go env cannot run in a directory that does not exist, so the scope
+	// cannot know the workspace and must not be written.
+	require.Error(t, writeResolutionScope(t.Context(), missing, []string{modDir}))
+	require.Error(t, writeResolutionScope(t.Context(), modDir, []string{missing}))
+	assert.NoFileExists(t, util.GetResolutionScopeFile())
+
+	// A scope file that cannot be written is an error, not a silent skip.
+	require.NoError(t, os.MkdirAll(util.GetResolutionScopeFile(), 0o755))
+	require.Error(t, writeResolutionScope(t.Context(), modDir, []string{modDir}))
+}
+
+func TestResolvedGoWork(t *testing.T) {
+	t.Setenv("GOWORK", "")
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "go.work"), "go 1.24\n")
+	sub := filepath.Join(root, "sub")
+	require.NoError(t, os.MkdirAll(sub, 0o755))
+
+	got, err := resolvedGoWork(t.Context(), sub)
+	require.NoError(t, err)
+	want, err := filepath.EvalSymlinks(filepath.Join(root, "go.work"))
+	require.NoError(t, err)
+	gotResolved, err := filepath.EvalSymlinks(got)
+	require.NoError(t, err)
+	assert.Equal(t, want, gotResolved, "go.work in a parent directory applies")
+
+	t.Setenv("GOWORK", "off")
+	got, err = resolvedGoWork(t.Context(), sub)
+	require.NoError(t, err)
+	assert.Equal(t, "off", got)
+}

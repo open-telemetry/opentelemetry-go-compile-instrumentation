@@ -121,3 +121,22 @@ func TestWithLoadSlotBoundsAcrossProcesses(t *testing.T) {
 	assert.True(t, a.end <= b.start || b.end <= a.start,
 		"two processes held the only load slot at once: %v %v", a, b)
 }
+
+func TestLockPathReportsWaitOnce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "busy.lock")
+	release, err := lockPath(t.Context(), path, nil)
+	require.NoError(t, err)
+
+	waits := 0
+	acquired := make(chan func())
+	go func() {
+		next, lockErr := lockPath(context.Background(), path, func() { waits++ })
+		assert.NoError(t, lockErr)
+		acquired <- next
+	}()
+	time.Sleep(3 * lockRetryInterval)
+	release()
+	next := <-acquired
+	next()
+	assert.Equal(t, 1, waits, "onWait must run exactly once while the lock is busy")
+}

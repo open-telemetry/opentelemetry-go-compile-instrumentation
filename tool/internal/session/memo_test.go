@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -195,4 +196,71 @@ func TestMemoLockCanceled(t *testing.T) {
 	_, err = m.Lock(ctx)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func TestMemoTreatsUnreadableEntriesAsMisses(t *testing.T) {
+	setupSession(t)
+	m := Open(nil)
+	m.Store("example.com/a", map[string]string{"example.com/a": archive(t, "a")}, nil)
+	path := m.entryPath("example.com/a")
+
+	require.NoError(t, os.WriteFile(path, []byte("{not json"), 0o644))
+	_, _, ok := m.Lookup("example.com/a", nil)
+	assert.False(t, ok, "a corrupt entry must be a miss")
+
+	require.NoError(t, os.WriteFile(path, []byte(`{}`), 0o644))
+	_, _, ok = m.Lookup("example.com/a", nil)
+	assert.False(t, ok, "an entry with neither a closure nor a failure must be a miss")
+}
+
+func TestMemoStoreFailuresLeaveNoEntry(t *testing.T) {
+	setupSession(t)
+	closure := map[string]string{"example.com/a": archive(t, "a")}
+
+	t.Run("session dir is not a directory", func(t *testing.T) {
+		blocker := filepath.Join(t.TempDir(), "file")
+		require.NoError(t, os.WriteFile(blocker, nil, 0o644))
+		t.Setenv(util.EnvOtelcSessionDir, blocker)
+		m := Open(nil)
+		require.NotNil(t, m)
+		m.Store("example.com/a", closure, nil)
+		_, _, ok := m.Lookup("example.com/a", nil)
+		assert.False(t, ok)
+	})
+
+	t.Run("entry path is taken by a directory", func(t *testing.T) {
+		t.Setenv(util.EnvOtelcSessionDir, t.TempDir())
+		m := Open(nil)
+		require.NoError(t, os.MkdirAll(filepath.Join(m.entryPath("example.com/a"), "x"), 0o755))
+		m.Store("example.com/a", closure, nil)
+		_, _, ok := m.Lookup("example.com/a", nil)
+		assert.False(t, ok)
+		entries, err := os.ReadDir(m.dir)
+		require.NoError(t, err)
+		for _, e := range entries {
+			assert.False(t, strings.HasPrefix(e.Name(), ".entry-"),
+				"a failed rename must not leave its temp file: %s", e.Name())
+		}
+	})
+}
+
+func TestMemoLockFailsWhenSessionIsNotADirectory(t *testing.T) {
+	setupSession(t)
+	blocker := filepath.Join(t.TempDir(), "file")
+	require.NoError(t, os.WriteFile(blocker, nil, 0o644))
+	t.Setenv(util.EnvOtelcSessionDir, blocker)
+
+	_, err := Open(nil).Lock(t.Context())
+	require.Error(t, err)
+}
+
+func TestMemoStoreInReadOnlyDirLeavesNoEntry(t *testing.T) {
+	setupSession(t)
+	m := Open(nil)
+	require.NoError(t, os.MkdirAll(m.dir, 0o755))
+	makeReadOnly(t, m.dir)
+
+	m.Store("example.com/a", map[string]string{"example.com/a": archive(t, "a")}, nil)
+	_, _, ok := m.Lookup("example.com/a", nil)
+	assert.False(t, ok)
 }

@@ -18,12 +18,14 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/imports"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/internal/session"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -2379,4 +2381,81 @@ func TestCompileResolutionReusesMemo(t *testing.T) {
 	assert.Equal(t, 1, calls, "the second compile must read the memo instead of running go list")
 	assert.Equal(t, first, second)
 	assert.Contains(t, second, "packagefile example.com/extra=")
+}
+
+// TestLinkResolutionReadsResultOfLinkItWaitedFor covers the single-flight
+// lock: a link that misses while another holds the lock must read what that
+// holder stored instead of running go list itself.
+func TestLinkResolutionReadsResultOfLinkItWaitedFor(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra")
+	resolver := &countingResolver{dir: t.TempDir()}
+	memo := session.Open(nil)
+	require.NotNil(t, memo)
+
+	release, err := memo.Lock(t.Context())
+	require.NoError(t, err)
+	done := make(chan *imports.ImportConfig)
+	go func() {
+		cfg := freshLinkConfig()
+		_, linkErr := resolveRuleAddedImportsWith(context.Background(), nil, cfg, resolver.resolve)
+		assert.NoError(t, linkErr)
+		done <- cfg
+	}()
+	// The holder resolves the import and stores it before releasing.
+	time.Sleep(200 * time.Millisecond)
+	archive := filepath.Join(t.TempDir(), "extra.a")
+	require.NoError(t, os.WriteFile(archive, []byte("extra"), 0o644))
+	memo.Store("example.com/extra", map[string]string{"example.com/extra": archive}, nil)
+	release()
+
+	cfg := <-done
+	assert.Zero(t, resolver.calls, "the waiting link must reuse the holder's result")
+	assert.Equal(t, archive, cfg.PackageFile["example.com/extra"])
+}
+
+func TestLinkResolutionFailsWhenMemoLockFails(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra")
+	blocker := filepath.Join(t.TempDir(), "file")
+	require.NoError(t, os.WriteFile(blocker, nil, 0o644))
+	t.Setenv(util.EnvOtelcSessionDir, blocker)
+	resolver := &countingResolver{dir: t.TempDir()}
+
+	_, err := resolveRuleAddedImportsWith(t.Context(), nil, freshLinkConfig(), resolver.resolve)
+	require.Error(t, err)
+	assert.Zero(t, resolver.calls)
+}
+
+func TestRuleAddedResolutionLogsStats(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra")
+	t.Setenv(util.EnvOtelcStats, "1")
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	resolver := &countingResolver{dir: t.TempDir()}
+
+	_, err := resolveRuleAddedImportsWith(util.ContextWithLogger(t.Context(), logger), nil,
+		freshLinkConfig(), resolver.resolve)
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "resolve_phase=link candidates=1 memo_hits=0 go_list_calls=1 failed=0")
+
+	buf.Reset()
+	cfgPath := filepath.Join(t.TempDir(), "importcfg")
+	require.NoError(t, os.WriteFile(cfgPath, []byte("packagefile context=/unused/context.a\n"), 0o644))
+	ip := &instrumentPhase{
+		logger:           logger,
+		importConfigPath: cfgPath,
+		importConfig:     imports.ImportConfig{PackageFile: map[string]string{"context": "/unused/context.a"}},
+		resolveAddedImport: func(_ context.Context, importPath string, _ ...string) (map[string]string, error) {
+			return map[string]string{importPath: resolverArchive(t, resolver.dir, importPath)}, nil
+		},
+	}
+	// The link stored example.com/extra, so the compile reads it from the memo.
+	require.NoError(t, ip.updateImportConfig(t.Context(), map[string]string{"extra": "example.com/extra"}))
+	assert.Contains(t, buf.String(), "resolve_phase=compile candidates=1 memo_hits=1 go_list_calls=0")
+}
+
+func resolverArchive(t *testing.T, dir, importPath string) string {
+	t.Helper()
+	p := filepath.Join(dir, util.EscapePackagePath(importPath)+".a")
+	require.NoError(t, os.WriteFile(p, []byte(importPath), 0o644))
+	return p
 }

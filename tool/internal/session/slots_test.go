@@ -4,7 +4,11 @@
 package session
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -116,4 +120,56 @@ func TestMaxParallelLoads(t *testing.T) {
 	assert.Equal(t, 0, maxParallelLoads())
 	t.Setenv(util.EnvOtelcMaxParallelLoads, "nope")
 	assert.Positive(t, maxParallelLoads())
+}
+
+func TestWithLoadSlotUnboundedWithZero(t *testing.T) {
+	t.Setenv(util.EnvOtelcSessionDir, t.TempDir())
+	t.Setenv(util.EnvOtelcMaxParallelLoads, "0")
+
+	// With no bound, a load runs while another one still holds.
+	holding := make(chan struct{})
+	release := make(chan struct{})
+	go func() {
+		_ = WithLoadSlot(t.Context(), func(context.Context) error {
+			close(holding)
+			<-release
+			return nil
+		})
+	}()
+	<-holding
+	defer close(release)
+
+	done := make(chan error, 1)
+	go func() { done <- WithLoadSlot(t.Context(), func(context.Context) error { return nil }) }()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("a load waited although loads are unbounded")
+	}
+}
+
+func TestWithLoadSlotLogsStats(t *testing.T) {
+	t.Setenv(util.EnvOtelcSessionDir, t.TempDir())
+	t.Setenv(util.EnvOtelcMaxParallelLoads, "1")
+	t.Setenv(util.EnvOtelcStats, "1")
+	var buf bytes.Buffer
+	ctx := util.ContextWithLogger(t.Context(), slog.New(slog.NewTextHandler(&buf, nil)))
+
+	require.NoError(t, WithLoadSlot(ctx, func(context.Context) error { return nil }))
+	assert.Contains(t, buf.String(), "setup load stats")
+	assert.Contains(t, buf.String(), "slot_wait=")
+}
+
+func TestWithLoadSlotFailsWhenSessionIsNotADirectory(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "file")
+	require.NoError(t, os.WriteFile(blocker, nil, 0o644))
+	t.Setenv(util.EnvOtelcSessionDir, blocker)
+	t.Setenv(util.EnvOtelcMaxParallelLoads, "1")
+
+	err := WithLoadSlot(t.Context(), func(context.Context) error {
+		t.Error("ran without a slot")
+		return nil
+	})
+	require.Error(t, err)
 }
