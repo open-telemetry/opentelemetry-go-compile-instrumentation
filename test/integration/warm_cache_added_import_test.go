@@ -374,27 +374,23 @@ func main() {
 	profile := filepath.Join(appDir, "cpu.pgo")
 	extraDir := filepath.Join(appDir, "extra")
 	assertNoteNotInlinedUnprofiled(t, extraDir)
-	const maxRecordings = 3
-	var profiledOut string
-	for attempt := 1; attempt <= maxRecordings; attempt++ {
+	record := func() {
 		gen := exec.CommandContext(t.Context(), "go", "run", "./profilegen", profile)
 		gen.Dir = appDir
 		gen.Env = append(preparedBuildBaseEnvironment(), "GOWORK=off")
 		out, err := gen.CombinedOutput()
 		require.NoError(t, err, "recording the CPU profile failed:\n%s", out)
-		profiledOut = compileExtraDiagnostics(t, extraDir, "-pgo="+profile)
-		if strings.Contains(profiledOut, noteInline) {
-			break
-		}
-		t.Logf("recording %d/%d did not make Note hot; re-recording:\n%s",
-			attempt, maxRecordings, profiledOut)
 	}
+	profiledCompile := func() string {
+		return compileExtraDiagnostics(t, extraDir, "-pgo="+profile)
+	}
+	attempts, profiledOut := recordUntilNoteHot(t.Logf, record, profiledCompile)
 	require.Contains(
 		t,
 		profiledOut,
 		noteInline,
 		"after %d recordings a profiled compile still does not inline Note, so profiled and unprofiled extra no longer differ and the warm subtest proves nothing",
-		maxRecordings,
+		attempts,
 	)
 
 	// The profile path must be absolute: the nested builds toolexec runs
@@ -471,6 +467,31 @@ func compileExtraDiagnostics(t *testing.T, extraDir string, args ...string) stri
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "go build %v failed:\n%s", args, out)
 	return string(out)
+}
+
+// maxNoteRecordings bounds how many times recordUntilNoteHot records the
+// CPU profile.
+const maxNoteRecordings = 3
+
+// recordUntilNoteHot records the profile and runs the profiled compile until
+// the compile output shows Note inlined, at most maxNoteRecordings times. It
+// returns the number of recordings made and the last compile output; the
+// caller asserts on that output, so a run that never makes Note hot fails.
+func recordUntilNoteHot(
+	logf func(format string, args ...any),
+	record func(),
+	profiledCompile func() string,
+) (int, string) {
+	var out string
+	for attempt := 1; attempt <= maxNoteRecordings; attempt++ {
+		record()
+		out = profiledCompile()
+		if strings.Contains(out, noteInline) {
+			return attempt, out
+		}
+		logf("recording %d/%d did not make Note hot:\n%s", attempt, maxNoteRecordings, out)
+	}
+	return maxNoteRecordings, out
 }
 
 // assertNoteNotInlinedUnprofiled fails the test when an unprofiled compile
