@@ -52,16 +52,26 @@ func LoadPackages(
 // consistency check while go.mod is mid-edit. moduleDir is empty when dir is
 // outside any module.
 func ModuleAndWorkspace(ctx context.Context, dir string) (string, bool, error) {
+	moduleDir, workFile, err := ModuleAndWorkFile(ctx, dir)
+	return moduleDir, workFile != "", err
+}
+
+// ModuleAndWorkFile is ModuleAndWorkspace, but returns the path of the active
+// go.work file instead of a flag. workFile is empty when dir is not inside an
+// active workspace.
+//
+//nolint:revive // if we add named returns then nonamedreturns will complain
+func ModuleAndWorkFile(ctx context.Context, dir string) (string, string, error) {
 	cmd := exec.CommandContext(ctx, "go", "env", "GOMOD", "GOWORK")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
-		return "", false, ex.Wrapf(err, "running go env GOMOD GOWORK in %s", dir)
+		return "", "", ex.Wrapf(err, "running go env GOMOD GOWORK in %s", dir)
 	}
 	// go env prints one line per requested var, in order: GOMOD then GOWORK.
 	goModLine, goWorkLine, ok := strings.Cut(string(out), "\n")
 	if !ok {
-		return "", false, ex.Newf("unexpected output from go env GOMOD GOWORK in %s: %q", dir, out)
+		return "", "", ex.Newf("unexpected output from go env GOMOD GOWORK in %s: %q", dir, out)
 	}
 	goMod := strings.TrimSpace(goModLine)
 	goWork := strings.TrimSpace(goWorkLine)
@@ -72,8 +82,10 @@ func ModuleAndWorkspace(ctx context.Context, dir string) (string, bool, error) {
 	}
 	// GOWORK is the path to the resolved go.work file, "off" when workspace
 	// mode is explicitly disabled, or empty when none applies.
-	workspace := goWork != "" && goWork != "off"
-	return moduleDir, workspace, nil
+	if goWork == "off" {
+		goWork = ""
+	}
+	return moduleDir, goWork, nil
 }
 
 func loadDirFromBuildFlags(buildFlags []string) (string, []string, error) {
@@ -178,6 +190,67 @@ func ResolveExportFiles(ctx context.Context, importPath string, buildFlags ...st
 	}
 
 	return result, nil
+}
+
+// ResolveExportFilesBatch resolves several import paths with one packages.Load
+// call. It returns importPath -> exportFile for every requested package that
+// loaded cleanly and for all their transitive dependencies. Load failures are
+// reported per requested import path in failed, so a caller can treat one
+// unresolvable candidate as non-fatal while keeping the rest.
+func ResolveExportFilesBatch(
+	ctx context.Context,
+	importPaths []string,
+	buildFlags ...string,
+) (map[string]string, map[string]error, error) {
+	if len(importPaths) == 0 {
+		return map[string]string{}, nil, nil
+	}
+
+	mode := packages.NeedName | packages.NeedImports | packages.NeedDeps | packages.NeedExportFile
+	pkgs, err := LoadPackages(ctx, mode, buildFlags, false, importPaths...)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(pkgs) == 0 {
+		return nil, nil, ex.Newf("no packages found for %v", importPaths)
+	}
+
+	requested := make(map[string]bool, len(importPaths))
+	for _, path := range importPaths {
+		requested[path] = true
+	}
+
+	resolved := make(map[string]string)
+	failed := make(map[string]error)
+	visited := make(map[string]bool)
+
+	var walk func(pkg *packages.Package)
+	walk = func(pkg *packages.Package) {
+		if visited[pkg.PkgPath] {
+			return
+		}
+		visited[pkg.PkgPath] = true
+		if len(pkg.Errors) == 0 && pkg.ExportFile != "" {
+			resolved[pkg.PkgPath] = pkg.ExportFile
+		}
+		for _, dep := range pkg.Imports {
+			walk(dep)
+		}
+	}
+
+	for _, pkg := range pkgs {
+		walk(pkg)
+		if !requested[pkg.PkgPath] {
+			continue
+		}
+		if len(pkg.Errors) > 0 {
+			failed[pkg.PkgPath] = pkg.Errors[0]
+		} else if _, ok := resolved[pkg.PkgPath]; !ok {
+			failed[pkg.PkgPath] = ex.Newf("package %q has no export file", pkg.PkgPath)
+		}
+	}
+
+	return resolved, failed, nil
 }
 
 // CollectPackageNames walks pkgs and their transitive imports, mapping

@@ -282,7 +282,13 @@ func wrapDeliveries(ch *amqp.Channel, queue string, autoAck bool, in <-chan amqp
 	return out
 }
 
-func startDeliverySpan(ch *amqp.Channel, queue string, autoAck bool, d amqp.Delivery, local *pendingAcks) amqp.Delivery {
+func startDeliverySpan(
+	ch *amqp.Channel,
+	queue string,
+	autoAck bool,
+	d amqp.Delivery,
+	local *pendingAcks,
+) amqp.Delivery {
 	op := semconv.OperationProcess
 	if autoAck {
 		op = semconv.OperationReceive

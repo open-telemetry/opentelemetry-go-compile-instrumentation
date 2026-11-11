@@ -19,6 +19,7 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // fileRuleSourceImports returns the import paths declared in the source file of an InstFileRule.
@@ -79,7 +80,7 @@ func (sp *setupPhase) hookPackagePaths(matched []*rule.InstRuleSet) []string {
 	seen := make(map[string]bool)
 	paths := make([]string, 0)
 	add := func(path string) {
-		if path == "" || seen[path] {
+		if path == "" || path == util.InternalPath || seen[path] {
 			return
 		}
 		seen[path] = true
@@ -90,6 +91,9 @@ func (sp *setupPhase) hookPackagePaths(matched []*rule.InstRuleSet) []string {
 			add(r.Path)
 		}
 		for _, r := range m.FileRules {
+			if r.Path == util.InternalPath {
+				continue
+			}
 			add(r.Path)
 			srcImps, err := sp.fileRuleSourceImports(r)
 			if err != nil {
@@ -122,9 +126,6 @@ func injectedDeps(
 	if len(hookPaths) == 0 {
 		return nil, nil
 	}
-
-	ctx, cancel := context.WithTimeout(ctx, packagesLoadTimeout)
-	defer cancel()
 
 	pkgs, err := pkgload.LoadPackages(
 		ctx,
@@ -230,7 +231,7 @@ func (sp *setupPhase) matchInjectedDeps(
 	ctx context.Context,
 	matched []*rule.InstRuleSet,
 	deps []*Dependency,
-	moduleDirs []string,
+	idx *ruleIndex,
 	buildFlags []string,
 ) ([]*rule.InstRuleSet, error) {
 	known := make(map[string]bool, len(deps))
@@ -260,11 +261,15 @@ func (sp *setupPhase) matchInjectedDeps(
 			return injected, nil
 		},
 		match: func(ctx context.Context, injected []*Dependency) ([]*rule.InstRuleSet, error) {
-			more, err := sp.matchDeps(ctx, injected, moduleDirs)
+			more, err := sp.matchDeps(ctx, injected, idx)
 			if err != nil {
 				return nil, ex.Wrapf(err, "matching injected dependencies to hook rules")
 			}
 			if len(more) > 0 {
+				var moduleDirs []string
+				if idx != nil {
+					moduleDirs = idx.moduleDirs
+				}
 				if err = resolveRulePaths(ctx, more, moduleDirs); err != nil {
 					return nil, ex.Wrapf(err, "resolving injected rule paths")
 				}

@@ -27,6 +27,16 @@ const (
 	// EnvOtelcNestedToolexec marks toolexec invocations spawned by a go
 	// command otelc itself ran (e.g. `go list -export`).
 	EnvOtelcNestedToolexec = "OTELC_NESTED_TOOLEXEC"
+	// EnvOtelcHeldBuildLocks lists the build lock files that a parent otelc
+	// invocation holds, as a JSON array of paths. otelc sets it for
+	// the go command it runs, so an otelc invocation started under that
+	// command (for example from a test) does not wait for its own parent.
+	EnvOtelcHeldBuildLocks = "OTELC_HELD_BUILD_LOCKS"
+	// EnvOtelcParentWorkDirs lists the work dirs of the parent otelc
+	// invocations, in the format of EnvOtelcHeldBuildLocks. An otelc
+	// invocation that uses one of them fails, because it would overwrite the
+	// .otelc-build of that parent.
+	EnvOtelcParentWorkDirs = "OTELC_PARENT_WORK_DIRS"
 	// EnvOtelcNestedResolving lists, outermost first, the compiles waiting on
 	// a nested build to resolve an import a rule added, as comma-separated
 	// "package>added import" entries. Import paths cannot contain "," or ">",
@@ -39,6 +49,10 @@ const (
 	OtelcInstRoot           = OtelcRoot + "/instrumentation"
 	OtelcToolCmdRoot        = OtelcRoot + "/tool/cmd/otelc"
 	OtelcToolExe            = "otelc"
+	// InternalPath is a sentinel Path value for compiler-internal rules and
+	// synthetic files (e.g. runtime GLS context propagation) injected directly
+	// by otelc rather than loaded from an external Go package.
+	InternalPath = "<internal>"
 )
 
 // DirectiveIgnore and DirectiveInstrument live in util, not ast or rule. ast

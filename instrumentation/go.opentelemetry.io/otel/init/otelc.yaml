@@ -1,4 +1,4 @@
-version: "v1.0.0"
+version: "v1.2.0"
 
 init_sdk:
   target: main
@@ -6,3 +6,22 @@ init_sdk:
     - add_file:
         file: init_otelsdk.go
         path: "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/init"
+
+# The rules below report every signal.Notify call to pkg/runtime, which the
+# init_sdk rule links in. pkg/runtime re-raises a shutdown signal after
+# flushing telemetry only when the application never registered for it.
+signal_notify_linker:
+  target: "os/signal"
+  do:
+    - add_file:
+        file: "signal_hook.go"
+        path: "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/init"
+
+signal_notify_record:
+  target: "os/signal"
+  where:
+    func: "Notify"
+  do:
+    - inject_code:
+        raw: |
+          otelcRecordNotify(c, sig)

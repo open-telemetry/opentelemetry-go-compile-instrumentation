@@ -11,7 +11,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"golang.org/x/tools/go/packages"
 
@@ -30,6 +29,7 @@ const (
 
 type instrumentationConfig struct {
 	ImportPath string
+	ModuleDir  string
 	ToolFile   string
 	RuleFiles  []string
 	Error      error
@@ -77,8 +77,6 @@ func findToolFiles(moduleDirs []string) ([]string, error) {
 	return toolFiles, nil
 }
 
-const packagesLoadTimeout = 30 * time.Second
-
 // resolveInstrumentationConfigs resolves instrumentation configs for the given import paths.
 //
 //nolint:nilnil // nil, nil when no imports are specified
@@ -90,9 +88,6 @@ func resolveInstrumentationConfigs(
 	if len(importPaths) == 0 {
 		return nil, nil
 	}
-
-	ctx, cancel := context.WithTimeout(ctx, packagesLoadTimeout)
-	defer cancel()
 
 	pkgs, loadErr := packages.Load(&packages.Config{
 		Mode:    packages.NeedFiles | packages.NeedModule | packages.NeedName,
@@ -120,6 +115,7 @@ func resolveInstrumentationConfigs(
 		}
 
 		modDir := pkg.Module.Dir
+		cfgs[importPath].ModuleDir = modDir
 		// A tools-only instrumentation package (its only .go file carries
 		// //go:build tools) has no buildable Go files, so packages.Load reports
 		// "build constraints exclude all Go files" and PackageDir returns the

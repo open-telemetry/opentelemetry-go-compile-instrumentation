@@ -338,20 +338,33 @@ func shutdownSignals() []os.Signal {
 }
 
 // setupSignalHandler flushes the OTel SDK on SIGINT/SIGTERM so buffered telemetry
-// survives shutdown, then steps aside. It never exits or re-raises the signal:
-// the application owns its own exit path and exit code. Terminating here would
-// race an application running its own graceful shutdown and could truncate it.
+// survives shutdown. It never exits. It re-raises the signal only when the
+// application never registered a handler for it (see shouldReraise), so the
+// process terminates the way it would without otelc. An application that
+// handles the signal owns its exit path and exit code: re-raising there would
+// race its own graceful shutdown and could truncate it.
 func setupSignalHandler() {
 	registerSignalHandler.Do(func() {
 		sigCh := make(chan os.Signal, 1)
+		signalOwners.Lock()
+		signalOwners.otelcCh = sigCh
+		// otelc's signal.Notify below turns an ignored signal back on. Treat
+		// the application as owning such a signal so otelc never re-raises it.
+		for _, s := range shutdownSignals() {
+			if signal.Ignored(s) {
+				signalOwners.recordLocked(s)
+			}
+		}
+		signalOwners.Unlock()
 		signal.Notify(sigCh, shutdownSignals()...)
 		go handleShutdownSignal(sigCh)
 	})
 }
 
 // handleShutdownSignal waits for the first signal on sigCh and flushes the SDK.
-// It does not exit or re-raise the signal, leaving the process exit to the
-// application or the OS default disposition.
+// It then re-raises the signal if shouldReraise reports that nothing else
+// handles it. Otherwise it returns and leaves the process exit to the
+// application.
 func handleShutdownSignal(sigCh chan os.Signal) {
 	sig := <-sigCh
 
@@ -369,5 +382,102 @@ func handleShutdownSignal(sigCh chan os.Signal) {
 		logger.Error("error flushing telemetry during shutdown", "error", err)
 	} else {
 		logger.Info("OpenTelemetry SDK shutdown completed successfully")
+	}
+
+	reraiseIfUnhandled(sig)
+}
+
+// signalOwners records which signals the application registered for with
+// signal.Notify. The os/signal rules in instrumentation/go.opentelemetry.io/otel/init
+// report every signal.Notify call through RecordSignalNotify.
+var signalOwners signalRecord
+
+type signalRecord struct {
+	sync.Mutex
+	// otelcCh is the channel that setupSignalHandler registers.
+	otelcCh chan<- os.Signal
+	// hookInstalled is true once otelc's own signal.Notify call has gone
+	// through RecordSignalNotify, which proves the os/signal instrumentation
+	// is applied to this binary.
+	hookInstalled bool
+	// allSignals is true when the application called signal.Notify with no
+	// signal list, which registers for every signal.
+	allSignals bool
+	// signals holds the signals the application registered for.
+	signals map[os.Signal]bool
+}
+
+// recordLocked marks sig as handled by the application. The caller must hold r.
+func (r *signalRecord) recordLocked(sig os.Signal) {
+	if r.signals == nil {
+		r.signals = make(map[os.Signal]bool)
+	}
+	r.signals[sig] = true
+}
+
+// RecordSignalNotify is called at the start of every signal.Notify call by the
+// os/signal instrumentation, which reaches it through go:linkname. It is not
+// meant to be called by application code.
+//
+// The record is never cleared when the application calls signal.Stop:
+// signal.NotifyContext callers often call stop() as soon as the signal arrives
+// and then drain for a while, and a re-raise at that point would kill them.
+// So an application that registered for a signal at any point keeps today's
+// behavior for that signal: otelc flushes and does not re-raise.
+func RecordSignalNotify(c chan<- os.Signal, sig []os.Signal) {
+	signalOwners.Lock()
+	defer signalOwners.Unlock()
+
+	if c != nil && c == signalOwners.otelcCh {
+		signalOwners.hookInstalled = true
+		return
+	}
+	if len(sig) == 0 {
+		signalOwners.allSignals = true
+		return
+	}
+	for _, s := range sig {
+		// signal.Notify ignores signal types it does not know. Skip them
+		// too: an uncomparable os.Signal would panic as a map key.
+		if s, ok := s.(syscall.Signal); ok {
+			signalOwners.recordLocked(s)
+		}
+	}
+}
+
+// reraiseIfUnhandled re-raises sig if shouldReraise allows it. It holds
+// signalOwners across the check and the re-raise, so an application that calls
+// signal.Notify during the flush either is seen by the check or registers
+// after the signal is sent.
+func reraiseIfUnhandled(sig os.Signal) {
+	signalOwners.Lock()
+	defer signalOwners.Unlock()
+
+	if shouldReraise(sig) {
+		reraise(sig)
+	}
+}
+
+// shouldReraise reports whether sig must be re-raised after the flush. That is
+// the case only when the os/signal instrumentation is applied and the
+// application never registered for sig. Without the instrumentation otelc
+// cannot tell whether the application handles sig, so it does not re-raise.
+// The caller must hold signalOwners.
+func shouldReraise(sig os.Signal) bool {
+	return signalOwners.hookInstalled && !signalOwners.allSignals && !signalOwners.signals[sig]
+}
+
+// reraise sends sig to the current process. handleShutdownSignal has already
+// called signal.Stop, and nothing else registered for sig, so sig now gets the
+// disposition it would have without otelc: by default the process terminates
+// with the signal. It does nothing on Windows, which cannot send these signals
+// to a process.
+func reraise(sig os.Signal) {
+	p, err := os.FindProcess(os.Getpid())
+	if err == nil {
+		err = p.Signal(sig)
+	}
+	if err != nil {
+		logger.Debug("could not re-raise signal", "signal", sig.String(), "error", err)
 	}
 }
