@@ -7,6 +7,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -130,4 +131,11 @@ func TestTypeString(t *testing.T) {
 			require.Equal(t, tt.want, typeString(paramType))
 		})
 	}
+}
+
+func TestRenderRulesYAMLDeclaresMinimumOtelcVersion(t *testing.T) {
+	out := string(renderRulesYAML("v2.4.1", []method{{name: "GetAccount", nParams: 1, nResults: 2}}))
+	require.True(t, strings.HasPrefix(out, `version: "`+minOtelcVer+`"`+"\n"),
+		"generated rules must start with the top-level otelc version, got:\n%s", out)
+	require.Contains(t, out, "linodego_api_GetAccount:\n")
 }

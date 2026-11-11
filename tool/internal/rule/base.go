@@ -5,6 +5,7 @@ package rule
 
 import (
 	"fmt"
+	"iter"
 	"maps"
 	"path/filepath"
 	"slices"
@@ -156,6 +157,25 @@ func (irs *InstRuleSet) IsEmpty() bool {
 			len(irs.IgnoredCallFiles) == 0)
 }
 
+// IsInternal reports whether the rule set consists of compiler-internal
+// rules (such as runtime GLS context propagation) rather than external instrumentation.
+func (irs *InstRuleSet) IsInternal() bool {
+	if irs == nil || irs.IsEmpty() {
+		return false
+	}
+	for _, fr := range irs.FileRules {
+		if fr.Path == util.InternalPath {
+			return true
+		}
+	}
+	for _, fr := range irs.AllFuncRules() {
+		if fr.Path == util.InternalPath {
+			return true
+		}
+	}
+	return false
+}
+
 // AddRule is a generic method that adds any type of rule to the appropriate map.
 // It works with any rule type that implements the InstRule interface.
 func addRule[T InstRule](file string, rule T, rulesMap map[string][]T) {
@@ -202,6 +222,30 @@ func (irs *InstRuleSet) AddFileRule(rule *InstFileRule) {
 	irs.FileRules = append(irs.FileRules, rule)
 }
 
+// AllRules returns every rule in the set in a stable order. Rule maps are
+// traversed by sorted source file, with rule kinds visited in a fixed order.
+func (irs *InstRuleSet) AllRules() iter.Seq[InstRule] {
+	return func(yield func(InstRule) bool) {
+		if irs == nil {
+			return
+		}
+		if !yieldRuleMap(irs.RawRules, yield) ||
+			!yieldRuleMap(irs.FuncRules, yield) ||
+			!yieldRuleMap(irs.StructRules, yield) ||
+			!yieldRuleMap(irs.CallRules, yield) ||
+			!yieldRuleMap(irs.LitRules, yield) ||
+			!yieldRuleMap(irs.DirectiveRules, yield) ||
+			!yieldRuleMap(irs.DeclRules, yield) {
+			return
+		}
+		for _, r := range irs.FileRules {
+			if !yield(r) {
+				return
+			}
+		}
+	}
+}
+
 func (irs *InstRuleSet) SetPackageName(name string) {
 	util.Assert(name != "", "package name is empty")
 	irs.PackageName = name
@@ -224,6 +268,15 @@ func allRules[T InstRule](rulesByFile map[string][]T) []T {
 		rules = append(rules, rulesByFile[file]...)
 	}
 	return rules
+}
+
+func yieldRuleMap[T InstRule](rulesByFile map[string][]T, yield func(InstRule) bool) bool {
+	for _, r := range allRules(rulesByFile) {
+		if !yield(r) {
+			return false
+		}
+	}
+	return true
 }
 
 // AllFuncRules returns all function rules from the rule set as a flat slice,

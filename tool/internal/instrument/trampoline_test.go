@@ -115,9 +115,9 @@ func TestFindHookFileOnlyReadsPackageDir(t *testing.T) {
 
 			ip := &instrumentPhase{}
 			r := &rule.InstFuncRule{Before: "BeforeA", ResolvedPath: dir}
-			file, root, err := ip.findHookFile(r)
+			file, decl, err := ip.findHookFile(r, r.Before)
 			require.NoError(t, err)
-			require.NotNil(t, root)
+			require.NotNil(t, decl)
 			assert.Equal(t, filepath.Join(dir, "zz_hook.go"), file)
 		})
 	}
@@ -126,10 +126,43 @@ func TestFindHookFileOnlyReadsPackageDir(t *testing.T) {
 		missing := filepath.Join(t.TempDir(), "missing")
 		ip := &instrumentPhase{}
 		r := &rule.InstFuncRule{Before: "BeforeA", ResolvedPath: missing}
-		_, _, err := ip.findHookFile(r)
+		_, _, err := ip.findHookFile(r, r.Before)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "reading hook directory")
 	})
+}
+
+func TestGetHookFuncFindsHooksInSeparateFiles(t *testing.T) {
+	dir := t.TempDir()
+	writeHookFiles(t, dir, map[string]string{
+		"after.go":  "package hook\n\nfunc AfterA(err error) {}\n",
+		"before.go": "package hook\n\nfunc BeforeA(n int) {}\n",
+	})
+
+	ip := &instrumentPhase{}
+	r := &rule.InstFuncRule{Before: "BeforeA", After: "AfterA", ResolvedPath: dir}
+
+	before, err := ip.getHookFunc(r, true)
+	require.NoError(t, err)
+	assert.Equal(t, "BeforeA", before.Name.Name)
+
+	after, err := ip.getHookFunc(r, false)
+	require.NoError(t, err)
+	assert.Equal(t, "AfterA", after.Name.Name)
+}
+
+func TestGetHookFuncReportsMissingHook(t *testing.T) {
+	dir := t.TempDir()
+	writeHookFiles(t, dir, map[string]string{
+		"hook.go": "package hook\n\nfunc BeforeA(n int) {}\n",
+	})
+
+	ip := &instrumentPhase{}
+	r := &rule.InstFuncRule{Func: "Target", Before: "BeforeA", After: "AfterA", ResolvedPath: dir}
+
+	_, err := ip.getHookFunc(r, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no hook AfterA found for Target")
 }
 
 func TestMaterializeTemplateClonesIndependently(t *testing.T) {

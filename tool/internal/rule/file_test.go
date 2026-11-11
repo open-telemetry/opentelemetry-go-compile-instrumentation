@@ -97,6 +97,31 @@ version: "v1.1.0"
 	}
 }
 
+func TestParseLegacyFilePreservesRules(t *testing.T) {
+	// An unversioned file is the legacy baseline: it parses to LegacyVersion
+	// and its entries are returned unchanged.
+	doc, err := ParseFile([]byte(`server_hook:
+  target: net/http
+  where:
+    func: ServeHTTP
+    recv: serverHandler
+  do:
+    - inject_hooks:
+        before: BeforeServeHTTP
+        after: AfterServeHTTP
+        path: example.com/hooks
+`))
+	require.NoError(t, err)
+	assert.Equal(t, LegacyVersion, doc.MinimumVersion)
+	assert.True(t, doc.Legacy)
+
+	rules, err := doc.Rules()
+	require.NoError(t, err)
+	require.Len(t, rules, 1)
+	assert.Equal(t, "server_hook", rules[0].GetName())
+	assert.Equal(t, "net/http", rules[0].GetTarget().String())
+}
+
 func TestFileRules(t *testing.T) {
 	tests := []struct {
 		name     string
