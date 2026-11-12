@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	otelconfx "go.opentelemetry.io/contrib/otelconf/x"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -450,4 +451,247 @@ func TestValidateApplicationValue(t *testing.T) {
 		require.Error(t, ValidateApplicationValue(entry, value, "app.yaml:1:1"))
 	}
 	require.Error(t, ValidateApplicationValue(Entry{Name: "go.enabled", Type: booleanType}, "true", "app.yaml:1:1"))
+}
+
+func TestOverlayEnvironmentValuesRejectsInvalidNormalizedShapes(t *testing.T) {
+	var source, parsed yaml.Node
+	require.NoError(t, yaml.Unmarshal([]byte("value: ${VALUE}\n"), &source))
+	require.NoError(t, yaml.Unmarshal([]byte("value:\n  nested: true\n"), &parsed))
+	sourceRoot := source.Content[0]
+	parsedRoot := parsed.Content[0]
+
+	err := overlayEnvironmentNode(sourceRoot, parsedRoot, "app.yaml", "")
+	require.ErrorContains(t, err, "environment substitution at value did not produce a scalar")
+}
+
+func TestOverlayEnvironmentValuesRejectsNonMappingSource(t *testing.T) {
+	var parsed otelconfx.OpenTelemetryConfiguration
+	require.NoError(t, yaml.Unmarshal([]byte("file_format: '1.2'\n"), &parsed))
+
+	err := overlayEnvironmentValues(&yaml.Node{Kind: yaml.ScalarNode}, &parsed, "app.yaml")
+	require.ErrorContains(t, err, "application configuration must contain one mapping")
+}
+
+func TestOverlayEnvironmentSequenceReportsSubstitutionErrors(t *testing.T) {
+	var source, parsed yaml.Node
+	require.NoError(t, yaml.Unmarshal([]byte("value: [\"${VALUE}\"]\n"), &source))
+	require.NoError(t, yaml.Unmarshal([]byte("value: [{nested: true}]\n"), &parsed))
+
+	err := overlayEnvironmentNode(source.Content[0], parsed.Content[0], "app.yaml", "")
+	require.ErrorContains(t, err, "environment substitution at value[0] did not produce a scalar")
+}
+
+func TestOverlayEnvironmentNodeHandlesAliasesAndShortSequences(t *testing.T) {
+	var source, parsed yaml.Node
+	require.NoError(t, yaml.Unmarshal([]byte("value: &item [\"${ONE}\", \"${TWO}\"]\n"), &source))
+	require.NoError(t, yaml.Unmarshal([]byte("value: [one]\n"), &parsed))
+
+	err := overlayEnvironmentNode(source.Content[0], parsed.Content[0], "app.yaml", "")
+	require.NoError(t, err)
+	assert.Equal(t, "one", source.Content[0].Content[1].Content[0].Value)
+
+	alias := &yaml.Node{Kind: yaml.AliasNode, Alias: &yaml.Node{Kind: yaml.ScalarNode, Value: "${VALUE}"}}
+	parsedScalar := &yaml.Node{Kind: yaml.ScalarNode, Value: "one"}
+	require.NoError(t, overlayEnvironmentNode(alias, parsedScalar, "app.yaml", "value"))
+	assert.Equal(t, "one", alias.Alias.Value)
+}
+
+func TestValidateApplicationOptionsClassifiesUnknownAndIgnoredSections(t *testing.T) {
+	app, err := ParseApplicationConfiguration([]byte(`file_format: "1.2"
+instrumentation/development:
+  general:
+    unknown:
+      enabled: true
+  custom:
+    enabled: true
+`), "app.yaml")
+	require.NoError(t, err)
+
+	_, err = ValidateApplicationOptions(app, nil, nil)
+	require.ErrorContains(t, err, "unknown or removed configuration path")
+
+	app, err = ParseApplicationConfiguration([]byte(`file_format: "1.2"
+instrumentation/development:
+  custom:
+    enabled: true
+`), "app.yaml")
+	require.NoError(t, err)
+	validated, err := ValidateApplicationOptions(app, nil, nil)
+	require.NoError(t, err)
+	require.Len(t, validated.Warnings, 1)
+	assert.Contains(t, validated.Warnings[0].Message, "only validates general and Go")
+}
+
+func TestValidateApplicationOptionsRejectsUnsupportedSectionPath(t *testing.T) {
+	application := ApplicationConfiguration{
+		Source:          "app.yaml",
+		Instrumentation: map[string]any{"go": true},
+		SourceLocations: map[string]SourceLocation{"go": {File: "app.yaml", Line: 2, Column: 3}},
+	}
+
+	_, err := ValidateApplicationOptions(application, nil, nil)
+	require.ErrorContains(t, err, "unsupported instrumentation configuration path")
+}
+
+func TestValidateApplicationOptionsReportsMissingMetadataForGeneralOption(t *testing.T) {
+	app, err := ParseApplicationConfiguration([]byte(`file_format: "1.2"
+instrumentation/development:
+  general:
+    http:
+      client:
+        request_captured_headers: [x-request-id]
+`), "app.yaml")
+	require.NoError(t, err)
+
+	_, err = ValidateApplicationOptions(app, nil, []string{"/instrumentation/http"})
+	require.ErrorContains(t, err, "selected instrumentation modules lack metadata.yaml")
+}
+
+func TestValidateYAMLFieldsCoversMapsSequencesAndPointers(t *testing.T) {
+	var document yaml.Node
+	require.NoError(t, yaml.Unmarshal([]byte("items:\n  - name: value\n"), &document))
+	type item struct {
+		Name string `yaml:"name"`
+	}
+	type config struct {
+		Items []item `yaml:"items"`
+	}
+	require.NoError(t, validateYAMLFields(
+		document.Content[0],
+		reflect.TypeFor[*config](),
+		"app.yaml",
+		"",
+	))
+
+	var invalid yaml.Node
+	require.NoError(t, yaml.Unmarshal([]byte("items:\n  - unknown: true\n"), &invalid))
+	require.ErrorContains(t, validateYAMLFields(
+		invalid.Content[0],
+		reflect.TypeFor[config](),
+		"app.yaml",
+		"",
+	), "unsupported field")
+}
+
+func TestValidateFileFormatAndSchemaMajorMinorRejectMalformedValues(t *testing.T) {
+	for _, value := range []string{"", "1", "1.", "1.2.3", "x.2", "-1.2", "1.2-", "1.2-!"} {
+		require.Error(t, validateFileFormat(value), value)
+	}
+	for _, value := range []string{"", "1", "x.y"} {
+		_, ok := schemaMajorMinor(value)
+		assert.False(t, ok, value)
+	}
+	version, ok := schemaMajorMinor("v1.2.3")
+	require.True(t, ok)
+	assert.Equal(t, majorMinorVersion{major: 1, minor: 2}, version)
+}
+
+func TestYAMLNodeMappingRejectsNilAndScalarNodes(t *testing.T) {
+	_, err := yamlNodeMapping(nil, "app.yaml")
+	require.ErrorContains(t, err, "application configuration must be a mapping")
+	_, err = yamlNodeMapping(&yaml.Node{Kind: yaml.ScalarNode}, "app.yaml")
+	require.ErrorContains(t, err, "application configuration must be a mapping")
+}
+
+func TestYAMLTraversalHandlesNilAndNonMappingNodes(t *testing.T) {
+	locations := map[string]SourceLocation{}
+	indexInstrumentationLocations(nil, "app.yaml", locations)
+	indexInstrumentationLocations(&yaml.Node{Kind: yaml.ScalarNode}, "app.yaml", locations)
+	indexYAMLNodeLocations(nil, "root", "app.yaml", locations)
+	assert.Empty(t, locations)
+
+	assert.False(t, hasYAMLField(nil, "field"))
+	assert.False(t, hasYAMLField(&yaml.Node{Kind: yaml.ScalarNode}, "field"))
+}
+
+func TestOverlayEnvironmentNodeIgnoresIncompatibleNodes(t *testing.T) {
+	source := &yaml.Node{Kind: yaml.MappingNode}
+	parsed := &yaml.Node{Kind: yaml.ScalarNode, Value: "value"}
+	assert.NoError(t, overlayEnvironmentNode(source, parsed, "app.yaml", "root"))
+	assert.NoError(t, overlayEnvironmentNode(nil, parsed, "app.yaml", "root"))
+}
+
+func TestParseSingleYAMLDocumentReportsTrailingErrors(t *testing.T) {
+	_, err := parseSingleYAMLDocument([]byte("file_format: [\n"), "app.yaml")
+	require.ErrorContains(t, err, "parse application configuration")
+
+	_, err = parseSingleYAMLDocument([]byte("file_format: '1.2'\n---\n["), "app.yaml")
+	require.ErrorContains(t, err, "parse trailing application configuration document")
+}
+
+func TestParseAndValidateSelectedConfigurationRejectsMalformedDocuments(t *testing.T) {
+	var malformed, invalidFormat yaml.Node
+	require.NoError(t, yaml.Unmarshal([]byte("file_format: {}\n"), &malformed))
+	require.NoError(t, yaml.Unmarshal([]byte("file_format: '1.3'\n"), &invalidFormat))
+
+	application := ApplicationConfiguration{Source: "app.yaml", Document: malformed.Content[0]}
+	_, _, err := parseAndValidateSelectedApplicationConfiguration(application, nil, nil)
+	require.Error(t, err)
+
+	application.Document = invalidFormat.Content[0]
+	_, _, err = parseAndValidateSelectedApplicationConfiguration(application, nil, nil)
+	require.ErrorContains(t, err, "newer than the supported")
+}
+
+func TestRejectDuplicateYAMLKeysHandlesAliasesAndNonStringKeys(t *testing.T) {
+	require.NoError(t, rejectDuplicateYAMLKeys(nil, "app.yaml", ""))
+	var document yaml.Node
+	require.NoError(t, yaml.Unmarshal([]byte("base: &base\n  value: true\ncopy: *base\n"), &document))
+	require.NoError(t, rejectDuplicateYAMLKeys(document.Content[0], "app.yaml", ""))
+
+	var nestedDuplicate yaml.Node
+	require.NoError(t, yaml.Unmarshal([]byte("items:\n  - value: true\n    value: false\n"), &nestedDuplicate))
+	require.ErrorContains(t, rejectDuplicateYAMLKeys(nestedDuplicate.Content[0], "app.yaml", ""), "duplicate key")
+
+	var sequenceDuplicate yaml.Node
+	require.NoError(t, yaml.Unmarshal([]byte("items:\n  - value: true\n"), &sequenceDuplicate))
+	require.NoError(t, rejectDuplicateYAMLKeys(sequenceDuplicate.Content[0], "app.yaml", ""))
+
+	nonStringKey := &yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{
+		{Kind: yaml.SequenceNode, Content: []*yaml.Node{{Kind: yaml.ScalarNode, Value: "key"}}},
+		{Kind: yaml.ScalarNode, Value: "value"},
+	}}
+	require.ErrorContains(t, rejectDuplicateYAMLKeys(nonStringKey, "app.yaml", ""), "mapping keys must be strings")
+}
+
+func TestValidateYAMLFieldsHandlesUnsupportedShapes(t *testing.T) {
+	assert.NoError(t, validateYAMLFields(nil, reflect.TypeFor[int](), "app.yaml", ""))
+	assert.NoError(t, validateYAMLFields(
+		&yaml.Node{Kind: yaml.AliasNode, Alias: &yaml.Node{Kind: yaml.ScalarNode}},
+		reflect.TypeFor[int](),
+		"app.yaml",
+		"",
+	))
+
+	mapping := &yaml.Node{Kind: yaml.MappingNode}
+	assert.NoError(t, validateYAMLFields(mapping, reflect.TypeFor[int](), "app.yaml", ""))
+
+	mapNode := &yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{
+		{Kind: yaml.ScalarNode, Value: "key"},
+		{Kind: yaml.ScalarNode, Value: "value"},
+	}}
+	assert.NoError(t, validateYAMLFields(mapNode, reflect.TypeFor[map[string]string](), "app.yaml", ""))
+	assert.NoError(t, validateYAMLFields(mapNode, reflect.TypeFor[map[int]string](), "app.yaml", ""))
+
+	type Embedded struct {
+		Value string `yaml:"value"`
+	}
+	type config struct {
+		Embedded
+	}
+	var embeddedNode yaml.Node
+	require.NoError(t, yaml.Unmarshal([]byte("value: true\n"), &embeddedNode))
+	require.NoError(t, validateYAMLFields(embeddedNode.Content[0], reflect.TypeFor[config](), "app.yaml", ""))
+	var unknownNode yaml.Node
+	require.NoError(t, yaml.Unmarshal([]byte("unknown: true\n"), &unknownNode))
+	require.ErrorContains(t, validateYAMLFields(
+		unknownNode.Content[0], reflect.TypeFor[config](), "app.yaml", ""), "unsupported field")
+}
+
+func TestValidateApplicationRootFieldsHandlesNilAndInvalidKeys(t *testing.T) {
+	require.Error(t, validateApplicationRootFields(nil, reflect.TypeFor[struct{}](), "app.yaml"))
+	nonStringKey := &yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{
+		{Kind: yaml.SequenceNode}, {Kind: yaml.ScalarNode, Value: "value"},
+	}}
+	assert.NoError(t, validateApplicationRootFields(nonStringKey, reflect.TypeFor[struct{}](), "app.yaml"))
 }
