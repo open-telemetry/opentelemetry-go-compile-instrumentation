@@ -96,3 +96,23 @@ func TestPackageGraphResetsOnOtherFlags(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 2, loaded[hook], "a load with other build flags must not reuse the cache")
 }
+
+// TestPackageGraphCachesPathsLoadedUnderAnotherImportPath covers a requested
+// path that is not an import path, such as a relative directory: its root
+// loads under the import path, and the cache must still answer the
+// requested path next time instead of loading it again.
+func TestPackageGraphCachesPathsLoadedUnderAnotherImportPath(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "go.mod"), "module example.com/graphtest\n\ngo 1.24\n")
+	mustWriteFile(t, filepath.Join(dir, "hooks", "hooks.go"), "package hooks\n")
+
+	loaded := map[string]int{}
+	sp := countingGraphPhase(dir, loaded)
+	for range 2 {
+		pkgs, err := sp.loadGraph(t.Context(), sp.buildFlags, []string{"./hooks"})
+		require.NoError(t, err)
+		require.Len(t, pkgs, 1)
+		assert.Equal(t, "example.com/graphtest/hooks", pkgs[0].PkgPath)
+	}
+	assert.Equal(t, 1, loaded["./hooks"], "a path loaded under another import path must hit the cache")
+}

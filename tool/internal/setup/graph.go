@@ -26,7 +26,10 @@ type graphLoader func(ctx context.Context, paths []string) ([]*packages.Package,
 // decides what they mean. A failed load caches nothing.
 type packageGraph struct {
 	flags []string
-	roots map[string]*packages.Package
+	// roots maps a requested path to the roots its load returned: normally
+	// the one package with that import path, but a path that is not an
+	// import path, such as a relative directory, loads under another one.
+	roots map[string][]*packages.Package
 	// load replaces the package load in tests.
 	load func(ctx context.Context, flags, paths []string) ([]*packages.Package, error)
 }
@@ -56,7 +59,7 @@ func (sp *setupPhase) loadGraph(ctx context.Context, flags, paths []string) ([]*
 	g := &sp.graph
 	if g.roots == nil || !slices.Equal(g.flags, flags) {
 		g.flags = slices.Clone(flags)
-		g.roots = make(map[string]*packages.Package)
+		g.roots = make(map[string][]*packages.Package)
 	}
 	var missing []string
 	for _, p := range paths {
@@ -73,17 +76,42 @@ func (sp *setupPhase) loadGraph(ctx context.Context, flags, paths []string) ([]*
 		if err != nil {
 			return nil, err
 		}
-		for _, pkg := range loaded {
-			g.roots[pkg.PkgPath] = pkg
-		}
+		g.store(missing, loaded)
 	}
 	pkgs := make([]*packages.Package, 0, len(paths))
 	seen := make(map[*packages.Package]bool, len(paths))
 	for _, p := range paths {
-		if pkg, ok := g.roots[p]; ok && !seen[pkg] {
-			seen[pkg] = true
-			pkgs = append(pkgs, pkg)
+		for _, pkg := range g.roots[p] {
+			if !seen[pkg] {
+				seen[pkg] = true
+				pkgs = append(pkgs, pkg)
+			}
 		}
 	}
 	return pkgs, nil
+}
+
+// store records the roots one load returned for the requested paths. A
+// root is stored under its import path when that path was requested. The
+// roots that match no requested path are stored under every requested path
+// that matched no root, so those paths hit the cache next time instead of
+// loading again.
+func (g *packageGraph) store(requested []string, loaded []*packages.Package) {
+	want := make(map[string]bool, len(requested))
+	for _, p := range requested {
+		want[p] = true
+	}
+	var unmatched []*packages.Package
+	for _, pkg := range loaded {
+		if want[pkg.PkgPath] {
+			g.roots[pkg.PkgPath] = append(g.roots[pkg.PkgPath], pkg)
+			continue
+		}
+		unmatched = append(unmatched, pkg)
+	}
+	for _, p := range requested {
+		if _, ok := g.roots[p]; !ok {
+			g.roots[p] = unmatched
+		}
+	}
 }
