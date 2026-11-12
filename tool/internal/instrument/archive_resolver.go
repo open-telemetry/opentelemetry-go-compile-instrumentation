@@ -6,12 +6,16 @@ package instrument
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -23,11 +27,13 @@ import (
 )
 
 const (
-	probeWorkDirName        = "probe_work"
-	resolvedArchivesDirName = "resolved_archives"
-	filePermPrivate         = 0o600
-	dirPermPrivate          = 0o750
-	probeBaseArgCount       = 3
+	probeWorkDirName         = "probe_work"
+	resolvedArchivesDirName  = "resolved_archives"
+	directArchivesDirName    = "direct_archives"
+	filePermPrivate          = 0o600
+	dirPermPrivate           = 0o750
+	probeBaseArgCount        = 3
+	directProbeExtraArgCount = 2
 )
 
 // resolvedArchivesCache stores resolved archives across compiles and link within a build.
@@ -41,13 +47,10 @@ type resolvedArchivesCache struct {
 //nolint:gochecknoglobals // process-level synchronization for archive caching
 var archiveCacheMu sync.Mutex
 
-// inMemoryCache stores in-process resolved archives to avoid repeated disk reads.
+// inMemoryCache stores in-process resolved archives keyed by configuration hash.
 //
 //nolint:gochecknoglobals // process-level in-memory archive cache
-var inMemoryCache = &resolvedArchivesCache{
-	Compile: make(map[string]string),
-	Link:    make(map[string]string),
-}
+var inMemoryCache = make(map[string]*resolvedArchivesCache)
 
 // resolvePackageArchives resolves compiler and linker archives for importPaths.
 //
@@ -55,7 +58,7 @@ var inMemoryCache = &resolvedArchivesCache{
 // so pkgload.ResolveExportFilesBatch serves both compile and link.
 //
 // From Go 1.28+, go list -export outputs tools-format export data (golang/go#79427)
-// which cmd/compile and cmd/link reject. This function builds a synthetic library probe package
+// which cmd/compile and cmd/link reject. This function builds a synthetic library probe
 // importing the requested paths, using cmd/go to populate compiler and linker archives.
 //
 //nolint:revive // confusing-results conflicts with nonamedreturns
@@ -77,8 +80,10 @@ func resolvePackageArchives(
 		return archives, maps.Clone(archives), resFailed, nil
 	}
 
-	// Go 1.28+: check in-memory and on-disk cross-process cache in .otelc-build/
-	cache := loadArchiveCache()
+	configHash := computeConfigHash(toolPath, buildFlags)
+
+	// Go 1.28+: check configuration-scoped in-memory and on-disk cross-process cache in .otelc-build/
+	cache := loadArchiveCache(configHash)
 
 	missing := make([]string, 0, len(importPaths))
 	for _, p := range importPaths {
@@ -118,9 +123,35 @@ func resolvePackageArchives(
 		maps.Copy(resolvedLink, lArchives)
 	}
 
+	// Verify that each requested package resolved both compiler and linker archives.
+	for _, p := range missing {
+		if failed[p] != nil {
+			continue
+		}
+		cPath := resolvedCompile[p]
+		lPath := resolvedLink[p]
+		if cPath == "" || lPath == "" || !util.PathExists(cPath) || !util.PathExists(lPath) {
+			failed[p] = ex.Newf(
+				"missing or invalid archive for %q (compile=%q, link=%q)",
+				p,
+				cPath,
+				lPath,
+			)
+			delete(resolvedCompile, p)
+			delete(resolvedLink, p)
+		}
+	}
+
 	if len(resolvedCompile) > 0 {
-		saveArchiveCache(resolvedCompile, resolvedLink)
-		cache = loadArchiveCache()
+		if saveErr := saveArchiveCache(configHash, resolvedCompile, resolvedLink); saveErr != nil {
+			util.LoggerFromContext(ctx).WarnContext(
+				ctx,
+				"failed to persist archive cache",
+				"config", configHash,
+				"error", saveErr,
+			)
+		}
+		cache = loadArchiveCache(configHash)
 		return cache.Compile, cache.Link, failed, nil
 	}
 
@@ -178,6 +209,81 @@ func isInternalPackage(importPath string) bool {
 		importPath == "internal"
 }
 
+// computeConfigHash computes a deterministic fingerprint for the build configuration.
+func computeConfigHash(toolPath string, buildFlags []string) string {
+	h := sha256.New()
+	goBin, _ := findGoBinary(toolPath)
+	_, _ = h.Write([]byte(goBin))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(toolPath))
+	_, _ = h.Write([]byte{0})
+
+	goos := os.Getenv("GOOS")
+	if goos == "" {
+		goos = runtime.GOOS
+	}
+	_, _ = h.Write([]byte(goos))
+	_, _ = h.Write([]byte{0})
+
+	goarch := os.Getenv("GOARCH")
+	if goarch == "" {
+		goarch = runtime.GOARCH
+	}
+	_, _ = h.Write([]byte(goarch))
+	_, _ = h.Write([]byte{0})
+
+	_, _ = h.Write([]byte(os.Getenv("CGO_ENABLED")))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(os.Getenv("GOEXPERIMENT")))
+	_, _ = h.Write([]byte{0})
+
+	flags := slices.Clone(buildFlags)
+	slices.Sort(flags)
+	for _, f := range flags {
+		_, _ = h.Write([]byte(f))
+		_, _ = h.Write([]byte{0})
+	}
+
+	return hex.EncodeToString(h.Sum(nil))[:16]
+}
+
+// runProbeCmd executes a go command with probe environment and returns the WORK directory.
+func runProbeCmd(
+	ctx context.Context,
+	toolPath string,
+	args []string,
+) (string, error) {
+	goBin, err := findGoBinary(toolPath)
+	if err != nil {
+		return "", err
+	}
+
+	tempDir := util.GetBuildTempDir()
+	probeWorkBase := filepath.Join(tempDir, probeWorkDirName)
+	if mkdirErr := os.MkdirAll(probeWorkBase, dirPermPrivate); mkdirErr != nil {
+		return "", ex.Wrapf(mkdirErr, "creating probe work dir %s", probeWorkBase)
+	}
+
+	cmd := exec.CommandContext(ctx, goBin, args...)
+	cmd.Dir = util.GetOtelcWorkDir()
+	cmd.Env = probeEnv(probeWorkBase)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	cmdErr := cmd.Run()
+	stderrStr := stderr.String()
+	workDir := parseWorkDir(stderrStr)
+
+	if cmdErr != nil {
+		return "", ex.Wrapf(cmdErr, "probe command failed: %s", strings.TrimSpace(stderrStr))
+	}
+	if workDir == "" {
+		return "", ex.Newf("probe command succeeded but WORK directory not found: %s", stderrStr)
+	}
+	return workDir, nil
+}
+
 // runProbeBuild compiles a synthetic library package importing importPaths, capturing
 // compiler and linker archive locations from cmd/go's importcfg files across WORK.
 //
@@ -189,12 +295,7 @@ func runProbeBuild(
 	buildFlags []string,
 ) (map[string]string, map[string]string, error) {
 	tempDir := util.GetBuildTempDir()
-	probeWorkBase := filepath.Join(tempDir, probeWorkDirName)
-	if mkdirErr := os.MkdirAll(probeWorkBase, dirPermPrivate); mkdirErr != nil {
-		return nil, nil, ex.Wrapf(mkdirErr, "creating probe work dir %s", probeWorkBase)
-	}
-
-	probeName := fmt.Sprintf("probe-%d-%d", time.Now().UnixNano(), os.Getpid())
+	probeName := fmt.Sprintf("probe-%d-%d", os.Getpid(), time.Now().UnixNano())
 	probeDir := filepath.Join(tempDir, probeName)
 	if mkdirErr := os.MkdirAll(probeDir, dirPermPrivate); mkdirErr != nil {
 		return nil, nil, ex.Wrapf(mkdirErr, "creating probe directory %s", probeDir)
@@ -205,7 +306,6 @@ func runProbeBuild(
 
 	var src bytes.Buffer
 	_, _ = src.WriteString("// Code generated by otelc archive probe. DO NOT EDIT.\n")
-	_, _ = fmt.Fprintf(&src, "// nonce: %d\n", time.Now().UnixNano())
 	_, _ = src.WriteString("package probe\n\nimport (\n")
 	for _, p := range importPaths {
 		_, _ = fmt.Fprintf(&src, "\t_ %q\n", p)
@@ -217,37 +317,21 @@ func runProbeBuild(
 		return nil, nil, ex.Wrapf(writeErr, "writing probe.go")
 	}
 
-	goBin := findGoBinary(toolPath)
-
-	args := make([]string, 0, probeBaseArgCount+len(buildFlags))
+	args := make([]string, 0, probeBaseArgCount+len(buildFlags)+1)
 	args = append(args, "build", "-work")
 	args = append(args, buildFlags...)
 	args = append(args, probeDir)
 
-	cmd := exec.CommandContext(ctx, goBin, args...)
-	cmd.Dir = util.GetOtelcWorkDir()
-	cmd.Env = probeEnv(probeWorkBase)
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	cmdErr := cmd.Run()
-	stderrStr := stderr.String()
-	workDir := parseWorkDir(stderrStr)
-
+	workDir, cmdErr := runProbeCmd(ctx, toolPath, args)
 	if cmdErr != nil {
-		return nil, nil, ex.Wrapf(cmdErr, "probe build failed for %v: %s", importPaths, strings.TrimSpace(stderrStr))
-	}
-
-	if workDir == "" {
-		return nil, nil, ex.Newf("probe build succeeded but WORK directory not found in output: %s", stderrStr)
+		return nil, nil, ex.Wrapf(cmdErr, "probe build failed for %v", importPaths)
 	}
 
 	return collectArchivesFromWorkDir(workDir)
 }
 
-// runDirectProbeBuild builds a specific package directly with go build -work, capturing its
-// compiler and linker archives. This avoids importing restrictions (such as internal packages).
+// runDirectProbeBuild builds a specific package directly with go build -work -o, capturing its
+// actual compiler and linker archive without importing restrictions.
 //
 //nolint:revive // confusing-results conflicts with nonamedreturns
 func runDirectProbeBuild(
@@ -257,71 +341,44 @@ func runDirectProbeBuild(
 	buildFlags []string,
 ) (map[string]string, map[string]string, error) {
 	tempDir := util.GetBuildTempDir()
-	probeWorkBase := filepath.Join(tempDir, probeWorkDirName)
-	if mkdirErr := os.MkdirAll(probeWorkBase, dirPermPrivate); mkdirErr != nil {
-		return nil, nil, ex.Wrapf(mkdirErr, "creating probe work dir %s", probeWorkBase)
+	directArchivesBase := filepath.Join(tempDir, directArchivesDirName)
+	if mkdirErr := os.MkdirAll(directArchivesBase, dirPermPrivate); mkdirErr != nil {
+		return nil, nil, ex.Wrapf(mkdirErr, "creating direct archives dir %s", directArchivesBase)
 	}
 
-	goBin := findGoBinary(toolPath)
+	safePkg := util.EscapePackagePath(importPath)
+	outArchive := filepath.Join(directArchivesBase, safePkg+".a")
 
-	args := make([]string, 0, probeBaseArgCount+len(buildFlags)+1)
-	args = append(args, "build", "-work")
+	args := make([]string, 0, probeBaseArgCount+len(buildFlags)+directProbeExtraArgCount)
+	args = append(args, "build", "-work", "-o", outArchive)
 	args = append(args, buildFlags...)
 	args = append(args, importPath)
 
-	cmd := exec.CommandContext(ctx, goBin, args...)
-	cmd.Dir = util.GetOtelcWorkDir()
-	cmd.Env = probeEnv(probeWorkBase)
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	cmdErr := cmd.Run()
-	stderrStr := stderr.String()
-	workDir := parseWorkDir(stderrStr)
-
+	workDir, cmdErr := runProbeCmd(ctx, toolPath, args)
 	if cmdErr != nil {
-		return nil, nil, ex.Wrapf(cmdErr, "direct build failed for %q: %s", importPath, strings.TrimSpace(stderrStr))
+		return nil, nil, ex.Wrapf(cmdErr, "direct build failed for %q", importPath)
 	}
-	if workDir == "" {
+
+	if !util.PathExists(outArchive) {
 		return nil, nil, ex.Newf(
-			"direct build succeeded for %q but WORK directory not found: %s",
+			"direct build succeeded for %q but output archive was not created at %s",
 			importPath,
-			stderrStr,
+			outArchive,
 		)
 	}
 
-	compileArchives, linkArchives, err := collectArchivesFromWorkDir(workDir)
-	if err == nil && compileArchives[importPath] != "" && linkArchives[importPath] != "" {
-		return compileArchives, linkArchives, nil
+	compileArchives := map[string]string{importPath: outArchive}
+	linkArchives := map[string]string{importPath: outArchive}
+
+	depCompile, depLink, depErr := collectArchivesFromWorkDir(workDir)
+	if depErr == nil {
+		maps.Copy(compileArchives, depCompile)
+		maps.Copy(linkArchives, depLink)
+		compileArchives[importPath] = outArchive
+		linkArchives[importPath] = outArchive
 	}
 
-	// If the package was already cached, re-run with -a to force artifact creation into WORK.
-	argsWithForce := make([]string, 0, len(args)+1)
-	argsWithForce = append(argsWithForce, "build", "-work", "-a")
-	argsWithForce = append(argsWithForce, buildFlags...)
-	argsWithForce = append(argsWithForce, importPath)
-
-	cmd = exec.CommandContext(ctx, goBin, argsWithForce...)
-	cmd.Dir = util.GetOtelcWorkDir()
-	cmd.Env = probeEnv(probeWorkBase)
-	stderr.Reset()
-	cmd.Stderr = &stderr
-
-	if runErr := cmd.Run(); runErr != nil {
-		return nil, nil, ex.Wrapf(
-			runErr,
-			"forced direct build failed for %q: %s",
-			importPath,
-			strings.TrimSpace(stderr.String()),
-		)
-	}
-	forcedWorkDir := parseWorkDir(stderr.String())
-	if forcedWorkDir == "" {
-		return nil, nil, ex.Newf("forced direct build succeeded for %q but WORK directory not found", importPath)
-	}
-
-	return collectArchivesFromWorkDir(forcedWorkDir)
+	return compileArchives, linkArchives, nil
 }
 
 // collectArchivesFromWorkDir extracts all packagefile mappings from the probe build's WORK directory.
@@ -377,14 +434,18 @@ func parseActionConfigs(
 				compileArchives[pkg] = archive
 			}
 			if _, ok := linkArchives[pkg]; !ok {
-				linkArchives[pkg] = toLinkerArchive(workDir, archive)
+				if lArchive := toLinkerArchive(workDir, archive); lArchive != "" {
+					linkArchives[pkg] = lArchive
+				}
 			}
 		}
 	}
 }
 
-// toLinkerArchive converts a compiler-only archive in export/bXXX.a to the linker-compatible
-// archive in bXXX/_pkg_.a if it exists.
+// toLinkerArchive converts a compiler archive to a linker-compatible archive.
+// For compiler-only export files in export/bXXX.a, it returns the object archive
+// in bXXX/_pkg_.a if it exists. If the object archive does not exist, it returns
+// empty string to prevent compiler-only artifacts from reaching the linker.
 func toLinkerArchive(workDir, archive string) string {
 	exportDir := filepath.Join(workDir, "export")
 	if strings.HasPrefix(archive, exportDir) {
@@ -393,6 +454,8 @@ func toLinkerArchive(workDir, archive string) string {
 		if util.PathExists(candidate) {
 			return candidate
 		}
+		// Compiler export file cannot be used as linker archive.
+		return ""
 	}
 	return archive
 }
@@ -412,21 +475,39 @@ func probeEnv(probeWorkBase string) []string {
 	return out
 }
 
-// findGoBinary locates the go binary matching the given compiler or linker toolPath,
-// or falls back to "go".
-func findGoBinary(toolPath string) string {
-	if toolPath != "" {
-		if _, err := os.Stat(toolPath); err == nil {
-			ext := filepath.Ext(toolPath)
-			// Standard layout: GOROOT/pkg/tool/$GOOS_$GOARCH/compile -> GOROOT/bin/go.
-			goRoot := filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(toolPath))))
-			candidate := filepath.Join(goRoot, "bin", "go"+ext)
-			if _, statErr := os.Stat(candidate); statErr == nil {
-				return candidate
-			}
+// resolveGoBinaryFromTool resolves the go executable matching the toolchain of toolPath.
+func resolveGoBinaryFromTool(toolPath string) (string, error) {
+	if _, err := os.Stat(toolPath); err != nil {
+		return "", ex.Wrapf(err, "inspecting tool path %s", toolPath)
+	}
+	ext := filepath.Ext(toolPath)
+	// Standard layout: GOROOT/pkg/tool/$GOOS_$GOARCH/compile -> GOROOT/bin/go.
+	goRoot := filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(toolPath))))
+	candidate := filepath.Join(goRoot, "bin", "go"+ext)
+	if _, statErr := os.Stat(candidate); statErr == nil {
+		return candidate, nil
+	}
+	if goroot := os.Getenv("GOROOT"); goroot != "" {
+		cleaned := filepath.Clean(goroot)
+		candidate = filepath.Join(cleaned, "bin", "go"+ext)
+		if _, statErr := os.Stat(candidate); statErr == nil {
+			return candidate, nil
 		}
 	}
-	return "go"
+	return "", ex.Newf("cannot locate matching go binary for tool %s", toolPath)
+}
+
+// findGoBinary locates the go binary matching the given compiler or linker toolPath,
+// or resolves "go" from PATH when toolPath is empty.
+func findGoBinary(toolPath string) (string, error) {
+	if toolPath != "" {
+		return resolveGoBinaryFromTool(toolPath)
+	}
+	path, err := exec.LookPath("go")
+	if err != nil {
+		return "", ex.Wrapf(err, "looking up go binary in PATH")
+	}
+	return path, nil
 }
 
 // parseWorkDir extracts the WORK directory path printed by go build -work on stderr.
@@ -440,23 +521,21 @@ func parseWorkDir(stderr string) string {
 	return ""
 }
 
-// CleanupProbeWorkDirs removes temporary probe WORK directories and disk cache records.
+// CleanupProbeWorkDirs removes temporary probe WORK directories, direct archives, and disk cache records.
 func CleanupProbeWorkDirs() {
 	archiveCacheMu.Lock()
-	inMemoryCache = &resolvedArchivesCache{
-		Compile: make(map[string]string),
-		Link:    make(map[string]string),
-	}
+	inMemoryCache = make(map[string]*resolvedArchivesCache)
 	archiveCacheMu.Unlock()
 
 	tempDir := util.GetBuildTempDir()
 	_ = os.RemoveAll(filepath.Join(tempDir, probeWorkDirName))
 	_ = os.RemoveAll(filepath.Join(tempDir, resolvedArchivesDirName))
+	_ = os.RemoveAll(filepath.Join(tempDir, directArchivesDirName))
 }
 
-// loadArchiveCache reads and merges all valid archive records from .otelc-build/resolved_archives/.
+// loadArchiveCache reads and merges all valid archive records from .otelc-build/resolved_archives/<configHash>.
 // It verifies that referenced artifact files still exist on disk.
-func loadArchiveCache() *resolvedArchivesCache {
+func loadArchiveCache(configHash string) *resolvedArchivesCache {
 	archiveCacheMu.Lock()
 	defer archiveCacheMu.Unlock()
 
@@ -466,23 +545,33 @@ func loadArchiveCache() *resolvedArchivesCache {
 	}
 
 	// Copy from in-memory cache first
-	for pkg, path := range inMemoryCache.Compile {
-		if util.PathExists(path) {
-			merged.Compile[pkg] = path
+	if mem, ok := inMemoryCache[configHash]; ok {
+		for pkg, path := range mem.Compile {
+			if util.PathExists(path) {
+				merged.Compile[pkg] = path
+			}
 		}
-	}
-	for pkg, path := range inMemoryCache.Link {
-		if util.PathExists(path) {
-			merged.Link[pkg] = path
+		for pkg, path := range mem.Link {
+			if util.PathExists(path) {
+				merged.Link[pkg] = path
+			}
 		}
 	}
 
-	// Read on-disk records from other toolexec processes
-	cacheDir := filepath.Join(util.GetBuildTempDir(), resolvedArchivesDirName)
+	// Read on-disk records from other toolexec processes for this configuration
+	cacheDir := filepath.Join(util.GetBuildTempDir(), resolvedArchivesDirName, configHash)
 	entries, err := os.ReadDir(cacheDir)
 	if err != nil {
 		return merged
 	}
+
+	if _, ok := inMemoryCache[configHash]; !ok {
+		inMemoryCache[configHash] = &resolvedArchivesCache{
+			Compile: make(map[string]string),
+			Link:    make(map[string]string),
+		}
+	}
+	mem := inMemoryCache[configHash]
 
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
@@ -504,8 +593,8 @@ func loadArchiveCache() *resolvedArchivesCache {
 			if hasL && util.PathExists(cPath) && util.PathExists(lPath) {
 				merged.Compile[pkg] = cPath
 				merged.Link[pkg] = lPath
-				inMemoryCache.Compile[pkg] = cPath
-				inMemoryCache.Link[pkg] = lPath
+				mem.Compile[pkg] = cPath
+				mem.Link[pkg] = lPath
 			}
 		}
 	}
@@ -513,21 +602,28 @@ func loadArchiveCache() *resolvedArchivesCache {
 	return merged
 }
 
-// saveArchiveCache writes a probe-specific cache file into .otelc-build/resolved_archives/.
+// saveArchiveCache writes a probe-specific cache file into .otelc-build/resolved_archives/<configHash>/.
 // Using individual atomic files avoids cross-process file-write collisions.
-func saveArchiveCache(newCompile, newLink map[string]string) {
+func saveArchiveCache(configHash string, newCompile, newLink map[string]string) error {
 	if len(newCompile) == 0 && len(newLink) == 0 {
-		return
+		return nil
 	}
 
 	archiveCacheMu.Lock()
-	maps.Copy(inMemoryCache.Compile, newCompile)
-	maps.Copy(inMemoryCache.Link, newLink)
+	if _, ok := inMemoryCache[configHash]; !ok {
+		inMemoryCache[configHash] = &resolvedArchivesCache{
+			Compile: make(map[string]string),
+			Link:    make(map[string]string),
+		}
+	}
+	mem := inMemoryCache[configHash]
+	maps.Copy(mem.Compile, newCompile)
+	maps.Copy(mem.Link, newLink)
 	archiveCacheMu.Unlock()
 
-	cacheDir := filepath.Join(util.GetBuildTempDir(), resolvedArchivesDirName)
+	cacheDir := filepath.Join(util.GetBuildTempDir(), resolvedArchivesDirName, configHash)
 	if err := os.MkdirAll(cacheDir, dirPermPrivate); err != nil {
-		return
+		return ex.Wrapf(err, "creating archive cache dir %s", cacheDir)
 	}
 
 	record := resolvedArchivesCache{
@@ -536,10 +632,13 @@ func saveArchiveCache(newCompile, newLink map[string]string) {
 	}
 	data, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
-		return
+		return ex.Wrapf(err, "marshaling archive cache record")
 	}
 
 	fileName := fmt.Sprintf("probe_%d_%d.json", os.Getpid(), time.Now().UnixNano())
 	filePath := filepath.Join(cacheDir, fileName)
-	_ = util.WriteFileAtomic(filePath, data, filePermPrivate)
+	if writeErr := util.WriteFileAtomic(filePath, data, filePermPrivate); writeErr != nil {
+		return ex.Wrapf(writeErr, "writing archive cache file %s", filePath)
+	}
+	return nil
 }

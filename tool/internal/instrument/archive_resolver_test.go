@@ -18,12 +18,15 @@ import (
 )
 
 func TestFindGoBinary(t *testing.T) {
-	t.Run("empty tool path falls back to go", func(t *testing.T) {
-		assert.Equal(t, "go", findGoBinary(""))
+	t.Run("empty tool path resolves go from PATH", func(t *testing.T) {
+		bin, err := findGoBinary("")
+		require.NoError(t, err)
+		assert.Contains(t, bin, "go")
 	})
 
-	t.Run("non-existent tool path falls back to go", func(t *testing.T) {
-		assert.Equal(t, "go", findGoBinary("/non/existent/tool/compile"))
+	t.Run("non-existent tool path returns error", func(t *testing.T) {
+		_, err := findGoBinary("/non/existent/tool/compile")
+		require.Error(t, err)
 	})
 
 	t.Run("valid tool path resolves matching go binary", func(t *testing.T) {
@@ -38,7 +41,9 @@ func TestFindGoBinary(t *testing.T) {
 		require.NoError(t, os.WriteFile(compileTool, []byte("compile"), 0o755))
 		require.NoError(t, os.WriteFile(goBin, []byte("go"), 0o755))
 
-		assert.Equal(t, goBin, findGoBinary(compileTool))
+		resolved, err := findGoBinary(compileTool)
+		require.NoError(t, err)
+		assert.Equal(t, goBin, resolved)
 	})
 }
 
@@ -99,10 +104,10 @@ func TestToLinkerArchive(t *testing.T) {
 		assert.Equal(t, linkerArchive, got)
 	})
 
-	t.Run("keeps export archive if _pkg_.a does not exist", func(t *testing.T) {
+	t.Run("returns empty string if _pkg_.a does not exist to reject compiler-only artifact", func(t *testing.T) {
 		missingExport := filepath.Join(exportDir, "b003.a")
 		got := toLinkerArchive(tempDir, missingExport)
-		assert.Equal(t, missingExport, got)
+		assert.Empty(t, got)
 	})
 
 	t.Run("keeps cached archive unchanged", func(t *testing.T) {
@@ -113,55 +118,41 @@ func TestToLinkerArchive(t *testing.T) {
 }
 
 func TestCollectArchivesFromWorkDir(t *testing.T) {
-	t.Run("collects and transforms archives from work dir", func(t *testing.T) {
+	t.Run("collects compiler and linker archives from b001 and other actions", func(t *testing.T) {
 		workDir := t.TempDir()
 		b001Dir := filepath.Join(workDir, "b001")
 		b002Dir := filepath.Join(workDir, "b002")
-		exportDir := filepath.Join(workDir, "export")
 		require.NoError(t, os.MkdirAll(b001Dir, 0o755))
 		require.NoError(t, os.MkdirAll(b002Dir, 0o755))
-		require.NoError(t, os.MkdirAll(exportDir, 0o755))
 
-		cachedFile := filepath.Join(workDir, "cached-d")
-		require.NoError(t, os.WriteFile(cachedFile, []byte("cached"), 0o644))
+		compPath := filepath.Join(workDir, "comp.a")
+		linkPath := filepath.Join(workDir, "link.a")
+		depComp := filepath.Join(workDir, "dep_comp.a")
+		depLink := filepath.Join(workDir, "dep_link.a")
+		require.NoError(t, os.WriteFile(compPath, []byte("comp"), 0o644))
+		require.NoError(t, os.WriteFile(linkPath, []byte("link"), 0o644))
+		require.NoError(t, os.WriteFile(depComp, []byte("depcomp"), 0o644))
+		require.NoError(t, os.WriteFile(depLink, []byte("deplink"), 0o644))
 
-		linkerArchive := filepath.Join(b002Dir, "_pkg_.a")
-		require.NoError(t, os.WriteFile(linkerArchive, []byte("archive"), 0o644))
+		b001LinkCfg := "packagefile example.com/pkg=" + linkPath + "\n"
+		require.NoError(t, os.WriteFile(filepath.Join(b001Dir, "importcfg.link"), []byte(b001LinkCfg), 0o644))
 
-		b001Cfg := "packagefile example.com/cached=" + cachedFile + "\n" +
-			"packagefile example.com/fresh=" + filepath.Join(exportDir, "b002.a") + "\n"
-		require.NoError(t, os.WriteFile(filepath.Join(b001Dir, "importcfg"), []byte(b001Cfg), 0o644))
+		b001CompCfg := "packagefile example.com/pkg=" + compPath + "\n"
+		require.NoError(t, os.WriteFile(filepath.Join(b001Dir, "importcfg"), []byte(b001CompCfg), 0o644))
 
-		b002Cfg := "packagefile example.com/dep=" + cachedFile + "\n"
-		require.NoError(t, os.WriteFile(filepath.Join(b002Dir, "importcfg"), []byte(b002Cfg), 0o644))
+		b002LinkCfg := "packagefile example.com/dep=" + depLink + "\n"
+		require.NoError(t, os.WriteFile(filepath.Join(b002Dir, "importcfg.link"), []byte(b002LinkCfg), 0o644))
 
-		compileArchives, linkArchives, err := collectArchivesFromWorkDir(workDir)
-		require.NoError(t, err)
-
-		assert.Equal(t, cachedFile, compileArchives["example.com/cached"])
-		assert.Equal(t, filepath.Join(exportDir, "b002.a"), compileArchives["example.com/fresh"])
-		assert.Equal(t, cachedFile, compileArchives["example.com/dep"])
-
-		assert.Equal(t, cachedFile, linkArchives["example.com/cached"])
-		assert.Equal(t, linkerArchive, linkArchives["example.com/fresh"])
-		assert.Equal(t, cachedFile, linkArchives["example.com/dep"])
-	})
-
-	t.Run("collects linker archives from importcfg.link when present", func(t *testing.T) {
-		workDir := t.TempDir()
-		b001Dir := filepath.Join(workDir, "b001")
-		require.NoError(t, os.MkdirAll(b001Dir, 0o755))
-
-		linkCfg := "packagefile example.com/pkg=/link/path/pkg.a\n"
-		require.NoError(t, os.WriteFile(filepath.Join(b001Dir, "importcfg.link"), []byte(linkCfg), 0o644))
-
-		compCfg := "packagefile example.com/pkg=/comp/path/pkg.a\n"
-		require.NoError(t, os.WriteFile(filepath.Join(b001Dir, "importcfg"), []byte(compCfg), 0o644))
+		b002CompCfg := "packagefile example.com/dep=" + depComp + "\n"
+		require.NoError(t, os.WriteFile(filepath.Join(b002Dir, "importcfg"), []byte(b002CompCfg), 0o644))
 
 		compileArchives, linkArchives, err := collectArchivesFromWorkDir(workDir)
 		require.NoError(t, err)
-		assert.Equal(t, "/comp/path/pkg.a", compileArchives["example.com/pkg"])
-		assert.Equal(t, "/link/path/pkg.a", linkArchives["example.com/pkg"])
+
+		assert.Equal(t, compPath, compileArchives["example.com/pkg"])
+		assert.Equal(t, linkPath, linkArchives["example.com/pkg"])
+		assert.Equal(t, depComp, compileArchives["example.com/dep"])
+		assert.Equal(t, depLink, linkArchives["example.com/dep"])
 	})
 
 	t.Run("fails on non-existent work dir", func(t *testing.T) {
@@ -183,7 +174,8 @@ func TestArchiveCache_LoadSave(t *testing.T) {
 
 	CleanupProbeWorkDirs()
 
-	// Create dummy artifact files on disk to satisfy validity checks
+	const cfgHash = "testcfg1"
+
 	aComp := filepath.Join(tempDir, "a.a")
 	aLink := filepath.Join(tempDir, "a_pkg.a")
 	bComp := filepath.Join(tempDir, "b.a")
@@ -193,29 +185,75 @@ func TestArchiveCache_LoadSave(t *testing.T) {
 	require.NoError(t, os.WriteFile(bComp, []byte("b"), 0o644))
 	require.NoError(t, os.WriteFile(bLink, []byte("b"), 0o644))
 
-	cache := loadArchiveCache()
+	cache := loadArchiveCache(cfgHash)
 	assert.Empty(t, cache.Compile)
 	assert.Empty(t, cache.Link)
 
-	saveArchiveCache(
+	require.NoError(t, saveArchiveCache(
+		cfgHash,
 		map[string]string{"pkg/a": aComp},
 		map[string]string{"pkg/a": aLink},
-	)
+	))
 
-	loaded := loadArchiveCache()
+	loaded := loadArchiveCache(cfgHash)
 	assert.Equal(t, aComp, loaded.Compile["pkg/a"])
 	assert.Equal(t, aLink, loaded.Link["pkg/a"])
 
-	saveArchiveCache(
+	require.NoError(t, saveArchiveCache(
+		cfgHash,
 		map[string]string{"pkg/b": bComp},
 		map[string]string{"pkg/b": bLink},
-	)
+	))
 
-	updated := loadArchiveCache()
+	updated := loadArchiveCache(cfgHash)
 	assert.Equal(t, aComp, updated.Compile["pkg/a"])
 	assert.Equal(t, bComp, updated.Compile["pkg/b"])
 	assert.Equal(t, aLink, updated.Link["pkg/a"])
 	assert.Equal(t, bLink, updated.Link["pkg/b"])
+}
+
+func TestArchiveCache_ConfigurationIsolation(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tempDir)
+
+	CleanupProbeWorkDirs()
+
+	aComp := filepath.Join(tempDir, "a_comp.a")
+	aLink := filepath.Join(tempDir, "a_link.a")
+	bComp := filepath.Join(tempDir, "b_comp.a")
+	bLink := filepath.Join(tempDir, "b_link.a")
+	require.NoError(t, os.WriteFile(aComp, []byte("a"), 0o644))
+	require.NoError(t, os.WriteFile(aLink, []byte("a"), 0o644))
+	require.NoError(t, os.WriteFile(bComp, []byte("b"), 0o644))
+	require.NoError(t, os.WriteFile(bLink, []byte("b"), 0o644))
+
+	// Save under config A
+	require.NoError(t, saveArchiveCache(
+		"configA",
+		map[string]string{"pkg/common": aComp},
+		map[string]string{"pkg/common": aLink},
+	))
+
+	// Load under config B -> must be empty
+	cacheB := loadArchiveCache("configB")
+	assert.Empty(t, cacheB.Compile)
+	assert.Empty(t, cacheB.Link)
+
+	// Save under config B with different artifacts
+	require.NoError(t, saveArchiveCache(
+		"configB",
+		map[string]string{"pkg/common": bComp},
+		map[string]string{"pkg/common": bLink},
+	))
+
+	// Config A and Config B must remain isolated
+	loadedA := loadArchiveCache("configA")
+	assert.Equal(t, aComp, loadedA.Compile["pkg/common"])
+	assert.Equal(t, aLink, loadedA.Link["pkg/common"])
+
+	loadedB := loadArchiveCache("configB")
+	assert.Equal(t, bComp, loadedB.Compile["pkg/common"])
+	assert.Equal(t, bLink, loadedB.Link["pkg/common"])
 }
 
 func TestArchiveCache_PrunesMissingFiles(t *testing.T) {
@@ -224,29 +262,30 @@ func TestArchiveCache_PrunesMissingFiles(t *testing.T) {
 
 	CleanupProbeWorkDirs()
 
-	// Write cache with paths to nonexistent files
-	saveArchiveCache(
+	const cfgHash = "testcfg2"
+
+	require.NoError(t, saveArchiveCache(
+		cfgHash,
 		map[string]string{"pkg/missing": "/nonexistent/compile.a"},
 		map[string]string{"pkg/missing": "/nonexistent/link.a"},
-	)
+	))
 
-	// loadArchiveCache must prune nonexistent files
-	cache := loadArchiveCache()
+	cache := loadArchiveCache(cfgHash)
 	assert.Empty(t, cache.Compile)
 	assert.Empty(t, cache.Link)
 }
 
-func TestArchiveCache_ConcurrentMultiProcessSimulation(t *testing.T) {
+func TestArchiveCache_ConcurrentGoroutineSimulation(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, tempDir)
 
 	CleanupProbeWorkDirs()
 
-	const numProcesses = 10
+	const cfgHash = "concurrentcfg"
+	const numGoroutines = 10
 	var wg sync.WaitGroup
 
-	// Create real artifact files for each process
-	for i := range numProcesses {
+	for i := range numGoroutines {
 		pkgName := fmt.Sprintf("pkg/%d", i)
 		cFile := filepath.Join(tempDir, fmt.Sprintf("comp_%d.a", i))
 		lFile := filepath.Join(tempDir, fmt.Sprintf("link_%d.a", i))
@@ -256,15 +295,14 @@ func TestArchiveCache_ConcurrentMultiProcessSimulation(t *testing.T) {
 		wg.Add(1)
 		go func(pkg, c, l string) {
 			defer wg.Done()
-			saveArchiveCache(map[string]string{pkg: c}, map[string]string{pkg: l})
+			_ = saveArchiveCache(cfgHash, map[string]string{pkg: c}, map[string]string{pkg: l})
 		}(pkgName, cFile, lFile)
 	}
 
 	wg.Wait()
 
-	// loadArchiveCache must merge all distinct process records without losing any
-	cache := loadArchiveCache()
-	for i := range numProcesses {
+	cache := loadArchiveCache(cfgHash)
+	for i := range numGoroutines {
 		pkgName := fmt.Sprintf("pkg/%d", i)
 		assert.NotEmpty(t, cache.Compile[pkgName], "package %s should be present in compile cache", pkgName)
 		assert.NotEmpty(t, cache.Link[pkgName], "package %s should be present in link cache", pkgName)
@@ -277,14 +315,30 @@ func TestArchiveCache_IgnoresMalformedJSON(t *testing.T) {
 
 	CleanupProbeWorkDirs()
 
-	cacheDir := filepath.Join(util.GetBuildTempDir(), resolvedArchivesDirName)
+	const cfgHash = "malformedcfg"
+	cacheDir := filepath.Join(util.GetBuildTempDir(), resolvedArchivesDirName, cfgHash)
 	require.NoError(t, os.MkdirAll(cacheDir, 0o750))
 	badFile := filepath.Join(cacheDir, "probe_corrupt.json")
 	require.NoError(t, os.WriteFile(badFile, []byte("{ malformed json"), 0o600))
 
-	// Should not panic or error
-	cache := loadArchiveCache()
+	cache := loadArchiveCache(cfgHash)
 	assert.Empty(t, cache.Compile)
+}
+
+func TestArchiveCache_SaveErrorsObservable(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tempDir)
+
+	CleanupProbeWorkDirs()
+
+	// Create a file blocking directory creation
+	const cfgHash = "unwritablecfg"
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o750))
+	blocker := filepath.Join(util.GetBuildTempDir(), resolvedArchivesDirName)
+	require.NoError(t, os.WriteFile(blocker, []byte("blocking-file"), 0o644))
+
+	err := saveArchiveCache(cfgHash, map[string]string{"pkg/x": "/some/path"}, map[string]string{"pkg/x": "/some/path"})
+	require.Error(t, err)
 }
 
 func TestRecordAndCleanupProbeWorkDirs(t *testing.T) {
@@ -293,16 +347,20 @@ func TestRecordAndCleanupProbeWorkDirs(t *testing.T) {
 
 	workBase := filepath.Join(util.GetBuildTempDir(), probeWorkDirName)
 	cacheBase := filepath.Join(util.GetBuildTempDir(), resolvedArchivesDirName)
+	directBase := filepath.Join(util.GetBuildTempDir(), directArchivesDirName)
 	require.NoError(t, os.MkdirAll(workBase, 0o750))
 	require.NoError(t, os.MkdirAll(cacheBase, 0o750))
+	require.NoError(t, os.MkdirAll(directBase, 0o750))
 
 	assert.True(t, util.PathExists(workBase))
 	assert.True(t, util.PathExists(cacheBase))
+	assert.True(t, util.PathExists(directBase))
 
 	CleanupProbeWorkDirs()
 
 	assert.False(t, util.PathExists(workBase))
 	assert.False(t, util.PathExists(cacheBase))
+	assert.False(t, util.PathExists(directBase))
 }
 
 func TestProbeEnv(t *testing.T) {
@@ -318,6 +376,22 @@ func TestProbeEnv(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 1, gotTmpCount)
+}
+
+func TestComputeConfigHash(t *testing.T) {
+	hash1 := computeConfigHash("", []string{"-tags", "foo"})
+	hash2 := computeConfigHash("", []string{"-tags", "foo"})
+	assert.Equal(t, hash1, hash2, "identical configurations must produce identical hash")
+
+	hashDiffTags := computeConfigHash("", []string{"-tags", "bar"})
+	assert.NotEqual(t, hash1, hashDiffTags, "different tags must produce different hash")
+
+	hashDiffPGO := computeConfigHash("", []string{"-tags", "foo", "-pgo=some.pgo"})
+	assert.NotEqual(t, hash1, hashDiffPGO, "different PGO setting must produce different hash")
+
+	t.Setenv("GOOS", "darwin")
+	hashDarwin := computeConfigHash("", []string{"-tags", "foo"})
+	assert.NotEqual(t, hash1, hashDarwin, "different GOOS must produce different hash")
 }
 
 func TestIsInternalPackage(t *testing.T) {
