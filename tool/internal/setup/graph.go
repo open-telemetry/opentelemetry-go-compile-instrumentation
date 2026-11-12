@@ -24,6 +24,10 @@ type graphLoader func(ctx context.Context, paths []string) ([]*packages.Package,
 // injected-dependency passes, the hook imports, and the runtime scope load
 // every root once. A cached package keeps its own load errors; each caller
 // decides what they mean. A failed load caches nothing.
+//
+// It is not safe for concurrent use. That is fine today: one setupPhase runs
+// its phases one after another on one goroutine, and no phase loads the
+// graph from another goroutine.
 type packageGraph struct {
 	flags []string
 	// roots maps a requested path to the roots its load returned: normally
