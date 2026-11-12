@@ -819,8 +819,10 @@ func TestResolveExportClosures_PerRootClosures(t *testing.T) {
 func TestResolveExportFilesBatch_KeepsDependenciesOfFailedRoot(t *testing.T) {
 	writeBatchFixture(t)
 	require.NoError(t, os.MkdirAll("broken", 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join("broken", "broken.go"), []byte(
-		"package broken\n\nimport (\n\t\"example.com/batch/b\"\n\t_ \"example.com/batch/missing\"\n)\n\nvar _ = b.B\n"), 0o644))
+	broken := "package broken\n\n" +
+		"import (\n\t\"example.com/batch/b\"\n\t_ \"example.com/batch/missing\"\n)\n\n" +
+		"var _ = b.B\n"
+	require.NoError(t, os.WriteFile(filepath.Join("broken", "broken.go"), []byte(broken), 0o644))
 
 	resolved, failed, err := ResolveExportFilesBatch(t.Context(), []string{"example.com/batch/broken"})
 	require.NoError(t, err)
