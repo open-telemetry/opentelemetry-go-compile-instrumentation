@@ -4,11 +4,13 @@
 package configuration
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.yaml.in/yaml/v3"
 )
 
 func TestParseApplicationConfiguration(t *testing.T) {
@@ -339,4 +341,113 @@ instrumentation/development:
 
 	require.ErrorContains(t, err, "deprecated configuration")
 	require.ErrorContains(t, err, replacement)
+}
+
+func TestApplicationHelpers(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		value any
+		want  bool
+	}{
+		{name: "nil", value: nil},
+		{name: "empty map", value: map[string]any{}},
+		{name: "empty list", value: []any{}},
+		{name: "scalar", value: "value", want: true},
+		{name: "non-empty map", value: map[string]any{"key": true}, want: true},
+		{name: "non-empty list", value: []any{"value"}, want: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.want, hasApplicationValue(test.value))
+		})
+	}
+
+	assert.Equal(t, "general.http", joinYAMLPath("general", "http"))
+	assert.Equal(t, "http", joinYAMLPath("", "http"))
+	for _, test := range []struct {
+		path  string
+		group string
+		ok    bool
+	}{
+		{path: "general.http"},
+		{path: "go"},
+		{path: "go."},
+		{path: "go.http.client", group: "http", ok: true},
+	} {
+		group, ok := goConfigurationGroup(test.path)
+		assert.Equal(t, test.group, group)
+		assert.Equal(t, test.ok, ok)
+	}
+}
+
+func TestSetApplicationOptionErrors(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "unsupported root", path: "other.value", want: "unsupported instrumentation configuration path"},
+		{name: "missing leaf", path: "go", want: "unsupported instrumentation configuration path"},
+		{name: "scalar conflict", path: "go.http.client", want: "conflicts with a scalar"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := map[string]any{"go": map[string]any{"http": "scalar"}}
+			if test.name == "scalar conflict" {
+				root = map[string]any{"go": map[string]any{"http": "scalar"}}
+			}
+			err := setApplicationOption(root, test.path, true)
+			require.ErrorContains(t, err, test.want)
+		})
+	}
+}
+
+func TestApplicationYAMLHelpers(t *testing.T) {
+	var document yaml.Node
+	require.NoError(t, yaml.Unmarshal([]byte(`root:
+  nested:
+    - value
+`), &document))
+	root := document.Content[0]
+
+	fields, err := yamlNodeMapping(root, "app.yaml")
+	require.NoError(t, err)
+	assert.Contains(t, fields, "root")
+	require.NoError(t, validateYAMLFields(
+		root,
+		reflect.TypeFor[struct {
+			Root map[string][]string `yaml:"root"`
+		}](),
+		"app.yaml",
+		"",
+	))
+
+	_, err = yamlNodeMapping(&yaml.Node{Kind: yaml.ScalarNode}, "app.yaml")
+	require.ErrorContains(t, err, "must be a mapping")
+	assert.True(t, hasYAMLField(root, "root"))
+	assert.False(t, hasYAMLField(root, "missing"))
+}
+
+func TestValidateApplicationValue(t *testing.T) {
+	entry := Entry{
+		Name: "go.http.rules",
+		Type: structuredListType,
+		Schema: &Schema{
+			Type:     "object",
+			Required: []string{"enabled"},
+			Properties: map[string]Property{
+				"enabled": {Type: booleanType},
+			},
+		},
+	}
+
+	require.NoError(t, ValidateApplicationValue(entry, []any{map[string]any{"enabled": true}}, "app.yaml:1:1"))
+	for _, value := range []any{
+		"not-a-list",
+		[]any{"not-a-map"},
+		[]any{map[string]any{}},
+		[]any{map[string]any{"unknown": true}},
+		[]any{map[string]any{"enabled": "true"}},
+	} {
+		require.Error(t, ValidateApplicationValue(entry, value, "app.yaml:1:1"))
+	}
+	require.Error(t, ValidateApplicationValue(Entry{Name: "go.enabled", Type: booleanType}, "true", "app.yaml:1:1"))
 }
