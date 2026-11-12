@@ -28,7 +28,6 @@ import (
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/imports"
-	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -203,9 +202,16 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 	// Extract -importcfg flag
 	importCfgPath := util.FindFlagValue(args, "-importcfg")
 
+	workDir := filepath.Dir(target)
+	if linkObj := util.FindFlagValue(args, "-linkobj"); linkObj != "" {
+		workDir = filepath.Dir(linkObj)
+	} else if importCfgPath != "" {
+		workDir = filepath.Dir(importCfgPath)
+	}
+
 	ip := &instrumentPhase{
 		logger:           util.LoggerFromContext(ctx),
-		workDir:          filepath.Dir(target),
+		workDir:          workDir,
 		compileArgs:      args,
 		importConfigPath: importCfgPath,
 	}
@@ -272,7 +278,74 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 	if pgoErr != nil {
 		return pgoErr
 	}
+
+	missing := ip.missingImports(newImports)
+	if len(missing) == 0 {
+		return nil
+	}
+
+	restores := make([]func(), 0, len(missing))
+	defer func() {
+		for _, restore := range restores {
+			restore()
+		}
+	}()
+
+	for _, importPath := range missing {
+		restore, enterErr := ip.enterNestedResolution(importPath)
+		if enterErr != nil {
+			return enterErr
+		}
+		restores = append(restores, restore)
+	}
+
+	toolPath := ""
+	if len(ip.compileArgs) > 0 {
+		toolPath = ip.compileArgs[0]
+	}
+
+	buildFlags := append(util.GetBuildFlags(), pgoFlags...)
+	compileArchives, linkArchives, failed, err := resolvePackageArchives(ctx, toolPath, missing, buildFlags)
+	if err != nil {
+		return ex.Wrapf(err, "resolving %v", missing)
+	}
+	for _, p := range missing {
+		if loadErr, ok := failed[p]; ok {
+			return ex.Wrapf(loadErr, "resolving %q", p)
+		}
+	}
+
 	var updated bool
+	for pkg, archive := range compileArchives {
+		if _, exists := ip.importConfig.PackageFile[pkg]; !exists {
+			ip.Debug("Adding import to importcfg", "package", pkg, "archive", archive)
+			ip.importConfig.PackageFile[pkg] = archive
+			updated = true
+		}
+	}
+
+	if !updated {
+		return nil
+	}
+
+	if writeErr := ip.importConfig.WriteFile(ip.importConfigPath); writeErr != nil {
+		return writeErr
+	}
+
+	ip.Info("Updated importcfg", "path", ip.importConfigPath)
+
+	// Track added imports for the link phase using the linker archives
+	if trackErr := trackAddedImports(linkArchives); trackErr != nil {
+		ip.Warn("failed to track added imports for link phase", "error", trackErr)
+		// Non-fatal: link phase may still work if imports were already present
+	}
+
+	return nil
+}
+
+// missingImports filters newImports for packages not already in importConfig and not built-in.
+func (ip *instrumentPhase) missingImports(newImports map[string]string) []string {
+	missing := make([]string, 0, len(newImports))
 	for _, importPath := range newImports {
 		if importPath == unsafePackageName || importPath == "C" {
 			// unsafe is built-in, C is the cgo pseudo-package; neither has an archive file
@@ -283,45 +356,12 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 			// Already have this import
 			continue
 		}
-
-		restore, err := ip.enterNestedResolution(importPath)
-		if err != nil {
-			return err
-		}
-		// Resolve package archive location, passing build flags to match the current build context
-		buildFlags := append(util.GetBuildFlags(), pgoFlags...)
-		archives, err := pkgload.ResolveExportFiles(ctx, importPath, buildFlags...)
-		restore()
-		if err != nil {
-			return ex.Wrapf(err, "resolving %q", importPath)
-		}
-
-		for pkg, archive := range archives {
-			if _, exists := ip.importConfig.PackageFile[pkg]; !exists {
-				ip.Debug("Adding import to importcfg", "package", pkg, "archive", archive)
-				ip.importConfig.PackageFile[pkg] = archive
-				updated = true
-			}
-		}
+		missing = append(missing, importPath)
 	}
 
-	if !updated {
-		return nil
-	}
-
-	if err := ip.importConfig.WriteFile(ip.importConfigPath); err != nil {
-		return err
-	}
-
-	ip.Info("Updated importcfg", "path", ip.importConfigPath)
-
-	// Track added imports for the link phase
-	if err := trackAddedImports(ip.importConfig.PackageFile); err != nil {
-		ip.Warn("failed to track added imports for link phase", "error", err)
-		// Non-fatal: link phase may still work if imports were already present
-	}
-
-	return nil
+	missing = slices.Clip(missing)
+	slices.Sort(missing)
+	return missing
 }
 
 // pgoBuildFlags returns the -pgo flag that makes a nested go list compile the
@@ -458,7 +498,13 @@ func trackAddedImports(packages map[string]string) error {
 	// Write to process-specific file (no locking needed)
 	filePath := util.GetAddedImportsFileForProcess()
 
-	data, err := json.MarshalIndent(packages, "", "  ")
+	merged := make(map[string]string, len(packages))
+	if data, readErr := os.ReadFile(filePath); readErr == nil {
+		_ = json.Unmarshal(data, &merged)
+	}
+	maps.Copy(merged, packages)
+
+	data, err := json.MarshalIndent(merged, "", "  ")
 	if err != nil {
 		return ex.Wrapf(err, "marshaling added imports")
 	}
@@ -495,7 +541,7 @@ func addedImportFiles() ([]string, error) {
 	return files, nil
 }
 
-// CleanupImportTrackingFiles removes import tracking files from previous builds.
+// CleanupImportTrackingFiles removes import tracking files and probe WORK directories from previous builds.
 // Should be called at the start of a new build to clean up stale files from prior runs.
 // This is exported for use by the setup phase.
 func CleanupImportTrackingFiles() {
@@ -507,6 +553,7 @@ func CleanupImportTrackingFiles() {
 	for _, file := range files {
 		_ = os.Remove(file) // Best effort cleanup
 	}
+	CleanupProbeWorkDirs()
 }
 
 // CleanupDebugArtifacts removes debug artifacts from previous builds.
@@ -662,7 +709,7 @@ func resolveRuleAddedImports(ctx context.Context, linkArgs []string, linkConfig 
 	// the chains the compile accepted, so a link that still exhausts the
 	// loop follows a chain no compile accepted.
 	for range maxResolutionChain + 1 {
-		pass, passErr := resolveRuleAddedImportsPass(ctx, ruleImports, buildFlags, linkConfig)
+		pass, passErr := resolveRuleAddedImportsPass(ctx, linkArgs, ruleImports, buildFlags, linkConfig)
 		if passErr != nil {
 			return updated, passErr
 		}
@@ -684,6 +731,7 @@ func resolveRuleAddedImports(ctx context.Context, linkArgs []string, linkConfig 
 // and the add_file source parses again.
 func resolveRuleAddedImportsPass(
 	ctx context.Context,
+	linkArgs []string,
 	ruleImports *linkRuleImports,
 	buildFlags []string,
 	linkConfig *imports.ImportConfig,
@@ -710,7 +758,12 @@ func resolveRuleAddedImportsPass(
 	// Sorting keeps the go list output and the importcfg edits stable.
 	slices.Sort(missing)
 
-	archives, failed, err := pkgload.ResolveExportFilesBatch(ctx, missing, buildFlags...)
+	toolPath := ""
+	if len(linkArgs) > 0 {
+		toolPath = linkArgs[0]
+	}
+
+	_, linkArchives, failed, err := resolvePackageArchives(ctx, toolPath, missing, buildFlags)
 	if err != nil {
 		return false, err
 	}
@@ -724,7 +777,7 @@ func resolveRuleAddedImportsPass(
 	}
 
 	var updated bool
-	for pkg, archive := range archives {
+	for pkg, archive := range linkArchives {
 		if _, exists := linkConfig.PackageFile[pkg]; exists {
 			continue
 		}
