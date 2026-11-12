@@ -6,6 +6,7 @@
 - [Enabling Debug Output](#enabling-debug-output)
 - [Inspecting Build Artifacts](#inspecting-build-artifacts)
 - [Common Errors](#common-errors)
+- [Duplicate Spans with `otelhttp`, `otelgin` and `otelgrpc`](#duplicate-spans-with-otelhttp-otelgin-and-otelgrpc)
 - [Hook and Instrumentation Limitations](#hook-and-instrumentation-limitations)
 - [Getting Help](#getting-help)
 
@@ -270,6 +271,40 @@ Errors from `pkgload` (for example, `"failed to resolve package name for ..."` o
 `"no packages found for ..."`) mean `otelc` could not load a Go package during setup. These
 are fatal. Common causes: the package is not in the module graph, the module is not
 downloaded, or the module proxy is unreachable. Run `go mod download` and try again.
+
+## Duplicate Spans with `otelhttp`, `otelgin` and `otelgrpc`
+
+An application can use wrappers from
+[opentelemetry-go-contrib](https://github.com/open-telemetry/opentelemetry-go-contrib) and also
+be built with `otelc`. Both layers can then record the same request. The result depends on the
+path:
+
+| Path | Result |
+| --- | --- |
+| `http.Client` with `otelhttp.NewTransport` over `*http.Transport` | One CLIENT span. `otelhttp` owns the span. `otelc` steps aside when the request context carries a live `otelhttp` client span. |
+| `net/http` server with `otelhttp.NewHandler`, or gin with `otelgin.Middleware` | Two SERVER spans per request. `otelc` starts its span at the outer `net/http` layer, outside the app handler. The wrapper starts a second SERVER span inside it. |
+| gRPC server or client with `otelgrpc` stats handlers | Two SERVER spans or two CLIENT spans per hop. Both are exported. On the client, `otelc`'s span is the parent of `otelgrpc`'s span. On the server, the two spans nest like the HTTP server spans. |
+
+On the server side, for HTTP and gRPC, the two SERVER spans nest differently. Without an
+incoming `traceparent`, the wrapper's span is a child of `otelc`'s span. With an incoming
+`traceparent` in the HTTP headers or the gRPC metadata, the wrapper extracts it again and starts
+its span from the remote parent. The two spans are then siblings.
+
+For the server paths and gRPC, do one of the following to get one span per hop:
+
+1. Remove the contrib wrapper and rely on `otelc` for that path.
+2. Disable `otelc` for that protocol with `OTEL_GO_DISABLED_INSTRUMENTATIONS`. The `net/http`
+   client and server instrumentation share the key `nethttp`, and gRPC uses `grpc`. Each
+   key covers the client and the server side, so it also disables `otelc` for calls that the
+   wrapper does not cover. See
+   [Runtime selection without rebuilding](configuration.md#runtime-selection-without-rebuilding).
+
+Disabling the `gin` key does not remove a span. The gin instrumentation does not start a span.
+It only adds the route and any gin errors to the `net/http` server span.
+
+The `net/http` server hook and the gRPC hooks have no step-aside logic yet.
+[Issue #1695](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/1695)
+tracks the open design question.
 
 ## Hook and Instrumentation Limitations
 
