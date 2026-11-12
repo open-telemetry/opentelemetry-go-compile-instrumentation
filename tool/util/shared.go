@@ -44,11 +44,11 @@ const (
 	EnvOtelcNestedResolving = "OTELC_NESTED_RESOLVING"
 	BuildTempDir            = ".otelc-build"
 	BuildLockFile           = BuildTempDir + ".lock"
-	OtelcRoot         = "go.opentelemetry.io/otelc"
-	OtelcPkgRoot      = OtelcRoot + "/pkg"
-	OtelcInstRoot     = OtelcRoot + "/instrumentation"
-	OtelcToolCmdRoot  = OtelcRoot + "/tool/cmd/otelc"
-	OtelcToolExe      = "otelc"
+	OtelcRoot               = "go.opentelemetry.io/otelc"
+	OtelcPkgRoot            = OtelcRoot + "/pkg"
+	OtelcInstRoot           = OtelcRoot + "/instrumentation"
+	OtelcToolCmdRoot        = OtelcRoot + "/tool/cmd/otelc"
+	OtelcToolExe            = "otelc"
 	// InternalPath is a sentinel Path value for compiler-internal rules and
 	// synthetic files (e.g. runtime GLS context propagation) injected directly
 	// by otelc rather than loaded from an external Go package.

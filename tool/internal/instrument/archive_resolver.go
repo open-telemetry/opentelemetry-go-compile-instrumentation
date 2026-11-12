@@ -226,11 +226,10 @@ func computeConfigHash(toolPath string, buildFlags []string) string {
 		writeHashField(h, "gobin_stat", fmt.Sprintf("%d:%d", fi.Size(), fi.ModTime().UnixNano()))
 	}
 
-	writeHashField(h, "tool", toolPath)
 	if toolPath != "" {
-		if fi, err := os.Stat(toolPath); err == nil {
-			writeHashField(h, "tool_stat", fmt.Sprintf("%d:%d", fi.Size(), fi.ModTime().UnixNano()))
-		}
+		// toolPath may be cmd/compile during compilation or cmd/link during linking.
+		// Use the containing toolchain directory so compiler and linker share the same cache identity.
+		writeHashField(h, "tooldir", filepath.Dir(toolPath))
 	}
 
 	goos := os.Getenv("GOOS")
@@ -453,6 +452,9 @@ func parseActionConfigs(
 		}
 	}
 	slices.Sort(actionDirs)
+	if idx := slices.Index(actionDirs, "b001"); idx > 0 {
+		actionDirs = append([]string{"b001"}, append(actionDirs[:idx], actionDirs[idx+1:]...)...)
+	}
 
 	for _, name := range actionDirs {
 		parseActionDir(filepath.Join(workDir, name), workDir, compileArchives, linkArchives)

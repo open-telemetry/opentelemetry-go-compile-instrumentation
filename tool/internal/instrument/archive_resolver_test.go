@@ -418,6 +418,38 @@ func TestComputeConfigHash(t *testing.T) {
 	assert.NotEqual(t, hashAMD64v3, hashAMD64v1, "different architecture feature levels must produce different hash")
 }
 
+func TestComputeConfigHash_CompilerAndLinkerIdentical(t *testing.T) {
+	tempDir := t.TempDir()
+	toolDir := filepath.Join(tempDir, "pkg", "tool", runtime.GOOS+"_"+runtime.GOARCH)
+	binDir := filepath.Join(tempDir, "bin")
+	require.NoError(t, os.MkdirAll(toolDir, 0o755))
+	require.NoError(t, os.MkdirAll(binDir, 0o755))
+
+	var exeSuffix string
+	if runtime.GOOS == "windows" {
+		exeSuffix = ".exe"
+	}
+
+	compileTool := filepath.Join(toolDir, "compile"+exeSuffix)
+	linkTool := filepath.Join(toolDir, "link"+exeSuffix)
+	goBin := filepath.Join(binDir, "go"+exeSuffix)
+
+	require.NoError(t, os.WriteFile(compileTool, []byte("mock-compile"), 0o755))
+	require.NoError(t, os.WriteFile(linkTool, []byte("mock-link"), 0o755))
+	require.NoError(t, os.WriteFile(goBin, []byte("mock-go"), 0o755))
+
+	flags := []string{"-tags", "foo"}
+	compileHash := computeConfigHash(compileTool, flags)
+	linkHash := computeConfigHash(linkTool, flags)
+
+	assert.Equal(
+		t,
+		compileHash,
+		linkHash,
+		"compiler and linker in the same toolchain must share the same config hash so linker can hit compiler cache",
+	)
+}
+
 func TestIsInternalPackage(t *testing.T) {
 	tests := []struct {
 		pkg      string
