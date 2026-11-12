@@ -286,7 +286,7 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 
 	restores := make([]func(), 0, len(missing))
 	defer func() {
-		for _, restore := range restores {
+		for _, restore := range slices.Backward(restores) {
 			restore()
 		}
 	}()
@@ -345,6 +345,7 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 
 // missingImports filters newImports for packages not already in importConfig and not built-in.
 func (ip *instrumentPhase) missingImports(newImports map[string]string) []string {
+	seen := make(map[string]bool, len(newImports))
 	missing := make([]string, 0, len(newImports))
 	for _, importPath := range newImports {
 		if importPath == unsafePackageName || importPath == "C" {
@@ -356,10 +357,12 @@ func (ip *instrumentPhase) missingImports(newImports map[string]string) []string
 			// Already have this import
 			continue
 		}
-		missing = append(missing, importPath)
+		if !seen[importPath] {
+			seen[importPath] = true
+			missing = append(missing, importPath)
+		}
 	}
 
-	missing = slices.Clip(missing)
 	slices.Sort(missing)
 	return missing
 }

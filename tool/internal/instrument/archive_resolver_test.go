@@ -4,8 +4,11 @@
 package instrument
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -119,26 +122,46 @@ func TestCollectArchivesFromWorkDir(t *testing.T) {
 		require.NoError(t, os.MkdirAll(b002Dir, 0o755))
 		require.NoError(t, os.MkdirAll(exportDir, 0o755))
 
+		cachedFile := filepath.Join(workDir, "cached-d")
+		require.NoError(t, os.WriteFile(cachedFile, []byte("cached"), 0o644))
+
 		linkerArchive := filepath.Join(b002Dir, "_pkg_.a")
 		require.NoError(t, os.WriteFile(linkerArchive, []byte("archive"), 0o644))
 
-		b001Cfg := "packagefile example.com/cached=/cache/ab/123-d\n" +
+		b001Cfg := "packagefile example.com/cached=" + cachedFile + "\n" +
 			"packagefile example.com/fresh=" + filepath.Join(exportDir, "b002.a") + "\n"
 		require.NoError(t, os.WriteFile(filepath.Join(b001Dir, "importcfg"), []byte(b001Cfg), 0o644))
 
-		b002Cfg := "packagefile example.com/dep=/cache/cd/456-d\n"
+		b002Cfg := "packagefile example.com/dep=" + cachedFile + "\n"
 		require.NoError(t, os.WriteFile(filepath.Join(b002Dir, "importcfg"), []byte(b002Cfg), 0o644))
 
 		compileArchives, linkArchives, err := collectArchivesFromWorkDir(workDir)
 		require.NoError(t, err)
 
-		assert.Equal(t, "/cache/ab/123-d", compileArchives["example.com/cached"])
+		assert.Equal(t, cachedFile, compileArchives["example.com/cached"])
 		assert.Equal(t, filepath.Join(exportDir, "b002.a"), compileArchives["example.com/fresh"])
-		assert.Equal(t, "/cache/cd/456-d", compileArchives["example.com/dep"])
+		assert.Equal(t, cachedFile, compileArchives["example.com/dep"])
 
-		assert.Equal(t, "/cache/ab/123-d", linkArchives["example.com/cached"])
+		assert.Equal(t, cachedFile, linkArchives["example.com/cached"])
 		assert.Equal(t, linkerArchive, linkArchives["example.com/fresh"])
-		assert.Equal(t, "/cache/cd/456-d", linkArchives["example.com/dep"])
+		assert.Equal(t, cachedFile, linkArchives["example.com/dep"])
+	})
+
+	t.Run("collects linker archives from importcfg.link when present", func(t *testing.T) {
+		workDir := t.TempDir()
+		b001Dir := filepath.Join(workDir, "b001")
+		require.NoError(t, os.MkdirAll(b001Dir, 0o755))
+
+		linkCfg := "packagefile example.com/pkg=/link/path/pkg.a\n"
+		require.NoError(t, os.WriteFile(filepath.Join(b001Dir, "importcfg.link"), []byte(linkCfg), 0o644))
+
+		compCfg := "packagefile example.com/pkg=/comp/path/pkg.a\n"
+		require.NoError(t, os.WriteFile(filepath.Join(b001Dir, "importcfg"), []byte(compCfg), 0o644))
+
+		compileArchives, linkArchives, err := collectArchivesFromWorkDir(workDir)
+		require.NoError(t, err)
+		assert.Equal(t, "/comp/path/pkg.a", compileArchives["example.com/pkg"])
+		assert.Equal(t, "/link/path/pkg.a", linkArchives["example.com/pkg"])
 	})
 
 	t.Run("fails on non-existent work dir", func(t *testing.T) {
@@ -158,58 +181,164 @@ func TestArchiveCache_LoadSave(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, tempDir)
 
-	cache, err := loadArchiveCache()
-	require.NoError(t, err)
+	CleanupProbeWorkDirs()
+
+	// Create dummy artifact files on disk to satisfy validity checks
+	aComp := filepath.Join(tempDir, "a.a")
+	aLink := filepath.Join(tempDir, "a_pkg.a")
+	bComp := filepath.Join(tempDir, "b.a")
+	bLink := filepath.Join(tempDir, "b_pkg.a")
+	require.NoError(t, os.WriteFile(aComp, []byte("a"), 0o644))
+	require.NoError(t, os.WriteFile(aLink, []byte("a"), 0o644))
+	require.NoError(t, os.WriteFile(bComp, []byte("b"), 0o644))
+	require.NoError(t, os.WriteFile(bLink, []byte("b"), 0o644))
+
+	cache := loadArchiveCache()
 	assert.Empty(t, cache.Compile)
 	assert.Empty(t, cache.Link)
 
-	err = saveArchiveCache(
-		map[string]string{"pkg/a": "a.a"},
-		map[string]string{"pkg/a": "a_pkg.a"},
+	saveArchiveCache(
+		map[string]string{"pkg/a": aComp},
+		map[string]string{"pkg/a": aLink},
 	)
-	require.NoError(t, err)
 
-	loaded, err := loadArchiveCache()
-	require.NoError(t, err)
-	assert.Equal(t, "a.a", loaded.Compile["pkg/a"])
-	assert.Equal(t, "a_pkg.a", loaded.Link["pkg/a"])
+	loaded := loadArchiveCache()
+	assert.Equal(t, aComp, loaded.Compile["pkg/a"])
+	assert.Equal(t, aLink, loaded.Link["pkg/a"])
 
-	err = saveArchiveCache(
-		map[string]string{"pkg/b": "b.a"},
-		map[string]string{"pkg/b": "b_pkg.a"},
+	saveArchiveCache(
+		map[string]string{"pkg/b": bComp},
+		map[string]string{"pkg/b": bLink},
 	)
-	require.NoError(t, err)
 
-	updated, err := loadArchiveCache()
-	require.NoError(t, err)
-	assert.Equal(t, "a.a", updated.Compile["pkg/a"])
-	assert.Equal(t, "b.a", updated.Compile["pkg/b"])
-	assert.Equal(t, "a_pkg.a", updated.Link["pkg/a"])
-	assert.Equal(t, "b_pkg.a", updated.Link["pkg/b"])
+	updated := loadArchiveCache()
+	assert.Equal(t, aComp, updated.Compile["pkg/a"])
+	assert.Equal(t, bComp, updated.Compile["pkg/b"])
+	assert.Equal(t, aLink, updated.Link["pkg/a"])
+	assert.Equal(t, bLink, updated.Link["pkg/b"])
+}
+
+func TestArchiveCache_PrunesMissingFiles(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tempDir)
+
+	CleanupProbeWorkDirs()
+
+	// Write cache with paths to nonexistent files
+	saveArchiveCache(
+		map[string]string{"pkg/missing": "/nonexistent/compile.a"},
+		map[string]string{"pkg/missing": "/nonexistent/link.a"},
+	)
+
+	// loadArchiveCache must prune nonexistent files
+	cache := loadArchiveCache()
+	assert.Empty(t, cache.Compile)
+	assert.Empty(t, cache.Link)
+}
+
+func TestArchiveCache_ConcurrentMultiProcessSimulation(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tempDir)
+
+	CleanupProbeWorkDirs()
+
+	const numProcesses = 10
+	var wg sync.WaitGroup
+
+	// Create real artifact files for each process
+	for i := range numProcesses {
+		pkgName := fmt.Sprintf("pkg/%d", i)
+		cFile := filepath.Join(tempDir, fmt.Sprintf("comp_%d.a", i))
+		lFile := filepath.Join(tempDir, fmt.Sprintf("link_%d.a", i))
+		require.NoError(t, os.WriteFile(cFile, []byte("c"), 0o644))
+		require.NoError(t, os.WriteFile(lFile, []byte("l"), 0o644))
+
+		wg.Add(1)
+		go func(pkg, c, l string) {
+			defer wg.Done()
+			saveArchiveCache(map[string]string{pkg: c}, map[string]string{pkg: l})
+		}(pkgName, cFile, lFile)
+	}
+
+	wg.Wait()
+
+	// loadArchiveCache must merge all distinct process records without losing any
+	cache := loadArchiveCache()
+	for i := range numProcesses {
+		pkgName := fmt.Sprintf("pkg/%d", i)
+		assert.NotEmpty(t, cache.Compile[pkgName], "package %s should be present in compile cache", pkgName)
+		assert.NotEmpty(t, cache.Link[pkgName], "package %s should be present in link cache", pkgName)
+	}
+}
+
+func TestArchiveCache_IgnoresMalformedJSON(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tempDir)
+
+	CleanupProbeWorkDirs()
+
+	cacheDir := filepath.Join(util.GetBuildTempDir(), resolvedArchivesDirName)
+	require.NoError(t, os.MkdirAll(cacheDir, 0o750))
+	badFile := filepath.Join(cacheDir, "probe_corrupt.json")
+	require.NoError(t, os.WriteFile(badFile, []byte("{ malformed json"), 0o600))
+
+	// Should not panic or error
+	cache := loadArchiveCache()
+	assert.Empty(t, cache.Compile)
 }
 
 func TestRecordAndCleanupProbeWorkDirs(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, tempDir)
 
-	dir1 := filepath.Join(tempDir, "work1")
-	dir2 := filepath.Join(tempDir, "work2")
-	require.NoError(t, os.MkdirAll(dir1, 0o755))
-	require.NoError(t, os.MkdirAll(dir2, 0o755))
+	workBase := filepath.Join(util.GetBuildTempDir(), probeWorkDirName)
+	cacheBase := filepath.Join(util.GetBuildTempDir(), resolvedArchivesDirName)
+	require.NoError(t, os.MkdirAll(workBase, 0o750))
+	require.NoError(t, os.MkdirAll(cacheBase, 0o750))
 
-	recordProbeWorkDir(dir1)
-	recordProbeWorkDir(dir2)
-
-	assert.True(t, util.PathExists(dir1))
-	assert.True(t, util.PathExists(dir2))
+	assert.True(t, util.PathExists(workBase))
+	assert.True(t, util.PathExists(cacheBase))
 
 	CleanupProbeWorkDirs()
 
-	assert.False(t, util.PathExists(dir1))
-	assert.False(t, util.PathExists(dir2))
+	assert.False(t, util.PathExists(workBase))
+	assert.False(t, util.PathExists(cacheBase))
+}
 
-	trackingFile := filepath.Join(util.GetBuildTempDir(), probeWorkDirsFileName)
-	assert.False(t, util.PathExists(trackingFile))
+func TestProbeEnv(t *testing.T) {
+	t.Setenv("GOTMPDIR", "/old/temp")
+	env := probeEnv("/new/temp")
+	gotTmpCount := 0
+	for _, kv := range env {
+		switch kv {
+		case "GOTMPDIR=/new/temp":
+			gotTmpCount++
+		case "GOTMPDIR=/old/temp":
+			t.Errorf("old GOTMPDIR was not removed")
+		}
+	}
+	assert.Equal(t, 1, gotTmpCount)
+}
+
+func TestIsInternalPackage(t *testing.T) {
+	tests := []struct {
+		pkg      string
+		expected bool
+	}{
+		{"internal", true},
+		{"internal/foo", true},
+		{"example.com/lib/internal/bar", true},
+		{"example.com/lib/internal", true},
+		{"example.com/internalizing", false},
+		{"example.com/lib/notinternal/foo", false},
+		{"fmt", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.pkg, func(t *testing.T) {
+			assert.Equal(t, tt.expected, isInternalPackage(tt.pkg))
+		})
+	}
 }
 
 func TestResolvePackageArchives_GoLess128(t *testing.T) {
@@ -230,4 +359,28 @@ func TestResolvePackageArchives_GoLess128(t *testing.T) {
 		assert.NotEmpty(t, compile["fmt"])
 		assert.Equal(t, compile["fmt"], link["fmt"])
 	})
+}
+
+func TestNestedResolutionLIFORestoration(t *testing.T) {
+	t.Setenv(util.EnvOtelcNestedResolving, "initial_val")
+
+	ip := &instrumentPhase{
+		compileArgs: []string{"compile", "-p", "example.com/testpkg"},
+	}
+
+	r1, err1 := ip.enterNestedResolution("example.com/dep1")
+	require.NoError(t, err1)
+	assert.Contains(t, os.Getenv(util.EnvOtelcNestedResolving), "dep1")
+
+	r2, err2 := ip.enterNestedResolution("example.com/dep2")
+	require.NoError(t, err2)
+	assert.Contains(t, os.Getenv(util.EnvOtelcNestedResolving), "dep2")
+
+	// Execute restores in LIFO order
+	restores := []func(){r1, r2}
+	for _, restore := range slices.Backward(restores) {
+		restore()
+	}
+
+	assert.Equal(t, "initial_val", os.Getenv(util.EnvOtelcNestedResolving))
 }
