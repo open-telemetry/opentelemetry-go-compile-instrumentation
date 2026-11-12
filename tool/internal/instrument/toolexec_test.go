@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/imports"
+	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/internal/session"
 	"go.opentelemetry.io/otelc/tool/util"
@@ -2200,7 +2201,8 @@ func linkToolPath() string {
 type countingResolver struct {
 	dir string
 	bad map[string]bool
-	// transient roots fail with an error go list may not repeat.
+	// transient roots fail the way a nested compile does: a ListError that
+	// go list may not repeat.
 	transient map[string]bool
 	deps      []string
 	calls     int
@@ -2216,11 +2218,19 @@ func (c *countingResolver) resolve(
 	failed := make(map[string]error)
 	for _, root := range roots {
 		if c.bad[root] {
-			failed[root] = packages.Error{Msg: "cannot find package " + root, Kind: packages.ListError}
+			failed[root] = packages.Error{
+				Msg:  "no required module provides package " + root + "; to add it:\n\tgo get " + root,
+				Kind: packages.ListError,
+			}
 			continue
 		}
 		if c.transient[root] {
-			failed[root] = errors.New("compile of " + root + " left no export file")
+			// go/packages reports a failed nested compile as a ListError,
+			// the same kind as a missing package.
+			failed[root] = packages.Error{
+				Msg:  "# " + root + "\nflaky.go:3:12: undefined: x",
+				Kind: packages.ListError,
+			}
 			continue
 		}
 		archive := filepath.Join(c.dir, util.EscapePackagePath(root)+".a")
@@ -2526,4 +2536,49 @@ func TestCompileResolutionReResolvesStoredFailure(t *testing.T) {
 	t.Setenv(util.EnvOtelcNestedResolving, "")
 	require.NoError(t, compile(t))
 	assert.Equal(t, 1, calls, "a stored failure must be resolved again, not reused")
+}
+
+// TestDeterministicLoadFailure pins which failures the memo stores, using
+// the messages go list really reports. Compiler errors arrive as ListErrors
+// too, so the kind alone must not decide.
+func TestDeterministicLoadFailure(t *testing.T) {
+	listErr := func(msg string) error { return packages.Error{Msg: msg, Kind: packages.ListError} }
+	for _, tt := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"missing module package", listErr("no required module provides package example.invalid/zzz; to add it:\n\tgo get example.invalid/zzz"), true},
+		{"not in std", listErr("package fmtx is not in std (/usr/local/go/src/fmtx)"), true},
+		{"build constraints", listErr("package example.com/p/ex: build constraints exclude all Go files in /tmp/p/ex"), true},
+		{"no export file", errors.New(`package "unsafe" has no export file`), true},
+		{"compiler error", listErr("# example.com/p/broken\nbroken/b.go:3:12: undefined: x"), false},
+		{"invalid compiler flag", listErr("# example.com/p\nflag provided but not defined: -otelc-review-invalid-flag"), false},
+		{"other error", errors.New("signal: killed"), false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, deterministicLoadFailure(tt.err))
+		})
+	}
+}
+
+// TestDeterministicLoadFailureOnRealGoList runs the real go list behind the
+// link's resolution: a package that does not exist is stored, a package
+// whose compile fails is not.
+func TestDeterministicLoadFailureOnRealGoList(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/p\n\ngo 1.25\n"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "broken"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "broken", "b.go"),
+		[]byte("package broken\n\nfunc f() { x }\n"), 0o644))
+
+	_, failed, err := pkgload.ResolveExportClosures(t.Context(),
+		[]string{"example.com/p/broken", "example.com/p/missing"}, "-C", dir)
+	require.NoError(t, err)
+	require.Contains(t, failed, "example.com/p/broken")
+	require.Contains(t, failed, "example.com/p/missing")
+	assert.False(t, deterministicLoadFailure(failed["example.com/p/broken"]),
+		"a compile failure must be retried: %v", failed["example.com/p/broken"])
+	assert.True(t, deterministicLoadFailure(failed["example.com/p/missing"]),
+		"a missing package must be stored: %v", failed["example.com/p/missing"])
 }

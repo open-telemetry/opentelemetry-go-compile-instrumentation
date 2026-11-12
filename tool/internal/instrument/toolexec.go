@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/dave/dst"
-	"golang.org/x/tools/go/packages"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
@@ -865,14 +864,38 @@ func (lr *linkResolution) lookup(
 }
 
 // deterministicLoadFailure reports whether a root's load failure is one go
-// list reports the same way for the rest of the session: an error listing
-// the package, such as a path no module provides or build constraints that
-// exclude every file. Only those are stored in the memo. Any other failure,
-// such as a compile error that left no export file, may not repeat, so a
-// later link resolves the root again; the current link still skips it.
+// list reports the same way for the rest of the session: the package does not
+// exist, or no file of it builds for this target. Only those are stored in the
+// memo. Any other failure, compiler errors included, may not repeat, so a later
+// link resolves the root again; the current link still skips it.
+//
+// The error kind cannot tell the two apart: go/packages reports a failed
+// nested compile as a ListError too, the same kind as a missing package. The
+// messages cmd/go and pkgload use for the deterministic cases can.
 func deterministicLoadFailure(err error) bool {
-	pkgErr, ok := errors.AsType[packages.Error](err)
-	return ok && pkgErr.Kind == packages.ListError
+	msg := err.Error()
+	for _, pattern := range deterministicFailurePatterns() {
+		if strings.Contains(msg, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// deterministicFailurePatterns are the messages of the failures
+// deterministicLoadFailure stores.
+func deterministicFailurePatterns() []string {
+	return []string{
+		"no required module provides package",
+		"cannot find module providing package",
+		"cannot find package",
+		"is not in std",
+		"is not in GOROOT",
+		"malformed import path",
+		"build constraints exclude all Go files",
+		"no Go files in",
+		"has no export file",
+	}
 }
 
 // resolveMisses resolves the roots the memo could not answer with one nested
