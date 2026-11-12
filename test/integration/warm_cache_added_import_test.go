@@ -450,8 +450,16 @@ func assertNoteInliningPremise(t *testing.T, extraDir, profile string) {
 	}
 
 	const noteInline = "can inline Note"
-	assert.NotContains(t, build("-gcflags=-m=2", "."), noteInline,
-		"an unprofiled compile inlines Note, so profiled and unprofiled extra no longer differ and the warm subtest proves nothing")
-	assert.Contains(t, build("-pgo="+profile, "-gcflags=-m=2", "."), noteInline,
-		"a profiled compile no longer inlines Note, so profiled and unprofiled extra no longer differ and the warm subtest proves nothing")
+	assert.NotContains(
+		t,
+		build("-gcflags=-m=2", "."),
+		noteInline,
+		"an unprofiled compile inlines Note, so profiled and unprofiled extra no longer differ and the warm subtest proves nothing",
+	)
+	assert.Contains(
+		t,
+		build("-pgo="+profile, "-gcflags=-m=2", "."),
+		noteInline,
+		"a profiled compile no longer inlines Note, so profiled and unprofiled extra no longer differ and the warm subtest proves nothing",
+	)
 }
