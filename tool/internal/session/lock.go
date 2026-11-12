@@ -27,6 +27,7 @@ import (
 const (
 	lockRetryInterval    = 50 * time.Millisecond
 	maxLockRetryInterval = 800 * time.Millisecond
+	lockRetryGrowth      = 2
 )
 
 // pollBackoff paces the attempts of one wait. A failed attempt opens and
@@ -52,7 +53,7 @@ func (b *pollBackoff) wait(ctx context.Context) error {
 		return ctx.Err()
 	case <-timer.C:
 	}
-	b.delay = min(2*b.delay, maxLockRetryInterval)
+	b.delay = min(lockRetryGrowth*b.delay, maxLockRetryInterval)
 	b.polls++
 	return nil
 }

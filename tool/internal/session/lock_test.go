@@ -193,13 +193,14 @@ func TestSlotWaitBacksOff(t *testing.T) {
 
 func TestPollBackoffDoublesUpToTheCap(t *testing.T) {
 	b := &pollBackoff{delay: time.Millisecond}
-	var delays []time.Duration
-	for range 12 {
+	const attempts = 12
+	delays := make([]time.Duration, 0, attempts)
+	for range attempts {
 		delays = append(delays, b.delay)
 		require.NoError(t, b.wait(t.Context()))
 	}
 	for i := 1; i < len(delays); i++ {
 		assert.Equal(t, min(2*delays[i-1], maxLockRetryInterval), delays[i])
 	}
-	assert.Equal(t, 12, b.polls)
+	assert.Equal(t, attempts, b.polls)
 }
