@@ -2488,3 +2488,42 @@ func TestLinkResolutionRetriesTransientFailures(t *testing.T) {
 		"only the root that failed transiently is listed again")
 	assert.Contains(t, cfg.PackageFile, "example.com/flaky")
 }
+
+// TestCompileResolutionReResolvesStoredFailure covers the claim that lets a
+// compile skip the import-cycle check on a memo hit: only a successful
+// resolution counts as a hit. A stored failure is not one, so the compile
+// resolves the import again, with the cycle check in place.
+func TestCompileResolutionReResolvesStoredFailure(t *testing.T) {
+	setupLinkMemo(t)
+	session.Open(nil).Store("example.com/extra", nil, errors.New("cannot find package"))
+	archiveDir := t.TempDir()
+	calls := 0
+	compile := func(t *testing.T) error {
+		t.Helper()
+		cfgPath := filepath.Join(t.TempDir(), "importcfg")
+		require.NoError(t, os.WriteFile(cfgPath, []byte("packagefile context=/unused/context.a\n"), 0o644))
+		ip := &instrumentPhase{
+			logger:           slog.Default(),
+			importConfigPath: cfgPath,
+			importConfig:     imports.ImportConfig{PackageFile: map[string]string{"context": "/unused/context.a"}},
+			compileArgs:      []string{"compile", "-p", "example.com/app/dep"},
+			resolveAddedImport: func(_ context.Context, importPath string, _ ...string) (map[string]string, error) {
+				calls++
+				return map[string]string{importPath: resolverArchive(t, archiveDir, importPath)}, nil
+			},
+		}
+		return ip.updateImportConfig(t.Context(), map[string]string{"extra": "example.com/extra"})
+	}
+
+	// A chain in which example.com/extra already waits makes the import a
+	// cycle: the stored failure must not let the compile skip that check.
+	t.Setenv(util.EnvOtelcNestedResolving, "example.com/extra>example.com/app/dep")
+	err := compile(t)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "import cycle")
+	assert.Zero(t, calls)
+
+	t.Setenv(util.EnvOtelcNestedResolving, "")
+	require.NoError(t, compile(t))
+	assert.Equal(t, 1, calls, "a stored failure must be resolved again, not reused")
+}
