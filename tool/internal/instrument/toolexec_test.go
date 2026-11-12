@@ -1140,6 +1140,15 @@ func TestMarkedToolVersion(t *testing.T) {
 		assert.NotEqual(t, tagged, otherTag)
 	})
 
+	t.Run("embedded GLS change invalidates the rules hash", func(t *testing.T) {
+		content := []byte(`[{"module_path":"main"}]`)
+
+		base := rulesDigest(content, nil, []byte("gls-v1"), nil)
+		diffGLS := rulesDigest(content, nil, []byte("gls-v2"), nil)
+
+		assert.NotEqual(t, base, diffGLS)
+	})
+
 	t.Run("injected package hash changes the rules hash", func(t *testing.T) {
 		workDir := t.TempDir()
 		t.Setenv(util.EnvOtelcWorkDir, workDir)

@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	toolruntime "go.opentelemetry.io/otelc/tool/internal/runtime"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -409,4 +410,29 @@ func Helper() string {
 	assert.Contains(t, diffText, "=== rule: test_file_rule ===")
 	assert.Contains(t, diffText, "--- /dev/null")
 	assert.Contains(t, diffText, "+++ "+outPath)
+}
+
+func TestApplyFileRule_InternalFile(t *testing.T) {
+	workDir := t.TempDir()
+	ip := &instrumentPhase{
+		logger:  slog.New(slog.DiscardHandler),
+		workDir: workDir,
+	}
+
+	err := ip.applyFileRule(t.Context(), toolruntime.FileRule(), "runtime")
+	require.NoError(t, err)
+
+	outPath := filepath.Join(workDir, "otelc.runtime_gls.go")
+	require.FileExists(t, outPath)
+	assert.Contains(t, ip.compileArgs, outPath)
+
+	outData, err := os.ReadFile(outPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(outData), "package runtime")
+	assert.Contains(t, string(outData), "GetTraceContextFromGLS")
+
+	unknownRule := &rule.InstFileRule{File: "missing.go", Path: util.InternalPath}
+	err = ip.applyFileRule(t.Context(), unknownRule, "runtime")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown internal runtime file")
 }
