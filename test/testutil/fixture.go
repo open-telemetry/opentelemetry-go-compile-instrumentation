@@ -122,13 +122,11 @@ func (f *TestFixture) CollectorURL() string {
 }
 
 // Server represents a running server process.
-// Note: Cmd.Wait() is managed internally by Server; tests must not call Cmd.Wait() directly.
 type Server struct {
 	t        *testing.T
 	appPath  string
 	output   *AppOutput
 	stdin    io.WriteCloser
-	done     chan error
 	stopOnce sync.Once
 
 	*exec.Cmd
@@ -148,8 +146,13 @@ func (s *Server) Stop() {
 			_ = s.Cmd.Process.Signal(os.Interrupt)
 		}
 
+		done := make(chan error, 1)
+		go func() {
+			done <- s.Cmd.Wait()
+		}()
+
 		select {
-		case err := <-s.done:
+		case err := <-done:
 			if err != nil {
 				s.t.Fatalf("app %s exited with error: %v\napp output:\n%s", s.appPath, err, s.output)
 			}
@@ -159,7 +162,7 @@ func (s *Server) Stop() {
 				killErr = s.Cmd.Process.Kill()
 			}
 			select {
-			case <-s.done:
+			case <-done:
 				if killErr != nil && !errors.Is(killErr, os.ErrProcessDone) {
 					s.t.Fatalf("app %s timed out after %v waiting for graceful shutdown (kill error: %v)\napp output:\n%s",
 						s.appPath, defaultShutdownTimeout, killErr, s.output)
@@ -184,8 +187,12 @@ func (s *Server) cleanup() {
 		if s.Cmd.Process != nil {
 			killErr = s.Cmd.Process.Kill()
 		}
+		done := make(chan error, 1)
+		go func() {
+			done <- s.Cmd.Wait()
+		}()
 		select {
-		case <-s.done:
+		case <-done:
 		case <-time.After(5 * time.Second):
 			s.t.Logf("app %s process reaping did not complete during cleanup (kill error: %v)", s.appPath, killErr)
 		}

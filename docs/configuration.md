@@ -209,6 +209,7 @@ Background jobs and periodic health probes often generate high volumes of single
 #### Descendant Behavior and Non-Parent-Based Samplers
 
 When a root span is dropped by either filter:
+
 - The span becomes a non-recording span (`IsRecording() == false`, unsampled).
 - Any local child spans created inside the handler (such as database queries or internal spans executed during a `/healthz` probe) have an unsampled local parent and are also suppressed.
 - Descendant suppression holds even when a non-parent-based sampler such as `always_on` is configured via `OTEL_TRACES_SAMPLER=always_on`.

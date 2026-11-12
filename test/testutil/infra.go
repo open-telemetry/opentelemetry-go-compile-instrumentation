@@ -158,7 +158,6 @@ func hasStdinShutdown(args []string) bool {
 // is nil, the parent process env is used. Stdout and stderr are captured and
 // logged when the test fails, so that app crashes are visible in CI output.
 // The returned Server manages the process lifecycle and provides graceful shutdown via Stop.
-// Note: Cmd.Wait() is managed by Server; tests must not invoke Cmd.Wait() directly.
 func Start(t *testing.T, appsDir, app string, env []string, args ...string) *Server {
 	t.Helper()
 	appName := "./" + appBinName
@@ -188,18 +187,12 @@ func Start(t *testing.T, appsDir, app string, env []string, args ...string) *Ser
 
 	require.NoError(t, cmd.Start())
 
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
-
 	srv := &Server{
 		t:       t,
 		appPath: app,
 		output:  out,
 		stdin:   stdin,
 		Cmd:     cmd,
-		done:    done,
 	}
 	t.Cleanup(func() {
 		srv.cleanup()
