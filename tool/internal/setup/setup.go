@@ -609,7 +609,10 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Write the matched ruleset to matched.json for further instrument phase
-	return sp.store(matched)
+	if err = sp.store(matched); err != nil {
+		return err
+	}
+	return sp.storeInjectedHash(ctx, matched)
 }
 
 // warnIfNoInstrumentationMatched reports the combined result. An individual

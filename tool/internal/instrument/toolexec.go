@@ -1072,7 +1072,7 @@ func toolVersionLine(line, rulesHash string) string {
 	return line + " " + marker
 }
 
-func rulesDigest(content []byte, tags []string, glsSource []byte) string {
+func rulesDigest(content []byte, tags []string, glsSource, injectedHash []byte) string {
 	// Build tags decide which add_file rule files apply, so a tagged build
 	// must not reuse artifacts compiled without those tags.
 	if len(tags) > 0 {
@@ -1083,6 +1083,14 @@ func rulesDigest(content []byte, tags []string, glsSource []byte) string {
 	// hash so edits to it still invalidate the build cache.
 	glsSum := sha256.Sum256(glsSource)
 	content = append(content, "\ngls="+hex.EncodeToString(glsSum[:])...)
+	// go never sees the packages rules add, so their hash stands in. The
+	// tool ID is shared by every compile, so an edit to one injected
+	// package rebuilds the whole instrumented build, not only the
+	// packages that import it. Missing an edit would put stale code in
+	// the binary, so the coarser invalidation is the accepted cost.
+	if len(injectedHash) > 0 {
+		content = append(content, "\ninjected="+string(injectedHash)...)
+	}
 	sum := sha256.Sum256(content)
 	return hex.EncodeToString(sum[:8])
 }
@@ -1093,7 +1101,8 @@ func rulesDigest(content []byte, tags []string, glsSource []byte) string {
 func markedToolVersion(rawOutput string) string {
 	var rulesHash string
 	if content, err := os.ReadFile(util.GetMatchedRuleFile()); err == nil {
-		rulesHash = rulesDigest(content, util.ActiveBuildTags(), toolruntime.RuntimeGLSSource)
+		injected, _ := os.ReadFile(util.GetInjectedHashFile())
+		rulesHash = rulesDigest(content, util.ActiveBuildTags(), toolruntime.RuntimeGLSSource, injected)
 	}
 	return toolVersionLine(strings.TrimSpace(rawOutput), rulesHash)
 }
