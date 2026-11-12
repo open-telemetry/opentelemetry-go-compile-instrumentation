@@ -164,12 +164,19 @@ func (m *Memo) Store(root string, closure map[string]string, failure error) {
 	}
 }
 
-// Lock takes the memo's single-flight lock for this scope, so concurrent
+// Lock takes the memo's single-flight lock for this scope and build flags, so concurrent
 // links resolve a miss once and the others read the result. Callers re-check
 // the memo after taking it. The wait has no deadline; ctx cancels it.
 func (m *Memo) Lock(ctx context.Context) (func(), error) {
 	if m == nil {
 		return func() {}, nil
 	}
-	return lockPath(ctx, filepath.Join(m.dir, m.scope[:min(len(m.scope), maxLockNameLen)]+".lock"), nil)
+	return lockPath(ctx, m.lockPath(), nil)
+}
+
+// lockPath names the single-flight lock after the scope and the flags
+// digest, the same key the entries use, so links with other build flags
+// never wait on each other.
+func (m *Memo) lockPath() string {
+	return filepath.Join(m.dir, m.scope[:min(len(m.scope), maxLockNameLen)]+"-"+m.flags+".lock")
 }

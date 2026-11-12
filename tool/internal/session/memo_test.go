@@ -279,3 +279,23 @@ func TestMemoSeparatesBuildEnvironments(t *testing.T) {
 	_, _, ok = Open(nil).Lookup("example.com/a", nil)
 	assert.False(t, ok, "another GOOS must not reuse the entry")
 }
+
+func TestMemoLockIsPerScopeAndFlags(t *testing.T) {
+	setupSession(t)
+	release, err := Open([]string{"-tags=a"}).Lock(t.Context())
+	require.NoError(t, err)
+	defer release()
+
+	// Other build flags take another lock, so they do not wait.
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	other, err := Open([]string{"-tags=b"}).Lock(ctx)
+	require.NoError(t, err, "links with other build flags must not wait on each other")
+	other()
+
+	// The same flags share the lock.
+	short, cancelShort := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer cancelShort()
+	_, err = Open([]string{"-tags=a"}).Lock(short)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+}
