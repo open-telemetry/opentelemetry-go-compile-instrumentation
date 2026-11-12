@@ -194,15 +194,20 @@ func ResolveExportFilesBatch(
 	importPaths []string,
 	buildFlags ...string,
 ) (map[string]string, map[string]error, error) {
-	closures, failed, err := ResolveExportClosures(ctx, importPaths, buildFlags...)
+	res, err := loadExportClosures(ctx, importPaths, buildFlags...)
 	if err != nil {
 		return nil, nil, err
 	}
+	// The union keeps the error-free dependencies of a root that failed too,
+	// as it always has: they are resolved, only the root is not.
 	resolved := make(map[string]string)
-	for _, closure := range closures {
+	for _, closure := range res.closures {
 		maps.Copy(resolved, closure)
 	}
-	return resolved, failed, nil
+	for _, closure := range res.partial {
+		maps.Copy(resolved, closure)
+	}
+	return resolved, res.failed, nil
 }
 
 // ResolveExportClosures resolves several import paths with one packages.Load
@@ -217,17 +222,38 @@ func ResolveExportClosures(
 	importPaths []string,
 	buildFlags ...string,
 ) (map[string]map[string]string, map[string]error, error) {
+	res, err := loadExportClosures(ctx, importPaths, buildFlags...)
+	if err != nil {
+		return nil, nil, err
+	}
+	return res.closures, res.failed, nil
+}
+
+// exportClosures is the result of loadExportClosures.
+type exportClosures struct {
+	// closures holds the closure of every root that loaded cleanly.
+	closures map[string]map[string]string
+	// partial holds, for each requested root that failed, the closure of
+	// its error-free dependencies.
+	partial map[string]map[string]string
+	// failed holds the failure of each requested root that did not load.
+	failed map[string]error
+}
+
+// loadExportClosures is ResolveExportClosures that also returns the partial
+// closures of the requested roots that failed.
+func loadExportClosures(ctx context.Context, importPaths []string, buildFlags ...string) (*exportClosures, error) {
 	if len(importPaths) == 0 {
-		return map[string]map[string]string{}, nil, nil
+		return &exportClosures{closures: map[string]map[string]string{}}, nil
 	}
 
 	mode := packages.NeedName | packages.NeedImports | packages.NeedDeps | packages.NeedExportFile
 	pkgs, err := LoadPackages(ctx, mode, buildFlags, false, importPaths...)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if len(pkgs) == 0 {
-		return nil, nil, ex.Newf("no packages found for %v", importPaths)
+		return nil, ex.Newf("no packages found for %v", importPaths)
 	}
 
 	requested := make(map[string]bool, len(importPaths))
@@ -236,18 +262,9 @@ func ResolveExportClosures(
 	}
 
 	closures := make(map[string]map[string]string)
+	partial := make(map[string]map[string]string)
 	failed := make(map[string]error)
 	for _, pkg := range pkgs {
-		if requested[pkg.PkgPath] {
-			if len(pkg.Errors) > 0 {
-				failed[pkg.PkgPath] = pkg.Errors[0]
-				continue
-			}
-			if pkg.ExportFile == "" {
-				failed[pkg.PkgPath] = ex.Newf("package %q has no export file", pkg.PkgPath)
-				continue
-			}
-		}
 		// A root a pattern expanded to was not requested by path: it still
 		// contributes its closure, but never counts as a failure.
 		closure := make(map[string]string)
@@ -256,9 +273,18 @@ func ResolveExportClosures(
 				closure[p.PkgPath] = p.ExportFile
 			}
 		})
-		closures[pkg.PkgPath] = closure
+		switch {
+		case requested[pkg.PkgPath] && len(pkg.Errors) > 0:
+			failed[pkg.PkgPath] = pkg.Errors[0]
+			partial[pkg.PkgPath] = closure
+		case requested[pkg.PkgPath] && pkg.ExportFile == "":
+			failed[pkg.PkgPath] = ex.Newf("package %q has no export file", pkg.PkgPath)
+			partial[pkg.PkgPath] = closure
+		default:
+			closures[pkg.PkgPath] = closure
+		}
 	}
-	return closures, failed, nil
+	return &exportClosures{closures: closures, partial: partial, failed: failed}, nil
 }
 
 // CollectPackageNames walks pkgs and their transitive imports, mapping

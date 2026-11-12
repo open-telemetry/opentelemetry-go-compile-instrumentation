@@ -811,3 +811,26 @@ func TestResolveExportClosures_PerRootClosures(t *testing.T) {
 	}
 	assert.Equal(t, union, merged)
 }
+
+// TestResolveExportFilesBatch_KeepsDependenciesOfFailedRoot pins the union's
+// behavior for a root that fails to load: the root is reported as failed,
+// but its error-free dependencies still resolve. Per-root closures leave the
+// failed root out entirely.
+func TestResolveExportFilesBatch_KeepsDependenciesOfFailedRoot(t *testing.T) {
+	writeBatchFixture(t)
+	require.NoError(t, os.MkdirAll("broken", 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join("broken", "broken.go"), []byte(
+		"package broken\n\nimport (\n\t\"example.com/batch/b\"\n\t_ \"example.com/batch/missing\"\n)\n\nvar _ = b.B\n"), 0o644))
+
+	resolved, failed, err := ResolveExportFilesBatch(t.Context(), []string{"example.com/batch/broken"})
+	require.NoError(t, err)
+	require.Contains(t, failed, "example.com/batch/broken")
+	assert.NotContains(t, resolved, "example.com/batch/broken")
+	require.Contains(t, resolved, "example.com/batch/b", "a failed root's error-free dependency must still resolve")
+	assert.FileExists(t, resolved["example.com/batch/b"])
+
+	closures, failedRoots, err := ResolveExportClosures(t.Context(), []string{"example.com/batch/broken"})
+	require.NoError(t, err)
+	assert.Contains(t, failedRoots, "example.com/batch/broken")
+	assert.Empty(t, closures)
+}
