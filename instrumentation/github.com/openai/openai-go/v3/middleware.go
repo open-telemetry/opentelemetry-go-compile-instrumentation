@@ -138,14 +138,17 @@ func operationName(op operationType) string {
 // preserving the full stream for downstream consumers (the SDK or the HTTP
 // caller). truncated reports whether body held more than limit bytes; in that
 // case bodyBytes is nil so no caller can parse a cut-off prefix as JSON.
-func readBounded(body io.ReadCloser, limit int64) (bodyBytes []byte, truncated bool, reassembled io.ReadCloser, err error) {
+func readBounded(
+	body io.ReadCloser,
+	limit int64,
+) ([]byte, bool, io.ReadCloser, error) {
 	var buf bytes.Buffer
 	tee := io.TeeReader(body, &buf)
 	// Read one byte past the limit so a full body can be told apart from one
 	// that was cut short. That extra byte is still captured by the tee, so
 	// reassembled below reproduces the stream in full either way.
 	read, err := io.ReadAll(io.LimitReader(tee, limit+1))
-	reassembled = struct {
+	reassembled := struct {
 		io.Reader
 		io.Closer
 	}{io.MultiReader(&buf, body), body}
@@ -505,9 +508,10 @@ func parseChatResponse(body []byte, span trace.Span, captureContent bool) {
 			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 		Usage struct {
-			PromptTokens     int64 `json:"prompt_tokens"`
-			CompletionTokens int64 `json:"completion_tokens"`
-			TotalTokens      int64 `json:"total_tokens"`
+			PromptTokens        int64           `json:"prompt_tokens"`
+			CompletionTokens    int64           `json:"completion_tokens"`
+			TotalTokens         int64           `json:"total_tokens"`
+			PromptTokensDetails json.RawMessage `json:"prompt_tokens_details"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
@@ -532,6 +536,17 @@ func parseChatResponse(body []byte, span trace.Span, captureContent bool) {
 		otelsemconv.GenAIUsageOutputTokensKey.Int64(resp.Usage.CompletionTokens),
 		otelcconv.GenAIUsageTotalTokensKey.Int64(resp.Usage.TotalTokens),
 	)
+
+	// OpenAI serves part of the prompt from an automatic cache and reports the
+	// count under prompt_tokens_details. It is already included in
+	// prompt_tokens, so this is a breakdown of the input count and is never
+	// added to gen_ai.usage.input_tokens - unlike Anthropic, whose input_tokens
+	// excludes cache reads and therefore has to fold them back in. Recorded only
+	// when the request actually hit the cache, matching the Anthropic
+	// instrumentation.
+	if cached := cachedPromptTokens(resp.Usage.PromptTokensDetails); cached > 0 {
+		span.SetAttributes(otelcconv.GenAIUsageCacheReadInputTokensKey.Int64(cached))
+	}
 }
 
 func parseCompletionResponse(body []byte, span trace.Span, captureContent bool) {
@@ -542,9 +557,10 @@ func parseCompletionResponse(body []byte, span trace.Span, captureContent bool) 
 			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 		Usage struct {
-			PromptTokens     int64 `json:"prompt_tokens"`
-			CompletionTokens int64 `json:"completion_tokens"`
-			TotalTokens      int64 `json:"total_tokens"`
+			PromptTokens        int64           `json:"prompt_tokens"`
+			CompletionTokens    int64           `json:"completion_tokens"`
+			TotalTokens         int64           `json:"total_tokens"`
+			PromptTokensDetails json.RawMessage `json:"prompt_tokens_details"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
@@ -569,6 +585,31 @@ func parseCompletionResponse(body []byte, span trace.Span, captureContent bool) 
 		otelsemconv.GenAIUsageOutputTokensKey.Int64(resp.Usage.CompletionTokens),
 		otelcconv.GenAIUsageTotalTokensKey.Int64(resp.Usage.TotalTokens),
 	)
+
+	// OpenAI serves part of the prompt from an automatic cache and reports the
+	// count under prompt_tokens_details. It is already included in
+	// prompt_tokens, so this is a breakdown of the input count and is never
+	// added to gen_ai.usage.input_tokens - unlike Anthropic, whose input_tokens
+	// excludes cache reads and therefore has to fold them back in. Recorded only
+	// when the request actually hit the cache, matching the Anthropic
+	// instrumentation.
+	if cached := cachedPromptTokens(resp.Usage.PromptTokensDetails); cached > 0 {
+		span.SetAttributes(otelcconv.GenAIUsageCacheReadInputTokensKey.Int64(cached))
+	}
+}
+
+// cachedPromptTokens returns usage.prompt_tokens_details.cached_tokens, or 0
+// when the field is absent or malformed. It is decoded separately from the
+// rest of the response so that a malformed details object cannot drop the
+// other usage attributes along with it.
+func cachedPromptTokens(details json.RawMessage) int64 {
+	var d struct {
+		CachedTokens int64 `json:"cached_tokens"`
+	}
+	if len(details) == 0 || json.Unmarshal(details, &d) != nil {
+		return 0
+	}
+	return d.CachedTokens
 }
 
 func parseChatCompletions(body []byte) []string {

@@ -74,6 +74,12 @@ const (
 	// Stability: Development
 	//
 	// Examples: 1024
+	// Note: Always a subset of `gen_ai.usage.input_tokens`, never in addition to
+	// it. OpenAI already counts cached tokens inside `prompt_tokens`, so the
+	// openai-go instrumentation records them as reported. Anthropic reports cache
+	// reads outside its `input_tokens`, so the anthropic-sdk-go instrumentation
+	// adds them to `gen_ai.usage.input_tokens` as well. Recorded only when the
+	// request read from the cache.
 	GenAIUsageCacheReadInputTokensKey = attribute.Key("gen_ai.usage.cache_read.input_tokens")
 
 	// GenAIUsageTotalTokensKey is the attribute Key conforming to the

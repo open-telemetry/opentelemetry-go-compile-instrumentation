@@ -19,6 +19,7 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // fileRuleSourceImports returns the import paths declared in the source file of an InstFileRule.
@@ -79,7 +80,7 @@ func (sp *setupPhase) hookPackagePaths(matched []*rule.InstRuleSet) []string {
 	seen := make(map[string]bool)
 	paths := make([]string, 0)
 	add := func(path string) {
-		if path == "" || seen[path] {
+		if path == "" || path == util.InternalPath || seen[path] {
 			return
 		}
 		seen[path] = true
@@ -90,6 +91,9 @@ func (sp *setupPhase) hookPackagePaths(matched []*rule.InstRuleSet) []string {
 			add(r.Path)
 		}
 		for _, r := range m.FileRules {
+			if r.Path == util.InternalPath {
+				continue
+			}
 			add(r.Path)
 			srcImps, err := sp.fileRuleSourceImports(r)
 			if err != nil {

@@ -341,23 +341,35 @@ func (a app) reportMissingToken(files ghaction.Files) error {
 }
 
 // credentials chooses between the App token and the environment token. It
-// reads CLIENT_ID and PRIVATE_KEY and never prints the key. A variable that
-// the decision needs must be set, even if empty. The variables are read in
-// this order and the decision stops at the first one that rules out the App:
-// CLIENT_ID, PRIVATE_KEY. The App serves repository and fork branches.
+// reads REPO, HEAD_REPO_FULL, CLIENT_ID, and PRIVATE_KEY in this order and
+// stops at the first variable that rules out the App. A variable read before
+// the stop must be set, even if empty. The App serves a branch only when the
+// head repository equals REPO and both App credentials are set. Fork branches
+// use the environment token, because GitHub does not let an App write workflow
+// files to a fork. The key is never printed.
 func (a app) credentials(args []string) error {
 	if len(args) != 0 {
 		return errors.New("credentials takes no arguments")
 	}
-	useApp := true
-	for _, name := range []string{"CLIENT_ID", "PRIVATE_KEY"} {
-		value, set := a.lookup(name)
-		if !set {
-			return errors.New(name + " must be set")
-		}
-		if value == "" {
-			useApp = false
-			break
+	repo, set := a.lookup("REPO")
+	if !set {
+		return errors.New("REPO must be set")
+	}
+	headRepo, set := a.lookup("HEAD_REPO_FULL")
+	if !set {
+		return errors.New("HEAD_REPO_FULL must be set")
+	}
+	useApp := headRepo == repo
+	if useApp {
+		for _, name := range []string{"CLIENT_ID", "PRIVATE_KEY"} {
+			value, ok := a.lookup(name)
+			if !ok {
+				return errors.New(name + " must be set")
+			}
+			if value == "" {
+				useApp = false
+				break
+			}
 		}
 	}
 	return ghaction.FromEnv(a.getenv).SetOutput("use_app", strconv.FormatBool(useApp))
