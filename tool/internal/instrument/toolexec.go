@@ -1275,7 +1275,7 @@ func RulesDigest() string {
 	if err != nil {
 		return ""
 	}
-	content = withoutWorkDirPaths(content)
+	content = WithoutWorkDirPaths(content)
 	// Build tags decide which add_file rule files apply, so a tagged build
 	// must not reuse artifacts compiled without those tags.
 	if tags := util.ActiveBuildTags(); len(tags) > 0 {
@@ -1297,13 +1297,13 @@ func RulesDigest() string {
 // runtime sources in the rules digest.
 const runtimeDirPlaceholder = "<otelc-build>/runtime"
 
-// withoutWorkDirPaths replaces, in matched.json content, the absolute path of
+// WithoutWorkDirPaths replaces, in content such as matched.json, the absolute path of
 // the directory setup writes the runtime GLS source to with a fixed
 // placeholder. That source is embedded in otelc and identical in every work
 // dir, so builds with different --work-dir values keep one tool ID and share
 // the build cache. Both the raw and the JSON-escaped forms of the path are
 // replaced, since Windows paths are escaped in matched.json.
-func withoutWorkDirPaths(content []byte) []byte {
+func WithoutWorkDirPaths(content []byte) []byte {
 	dir := util.GetBuildTemp("runtime")
 	escaped, err := json.Marshal(dir)
 	if err == nil {

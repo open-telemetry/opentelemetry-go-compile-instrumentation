@@ -141,3 +141,35 @@ func TestRuntimeGLSDigestIsWorkDirIndependent(t *testing.T) {
 	assert.Equal(t, first.digest, second.digest,
 		"builds in different work dirs must report the same tool ID")
 }
+
+// TestRuntimeGLSInjectedHashIsWorkDirIndependent covers the injected package
+// hash, the other input of otelc's tool ID: the runtime GLS source it hashes
+// lives under the work dir, so the hash must name it without the work dir.
+// TestRuntimeGLSDigestIsWorkDirIndependent checks that its content matches.
+func TestRuntimeGLSInjectedHashIsWorkDirIndependent(t *testing.T) {
+	runtimeSrc := t.TempDir()
+	deps := []*Dependency{{
+		ImportPath: toolruntime.TargetRuntime,
+		Sources: []string{
+			filepath.Join(runtimeSrc, "runtime2.go"),
+			filepath.Join(runtimeSrc, "proc.go"),
+		},
+	}}
+	sp := &setupPhase{logger: slog.New(slog.DiscardHandler)}
+
+	hashIn := func(workDir string) (string, string) {
+		t.Helper()
+		t.Setenv(util.EnvOtelcWorkDir, workDir)
+		sets, err := matchRuntimeGLS(deps)
+		require.NoError(t, err)
+		hash, err := sp.injectedHash(t.Context(), sets)
+		require.NoError(t, err)
+		file := filepath.Join(util.GetBuildTemp("runtime"), toolruntime.GLSFileName)
+		return hash, string(instrument.WithoutWorkDirPaths([]byte(file)))
+	}
+
+	firstHash, firstName := hashIn(t.TempDir())
+	secondHash, secondName := hashIn(t.TempDir())
+	assert.Equal(t, firstName, secondName, "the hashed name must not depend on the work dir")
+	assert.Equal(t, firstHash, secondHash, "builds in different work dirs must get the same injected hash")
+}

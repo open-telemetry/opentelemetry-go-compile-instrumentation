@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/instrument"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
@@ -207,7 +208,7 @@ func (sp *setupPhase) injectedHash(ctx context.Context, matched []*rule.InstRule
 			// An add_file source is often excluded from its own package with
 			// //go:build ignore, so the package hash below does not cover it.
 			if r.ResolvedPath != "" && r.File != "" {
-				if err = hashFile(h, filepath.Join(r.ResolvedPath, r.File)); err != nil {
+				if err = hashFileAs(h, filepath.Join(r.ResolvedPath, r.File)); err != nil {
 					return "", err
 				}
 			}
@@ -318,12 +319,25 @@ func isStdPackage(pkg *packages.Package, goroot string) bool {
 
 // hashFile writes the path and the content hash of a file to w.
 func hashFile(w io.Writer, path string) error {
+	return hashFileNamed(w, path, path)
+}
+
+// hashFileAs is hashFile for an add_file source: a source setup generates
+// under the work dir, such as the runtime GLS file, is written under a name
+// that does not depend on the work dir. Its content is embedded in otelc and
+// identical in every work dir, so builds with different --work-dir values
+// keep one injected hash, one tool ID, and one build cache.
+func hashFileAs(w io.Writer, path string) error {
+	return hashFileNamed(w, path, string(instrument.WithoutWorkDirPaths([]byte(path))))
+}
+
+func hashFileNamed(w io.Writer, path, name string) error {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return ex.Wrapf(err, "reading %s", path)
 	}
 	sum := sha256.Sum256(content)
-	_, _ = fmt.Fprintf(w, "%s %x\n", path, sum)
+	_, _ = fmt.Fprintf(w, "%s %x\n", name, sum)
 	return nil
 }
 
