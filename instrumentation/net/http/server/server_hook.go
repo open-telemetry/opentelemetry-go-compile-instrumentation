@@ -7,6 +7,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -61,6 +62,15 @@ func (n netHttpServerEnabler) Enable() bool {
 
 var serverEnabler = netHttpServerEnabler{}
 
+// isOTelExporterRequest reports whether r is an OTLP/HTTP export from the
+// OpenTelemetry Go exporter. Those requests use a stable User-Agent prefix.
+func isOTelExporterRequest(r *http.Request) bool {
+	ua := r.Header.Get("User-Agent")
+	return strings.HasPrefix(ua, "OTel OTLP Exporter Go") ||
+		strings.HasPrefix(ua, "OTel Go OTLP") ||
+		strings.HasPrefix(ua, "OTel-Go-OTLP")
+}
+
 // hookData carries span state from BeforeServeHTTP to AfterServeHTTP. A typed
 // struct instead of SetKeyData's map[string]interface{} keeps the per-request
 // cost to a single small allocation with no map or string hashing.
@@ -72,6 +82,16 @@ type hookData struct {
 func BeforeServeHTTP(ictx hook.HookContext, recv interface{}, w http.ResponseWriter, r *http.Request) {
 	// This runs once per request; keep the disabled path free of logging.
 	if !serverEnabler.Enable() {
+		return
+	}
+
+	// The OTel OTLP exporter posts its own telemetry here when the endpoint
+	// points at this process. A server span for that request is exported
+	// again, so the loop never stops. The client hook skips the same agents.
+	if r != nil && isOTelExporterRequest(r) {
+		if debugEnabled() {
+			logger.Debug("Skipping OTel exporter request", "user_agent", r.Header.Get("User-Agent"))
+		}
 		return
 	}
 
