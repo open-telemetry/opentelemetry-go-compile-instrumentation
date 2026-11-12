@@ -648,3 +648,42 @@ func TestBeforeRoundTrip_SharedHeaderMapIsNotWritten(t *testing.T) {
 
 	assert.Equal(t, http.Header{"X-Shared": {"1"}}, shared)
 }
+
+// An ended otelhttp client span stays on the request context. otelhttp ends
+// that span when the response body is closed, and resp.Request still carries
+// the context. A later call must get an otelc span. IsRecording is false for
+// the ended span, so the hook does not treat it as an in-flight otelhttp call.
+func TestBeforeRoundTrip_EndedOtelhttpClientSpanStillTraces(t *testing.T) {
+	initOnce = *new(sync.Once)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+	sr, _ := setupTestTracer(t)
+
+	ctx, otelhttpSpan := otel.Tracer(otelhttpScope).Start(context.Background(), "HTTP GET",
+		trace.WithSpanKind(trace.SpanKindClient))
+	otelhttpSpan.End()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://example.com/next", nil)
+	require.NoError(t, err)
+
+	mockCtx := hooktest.NewMockHookContext()
+	BeforeRoundTrip(mockCtx, &http.Transport{}, req)
+
+	data, ok := mockCtx.GetData().(*hookData)
+	require.True(t, ok, "an ended otelhttp span must not suppress the otelc span")
+	require.NotNil(t, data.span)
+
+	AfterRoundTrip(mockCtx, &http.Response{StatusCode: http.StatusOK, Request: req}, nil)
+
+	var parent, child sdktrace.ReadOnlySpan
+	for _, s := range sr.Ended() {
+		switch s.InstrumentationScope().Name {
+		case otelhttpScope:
+			parent = s
+		case instrumentationName:
+			child = s
+		}
+	}
+	require.NotNil(t, parent)
+	require.NotNil(t, child)
+	assert.Equal(t, parent.SpanContext().SpanID(), child.Parent().SpanID())
+}
