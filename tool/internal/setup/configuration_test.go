@@ -233,6 +233,90 @@ func TestModuleRootForPackage(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestModuleRootForPackageInVendor(t *testing.T) {
+	moduleDir := t.TempDir()
+	vendorDir := filepath.Join(moduleDir, vendorDirName)
+	packageDir := filepath.Join(vendorDir, "example.com", "dependency", "hooks")
+	require.NoError(t, os.MkdirAll(packageDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(vendorDir, "modules.txt"),
+		[]byte("# example.com/dependency v1.2.3\n## explicit; go 1.26\nexample.com/dependency/hooks\n"),
+		0o644,
+	))
+
+	got, err := moduleRootForPackage(packageDir)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(vendorDir, "example.com", "dependency"), got)
+}
+
+func TestModuleRootForPackageInVendorReportsMissingOwner(t *testing.T) {
+	moduleDir := t.TempDir()
+	vendorDir := filepath.Join(moduleDir, vendorDirName)
+	packageDir := filepath.Join(vendorDir, "example.com", "dependency")
+	require.NoError(t, os.MkdirAll(packageDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(vendorDir, "modules.txt"),
+		[]byte("# example.com/other v1.0.0\n"),
+		0o644,
+	))
+
+	_, err := moduleRootForPackage(packageDir)
+	require.ErrorContains(t, err, "no module of vendor/modules.txt owns package")
+}
+
+func TestSetInstrumentationConfigPath(t *testing.T) {
+	sp := newTestSetupPhase()
+	require.NoError(t, sp.setInstrumentationConfigPath("config/instrumentation.yaml"))
+	assert.True(t, filepath.IsAbs(sp.instrumentationConfigPath))
+
+	sp.instrumentationConfigPath = "previous"
+	require.NoError(t, sp.setInstrumentationConfigPath(""))
+	assert.Equal(t, "previous", sp.instrumentationConfigPath)
+}
+
+func TestLoadConfiguredApplication(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "instrumentation.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte("file_format: '1.2'\n"), 0o600))
+
+	sp := newTestSetupPhase()
+	require.NoError(t, sp.loadConfiguredApplication(configPath))
+	assert.Equal(t, configPath, sp.instrumentationConfigPath)
+	assert.NotNil(t, sp.applicationConfiguration.Document)
+	assert.Equal(t, configPath, sp.applicationConfiguration.Source)
+}
+
+func TestLoadConfiguredApplicationReturnsReadError(t *testing.T) {
+	sp := newTestSetupPhase()
+
+	err := sp.loadConfiguredApplication(filepath.Join(t.TempDir(), "missing.yaml"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "read application configuration")
+}
+
+func TestValidateAndStoreApplicationConfigurationRequiresLoadedDocument(t *testing.T) {
+	sp := newTestSetupPhase()
+	sp.instrumentationConfigPath = "instrumentation.yaml"
+
+	err := sp.validateAndStoreApplicationConfiguration()
+	require.ErrorContains(t, err, "was not loaded before setup validation")
+}
+
+func TestValidateAndStoreApplicationConfigurationWritesWarnings(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "instrumentation.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(`file_format: "1.2"
+instrumentation/development:
+  go:
+    unselected:
+      enabled: true
+`), 0o600))
+
+	sp := newTestSetupPhase()
+	sp.instrumentationConfigPath = configPath
+	require.NoError(t, sp.loadApplicationConfiguration())
+	require.NoError(t, sp.validateAndStoreApplicationConfiguration())
+	require.Len(t, sp.validatedApplicationConfig.Warnings, 1)
+}
+
 func TestValidateSelectedConfigurationMetadataForNestedInRepoModules(t *testing.T) {
 	instrumentationRoot, err := filepath.Abs(filepath.Join("testdata", "instrumentation"))
 	require.NoError(t, err)
