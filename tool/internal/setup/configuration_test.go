@@ -264,6 +264,16 @@ func TestModuleRootForPackageInVendorReportsMissingOwner(t *testing.T) {
 	require.ErrorContains(t, err, "no module of vendor/modules.txt owns package")
 }
 
+func TestModuleRootForPackageInVendorReportsMissingModulesFile(t *testing.T) {
+	moduleDir := t.TempDir()
+	vendorDir := filepath.Join(moduleDir, vendorDirName)
+	packageDir := filepath.Join(vendorDir, "example.com", "dependency")
+	require.NoError(t, os.MkdirAll(packageDir, 0o755))
+
+	_, err := moduleRootForPackage(packageDir)
+	require.ErrorContains(t, err, "reading the vendor/modules.txt")
+}
+
 func TestSetInstrumentationConfigPath(t *testing.T) {
 	sp := newTestSetupPhase()
 	require.NoError(t, sp.setInstrumentationConfigPath("config/instrumentation.yaml"))
