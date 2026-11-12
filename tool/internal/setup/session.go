@@ -89,7 +89,17 @@ func writeResolutionScope(ctx context.Context, buildDir string, moduleDirs []str
 		_, _ = h.Write([]byte(name + "=" + os.Getenv(name) + "\x00"))
 	}
 	f := util.GetResolutionScopeFile()
-	if err := util.WriteFileAtomic(f, []byte(hex.EncodeToString(h.Sum(nil))[:32])); err != nil {
+	// The scope carries the token of the setup that wrote it; see
+	// session.Open.
+	record := hex.EncodeToString(h.Sum(nil))[:32]
+	generation, genErr := os.ReadFile(util.GetSetupGenerationFile())
+	switch {
+	case genErr == nil:
+		record += " " + strings.TrimSpace(string(generation))
+	case !os.IsNotExist(genErr):
+		return ex.Wrapf(genErr, "reading the setup generation")
+	}
+	if err := util.WriteFileAtomic(f, []byte(record)); err != nil {
 		return ex.Wrapf(err, "failed to write resolution scope to file %s", f)
 	}
 	return nil

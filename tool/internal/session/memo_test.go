@@ -300,14 +300,38 @@ func TestMemoLockIsPerScopeAndFlags(t *testing.T) {
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 }
 
-func TestMemoIgnoresScopeOlderThanMatchedRules(t *testing.T) {
+// TestMemoRequiresScopeFromLatestSetup pins how the memo recognizes a scope
+// an earlier setup left behind: by the setup generation token, never by file
+// times. A stale scope stays stale whether its mtime is older than, equal to,
+// or newer than the files of the current setup.
+func TestMemoRequiresScopeFromLatestSetup(t *testing.T) {
 	setupSession(t)
-	require.NotNil(t, Open(nil), "a scope with no matched rules is trusted")
+	require.NotNil(t, Open(nil), "a bare scope with no setup generation is trusted")
 
-	time.Sleep(20 * time.Millisecond)
-	require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), []byte("[]"), 0o644))
-	assert.Nil(t, Open(nil), "a scope older than this setup's matched rules is stale")
+	generation := util.GetSetupGenerationFile()
+	require.NoError(t, os.WriteFile(generation, []byte("gen1"), 0o644))
+	assert.Nil(t, Open(nil), "a scope without a token is stale once a setup recorded one")
 
-	writeScope(t, "scope1")
-	assert.NotNil(t, Open(nil), "a scope written after the matched rules is current")
+	writeScope(t, "scope1 gen1")
+	require.NotNil(t, Open(nil), "a scope carrying the latest token is current")
+
+	// A later setup records a new token but cannot replace the scope.
+	require.NoError(t, os.WriteFile(generation, []byte("gen2"), 0o644))
+	genInfo, err := os.Stat(generation)
+	require.NoError(t, err)
+	scopeFile := util.GetResolutionScopeFile()
+	for name, mtime := range map[string]time.Time{
+		"older": genInfo.ModTime().Add(-time.Hour),
+		"equal": genInfo.ModTime(),
+		"newer": genInfo.ModTime().Add(time.Hour),
+	} {
+		require.NoError(t, os.Chtimes(scopeFile, mtime, mtime))
+		assert.Nil(t, Open(nil), "a stale scope with an mtime %s than the setup's must stay off", name)
+	}
+
+	// The scope that setup writes is current whatever its mtime.
+	writeScope(t, "scope1 gen2")
+	old := genInfo.ModTime().Add(-time.Hour)
+	require.NoError(t, os.Chtimes(scopeFile, old, old))
+	assert.NotNil(t, Open(nil), "a scope with the latest token is current even with an older mtime")
 }

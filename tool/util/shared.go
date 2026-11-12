@@ -199,6 +199,14 @@ func GetResolutionScopeFile() string {
 	return GetBuildTemp(resolutionScopeFile)
 }
 
+// GetSetupGenerationFile returns the path to the file in which each setup
+// records a fresh token. The resolution scope carries the token of the setup
+// that wrote it, so a scope left by an earlier setup is recognized as stale.
+func GetSetupGenerationFile() string {
+	const setupGenerationFile = "setup_generation"
+	return GetBuildTemp(setupGenerationFile)
+}
+
 // GetBuildFlags returns the build flags from OTELC_BUILD_FLAGS environment variable.
 // The flags are stored as a JSON-encoded string array to preserve arguments that contain spaces.
 // Returns nil if not set or on decode error.

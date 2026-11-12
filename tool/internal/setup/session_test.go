@@ -239,10 +239,15 @@ func TestRecordResolutionScopeDisablesMemoWhenStaleScopeStays(t *testing.T) {
 	t.Setenv(util.EnvOtelcSessionDir, "")
 	tempDir := util.GetBuildTempDir()
 	require.NoError(t, os.MkdirAll(tempDir, 0o755))
-	require.NoError(t, os.WriteFile(util.GetResolutionScopeFile(), []byte("stale"), 0o644))
-	// This setup's matched.json is newer than the earlier setup's scope.
-	time.Sleep(20 * time.Millisecond)
-	require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), []byte("[]"), 0o644))
+	// An earlier setup's scope, carrying that setup's token.
+	require.NoError(t, os.WriteFile(util.GetSetupGenerationFile(), []byte("earlier"), 0o644))
+	require.NoError(t, os.WriteFile(util.GetResolutionScopeFile(), []byte("stale earlier"), 0o644))
+	// This setup records its own token, then cannot replace the scope. The
+	// stale scope's mtime is made newer than everything this setup wrote, so
+	// only the token can tell it is stale.
+	require.NoError(t, writeSetupGeneration())
+	future := time.Now().Add(time.Hour)
+	require.NoError(t, os.Chtimes(util.GetResolutionScopeFile(), future, future))
 	require.NoError(t, os.Chmod(tempDir, 0o500))
 	t.Cleanup(func() { _ = os.Chmod(tempDir, 0o755) })
 
@@ -258,5 +263,23 @@ func TestRecordResolutionScopeDisablesMemoWhenStaleScopeStays(t *testing.T) {
 	// Even a process that does not inherit the disabled session, such as a
 	// bare -toolexec run, ignores the stale scope.
 	t.Setenv(util.EnvOtelcSessionDir, t.TempDir())
-	assert.Nil(t, session.Open(nil), "a scope older than matched.json must not open the memo")
+	assert.Nil(t, session.Open(nil), "a scope from an earlier setup must not open the memo, whatever its mtime")
+}
+
+// TestResolutionScopeCarriesSetupGeneration checks the scope a setup writes
+// opens the memo, and the scope of an earlier setup does not once a new
+// setup has recorded its generation, with no file times involved.
+func TestResolutionScopeCarriesSetupGeneration(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	t.Setenv(util.EnvOtelcSessionDir, t.TempDir())
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	modDir := t.TempDir()
+	mustWriteFile(t, filepath.Join(modDir, "go.mod"), "module example.com/scope\n\ngo 1.24\n")
+
+	require.NoError(t, writeSetupGeneration())
+	require.NoError(t, writeResolutionScope(t.Context(), modDir, []string{modDir}))
+	require.NotNil(t, session.Open(nil), "the scope this setup wrote is current")
+
+	require.NoError(t, writeSetupGeneration())
+	assert.Nil(t, session.Open(nil), "a new setup's generation makes the earlier scope stale")
 }

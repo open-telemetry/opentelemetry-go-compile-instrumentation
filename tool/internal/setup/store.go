@@ -5,6 +5,7 @@ package setup
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -128,6 +129,10 @@ func (sp *setupPhase) store(matched []*rule.InstRuleSet) error {
 	bs, err := json.Marshal(matched)
 	if err != nil {
 		return ex.Wrapf(err, "failed to marshal rules to JSON")
+	}
+
+	if err = writeSetupGeneration(); err != nil {
+		return err
 	}
 
 	f := util.GetMatchedRuleFile()
@@ -355,5 +360,23 @@ func (sp *setupPhase) storeResolvedNames() error {
 		return ex.Wrapf(writeErr, "failed to write import names to file %s", f)
 	}
 	sp.Info("Stored resolved import names", "path", f, "count", len(sp.resolvedNames))
+	return nil
+}
+
+// setupGenerationBytes is the size of the random setup generation token.
+const setupGenerationBytes = 16
+
+// writeSetupGeneration records a fresh token for this setup. The resolution
+// scope written later carries it, so session.Open can tell a scope this setup
+// wrote from one an earlier setup left behind, without relying on file times.
+func writeSetupGeneration() error {
+	token := make([]byte, setupGenerationBytes)
+	if _, err := rand.Read(token); err != nil {
+		return ex.Wrapf(err, "generating the setup generation token")
+	}
+	f := util.GetSetupGenerationFile()
+	if err := util.WriteFileAtomic(f, []byte(hex.EncodeToString(token))); err != nil {
+		return ex.Wrapf(err, "failed to write setup generation to file %s", f)
+	}
 	return nil
 }

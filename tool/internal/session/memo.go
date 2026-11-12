@@ -8,6 +8,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,36 +50,50 @@ func Open(buildFlags []string) *Memo {
 	if dir == "" || dir == util.SessionOff {
 		return nil
 	}
-	if !scopeIsCurrent() {
-		return nil
-	}
-	scope, err := os.ReadFile(util.GetResolutionScopeFile())
-	if err != nil || len(strings.TrimSpace(string(scope))) == 0 {
+	scope, ok := currentScope()
+	if !ok {
 		return nil
 	}
 	return &Memo{
 		dir:   filepath.Join(dir, exportsDir),
-		scope: strings.TrimSpace(string(scope)),
+		scope: scope,
 		flags: flagsDigest(buildFlags),
 	}
 }
 
-// scopeIsCurrent reports whether the resolution scope was written by the
-// latest setup. Setup writes matched.json first and the scope after it, so a
-// scope older than matched.json is left from an earlier setup whose scope
-// this setup could neither replace nor remove.
-func scopeIsCurrent() bool {
-	scope, err := os.Stat(util.GetResolutionScopeFile())
+// currentScope returns the resolution scope digest when the scope file was
+// written by the latest setup. Setup records a fresh generation token before
+// it writes matched.json and appends that token to the scope it writes after,
+// so a scope whose token differs, or has none while a token exists, is one an
+// earlier setup left behind because this setup could neither replace nor
+// remove it. No file times are compared, so coarse or skewed timestamps
+// cannot make a stale scope look current.
+func currentScope() (string, bool) {
+	content, err := os.ReadFile(util.GetResolutionScopeFile())
 	if err != nil {
-		return false
+		return "", false
 	}
-	matched, err := os.Stat(util.GetMatchedRuleFile())
-	if err != nil {
-		// Without matched.json no setup ran here; a scope alone is
-		// trusted, as tests that record only a scope expect.
-		return true
+	digest, token, _ := strings.Cut(strings.TrimSpace(string(content)), " ")
+	if digest == "" {
+		return "", false
 	}
-	return !scope.ModTime().Before(matched.ModTime())
+	generation, err := os.ReadFile(util.GetSetupGenerationFile())
+	switch {
+	case err == nil:
+		if want := strings.TrimSpace(string(generation)); want == "" || token != want {
+			return "", false
+		}
+	case errors.Is(err, fs.ErrNotExist):
+		// No setup recorded a generation here; a scope that claims one is
+		// stale, and a bare scope is trusted, as tests that record only a
+		// scope expect.
+		if token != "" {
+			return "", false
+		}
+	default:
+		return "", false
+	}
+	return digest, true
 }
 
 // buildEnvVars are the environment variables that change what a nested
