@@ -25,6 +25,7 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/manifest"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -585,18 +586,16 @@ func generatePinnedProjects(ctx context.Context, moduleDirs []string, opts PinOp
 		return nil, findDepsErr
 	}
 
-	extractErr := extractOtelcBundle()
-	if extractErr != nil {
-		return nil, extractErr
-	}
-
-	ruleset, err := loadMinimalRules(
-		ctx,
-		filepath.Join(util.GetBuildTempDir(), unzippedInstDir),
-		util.Version,
-	)
+	entries, err := manifest.Load()
 	if err != nil {
-		return nil, err
+		return nil, ex.Wrapf(err, "loading instrumentation manifest")
+	}
+	ruleset := make(map[string][]yamlRule, len(entries))
+	for _, entry := range entries {
+		ruleset[entry.ModulePath] = append(ruleset[entry.ModulePath], yamlRule{
+			Target:       rule.NewTarget(entry.Target),
+			VersionRange: entry.VersionRange,
+		})
 	}
 
 	// We expect every built-in instrumentation module to be importable
