@@ -3,8 +3,8 @@ module go.opentelemetry.io/otelc/instrumentation/github.com/aws/aws-sdk-go-v2
 go 1.26.0
 
 require (
-	github.com/aws/aws-sdk-go-v2 v1.47.4
-	github.com/aws/smithy-go v1.28.6
+	github.com/aws/aws-sdk-go-v2 v1.47.7
+	github.com/aws/smithy-go v1.28.8
 	github.com/stretchr/testify v1.12.1
 	go.opentelemetry.io/contrib/instrumentation/github.com/aws/aws-sdk-go-v2/otelaws v0.72.0
 	go.opentelemetry.io/otelc/pkg v0.1.0
