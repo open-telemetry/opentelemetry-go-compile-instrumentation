@@ -193,10 +193,11 @@ showing all source modifications and source additions introduced into the Go com
 otelc --stats go build .
 ```
 
-With `--stats`, each link also logs a `rule-added import resolution` line. It
-shows how many imports that rules add the link had to find (`candidates`), how
-many it read from the session memo (`memo_hits`), and how many `go list -export`
-runs it needed (`go_list_calls`).
+With `--stats`, each link logs a `rule-added import resolution` line with
+`resolve_phase=link`. Each compile that a rule adds imports to logs the same
+line with `resolve_phase=compile`. The line shows how many imports that rules
+add the step had to find (`candidates`), how many it read from the session memo
+(`memo_hits`), and how many `go list -export` runs it needed (`go_list_calls`).
 
 ### Sessions: `OTELC_SESSION_DIR` and `OTELC_MAX_PARALLEL_LOADS`
 
@@ -206,6 +207,12 @@ An `otelc go build`, `go install`, or `go test` owns a session directory,
 files that links found for imports that rules add, so other builds in the same
 session do not run `go list -export` again. A new outer build removes the old
 session.
+
+When you run `otelc setup` and then `go build -toolexec otelc` yourself, no
+otelc build owns the session. It stays in `.otelc-build/session` between your
+`go build` runs, until the next `otelc setup` or `otelc go ...` command removes
+it. Set `OTELC_SESSION_DIR=off` if you change library sources between those
+runs.
 
 - `OTELC_SESSION_DIR=<dir>` makes builds use `<dir>` as their session. otelc
   sets it for the processes it starts, so you rarely need to set it.
