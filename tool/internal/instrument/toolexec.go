@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/dave/dst"
+	"golang.org/x/tools/go/packages"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
@@ -863,6 +864,17 @@ func (lr *linkResolution) lookup(
 	return misses
 }
 
+// deterministicLoadFailure reports whether a root's load failure is one go
+// list reports the same way for the rest of the session: an error listing
+// the package, such as a path no module provides or build constraints that
+// exclude every file. Only those are stored in the memo. Any other failure,
+// such as a compile error that left no export file, may not repeat, so a
+// later link resolves the root again; the current link still skips it.
+func deterministicLoadFailure(err error) bool {
+	pkgErr, ok := errors.AsType[packages.Error](err)
+	return ok && pkgErr.Kind == packages.ListError
+}
+
 // resolveMisses resolves the roots the memo could not answer with one nested
 // go list, under the memo's single-flight lock so concurrent links of the
 // session resolve each root once, and stores the results.
@@ -897,7 +909,9 @@ func (lr *linkResolution) resolveMisses(
 	for _, root := range misses {
 		if loadErr, bad := resolveFailed[root]; bad {
 			failed[root] = loadErr
-			lr.memo.Store(root, nil, loadErr)
+			if deterministicLoadFailure(loadErr) {
+				lr.memo.Store(root, nil, loadErr)
+			}
 			continue
 		}
 		if closure, ok := resolved[root]; ok {

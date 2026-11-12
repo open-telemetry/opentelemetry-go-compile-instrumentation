@@ -27,6 +27,7 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/internal/session"
 	"go.opentelemetry.io/otelc/tool/util"
+	"golang.org/x/tools/go/packages"
 )
 
 func TestPGOBuildFlags(t *testing.T) {
@@ -2197,11 +2198,13 @@ func linkToolPath() string {
 // closure of archive files it creates under dir (the root plus deps), except
 // the roots in bad, and counts the calls and the roots each call lists.
 type countingResolver struct {
-	dir   string
-	bad   map[string]bool
-	deps  []string
-	calls int
-	roots [][]string
+	dir string
+	bad map[string]bool
+	// transient roots fail with an error go list may not repeat.
+	transient map[string]bool
+	deps      []string
+	calls     int
+	roots     [][]string
 }
 
 func (c *countingResolver) resolve(
@@ -2213,7 +2216,11 @@ func (c *countingResolver) resolve(
 	failed := make(map[string]error)
 	for _, root := range roots {
 		if c.bad[root] {
-			failed[root] = errors.New("cannot load " + root)
+			failed[root] = packages.Error{Msg: "cannot find package " + root, Kind: packages.ListError}
+			continue
+		}
+		if c.transient[root] {
+			failed[root] = errors.New("compile of " + root + " left no export file")
 			continue
 		}
 		archive := filepath.Join(c.dir, util.EscapePackagePath(root)+".a")
@@ -2458,4 +2465,26 @@ func resolverArchive(t *testing.T, dir, importPath string) string {
 	p := filepath.Join(dir, util.EscapePackagePath(importPath)+".a")
 	require.NoError(t, os.WriteFile(p, []byte(importPath), 0o644))
 	return p
+}
+
+// TestLinkResolutionRetriesTransientFailures pins the failure policy: only a
+// failure go list reports the same way for the whole session (a listing
+// error) is stored in the memo. Any other failure is skipped for the rest of
+// its own link but resolved again by the next one.
+func TestLinkResolutionRetriesTransientFailures(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra", "example.com/flaky")
+	resolver := &countingResolver{dir: t.TempDir(), transient: map[string]bool{"example.com/flaky": true}}
+
+	cfg := freshLinkConfig()
+	resolver.link(t, cfg)
+	require.Equal(t, 1, resolver.calls)
+	assert.NotContains(t, cfg.PackageFile, "example.com/flaky")
+
+	resolver.transient = nil
+	cfg = freshLinkConfig()
+	resolver.link(t, cfg)
+	assert.Equal(t, 2, resolver.calls, "a transient failure must be resolved again")
+	assert.Equal(t, []string{"example.com/flaky"}, resolver.roots[1],
+		"only the root that failed transiently is listed again")
+	assert.Contains(t, cfg.PackageFile, "example.com/flaky")
 }
