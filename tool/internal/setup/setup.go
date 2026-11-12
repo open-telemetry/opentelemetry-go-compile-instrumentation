@@ -23,6 +23,7 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/instrument"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/internal/session"
 	"go.opentelemetry.io/otelc/tool/util"
 	"golang.org/x/tools/go/packages"
 )
@@ -53,6 +54,8 @@ type setupPhase struct {
 	// ruleModuleRoots keeps instrumentation rule ownership outside the rules
 	// themselves so setup can resolve module-local metadata for matched rules.
 	ruleModuleRoots map[rule.InstRule]string
+	// graph caches the package graph loads setup shares between phases.
+	graph packageGraph
 }
 
 func (sp *setupPhase) getBuildContext() *gobuild.Context {
@@ -199,30 +202,24 @@ func loadBuildPackages(
 	}
 	buildFlags := extractBuildFlags(subcommand, args)
 
-	var (
-		pkgs    []*packages.Package
-		loadErr error
-	)
-	switch {
-	case len(fileTargets) > 0:
-		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, buildFlags, tests, fileTargets...)
-		if loadErr != nil {
-			return nil, nil, loadErr
+	var pkgs []*packages.Package
+	loadErr := session.WithLoadSlot(ctx, func(ctx context.Context) error {
+		var targetErr error
+		switch {
+		case len(fileTargets) > 0:
+			pkgs, targetErr = pkgload.LoadPackages(ctx, mode, buildFlags, tests, fileTargets...)
+			if targetErr == nil && len(pkgs) > 1 {
+				targetErr = ex.New("multiple packages found for file targets")
+			}
+		case len(pkgTargets) > 0:
+			pkgs, targetErr = pkgload.LoadPackages(ctx, mode, buildFlags, tests, pkgTargets...)
+		default:
+			pkgs, targetErr = pkgload.LoadPackages(ctx, mode, buildFlags, tests, ".")
 		}
-
-		if len(pkgs) > 1 {
-			return nil, nil, ex.New("multiple packages found for file targets")
-		}
-	case len(pkgTargets) > 0:
-		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, buildFlags, tests, pkgTargets...)
-		if loadErr != nil {
-			return nil, nil, loadErr
-		}
-	default:
-		pkgs, loadErr = pkgload.LoadPackages(ctx, mode, buildFlags, tests, ".")
-		if loadErr != nil {
-			return nil, nil, loadErr
-		}
+		return targetErr
+	})
+	if loadErr != nil {
+		return nil, nil, loadErr
 	}
 
 	// A test load sets ForTest on every test package it adds. The synthesized
@@ -504,6 +501,8 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	if cmd.Name == "go" {
 		subcommand = cmd.Args().First() // build / install / test
 		args = cmd.Args().Tail()        // trim the subcommand
+	} else if cleanErr := cleanupOwnedSession(); cleanErr != nil {
+		return ex.Wrapf(cleanErr, "cleaning the session directory")
 	} else if err := cleanupDebugArtifacts(); err != nil {
 		// Clean up debug artifacts from previous runs for standalone `otelc setup`,
 		// as it prepares the environment for a subsequent toolexec build.
@@ -616,7 +615,38 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	if err = sp.store(matched); err != nil {
 		return err
 	}
-	return sp.storeInjectedHash(ctx, matched)
+	if err = sp.storeInjectedHash(ctx, matched); err != nil {
+		return err
+	}
+	sp.recordResolutionScope(ctx, moduleDirs)
+	return nil
+}
+
+// recordResolutionScope writes the export memo's resolution scope. The memo
+// only saves work, so a scope that cannot be computed or written disables it
+// for this build instead of failing the build: no scope file means no memo.
+func (sp *setupPhase) recordResolutionScope(ctx context.Context, moduleDirs []string) {
+	buildDir, err := buildCommandDir(sp.buildFlags)
+	if err == nil {
+		err = writeResolutionScope(ctx, buildDir, moduleDirs)
+	}
+	if err == nil {
+		return
+	}
+	sp.Warn("cannot record the resolution scope; the export memo is off for this build", "error", err)
+	rmErr := os.Remove(util.GetResolutionScopeFile())
+	if rmErr == nil || os.IsNotExist(rmErr) {
+		return
+	}
+	// A scope from an earlier setup is still readable, but it carries that
+	// setup's generation token: session.Open rejects a scope whose token does
+	// not match the current setup_generation, so the stale scope is not
+	// trusted. The processes this build starts inherit a disabled session as
+	// well.
+	sp.Warn("cannot remove a stale resolution scope", "error", rmErr)
+	if setErr := os.Setenv(util.EnvOtelcSessionDir, util.SessionOff); setErr != nil {
+		sp.Warn("cannot turn the session off", "error", setErr)
+	}
 }
 
 // warnIfNoInstrumentationMatched reports the combined result. An individual
@@ -958,6 +988,7 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 	// Tell otelc invocations started under the go command (for example from
 	// a test) which build locks and work dir this invocation holds.
 	env = append(env, nestedBuildEnv(ctx)...)
+	env = sessionEnv(env)
 
 	// Extract and forward build flags that affect the build context
 	// This ensures `go list` resolves archives matching the current build
@@ -1016,6 +1047,9 @@ func runGoBuild(ctx context.Context, cmd *cli.Command) error {
 	// Clean up import tracking files from previous builds at the start
 	// to prevent stale data from affecting this build.
 	instrument.CleanupImportTrackingFiles()
+	if err := cleanupOwnedSession(); err != nil {
+		return ex.Wrapf(err, "cleaning the session directory")
+	}
 	if err := cleanupDebugArtifacts(); err != nil {
 		return ex.Wrapf(err, "cleaning debug artifacts")
 	}
@@ -1071,13 +1105,7 @@ func (sp *setupPhase) hookImports(
 		return map[string]map[string]bool{}, nil
 	}
 
-	pkgs, err := pkgload.LoadPackages(
-		ctx,
-		packages.NeedName|packages.NeedImports|packages.NeedDeps,
-		sp.buildFlags,
-		false,
-		hookPaths...,
-	)
+	pkgs, err := sp.loadGraph(ctx, sp.buildFlags, hookPaths)
 	if err != nil {
 		return nil, ex.Wrapf(err, "loading hook packages to find their imports")
 	}

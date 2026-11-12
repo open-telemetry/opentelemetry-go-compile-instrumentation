@@ -6,6 +6,8 @@ package pkgload
 
 import (
 	"context"
+	"errors"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -165,52 +167,21 @@ func ResolvePackageName(ctx context.Context, importPath string, buildFlags ...st
 // ResolveExportFiles returns importPath -> exportFile for a package and all
 // transitive dependencies.
 func ResolveExportFiles(ctx context.Context, importPath string, buildFlags ...string) (map[string]string, error) {
-	mode := packages.NeedName | packages.NeedImports | packages.NeedDeps | packages.NeedExportFile
-	pkgs, err := LoadPackages(ctx, mode, buildFlags, false, importPath)
+	closures, failed, err := ResolveExportClosures(ctx, []string{importPath}, buildFlags...)
 	if err != nil {
 		return nil, err
 	}
-
-	if len(pkgs) == 0 {
-		return nil, ex.Newf("no packages found for %q", importPath)
-	}
-
-	// Check for package-level errors
-	for _, pkg := range pkgs {
-		if len(pkg.Errors) > 0 {
-			return nil, ex.Newf("loading package %q: %v", importPath, pkg.Errors[0])
+	if loadErr, ok := failed[importPath]; ok {
+		if _, isPkgErr := errors.AsType[packages.Error](loadErr); isPkgErr {
+			return nil, ex.Newf("loading package %q: %v", importPath, loadErr)
 		}
-	}
-
-	result := make(map[string]string)
-	visited := make(map[string]bool)
-
-	var walk func(pkg *packages.Package)
-	walk = func(pkg *packages.Package) {
-		if visited[pkg.PkgPath] {
-			return
-		}
-		visited[pkg.PkgPath] = true
-
-		if pkg.ExportFile != "" {
-			result[pkg.PkgPath] = pkg.ExportFile
-		}
-
-		for _, dep := range pkg.Imports {
-			walk(dep)
-		}
-	}
-
-	for _, pkg := range pkgs {
-		walk(pkg)
-	}
-
-	// Verify we found the requested package
-	if _, found := result[importPath]; !found {
 		return nil, ex.Newf("package %q not found or has no export file", importPath)
 	}
-
-	return result, nil
+	closure, ok := closures[importPath]
+	if !ok {
+		return nil, ex.Newf("package %q not found or has no export file", importPath)
+	}
+	return closure, nil
 }
 
 // ResolveExportFilesBatch resolves several import paths with one packages.Load
@@ -223,17 +194,66 @@ func ResolveExportFilesBatch(
 	importPaths []string,
 	buildFlags ...string,
 ) (map[string]string, map[string]error, error) {
+	res, err := loadExportClosures(ctx, importPaths, buildFlags...)
+	if err != nil {
+		return nil, nil, err
+	}
+	// The union keeps the error-free dependencies of a root that failed too,
+	// as it always has: they are resolved, only the root is not.
+	resolved := make(map[string]string)
+	for _, closure := range res.closures {
+		maps.Copy(resolved, closure)
+	}
+	for _, closure := range res.partial {
+		maps.Copy(resolved, closure)
+	}
+	return resolved, res.failed, nil
+}
+
+// ResolveExportClosures resolves several import paths with one packages.Load
+// call and returns, for each loaded root (requested or expanded from a
+// pattern) that loaded cleanly, its own
+// importPath -> exportFile closure: the root and every transitive dependency
+// that has an export file. Roots that fail to load, or that have no export
+// file, are reported in failed instead. A dependency with load errors is left
+// out of a closure, as ResolveExportFilesBatch always did.
+func ResolveExportClosures(
+	ctx context.Context,
+	importPaths []string,
+	buildFlags ...string,
+) (map[string]map[string]string, map[string]error, error) {
+	res, err := loadExportClosures(ctx, importPaths, buildFlags...)
+	if err != nil {
+		return nil, nil, err
+	}
+	return res.closures, res.failed, nil
+}
+
+// exportClosures is the result of loadExportClosures.
+type exportClosures struct {
+	// closures holds the closure of every root that loaded cleanly.
+	closures map[string]map[string]string
+	// partial holds, for each requested root that failed, the closure of
+	// its error-free dependencies.
+	partial map[string]map[string]string
+	// failed holds the failure of each requested root that did not load.
+	failed map[string]error
+}
+
+// loadExportClosures is ResolveExportClosures that also returns the partial
+// closures of the requested roots that failed.
+func loadExportClosures(ctx context.Context, importPaths []string, buildFlags ...string) (*exportClosures, error) {
 	if len(importPaths) == 0 {
-		return map[string]string{}, nil, nil
+		return &exportClosures{closures: map[string]map[string]string{}}, nil
 	}
 
 	mode := packages.NeedName | packages.NeedImports | packages.NeedDeps | packages.NeedExportFile
 	pkgs, err := LoadPackages(ctx, mode, buildFlags, false, importPaths...)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if len(pkgs) == 0 {
-		return nil, nil, ex.Newf("no packages found for %v", importPaths)
+		return nil, ex.Newf("no packages found for %v", importPaths)
 	}
 
 	requested := make(map[string]bool, len(importPaths))
@@ -241,37 +261,30 @@ func ResolveExportFilesBatch(
 		requested[path] = true
 	}
 
-	resolved := make(map[string]string)
+	closures := make(map[string]map[string]string)
+	partial := make(map[string]map[string]string)
 	failed := make(map[string]error)
-	visited := make(map[string]bool)
-
-	var walk func(pkg *packages.Package)
-	walk = func(pkg *packages.Package) {
-		if visited[pkg.PkgPath] {
-			return
-		}
-		visited[pkg.PkgPath] = true
-		if len(pkg.Errors) == 0 && pkg.ExportFile != "" {
-			resolved[pkg.PkgPath] = pkg.ExportFile
-		}
-		for _, dep := range pkg.Imports {
-			walk(dep)
-		}
-	}
-
 	for _, pkg := range pkgs {
-		walk(pkg)
-		if !requested[pkg.PkgPath] {
-			continue
-		}
-		if len(pkg.Errors) > 0 {
+		// A root a pattern expanded to was not requested by path: it still
+		// contributes its closure, but never counts as a failure.
+		closure := make(map[string]string)
+		packages.Visit([]*packages.Package{pkg}, nil, func(p *packages.Package) {
+			if len(p.Errors) == 0 && p.ExportFile != "" {
+				closure[p.PkgPath] = p.ExportFile
+			}
+		})
+		switch {
+		case requested[pkg.PkgPath] && len(pkg.Errors) > 0:
 			failed[pkg.PkgPath] = pkg.Errors[0]
-		} else if _, ok := resolved[pkg.PkgPath]; !ok {
+			partial[pkg.PkgPath] = closure
+		case requested[pkg.PkgPath] && pkg.ExportFile == "":
 			failed[pkg.PkgPath] = ex.Newf("package %q has no export file", pkg.PkgPath)
+			partial[pkg.PkgPath] = closure
+		default:
+			closures[pkg.PkgPath] = closure
 		}
 	}
-
-	return resolved, failed, nil
+	return &exportClosures{closures: closures, partial: partial, failed: failed}, nil
 }
 
 // CollectPackageNames walks pkgs and their transitive imports, mapping

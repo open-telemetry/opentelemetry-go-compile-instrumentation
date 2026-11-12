@@ -18,6 +18,7 @@ import (
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
+	"go.opentelemetry.io/otelc/tool/internal/session"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -89,11 +90,14 @@ func resolveInstrumentationConfigs(
 		return nil, nil
 	}
 
-	pkgs, loadErr := packages.Load(&packages.Config{
-		Mode:    packages.NeedFiles | packages.NeedModule | packages.NeedName,
-		Context: ctx,
-		Dir:     dir,
-	}, importPaths...)
+	var pkgs []*packages.Package
+	loadErr := session.WithLoadSlot(ctx, func(ctx context.Context) error {
+		var err error
+		pkgs, err = pkgload.LoadPackages(ctx,
+			packages.NeedFiles|packages.NeedModule|packages.NeedName,
+			[]string{"-C", dir}, false, importPaths...)
+		return err
+	})
 	if loadErr != nil {
 		return nil, ex.Wrapf(loadErr, "failed to load instrumentation packages")
 	}

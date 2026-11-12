@@ -5,7 +5,9 @@ package instrument
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"go/build"
 	"log/slog"
 	"os"
@@ -16,13 +18,17 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/imports"
+	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/internal/session"
 	"go.opentelemetry.io/otelc/tool/util"
+	"golang.org/x/tools/go/packages"
 )
 
 func TestPGOBuildFlags(t *testing.T) {
@@ -2187,4 +2193,393 @@ func linkToolPath() string {
 		name += ".exe"
 	}
 	return filepath.Join(string(filepath.Separator)+"go", "pkg", "tool", name)
+}
+
+// countingResolver is a fake nested go list that resolves every root to a
+// closure of archive files it creates under dir (the root plus deps), except
+// the roots in bad, and counts the calls and the roots each call lists.
+type countingResolver struct {
+	dir string
+	bad map[string]bool
+	// transient roots fail the way a nested compile does: a ListError that
+	// go list may not repeat.
+	transient map[string]bool
+	deps      []string
+	calls     int
+	roots     [][]string
+}
+
+func (c *countingResolver) resolve(
+	_ context.Context, roots []string, _ ...string,
+) (map[string]map[string]string, map[string]error, error) {
+	c.calls++
+	c.roots = append(c.roots, roots)
+	closures := make(map[string]map[string]string)
+	failed := make(map[string]error)
+	for _, root := range roots {
+		if c.bad[root] {
+			failed[root] = packages.Error{
+				Msg:  "no required module provides package " + root + "; to add it:\n\tgo get " + root,
+				Kind: packages.ListError,
+			}
+			continue
+		}
+		if c.transient[root] {
+			// go/packages reports a failed nested compile as a ListError,
+			// the same kind as a missing package.
+			failed[root] = packages.Error{
+				Msg:  "# " + root + "\nflaky.go:3:12: undefined: x",
+				Kind: packages.ListError,
+			}
+			continue
+		}
+		archive := filepath.Join(c.dir, util.EscapePackagePath(root)+".a")
+		if err := os.WriteFile(archive, []byte(root), 0o644); err != nil {
+			return nil, nil, err
+		}
+		closures[root] = map[string]string{root: archive}
+		for _, dep := range c.deps {
+			closures[root][dep] = filepath.Join(c.dir, util.EscapePackagePath(dep)+".a")
+			if err := os.WriteFile(closures[root][dep], []byte(dep), 0o644); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+	return closures, failed, nil
+}
+
+// link runs one link's recovery with the counting resolver.
+func (c *countingResolver) link(t *testing.T, cfg *imports.ImportConfig) bool {
+	t.Helper()
+	updated, err := resolveRuleAddedImportsWith(t.Context(), nil, cfg, c.resolve)
+	require.NoError(t, err)
+	return updated
+}
+
+// setupLinkMemo prepares a work dir with a session, a resolution scope, and
+// matched rules that add imports of the given paths to example.com/app/dep.
+func setupLinkMemo(t *testing.T, adds ...string) {
+	t.Helper()
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	t.Setenv(util.EnvOtelcSessionDir, filepath.Join(t.TempDir(), "session"))
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	importsMap := make(map[string]string, len(adds))
+	for i, path := range adds {
+		importsMap["i"+string(rune('a'+i))] = path
+	}
+	writeMatchedRules(t, []*rule.InstRuleSet{{
+		PackageName: "dep",
+		ModulePath:  "example.com/app/dep",
+		FuncRules: map[string][]*rule.InstFuncRule{
+			"dep.go": {{InstBaseRule: rule.InstBaseRule{Name: "rule", Imports: importsMap}}},
+		},
+	}})
+	// Setup writes the scope after matched.json; an older scope is stale.
+	require.NoError(t, os.WriteFile(util.GetResolutionScopeFile(), []byte("scope"), 0o644))
+}
+
+func freshLinkConfig() *imports.ImportConfig {
+	return &imports.ImportConfig{PackageFile: map[string]string{"example.com/app/dep": "/unused/dep.a"}}
+}
+
+func TestLinkResolutionReusesMemoAcrossLinks(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra")
+	resolver := &countingResolver{dir: t.TempDir()}
+
+	first := freshLinkConfig()
+	updated := resolver.link(t, first)
+	assert.True(t, updated)
+	second := freshLinkConfig()
+	updated = resolver.link(t, second)
+	assert.True(t, updated)
+
+	assert.Equal(t, 1, resolver.calls, "the second link must read the memo instead of running go list")
+	assert.Equal(t, first.PackageFile, second.PackageFile)
+	assert.Contains(t, second.PackageFile, "example.com/extra")
+}
+
+func TestLinkResolutionReResolvesStaleMemoEntry(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra")
+	resolver := &countingResolver{dir: t.TempDir()}
+
+	cfg := freshLinkConfig()
+	resolver.link(t, cfg)
+	require.NoError(t, os.Remove(cfg.PackageFile["example.com/extra"]))
+
+	resolver.link(t, freshLinkConfig())
+	assert.Equal(t, 2, resolver.calls, "an entry whose archive is gone must be resolved again")
+}
+
+// TestLinkResolutionReResolvesIncompatibleArchive covers a memo entry
+// resolved against other deps: its closure maps a package the link already
+// lists to another archive, so the link must resolve it again rather than
+// mix the two builds.
+func TestLinkResolutionReResolvesIncompatibleArchive(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra")
+	resolver := &countingResolver{dir: t.TempDir(), deps: []string{"example.com/shared"}}
+
+	resolver.link(t, freshLinkConfig())
+	require.Equal(t, 1, resolver.calls)
+
+	// The link compiled example.com/shared itself, in its own $WORK.
+	cfg := freshLinkConfig()
+	own := filepath.Join(t.TempDir(), "b007", "_pkg_.a")
+	cfg.PackageFile["example.com/shared"] = own
+	resolver.link(t, cfg)
+	assert.Equal(t, 2, resolver.calls, "an entry built against another archive must be resolved again")
+	assert.Equal(t, own, cfg.PackageFile["example.com/shared"], "the link keeps its own archive")
+}
+
+func TestLinkResolutionListsFailedCandidateOnce(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra", "example.invalid/bad")
+	resolver := &countingResolver{dir: t.TempDir(), bad: map[string]bool{"example.invalid/bad": true}}
+
+	cfg := freshLinkConfig()
+	resolver.link(t, cfg)
+	require.Equal(t, 1, resolver.calls)
+	assert.NotContains(t, cfg.PackageFile, "example.invalid/bad")
+
+	// A later link reads the failure from the memo too.
+	resolver.link(t, freshLinkConfig())
+	assert.Equal(t, 1, resolver.calls)
+}
+
+func TestLinkResolutionSkipsGoListWhenNothingIsMissing(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra")
+	resolver := &countingResolver{dir: t.TempDir()}
+
+	cfg := freshLinkConfig()
+	cfg.PackageFile["example.com/extra"] = "/unused/extra.a"
+	updated := resolver.link(t, cfg)
+	assert.False(t, updated)
+	assert.Zero(t, resolver.calls)
+}
+
+func TestLinkResolutionWithoutSessionResolvesEveryLink(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra")
+	t.Setenv(util.EnvOtelcSessionDir, util.SessionOff)
+	resolver := &countingResolver{dir: t.TempDir()}
+
+	for range 2 {
+		resolver.link(t, freshLinkConfig())
+	}
+	assert.Equal(t, 2, resolver.calls)
+}
+
+func TestCompileResolutionReusesMemo(t *testing.T) {
+	setupLinkMemo(t)
+	archiveDir := t.TempDir()
+	calls := 0
+	resolve := func(_ context.Context, importPath string, _ ...string) (map[string]string, error) {
+		calls++
+		archive := filepath.Join(archiveDir, "extra.a")
+		if err := os.WriteFile(archive, []byte(importPath), 0o644); err != nil {
+			return nil, err
+		}
+		return map[string]string{importPath: archive}, nil
+	}
+
+	compile := func() string {
+		cfgPath := filepath.Join(t.TempDir(), "importcfg")
+		require.NoError(t, os.WriteFile(cfgPath, []byte("packagefile context=/unused/context.a\n"), 0o644))
+		ip := &instrumentPhase{
+			logger:             slog.Default(),
+			importConfigPath:   cfgPath,
+			importConfig:       imports.ImportConfig{PackageFile: map[string]string{"context": "/unused/context.a"}},
+			resolveAddedImport: resolve,
+		}
+		require.NoError(t, ip.updateImportConfig(t.Context(), map[string]string{"extra": "example.com/extra"}))
+		content, err := os.ReadFile(cfgPath)
+		require.NoError(t, err)
+		return string(content)
+	}
+
+	first := compile()
+	second := compile()
+	assert.Equal(t, 1, calls, "the second compile must read the memo instead of running go list")
+	assert.Equal(t, first, second)
+	assert.Contains(t, second, "packagefile example.com/extra=")
+}
+
+// TestLinkResolutionReadsResultOfLinkItWaitedFor covers the single-flight
+// lock: a link that misses while another holds the lock must read what that
+// holder stored instead of running go list itself.
+func TestLinkResolutionReadsResultOfLinkItWaitedFor(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra")
+	resolver := &countingResolver{dir: t.TempDir()}
+	memo := session.Open(nil)
+	require.NotNil(t, memo)
+
+	release, err := memo.Lock(t.Context())
+	require.NoError(t, err)
+	done := make(chan *imports.ImportConfig)
+	go func() {
+		cfg := freshLinkConfig()
+		_, linkErr := resolveRuleAddedImportsWith(context.Background(), nil, cfg, resolver.resolve)
+		assert.NoError(t, linkErr)
+		done <- cfg
+	}()
+	// The holder resolves the import and stores it before releasing.
+	time.Sleep(200 * time.Millisecond)
+	archive := filepath.Join(t.TempDir(), "extra.a")
+	require.NoError(t, os.WriteFile(archive, []byte("extra"), 0o644))
+	memo.Store("example.com/extra", map[string]string{"example.com/extra": archive}, nil)
+	release()
+
+	cfg := <-done
+	assert.Zero(t, resolver.calls, "the waiting link must reuse the holder's result")
+	assert.Equal(t, archive, cfg.PackageFile["example.com/extra"])
+}
+
+func TestLinkResolutionFailsWhenMemoLockFails(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra")
+	blocker := filepath.Join(t.TempDir(), "file")
+	require.NoError(t, os.WriteFile(blocker, nil, 0o644))
+	t.Setenv(util.EnvOtelcSessionDir, blocker)
+	resolver := &countingResolver{dir: t.TempDir()}
+
+	_, err := resolveRuleAddedImportsWith(t.Context(), nil, freshLinkConfig(), resolver.resolve)
+	require.Error(t, err)
+	assert.Zero(t, resolver.calls)
+}
+
+func TestRuleAddedResolutionLogsStats(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra")
+	t.Setenv(util.EnvOtelcStats, "1")
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	resolver := &countingResolver{dir: t.TempDir()}
+
+	_, err := resolveRuleAddedImportsWith(util.ContextWithLogger(t.Context(), logger), nil,
+		freshLinkConfig(), resolver.resolve)
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "resolve_phase=link candidates=1 memo_hits=0 go_list_calls=1 failed=0")
+
+	buf.Reset()
+	cfgPath := filepath.Join(t.TempDir(), "importcfg")
+	require.NoError(t, os.WriteFile(cfgPath, []byte("packagefile context=/unused/context.a\n"), 0o644))
+	ip := &instrumentPhase{
+		logger:           logger,
+		importConfigPath: cfgPath,
+		importConfig:     imports.ImportConfig{PackageFile: map[string]string{"context": "/unused/context.a"}},
+		resolveAddedImport: func(_ context.Context, importPath string, _ ...string) (map[string]string, error) {
+			return map[string]string{importPath: resolverArchive(t, resolver.dir, importPath)}, nil
+		},
+	}
+	// The link stored example.com/extra, so the compile reads it from the memo.
+	require.NoError(t, ip.updateImportConfig(t.Context(), map[string]string{"extra": "example.com/extra"}))
+	assert.Contains(t, buf.String(), "resolve_phase=compile candidates=1 memo_hits=1 go_list_calls=0")
+}
+
+func resolverArchive(t *testing.T, dir, importPath string) string {
+	t.Helper()
+	p := filepath.Join(dir, util.EscapePackagePath(importPath)+".a")
+	require.NoError(t, os.WriteFile(p, []byte(importPath), 0o644))
+	return p
+}
+
+// TestLinkResolutionRetriesTransientFailures pins the failure policy: only a
+// failure go list reports the same way for the whole session (a listing
+// error) is stored in the memo. Any other failure is skipped for the rest of
+// its own link but resolved again by the next one.
+func TestLinkResolutionRetriesTransientFailures(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra", "example.com/flaky")
+	resolver := &countingResolver{dir: t.TempDir(), transient: map[string]bool{"example.com/flaky": true}}
+
+	cfg := freshLinkConfig()
+	resolver.link(t, cfg)
+	require.Equal(t, 1, resolver.calls)
+	assert.NotContains(t, cfg.PackageFile, "example.com/flaky")
+
+	resolver.transient = nil
+	cfg = freshLinkConfig()
+	resolver.link(t, cfg)
+	assert.Equal(t, 2, resolver.calls, "a transient failure must be resolved again")
+	assert.Equal(t, []string{"example.com/flaky"}, resolver.roots[1],
+		"only the root that failed transiently is listed again")
+	assert.Contains(t, cfg.PackageFile, "example.com/flaky")
+}
+
+// TestCompileResolutionReResolvesStoredFailure covers the claim that lets a
+// compile skip the import-cycle check on a memo hit: only a successful
+// resolution counts as a hit. A stored failure is not one, so the compile
+// resolves the import again, with the cycle check in place.
+func TestCompileResolutionReResolvesStoredFailure(t *testing.T) {
+	setupLinkMemo(t)
+	session.Open(nil).Store("example.com/extra", nil, errors.New("cannot find package"))
+	archiveDir := t.TempDir()
+	calls := 0
+	compile := func(t *testing.T) error {
+		t.Helper()
+		cfgPath := filepath.Join(t.TempDir(), "importcfg")
+		require.NoError(t, os.WriteFile(cfgPath, []byte("packagefile context=/unused/context.a\n"), 0o644))
+		ip := &instrumentPhase{
+			logger:           slog.Default(),
+			importConfigPath: cfgPath,
+			importConfig:     imports.ImportConfig{PackageFile: map[string]string{"context": "/unused/context.a"}},
+			compileArgs:      []string{"compile", "-p", "example.com/app/dep"},
+			resolveAddedImport: func(_ context.Context, importPath string, _ ...string) (map[string]string, error) {
+				calls++
+				return map[string]string{importPath: resolverArchive(t, archiveDir, importPath)}, nil
+			},
+		}
+		return ip.updateImportConfig(t.Context(), map[string]string{"extra": "example.com/extra"})
+	}
+
+	// A chain in which example.com/extra already waits makes the import a
+	// cycle: the stored failure must not let the compile skip that check.
+	t.Setenv(util.EnvOtelcNestedResolving, "example.com/extra>example.com/app/dep")
+	err := compile(t)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "import cycle")
+	assert.Zero(t, calls)
+
+	t.Setenv(util.EnvOtelcNestedResolving, "")
+	require.NoError(t, compile(t))
+	assert.Equal(t, 1, calls, "a stored failure must be resolved again, not reused")
+}
+
+// TestDeterministicLoadFailure pins which failures the memo stores, using
+// the messages go list really reports. Compiler errors arrive as ListErrors
+// too, so the kind alone must not decide.
+func TestDeterministicLoadFailure(t *testing.T) {
+	listErr := func(msg string) error { return packages.Error{Msg: msg, Kind: packages.ListError} }
+	for _, tt := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"missing module package", listErr("no required module provides package example.invalid/zzz; to add it:\n\tgo get example.invalid/zzz"), true},
+		{"not in std", listErr("package fmtx is not in std (/usr/local/go/src/fmtx)"), true},
+		{"build constraints", listErr("package example.com/p/ex: build constraints exclude all Go files in /tmp/p/ex"), true},
+		{"no export file", errors.New(`package "unsafe" has no export file`), true},
+		{"compiler error", listErr("# example.com/p/broken\nbroken/b.go:3:12: undefined: x"), false},
+		{"invalid compiler flag", listErr("# example.com/p\nflag provided but not defined: -otelc-review-invalid-flag"), false},
+		{"other error", errors.New("signal: killed"), false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, deterministicLoadFailure(tt.err))
+		})
+	}
+}
+
+// TestDeterministicLoadFailureOnRealGoList runs the real go list behind the
+// link's resolution: a package that does not exist is stored, a package
+// whose compile fails is not.
+func TestDeterministicLoadFailureOnRealGoList(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/p\n\ngo 1.25\n"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "broken"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "broken", "b.go"),
+		[]byte("package broken\n\nfunc f() { x }\n"), 0o644))
+
+	_, failed, err := pkgload.ResolveExportClosures(t.Context(),
+		[]string{"example.com/p/broken", "example.com/p/missing"}, "-C", dir)
+	require.NoError(t, err)
+	require.Contains(t, failed, "example.com/p/broken")
+	require.Contains(t, failed, "example.com/p/missing")
+	assert.False(t, deterministicLoadFailure(failed["example.com/p/broken"]),
+		"a compile failure must be retried: %v", failed["example.com/p/broken"])
+	assert.True(t, deterministicLoadFailure(failed["example.com/p/missing"]),
+		"a missing package must be stored: %v", failed["example.com/p/missing"])
 }
