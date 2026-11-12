@@ -6,6 +6,8 @@
 package test
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -148,17 +150,29 @@ func newSessionHarness(t *testing.T) *sessionHarness {
 // and returns the work dir.
 func (h *sessionHarness) build(t *testing.T, extraEnv ...string) string {
 	t.Helper()
-	workDir := t.TempDir()
+	workDir, err := h.tryBuild(t.Context(), t.TempDir(), extraEnv...)
+	require.NoError(t, err)
+	return workDir
+}
+
+// tryBuild is build for goroutines, which must not call require: it builds
+// into workDir and runs the binary, and returns any failure as an error.
+func (h *sessionHarness) tryBuild(ctx context.Context, workDir string, extraEnv ...string) (string, error) {
 	bin := appBinary(workDir)
-	cmd := exec.CommandContext(t.Context(), h.otelcPath, "--work-dir", workDir, "go", "build", "-o", bin, ".")
+	cmd := exec.CommandContext(ctx, h.otelcPath, "--work-dir", workDir, "go", "build", "-o", bin, ".")
 	cmd.Dir = h.appDir
 	cmd.Env = append(append([]string{}, h.env...), extraEnv...)
-	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, "otelc go build failed:\n%s", out)
-	run, err := exec.CommandContext(t.Context(), bin).CombinedOutput()
-	require.NoError(t, err, "%s", run)
-	assert.Contains(t, string(run), "extra: note called")
-	return workDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("otelc go build failed: %w\n%s", err, out)
+	}
+	run, err := exec.CommandContext(ctx, bin).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("running %s failed: %w\n%s", bin, err, run)
+	}
+	if !strings.Contains(string(run), "extra: note called") {
+		return "", fmt.Errorf("the binary was not instrumented:\n%s", run)
+	}
+	return workDir, nil
 }
 
 // TestSessionReusesLinkResolution covers repeated warm builds in one session:
@@ -187,11 +201,16 @@ func TestSessionConcurrentBuildsResolveOnce(t *testing.T) {
 	session := "OTELC_SESSION_DIR=" + filepath.Join(t.TempDir(), "session")
 	const builds = 4
 	workDirs := make([]string, builds)
+	errs := make([]error, builds)
 	var wg sync.WaitGroup
 	for i := range builds {
-		wg.Go(func() { workDirs[i] = h.build(t, session) })
+		dir := t.TempDir()
+		wg.Go(func() { workDirs[i], errs[i] = h.tryBuild(t.Context(), dir, session) })
 	}
 	wg.Wait()
+	for i, err := range errs {
+		require.NoError(t, err, "build %d", i)
+	}
 
 	total := 0
 	for _, dir := range workDirs {
