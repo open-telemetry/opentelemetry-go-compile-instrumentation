@@ -333,6 +333,13 @@ func ensureOtelcRequire(moduleDir, version string) (bool, error) {
 	return true, nil
 }
 
+const (
+	// otelInitInstModule sets up the OTel SDK in package main.
+	otelInitInstModule = "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/init"
+	// otelSDKTraceInstModule hooks the OTel SDK trace package.
+	otelSDKTraceInstModule = "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/sdk/trace"
+)
+
 func matchInstrumentationImports(
 	deps []*Dependency,
 	ruleset map[string][]yamlRule,
@@ -366,6 +373,15 @@ func matchInstrumentationImports(
 
 				imports[modPath] = true
 			}
+		}
+	}
+
+	// The init module imports pkg/runtime, which imports the OTel SDK trace
+	// package. Pin the sdk/trace rules with init, so they apply when the app
+	// does not import the SDK (#1712). Only a module with rules is pinned.
+	if imports[otelInitInstModule] {
+		if _, ok := ruleset[otelSDKTraceInstModule]; ok {
+			imports[otelSDKTraceInstModule] = true
 		}
 	}
 

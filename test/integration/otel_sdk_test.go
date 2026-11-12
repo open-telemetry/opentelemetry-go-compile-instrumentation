@@ -6,12 +6,46 @@
 package test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"go.opentelemetry.io/otelc/test/testutil"
 )
+
+// TestOtelSDKImplicitRulesWithoutAppSDK verifies #1712: the SDK trace
+// rules apply even when the application imports only the OTel API. The
+// test application starts a span from context.Background() inside a traced
+// server handler. Without the implicit SDK instrumentation that span starts
+// a new trace, because nothing propagates the server span through GLS.
+func TestOtelSDKImplicitRulesWithoutAppSDK(t *testing.T) {
+	t.Parallel()
+	testutil.Build(t, "", "otelsdkimplicit", "go", "build", "-a")
+
+	f := testutil.NewTestFixture(t)
+
+	var output string
+	defer func() {
+		if t.Failed() {
+			t.Logf("otelsdkimplicit output:\n%s", output)
+		}
+	}()
+	output = f.Run("otelsdkimplicit", fmt.Sprintf("-port=%d", testutil.FreePort(t)))
+	require.Contains(t, output, "OTEL_SDK_IMPLICIT: parent-valid=true",
+		"SpanFromContext(context.Background()) should return the server span from GLS")
+	require.Contains(t, output, "same-trace=true",
+		"a span started from context.Background() must join the server span's trace")
+
+	f.WaitForSpans(3)
+
+	server := testutil.RequireSpan(t, f.Traces(), testutil.IsServer, testutil.HasName("GET /otel"))
+	child := testutil.RequireSpan(t, f.Traces(), testutil.HasName("bg-child-span"))
+	require.Equal(t, server.TraceID(), child.TraceID(),
+		"the span started from context.Background() must share the server span's trace")
+	require.Equal(t, server.SpanID(), child.ParentSpanID(),
+		"the server span must be the parent of the span started from context.Background()")
+}
 
 // TestOtelSDKSpanFromContext verifies that trace.SpanFromContext returns
 // the active span from GLS when called with context.Background().

@@ -6,4 +6,7 @@
 //go:generate go tool otelc pin --generate
 package tools
 
-import _ "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/init"
+import (
+	_ "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/init"
+	_ "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/sdk/trace"
+)
