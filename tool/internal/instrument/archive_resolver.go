@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"os/exec"
@@ -114,7 +115,7 @@ func resolvePackageArchives(
 
 	// Resolve internal packages directly via direct build rather than synthetic imports.
 	for _, p := range internalMissing {
-		cArchives, lArchives, directErr := runDirectProbeBuild(ctx, toolPath, p, buildFlags)
+		cArchives, lArchives, directErr := runDirectProbeBuild(ctx, toolPath, p, buildFlags, configHash)
 		if directErr != nil {
 			failed[p] = directErr
 			continue
@@ -209,42 +210,72 @@ func isInternalPackage(importPath string) bool {
 		importPath == "internal"
 }
 
+// writeHashField writes an unambiguous, length-prefixed key-value pair to h.
+func writeHashField(h io.Writer, key, value string) {
+	_, _ = fmt.Fprintf(h, "%d:%s=%d:%s\x00", len(key), key, len(value), value)
+}
+
 // computeConfigHash computes a deterministic fingerprint for the build configuration.
+// Build flag ordering is preserved because flag semantics can be order-dependent.
 func computeConfigHash(toolPath string, buildFlags []string) string {
 	h := sha256.New()
+
 	goBin, _ := findGoBinary(toolPath)
-	_, _ = h.Write([]byte(goBin))
-	_, _ = h.Write([]byte{0})
-	_, _ = h.Write([]byte(toolPath))
-	_, _ = h.Write([]byte{0})
+	writeHashField(h, "gobin", goBin)
+	if fi, err := os.Stat(goBin); err == nil {
+		writeHashField(h, "gobin_stat", fmt.Sprintf("%d:%d", fi.Size(), fi.ModTime().UnixNano()))
+	}
+
+	writeHashField(h, "tool", toolPath)
+	if toolPath != "" {
+		if fi, err := os.Stat(toolPath); err == nil {
+			writeHashField(h, "tool_stat", fmt.Sprintf("%d:%d", fi.Size(), fi.ModTime().UnixNano()))
+		}
+	}
 
 	goos := os.Getenv("GOOS")
 	if goos == "" {
 		goos = runtime.GOOS
 	}
-	_, _ = h.Write([]byte(goos))
-	_, _ = h.Write([]byte{0})
+	writeHashField(h, "goos", goos)
 
 	goarch := os.Getenv("GOARCH")
 	if goarch == "" {
 		goarch = runtime.GOARCH
 	}
-	_, _ = h.Write([]byte(goarch))
-	_, _ = h.Write([]byte{0})
+	writeHashField(h, "goarch", goarch)
 
-	_, _ = h.Write([]byte(os.Getenv("CGO_ENABLED")))
-	_, _ = h.Write([]byte{0})
-	_, _ = h.Write([]byte(os.Getenv("GOEXPERIMENT")))
-	_, _ = h.Write([]byte{0})
-
-	flags := slices.Clone(buildFlags)
-	slices.Sort(flags)
-	for _, f := range flags {
-		_, _ = h.Write([]byte(f))
-		_, _ = h.Write([]byte{0})
+	for _, archVar := range []string{
+		"GOAMD64", "GOARM", "GOARM64", "GOMIPS", "GOMIPS64",
+		"GOPPC64", "GORISCV64", "GOWASM",
+	} {
+		if val := os.Getenv(archVar); val != "" {
+			writeHashField(h, archVar, val)
+		}
 	}
 
-	return hex.EncodeToString(h.Sum(nil))[:16]
+	writeHashField(h, "cgo", os.Getenv("CGO_ENABLED"))
+	writeHashField(h, "experiment", os.Getenv("GOEXPERIMENT"))
+	writeHashField(h, "goflags", os.Getenv("GOFLAGS"))
+	if goroot := os.Getenv("GOROOT"); goroot != "" {
+		writeHashField(h, "goroot", goroot)
+	}
+
+	for i, f := range buildFlags {
+		writeHashField(h, fmt.Sprintf("flag_%d", i), f)
+		if cut, ok := strings.CutPrefix(f, "-pgo="); ok && cut != "off" && cut != "auto" {
+			if fi, err := os.Stat(cut); err == nil {
+				writeHashField(h, "pgo_file_stat", fmt.Sprintf("%d:%d", fi.Size(), fi.ModTime().UnixNano()))
+			}
+		}
+	}
+
+	pgoProfileFile := util.GetPGOProfileFile()
+	if fi, err := os.Stat(pgoProfileFile); err == nil {
+		writeHashField(h, "pgo_profile_stat", fmt.Sprintf("%d:%d", fi.Size(), fi.ModTime().UnixNano()))
+	}
+
+	return hex.EncodeToString(h.Sum(nil))[:32]
 }
 
 // runProbeCmd executes a go command with probe environment and returns the WORK directory.
@@ -331,7 +362,8 @@ func runProbeBuild(
 }
 
 // runDirectProbeBuild builds a specific package directly with go build -work -o, capturing its
-// actual compiler and linker archive without importing restrictions.
+// actual compiler and linker archive without importing restrictions. Each probe produces a uniquely
+// named artifact under .otelc-build/direct_archives/<configHash>/ to prevent concurrent output collisions.
 //
 //nolint:revive // confusing-results conflicts with nonamedreturns
 func runDirectProbeBuild(
@@ -339,15 +371,19 @@ func runDirectProbeBuild(
 	toolPath string,
 	importPath string,
 	buildFlags []string,
+	configHash string,
 ) (map[string]string, map[string]string, error) {
 	tempDir := util.GetBuildTempDir()
-	directArchivesBase := filepath.Join(tempDir, directArchivesDirName)
-	if mkdirErr := os.MkdirAll(directArchivesBase, dirPermPrivate); mkdirErr != nil {
-		return nil, nil, ex.Wrapf(mkdirErr, "creating direct archives dir %s", directArchivesBase)
+	directArchivesConfigDir := filepath.Join(tempDir, directArchivesDirName, configHash)
+	if mkdirErr := os.MkdirAll(directArchivesConfigDir, dirPermPrivate); mkdirErr != nil {
+		return nil, nil, ex.Wrapf(mkdirErr, "creating direct archives dir %s", directArchivesConfigDir)
 	}
 
 	safePkg := util.EscapePackagePath(importPath)
-	outArchive := filepath.Join(directArchivesBase, safePkg+".a")
+	h := sha256.Sum256([]byte(importPath))
+	pkgHash := hex.EncodeToString(h[:])[:12]
+	outFileName := fmt.Sprintf("%s-%s-%d-%d.a", safePkg, pkgHash, os.Getpid(), time.Now().UnixNano())
+	outArchive := filepath.Join(directArchivesConfigDir, outFileName)
 
 	args := make([]string, 0, probeBaseArgCount+len(buildFlags)+directProbeExtraArgCount)
 	args = append(args, "build", "-work", "-o", outArchive)
@@ -403,40 +439,59 @@ func collectArchivesFromWorkDir(workDir string) (map[string]string, map[string]s
 }
 
 // parseActionConfigs scans each action directory for importcfg and importcfg.link.
+// Action directories are processed in sorted order (b001 first) so root probe mappings take precedence.
 func parseActionConfigs(
 	workDir string,
 	entries []os.DirEntry,
 	compileArchives map[string]string,
 	linkArchives map[string]string,
 ) {
+	actionDirs := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "b") {
-			continue
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), "b") {
+			actionDirs = append(actionDirs, entry.Name())
 		}
-		actionDir := filepath.Join(workDir, entry.Name())
-		linkCfgPath := filepath.Join(actionDir, "importcfg.link")
-		if util.PathExists(linkCfgPath) {
-			if cfg, parseErr := imports.ParseImportCfg(linkCfgPath); parseErr == nil {
-				maps.Copy(linkArchives, cfg.PackageFile)
-			}
-		}
+	}
+	slices.Sort(actionDirs)
 
-		cfgPath := filepath.Join(actionDir, "importcfg")
-		if !util.PathExists(cfgPath) {
-			continue
-		}
-		cfg, parseErr := imports.ParseImportCfg(cfgPath)
-		if parseErr != nil {
-			continue
-		}
-		for pkg, archive := range cfg.PackageFile {
-			if _, ok := compileArchives[pkg]; !ok {
-				compileArchives[pkg] = archive
-			}
-			if _, ok := linkArchives[pkg]; !ok {
-				if lArchive := toLinkerArchive(workDir, archive); lArchive != "" {
+	for _, name := range actionDirs {
+		parseActionDir(filepath.Join(workDir, name), workDir, compileArchives, linkArchives)
+	}
+}
+
+// parseActionDir extracts compiler and linker archive mappings from a single action directory.
+func parseActionDir(
+	actionDir string,
+	workDir string,
+	compileArchives map[string]string,
+	linkArchives map[string]string,
+) {
+	linkCfgPath := filepath.Join(actionDir, "importcfg.link")
+	if util.PathExists(linkCfgPath) {
+		if cfg, parseErr := imports.ParseImportCfg(linkCfgPath); parseErr == nil {
+			for pkg, lArchive := range cfg.PackageFile {
+				if _, ok := linkArchives[pkg]; !ok {
 					linkArchives[pkg] = lArchive
 				}
+			}
+		}
+	}
+
+	cfgPath := filepath.Join(actionDir, "importcfg")
+	if !util.PathExists(cfgPath) {
+		return
+	}
+	cfg, parseErr := imports.ParseImportCfg(cfgPath)
+	if parseErr != nil {
+		return
+	}
+	for pkg, archive := range cfg.PackageFile {
+		if _, ok := compileArchives[pkg]; !ok {
+			compileArchives[pkg] = archive
+		}
+		if _, ok := linkArchives[pkg]; !ok {
+			if lArchive := toLinkerArchive(workDir, archive); lArchive != "" {
+				linkArchives[pkg] = lArchive
 			}
 		}
 	}
@@ -448,7 +503,7 @@ func parseActionConfigs(
 // empty string to prevent compiler-only artifacts from reaching the linker.
 func toLinkerArchive(workDir, archive string) string {
 	exportDir := filepath.Join(workDir, "export")
-	if strings.HasPrefix(archive, exportDir) {
+	if archive == exportDir || strings.HasPrefix(archive, exportDir+string(filepath.Separator)) {
 		actionID := strings.TrimSuffix(filepath.Base(archive), ".a")
 		candidate := filepath.Join(workDir, actionID, "_pkg_.a")
 		if util.PathExists(candidate) {
@@ -558,13 +613,6 @@ func loadArchiveCache(configHash string) *resolvedArchivesCache {
 		}
 	}
 
-	// Read on-disk records from other toolexec processes for this configuration
-	cacheDir := filepath.Join(util.GetBuildTempDir(), resolvedArchivesDirName, configHash)
-	entries, err := os.ReadDir(cacheDir)
-	if err != nil {
-		return merged
-	}
-
 	if _, ok := inMemoryCache[configHash]; !ok {
 		inMemoryCache[configHash] = &resolvedArchivesCache{
 			Compile: make(map[string]string),
@@ -573,12 +621,25 @@ func loadArchiveCache(configHash string) *resolvedArchivesCache {
 	}
 	mem := inMemoryCache[configHash]
 
+	// Read on-disk records from other toolexec processes for this configuration
+	cacheDir := filepath.Join(util.GetBuildTempDir(), resolvedArchivesDirName, configHash)
+	loadDiskArchiveRecords(cacheDir, merged, mem)
+
+	return merged
+}
+
+// loadDiskArchiveRecords reads valid on-disk archive records from cacheDir and merges them into merged and mem.
+func loadDiskArchiveRecords(cacheDir string, merged, mem *resolvedArchivesCache) {
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		return
+	}
+
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		filePath := filepath.Join(cacheDir, entry.Name())
-		data, readErr := os.ReadFile(filePath)
+		data, readErr := os.ReadFile(filepath.Join(cacheDir, entry.Name()))
 		if readErr != nil {
 			continue
 		}
@@ -591,15 +652,17 @@ func loadArchiveCache(configHash string) *resolvedArchivesCache {
 		for pkg, cPath := range record.Compile {
 			lPath, hasL := record.Link[pkg]
 			if hasL && util.PathExists(cPath) && util.PathExists(lPath) {
-				merged.Compile[pkg] = cPath
-				merged.Link[pkg] = lPath
-				mem.Compile[pkg] = cPath
-				mem.Link[pkg] = lPath
+				if _, ok := merged.Compile[pkg]; !ok {
+					merged.Compile[pkg] = cPath
+					merged.Link[pkg] = lPath
+				}
+				if _, ok := mem.Compile[pkg]; !ok {
+					mem.Compile[pkg] = cPath
+					mem.Link[pkg] = lPath
+				}
 			}
 		}
 	}
-
-	return merged
 }
 
 // saveArchiveCache writes a probe-specific cache file into .otelc-build/resolved_archives/<configHash>/.

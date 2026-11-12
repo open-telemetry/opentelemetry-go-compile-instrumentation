@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sync"
 	"testing"
@@ -114,6 +115,15 @@ func TestToLinkerArchive(t *testing.T) {
 		cached := "/home/user/.cache/go-build/ab/abcdef-d"
 		got := toLinkerArchive(tempDir, cached)
 		assert.Equal(t, cached, got)
+	})
+
+	t.Run("does not match directory with export prefix but different name", func(t *testing.T) {
+		exportOtherDir := filepath.Join(tempDir, "export_other")
+		require.NoError(t, os.MkdirAll(exportOtherDir, 0o755))
+		otherArchive := filepath.Join(exportOtherDir, "b002.a")
+		require.NoError(t, os.WriteFile(otherArchive, []byte("other"), 0o644))
+		got := toLinkerArchive(tempDir, otherArchive)
+		assert.Equal(t, otherArchive, got)
 	})
 }
 
@@ -386,12 +396,26 @@ func TestComputeConfigHash(t *testing.T) {
 	hashDiffTags := computeConfigHash("", []string{"-tags", "bar"})
 	assert.NotEqual(t, hash1, hashDiffTags, "different tags must produce different hash")
 
+	hashOrder1 := computeConfigHash("", []string{"-tags=a", "-tags=b"})
+	hashOrder2 := computeConfigHash("", []string{"-tags=b", "-tags=a"})
+	assert.NotEqual(t, hashOrder1, hashOrder2, "reordered flags must produce different hash")
+
 	hashDiffPGO := computeConfigHash("", []string{"-tags", "foo", "-pgo=some.pgo"})
 	assert.NotEqual(t, hash1, hashDiffPGO, "different PGO setting must produce different hash")
 
-	t.Setenv("GOOS", "darwin")
-	hashDarwin := computeConfigHash("", []string{"-tags", "foo"})
-	assert.NotEqual(t, hash1, hashDarwin, "different GOOS must produce different hash")
+	altGOOS := "darwin"
+	if runtime.GOOS == "darwin" {
+		altGOOS = "linux"
+	}
+	t.Setenv("GOOS", altGOOS)
+	hashAltOS := computeConfigHash("", []string{"-tags", "foo"})
+	assert.NotEqual(t, hash1, hashAltOS, "different GOOS must produce different hash")
+
+	t.Setenv("GOAMD64", "v3")
+	hashAMD64v3 := computeConfigHash("", []string{"-tags", "foo"})
+	t.Setenv("GOAMD64", "v1")
+	hashAMD64v1 := computeConfigHash("", []string{"-tags", "foo"})
+	assert.NotEqual(t, hashAMD64v3, hashAMD64v1, "different architecture feature levels must produce different hash")
 }
 
 func TestIsInternalPackage(t *testing.T) {
@@ -457,4 +481,93 @@ func TestNestedResolutionLIFORestoration(t *testing.T) {
 	}
 
 	assert.Equal(t, "initial_val", os.Getenv(util.EnvOtelcNestedResolving))
+}
+
+func TestParseActionConfigs_Deterministic(t *testing.T) {
+	workDir := t.TempDir()
+	b001Dir := filepath.Join(workDir, "b001")
+	b002Dir := filepath.Join(workDir, "b002")
+	require.NoError(t, os.MkdirAll(b001Dir, 0o755))
+	require.NoError(t, os.MkdirAll(b002Dir, 0o755))
+
+	b001Comp := filepath.Join(workDir, "b001.a")
+	b002Comp := filepath.Join(workDir, "b002.a")
+	require.NoError(t, os.WriteFile(b001Comp, []byte("b001"), 0o644))
+	require.NoError(t, os.WriteFile(b002Comp, []byte("b002"), 0o644))
+
+	// b001 and b002 both define example.com/conflict
+	require.NoError(
+		t,
+		os.WriteFile(
+			filepath.Join(b001Dir, "importcfg"),
+			[]byte("packagefile example.com/conflict="+b001Comp+"\n"),
+			0o644,
+		),
+	)
+	require.NoError(
+		t,
+		os.WriteFile(
+			filepath.Join(b002Dir, "importcfg"),
+			[]byte("packagefile example.com/conflict="+b002Comp+"\n"),
+			0o644,
+		),
+	)
+
+	entries, err := os.ReadDir(workDir)
+	require.NoError(t, err)
+
+	compileArchives := make(map[string]string)
+	linkArchives := make(map[string]string)
+	parseActionConfigs(workDir, entries, compileArchives, linkArchives)
+
+	// b001 must win deterministically
+	assert.Equal(t, b001Comp, compileArchives["example.com/conflict"])
+}
+
+func TestDirectProbeArchiveUniqueness(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tempDir)
+
+	CleanupProbeWorkDirs()
+
+	ctx := t.Context()
+	modDir := filepath.Join(tempDir, "testmod")
+	secretDir := filepath.Join(modDir, "internal", "secret")
+	require.NoError(t, os.MkdirAll(secretDir, 0o755))
+	require.NoError(
+		t,
+		os.WriteFile(filepath.Join(modDir, "go.mod"), []byte("module example.com/testmod\n\ngo 1.25.0\n"), 0o644),
+	)
+	require.NoError(
+		t,
+		os.WriteFile(
+			filepath.Join(secretDir, "secret.go"),
+			[]byte("package secret\nfunc Key() string { return \"abc\" }\n"),
+			0o644,
+		),
+	)
+
+	// Run from modDir
+	t.Setenv(util.EnvOtelcWorkDir, modDir)
+
+	configA := "cfgA"
+	configB := "cfgB"
+
+	c1, l1, err1 := runDirectProbeBuild(ctx, "", "example.com/testmod/internal/secret", nil, configA)
+	require.NoError(t, err1)
+	c2, l2, err2 := runDirectProbeBuild(ctx, "", "example.com/testmod/internal/secret", nil, configB)
+	require.NoError(t, err2)
+
+	assert.NotEmpty(t, c1["example.com/testmod/internal/secret"])
+	assert.NotEmpty(t, c2["example.com/testmod/internal/secret"])
+	assert.NotEqual(
+		t,
+		c1["example.com/testmod/internal/secret"],
+		c2["example.com/testmod/internal/secret"],
+		"different configurations must produce separate archive paths",
+	)
+	assert.Equal(t, c1["example.com/testmod/internal/secret"], l1["example.com/testmod/internal/secret"])
+	assert.Equal(t, c2["example.com/testmod/internal/secret"], l2["example.com/testmod/internal/secret"])
+	assert.True(t, util.PathExists(c1["example.com/testmod/internal/secret"]))
+	assert.True(t, util.PathExists(c2["example.com/testmod/internal/secret"]))
 }

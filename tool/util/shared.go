@@ -42,11 +42,8 @@ const (
 	// "package>added import" entries. Import paths cannot contain "," or ">",
 	// so the entries need no escaping.
 	EnvOtelcNestedResolving = "OTELC_NESTED_RESOLVING"
-	// EnvOtelcProbeLink marks toolexec invocations spawned during an archive probe
-	// so the probe's link action does not recurse into rule resolution.
-	EnvOtelcProbeLink = "OTELC_PROBE_LINK"
-	BuildTempDir      = ".otelc-build"
-	BuildLockFile     = BuildTempDir + ".lock"
+	BuildTempDir            = ".otelc-build"
+	BuildLockFile           = BuildTempDir + ".lock"
 	OtelcRoot         = "go.opentelemetry.io/otelc"
 	OtelcPkgRoot      = OtelcRoot + "/pkg"
 	OtelcInstRoot     = OtelcRoot + "/instrumentation"

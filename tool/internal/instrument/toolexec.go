@@ -621,12 +621,6 @@ func loadAddedImports(ctx context.Context) (map[string]string, error) {
 
 // interceptLink updates the link-time importcfg with packages added during compilation.
 func interceptLink(ctx context.Context, args []string) ([]string, error) {
-	// In a probe build, cmd/go invokes link only to generate importcfg.link.
-	// Bypassing rule-added import resolution prevents recursive probe execution.
-	if os.Getenv(util.EnvOtelcProbeLink) == "1" {
-		return args, nil
-	}
-
 	logger := util.LoggerFromContext(ctx)
 
 	// Extract -importcfg flag for link
