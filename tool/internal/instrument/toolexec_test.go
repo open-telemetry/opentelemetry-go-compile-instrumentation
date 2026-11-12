@@ -2263,7 +2263,6 @@ func setupLinkMemo(t *testing.T, adds ...string) {
 	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
 	t.Setenv(util.EnvOtelcSessionDir, filepath.Join(t.TempDir(), "session"))
 	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
-	require.NoError(t, os.WriteFile(util.GetResolutionScopeFile(), []byte("scope"), 0o644))
 	importsMap := make(map[string]string, len(adds))
 	for i, path := range adds {
 		importsMap["i"+string(rune('a'+i))] = path
@@ -2275,6 +2274,8 @@ func setupLinkMemo(t *testing.T, adds ...string) {
 			"dep.go": {{InstBaseRule: rule.InstBaseRule{Name: "rule", Imports: importsMap}}},
 		},
 	}})
+	// Setup writes the scope after matched.json; an older scope is stale.
+	require.NoError(t, os.WriteFile(util.GetResolutionScopeFile(), []byte("scope"), 0o644))
 }
 
 func freshLinkConfig() *imports.ImportConfig {

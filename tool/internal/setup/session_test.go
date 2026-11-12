@@ -8,7 +8,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -222,4 +224,39 @@ func TestRecordResolutionScopeDisablesMemoOnFailure(t *testing.T) {
 	assert.NoFileExists(t, util.GetResolutionScopeFile())
 	assert.Nil(t, session.Open(nil), "without a scope the memo is off")
 	assert.Contains(t, logs.String(), "export memo is off")
+}
+
+// TestRecordResolutionScopeDisablesMemoWhenStaleScopeStays covers a scope
+// that can be neither replaced nor removed, here because the build temp dir
+// is read-only: the stale scope from an earlier setup must not let the memo
+// run against the wrong inputs. Directory permissions do not stop removal on
+// Windows or for root, so the test skips there.
+func TestRecordResolutionScopeDisablesMemoWhenStaleScopeStays(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("directory permissions do not stop file removal here")
+	}
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	t.Setenv(util.EnvOtelcSessionDir, "")
+	tempDir := util.GetBuildTempDir()
+	require.NoError(t, os.MkdirAll(tempDir, 0o755))
+	require.NoError(t, os.WriteFile(util.GetResolutionScopeFile(), []byte("stale"), 0o644))
+	// This setup's matched.json is newer than the earlier setup's scope.
+	time.Sleep(20 * time.Millisecond)
+	require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), []byte("[]"), 0o644))
+	require.NoError(t, os.Chmod(tempDir, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(tempDir, 0o755) })
+
+	var logs bytes.Buffer
+	sp := &setupPhase{logger: slog.New(slog.NewTextHandler(&logs, nil))}
+	sp.recordResolutionScope(t.Context(), []string{filepath.Join(t.TempDir(), "missing")})
+
+	require.FileExists(t, util.GetResolutionScopeFile(), "the stale scope could not be removed")
+	assert.Contains(t, logs.String(), "cannot remove a stale resolution scope")
+	assert.Equal(t, util.SessionOff, os.Getenv(util.EnvOtelcSessionDir),
+		"processes this build starts must inherit a disabled session")
+
+	// Even a process that does not inherit the disabled session, such as a
+	// bare -toolexec run, ignores the stale scope.
+	t.Setenv(util.EnvOtelcSessionDir, t.TempDir())
+	assert.Nil(t, session.Open(nil), "a scope older than matched.json must not open the memo")
 }

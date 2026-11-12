@@ -299,3 +299,15 @@ func TestMemoLockIsPerScopeAndFlags(t *testing.T) {
 	_, err = Open([]string{"-tags=a"}).Lock(short)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 }
+
+func TestMemoIgnoresScopeOlderThanMatchedRules(t *testing.T) {
+	setupSession(t)
+	require.NotNil(t, Open(nil), "a scope with no matched rules is trusted")
+
+	time.Sleep(20 * time.Millisecond)
+	require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), []byte("[]"), 0o644))
+	assert.Nil(t, Open(nil), "a scope older than this setup's matched rules is stale")
+
+	writeScope(t, "scope1")
+	assert.NotNil(t, Open(nil), "a scope written after the matched rules is current")
+}

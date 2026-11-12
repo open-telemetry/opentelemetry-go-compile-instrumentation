@@ -48,6 +48,9 @@ func Open(buildFlags []string) *Memo {
 	if dir == "" || dir == util.SessionOff {
 		return nil
 	}
+	if !scopeIsCurrent() {
+		return nil
+	}
 	scope, err := os.ReadFile(util.GetResolutionScopeFile())
 	if err != nil || len(strings.TrimSpace(string(scope))) == 0 {
 		return nil
@@ -57,6 +60,24 @@ func Open(buildFlags []string) *Memo {
 		scope: strings.TrimSpace(string(scope)),
 		flags: flagsDigest(buildFlags),
 	}
+}
+
+// scopeIsCurrent reports whether the resolution scope was written by the
+// latest setup. Setup writes matched.json first and the scope after it, so a
+// scope older than matched.json is left from an earlier setup whose scope
+// this setup could neither replace nor remove.
+func scopeIsCurrent() bool {
+	scope, err := os.Stat(util.GetResolutionScopeFile())
+	if err != nil {
+		return false
+	}
+	matched, err := os.Stat(util.GetMatchedRuleFile())
+	if err != nil {
+		// Without matched.json no setup ran here; a scope alone is
+		// trusted, as tests that record only a scope expect.
+		return true
+	}
+	return !scope.ModTime().Before(matched.ModTime())
 }
 
 // buildEnvVars are the environment variables that change what a nested

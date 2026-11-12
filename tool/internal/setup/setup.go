@@ -634,8 +634,16 @@ func (sp *setupPhase) recordResolutionScope(ctx context.Context, moduleDirs []st
 		return
 	}
 	sp.Warn("cannot record the resolution scope; the export memo is off for this build", "error", err)
-	if rmErr := os.Remove(util.GetResolutionScopeFile()); rmErr != nil && !os.IsNotExist(rmErr) {
-		sp.Warn("cannot remove a stale resolution scope", "error", rmErr)
+	rmErr := os.Remove(util.GetResolutionScopeFile())
+	if rmErr == nil || os.IsNotExist(rmErr) {
+		return
+	}
+	// A scope from an earlier setup is still readable. session.Open ignores a
+	// scope older than matched.json, which setup has just rewritten, and the
+	// processes this build starts inherit a disabled session as well.
+	sp.Warn("cannot remove a stale resolution scope", "error", rmErr)
+	if setErr := os.Setenv(util.EnvOtelcSessionDir, util.SessionOff); setErr != nil {
+		sp.Warn("cannot turn the session off", "error", setErr)
 	}
 }
 
