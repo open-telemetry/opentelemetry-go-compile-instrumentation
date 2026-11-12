@@ -52,16 +52,26 @@ func LoadPackages(
 // consistency check while go.mod is mid-edit. moduleDir is empty when dir is
 // outside any module.
 func ModuleAndWorkspace(ctx context.Context, dir string) (string, bool, error) {
+	moduleDir, workFile, err := ModuleAndWorkFile(ctx, dir)
+	return moduleDir, workFile != "", err
+}
+
+// ModuleAndWorkFile is ModuleAndWorkspace, but returns the path of the active
+// go.work file instead of a flag. workFile is empty when dir is not inside an
+// active workspace.
+//
+//nolint:revive // if we add named returns then nonamedreturns will complain
+func ModuleAndWorkFile(ctx context.Context, dir string) (string, string, error) {
 	cmd := exec.CommandContext(ctx, "go", "env", "GOMOD", "GOWORK")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
-		return "", false, ex.Wrapf(err, "running go env GOMOD GOWORK in %s", dir)
+		return "", "", ex.Wrapf(err, "running go env GOMOD GOWORK in %s", dir)
 	}
 	// go env prints one line per requested var, in order: GOMOD then GOWORK.
 	goModLine, goWorkLine, ok := strings.Cut(string(out), "\n")
 	if !ok {
-		return "", false, ex.Newf("unexpected output from go env GOMOD GOWORK in %s: %q", dir, out)
+		return "", "", ex.Newf("unexpected output from go env GOMOD GOWORK in %s: %q", dir, out)
 	}
 	goMod := strings.TrimSpace(goModLine)
 	goWork := strings.TrimSpace(goWorkLine)
@@ -72,8 +82,10 @@ func ModuleAndWorkspace(ctx context.Context, dir string) (string, bool, error) {
 	}
 	// GOWORK is the path to the resolved go.work file, "off" when workspace
 	// mode is explicitly disabled, or empty when none applies.
-	workspace := goWork != "" && goWork != "off"
-	return moduleDir, workspace, nil
+	if goWork == "off" {
+		goWork = ""
+	}
+	return moduleDir, goWork, nil
 }
 
 func loadDirFromBuildFlags(buildFlags []string) (string, []string, error) {
