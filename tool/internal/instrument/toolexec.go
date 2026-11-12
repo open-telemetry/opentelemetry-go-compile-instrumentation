@@ -1083,6 +1083,14 @@ func markedToolVersion(rawOutput string) string {
 		if tags := util.ActiveBuildTags(); len(tags) > 0 {
 			content = append(content, "\ntags="+strings.Join(tags, ",")...)
 		}
+		// go never sees the packages rules add, so their hash stands in. The
+		// tool ID is shared by every compile, so an edit to one injected
+		// package rebuilds the whole instrumented build, not only the
+		// packages that import it. Missing an edit would put stale code in
+		// the binary, so the coarser invalidation is the accepted cost.
+		if injected, injErr := os.ReadFile(util.GetInjectedHashFile()); injErr == nil && len(injected) > 0 {
+			content = append(content, "\ninjected="+string(injected)...)
+		}
 		sum := sha256.Sum256(content)
 		rulesHash = hex.EncodeToString(sum[:8])
 	}
