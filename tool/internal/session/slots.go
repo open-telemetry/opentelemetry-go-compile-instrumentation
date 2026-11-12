@@ -6,11 +6,14 @@ package session
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"time"
+
+	"github.com/gofrs/flock"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/util"
@@ -71,20 +74,35 @@ func acquireSlot(ctx context.Context, dir string, n int) (func(), time.Duration,
 		return nil, 0, ex.Wrapf(err, "creating load slot directory %s", dir)
 	}
 	start := time.Now()
+	// One handle per slot file for the whole wait, so a busy poll costs a
+	// flock call per slot instead of an open and a close. Starting at a
+	// random slot spreads concurrent waiters over the slots.
+	locks := make([]*flock.Flock, n)
+	for i := range n {
+		locks[i] = flock.New(filepath.Join(dir, fmt.Sprintf("slot-%d.lock", i)))
+	}
+	closeExcept := func(keep int) {
+		for i, lock := range locks {
+			if i != keep {
+				_ = lock.Close()
+			}
+		}
+	}
+	first := rand.IntN(n)
 	logged := false
 	ticker := time.NewTicker(lockRetryInterval)
 	defer ticker.Stop()
 	for {
-		for i := range n {
-			lock, ok, err := tryLock(filepath.Join(dir, fmt.Sprintf("slot-%d.lock", i)))
+		for k := range n {
+			i := (first + k) % n
+			ok, err := tryLock(locks[i])
 			if err != nil {
+				closeExcept(-1)
 				return nil, 0, err
 			}
 			if ok {
-				return func() {
-					_ = lock.Unlock()
-					_ = lock.Close()
-				}, time.Since(start), nil
+				closeExcept(i)
+				return releaseLock(locks[i]), time.Since(start), nil
 			}
 		}
 		if !logged {
@@ -94,6 +112,7 @@ func acquireSlot(ctx context.Context, dir string, n int) (func(), time.Duration,
 		}
 		select {
 		case <-ctx.Done():
+			closeExcept(-1)
 			return nil, 0, ex.Wrapf(ctx.Err(), "waiting for a package load slot in %s", dir)
 		case <-ticker.C:
 		}

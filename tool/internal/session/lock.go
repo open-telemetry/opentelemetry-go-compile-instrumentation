@@ -25,25 +25,29 @@ import (
 // the caller cancels.
 const lockRetryInterval = 50 * time.Millisecond
 
-// tryLock makes one attempt to take the lock file at path. Session lock files
-// are never removed while the session lives, so a handle stays valid. It
-// reports contention as "not acquired" so the caller polls again, and returns
-// any other failure, such as an unwritable path, as an error.
-func tryLock(path string) (*flock.Flock, bool, error) {
-	lock := flock.New(path)
+// tryLock makes one attempt to take lock. Session lock files are never
+// removed while the session lives, so a handle stays valid across attempts:
+// callers keep one *flock.Flock per file for the whole wait instead of
+// opening the file again on every poll. It reports contention as "not
+// acquired" so the caller polls again, and returns any other failure, such
+// as an unwritable path, as an error.
+func tryLock(lock *flock.Flock) (bool, error) {
 	acquired, err := lock.TryLock()
 	if err != nil {
-		_ = lock.Close()
 		if isContention(err) {
-			return nil, false, nil
+			return false, nil
 		}
-		return nil, false, ex.Wrapf(err, "taking session lock %s", path)
+		return false, ex.Wrapf(err, "taking session lock %s", lock.Path())
 	}
-	if !acquired {
+	return acquired, nil
+}
+
+// releaseLock unlocks lock and closes its handle.
+func releaseLock(lock *flock.Flock) func() {
+	return func() {
+		_ = lock.Unlock()
 		_ = lock.Close()
-		return nil, false, nil
 	}
-	return lock, true, nil
 }
 
 // lockPath takes the lock file at path, waiting without a deadline until it
@@ -52,8 +56,10 @@ func lockPath(ctx context.Context, path string, onWait func()) (func(), error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, ex.Wrapf(err, "creating lock directory for %s", path)
 	}
-	lock, ok, err := tryLock(path)
+	lock := flock.New(path)
+	ok, err := tryLock(lock)
 	if err != nil {
+		_ = lock.Close()
 		return nil, err
 	}
 	if !ok {
@@ -65,17 +71,15 @@ func lockPath(ctx context.Context, path string, onWait func()) (func(), error) {
 		for !ok {
 			select {
 			case <-ctx.Done():
+				_ = lock.Close()
 				return nil, ex.Wrapf(ctx.Err(), "waiting for session lock %s", path)
 			case <-ticker.C:
-				lock, ok, err = tryLock(path)
-				if err != nil {
+				if ok, err = tryLock(lock); err != nil {
+					_ = lock.Close()
 					return nil, err
 				}
 			}
 		}
 	}
-	return func() {
-		_ = lock.Unlock()
-		_ = lock.Close()
-	}, nil
+	return releaseLock(lock), nil
 }
