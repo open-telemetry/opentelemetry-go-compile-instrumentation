@@ -630,6 +630,12 @@ func instrumentStart(
 	spanName, query, endpoint, driverName, dsn, dbName string,
 	args ...interface{},
 ) {
+	// A call during package initialization can come before the OpenTelemetry
+	// API is usable. Starting a span then would panic inside initOnce and leave
+	// tracer nil for the rest of the process.
+	if !runtime.Ready() {
+		return
+	}
 	if !clientEnabler.Enable() {
 		logger.Debug("Db client instrumentation disabled")
 		return
