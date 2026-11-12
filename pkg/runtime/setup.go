@@ -184,10 +184,15 @@ func setupTraceProvider(ctx context.Context, res *resource.Resource) error {
 
 	spanProcessor := newSpanProcessor(traceExporter)
 
-	tracerProvider = sdktrace.NewTracerProvider(
+	opts := []sdktrace.TracerProviderOption{
 		sdktrace.WithResource(res),
 		sdktrace.WithSpanProcessor(spanProcessor),
-	)
+	}
+	if sampler := newFilteringSamplerFromEnv(); sampler != nil {
+		opts = append(opts, sdktrace.WithSampler(sampler))
+	}
+
+	tracerProvider = sdktrace.NewTracerProvider(opts...)
 
 	// Set global tracer provider
 	otel.SetTracerProvider(tracerProvider)

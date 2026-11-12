@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -19,7 +20,10 @@ import (
 	_ "go.opentelemetry.io/otelc/test/shared/testdb"
 )
 
-var frontPort = flag.Int("front-port", 8080, "port for HTTP frontend")
+var (
+	frontPort     = flag.Int("front-port", 8080, "port for HTTP frontend")
+	stdinShutdown = flag.Bool("stdin-shutdown", false, "shut down gracefully when stdin is closed")
+)
 
 func main() {
 	flag.Parse()
@@ -42,6 +46,17 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("frontend querying database"))
 	})
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		rows, err := db.QueryContext(r.Context(), "SELECT 1")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
 
 	server := &http.Server{
 		Addr:    fmt.Sprintf(":%d", *frontPort),
@@ -54,9 +69,18 @@ func main() {
 		}
 	}()
 
-	// Wait for shutdown signal
+	// Wait for shutdown signal (or stdin close when opt-in enabled).
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	if *stdinShutdown {
+		go func() {
+			// Read until stdin is closed (EOF) before requesting shutdown.
+			_, _ = io.Copy(io.Discard, os.Stdin)
+			stop()
+		}()
+	}
+
 	<-ctx.Done()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

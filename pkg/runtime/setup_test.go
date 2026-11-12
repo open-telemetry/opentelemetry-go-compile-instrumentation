@@ -394,7 +394,22 @@ func TestShutdownMultipleErrors(t *testing.T) {
 // restoreProviders resets the global providers after a test that configures them.
 func restoreProviders(t *testing.T) {
 	origTracer, origMeter, origLogger := tracerProvider, meterProvider, loggerProvider
-	t.Cleanup(func() { tracerProvider, meterProvider, loggerProvider = origTracer, origMeter, origLogger })
+	origGlobalTracer := otel.GetTracerProvider()
+	t.Cleanup(func() {
+		if tracerProvider != nil && tracerProvider != origTracer {
+			_ = tracerProvider.Shutdown(context.Background())
+		}
+		if meterProvider != nil && meterProvider != origMeter {
+			_ = meterProvider.Shutdown(context.Background())
+		}
+		if loggerProvider != nil && loggerProvider != origLogger {
+			_ = loggerProvider.Shutdown(context.Background())
+		}
+		if current := otel.GetTracerProvider(); current != origGlobalTracer {
+			otel.SetTracerProvider(origGlobalTracer)
+		}
+		tracerProvider, meterProvider, loggerProvider = origTracer, origMeter, origLogger
+	})
 }
 
 func TestNewResourceIncludesTelemetrySDK(t *testing.T) {

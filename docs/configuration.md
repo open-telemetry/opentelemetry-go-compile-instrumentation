@@ -188,9 +188,43 @@ Keep in mind:
 ## Runtime Tuning
 
 `otelc` injects an OpenTelemetry SDK initialization package into instrumented binaries. The
-SDK reads standard OTel environment variables at startup. There is no `otelc`-specific
-configuration for exporters, samplers, or resource attributes — set those through the
-[OTel SDK environment variable specification](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/).
+SDK reads standard OTel environment variables at startup (exporters, samplers, propagators, and resource attributes).
+See the [OTel SDK environment variable specification](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/).
+
+### Trace Root Suppression
+
+Background jobs and periodic health probes often generate high volumes of single-span or orphan traces (e.g., background database polling or `/healthz` checks). `otelc` provides two opt-in environment variables to suppress these traces at sampling time:
+
+- **`OTEL_GO_DROP_ROOT_CLIENT_PRODUCER`** — set to `true` (case-insensitive) to drop parentless `CLIENT` and `PRODUCER` spans (such as background database queries, outbound HTTP requests, or messaging operations that start without an active span in context). Valid child `CLIENT` and `PRODUCER` spans that have a valid parent context are delegated normally and are not dropped. Disabled by default.
+- **`OTEL_GO_EXCLUDED_SERVER_PATHS`** — comma-separated list of HTTP URL paths (e.g. `/healthz,/readyz`) to suppress when they originate as root `SERVER` spans. Disabled by default.
+
+#### Exact Path-Matching Semantics
+
+- Paths in `OTEL_GO_EXCLUDED_SERVER_PATHS` are matched against the initial `url.path` attribute of the span.
+- Whitespace around comma-separated entries is trimmed; empty entries are ignored.
+- Matching is exact and case-sensitive: `/healthz` matches `/healthz` (including with query strings such as `/healthz?ready=true`), but does not match `/healthz/`, `/healthz/ready`, or `/Healthz`.
+- Paths are not interpreted as regexes, globs, or prefixes.
+- Only root `SERVER` spans are filtered: if an incoming request contains a valid remote parent context (such as distributed trace headers from an upstream caller), it is delegated to the configured sampler and not dropped.
+
+#### Descendant Behavior and Non-Parent-Based Samplers
+
+When a root span is dropped by either filter:
+
+- The span becomes a non-recording span (`IsRecording() == false`, unsampled).
+- Any local child spans created inside the handler (such as database queries or internal spans executed during a `/healthz` probe) have an unsampled local parent and are also suppressed.
+- Descendant suppression holds even when a non-parent-based sampler such as `always_on` is configured via `OTEL_TRACES_SAMPLER=always_on`.
+- Remote-parent sampling decisions (sampled or unsampled remote parents) continue to be delegated to the configured sampler.
+
+> [!NOTE]
+> **Accepted trade-off for local unsampled parents under non-parent-based samplers:**
+> To prevent local descendants of filtered roots from unexpectedly recording under non-parent-based samplers (such as `always_on`) without introducing mutable per-trace tracking state, global locks, or custom propagation markers, the sampler suppresses any span whose valid local parent is unsampled.
+> As an intentional trade-off, this rule also applies to local descendants of any other locally unsampled parents (e.g. spans dropped by an underlying custom or ratio decision). When filtering is enabled, such local children remain unsampled rather than being re-sampled by `always_on`. Remote parents and sampled local parents are unaffected and remain fully delegated to the underlying sampler.
+
+#### Interaction with Standard SDK Samplers and Remote Limitations
+
+- The filtering sampler wraps whichever SDK sampler is selected by `OTEL_TRACES_SAMPLER` and `OTEL_TRACES_SAMPLER_ARG` (supporting `parentbased_always_on`, `parentbased_always_off`, `parentbased_traceidratio`, `always_on`, `always_off`, and `traceidratio`).
+- If neither filtering variable is enabled, no sampler wrapper is installed and standard SDK sampler initialization is retained.
+- **Cross-service boundaries**: When a suppressed span makes an outbound call to a remote service, it propagates an unsampled trace context. Downstream services using standard parent-based samplers will honor the unsampled flag and suppress their spans. However, downstream services configured with non-parent-based samplers (such as explicit `always_on`) will evaluate sampling independently.
 
 Two `otelc`-specific runtime knobs bound the goroutine-local storage (GLS) span tracker.
 Instrumentation that does not pass `context.Context` through all call boundaries relies on GLS

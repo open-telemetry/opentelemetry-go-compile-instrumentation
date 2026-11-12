@@ -5,6 +5,7 @@ package testutil
 
 import (
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -143,12 +144,21 @@ func Run(t *testing.T, appsDir, app string, env []string, args ...string) string
 	return string(out)
 }
 
+// hasStdinShutdown reports whether -stdin-shutdown is specified in args.
+func hasStdinShutdown(args []string) bool {
+	for _, arg := range args {
+		if arg == "-stdin-shutdown" {
+			return true
+		}
+	}
+	return false
+}
+
 // Start starts the application but does not wait for it to complete. If env
 // is nil, the parent process env is used. Stdout and stderr are captured and
 // logged when the test fails, so that app crashes are visible in CI output.
-// The returned AppOutput also lets a test block until the app logs a given
-// string, so tests can synchronise on the app reaching a known point.
-func Start(t *testing.T, appsDir, app string, env []string, args ...string) (*exec.Cmd, *AppOutput) {
+// The returned Server manages the process lifecycle and provides graceful shutdown via Stop.
+func Start(t *testing.T, appsDir, app string, env []string, args ...string) *Server {
 	t.Helper()
 	appName := "./" + appBinName
 	if util.IsWindows() {
@@ -162,20 +172,31 @@ func Start(t *testing.T, appsDir, app string, env []string, args ...string) (*ex
 	appDir := filepath.Join(appsDir, app)
 	cmd := newCmd(t.Context(), appDir, env, append([]string{appName}, args...)...)
 
+	// An open stdin pipe is created only when -stdin-shutdown is explicitly requested,
+	// leaving default stdin behavior (EOF) intact for all other test applications.
+	var stdin io.WriteCloser
+	if hasStdinShutdown(args) {
+		var err error
+		stdin, err = cmd.StdinPipe()
+		require.NoError(t, err)
+	}
+
 	out := &AppOutput{}
 	cmd.Stdout = out
 	cmd.Stderr = out
 
 	require.NoError(t, cmd.Start())
+
+	srv := &Server{
+		t:       t,
+		appPath: app,
+		output:  out,
+		stdin:   stdin,
+		Cmd:     cmd,
+	}
 	t.Cleanup(func() {
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-			_ = cmd.Wait() // ensure all output is flushed
-		}
-		if t.Failed() && out.Len() > 0 {
-			t.Logf("app output:\n%s", out)
-		}
+		srv.cleanup()
 	})
 
-	return cmd, out
+	return srv
 }

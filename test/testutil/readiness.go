@@ -18,6 +18,7 @@ const (
 	defaultSpanPollTimeout   = 15 * time.Second
 	defaultSpanPollInterval  = 25 * time.Millisecond
 	defaultAppLogTimeout     = 15 * time.Second
+	defaultShutdownTimeout   = 10 * time.Second
 )
 
 // WaitForTCP waits until a TCP connection can be established.

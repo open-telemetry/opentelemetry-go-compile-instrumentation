@@ -5,10 +5,14 @@ package testutil
 
 import (
 	"context"
+	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/pdata/ptrace"
@@ -119,11 +123,83 @@ func (f *TestFixture) CollectorURL() string {
 
 // Server represents a running server process.
 type Server struct {
-	t       *testing.T
-	appPath string
-	output  *AppOutput
+	t        *testing.T
+	appPath  string
+	output   *AppOutput
+	stdin    io.WriteCloser
+	stopOnce sync.Once
 
 	*exec.Cmd
+}
+
+// Stop requests a graceful shutdown and waits for the process to exit within defaultShutdownTimeout.
+// If stdin was initialized (via -stdin-shutdown), it closes stdin; otherwise it signals the process.
+// It fails the test if graceful shutdown times out or if the process exits with an error.
+func (s *Server) Stop() {
+	s.t.Helper()
+	s.stopOnce.Do(func() {
+		if s.stdin != nil {
+			if err := s.stdin.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
+				s.t.Logf("closing stdin for %s: %v", s.appPath, err)
+			}
+		} else if s.Cmd.Process != nil {
+			_ = s.Cmd.Process.Signal(os.Interrupt)
+		}
+
+		done := make(chan error, 1)
+		go func() {
+			done <- s.Cmd.Wait()
+		}()
+
+		select {
+		case err := <-done:
+			if err != nil {
+				s.t.Fatalf("app %s exited with error: %v\napp output:\n%s", s.appPath, err, s.output)
+			}
+		case <-time.After(defaultShutdownTimeout):
+			var killErr error
+			if s.Cmd.Process != nil {
+				killErr = s.Cmd.Process.Kill()
+			}
+			select {
+			case <-done:
+				if killErr != nil && !errors.Is(killErr, os.ErrProcessDone) {
+					s.t.Fatalf("app %s timed out after %v waiting for graceful shutdown (kill error: %v)\napp output:\n%s",
+						s.appPath, defaultShutdownTimeout, killErr, s.output)
+				}
+				s.t.Fatalf("app %s timed out after %v waiting for graceful shutdown\napp output:\n%s",
+					s.appPath, defaultShutdownTimeout, s.output)
+			case <-time.After(5 * time.Second):
+				s.t.Fatalf("app %s timed out after %v waiting for graceful shutdown; process reaping did not complete (kill error: %v)\napp output:\n%s",
+					s.appPath, defaultShutdownTimeout, killErr, s.output)
+			}
+		}
+	})
+}
+
+// cleanup is called by t.Cleanup to terminate and reap any process that was not explicitly stopped.
+func (s *Server) cleanup() {
+	s.stopOnce.Do(func() {
+		if s.stdin != nil {
+			_ = s.stdin.Close()
+		}
+		var killErr error
+		if s.Cmd.Process != nil {
+			killErr = s.Cmd.Process.Kill()
+		}
+		done := make(chan error, 1)
+		go func() {
+			done <- s.Cmd.Wait()
+		}()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			s.t.Logf("app %s process reaping did not complete during cleanup (kill error: %v)", s.appPath, killErr)
+		}
+	})
+	if s.t.Failed() && s.output.Len() > 0 {
+		s.t.Logf("app output:\n%s", s.output)
+	}
 }
 
 // WaitForLog blocks until the application has logged substr, failing the test
@@ -144,8 +220,7 @@ func (s *Server) WaitForLog(substr string) {
 // Start starts a test application from test/apps/. The binary is
 // expected to be built using Build.
 func (f *TestFixture) Start(appName string, args ...string) *Server {
-	cmd, out := Start(f.t, f.appsDir, appName, f.Env(), args...)
-	return &Server{t: f.t, appPath: appName, output: out, Cmd: cmd}
+	return Start(f.t, f.appsDir, appName, f.Env(), args...)
 }
 
 // Run runs a application and returns its output. The binary is
