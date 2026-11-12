@@ -140,3 +140,66 @@ func TestLockPathReportsWaitOnce(t *testing.T) {
 	next()
 	assert.Equal(t, 1, waits, "onWait must run exactly once while the lock is busy")
 }
+
+// TestLockWaitBacksOff pins the cost of a long wait: attempts that fail
+// reopen the lock file, so their rate must decay instead of staying at one
+// per lockRetryInterval.
+func TestLockWaitBacksOff(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "busy.lock")
+	release, err := lockPath(t.Context(), path, nil)
+	require.NoError(t, err)
+
+	const held = 2 * time.Second
+	b := newPollBackoff()
+	done := make(chan error)
+	go func() {
+		next, lockErr := lockPathWith(context.Background(), path, nil, b)
+		if lockErr == nil {
+			next()
+		}
+		done <- lockErr
+	}()
+	time.Sleep(held)
+	release()
+	require.NoError(t, <-done)
+
+	fixedRate := int(held / lockRetryInterval)
+	assert.LessOrEqual(t, b.polls, 6, "a %v wait made %d attempts; a fixed interval makes about %d",
+		held, b.polls, fixedRate)
+	assert.Positive(t, b.polls)
+}
+
+func TestSlotWaitBacksOff(t *testing.T) {
+	dir := t.TempDir()
+	release, _, err := acquireSlot(t.Context(), dir, 1, newPollBackoff())
+	require.NoError(t, err)
+
+	const held = 2 * time.Second
+	b := newPollBackoff()
+	done := make(chan error)
+	go func() {
+		next, _, slotErr := acquireSlot(context.Background(), dir, 1, b)
+		if slotErr == nil {
+			next()
+		}
+		done <- slotErr
+	}()
+	time.Sleep(held)
+	release()
+	require.NoError(t, <-done)
+	assert.LessOrEqual(t, b.polls, 6, "a %v slot wait made %d rounds of attempts", held, b.polls)
+	assert.Positive(t, b.polls)
+}
+
+func TestPollBackoffDoublesUpToTheCap(t *testing.T) {
+	b := &pollBackoff{delay: time.Millisecond}
+	var delays []time.Duration
+	for range 12 {
+		delays = append(delays, b.delay)
+		require.NoError(t, b.wait(t.Context()))
+	}
+	for i := 1; i < len(delays); i++ {
+		assert.Equal(t, min(2*delays[i-1], maxLockRetryInterval), delays[i])
+	}
+	assert.Equal(t, 12, b.polls)
+}

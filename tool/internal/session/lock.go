@@ -20,17 +20,48 @@ import (
 	"go.opentelemetry.io/otelc/tool/ex"
 )
 
-// lockRetryInterval is how often a waiting process re-attempts a session
-// lock. The wait itself is unbounded: it ends when the holder finishes or
-// the caller cancels.
-const lockRetryInterval = 50 * time.Millisecond
+// lockRetryInterval is the first delay before a waiting process re-attempts
+// a session lock. Each further attempt waits twice as long, up to
+// maxLockRetryInterval. The wait itself is unbounded: it ends when the holder
+// finishes or the caller cancels.
+const (
+	lockRetryInterval    = 50 * time.Millisecond
+	maxLockRetryInterval = 800 * time.Millisecond
+)
+
+// pollBackoff paces the attempts of one wait. A failed attempt opens and
+// closes the lock file, as gofrs/flock does for every TryLock that does not
+// take the lock, so the delay between attempts doubles: a long wait costs a
+// handful of opens per file instead of twenty per second.
+type pollBackoff struct {
+	delay time.Duration
+	// polls counts the attempts made after the first one.
+	polls int
+}
+
+func newPollBackoff() *pollBackoff {
+	return &pollBackoff{delay: lockRetryInterval}
+}
+
+// wait sleeps until the next attempt is due, or returns ctx's error.
+func (b *pollBackoff) wait(ctx context.Context) error {
+	timer := time.NewTimer(b.delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+	}
+	b.delay = min(2*b.delay, maxLockRetryInterval)
+	b.polls++
+	return nil
+}
 
 // tryLock makes one attempt to take lock. Session lock files are never
-// removed while the session lives, so a handle stays valid across attempts:
-// callers keep one *flock.Flock per file for the whole wait instead of
-// opening the file again on every poll. It reports contention as "not
-// acquired" so the caller polls again, and returns any other failure, such
-// as an unwritable path, as an error.
+// removed while the session lives, so one *flock.Flock serves a whole wait;
+// gofrs/flock still reopens the file on each attempt that fails. It reports
+// contention as "not acquired" so the caller polls again, and returns any
+// other failure, such as an unwritable path, as an error.
 func tryLock(lock *flock.Flock) (bool, error) {
 	acquired, err := lock.TryLock()
 	if err != nil {
@@ -53,33 +84,29 @@ func releaseLock(lock *flock.Flock) func() {
 // lockPath takes the lock file at path, waiting without a deadline until it
 // is free or ctx is done. onWait runs once, the first time the lock is busy.
 func lockPath(ctx context.Context, path string, onWait func()) (func(), error) {
+	return lockPathWith(ctx, path, onWait, newPollBackoff())
+}
+
+// lockPathWith is lockPath pacing its attempts with b.
+func lockPathWith(ctx context.Context, path string, onWait func(), b *pollBackoff) (func(), error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, ex.Wrapf(err, "creating lock directory for %s", path)
 	}
 	lock := flock.New(path)
 	ok, err := tryLock(lock)
+	if err == nil && !ok && onWait != nil {
+		onWait()
+	}
+	for err == nil && !ok {
+		if waitErr := b.wait(ctx); waitErr != nil {
+			_ = lock.Close()
+			return nil, ex.Wrapf(waitErr, "waiting for session lock %s", path)
+		}
+		ok, err = tryLock(lock)
+	}
 	if err != nil {
 		_ = lock.Close()
 		return nil, err
-	}
-	if !ok {
-		if onWait != nil {
-			onWait()
-		}
-		ticker := time.NewTicker(lockRetryInterval)
-		defer ticker.Stop()
-		for !ok {
-			select {
-			case <-ctx.Done():
-				_ = lock.Close()
-				return nil, ex.Wrapf(ctx.Err(), "waiting for session lock %s", path)
-			case <-ticker.C:
-				if ok, err = tryLock(lock); err != nil {
-					_ = lock.Close()
-					return nil, err
-				}
-			}
-		}
 	}
 	return releaseLock(lock), nil
 }

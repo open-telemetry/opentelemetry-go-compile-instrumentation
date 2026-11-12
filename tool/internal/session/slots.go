@@ -52,7 +52,7 @@ func WithLoadSlot(ctx context.Context, fn func(context.Context) error) error {
 	if n == 0 {
 		return fn(ctx)
 	}
-	release, wait, err := acquireSlot(ctx, filepath.Join(util.GetSessionDir(), slotsDir), n)
+	release, wait, err := acquireSlot(ctx, filepath.Join(util.GetSessionDir(), slotsDir), n, newPollBackoff())
 	if err != nil {
 		return err
 	}
@@ -66,17 +66,15 @@ func WithLoadSlot(ctx context.Context, fn func(context.Context) error) error {
 	return err
 }
 
-// acquireSlot takes the first free of n slot files in dir and reports how
-// long it waited.
-func acquireSlot(ctx context.Context, dir string, n int) (func(), time.Duration, error) {
+// acquireSlot takes the first free of n slot files in dir, pacing its rounds
+// of attempts with b, and reports how long it waited.
+func acquireSlot(ctx context.Context, dir string, n int, b *pollBackoff) (func(), time.Duration, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, 0, ex.Wrapf(err, "creating load slot directory %s", dir)
 	}
 	start := time.Now()
-	// One handle per slot file for the whole wait, so a busy poll costs a
-	// flock call per slot instead of an open and a close. Starting at a
-	// slot picked from the process ID spreads concurrent waiters over the
-	// slots.
+	// Starting at a slot picked from the process ID spreads concurrent
+	// waiters over the slots.
 	locks := make([]*flock.Flock, n)
 	for i := range n {
 		locks[i] = flock.New(filepath.Join(dir, fmt.Sprintf("slot-%d.lock", i)))
@@ -90,8 +88,6 @@ func acquireSlot(ctx context.Context, dir string, n int) (func(), time.Duration,
 	}
 	first := os.Getpid() % n
 	logged := false
-	ticker := time.NewTicker(lockRetryInterval)
-	defer ticker.Stop()
 	for {
 		for k := range n {
 			i := (first + k) % n
@@ -110,11 +106,9 @@ func acquireSlot(ctx context.Context, dir string, n int) (func(), time.Duration,
 			util.LoggerFromContext(ctx).InfoContext(ctx,
 				"waiting for a free package load slot", "slots", n, "dir", dir)
 		}
-		select {
-		case <-ctx.Done():
+		if err := b.wait(ctx); err != nil {
 			closeExcept(-1)
-			return nil, 0, ex.Wrapf(ctx.Err(), "waiting for a package load slot in %s", dir)
-		case <-ticker.C:
+			return nil, 0, ex.Wrapf(err, "waiting for a package load slot in %s", dir)
 		}
 	}
 }
