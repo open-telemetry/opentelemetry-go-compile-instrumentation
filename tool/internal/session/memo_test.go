@@ -264,3 +264,18 @@ func TestMemoStoreInReadOnlyDirLeavesNoEntry(t *testing.T) {
 	_, _, ok := m.Lookup("example.com/a", nil)
 	assert.False(t, ok)
 }
+
+// TestMemoSeparatesBuildEnvironments covers a session that outlives one
+// build, as in the bare -toolexec flow: a later build for another target
+// must not read entries resolved for the first, even with the same scope.
+func TestMemoSeparatesBuildEnvironments(t *testing.T) {
+	setupSession(t)
+	t.Setenv("GOOS", "linux")
+	Open(nil).Store("example.com/a", map[string]string{"example.com/a": archive(t, "a")}, nil)
+	_, _, ok := Open(nil).Lookup("example.com/a", nil)
+	require.True(t, ok)
+
+	t.Setenv("GOOS", "windows")
+	_, _, ok = Open(nil).Lookup("example.com/a", nil)
+	assert.False(t, ok, "another GOOS must not reuse the entry")
+}

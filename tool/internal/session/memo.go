@@ -59,10 +59,22 @@ func Open(buildFlags []string) *Memo {
 	}
 }
 
-// flagsDigest hashes the build flags plus the content of any PGO profile they
+// buildEnvVars are the environment variables that change what a nested
+// go list resolves. They are hashed when the memo is opened, not only when
+// setup records the scope: in the bare -toolexec flow the session outlives
+// one build, and setup may be skipped, so a later build for another target
+// would otherwise read entries resolved for the first.
+func buildEnvVars() []string {
+	return []string{"GOOS", "GOARCH", "CGO_ENABLED", "GOEXPERIMENT", "GOFLAGS", "GOTOOLCHAIN", "GOWORK"}
+}
+
+// flagsDigest hashes the build environment, the build flags, plus the content of any PGO profile they
 // name, so an edited profile never reuses closures resolved with the old one.
 func flagsDigest(buildFlags []string) string {
 	h := sha256.New()
+	for _, name := range buildEnvVars() {
+		_, _ = h.Write([]byte(name + "=" + os.Getenv(name) + "\x00"))
+	}
 	for _, flag := range buildFlags {
 		_, _ = h.Write([]byte(flag))
 		_, _ = h.Write([]byte{0})
