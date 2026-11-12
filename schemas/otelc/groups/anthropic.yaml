@@ -4,7 +4,10 @@ groups:
   #
   # Source of truth for this file:
   #   instrumentation/github.com/anthropics/anthropic-sdk-go/middleware.go     (span + attrs)
-  #   instrumentation/github.com/anthropics/anthropic-sdk-go/semconv/genai.go  (attribute keys)
+  #   instrumentation/github.com/anthropics/anthropic-sdk-go/semconv/genai.go  (gen_ai.system only)
+  #
+  # The other attribute keys come from upstream semconv v1.37.0 and from
+  # pkg/otelcconv, which is generated from the `id:` attributes in schemas/otelc/.
   #
   # The anthropic-sdk-go instrumentation is trace-only: it wraps the SDK HTTP
   # transport and creates one client span per Messages or Count Tokens call
