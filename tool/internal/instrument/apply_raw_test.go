@@ -23,11 +23,11 @@ import (
 )
 
 // renameReturnValues deliberately does not salt with a rule hash: raw and
-// directive rules reference the resulting name literally, in their injected
-// code, by its bare positional form. For example,
-// instrumentation/runtime/otelc.yaml's goroutine_propagate rule references
-// runtime.newproc1's first unnamed return value as "_unnamedRetVal0". Salting
-// this name broke every build that instruments runtime.newproc1.
+// directive rules that reference unnamed return values directly by their bare
+// positional name ("_unnamedRetValN") depend on these stable names remaining
+// unsalted. Salting this name breaks rules that reference "_unnamedRetValN"
+// literally instead of using template helpers like {{.FuncReturn N}} (as
+// runtime.newproc1 historically did before migrating).
 func TestRenameReturnValuesUsesStableBareNames(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc F() (int, string) { return 0, \"\" }")
 
@@ -997,6 +997,35 @@ func Run() {}
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "can not find function Missing")
+}
+
+func TestApplyRawRule_SignatureMismatch(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Process(s string) {}
+`)
+	doc, err := rule.ParseFile([]byte(`
+raw_with_signature:
+  target: main
+  where:
+    func: Process
+    signature:
+      args: [context.Context]
+  do:
+    - inject_code:
+        raw: 'println("injected")'
+`))
+	require.NoError(t, err)
+	rules, err := doc.Rules()
+	require.NoError(t, err)
+	require.Len(t, rules, 1)
+	raw, ok := rules[0].(*rule.InstRawRule)
+	require.True(t, ok)
+
+	err = newTestPhase().applyRawRule(context.Background(), raw, root)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "can not find function Process")
 }
 
 func TestApplyRawRule_InsertRawErrorPropagates(t *testing.T) {

@@ -80,6 +80,10 @@ type ruleResult struct {
 	// files that contain a match; the other rule kinds only reach files setup
 	// already matched.
 	modified bool
+	// noJoinpoint reports that the rule found nothing to instrument in the
+	// file. A directive rule still sets modified then, so the file is
+	// rewritten as before.
+	noJoinpoint bool
 }
 
 // applyOneRule applies a single rule to the target file.
@@ -106,8 +110,9 @@ func (ip *instrumentPhase) applyOneRule(ctx context.Context, r rule.InstRule, ro
 		modified, err := ip.applyLitRule(ctx, rt, root)
 		return ruleResult{needsGlobals: false, modified: modified}, err
 	case *rule.InstDirectiveRule:
-		needsGlobals, err := ip.applyDirectiveRule(ctx, rt, root)
-		return ruleResult{needsGlobals: needsGlobals, modified: true}, err
+		// applyDirectiveRule reports whether it instrumented a function.
+		applied, err := ip.applyDirectiveRule(ctx, rt, root)
+		return ruleResult{needsGlobals: applied, modified: true, noJoinpoint: err == nil && !applied}, err
 	default:
 		util.ShouldNotReachHere()
 		return ruleResult{needsGlobals: false, modified: false}, nil
@@ -164,6 +169,9 @@ func (ip *instrumentPhase) instrumentFile(ctx context.Context, file string, rule
 			"file", file)
 	}
 
+	if DiffDebugEnabled() {
+		ip.diagnosticSource = file
+	}
 	result, changes, err := ip.applyRulesCapturingDiffs(ctx, rules, root)
 	if err != nil {
 		return false, err
@@ -218,7 +226,7 @@ func (ip *instrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSe
 	// Run the type-check once, before any file in the package is rewritten,
 	// and only when a rule needs it.
 	if rsetHasMethodCallRule(rset) || rsetUsesImplements(rset) {
-		ip.ensureMethodCallInfo()
+		ip.ensureMethodCallInfo(ctx)
 	}
 
 	file2rules, files := groupRules(ip.workDir, rset)
