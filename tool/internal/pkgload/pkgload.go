@@ -303,6 +303,12 @@ func PackageDir(pkg *packages.Package) string {
 }
 
 // ResolveModule returns the module for a given package directory.
+//
+// The module comes from the go.mod that encloses pkgDir, so errors in the
+// package itself do not make it wrong. That matters for a build of named
+// files: go build accepts a file whose build constraints the plain load here
+// excludes, such as one marked //go:build ignore or one that needs a tag the
+// build passes with -tags, and the load still reports the module.
 func ResolveModule(ctx context.Context, pkgDir string) (*packages.Module, error) {
 	pkgs, err := LoadPackages(ctx, packages.NeedModule, nil, false, pkgDir)
 	if err != nil {
@@ -313,7 +319,7 @@ func ResolveModule(ctx context.Context, pkgDir string) (*packages.Module, error)
 	}
 
 	pkg := pkgs[0]
-	if pkg.Module == nil || pkg.Module.Dir == "" || len(pkg.Errors) > 0 {
+	if pkg.Module == nil || pkg.Module.Dir == "" {
 		return nil, ex.Newf(
 			"failed to load module information for package in directory %s: module=%v, errors=%v",
 			pkgDir,
