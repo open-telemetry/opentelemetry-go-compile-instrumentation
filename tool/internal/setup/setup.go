@@ -638,9 +638,11 @@ func (sp *setupPhase) recordResolutionScope(ctx context.Context, moduleDirs []st
 	if rmErr == nil || os.IsNotExist(rmErr) {
 		return
 	}
-	// A scope from an earlier setup is still readable. session.Open ignores a
-	// scope older than matched.json, which setup has just rewritten, and the
-	// processes this build starts inherit a disabled session as well.
+	// A scope from an earlier setup is still readable, but it carries that
+	// setup's generation token: session.Open rejects a scope whose token does
+	// not match the current setup_generation, so the stale scope is not
+	// trusted. The processes this build starts inherit a disabled session as
+	// well.
 	sp.Warn("cannot remove a stale resolution scope", "error", rmErr)
 	if setErr := os.Setenv(util.EnvOtelcSessionDir, util.SessionOff); setErr != nil {
 		sp.Warn("cannot turn the session off", "error", setErr)

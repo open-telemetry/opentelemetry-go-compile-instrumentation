@@ -399,8 +399,13 @@ func main() { fmt.Println("ws: " + inner.Work()) }
 			"the build in %s linked another workspace's replacement", buildDir)
 		scope, err := os.ReadFile(filepath.Join(workDir, ".otelc-build", "resolution_scope"))
 		require.NoError(t, err)
-		scopes[v] = string(scope)
+		// The scope file is "<digest> <setup generation token>"; the token
+		// differs on every setup, so only the digest says which inputs the
+		// build resolved against.
+		digest, _, _ := strings.Cut(strings.TrimSpace(string(scope)), " ")
+		require.NotEmpty(t, digest)
+		scopes[v] = digest
 		t.Logf("build in %s: scope %s, output %q", buildDir, scope, strings.TrimSpace(string(run)))
 	}
-	assert.NotEqual(t, scopes["A"], scopes["B"], "builds in different workspaces must not share a scope")
+	assert.NotEqual(t, scopes["A"], scopes["B"], "builds in different workspaces must not share a scope digest")
 }
