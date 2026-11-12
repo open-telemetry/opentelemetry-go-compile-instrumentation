@@ -618,11 +618,25 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	if err = sp.storeInjectedHash(ctx, matched); err != nil {
 		return err
 	}
+	sp.recordResolutionScope(ctx, moduleDirs)
+	return nil
+}
+
+// recordResolutionScope writes the export memo's resolution scope. The memo
+// only saves work, so a scope that cannot be computed or written disables it
+// for this build instead of failing the build: no scope file means no memo.
+func (sp *setupPhase) recordResolutionScope(ctx context.Context, moduleDirs []string) {
 	buildDir, err := buildCommandDir(sp.buildFlags)
-	if err != nil {
-		return err
+	if err == nil {
+		err = writeResolutionScope(ctx, buildDir, moduleDirs)
 	}
-	return writeResolutionScope(ctx, buildDir, moduleDirs)
+	if err == nil {
+		return
+	}
+	sp.Warn("cannot record the resolution scope; the export memo is off for this build", "error", err)
+	if rmErr := os.Remove(util.GetResolutionScopeFile()); rmErr != nil && !os.IsNotExist(rmErr) {
+		sp.Warn("cannot remove a stale resolution scope", "error", rmErr)
+	}
 }
 
 // warnIfNoInstrumentationMatched reports the combined result. An individual

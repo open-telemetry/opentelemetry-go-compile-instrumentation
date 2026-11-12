@@ -4,6 +4,8 @@
 package setup
 
 import (
+	"bytes"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -202,4 +204,22 @@ func TestResolvedGoWork(t *testing.T) {
 	got, err = resolvedGoWork(t.Context(), sub)
 	require.NoError(t, err)
 	assert.Equal(t, "off", got)
+}
+
+// TestRecordResolutionScopeDisablesMemoOnFailure covers a scope that cannot
+// be computed: the build goes on, and no scope file is left behind, which
+// keeps the memo off instead of reusing a scope from an earlier setup.
+func TestRecordResolutionScopeDisablesMemoOnFailure(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	t.Setenv(util.EnvOtelcSessionDir, t.TempDir())
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	require.NoError(t, os.WriteFile(util.GetResolutionScopeFile(), []byte("stale"), 0o644))
+
+	var logs bytes.Buffer
+	sp := &setupPhase{logger: slog.New(slog.NewTextHandler(&logs, nil))}
+	sp.recordResolutionScope(t.Context(), []string{filepath.Join(t.TempDir(), "missing")})
+
+	assert.NoFileExists(t, util.GetResolutionScopeFile())
+	assert.Nil(t, session.Open(nil), "without a scope the memo is off")
+	assert.Contains(t, logs.String(), "export memo is off")
 }
