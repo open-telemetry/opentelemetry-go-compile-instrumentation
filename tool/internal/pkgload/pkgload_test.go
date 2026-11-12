@@ -826,7 +826,8 @@ func TestResolveExportFilesBatch_KeepsDependenciesOfFailedRoot(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, failed, "example.com/batch/broken")
 	assert.NotContains(t, resolved, "example.com/batch/broken")
-	require.Contains(t, resolved, "example.com/batch/b", "a failed root's error-free dependency must still resolve")
+	require.Contains(t, resolved, "example.com/batch/b",
+		"a failed root's error-free dependency must still resolve")
 	assert.FileExists(t, resolved["example.com/batch/b"])
 
 	closures, failedRoots, err := ResolveExportClosures(t.Context(), []string{"example.com/batch/broken"})

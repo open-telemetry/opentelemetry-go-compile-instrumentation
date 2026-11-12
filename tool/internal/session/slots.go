@@ -6,7 +6,6 @@ package session
 import (
 	"context"
 	"fmt"
-	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -76,7 +75,8 @@ func acquireSlot(ctx context.Context, dir string, n int) (func(), time.Duration,
 	start := time.Now()
 	// One handle per slot file for the whole wait, so a busy poll costs a
 	// flock call per slot instead of an open and a close. Starting at a
-	// random slot spreads concurrent waiters over the slots.
+	// slot picked from the process ID spreads concurrent waiters over the
+	// slots.
 	locks := make([]*flock.Flock, n)
 	for i := range n {
 		locks[i] = flock.New(filepath.Join(dir, fmt.Sprintf("slot-%d.lock", i)))
@@ -88,7 +88,7 @@ func acquireSlot(ctx context.Context, dir string, n int) (func(), time.Duration,
 			}
 		}
 	}
-	first := rand.IntN(n)
+	first := os.Getpid() % n
 	logged := false
 	ticker := time.NewTicker(lockRetryInterval)
 	defer ticker.Stop()
