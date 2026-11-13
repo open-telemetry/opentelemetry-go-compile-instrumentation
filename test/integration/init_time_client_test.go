@@ -56,8 +56,49 @@ func TestGRPCClientCreatedDuringInit(t *testing.T) {
 	output := f.Run("grpcinit", "-addr="+server.Addr)
 
 	require.Contains(t, output, "Hello InitTest")
+	require.NotContains(t, output, "failed to exec")
 	span := f.RequireSingleSpan()
 	host, _, err := net.SplitHostPort(server.Addr)
 	require.NoError(t, err)
 	testutil.RequireGRPCClientSemconv(t, span, host, "greeter.Greeter", "SayHello", 0)
+}
+
+// An HTTP request during another package's init() skips the client and server
+// hooks. Their after hooks must not panic on the hook package's logger, and the
+// request from main must be traced.
+func TestHTTPUsedDuringInit(t *testing.T) {
+	t.Parallel()
+	testutil.Build(t, "", "httpinit", "go", "build", "-a")
+	f := testutil.NewTestFixture(t)
+
+	output := f.Run("httpinit")
+
+	require.NotContains(t, output, "failed to exec")
+	f.WaitForSpans(2)
+	spans := testutil.AllSpans(f.Traces())
+	require.Len(t, spans, 2)
+	testutil.RequireSpan(t, f.Traces(), testutil.IsClient)
+	testutil.RequireSpan(t, f.Traces(), testutil.IsServer)
+}
+
+// MongoDB clients created in package-level variables get their command
+// monitor before the OpenTelemetry API has initialized, and must trace later
+// commands.
+func TestMongoClientsCreatedDuringInit(t *testing.T) {
+	t.Parallel()
+	testutil.Build(t, "", "mongoinit", "go", "build", "-a")
+	f := testutil.NewTestFixture(t)
+	addr := StartMockMongoServer(t)
+
+	output := f.Run("mongoinit", "-uri=mongodb://"+addr)
+
+	require.NotContains(t, output, "failed to exec")
+	f.WaitForSpans(2)
+	for _, collection := range []string{"users_v1", "users_v2"} {
+		testutil.RequireSpan(t, f.Traces(),
+			testutil.IsClient,
+			testutil.HasAttribute("db.operation.name", "insert"),
+			testutil.HasAttribute("db.collection.name", collection),
+		)
+	}
 }

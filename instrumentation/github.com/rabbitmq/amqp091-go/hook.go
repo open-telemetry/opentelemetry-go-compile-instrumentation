@@ -211,7 +211,9 @@ type consumeData struct {
 
 func storeConsume(ictx hook.HookContext, ch *amqp.Channel, queue string, autoAck bool) {
 	if !enabler.Enable() {
-		logger.Debug("amqp091 instrumentation disabled")
+		if runtime.Ready() {
+			logger.Debug("amqp091 instrumentation disabled")
+		}
 		return
 	}
 	// startDeliverySpan initializes the instrumentation, so a Consume during
