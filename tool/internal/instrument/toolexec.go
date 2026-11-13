@@ -414,14 +414,16 @@ func (ip *instrumentPhase) enterNestedResolution(added ...string) (func(), error
 	for _, a := range added {
 		chain = append(chain, resolution{pkg: pkg, added: a})
 	}
+	waiting := make(map[string]struct{}, len(chain))
+	for _, r := range chain {
+		waiting[r.pkg] = struct{}{}
+	}
 	for _, a := range added {
-		for _, r := range chain {
-			if r.pkg == a {
-				return nil, ex.Newf("rules add an import cycle: %s", describeResolutionChain(chain))
-			}
+		if _, ok := waiting[a]; ok {
+			return nil, ex.Newf("rules add an import cycle: %s", describeResolutionChain(chain))
 		}
 	}
-	if resolutionChainDepth(chain) > maxResolutionChain {
+	if len(waiting) > maxResolutionChain {
 		return nil, ex.Newf(
 			"rules add imports nested deeper than %d: %s",
 			maxResolutionChain,
@@ -442,14 +444,6 @@ func (ip *instrumentPhase) enterNestedResolution(added ...string) (func(), error
 			_ = os.Unsetenv(util.EnvOtelcNestedResolving)
 		}
 	}, nil
-}
-
-func resolutionChainDepth(chain []resolution) int {
-	seen := make(map[string]struct{}, len(chain))
-	for _, r := range chain {
-		seen[r.pkg] = struct{}{}
-	}
-	return len(seen)
 }
 
 func parseResolutionChain(s string) []resolution {

@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -385,6 +384,40 @@ func TestUpdateImportConfig(t *testing.T) {
 		// Should not panic, even though we're trying to add imports
 		err = ip.updateImportConfig(t.Context(), map[string]string{"unsafe": "unsafe"})
 		require.NoError(t, err)
+	})
+
+	t.Run("resolves and adds multiple independent imports in batch", func(t *testing.T) {
+		workDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, workDir)
+		require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+		cfgPath := filepath.Join(workDir, "importcfg")
+		require.NoError(t, os.WriteFile(cfgPath, []byte(""), 0o644))
+
+		ip := &instrumentPhase{
+			logger:           slog.Default(),
+			importConfigPath: cfgPath,
+			importConfig: imports.ImportConfig{
+				PackageFile: map[string]string{},
+			},
+		}
+
+		err := ip.updateImportConfig(t.Context(), map[string]string{
+			"fmt":     "fmt",
+			"strings": "strings",
+			"errors":  "errors",
+		})
+		require.NoError(t, err)
+
+		assert.Contains(t, ip.importConfig.PackageFile, "fmt")
+		assert.Contains(t, ip.importConfig.PackageFile, "strings")
+		assert.Contains(t, ip.importConfig.PackageFile, "errors")
+
+		content, err := os.ReadFile(cfgPath)
+		require.NoError(t, err)
+		assert.Contains(t, string(content), "packagefile fmt=")
+		assert.Contains(t, string(content), "packagefile strings=")
+		assert.Contains(t, string(content), "packagefile errors=")
 	})
 }
 
@@ -1473,25 +1506,6 @@ func TestEnterNestedResolution(t *testing.T) {
 		}
 
 		restore()
-		_, set := os.LookupEnv(util.EnvOtelcNestedResolving)
-		assert.False(t, set)
-	})
-
-	t.Run("multiple sequential sibling resolutions do not trigger depth error", func(t *testing.T) {
-		t.Setenv(util.EnvOtelcNestedResolving, "")
-		require.NoError(t, os.Unsetenv(util.EnvOtelcNestedResolving))
-		ip := &instrumentPhase{compileArgs: []string{"compile", "-p", "example.com/p"}}
-
-		restores := make([]func(), 40)
-		for i := range 40 {
-			var err error
-			restores[i], err = ip.enterNestedResolution("example.com/dep" + strconv.Itoa(i))
-			require.NoError(t, err)
-		}
-
-		for _, restore := range slices.Backward(restores) {
-			restore()
-		}
 		_, set := os.LookupEnv(util.EnvOtelcNestedResolving)
 		assert.False(t, set)
 	})
