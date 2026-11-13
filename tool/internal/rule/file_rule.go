@@ -4,6 +4,7 @@
 package rule
 
 import (
+	"path/filepath"
 	"strings"
 
 	"go.opentelemetry.io/otelc/tool/ex"
@@ -48,6 +49,11 @@ func (r *InstFileRule) validate() error {
 	}
 	if strings.TrimSpace(r.Path) == "" {
 		return ex.Newf("path cannot be empty")
+	}
+	// The file is read from the directory that path resolves to, so it has to
+	// stay inside it. Otherwise "a/../../x.go" would read outside the module.
+	if !filepath.IsLocal(r.File) {
+		return ex.Newf("file %q must be a relative path inside the directory of path %q", r.File, r.Path)
 	}
 	return nil
 }

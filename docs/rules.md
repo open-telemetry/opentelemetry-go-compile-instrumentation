@@ -1548,7 +1548,7 @@ A rule targeting `main` also applies to the `main` package that `go test` genera
 
 **Modifier (`do: - add_file:`):**
 
-- `file` (string, required): The name of the new file to be added (e.g., `newfile.go`).
+- `file` (string, required): The name of the new file to be added (e.g., `newfile.go`). It must be a relative path that stays inside the directory of the package given by `path`. Absolute paths and paths that climb out with `..` are rejected.
 - `path` (string, required): The import path of the package where the content of the new file is located. The instrumentation tool will find the file within this package.
 
   The package referenced by `path` must be importable by `go/packages`. If the implementation files are marked with `//go:build ignore` (for example because they rely on otelc compile-time transformations), include a small buildable stub file so the package remains importable during rule resolution.
