@@ -148,7 +148,10 @@ func BeforeRoundTrip(ictx hook.HookContext, transport *http.Transport, req *http
 func AfterRoundTrip(ictx hook.HookContext, res *http.Response, err error) {
 	data, ok := ictx.GetData().(*hookData)
 	if !ok || data == nil || data.span == nil {
-		logger.Debug("AfterRoundTrip: no span from before hook")
+		// The logger is nil for a call skipped during package initialization.
+		if runtime.Ready() {
+			logger.Debug("AfterRoundTrip: no span from before hook")
+		}
 		return
 	}
 	span := data.span

@@ -125,7 +125,10 @@ func BeforePerformRequest(
 func AfterPerformRequest(ictx hook.HookContext, resp *elastic.Response, err error) {
 	data, ok := ictx.GetData().(*hookData)
 	if !ok || data == nil || data.span == nil {
-		logger.Debug("AfterPerformRequest: no span from before hook")
+		// The logger is nil for a call skipped during package initialization.
+		if runtime.Ready() {
+			logger.Debug("AfterPerformRequest: no span from before hook")
+		}
 		return
 	}
 	span := data.span

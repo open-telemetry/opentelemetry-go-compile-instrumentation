@@ -124,7 +124,10 @@ func BeforeServeHTTP(ictx hook.HookContext, recv interface{}, w http.ResponseWri
 func AfterServeHTTP(ictx hook.HookContext) {
 	data, ok := ictx.GetData().(*hookData)
 	if !ok || data == nil || data.span == nil {
-		logger.Debug("AfterServeHTTP: no span from before hook")
+		// The logger is nil for a call skipped during package initialization.
+		if runtime.Ready() {
+			logger.Debug("AfterServeHTTP: no span from before hook")
+		}
 		return
 	}
 	span := data.span

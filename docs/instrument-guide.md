@@ -254,7 +254,9 @@ When implementing hooks, we must adhere to certain limitations:
    }
    ```
 
-   Calls skipped this way are not traced and are not replayed. A hook that attaches
+   `runtime.Ready()` does not mean the hook's own package has initialized, so the rule above
+   still applies to the hook package's variables. Calls skipped this way are not traced and
+   are not replayed. A hook that attaches
    instrumentation to a client or server, such as a middleware or a stats handler, should
    still attach it during initialization and check `runtime.Ready()` when the attached code
    runs, so a client created in a package-level variable keeps its instrumentation.
