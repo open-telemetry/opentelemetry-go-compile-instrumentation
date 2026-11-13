@@ -344,6 +344,27 @@ instrumentation/development:
 	require.ErrorContains(t, err, replacement)
 }
 
+func TestValidateApplicationOptionsExplainsDeprecatedSchemaOption(t *testing.T) {
+	app, err := ParseApplicationConfiguration([]byte(`file_format: "1.2"
+instrumentation/development:
+  general:
+    http:
+      client:
+        request_captured_headers: []
+`), "app.yaml")
+	require.NoError(t, err)
+	replacement := "general.http.client.request_captured_headers.v2"
+
+	_, err = ValidateApplicationOptions(app, []Entry{{
+		Name:       "general.http.client.request_captured_headers",
+		Type:       listType,
+		Deprecated: true,
+		ReplacedBy: &replacement,
+	}}, nil)
+	require.ErrorContains(t, err, "migrate to")
+	require.ErrorContains(t, err, replacement)
+}
+
 func TestApplicationHelpers(t *testing.T) {
 	for _, test := range []struct {
 		name  string
@@ -686,6 +707,25 @@ func TestValidateYAMLFieldsHandlesUnsupportedShapes(t *testing.T) {
 	require.NoError(t, yaml.Unmarshal([]byte("unknown: true\n"), &unknownNode))
 	require.ErrorContains(t, validateYAMLFields(
 		unknownNode.Content[0], reflect.TypeFor[config](), "app.yaml", ""), "unsupported field")
+
+	var nestedMap yaml.Node
+	require.NoError(t, yaml.Unmarshal([]byte("items:\n  nested:\n    unknown: true\n"), &nestedMap))
+	type mapConfig struct {
+		Items map[string]config `yaml:"items"`
+	}
+	require.ErrorContains(t, validateYAMLFields(
+		nestedMap.Content[0], reflect.TypeFor[mapConfig](), "app.yaml", ""), "unsupported field")
+}
+
+func TestYAMLStructFieldsSkipsUnexportedAndIgnoredFields(t *testing.T) {
+	type config struct {
+		Visible string `yaml:"visible"`
+		Ignored string `yaml:"-"`
+	}
+
+	fields := yamlStructFields(reflect.TypeFor[config]())
+	assert.Contains(t, fields, "visible")
+	assert.NotContains(t, fields, "Ignored")
 }
 
 func TestValidateApplicationRootFieldsHandlesNilAndInvalidKeys(t *testing.T) {

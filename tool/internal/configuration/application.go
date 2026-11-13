@@ -620,8 +620,7 @@ func explainDeprecatedApplicationField(
 		}
 	}
 	if schemaError, ok := errors.AsType[*jsonschema.ValidationError](err); ok {
-		path := strings.Join(schemaError.InstanceLocation, ".")
-		if entry, entrySelected := selected[path]; entrySelected && entry.Deprecated {
+		if path, entry, found := deprecatedValidationPath(schemaError, selected); found {
 			location := application.SourceLocations[path]
 			if entry.ReplacedBy != nil {
 				return ex.Newf(
@@ -643,6 +642,24 @@ func explainDeprecatedApplicationField(
 		}
 	}
 	return err
+}
+
+func deprecatedValidationPath(
+	validationError *jsonschema.ValidationError,
+	selected map[string]Entry,
+) (string, Entry, bool) {
+	path := strings.Join(validationError.InstanceLocation, ".")
+	if entry, ok := selected[path]; ok && entry.Deprecated {
+		return path, entry, true
+	}
+	if index := slices.IndexFunc(validationError.Causes, func(cause *jsonschema.ValidationError) bool {
+		_, _, found := deprecatedValidationPath(cause, selected)
+		return found
+	}); index >= 0 {
+		cause := validationError.Causes[index]
+		return deprecatedValidationPath(cause, selected)
+	}
+	return "", Entry{}, false
 }
 
 func missingModuleMetadataError(
