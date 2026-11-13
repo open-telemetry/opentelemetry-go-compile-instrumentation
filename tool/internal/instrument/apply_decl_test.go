@@ -415,6 +415,23 @@ func TestDeclRuleReplaceRejectsIotaCascadeIntoLaterSibling(t *testing.T) {
 	assert.Contains(t, renderFile(t, file), "const (\n\tA = iota\n\tB\n\tC\n)", "declaration must be left untouched")
 }
 
+func TestDeclRuleReplaceRejectsIotaCascadeWithEmptyKind(t *testing.T) {
+	// Kind is omitted: ast.FindNamedDecl's default branch still resolves B
+	// to this const spec, so the cascade check must not be skipped just
+	// because the rule never said "const" explicitly.
+	file := parseTestFile(t, "package main\n\nconst (\n\tA = iota\n\tB\n\tC\n)\n")
+	r := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{Name: "replace_b"},
+		Identifier:   "B",
+		Replace:      "99",
+	}
+
+	err := newTestPhase().applyDeclRule(context.Background(), r, file)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `rewriting "B" would also change the value of C`)
+}
+
 func TestDeclRuleReplaceAllowsCascadeStoppedByExplicitSibling(t *testing.T) {
 	// D has its own initializer, so it breaks the implicit-repeat chain: only
 	// C (between B and D) inherits B's value, and D is unaffected. A

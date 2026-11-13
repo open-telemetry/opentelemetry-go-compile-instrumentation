@@ -5,6 +5,7 @@ package instrument
 
 import (
 	"context"
+	"go/token"
 	"slices"
 	"strings"
 
@@ -58,10 +59,8 @@ func (ip *instrumentPhase) applyDeclRule(ctx context.Context, r *rule.InstDeclRu
 	nameIdx := slices.IndexFunc(spec.Names, func(name *dst.Ident) bool { return name.Name == r.Identifier })
 	util.Assert(nameIdx >= 0, "matched spec must declare the targeted identifier")
 
-	if r.Kind == "const" {
-		if err := rejectIotaCascade(root, spec, r.Identifier); err != nil {
-			return err
-		}
+	if err := rejectIotaCascade(root, spec, r.Identifier); err != nil {
+		return err
 	}
 
 	_, aliasOverrides := ip.resolveImportOverrides(root, r.Imports)
@@ -93,7 +92,11 @@ func (ip *instrumentPhase) applyDeclRule(ctx context.Context, r *rule.InstDeclRu
 // textually substitutes the nearest preceding non-empty expression list (the
 // Go spec's "Iota" section), so rewriting spec's value also changes every
 // later spec that currently inherits it, with no indication in source that
-// those constants depend on spec at all.
+// those constants depend on spec at all. The check is unconditional on the
+// matched GenDecl's token, not on the rule's (optional) Kind field: a decl
+// rule that omits kind still resolves to a const declaration via
+// ast.FindNamedDecl's default branch, and the Go spec's implicit-repeat rule
+// only applies to const, so a var's GenDecl is skipped here.
 func rejectIotaCascade(root *dst.File, spec *dst.ValueSpec, identifier string) error {
 	for _, decl := range root.Decls {
 		genDecl, ok := decl.(*dst.GenDecl)
@@ -103,6 +106,9 @@ func rejectIotaCascade(root *dst.File, spec *dst.ValueSpec, identifier string) e
 		specIdx := slices.Index(genDecl.Specs, dst.Spec(spec))
 		if specIdx < 0 {
 			continue
+		}
+		if genDecl.Tok != token.CONST {
+			return nil
 		}
 		var cascaded []string
 		for i := specIdx + 1; i < len(genDecl.Specs); i++ {
