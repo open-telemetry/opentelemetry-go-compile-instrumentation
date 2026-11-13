@@ -277,20 +277,11 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 		return nil
 	}
 
-	restores := make([]func(), 0, len(missing))
-	defer func() {
-		for _, restore := range slices.Backward(restores) {
-			restore()
-		}
-	}()
-
-	for _, importPath := range missing {
-		restore, enterErr := ip.enterNestedResolution(importPath)
-		if enterErr != nil {
-			return enterErr
-		}
-		restores = append(restores, restore)
+	restore, enterErr := ip.enterNestedResolution(missing...)
+	if enterErr != nil {
+		return enterErr
 	}
+	defer restore()
 
 	buildFlags := append(util.GetBuildFlags(), pgoFlags...)
 	archives, failed, err := pkgload.ResolveExportFilesBatch(ctx, missing, buildFlags...)
@@ -405,23 +396,32 @@ type resolution struct {
 const maxResolutionChain = 32
 
 // enterNestedResolution records, for the nested build about to resolve added,
-// that the package being compiled waits on it. It fails when added is a
-// package already waiting further up the chain: the nested build would compile
+// that the package being compiled waits on them. It fails when any added import
+// is a package already waiting further up the chain: the nested build would compile
 // it again, add the same import, and never end. Go cannot catch this itself,
 // because a nested build only sees each package's original imports. It also
-// fails when the chain grows past maxResolutionChain, which rules could
-// otherwise do without ever closing a cycle. The returned function restores
-// the previous chain.
-func (ip *instrumentPhase) enterNestedResolution(added string) (func(), error) {
+// fails when the nesting depth (distinct waiting packages) grows past
+// maxResolutionChain, which rules could otherwise do without ever closing a cycle.
+// Sibling imports added in the same compilation share that package's level and
+// do not consume additional depth. The returned function restores the previous chain.
+func (ip *instrumentPhase) enterNestedResolution(added ...string) (func(), error) {
+	if len(added) == 0 {
+		return func() {}, nil
+	}
 	prev, hadPrev := os.LookupEnv(util.EnvOtelcNestedResolving)
 	chain := parseResolutionChain(prev)
-	chain = append(chain, resolution{pkg: util.FindFlagValue(ip.compileArgs, "-p"), added: added})
-	for _, r := range chain {
-		if r.pkg == added {
-			return nil, ex.Newf("rules add an import cycle: %s", describeResolutionChain(chain))
+	pkg := util.FindFlagValue(ip.compileArgs, "-p")
+	for _, a := range added {
+		chain = append(chain, resolution{pkg: pkg, added: a})
+	}
+	for _, a := range added {
+		for _, r := range chain {
+			if r.pkg == a {
+				return nil, ex.Newf("rules add an import cycle: %s", describeResolutionChain(chain))
+			}
 		}
 	}
-	if len(chain) > maxResolutionChain {
+	if resolutionChainDepth(chain) > maxResolutionChain {
 		return nil, ex.Newf(
 			"rules add imports nested deeper than %d: %s",
 			maxResolutionChain,
@@ -442,6 +442,14 @@ func (ip *instrumentPhase) enterNestedResolution(added string) (func(), error) {
 			_ = os.Unsetenv(util.EnvOtelcNestedResolving)
 		}
 	}, nil
+}
+
+func resolutionChainDepth(chain []resolution) int {
+	seen := make(map[string]struct{}, len(chain))
+	for _, r := range chain {
+		seen[r.pkg] = struct{}{}
+	}
+	return len(seen)
 }
 
 func parseResolutionChain(s string) []resolution {
@@ -490,8 +498,15 @@ func trackAddedImports(packages map[string]string) error {
 	filePath := util.GetAddedImportsFileForProcess()
 
 	merged := make(map[string]string, len(packages))
-	if data, readErr := os.ReadFile(filePath); readErr == nil {
-		_ = json.Unmarshal(data, &merged)
+	data, readErr := os.ReadFile(filePath)
+	if readErr != nil {
+		if !errors.Is(readErr, os.ErrNotExist) {
+			return ex.Wrapf(readErr, "reading existing added imports file")
+		}
+	} else {
+		if unmarshalErr := json.Unmarshal(data, &merged); unmarshalErr != nil {
+			return ex.Wrapf(unmarshalErr, "unmarshalling existing added imports file")
+		}
 	}
 	maps.Copy(merged, packages)
 

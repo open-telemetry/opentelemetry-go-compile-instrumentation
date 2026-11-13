@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -431,6 +432,64 @@ func TestTrackAddedImports(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, packages, result)
+	})
+
+	t.Run("multiple writes merge and preserve all entries", func(t *testing.T) {
+		tempDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, tempDir)
+		require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+		batch1 := map[string]string{
+			"pkg/a": "/path/to/a.a",
+			"pkg/b": "/path/to/b.a",
+		}
+		require.NoError(t, trackAddedImports(batch1))
+
+		batch2 := map[string]string{
+			"pkg/b": "/updated/path/to/b.a",
+			"pkg/c": "/path/to/c.a",
+		}
+		require.NoError(t, trackAddedImports(batch2))
+
+		expectedPath := util.GetAddedImportsFileForProcess()
+		data, err := os.ReadFile(expectedPath)
+		require.NoError(t, err)
+
+		var result map[string]string
+		require.NoError(t, json.Unmarshal(data, &result))
+
+		expected := map[string]string{
+			"pkg/a": "/path/to/a.a",
+			"pkg/b": "/updated/path/to/b.a",
+			"pkg/c": "/path/to/c.a",
+		}
+		assert.Equal(t, expected, result)
+	})
+
+	t.Run("malformed json returns error", func(t *testing.T) {
+		tempDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, tempDir)
+		require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+		expectedPath := util.GetAddedImportsFileForProcess()
+		require.NoError(t, os.WriteFile(expectedPath, []byte("invalid json content"), 0o600))
+
+		err := trackAddedImports(map[string]string{"pkg/a": "/path/to/a.a"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unmarshalling existing added imports file")
+	})
+
+	t.Run("unexpected read error returns error", func(t *testing.T) {
+		tempDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, tempDir)
+		require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+		expectedPath := util.GetAddedImportsFileForProcess()
+		require.NoError(t, os.Mkdir(expectedPath, 0o755))
+
+		err := trackAddedImports(map[string]string{"pkg/a": "/path/to/a.a"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "reading existing added imports file")
 	})
 }
 
@@ -1393,6 +1452,134 @@ func TestEnterNestedResolution(t *testing.T) {
 		assert.Contains(t, err.Error(),
 			"rules add imports nested deeper than "+strconv.Itoa(maxResolutionChain))
 		assert.Contains(t, err.Error(), "example.com/deep adds example.com/added")
+	})
+
+	t.Run("more than 32 independent sibling imports do not trigger depth error", func(t *testing.T) {
+		t.Setenv(util.EnvOtelcNestedResolving, "")
+		require.NoError(t, os.Unsetenv(util.EnvOtelcNestedResolving))
+		ip := &instrumentPhase{compileArgs: []string{"compile", "-p", "example.com/p"}}
+
+		siblings := make([]string, 40)
+		for i := range siblings {
+			siblings[i] = "example.com/dep" + strconv.Itoa(i)
+		}
+
+		restore, err := ip.enterNestedResolution(siblings...)
+		require.NoError(t, err)
+
+		envVal := os.Getenv(util.EnvOtelcNestedResolving)
+		for _, s := range siblings {
+			assert.Contains(t, envVal, "example.com/p>"+s)
+		}
+
+		restore()
+		_, set := os.LookupEnv(util.EnvOtelcNestedResolving)
+		assert.False(t, set)
+	})
+
+	t.Run("multiple sequential sibling resolutions do not trigger depth error", func(t *testing.T) {
+		t.Setenv(util.EnvOtelcNestedResolving, "")
+		require.NoError(t, os.Unsetenv(util.EnvOtelcNestedResolving))
+		ip := &instrumentPhase{compileArgs: []string{"compile", "-p", "example.com/p"}}
+
+		restores := make([]func(), 40)
+		for i := range 40 {
+			var err error
+			restores[i], err = ip.enterNestedResolution("example.com/dep" + strconv.Itoa(i))
+			require.NoError(t, err)
+		}
+
+		for _, restore := range slices.Backward(restores) {
+			restore()
+		}
+		_, set := os.LookupEnv(util.EnvOtelcNestedResolving)
+		assert.False(t, set)
+	})
+
+	t.Run("cycle detection with multiple sibling imports", func(t *testing.T) {
+		t.Setenv(util.EnvOtelcNestedResolving, "example.com/ancestor>example.com/p")
+		ip := &instrumentPhase{compileArgs: []string{"compile", "-p", "example.com/p"}}
+
+		// One sibling is fine, but the other creates a cycle with ancestor
+		_, err := ip.enterNestedResolution("example.com/ok", "example.com/ancestor")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "rules add an import cycle")
+		assert.Contains(t, err.Error(), "example.com/ancestor adds example.com/p")
+		assert.Contains(t, err.Error(), "example.com/p adds example.com/ancestor")
+	})
+
+	t.Run("exact environment restoration on success and failure", func(t *testing.T) {
+		const initial = "example.com/root>example.com/mid"
+		t.Setenv(util.EnvOtelcNestedResolving, initial)
+		ip := &instrumentPhase{compileArgs: []string{"compile", "-p", "example.com/mid"}}
+
+		// Failure case: cycle
+		_, err := ip.enterNestedResolution("example.com/root")
+		require.Error(t, err)
+		assert.Equal(t, initial, os.Getenv(util.EnvOtelcNestedResolving), "env must be preserved on error")
+
+		// Success case
+		restore, err := ip.enterNestedResolution("example.com/leaf")
+		require.NoError(t, err)
+		assert.NotEqual(t, initial, os.Getenv(util.EnvOtelcNestedResolving))
+
+		restore()
+		assert.Equal(t, initial, os.Getenv(util.EnvOtelcNestedResolving), "env must be restored on success")
+	})
+}
+
+func TestMissingImports(t *testing.T) {
+	t.Run("deduplicates and sorts missing imports", func(t *testing.T) {
+		ip := &instrumentPhase{
+			importConfig: imports.ImportConfig{
+				PackageFile: make(map[string]string),
+			},
+		}
+
+		newImports := map[string]string{
+			"alias1": "example.com/b",
+			"alias2": "example.com/a",
+			"alias3": "example.com/b",
+			"alias4": "example.com/c",
+		}
+
+		missing := ip.missingImports(newImports)
+		assert.Equal(t, []string{"example.com/a", "example.com/b", "example.com/c"}, missing)
+	})
+
+	t.Run("skips unsafe and C pseudo packages", func(t *testing.T) {
+		ip := &instrumentPhase{
+			importConfig: imports.ImportConfig{
+				PackageFile: make(map[string]string),
+			},
+		}
+
+		newImports := map[string]string{
+			"u": "unsafe",
+			"c": "C",
+			"p": "example.com/pkg",
+		}
+
+		missing := ip.missingImports(newImports)
+		assert.Equal(t, []string{"example.com/pkg"}, missing)
+	})
+
+	t.Run("skips imports already present in importcfg", func(t *testing.T) {
+		ip := &instrumentPhase{
+			importConfig: imports.ImportConfig{
+				PackageFile: map[string]string{
+					"example.com/existing": "/path/to/existing.a",
+				},
+			},
+		}
+
+		newImports := map[string]string{
+			"e": "example.com/existing",
+			"n": "example.com/new",
+		}
+
+		missing := ip.missingImports(newImports)
+		assert.Equal(t, []string{"example.com/new"}, missing)
 	})
 }
 
