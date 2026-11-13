@@ -272,7 +272,69 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 	if pgoErr != nil {
 		return pgoErr
 	}
+	missing := ip.missingImports(newImports)
+	if len(missing) == 0 {
+		return nil
+	}
+
+	restores := make([]func(), 0, len(missing))
+	defer func() {
+		for _, restore := range slices.Backward(restores) {
+			restore()
+		}
+	}()
+
+	for _, importPath := range missing {
+		restore, enterErr := ip.enterNestedResolution(importPath)
+		if enterErr != nil {
+			return enterErr
+		}
+		restores = append(restores, restore)
+	}
+
+	buildFlags := append(util.GetBuildFlags(), pgoFlags...)
+	archives, failed, err := pkgload.ResolveExportFilesBatch(ctx, missing, buildFlags...)
+	if err != nil {
+		return ex.Wrapf(err, "resolving %v", missing)
+	}
+	for _, p := range missing {
+		if loadErr, ok := failed[p]; ok {
+			return ex.Wrapf(loadErr, "resolving %q", p)
+		}
+	}
+
 	var updated bool
+	for pkg, archive := range archives {
+		if _, exists := ip.importConfig.PackageFile[pkg]; !exists {
+			ip.Debug("Adding import to importcfg", "package", pkg, "archive", archive)
+			ip.importConfig.PackageFile[pkg] = archive
+			updated = true
+		}
+	}
+
+	if !updated {
+		return nil
+	}
+
+	if writeErr := ip.importConfig.WriteFile(ip.importConfigPath); writeErr != nil {
+		return writeErr
+	}
+
+	ip.Info("Updated importcfg", "path", ip.importConfigPath)
+
+	// Track added imports for the link phase
+	if trackErr := trackAddedImports(ip.importConfig.PackageFile); trackErr != nil {
+		ip.Warn("failed to track added imports for link phase", "error", trackErr)
+		// Non-fatal: link phase may still work if imports were already present
+	}
+
+	return nil
+}
+
+// missingImports filters newImports for packages not already in importConfig and not built-in.
+func (ip *instrumentPhase) missingImports(newImports map[string]string) []string {
+	seen := make(map[string]bool, len(newImports))
+	missing := make([]string, 0, len(newImports))
 	for _, importPath := range newImports {
 		if importPath == unsafePackageName || importPath == "C" {
 			// unsafe is built-in, C is the cgo pseudo-package; neither has an archive file
@@ -283,45 +345,14 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 			// Already have this import
 			continue
 		}
-
-		restore, err := ip.enterNestedResolution(importPath)
-		if err != nil {
-			return err
-		}
-		// Resolve package archive location, passing build flags to match the current build context
-		buildFlags := append(util.GetBuildFlags(), pgoFlags...)
-		archives, err := pkgload.ResolveExportFiles(ctx, importPath, buildFlags...)
-		restore()
-		if err != nil {
-			return ex.Wrapf(err, "resolving %q", importPath)
-		}
-
-		for pkg, archive := range archives {
-			if _, exists := ip.importConfig.PackageFile[pkg]; !exists {
-				ip.Debug("Adding import to importcfg", "package", pkg, "archive", archive)
-				ip.importConfig.PackageFile[pkg] = archive
-				updated = true
-			}
+		if !seen[importPath] {
+			seen[importPath] = true
+			missing = append(missing, importPath)
 		}
 	}
 
-	if !updated {
-		return nil
-	}
-
-	if err := ip.importConfig.WriteFile(ip.importConfigPath); err != nil {
-		return err
-	}
-
-	ip.Info("Updated importcfg", "path", ip.importConfigPath)
-
-	// Track added imports for the link phase
-	if err := trackAddedImports(ip.importConfig.PackageFile); err != nil {
-		ip.Warn("failed to track added imports for link phase", "error", err)
-		// Non-fatal: link phase may still work if imports were already present
-	}
-
-	return nil
+	slices.Sort(missing)
+	return missing
 }
 
 // pgoBuildFlags returns the -pgo flag that makes a nested go list compile the
@@ -458,7 +489,13 @@ func trackAddedImports(packages map[string]string) error {
 	// Write to process-specific file (no locking needed)
 	filePath := util.GetAddedImportsFileForProcess()
 
-	data, err := json.MarshalIndent(packages, "", "  ")
+	merged := make(map[string]string, len(packages))
+	if data, readErr := os.ReadFile(filePath); readErr == nil {
+		_ = json.Unmarshal(data, &merged)
+	}
+	maps.Copy(merged, packages)
+
+	data, err := json.MarshalIndent(merged, "", "  ")
 	if err != nil {
 		return ex.Wrapf(err, "marshaling added imports")
 	}
