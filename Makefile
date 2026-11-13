@@ -161,7 +161,7 @@ build/pkg: ## Build all pkg modules to verify compilation
 build/instrumentation: ## Build all instrumentation modules to verify compilation
 	@echo "Building instrumentation modules..."
 	@set -euo pipefail
-	@INSTR_MODULES=$$(find instrumentation -name "go.mod" -type f -exec dirname {} \; | grep -v "instrumentation/runtime" | grep -v "instrumentation/database/sql"); \
+	@INSTR_MODULES=$$(find instrumentation -name "go.mod" -type f -exec dirname {} \; | grep -v "instrumentation/database/sql"); \
 	for moddir in $$INSTR_MODULES; do \
 		echo "Building $$moddir..."; \
 		(cd $$moddir && go mod tidy && go build ./...); \
@@ -302,7 +302,7 @@ lint/go/instrumentation: $(GOLANGCI_LINT)
 	@set -euo pipefail
 	@BASE_REV=$${LINT_BASE_REV:-origin/main}
 	@CONFIG=$(CURDIR)/.tools/golangci.yml
-	@INSTR_MODULES=$$(find instrumentation -name "go.mod" -type f -exec dirname {} \; | grep -v "instrumentation/runtime" | grep -v "instrumentation/database/sql"); \
+	@INSTR_MODULES=$$(find instrumentation -name "go.mod" -type f -exec dirname {} \; | grep -v "instrumentation/database/sql"); \
 	for moddir in $$INSTR_MODULES; do \
 		echo "Linting $$moddir..."; \
 		(cd $$moddir && $(GOLANGCI_LINT) run --config $$CONFIG --new-from-rev="$$BASE_REV" ./...); \
@@ -499,6 +499,10 @@ govulncheck: $(GOVULNCHECK) ## Scan core modules (root, pkg) for known Go vulner
 # Build each integration test app with otelc, then scan the resulting binary.
 # Binary mode sees injected instrumentation (including //go:build ignore sources
 # and field-injection modules like database/sql) that source mode cannot analyze.
+# echoserver uses echo v4.16.3. The upstream advisories list this version as fixed.
+# The Go vulnerability database still marks every echo v4 release as affected.
+# Ignore GO-2026-6872 and GO-2026-6875 for echoserver only.
+# After vuln.go.dev lists v4.16.3 as fixed, delete this ignore. See issue 1744.
 .ONESHELL:
 govulncheck/instrumentation: $(GOVULNCHECK) build ## Scan instrumented test apps (binary mode) for known Go vulnerabilities
 	@echo "Running govulncheck -mode=binary across $(words $(GOVULNCHECK_TEST_APPS)) instrumented test apps..."
@@ -516,9 +520,20 @@ govulncheck/instrumentation: $(GOVULNCHECK) build ## Scan instrumented test apps
 			continue; \
 		fi; \
 		echo "==> govulncheck -mode=binary $$app"; \
-		if ! "$(GOVULNCHECK)" -mode=binary "$$appdir/$$app_bin"; then \
-			status=1; \
+		vuln_log=$$(mktemp); \
+		if "$(GOVULNCHECK)" -mode=binary "$$appdir/$$app_bin" >"$$vuln_log" 2>&1; then \
+			cat "$$vuln_log"; \
+		else \
+			cat "$$vuln_log"; \
+			ids=$$(sed -n 's/^Vulnerability #[0-9][0-9]*:[[:space:]]*//p' "$$vuln_log" | sed 's/[[:space:]]*$$//' | sort -u); \
+			extra=$$(printf '%s\n' "$$ids" | grep -vxF -e 'GO-2026-6872' -e 'GO-2026-6875' || true); \
+			if [ "$$app" = echoserver ] && [ -n "$$ids" ] && [ -z "$$extra" ]; then \
+				echo "govulncheck/instrumentation: ignored GO-2026-6872 and GO-2026-6875 for echoserver. vuln.go.dev still marks echo v4.16.3 as affected. See issue 1744."; \
+			else \
+				status=1; \
+			fi; \
 		fi; \
+		rm -f "$$vuln_log"; \
 		rm -f "$$appdir/$$app_bin"; \
 		(cd "$$appdir" && "$$otelc" cleanup) || true; \
 	done; \
@@ -596,7 +611,6 @@ test-unit/pkg: package ## Run unit tests for pkg modules only
 	done
 
 # Notes on test-unit/instrumentation implementation:
-# - Excludes "runtime" entirely (compile-time field injection; no testable subpackages).
 # - "database/sql" root package also needs field injection, so ./... cannot type-check
 #   client.go. Safe subpackages (dsnparse, semconv) are tested explicitly afterwards.
 # - Skips modules without test files to avoid empty test output.
@@ -609,7 +623,7 @@ test-unit/instrumentation: package ## Run unit tests for instrumentation modules
 	@echo "Running instrumentation unit tests..."
 	set -euo pipefail
 	rm -f ./gotest-unit-instrumentation.log
-	INSTR_MODULES=$$(find instrumentation -name "go.mod" -type f -exec dirname {} \; | grep -v "instrumentation/runtime" | grep -v "instrumentation/database/sql"); \
+	INSTR_MODULES=$$(find instrumentation -name "go.mod" -type f -exec dirname {} \; | grep -v "instrumentation/database/sql"); \
 	for moddir in $$INSTR_MODULES; do \
 		if ! find "$$moddir" -name "*_test.go" -type f | grep -q .; then \
 			echo "Skipping $$moddir (no tests)..."; \
@@ -684,7 +698,7 @@ test-unit/instrumentation/coverage: package ## Run unit tests with coverage for 
 	@echo "Running instrumentation unit tests with coverage..."
 	set -euo pipefail
 	rm -f ./gotest-unit-instrumentation.log
-	INSTR_MODULES=$$(find instrumentation -name "go.mod" -type f -exec dirname {} \; | grep -v "instrumentation/runtime" | grep -v "instrumentation/database/sql"); \
+	INSTR_MODULES=$$(find instrumentation -name "go.mod" -type f -exec dirname {} \; | grep -v "instrumentation/database/sql"); \
 	for moddir in $$INSTR_MODULES; do \
 		if ! find "$$moddir" -name "*_test.go" -type f | grep -q .; then \
 			echo "Skipping $$moddir (no tests)..."; \
@@ -777,8 +791,9 @@ test-integration/coverage: ## Run integration tests with coverage report
 test-integration/coverage: build build-demo
 	@echo "Running integration tests with coverage report..."
 	set -euo pipefail
-	# See test-integration: linodego builds need >20m when the suite is unsharded.
-	go -C "test" test -json -v -shuffle=on -timeout=40m -count=1 -tags integration ./integration/... -coverprofile=../coverage-integration.txt -covermode=atomic 2>&1 | tee ./gotest-integration.log
+	# See test-integration: linodego builds need >20m when the suite is unsharded,
+	# and the unsharded suite can take more than 35m.
+	go -C "test" test -json -v -shuffle=on -timeout=50m -count=1 -tags integration ./integration/... -coverprofile=../coverage-integration.txt -covermode=atomic 2>&1 | tee ./gotest-integration.log
 
 .ONESHELL:
 test-e2e: ## Run e2e tests

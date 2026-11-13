@@ -188,7 +188,7 @@ func NewMetrics(meter metric.Meter) Metrics {
 //   - resource UIDs, request IDs, etc.
 //
 // Per-request HTTP method/path detail stays on spans (and optional net/http metrics).
-func MetricAttributes(operation string, statusCode int, errorType string, serverAddress string) []attribute.KeyValue {
+func MetricAttributes(operation string, statusCode int, errorType, serverAddress string) []attribute.KeyValue {
 	server := strings.TrimSpace(serverAddress)
 	if server == "" {
 		server = DefaultServerAddress

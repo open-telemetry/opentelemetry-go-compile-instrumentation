@@ -23,11 +23,11 @@ import (
 )
 
 // renameReturnValues deliberately does not salt with a rule hash: raw and
-// directive rules reference the resulting name literally, in their injected
-// code, by its bare positional form. For example,
-// instrumentation/runtime/otelc.yaml's goroutine_propagate rule references
-// runtime.newproc1's first unnamed return value as "_unnamedRetVal0". Salting
-// this name broke every build that instruments runtime.newproc1.
+// directive rules that reference unnamed return values directly by their bare
+// positional name ("_unnamedRetValN") depend on these stable names remaining
+// unsalted. Salting this name breaks rules that reference "_unnamedRetValN"
+// literally instead of using template helpers like {{.FuncReturn N}} (as
+// runtime.newproc1 historically did before migrating).
 func TestRenameReturnValuesUsesStableBareNames(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc F() (int, string) { return 0, \"\" }")
 

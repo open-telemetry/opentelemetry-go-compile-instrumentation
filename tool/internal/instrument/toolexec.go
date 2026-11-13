@@ -34,7 +34,11 @@ import (
 )
 
 type instrumentPhase struct {
-	logger *slog.Logger
+	diagnosticSource string
+	// ignoredCallSites counts the matching call sites skipped for
+	// //otelc:ignore, so diagnostics can tell an ignored call from no call.
+	ignoredCallSites int
+	logger           *slog.Logger
 	// buildContext evaluates build constraints (GOOS, GOARCH, etc.) for file rules.
 	// If nil, defaults to &build.Default.
 	buildContext *build.Context
@@ -1078,6 +1082,14 @@ func markedToolVersion(rawOutput string) string {
 		// must not reuse artifacts compiled without those tags.
 		if tags := util.ActiveBuildTags(); len(tags) > 0 {
 			content = append(content, "\ntags="+strings.Join(tags, ",")...)
+		}
+		// go never sees the packages rules add, so their hash stands in. The
+		// tool ID is shared by every compile, so an edit to one injected
+		// package rebuilds the whole instrumented build, not only the
+		// packages that import it. Missing an edit would put stale code in
+		// the binary, so the coarser invalidation is the accepted cost.
+		if injected, injErr := os.ReadFile(util.GetInjectedHashFile()); injErr == nil && len(injected) > 0 {
+			content = append(content, "\ninjected="+string(injected)...)
 		}
 		sum := sha256.Sum256(content)
 		rulesHash = hex.EncodeToString(sum[:8])
