@@ -70,6 +70,9 @@ type hookData struct {
 }
 
 func BeforeServeHTTP(ictx hook.HookContext, recv interface{}, w http.ResponseWriter, r *http.Request) {
+	if !runtime.Ready() {
+		return
+	}
 	// This runs once per request; keep the disabled path free of logging.
 	if !serverEnabler.Enable() {
 		return

@@ -111,9 +111,12 @@ func BeforeNewServer(ictx hook.HookContext, opts ...grpc.ServerOption) {
 		return
 	}
 
-	initInstrumentation()
-
-	logger.Debug("BeforeNewServer called")
+	// The stats handler initializes the instrumentation in TagRPC, so a server
+	// created during package initialization keeps it. The logger is not set
+	// up that early.
+	if runtime.Ready() {
+		logger.Debug("BeforeNewServer called")
+	}
 
 	// Create and inject stats handler
 	handler := newServerStatsHandler()
@@ -123,6 +126,9 @@ func BeforeNewServer(ictx hook.HookContext, opts ...grpc.ServerOption) {
 
 // AfterNewServer hooks after grpc.NewServer
 func AfterNewServer(ictx hook.HookContext, server *grpc.Server) {
+	if !runtime.Ready() {
+		return
+	}
 	if !serverEnabler.Enable() {
 		return
 	}
@@ -146,6 +152,11 @@ func newServerStatsHandler() stats.Handler {
 
 // TagRPC is called at the beginning of an RPC to create a context
 func (h *serverStatsHandler) TagRPC(ctx context.Context, info *stats.RPCTagInfo) context.Context {
+	if !runtime.Ready() {
+		return ctx
+	}
+	initInstrumentation()
+
 	// Skip instrumentation for OTLP exporter endpoints to prevent infinite recursion
 	if grpcsemconv.IsOTELExporterPath(info.FullMethodName) {
 		return ctx

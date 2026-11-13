@@ -30,20 +30,6 @@ path: example.com/pkg
 				assert.Equal(t, "MyFunc", r.Func)
 				assert.Equal(t, "MyBefore", r.Before)
 				assert.Nil(t, r.Signature)
-				assert.False(t, r.RequiresInit)
-			},
-		},
-		{
-			name: "rule with requires_init",
-			yaml: `
-func: MyFunc
-target: example.com/pkg
-before: MyBefore
-path: example.com/pkg
-requires_init: true
-`,
-			check: func(t *testing.T, r *InstFuncRule) {
-				assert.True(t, r.RequiresInit)
 			},
 		},
 		{

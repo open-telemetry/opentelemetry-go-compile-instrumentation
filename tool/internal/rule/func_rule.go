@@ -72,11 +72,6 @@ type InstFuncRule struct {
 	ParamImplements      string `json:"param_implements,omitempty"       yaml:"param_implements"`
 	ResultImplements     string `json:"result_implements,omitempty"      yaml:"result_implements"`
 	LastResultImplements string `json:"last_result_implements,omitempty" yaml:"last_result_implements"`
-
-	// RequiresInit skips the hooks until their package has initialized. A
-	// hook called earlier, during another package's initialization, returns
-	// at entry instead of using package state that is not set up yet.
-	RequiresInit bool `json:"requires_init,omitempty" yaml:"requires_init"`
 }
 
 // NewInstFuncRule loads and validates an InstFuncRule from YAML data.

@@ -137,6 +137,9 @@ func BeforeDoRequest(
 	_ interface{}, // requestParams
 	_ interface{}, // paginationMutator
 ) {
+	if !runtime.Ready() {
+		return
+	}
 	if !enabler.Enable() {
 		logger.Debug("linodego instrumentation disabled")
 		return

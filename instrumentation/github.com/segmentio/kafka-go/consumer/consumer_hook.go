@@ -75,6 +75,9 @@ type fetchMessageCallKey struct{}
 // BeforeReadMessage captures the reader configuration and the call start time so
 // AfterReadMessage can build an accurate consumer span once the message arrives.
 func BeforeReadMessage(ictx hook.HookContext, r *kafka.Reader, ctx context.Context) {
+	if !runtime.Ready() {
+		return
+	}
 	if !kafkaEnabler.Enable() {
 		logger.Debug("Kafka consumer instrumentation disabled")
 		return
@@ -195,6 +198,10 @@ func AfterFetchMessage(ictx hook.HookContext, msg kafka.Message, err error) {
 //	ctx = consumer.ExtractContext(msg)
 //	// spans created with ctx will be children of the producer span.
 func ExtractContext(msg kafka.Message) context.Context {
+	// The propagator is not set up before pkg/runtime has initialized.
+	if !runtime.Ready() {
+		return context.Background()
+	}
 	initInstrumentation()
 	return propagator.Extract(context.Background(), kafkaprop.NewHeaderCarrier(&msg.Headers))
 }

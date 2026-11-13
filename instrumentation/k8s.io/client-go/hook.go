@@ -54,6 +54,9 @@ func beforeProcessDeltas(
 	deltas cache.Deltas,
 	isInInitialList bool,
 ) {
+	if !runtime.Ready() {
+		return
+	}
 	if !k8SEnabler.Enable() {
 		logger.Debug("K8S client-go instrumentation disabled")
 		return
@@ -98,6 +101,9 @@ func beforeProcessDeltasInBatch(
 	deltas []cache.Delta,
 	isInInitialList bool,
 ) {
+	if !runtime.Ready() {
+		return
+	}
 	if !k8SEnabler.Enable() {
 		logger.Debug("K8S client-go instrumentation disabled")
 		return

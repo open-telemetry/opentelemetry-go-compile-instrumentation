@@ -84,6 +84,9 @@ func BeforePerformRequest(
 	ctx context.Context,
 	opt elastic.PerformRequestOptions,
 ) {
+	if !runtime.Ready() {
+		return
+	}
 	if !enabler.Enable() {
 		logger.Debug("olivere/elastic instrumentation disabled")
 		return

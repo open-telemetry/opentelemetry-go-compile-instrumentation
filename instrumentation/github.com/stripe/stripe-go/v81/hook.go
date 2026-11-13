@@ -120,6 +120,9 @@ func BeforeRequest(
 	_ *bytes.Buffer,
 	_ interface{}, // handleResponse callback
 ) {
+	if !runtime.Ready() {
+		return
+	}
 	if !enabler.Enable() {
 		logger.Debug("stripe instrumentation disabled")
 		return

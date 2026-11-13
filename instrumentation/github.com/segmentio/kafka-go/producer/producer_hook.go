@@ -87,6 +87,9 @@ func BeforeWriteMessages(
 	ctx context.Context,
 	msgs ...kafka.Message,
 ) {
+	if !runtime.Ready() {
+		return
+	}
 	if !kafkaEnabler.Enable() {
 		logger.Debug("Kafka producer instrumentation disabled")
 		return

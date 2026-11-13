@@ -238,19 +238,26 @@ When implementing hooks, we must adhere to certain limitations:
    The logrus instrumentation uses this pattern for the logger created by logrus's own
    package initialization.
 
-   A hook that cannot be written this way can set `requires_init: true` on its
-   `inject_hooks` modifier. Its hooks then return at entry until every variable initializer
-   and `init()` function of the hook package has run, and the first skipped call prints one
-   message per hook package to standard error:
+   The same applies to the OpenTelemetry API. Before its packages have initialized,
+   `otel.GetTracerProvider()` panics, and a panic inside `sync.Once` leaves the tracer nil
+   for the rest of the process. A hook or callback that starts telemetry must first check
+   `runtime.Ready()` from `go.opentelemetry.io/otelc/pkg/runtime`, which reports whether
+   that package, and with it the OpenTelemetry API it imports, has initialized:
 
-   ```text
-   otelc: skipping hooks in <package> before package initialization completes
+   ```go
+   func BeforeQuery(ictx hook.HookContext, query string) {
+       if !runtime.Ready() {
+           return
+       }
+       initInstrumentation()
+       // start the span
+   }
    ```
 
-   The target function still runs. Skipped calls are not queued or replayed, so calls made
-   during initialization, including those from the hook package's own initializers, are not
-   instrumented. Prefer lazy initialization where possible: a hook that runs early and is
-   safe keeps that instrumentation.
+   Calls skipped this way are not traced and are not replayed. A hook that attaches
+   instrumentation to a client or server, such as a middleware or a stats handler, should
+   still attach it during initialization and check `runtime.Ready()` when the attached code
+   runs, so a client created in a package-level variable keeps its instrumentation.
 
 ### GLS Operation for OTel SDK Instrumentation
 

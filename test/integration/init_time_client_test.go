@@ -6,6 +6,7 @@
 package test
 
 import (
+	"net"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -42,4 +43,21 @@ func TestRedisClientUsedDuringInit(t *testing.T) {
 
 	span := f.RequireSingleSpan()
 	require.Equal(t, "ping", span.Name())
+}
+
+// A gRPC client created in a package-level variable gets its stats handler
+// before the OpenTelemetry API has initialized, and must trace later calls.
+func TestGRPCClientCreatedDuringInit(t *testing.T) {
+	t.Parallel()
+	testutil.Build(t, "", "grpcinit", "go", "build", "-a")
+	f := testutil.NewTestFixture(t)
+	server := StartGRPCServer(t)
+
+	output := f.Run("grpcinit", "-addr="+server.Addr)
+
+	require.Contains(t, output, "Hello InitTest")
+	span := f.RequireSingleSpan()
+	host, _, err := net.SplitHostPort(server.Addr)
+	require.NoError(t, err)
+	testutil.RequireGRPCClientSemconv(t, span, host, "greeter.Greeter", "SayHello", 0)
 }

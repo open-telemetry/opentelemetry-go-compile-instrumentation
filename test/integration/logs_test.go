@@ -7,7 +7,6 @@ package test
 
 import (
 	"regexp"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -77,28 +76,6 @@ func TestLogsLogrus(t *testing.T) {
 	spanIDPattern := regexp.MustCompile(`"span_id":"[a-f0-9]{16}"`)
 	spanMatches := spanIDPattern.FindAllString(output, -1)
 	require.NotEmpty(t, spanMatches, "Expected span_id to be injected into logrus messages")
-}
-
-// TestLogsLogrusInitLogger checks a logger created by a package-level variable
-// initializer, before the logrus hook package itself initializes. Its hooks do
-// not set requires_init, so they still run that early and attach the trace hook.
-func TestLogsLogrusInitLogger(t *testing.T) {
-	t.Parallel()
-	testutil.Build(t, "", "logsinitlogrus", "go", "build", "-a")
-
-	f := testutil.NewTestFixture(t, testutil.WithoutCollector())
-	output := f.Run("logsinitlogrus")
-
-	var line string
-	for l := range strings.Lines(output) {
-		if strings.Contains(l, "logrus info message from init logger") {
-			line = l
-		}
-	}
-	require.NotEmpty(t, line, "Expected the init logger's message in:\n%s", output)
-	require.Regexp(t, `"trace_id":"[a-f0-9]{32}"`, line)
-	require.Regexp(t, `"span_id":"[a-f0-9]{16}"`, line)
-	require.NotContains(t, output, "skipping hooks")
 }
 
 func TestLogsZap(t *testing.T) {

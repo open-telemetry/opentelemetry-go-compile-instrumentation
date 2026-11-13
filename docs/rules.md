@@ -509,10 +509,6 @@ This is the most common rule type. It injects function calls at the beginning (`
   `otel.instrumentation.go` (whether written manually or generated automatically), the imported
   module is added to the build graph automatically. When supplying rules via `--rules` or the
   `OTELC_RULES` environment variable, the package must already be listed in the user's `go.mod`.
-- `requires_init` (bool, optional): Skip the hooks when they are called before the hook package
-  has initialized, for example from another package's `init()`. Defaults to `false`, which runs
-  them as soon as they are called. See
-  [Package Initialization Order](instrument-guide.md#limitations) for when to use it.
 
 **Example:**
 

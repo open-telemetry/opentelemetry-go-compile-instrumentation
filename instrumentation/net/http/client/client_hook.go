@@ -71,6 +71,9 @@ type hookData struct {
 }
 
 func BeforeRoundTrip(ictx hook.HookContext, transport *http.Transport, req *http.Request) {
+	if !runtime.Ready() {
+		return
+	}
 	// This runs once per outbound request; keep the disabled path free of logging.
 	if !clientEnabler.Enable() {
 		return

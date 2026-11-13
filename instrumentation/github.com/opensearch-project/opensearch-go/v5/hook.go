@@ -83,6 +83,9 @@ func BeforeRequest(
 	_ *opensearch.Client,
 	req *http.Request,
 ) {
+	if !runtime.Ready() {
+		return
+	}
 	if !enabler.Enable() {
 		logger.Debug("opensearch instrumentation disabled")
 		return

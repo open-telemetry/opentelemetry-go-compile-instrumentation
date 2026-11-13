@@ -130,15 +130,21 @@ func BeforeNewClient(ictx hook.HookContext, target string, opts ...grpc.DialOpti
 		return
 	}
 
-	initInstrumentation()
-
-	logger.Debug("BeforeNewClient called", "target", target)
+	// The stats handler initializes the instrumentation in TagRPC, so a client
+	// created during package initialization keeps it. The logger is not set
+	// up that early.
+	if runtime.Ready() {
+		logger.Debug("BeforeNewClient called", "target", target)
+	}
 
 	ictx.SetParam(newClientOptionsParamIndex, withClientStatsHandler(opts))
 }
 
 // AfterNewClient hooks after grpc.NewClient
 func AfterNewClient(ictx hook.HookContext, conn *grpc.ClientConn, err error) {
+	if !runtime.Ready() {
+		return
+	}
 	if !clientEnabler.Enable() {
 		return
 	}
@@ -156,15 +162,19 @@ func BeforeDialContext(ictx hook.HookContext, ctx context.Context, target string
 		return
 	}
 
-	initInstrumentation()
-
-	logger.Debug("BeforeDialContext called", "target", target)
+	// See BeforeNewClient.
+	if runtime.Ready() {
+		logger.Debug("BeforeDialContext called", "target", target)
+	}
 
 	ictx.SetParam(dialOptionsParamIndex, withClientStatsHandler(opts))
 }
 
 // AfterDialContext hooks after grpc.DialContext
 func AfterDialContext(ictx hook.HookContext, conn *grpc.ClientConn, err error) {
+	if !runtime.Ready() {
+		return
+	}
 	if !clientEnabler.Enable() {
 		return
 	}
@@ -192,6 +202,11 @@ func newClientStatsHandler() stats.Handler {
 
 // TagRPC is called at the beginning of an RPC to create a context
 func (h *clientStatsHandler) TagRPC(ctx context.Context, info *stats.RPCTagInfo) context.Context {
+	if !runtime.Ready() {
+		return ctx
+	}
+	initInstrumentation()
+
 	// Skip instrumentation for OTLP exporter endpoints to prevent infinite recursion
 	if grpcsemconv.IsOTELExporterPath(info.FullMethodName) {
 		return ctx
