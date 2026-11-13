@@ -43,13 +43,18 @@ type setupPhase struct {
 
 	// fileImportsCache caches discovered source imports for add_file rules during setup.
 	fileImportsCache map[string][]string
-	testMode         bool
 	// testPackages holds the test variants and test binaries of a go test
 	// build, which buildPackages leaves out.
 	testPackages []*packages.Package
+	// instrumentationConfigPath is the one explicit behavior-configuration
+	// source for this setup invocation; it is empty when the flag is omitted.
+	instrumentationConfigPath string
+	applicationConfiguration  configuration.ApplicationConfiguration
 	// configurationMetadata is the setup-time handoff to application config
 	// validation, including selected modules that have no metadata file.
-	configurationMetadata selectedConfigurationMetadata
+	configurationMetadata      selectedConfigurationMetadata
+	validatedApplicationConfig configuration.ValidatedApplicationConfiguration
+	testMode                   bool
 	// ruleModuleRoots keeps instrumentation rule ownership outside the rules
 	// themselves so setup can resolve module-local metadata for matched rules.
 	ruleModuleRoots map[rule.InstRule]string
@@ -116,6 +121,10 @@ const (
 	vendorDirName = "vendor"
 	flagMod       = "-mod"
 )
+
+// FlagInstrumentationConfig selects the application behavior configuration
+// file consumed during setup.
+const FlagInstrumentationConfig = "instrumentation-config"
 
 // Go command flags that the argument scanners treat specially.
 const (
@@ -487,6 +496,25 @@ func (sp *setupPhase) recordRuleModuleRoot(instRule rule.InstRule, moduleRoot st
 	sp.ruleModuleRoots[instRule] = moduleRoot
 }
 
+func (sp *setupPhase) setInstrumentationConfigPath(path string) error {
+	if path == "" {
+		return nil
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return ex.Wrapf(err, "resolve application configuration path %q", path)
+	}
+	sp.instrumentationConfigPath = absolute
+	return nil
+}
+
+func (sp *setupPhase) loadConfiguredApplication(path string) error {
+	if err := sp.setInstrumentationConfigPath(path); err != nil {
+		return err
+	}
+	return sp.loadApplicationConfiguration()
+}
+
 func (sp *setupPhase) validateAndStoreSelectedConfigurationMetadata(matched []*rule.InstRuleSet) error {
 	metadata, err := sp.validateSelectedConfigurationMetadata(matched, configuration.CatalogDefinitions)
 	if err != nil {
@@ -551,6 +579,9 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		pgo:        pgoValue(subcommand, args),
 		testMode:   subcommand == subcmdTest,
 	}
+	if err := sp.loadConfiguredApplication(cmd.String(FlagInstrumentationConfig)); err != nil {
+		return err
+	}
 
 	// Introduce additional hook code by generating otelc.runtime.go
 	// Use GetPackage to determine the build target directory
@@ -571,10 +602,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Ensure a state manager is available in the context
-	if stateManager, found := stateManagerFromContext(ctx); !found {
-		// save this state manager in the context
-		ctx = contextWithStateManager(ctx, stateManager)
-	}
+	ctx = ensureStateManager(ctx)
 
 	// Auto-pin generates/updates otel.instrumentation.go file
 	var deps []*Dependency
@@ -604,6 +632,9 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	if err = sp.validateAndStoreSelectedConfigurationMetadata(matched); err != nil {
 		return err
 	}
+	if err = sp.validateAndStoreApplicationConfiguration(); err != nil {
+		return err
+	}
 
 	sp.warnIfNoInstrumentationMatched(matched)
 
@@ -617,6 +648,13 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 	return sp.storeInjectedHash(ctx, matched)
+}
+
+func ensureStateManager(ctx context.Context) context.Context {
+	if stateManager, found := stateManagerFromContext(ctx); !found {
+		return contextWithStateManager(ctx, stateManager)
+	}
+	return ctx
 }
 
 // warnIfNoInstrumentationMatched reports the combined result. An individual

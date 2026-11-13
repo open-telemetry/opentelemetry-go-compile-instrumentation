@@ -280,6 +280,20 @@ func validateEntry(entry Entry, source string) error {
 	return nil
 }
 
+// ValidateApplicationValue validates a native YAML application value against a
+// selected instrumentation definition.
+func ValidateApplicationValue(entry Entry, value any, source string) error {
+	if !valueMatchesType(value, entry.Type) {
+		return ex.Newf("%s: value for %q must have type %s", source, entry.Name, entry.Type)
+	}
+	if entry.Type == structuredListType {
+		if err := validateStructuredValue(value, entry.Schema, source); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func isConfigurationPath(value string) bool {
 	if strings.HasPrefix(value, "general.") {
 		return len(value) > len("general.") && !strings.HasSuffix(value, "/development")
@@ -322,9 +336,13 @@ func validateDefault(value, typeName string, schema *Schema, source string) erro
 }
 
 func validateStructuredDefaults(value any, schema *Schema, source string) error {
+	return validateStructuredValue(value, schema, source)
+}
+
+func validateStructuredValue(value any, schema *Schema, source string) error {
 	items, ok := value.([]any)
 	if !ok {
-		return ex.Newf("%s: structured_list default must be a sequence", source)
+		return ex.Newf("%s: structured_list must be a sequence", source)
 	}
 	for i, item := range items {
 		object, isObject := item.(map[string]any)

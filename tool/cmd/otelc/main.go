@@ -46,6 +46,12 @@ func rootFlags() []cli.Flag {
 			Value:     "",
 		},
 		&cli.StringFlag{
+			Name:      setup.FlagInstrumentationConfig,
+			Usage:     "The path to the application instrumentation configuration file",
+			TakesFile: true,
+			OnlyOnce:  true,
+		},
+		&cli.StringFlag{
 			Name:    "profile-path",
 			Sources: cli.EnvVars(envProfilePath),
 			Usage:   "Directory for profiling output",
