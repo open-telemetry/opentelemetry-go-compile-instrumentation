@@ -43,6 +43,114 @@ func TestApplyStructRule_NonStructType_ReturnsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "not a struct type")
 }
 
+func TestApplyStructRule_CollidesWithExistingField_ReturnsError(t *testing.T) {
+	// A new_field entry that duplicates a field already declared on the target
+	// struct must be rejected here, not silently appended into invalid Go that
+	// only fails later at `go build`.
+	target := &dst.StructType{Fields: &dst.FieldList{
+		List: []*dst.Field{
+			{Names: []*dst.Ident{{Name: "Existing"}}, Type: &dst.Ident{Name: "string"}},
+		},
+	}}
+	file := typeDeclFile(&dst.TypeSpec{Name: &dst.Ident{Name: "Target"}, Type: target})
+	r := &rule.InstStructRule{
+		InstBaseRule: rule.InstBaseRule{Name: "add_field"},
+		Struct:       "Target",
+		NewField:     []*rule.InstStructField{{Name: "Existing", Type: "bool"}},
+	}
+
+	err := newTestPhase().applyStructRule(context.Background(), r, file)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `struct "Target" already has a field named "Existing"`)
+	require.Len(t, target.Fields.List, 1)
+}
+
+func TestApplyStructRule_BlankFieldDoesNotCollide(t *testing.T) {
+	// Go allows any number of fields named "_" on one struct; the collision
+	// check must not treat it like a real name.
+	target := &dst.StructType{Fields: &dst.FieldList{
+		List: []*dst.Field{
+			{Names: []*dst.Ident{{Name: "_"}}, Type: &dst.Ident{Name: "int"}},
+		},
+	}}
+	file := typeDeclFile(&dst.TypeSpec{Name: &dst.Ident{Name: "Target"}, Type: target})
+	r := &rule.InstStructRule{
+		InstBaseRule: rule.InstBaseRule{Name: "add_field"},
+		Struct:       "Target",
+		NewField:     []*rule.InstStructField{{Name: "_", Type: "bool"}, {Name: "_", Type: "string"}},
+	}
+
+	err := newTestPhase().applyStructRule(context.Background(), r, file)
+
+	require.NoError(t, err)
+	require.Len(t, target.Fields.List, 3)
+}
+
+func TestApplyStructRule_CollidesWithEmbeddedField_ReturnsError(t *testing.T) {
+	// An embedded field has no Names; its effective field name is the type
+	// name with any pointer, package qualifier and type arguments removed.
+	// new_field must be checked against that derived name too, not just
+	// against named fields.
+	cases := []struct {
+		name     string
+		embedded dst.Expr
+		newField string
+	}{
+		{"plain", &dst.Ident{Name: "Mutex"}, "Mutex"},
+		{"pointer", &dst.StarExpr{X: &dst.Ident{Name: "Inner"}}, "Inner"},
+		{"qualified", &dst.SelectorExpr{X: &dst.Ident{Name: "sync"}, Sel: &dst.Ident{Name: "Mutex"}}, "Mutex"},
+		{
+			"pointer to qualified generic",
+			&dst.StarExpr{X: &dst.IndexExpr{
+				X:     &dst.SelectorExpr{X: &dst.Ident{Name: "pkg"}, Sel: &dst.Ident{Name: "Box"}},
+				Index: &dst.Ident{Name: "T"},
+			}},
+			"Box",
+		},
+	}
+
+	for _, c := range cases {
+		target := &dst.StructType{Fields: &dst.FieldList{
+			List: []*dst.Field{{Type: c.embedded}},
+		}}
+		file := typeDeclFile(&dst.TypeSpec{Name: &dst.Ident{Name: "Target"}, Type: target})
+		r := &rule.InstStructRule{
+			InstBaseRule: rule.InstBaseRule{Name: "add_field"},
+			Struct:       "Target",
+			NewField:     []*rule.InstStructField{{Name: c.newField, Type: "bool"}},
+		}
+
+		err := newTestPhase().applyStructRule(context.Background(), r, file)
+
+		require.Errorf(t, err, "case %q", c.name)
+		assert.Containsf(t, err.Error(), `already has a field named "`+c.newField+`"`, "case %q", c.name)
+		require.Lenf(t, target.Fields.List, 1, "case %q", c.name)
+	}
+}
+
+func TestEmbeddedFieldName(t *testing.T) {
+	cases := []struct {
+		name string
+		expr dst.Expr
+		want string
+	}{
+		{
+			"generic with multiple type parameters",
+			&dst.IndexListExpr{
+				X:       &dst.Ident{Name: "Box"},
+				Indices: []dst.Expr{&dst.Ident{Name: "K"}, &dst.Ident{Name: "V"}},
+			},
+			"Box",
+		},
+		{"unrecognized expression", &dst.ArrayType{Elt: &dst.Ident{Name: "int"}}, ""},
+	}
+
+	for _, c := range cases {
+		assert.Equalf(t, c.want, embeddedFieldName(c.expr), "case %q", c.name)
+	}
+}
+
 func TestApplyStructRule_GroupedTypeBlock_TargetsNamedStruct(t *testing.T) {
 	// In a grouped type block the field must land in the NAMED struct, not the
 	// first spec (here a non-struct that used to be asserted via Specs[0]).
