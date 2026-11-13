@@ -661,10 +661,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Ensure a state manager is available in the context
-	if stateManager, found := stateManagerFromContext(ctx); !found {
-		// save this state manager in the context
-		ctx = contextWithStateManager(ctx, stateManager)
-	}
+	ctx = ensureStateManager(ctx)
 
 	deps, err := sp.buildDeps(ctx, moduleDirs, subcommand, args)
 	if err != nil {
@@ -732,6 +729,13 @@ func (sp *setupPhase) recordResolutionScope(ctx context.Context, moduleDirs []st
 	if setErr := os.Setenv(util.EnvOtelcSessionDir, util.SessionOff); setErr != nil {
 		sp.Warn("cannot turn the session off", "error", setErr)
 	}
+}
+
+func ensureStateManager(ctx context.Context) context.Context {
+	if stateManager, found := stateManagerFromContext(ctx); !found {
+		return contextWithStateManager(ctx, stateManager)
+	}
+	return ctx
 }
 
 // warnIfNoInstrumentationMatched reports the combined result. An individual
