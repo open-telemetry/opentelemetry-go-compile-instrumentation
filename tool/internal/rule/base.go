@@ -5,6 +5,7 @@ package rule
 
 import (
 	"fmt"
+	"go/version"
 	"iter"
 	"maps"
 	"path/filepath"
@@ -155,6 +156,25 @@ func (irs *InstRuleSet) IsEmpty() bool {
 			len(irs.DeclRules) == 0 &&
 			len(irs.FileRules) == 0 &&
 			len(irs.IgnoredCallFiles) == 0)
+}
+
+// MaxRequiredLang returns the highest minimum Go language version required
+// across all raw rules in this rule set, or an empty string if no rule specifies a language version.
+func (irs *InstRuleSet) MaxRequiredLang() string {
+	if irs == nil {
+		return ""
+	}
+	var maxLang string
+	for _, rawRules := range irs.RawRules {
+		for _, r := range rawRules {
+			if r.Lang != "" {
+				if maxLang == "" || version.Compare(r.Lang, maxLang) > 0 {
+					maxLang = r.Lang
+				}
+			}
+		}
+	}
+	return maxLang
 }
 
 // IsInternal reports whether the rule set consists of compiler-internal
