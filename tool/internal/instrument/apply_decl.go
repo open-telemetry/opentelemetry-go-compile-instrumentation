@@ -5,7 +5,9 @@ package instrument
 
 import (
 	"context"
+	"go/token"
 	"slices"
+	"strings"
 
 	"github.com/dave/dst"
 
@@ -57,6 +59,10 @@ func (ip *instrumentPhase) applyDeclRule(ctx context.Context, r *rule.InstDeclRu
 	nameIdx := slices.IndexFunc(spec.Names, func(name *dst.Ident) bool { return name.Name == r.Identifier })
 	util.Assert(nameIdx >= 0, "matched spec must declare the targeted identifier")
 
+	if err := rejectIotaCascade(root, spec, r.Identifier); err != nil {
+		return err
+	}
+
 	_, aliasOverrides := ip.resolveImportOverrides(root, r.Imports)
 
 	// Validate and apply the rewrite before touching imports: a rule that
@@ -77,6 +83,52 @@ func (ip *instrumentPhase) applyDeclRule(ctx context.Context, r *rule.InstDeclRu
 	}
 
 	ip.Info("Apply decl rule", "rule", r)
+	return nil
+}
+
+// rejectIotaCascade returns an error when rewriting spec's value would change
+// what a later sibling ValueSpec in the same const block evaluates to. Within
+// a parenthesized const declaration, a ValueSpec with no expression list
+// textually substitutes the nearest preceding non-empty expression list (the
+// Go spec's "Iota" section), so rewriting spec's value also changes every
+// later spec that currently inherits it, with no indication in source that
+// those constants depend on spec at all. The check is unconditional on the
+// matched GenDecl's token, not on the rule's (optional) Kind field: a decl
+// rule that omits kind still resolves to a const declaration via
+// ast.FindNamedDecl's default branch, and the Go spec's implicit-repeat rule
+// only applies to const, so a var's GenDecl is skipped here.
+func rejectIotaCascade(root *dst.File, spec *dst.ValueSpec, identifier string) error {
+	for _, decl := range root.Decls {
+		genDecl, ok := decl.(*dst.GenDecl)
+		if !ok {
+			continue
+		}
+		specIdx := slices.Index(genDecl.Specs, dst.Spec(spec))
+		if specIdx < 0 {
+			continue
+		}
+		if genDecl.Tok != token.CONST {
+			return nil
+		}
+		var cascaded []string
+		for i := specIdx + 1; i < len(genDecl.Specs); i++ {
+			sibling, isValueSpec := genDecl.Specs[i].(*dst.ValueSpec)
+			if !isValueSpec || len(sibling.Values) > 0 {
+				break
+			}
+			for _, name := range sibling.Names {
+				cascaded = append(cascaded, name.Name)
+			}
+		}
+		if len(cascaded) > 0 {
+			return ex.Newf(
+				"rewriting %q would also change the value of %s, which has no initializer "+
+					"of its own and implicitly repeats %q's",
+				identifier, strings.Join(cascaded, ", "), identifier,
+			)
+		}
+		return nil
+	}
 	return nil
 }
 
