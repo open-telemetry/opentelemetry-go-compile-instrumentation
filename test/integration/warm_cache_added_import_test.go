@@ -338,13 +338,15 @@ import (
 	"example.com/warmcache/extra"
 )
 
-// main records a CPU profile in which extra.Note is the dominant cost. The
-// inner loop does no allocation and no timing calls, so the samples land on
-// Note instead of on the runtime. Profiling samples at 100 Hz, so the run
-// is bounded by time, not by an iteration count: a fixed count finishes in
-// about 200ms on a fast runner, and the handful of samples it leaves can
-// miss Note entirely. The clock is read once per batch of 1e7 calls, so it
-// costs a negligible share of the samples.
+var note = extra.Note
+
+// main records a CPU profile in which extra.Note is the dominant cost. Calling
+// it through a function value prevents the profile generator from inlining it
+// before the samples are collected. The inner loop does no allocation and no
+// timing calls, so the samples land on Note instead of on the runtime.
+// Profiling samples at 100 Hz, so the run is bounded by time rather than by an
+// iteration count. The clock is read once per batch of 1e7 calls, so it costs
+// a negligible share of the samples.
 func main() {
 	f, err := os.Create(os.Args[1])
 	if err != nil {
@@ -353,9 +355,9 @@ func main() {
 	if err := pprof.StartCPUProfile(f); err != nil {
 		panic(err)
 	}
-	for start := time.Now(); time.Since(start) < time.Second; {
+	for start := time.Now(); time.Since(start) < 3*time.Second; {
 		for range 10_000_000 {
-			_ = extra.Note()
+			_ = note()
 		}
 	}
 	pprof.StopCPUProfile()

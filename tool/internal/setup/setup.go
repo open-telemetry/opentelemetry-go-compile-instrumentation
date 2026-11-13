@@ -602,10 +602,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Ensure a state manager is available in the context
-	if stateManager, found := stateManagerFromContext(ctx); !found {
-		// save this state manager in the context
-		ctx = contextWithStateManager(ctx, stateManager)
-	}
+	ctx = ensureStateManager(ctx)
 
 	// Auto-pin generates/updates otel.instrumentation.go file
 	var deps []*Dependency
@@ -651,6 +648,13 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 	return sp.storeInjectedHash(ctx, matched)
+}
+
+func ensureStateManager(ctx context.Context) context.Context {
+	if stateManager, found := stateManagerFromContext(ctx); !found {
+		return contextWithStateManager(ctx, stateManager)
+	}
+	return ctx
 }
 
 // warnIfNoInstrumentationMatched reports the combined result. An individual
