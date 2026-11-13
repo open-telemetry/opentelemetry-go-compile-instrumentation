@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 
+	"go.opentelemetry.io/otelc/tool/internal/instrument"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -52,6 +53,8 @@ func cleanupLocked(ctx context.Context, cleanAll bool) error {
 			}
 		}
 	}
+
+	instrument.CleanupProbeWorkDirs()
 
 	if cleanAll {
 		if !reverted {

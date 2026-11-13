@@ -106,6 +106,114 @@ func TestAddedImportsResolveInSecondNestedBuild(t *testing.T) {
 	)
 }
 
+// TestAddedInternalPackageResolves covers an added import of an internal package.
+// A synthetic probe outside the module cannot import dep's internal package due to
+// Go's internal package visibility rules. Direct package resolution must resolve
+// its archive correctly so both cold and warm builds succeed.
+func TestAddedInternalPackageResolves(t *testing.T) {
+	otelcPath, err := testutil.OtelcPath()
+	require.NoError(t, err)
+	absoluteOtelcPath, err := filepath.Abs(otelcPath)
+	require.NoError(t, err)
+	repoRoot := filepath.Dir(absoluteOtelcPath)
+
+	appDir := copyNestedImportsApp(t, repoRoot)
+
+	// Create dep/internal/secret/helper/helper.go (transitive internal dependency)
+	helperDir := filepath.Join(appDir, "dep", "internal", "secret", "helper")
+	require.NoError(t, os.MkdirAll(helperDir, 0o755))
+	helperContent := "package helper\n\nfunc SubNote() string {\n\treturn \"helper-note\"\n}\n"
+	require.NoError(t, os.WriteFile(filepath.Join(helperDir, "helper.go"), []byte(helperContent), 0o644))
+
+	// Create dep/internal/secret/secret.go importing helper
+	secretDir := filepath.Join(appDir, "dep", "internal", "secret")
+	require.NoError(t, os.MkdirAll(secretDir, 0o755))
+	secretContent := "package secret\n\nimport \"go.opentelemetry.io/otelc/test/apps/nestedimports/dep/internal/secret/helper\"\n\nfunc Note() string {\n\treturn \"internal-secret-\" + helper.SubNote()\n}\n"
+	require.NoError(t, os.WriteFile(filepath.Join(secretDir, "secret.go"), []byte(secretContent), 0o644))
+
+	// Add function to dep/dep.go that uses strings.ToLower so our rule can wrap it
+	depFile := filepath.Join(appDir, "dep", "dep.go")
+	depSrc, err := os.ReadFile(depFile)
+	require.NoError(t, err)
+	newDepSrc := string(
+		depSrc,
+	) + "\nfunc SecretWork() string {\n\treturn strings.ToLower(\"from dep with secret\")\n}\n"
+	require.NoError(t, os.WriteFile(depFile, []byte(newDepSrc), 0o644))
+
+	// Call dep.SecretWork() in main.go
+	mainFile := filepath.Join(appDir, "main.go")
+	mainSrc, err := os.ReadFile(mainFile)
+	require.NoError(t, err)
+	newMainSrc := strings.Replace(
+		string(mainSrc),
+		`fmt.Println("nestedimports: dep=" + dep.Work())`,
+		`fmt.Println("nestedimports: dep=" + dep.Work())`+"\n\t"+`fmt.Println("nestedimports: secret=" + dep.SecretWork())`,
+		1,
+	)
+	require.NoError(t, os.WriteFile(mainFile, []byte(newMainSrc), 0o644))
+
+	// Add rule to otelc.yaml importing dep/internal/secret
+	ruleFile := filepath.Join(appDir, "instrumentation", "otelc.yaml")
+	ruleSrc, err := os.ReadFile(ruleFile)
+	require.NoError(t, err)
+	newRule := `
+dep_internal_rule:
+  target: go.opentelemetry.io/otelc/test/apps/nestedimports/dep
+  where:
+    function_call: strings.ToLower
+  do:
+    - wrap_call:
+        replace: "(func() string { return secret.Note() + \": \" + {{ . }} })()"
+  imports:
+    secret: go.opentelemetry.io/otelc/test/apps/nestedimports/dep/internal/secret
+`
+	require.NoError(t, os.WriteFile(ruleFile, append(ruleSrc, []byte(newRule)...), 0o644))
+
+	goCache := filepath.Join(t.TempDir(), "gocache")
+	binary := filepath.Join(appDir, "app")
+	if util.IsWindows() {
+		binary += ".exe"
+	}
+
+	// 1. Cold cache build
+	cmd := exec.CommandContext(t.Context(), absoluteOtelcPath, "go", "build", "-o", binary, ".")
+	cmd.Dir = appDir
+	cmd.Env = append(
+		preparedBuildBaseEnvironment(),
+		"GOWORK=off",
+		"GOCACHE="+goCache,
+	)
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "cold build with internal package import failed:\n%s", out)
+
+	run := exec.CommandContext(t.Context(), binary)
+	run.Dir = appDir
+	runOut, err := run.CombinedOutput()
+	require.NoError(t, err, string(runOut))
+	assert.Contains(t, string(runOut), "nestedimports: secret=internal-secret-helper-note: from dep with secret")
+
+	// 2. Warm cache build
+	binaryWarm := filepath.Join(appDir, "app_warm")
+	if util.IsWindows() {
+		binaryWarm += ".exe"
+	}
+	cmdWarm := exec.CommandContext(t.Context(), absoluteOtelcPath, "go", "build", "-o", binaryWarm, ".")
+	cmdWarm.Dir = appDir
+	cmdWarm.Env = append(
+		preparedBuildBaseEnvironment(),
+		"GOWORK=off",
+		"GOCACHE="+goCache,
+	)
+	outWarm, err := cmdWarm.CombinedOutput()
+	require.NoError(t, err, "warm cache build with internal package import failed:\n%s", outWarm)
+
+	runWarm := exec.CommandContext(t.Context(), binaryWarm)
+	runWarm.Dir = appDir
+	runWarmOut, err := runWarm.CombinedOutput()
+	require.NoError(t, err, string(runWarmOut))
+	assert.Contains(t, string(runWarmOut), "nestedimports: secret=internal-secret-helper-note: from dep with secret")
+}
+
 // buildAndRunNestedImports builds the application in appDir with otelc on a
 // fresh GOCACHE, runs it, and returns its output. env is added to the build
 // environment.
