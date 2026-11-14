@@ -263,11 +263,16 @@ func (ip *instrumentPhase) updateImportConfig(newImports map[string]string) erro
 			// unsafe is built-in, C is the cgo pseudo-package; neither has an archive file
 			continue
 		}
-		if _, ok := ip.importConfig.PackageFile[importPath]; !ok {
-			return ex.Newf("rule import %q is not in the importcfg of %s; the build is missing otelc's "+
-				"-overlay (run it through otelc go, or add the -overlay that otelc setup printed to GOFLAGS)",
-				importPath, util.FindFlagValue(ip.compileArgs, "-p"))
+		if _, ok := ip.importConfig.PackageFile[importPath]; ok {
+			continue
 		}
+		if slices.ContainsFunc(ip.compileArgs, func(arg string) bool { return filepath.Base(arg) == "_testmain.go" }) {
+			return ex.Newf("rule import %q cannot be added to the testmain that go test generates: the go "+
+				"command fixes its imports; reach the package through //go:linkname instead", importPath)
+		}
+		return ex.Newf("rule import %q is not in the importcfg of %s; the build is missing otelc's "+
+			"-overlay (run it through otelc go, or add the -overlay that otelc setup printed to GOFLAGS)",
+			importPath, util.FindFlagValue(ip.compileArgs, "-p"))
 	}
 	return nil
 }

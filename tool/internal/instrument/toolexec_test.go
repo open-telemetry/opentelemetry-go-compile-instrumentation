@@ -870,3 +870,20 @@ func linkToolPath() string {
 	}
 	return filepath.Join(string(filepath.Separator)+"go", "pkg", "tool", name)
 }
+
+func TestUpdateImportConfigTestMainError(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "importcfg")
+	require.NoError(t, os.WriteFile(cfgPath, []byte("packagefile testing=/t.a\n"), 0o644))
+
+	ip := &instrumentPhase{
+		logger:           slog.Default(),
+		importConfigPath: cfgPath,
+		compileArgs:      []string{"compile", "-p", "main", "/work/b001/_testmain.go"},
+		importConfig:     imports.ImportConfig{PackageFile: map[string]string{"testing": "/t.a"}},
+	}
+	err := ip.updateImportConfig(map[string]string{"extra": "example.com/extra"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `"example.com/extra"`)
+	assert.Contains(t, err.Error(), "testmain")
+	assert.NotContains(t, err.Error(), "-overlay", "no overlay can add imports to the generated testmain")
+}

@@ -165,12 +165,14 @@ instrument_injected_dep:
 		require.NoError(t, err, "repeated warm build failed:\n%s", out)
 	})
 
-	t.Run("go test execution", func(t *testing.T) {
+	t.Run("go test rejects imports into the testmain", func(t *testing.T) {
+		// Under go test, target main matches the testmain the go command
+		// generates, and the go command fixes its imports.
 		cmd := exec.CommandContext(t.Context(), otelcPath, "go", "test", "-v", "-count=1", ".")
 		cmd.Dir = appDir
 		cmd.Env = env
 		out, err := cmd.CombinedOutput()
-		require.NoError(t, err, "go test failed:\n%s", out)
-		assert.Contains(t, string(out), "init injected: instrumented-from-extra-module")
+		require.Error(t, err, "%s", out)
+		assert.Contains(t, string(out), `rule import "example.com/extra" cannot be added to the testmain`)
 	})
 }
