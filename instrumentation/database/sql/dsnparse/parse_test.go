@@ -535,6 +535,23 @@ func TestRegisterDSNParsers(t *testing.T) {
 	assert.Equal(t, "h2:22", ParseDSN("batchdriver2", "x").Addr())
 }
 
+func TestRegistry_ZeroValue(t *testing.T) {
+	// sql.Open can run during another package's initialization, before this
+	// package's variables are set, so an unset registry must still resolve the
+	// built-in parsers and accept registrations.
+	var r registry
+	p, ok := r.lookup("mysql")
+	assert.True(t, ok)
+	assert.Equal(t, "127.0.0.1:3306", p.Parse("user:pass@tcp(127.0.0.1:3306)/db").Addr())
+	_, ok = r.lookup("unknown-driver")
+	assert.False(t, ok)
+
+	r.register("mysql", DSNParserFunc(func(string) DSNInfo { return DSNInfo{Host: "custom", Port: "1"} }))
+	p, ok = r.lookup("mysql")
+	assert.True(t, ok)
+	assert.Equal(t, "custom:1", p.Parse("anything").Addr())
+}
+
 func TestParseDSN_PostgresAliases(t *testing.T) {
 	// pgx and lib/pq share the PostgreSQL DSN format and resolve identically.
 	for _, driver := range []string{"postgres", "postgresql", "pgx", "lib/pq"} {

@@ -68,9 +68,10 @@ type DSNParserFunc func(dsn string) DSNInfo
 // Parse calls f(dsn).
 func (f DSNParserFunc) Parse(dsn string) DSNInfo { return f(dsn) }
 
-// registry holds DSNParser implementations indexed by driver name. It is safe
-// for concurrent use, so parsers may be registered from init() functions while
-// ParseDSN runs inside instrumentation hooks.
+// registry holds the DSNParser implementations registered with
+// RegisterDSNParser, indexed by driver name. Its zero value is ready to use. It
+// is safe for concurrent use, so parsers may be registered from init() functions
+// while ParseDSN runs inside instrumentation hooks.
 type registry struct {
 	mu      sync.RWMutex
 	parsers map[string]DSNParser
@@ -79,45 +80,59 @@ type registry struct {
 func (r *registry) register(driverName string, parser DSNParser) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.parsers == nil {
+		r.parsers = make(map[string]DSNParser)
+	}
 	r.parsers[driverName] = parser
 }
 
 func (r *registry) registerAll(parsers map[string]DSNParser) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.parsers == nil {
+		r.parsers = make(map[string]DSNParser, len(parsers))
+	}
 	for name, p := range parsers {
 		r.parsers[name] = p
 	}
 }
 
+// lookup returns the parser registered for driverName, or else the built-in one.
 func (r *registry) lookup(driverName string) (DSNParser, bool) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 	p, ok := r.parsers[driverName]
-	return p, ok
+	r.mu.RUnlock()
+	if ok {
+		return p, true
+	}
+	return builtinParser(driverName)
 }
 
-// defaultRegistry maps the built-in driver names to their parsers. Aliases that
-// share a wire format (e.g. pgx and lib/pq both speak the PostgreSQL DSN
-// format) point at the same parser.
-var defaultRegistry = &registry{
-	parsers: map[string]DSNParser{
-		"postgres":   DSNParserFunc(parsePostgresDSN),
-		"postgresql": DSNParserFunc(parsePostgresDSN),
-		"pgx":        DSNParserFunc(parsePostgresDSN),
-		"lib/pq":     DSNParserFunc(parsePostgresDSN),
-		"mysql":      DSNParserFunc(parseMySQLDSN),
-		"mariadb":    DSNParserFunc(parseMySQLDSN),
-		"sqlite3":    DSNParserFunc(parseSQLiteDSN),
-		"sqlite":     DSNParserFunc(parseSQLiteDSN),
-		"sqlserver":  DSNParserFunc(parseSQLServerDSN),
-		"mssql":      DSNParserFunc(parseSQLServerDSN),
-		"clickhouse": DSNParserFunc(parseClickHouseDSN),
-		"godror":     DSNParserFunc(parseOracleDSN),
-		"oracle":     DSNParserFunc(parseOracleDSN),
-		"oci8":       DSNParserFunc(parseOracleDSN),
-		"go-oci8":    DSNParserFunc(parseOracleDSN),
-	},
+// defaultRegistry holds the parsers registered with RegisterDSNParser. It has no
+// initializer, and the built-in parsers are a switch rather than a map, because
+// sql.Open can run during another package's initialization, before this
+// package's variables are set.
+var defaultRegistry registry
+
+// builtinParser returns the built-in parser for driverName. Aliases that share a
+// wire format (e.g. pgx and lib/pq both speak the PostgreSQL DSN format) map to
+// the same parser.
+func builtinParser(driverName string) (DSNParser, bool) {
+	switch driverName {
+	case "postgres", "postgresql", "pgx", "lib/pq":
+		return DSNParserFunc(parsePostgresDSN), true
+	case "mysql", "mariadb":
+		return DSNParserFunc(parseMySQLDSN), true
+	case "sqlite3", "sqlite":
+		return DSNParserFunc(parseSQLiteDSN), true
+	case "sqlserver", "mssql":
+		return DSNParserFunc(parseSQLServerDSN), true
+	case "clickhouse":
+		return DSNParserFunc(parseClickHouseDSN), true
+	case "godror", "oracle", "oci8", "go-oci8":
+		return DSNParserFunc(parseOracleDSN), true
+	}
+	return nil, false
 }
 
 // RegisterDSNParser registers a custom DSN parser for driverName. Built-in
@@ -345,9 +360,15 @@ func isMySQLUnixAddr(addr string) bool {
 	return colon >= 0 && addr[:colon] == "unix"
 }
 
-// mysqlKnownProtocols lists the transport keywords used by go-sql-driver/mysql.
-var mysqlKnownProtocols = map[string]bool{
-	"tcp": true, "unix": true, "udp": true, "pipe": true,
+// isMySQLProtocol reports whether proto is a transport keyword used by
+// go-sql-driver/mysql. It is a switch rather than a map for the same reason as
+// defaultRegistry.
+func isMySQLProtocol(proto string) bool {
+	switch proto {
+	case "tcp", "unix", "udp", "pipe":
+		return true
+	}
+	return false
 }
 
 // mysqlStripProtocol removes a leading "proto:" prefix when proto is a known
@@ -358,7 +379,7 @@ func mysqlStripProtocol(addr string) string {
 		return addr
 	}
 	proto := addr[:colon]
-	if !mysqlKnownProtocols[proto] {
+	if !isMySQLProtocol(proto) {
 		return addr
 	}
 	rest := addr[colon+1:]

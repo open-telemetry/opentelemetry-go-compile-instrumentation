@@ -82,8 +82,10 @@ func beforeOpenInstrumentation(ictx hook.HookContext, driverName, dataSourceName
 	if addr == "" {
 		// Surface the omission rather than silently emitting server.address:
 		// "unknown". The DSN is intentionally not logged as it may carry
-		// credentials.
-		if dataSourceName != "" {
+		// credentials. The logger is still nil when sql.Open runs during
+		// another package's initialization, before this package's variables
+		// are set.
+		if dataSourceName != "" && logger != nil {
 			logger.Warn("could not determine server.address from DSN", "driver", driverName)
 		}
 		addr = "unknown"
@@ -177,7 +179,8 @@ func beforeOpenDBInstrumentation(ictx hook.HookContext, c driver.Connector) {
 	info := ParseDSN(driverName, dsn)
 	addr := info.Addr()
 	if addr == "" {
-		if dsn != "" {
+		// See beforeOpenInstrumentation.
+		if dsn != "" && logger != nil {
 			logger.Warn("could not determine server.address from DSN", "driver", driverName)
 		}
 		addr = "unknown"
