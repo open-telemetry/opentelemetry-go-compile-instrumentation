@@ -35,5 +35,7 @@ func matchRuntimeGLS(deps []*Dependency) []*rule.InstRuleSet {
 			procFile = src
 		}
 	}
-	return []*rule.InstRuleSet{toolruntime.BuildRuleSet(runtime2File, procFile)}
+	rset := toolruntime.BuildRuleSet(runtime2File, procFile)
+	rset.Sources = runtimeDep.Sources
+	return []*rule.InstRuleSet{rset}
 }
