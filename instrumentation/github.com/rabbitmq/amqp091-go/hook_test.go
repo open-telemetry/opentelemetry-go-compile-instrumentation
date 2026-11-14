@@ -19,6 +19,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	amqprop "go.opentelemetry.io/otelc/instrumentation/github.com/rabbitmq/amqp091-go/internal/propagation"
+	"go.opentelemetry.io/otelc/pkg/hook"
 	"go.opentelemetry.io/otelc/pkg/hook/hooktest"
 )
 
@@ -568,4 +569,46 @@ func TestShutdown_DeliveryDuringTeardownIsStillCleanedUp(t *testing.T) {
 	require.False(t, publishParentsOK, "a delivery racing with shutdown must not leave the channel in publishParents")
 	require.False(t, channelAcksOK, "a delivery racing with shutdown must not leave the channel in channelAcks")
 	require.Len(t, sr.Ended(), 1, "a delivery racing with shutdown must still have its span ended, not leaked")
+}
+
+func TestPublishAfterCanceledPublishWithContext_DoesNotReuseItsParent(t *testing.T) {
+	// The WithContext variants return ctx.Err() without publishing when ctx is
+	// already done, so the inner PublishWithDeferredConfirm hook never runs.
+	variants := map[string]func(ictx hook.HookContext, ch *amqp.Channel, ctx context.Context, msg amqp.Publishing){
+		"PublishWithContext": func(ictx hook.HookContext, ch *amqp.Channel, ctx context.Context, msg amqp.Publishing) {
+			BeforePublishWithContext(ictx, ch, ctx, "ex", "rk", false, false, msg)
+			AfterPublishWithContext(ictx, ctx.Err())
+		},
+		"PublishWithDeferredConfirmWithContext": func(ictx hook.HookContext, ch *amqp.Channel, ctx context.Context, msg amqp.Publishing) {
+			BeforePublishWithDeferredConfirmWithContext(ictx, ch, ctx, "ex", "rk", false, false, msg)
+			AfterPublishWithDeferredConfirmWithContext(ictx, nil, ctx.Err())
+		},
+	}
+	for name, canceledPublish := range variants {
+		t.Run(name, func(t *testing.T) {
+			sr := setupTest(t)
+
+			ctx, stale := tracer.Start(context.Background(), "canceled request")
+			ctx, cancel := context.WithCancel(ctx)
+			cancel()
+			ch := &amqp.Channel{}
+			msg := amqp.Publishing{Body: []byte("hello")}
+			canceledPublish(hooktest.NewMockHookContext(), ch, ctx, msg)
+			stale.End()
+
+			// A later Publish without a context on the same channel has no parent.
+			pub := hooktest.NewMockHookContext(ch, "ex", "rk", false, false, msg)
+			BeforePublishWithDeferredConfirm(pub, ch, "ex", "rk", false, false, msg)
+			AfterPublishWithDeferredConfirm(pub, nil, nil)
+
+			var send sdktrace.ReadOnlySpan
+			for _, s := range sr.Ended() {
+				if s.Name() == "ex send" {
+					send = s
+				}
+			}
+			require.NotNil(t, send)
+			require.False(t, send.Parent().IsValid(), "send span must not use the canceled call's span as parent")
+		})
+	}
 }

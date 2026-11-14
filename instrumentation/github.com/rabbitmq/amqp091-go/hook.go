@@ -127,7 +127,7 @@ func acksLookup(ch *amqp.Channel) *pendingAcks {
 // BeforePublishWithContext stashes the API context. The library drops it
 // before PublishWithDeferredConfirm.
 func BeforePublishWithContext(
-	_ hook.HookContext,
+	ictx hook.HookContext,
 	ch *amqp.Channel,
 	ctx context.Context,
 	_ /*exchange*/, _ /*key*/ string,
@@ -135,12 +135,21 @@ func BeforePublishWithContext(
 	_ amqp.Publishing,
 ) {
 	stashPublishParent(ch, ctx)
+	ictx.SetData(ch)
+}
+
+// AfterPublishWithContext drops the stashed context if the inner
+// PublishWithDeferredConfirm hook did not take it. The library returns
+// ctx.Err() without publishing when ctx is already done, and the next Publish
+// on the channel would otherwise use that context as its parent.
+func AfterPublishWithContext(ictx hook.HookContext, _ error) {
+	dropPublishParent(ictx)
 }
 
 // BeforePublishWithDeferredConfirmWithContext stashes the API context for
 // the inner PublishWithDeferredConfirm hook.
 func BeforePublishWithDeferredConfirmWithContext(
-	_ hook.HookContext,
+	ictx hook.HookContext,
 	ch *amqp.Channel,
 	ctx context.Context,
 	_ /*exchange*/, _ /*key*/ string,
@@ -148,6 +157,20 @@ func BeforePublishWithDeferredConfirmWithContext(
 	_ amqp.Publishing,
 ) {
 	stashPublishParent(ch, ctx)
+	ictx.SetData(ch)
+}
+
+// AfterPublishWithDeferredConfirmWithContext drops the stashed context if the
+// inner hook did not take it. See AfterPublishWithContext.
+func AfterPublishWithDeferredConfirmWithContext(ictx hook.HookContext, _ *amqp.DeferredConfirmation, _ error) {
+	dropPublishParent(ictx)
+}
+
+// dropPublishParent removes the context stashed by the matching before hook.
+func dropPublishParent(ictx hook.HookContext) {
+	if ch, ok := ictx.GetData().(*amqp.Channel); ok && ch != nil {
+		publishParents.Delete(ch)
+	}
 }
 
 // -----------------------------------------------------------------------------
