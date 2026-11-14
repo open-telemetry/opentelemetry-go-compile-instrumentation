@@ -590,7 +590,7 @@ func materializeYAMLConfigs(ctx context.Context, configs []modulePinConfig, opts
 		if err = syncDeps(ctx, imports, config.moduleDir); err != nil {
 			return nil, ex.Wrapf(err, "syncing dependencies in %s", config.moduleDir)
 		}
-		keepForDebug(ctx, toolFile)
+		keepForDebug(ctx, toolFile, "")
 		toolFiles = append(toolFiles, toolFile)
 	}
 	return toolFiles, nil
@@ -636,6 +636,11 @@ func processYAMLConfigs(ctx context.Context, configs []modulePinConfig, opts Pin
 	states, err := loadYAMLStates(configs)
 	if err != nil {
 		return err
+	}
+	if !opts.AutoPin {
+		if interruptedErr := checkInterruptedBuild(); interruptedErr != nil {
+			return interruptedErr
+		}
 	}
 	manager, err := yamlStateManager(ctx, opts.AutoPin)
 	if err != nil {
@@ -696,9 +701,15 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 	}
 
 	// No tool file found? Try generating one.
-	deps, findDepsErr := findDeps(ctx, subcommand, opts.Args)
-	if findDepsErr != nil {
-		return nil, findDepsErr
+	var deps []*Dependency
+	if cached, ok := ctx.Value(pinDepsKey{}).(*pinDepsCache); ok && cached.loaded {
+		deps = cached.deps
+	} else {
+		var findDepsErr error
+		deps, findDepsErr = findDeps(ctx, subcommand, opts.Args)
+		if findDepsErr != nil {
+			return nil, findDepsErr
+		}
 	}
 
 	ruleset, err := manifest.Load()
@@ -742,7 +753,7 @@ func generatePinnedProjects(ctx context.Context, moduleDirs map[string]bool, opt
 			return nil, syncErr
 		}
 
-		keepForDebug(ctx, path)
+		keepForDebug(ctx, path, "")
 	}
 
 	// Intentionally return an empty PinResult
@@ -762,7 +773,7 @@ func prepareVendoredBuild(ctx context.Context, logger *slog.Logger, args []strin
 		return nil, ex.Wrapf(err, "forcing module mode for vendored build")
 	}
 
-	return rewriteModVendor(args), nil
+	return rewriteModVendor(subcmdBuild, args), nil
 }
 
 type PinOptions struct {
@@ -790,13 +801,91 @@ type PinResult struct {
 	AllDeps []*Dependency
 }
 
+type pinDepsKey struct{}
+
+type pinDepsCache struct {
+	deps   []*Dependency
+	loaded bool
+}
+
+// preflightPinSource validates discovery requirements before tracking or
+// modifying module files. An unconfigured module needs the checkout only if
+// one of its dependencies actually matches a built-in instrumentation.
+func preflightPinSource(
+	ctx context.Context,
+	configs []modulePinConfig,
+	unconfigured map[string]bool,
+	opts PinOptions,
+) error {
+	for _, config := range configs {
+		if config.yamlFile == "" {
+			continue
+		}
+		imports, err := loadOtelYAMLImports(config.yamlFile)
+		if err != nil {
+			return err
+		}
+		if len(imports) > 0 {
+			if err = pinSourceRoot(ctx); err != nil {
+				return err
+			}
+		}
+	}
+	if len(unconfigured) == 0 {
+		return nil
+	}
+	cache, ok := ctx.Value(pinDepsKey{}).(*pinDepsCache)
+	if !ok {
+		return ex.New("pin dependency cache not found in context")
+	}
+	if !cache.loaded {
+		// findDeps writes its build plan log in this directory.
+		if err := os.MkdirAll(util.GetBuildTempDir(), 0o755); err != nil {
+			return ex.Wrapf(err, "creating build working directory")
+		}
+		subcommand := opts.Subcommand
+		if subcommand == "" {
+			subcommand = subcmdBuild
+		}
+		deps, err := findDeps(ctx, subcommand, opts.Args)
+		if err != nil {
+			return err
+		}
+		cache.deps, cache.loaded = deps, true
+	}
+	ruleset, err := manifest.Load()
+	if err != nil {
+		return ex.Wrapf(err, "loading instrumentation manifest")
+	}
+	if len(matchInstrumentationImports(cache.deps, ruleset, nil)) > 0 {
+		err = pinSourceRoot(ctx)
+	}
+	return err
+}
+
+func withPinDiscoveryCache(ctx context.Context) context.Context {
+	if ctx.Value(pinSourceRootKey{}) == nil {
+		ctx = context.WithValue(ctx, pinSourceRootKey{}, &pinSourceRootCache{})
+	}
+	if ctx.Value(pinDepsKey{}) == nil {
+		ctx = context.WithValue(ctx, pinDepsKey{}, &pinDepsCache{})
+	}
+	return ctx
+}
+
 // Pin generates or updates otel.instrumentation.go to pin instrumentation packages for the current module.
 // It also returns a PinResult, which may optionally include a list of all dependencies found in the project
 // (not just those with instrumentation). The PinResult can be used by later stages (setup) instead of
 // re-parsing compile commands again.
 func Pin(ctx context.Context, opts PinOptions) (*PinResult, error) {
 	var result *PinResult
-	err := withBuildLock(ctx, func(ctx context.Context) error {
+	dir, _ := leadingDirFlag(opts.Args)
+	err := withBuildLock(ctx, dir, func(ctx context.Context) error {
+		if !opts.AutoPin {
+			if err := checkInterruptedBuild(); err != nil {
+				return err
+			}
+		}
 		var pinErr error
 		result, pinErr = pinLocked(ctx, opts)
 		return pinErr
@@ -808,16 +897,29 @@ func pinModuleDirs(ctx context.Context, opts *PinOptions) (map[string]bool, erro
 	if len(opts.ModuleDirs) > 0 {
 		return opts.ModuleDirs, nil
 	}
+	subcommand := opts.Subcommand
+	if subcommand == "" {
+		subcommand = subcmdBuild
+	}
 	args, err := prepareVendoredBuild(ctx, util.LoggerFromContext(ctx), opts.Args)
 	if err != nil {
 		return nil, err
 	}
+	args = rewriteModVendor(subcommand, args)
 	opts.Args = args
-	pkgs, err := getBuildPackages(ctx, opts.Args)
+	pkgs, _, err := getBuildPackages(ctx, subcommand, opts.Args)
 	if err != nil {
 		return nil, err
 	}
-	return pkgload.FindModuleDirs(ctx, pkgs)
+	dirs, err := pkgload.FindModuleDirs(ctx, pkgs)
+	if err != nil {
+		return nil, err
+	}
+	moduleDirs := make(map[string]bool, len(dirs))
+	for _, dir := range dirs {
+		moduleDirs[dir] = true
+	}
+	return moduleDirs, nil
 }
 
 func partitionPinConfigs(configs []modulePinConfig) ([]string, []modulePinConfig) {
@@ -847,6 +949,7 @@ func processConfiguredModules(ctx context.Context, configs []modulePinConfig, op
 }
 
 func pinLocked(ctx context.Context, opts PinOptions) (*PinResult, error) {
+	ctx = withPinDiscoveryCache(ctx)
 	moduleDirs, err := pinModuleDirs(ctx, &opts)
 	if err != nil {
 		return nil, err
@@ -854,6 +957,9 @@ func pinLocked(ctx context.Context, opts PinOptions) (*PinResult, error) {
 
 	configs, unconfigured, err := discoverPinConfigs(moduleDirs)
 	if err != nil {
+		return nil, err
+	}
+	if err = preflightPinSource(ctx, configs, unconfigured, opts); err != nil {
 		return nil, err
 	}
 	if err = processConfiguredModules(ctx, configs, opts); err != nil {
@@ -882,8 +988,17 @@ func autoPin(ctx context.Context, moduleDirs map[string]bool, subcommand string,
 	if !found {
 		return nil, ex.New("state manager not found in context")
 	}
+	ctx = withPinDiscoveryCache(ctx)
+	preflightOpts := PinOptions{Args: args, Subcommand: subcommand, ModuleDirs: moduleDirs, AutoPin: true}
+	configs, unconfigured, err := discoverPinConfigs(moduleDirs)
+	if err != nil {
+		return nil, err
+	}
+	if err = preflightPinSource(ctx, configs, unconfigured, preflightOpts); err != nil {
+		return nil, err
+	}
 
-	backupFiles, getBackupErr := getBackupFiles(ctx, moduleDirs)
+	backupFiles, getBackupErr := getBackupFiles(ctx, slices.Sorted(maps.Keys(moduleDirs)))
 	if getBackupErr != nil {
 		return nil, getBackupErr
 	}

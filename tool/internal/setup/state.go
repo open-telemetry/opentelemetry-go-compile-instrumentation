@@ -77,6 +77,19 @@ func loadStateManager() (*stateManager, error) {
 	return s, nil
 }
 
+// checkInterruptedBuild prevents a new snapshot from replacing state left by
+// an interrupted build or standalone pin invocation.
+func checkInterruptedBuild() error {
+	previous, err := loadStateManager()
+	if err != nil {
+		return err
+	}
+	if previous != nil {
+		return ex.New("previous otelc invocation did not complete; run `otelc cleanup` before retrying")
+	}
+	return nil
+}
+
 type stateManagerKey struct{}
 
 // contextWithStateManager returns a copy of ctx containing s.
@@ -96,10 +109,10 @@ func stateManagerFromContext(ctx context.Context) (*stateManager, bool) {
 	return s, true
 }
 
-func getBackupFiles(ctx context.Context, moduleDirs map[string]bool) ([]string, error) {
+func getBackupFiles(ctx context.Context, moduleDirs []string) ([]string, error) {
 	var files []string
 
-	dirs := slices.Sorted(maps.Keys(moduleDirs))
+	dirs := normalizeModuleDirs(moduleDirs)
 	// Find all go.mod, go.sum, and tool files
 	for _, moduleDir := range dirs {
 		goModFile := filepath.Join(moduleDir, "go.mod")

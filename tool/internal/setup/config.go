@@ -32,6 +32,7 @@ const (
 
 type instrumentationConfig struct {
 	ImportPath string
+	ModuleDir  string
 	ToolFile   string
 	RuleFiles  []string
 	Error      error
@@ -133,6 +134,7 @@ func resolveInstrumentationConfigs(
 		}
 
 		modDir := pkg.Module.Dir
+		cfgs[importPath].ModuleDir = modDir
 		// Prefer the directory of a real Go file. A tools-only instrumentation
 		// package (its only .go file carries //go:build tools) has no buildable Go
 		// files, so packages.Load reports "build constraints exclude all Go files"

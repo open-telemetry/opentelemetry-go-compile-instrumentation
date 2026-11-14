@@ -5,6 +5,7 @@ package setup
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"go/token"
 	"log/slog"
@@ -886,6 +887,70 @@ replace example.com/invalid => %s
 	require.NotContains(t, string(toolData), "example.com/invalid")
 }
 
+func TestAutoPinEmptyYAMLSuppressesDefaults(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, dir)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/app\n\ngo 1.25\n"), 0o644))
+	require.NoError(
+		t,
+		os.WriteFile(
+			filepath.Join(dir, "main.go"),
+			[]byte("package main\nimport _ \"net/http\"\nfunc main() {}\n"),
+			0o644,
+		),
+	)
+	yamlFile := filepath.Join(dir, instrumentationYAMLCanonical)
+	original := []byte("# deliberately disabled\ninstrumentations: []\n")
+	require.NoError(t, os.WriteFile(yamlFile, original, 0o644))
+	ctx := contextWithStateManager(t.Context(), newStateManager())
+	_, err := autoPin(ctx, map[string]bool{dir: true}, subcmdBuild, []string{"."})
+	require.NoError(t, err)
+	toolFile, err := os.ReadFile(filepath.Join(dir, toolFileCanonical))
+	require.NoError(t, err)
+	require.NotContains(t, string(toolFile), "go.opentelemetry.io/otelc/instrumentation/net/http")
+	require.NotContains(t, string(toolFile), "import (")
+	got, err := os.ReadFile(yamlFile)
+	require.NoError(t, err)
+	require.Equal(t, original, got)
+}
+
+func TestAutoPinMissingCheckoutDoesNotSnapshotModule(t *testing.T) {
+	for _, withYAML := range []bool{true, false} {
+		name := "built_in_defaults"
+		if withYAML {
+			name = "yaml"
+		}
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv(util.EnvOtelcWorkDir, dir)
+			t.Setenv("OTELC_SOURCE_ROOT", t.TempDir())
+			t.Setenv("GOWORK", "off")
+			t.Chdir(dir)
+			mod := []byte("module example.com/app\n\ngo 1.25\n")
+			require.NoError(t, os.WriteFile(filepath.Join(dir, goModFileName), mod, 0o644))
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"),
+				[]byte("package main\nimport _ \"net/http\"\nfunc main() {}\n"), 0o644))
+			if withYAML {
+				require.NoError(t, os.WriteFile(
+					filepath.Join(dir, instrumentationYAMLCanonical),
+					[]byte(
+						"instrumentations:\n  - go.opentelemetry.io/otelc/instrumentation/net/http/client\n",
+					),
+					0o644,
+				))
+			}
+			ctx := contextWithStateManager(t.Context(), newStateManager())
+			_, err := autoPin(ctx, map[string]bool{dir: true}, subcmdBuild, []string{"."})
+			require.ErrorContains(t, err, "otelc source checkout not found")
+			require.NoFileExists(t, util.GetBuildTemp(stateFileName), "no user files should have been snapshotted")
+			require.NoFileExists(t, filepath.Join(dir, toolFileCanonical))
+			got, err := os.ReadFile(filepath.Join(dir, goModFileName))
+			require.NoError(t, err)
+			require.Equal(t, mod, got)
+		})
+	}
+}
+
 func TestEnsureOtelcRequire(t *testing.T) {
 	const testVersion = "v1.2.3"
 
@@ -1538,6 +1603,108 @@ func main() {
 	// Verify tool is pinned in go.mod
 	require.Contains(t, string(goMod), "go.opentelemetry.io/otelc/tool/cmd/otelc")
 	require.Contains(t, string(goMod), "go.opentelemetry.io/otelc")
+}
+
+func TestGeneratePinnedProjectsSecondModuleFailure(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, root)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	repositoryDir, err := repositorySourceRoot()
+	require.NoError(t, err)
+	t.Setenv("OTELC_SOURCE_ROOT", repositoryDir)
+	t.Chdir(root)
+	first := filepath.Join(root, "a")
+	second := filepath.Join(root, "z")
+	require.NoError(t, os.MkdirAll(first, 0o755))
+	require.NoError(t, os.MkdirAll(second, 0o755))
+	require.NoError(
+		t,
+		os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/test\n\ngo 1.25\n"), 0o644),
+	)
+	require.NoError(
+		t,
+		os.WriteFile(
+			filepath.Join(root, "main.go"),
+			[]byte("package main\nimport _ \"net/http\"\nfunc main() {}\n"),
+			0o644,
+		),
+	)
+	require.NoError(
+		t,
+		os.WriteFile(filepath.Join(first, "go.mod"), []byte("module example.com/first\n\ngo 1.25\n"), 0o644),
+	)
+	require.NoError(t, os.WriteFile(filepath.Join(second, "go.mod"), []byte("invalid go.mod"), 0o644))
+	_, err = generatePinnedProjects(
+		t.Context(),
+		map[string]bool{first: true, second: true},
+		PinOptions{Args: []string{"."}},
+	)
+	require.Error(t, err)
+	require.ErrorContains(t, err, filepath.Join(second, goModFileName))
+	require.FileExists(t, filepath.Join(first, toolFileCanonical), "the first module was already materialized")
+	require.FileExists(t, filepath.Join(second, toolFileCanonical), "the second write precedes go.mod validation")
+}
+
+func TestGeneratePinnedProjectsTwoModules(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, root)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	repositoryDir, err := repositorySourceRoot()
+	require.NoError(t, err)
+	t.Setenv("OTELC_SOURCE_ROOT", repositoryDir)
+	t.Chdir(root)
+	require.NoError(t, os.WriteFile(filepath.Join(root, goModFileName),
+		[]byte("module example.com/test\n\ngo 1.25\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "main.go"),
+		[]byte("package main\nimport _ \"net/http\"\nfunc main() {}\n"), 0o644))
+	first := filepath.Join(root, "a")
+	second := filepath.Join(root, "z")
+	for _, moduleDir := range []string{first, second} {
+		require.NoError(t, os.MkdirAll(moduleDir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(moduleDir, goModFileName),
+			[]byte("module example.com/"+filepath.Base(moduleDir)+"\n\ngo 1.25\n"), 0o644))
+	}
+
+	result, err := generatePinnedProjects(
+		t.Context(),
+		map[string]bool{first: true, second: true},
+		PinOptions{Args: []string{"."}},
+	)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Nil(t, result.AllDeps)
+	for _, moduleDir := range []string{first, second} {
+		toolFile, readErr := os.ReadFile(filepath.Join(moduleDir, toolFileCanonical))
+		require.NoError(t, readErr)
+		require.Contains(t, string(toolFile), "go.opentelemetry.io/otelc/instrumentation/net/http/client")
+		goMod, readErr := os.ReadFile(filepath.Join(moduleDir, goModFileName))
+		require.NoError(t, readErr)
+		require.Contains(t, string(goMod), "tool go.opentelemetry.io/otelc/tool/cmd/otelc")
+	}
+}
+
+func TestGeneratePinnedProjectsNoMatchingInstrumentation(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, dir)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	t.Setenv("GOWORK", "off")
+	t.Chdir(dir)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, goModFileName),
+		[]byte("module example.com/empty\n\ngo 1.25\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "empty.go"),
+		[]byte("package empty\nfunc Example() {}\n"), 0o644))
+	result, err := generatePinnedProjects(t.Context(), map[string]bool{dir: true}, PinOptions{Args: []string{"."}})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotEmpty(t, result.AllDeps)
+	require.NoFileExists(t, filepath.Join(dir, toolFileCanonical))
+}
+
+func TestGeneratePinnedProjectsFindDepsError(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := generatePinnedProjects(ctx, map[string]bool{t.TempDir(): true}, PinOptions{})
+	require.Error(t, err)
 }
 
 func TestPrepareVendoredBuild_NotVendored(t *testing.T) {

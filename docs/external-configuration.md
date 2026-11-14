@@ -47,6 +47,16 @@ does not leave a generated tool file or track its instrumentation dependencies i
 file takes precedence when both formats exist in the same module. Selections from different modules
 are combined.
 
+An explicitly empty `instrumentations: []` selects no instrumentations for that module; it does
+not fall back to the embedded defaults. YAML files currently accept only the `instrumentations`
+key. Unknown fields fail fast; a future incompatible schema requires a versioned filename
+rather than silently changing how older binaries interpret these files. An older `otelc`
+rejecting a new field should be upgraded to the version that supports the new format.
+
+`otelc pin --prune` leaves YAML byte-identical when there is nothing to prune. When removing
+invalid entries it retains other entries and YAML comments through a syntax-tree edit; formatting
+of the rewritten file may change. If a pin is interrupted, run `otelc cleanup` before retrying.
+
 This approach mirrors how [DataDog Orchestrion](https://github.com/DataDog/orchestrion)
 manages its instrumentation configuration with `orchestrion.tool.go`, and it realizes the
 vendor-agnostic design described in [#567](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/567).

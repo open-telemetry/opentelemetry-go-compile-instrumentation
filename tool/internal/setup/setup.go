@@ -579,7 +579,11 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	// Auto-pin generates/updates otel.instrumentation.go file
 	var deps []*Dependency
 	if sp.ruleConfig == "" && os.Getenv(util.EnvOtelcRules) == "" {
-		pinResult, pinErr := autoPin(ctx, moduleDirs, subcommand, args)
+		moduleDirSet := make(map[string]bool, len(moduleDirs))
+		for _, moduleDir := range moduleDirs {
+			moduleDirSet[moduleDir] = true
+		}
+		pinResult, pinErr := autoPin(ctx, moduleDirSet, subcommand, args)
 		if pinErr != nil {
 			return pinErr
 		}
