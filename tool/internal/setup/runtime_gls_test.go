@@ -54,6 +54,7 @@ func TestMatchRuntimeGLS_WithRuntimeDep(t *testing.T) {
 	rset := sets[0]
 	assert.Equal(t, toolruntime.TargetRuntime, rset.ModulePath)
 	assert.Equal(t, toolruntime.TargetRuntime, rset.PackageName)
+	assert.Equal(t, deps[0].Sources, rset.Sources)
 
 	assert.Len(t, rset.StructRules[runtime2File], 1)
 	assert.Equal(t, "add_gls_field", rset.StructRules[runtime2File][0].Name)

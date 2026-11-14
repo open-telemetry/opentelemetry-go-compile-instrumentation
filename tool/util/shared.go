@@ -4,8 +4,9 @@
 package util
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,18 +38,13 @@ const (
 	// invocation that uses one of them fails, because it would overwrite the
 	// .otelc-build of that parent.
 	EnvOtelcParentWorkDirs = "OTELC_PARENT_WORK_DIRS"
-	// EnvOtelcNestedResolving lists, outermost first, the compiles waiting on
-	// a nested build to resolve an import a rule added, as comma-separated
-	// "package>added import" entries. Import paths cannot contain "," or ">",
-	// so the entries need no escaping.
-	EnvOtelcNestedResolving = "OTELC_NESTED_RESOLVING"
-	BuildTempDir            = ".otelc-build"
-	BuildLockFile           = BuildTempDir + ".lock"
-	OtelcRoot               = "go.opentelemetry.io/otelc"
-	OtelcPkgRoot            = OtelcRoot + "/pkg"
-	OtelcInstRoot           = OtelcRoot + "/instrumentation"
-	OtelcToolCmdRoot        = OtelcRoot + "/tool/cmd/otelc"
-	OtelcToolExe            = "otelc"
+	BuildTempDir           = ".otelc-build"
+	BuildLockFile          = BuildTempDir + ".lock"
+	OtelcRoot              = "go.opentelemetry.io/otelc"
+	OtelcPkgRoot           = OtelcRoot + "/pkg"
+	OtelcInstRoot          = OtelcRoot + "/instrumentation"
+	OtelcToolCmdRoot       = OtelcRoot + "/tool/cmd/otelc"
+	OtelcToolExe           = "otelc"
 	// InternalPath is a sentinel Path value for compiler-internal rules and
 	// synthetic files (e.g. runtime GLS context propagation) injected directly
 	// by otelc rather than loaded from an external Go package.
@@ -88,25 +84,11 @@ func GetImportNamesFile() string {
 	return GetBuildTemp(importNamesFile)
 }
 
-// GetPGOProfileFile returns the path to the file that records the build's PGO
-// profile for the nested builds toolexec runs.
-func GetPGOProfileFile() string {
-	const pgoProfileFile = "pgo_profile"
-	return GetBuildTemp(pgoProfileFile)
-}
-
 // GetInjectedHashFile returns the path to the file that records the content
 // hash of the packages rules add to the build.
 func GetInjectedHashFile() string {
 	const injectedHashFile = "injected_hash"
 	return GetBuildTemp(injectedHashFile)
-}
-
-// GetAddedImportsFileForProcess returns the per-process import tracking file.
-// Each compile process writes to its own file to avoid inter-process race conditions.
-func GetAddedImportsFileForProcess() string {
-	pid := os.Getpid()
-	return GetBuildTemp(fmt.Sprintf("added_imports.%d.json", pid))
 }
 
 // GetOtelcWorkDir returns the otelc working directory. It first checks the
@@ -250,4 +232,48 @@ func VersionInRange(version, versionRange string) bool {
 func EscapePackagePath(s string) string {
 	s = strings.ReplaceAll(s, "/", "_")
 	return strings.ReplaceAll(s, ".", "_")
+}
+
+// modFileRecord is the file under buildDir where setup records the go.mod (or
+// go.work) whose overlaid copy carries otelc's replace directives.
+func modFileRecord(buildDir string) string {
+	return filepath.Join(buildDir, "overlay", "modfile")
+}
+
+// RecordModFile records, under buildDir, path and the hash of its content, so
+// a build can tell when the file changed after setup copied it into the overlay.
+func RecordModFile(buildDir, path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ex.Wrapf(err, "reading %s", path)
+	}
+	sum := sha256.Sum256(data)
+	record := modFileRecord(buildDir)
+	if err = os.MkdirAll(filepath.Dir(record), 0o755); err != nil {
+		return ex.Wrapf(err, "creating %s", filepath.Dir(record))
+	}
+	return WriteFileAtomic(record, []byte(path+"\n"+hex.EncodeToString(sum[:])+"\n"))
+}
+
+// ModFileChangedSinceSetup reports whether the file RecordModFile recorded
+// changed since. Without a record it reports false.
+func ModFileChangedSinceSetup() (bool, error) {
+	record := modFileRecord(GetBuildTempDir())
+	data, err := os.ReadFile(record)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, ex.Wrapf(err, "reading %s", record)
+	}
+	path, want, _ := strings.Cut(strings.TrimSpace(string(data)), "\n")
+	current, err := os.ReadFile(filepath.Clean(path))
+	if os.IsNotExist(err) {
+		return true, nil
+	}
+	if err != nil {
+		return false, ex.Wrapf(err, "reading %s", path)
+	}
+	sum := sha256.Sum256(current)
+	return hex.EncodeToString(sum[:]) != want, nil
 }

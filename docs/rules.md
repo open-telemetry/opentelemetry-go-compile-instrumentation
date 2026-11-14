@@ -107,13 +107,11 @@ Field notes:
 
 #### Added-import cycles
 
-otelc resolves a rule-added import with a nested build. That build sees each package's original imports only, so Go cannot detect a cycle that the added imports form: when the rule for `p` adds an import of `q` and the rule for `q` adds an import of `p`, each nested build starts another one and the build never ends. otelc stops this and fails the build:
+`otelc setup` passes every rule-added import to the go command through `-overlay`, so the go command builds those packages itself. When the rule for `p` adds an import of `q` and `q` imports `p` (directly, or because a rule adds that import too), the go command reports the import cycle before the build starts. The added imports must not form a cycle. This applies to the `imports` field and to function hook rules alike.
 
-```
-rules add an import cycle: p adds q; q adds p
-```
+#### Imports into the test main package
 
-The added imports must not require each other in a cycle. This applies to the `imports` field and to function hook rules alike, whose imports are resolved the same way.
+Under `go test`, `target: main` matches the test main package that the go command generates. The go command fixes the imports of that package, so a rule that targets it cannot add new imports. Reach such packages through `//go:linkname` instead, as the bundled `init_sdk` rule does.
 
 ### Quick demo
 

@@ -218,7 +218,7 @@ func (ip *instrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSe
 	// Apply file rules first because they can introduce new files that used
 	// by other rules such as raw rules
 	for _, rule := range rset.FileRules {
-		err := ip.applyFileRule(ctx, rule, rset.PackageName)
+		err := ip.applyFileRule(rule, rset.PackageName)
 		if err != nil {
 			return ex.Wrapf(err, "applying file rule %s to package %s", rule.Name, rset.PackageName)
 		}

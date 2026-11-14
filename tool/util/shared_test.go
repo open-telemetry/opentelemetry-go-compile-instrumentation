@@ -4,7 +4,6 @@
 package util
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -220,12 +219,7 @@ func TestGetBuildTempPaths(t *testing.T) {
 	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "foo.txt"), GetBuildTemp("foo.txt"))
 	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "matched.json"), GetMatchedRuleFile())
 	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "import_names.json"), GetImportNamesFile())
-	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "pgo_profile"), GetPGOProfileFile())
 	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "injected_hash"), GetInjectedHashFile())
-
-	// The per-process import file embeds the current PID.
-	want := filepath.Join(workDir, BuildTempDir, fmt.Sprintf("added_imports.%d.json", os.Getpid()))
-	assert.Equal(t, want, GetAddedImportsFileForProcess())
 }
 
 func TestEncodeBuildFlagsEmpty(t *testing.T) {
@@ -291,4 +285,34 @@ func TestDiscoverWorkDir(t *testing.T) {
 			t.Errorf("DiscoverWorkDir() = %q, want empty", got)
 		}
 	})
+}
+
+func TestModFileChangedSinceSetupWithoutRecord(t *testing.T) {
+	t.Setenv(EnvOtelcWorkDir, t.TempDir())
+	changed, err := ModFileChangedSinceSetup()
+	require.NoError(t, err)
+	assert.False(t, changed)
+}
+
+func TestRecordModFileDetectsChange(t *testing.T) {
+	t.Setenv(EnvOtelcWorkDir, t.TempDir())
+	goMod := filepath.Join(t.TempDir(), "go.mod")
+	require.NoError(t, os.WriteFile(goMod, []byte("module example.com/app\n"), 0o644))
+	require.NoError(t, RecordModFile(GetBuildTempDir(), goMod))
+
+	changed, err := ModFileChangedSinceSetup()
+	require.NoError(t, err)
+	assert.False(t, changed)
+
+	require.NoError(t, os.WriteFile(goMod, []byte("module example.com/other\n"), 0o644))
+	changed, err = ModFileChangedSinceSetup()
+	require.NoError(t, err)
+	assert.True(t, changed)
+
+	require.NoError(t, os.Remove(goMod))
+	changed, err = ModFileChangedSinceSetup()
+	require.NoError(t, err)
+	assert.True(t, changed, "a removed mod file counts as changed")
+
+	require.Error(t, RecordModFile(GetBuildTempDir(), goMod), "recording a missing file fails")
 }

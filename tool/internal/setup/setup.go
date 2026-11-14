@@ -34,8 +34,9 @@ type setupPhase struct {
 	ruleConfig    string
 	buildPackages []*packages.Package
 	buildFlags    []string
-	// pgo is the build's effective -pgo value; see pgoValue.
-	pgo             string
+	// runtimeImports holds, by directory, the imports rules add to
+	// file-target packages (see prepareImportOverlay).
+	runtimeImports  map[string][]string
 	rootModulePaths []string
 	// resolvedNames maps an import path to a package name, built from
 	// buildPackages' dependency graph.
@@ -380,6 +381,7 @@ func (sp *setupPhase) generateRuntimePerPackage(
 			testRuleSets:    pkgMatched.test,
 			testMode:        sp.testMode,
 			fileTarget:      pkg.PkgPath == pkgload.CommandLineArgumentsPackage,
+			addedImports:    sp.runtimeImports[pkgDir],
 		}); err != nil {
 			return ex.Wrapf(err, "adding deps for package at %s", pkgDir)
 		}
@@ -548,7 +550,6 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		logger:     logger,
 		ruleConfig: cmd.String("rules"),
 		buildFlags: extractBuildFlags(subcommand, args),
-		pgo:        pgoValue(subcommand, args),
 		testMode:   subcommand == subcmdTest,
 	}
 
@@ -607,6 +608,11 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 
 	sp.warnIfNoInstrumentationMatched(matched)
 
+	// Make the imports rules add visible to the go command before the build.
+	if err = sp.writeBuildOverlay(ctx, cmd, args, matched); err != nil {
+		return err
+	}
+
 	// Generate otelc.runtime.go for all packages
 	if err = sp.generateRuntimePerPackage(ctx, buildPkgs, matched); err != nil {
 		return err
@@ -617,6 +623,62 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 	return sp.storeInjectedHash(ctx, matched)
+}
+
+// writeBuildOverlay writes the overlay that carries the imports the matched
+// rules add (see prepareImportOverlay). A standalone otelc setup cannot pass
+// it to the build the user runs, so it prints the flag to add to GOFLAGS.
+func (sp *setupPhase) writeBuildOverlay(
+	ctx context.Context,
+	cmd *cli.Command,
+	args []string,
+	matched []*rule.InstRuleSet,
+) error {
+	dir := util.GetOtelcWorkDir()
+	if c := commandBuildDir(cmd); c != "" {
+		if filepath.IsAbs(c) {
+			dir = c
+		} else {
+			dir = filepath.Join(dir, c)
+		}
+	}
+	goroot, err := pkgload.GOROOT(ctx, sp.buildFlags)
+	if err != nil {
+		return err
+	}
+	gomodcache, err := pkgload.GOMODCACHE(ctx, sp.buildFlags)
+	if err != nil {
+		return err
+	}
+	moduleDir, workFile, err := pkgload.ModuleAndWorkFile(ctx, dir)
+	if err != nil {
+		return err
+	}
+	modFile := workFile
+	if modFile == "" {
+		modFile = userModFilePath(args, dir)
+	}
+	if modFile == "" {
+		modFile = filepath.Join(moduleDir, goModFileName)
+	}
+	o, runtimeImports, err := sp.prepareImportOverlay(matched, modFile, goroot, gomodcache, util.GetBuildTempDir())
+	if err != nil {
+		return ex.Wrapf(err, "preparing the overlay for rule-added imports")
+	}
+	if len(o.Replace) > 0 {
+		if o, err = mergeUserOverlay(o, userOverlayPath(args, dir)); err != nil {
+			return err
+		}
+	}
+	path, err := writeImportOverlay(o, util.GetBuildTempDir())
+	if err != nil {
+		return err
+	}
+	sp.runtimeImports = runtimeImports
+	if path != "" && cmd.Name != "go" {
+		_, _ = fmt.Fprintf(os.Stderr, "otelc: add -overlay=%s to GOFLAGS for the instrumented build\n", path)
+	}
+	return nil
 }
 
 // warnIfNoInstrumentationMatched reports the combined result. An individual
@@ -944,6 +1006,10 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 		// does over GOFLAGS.
 		goFlags = append(goFlags, flagJSON)
 	}
+	args, overlayFlag := withImportOverlay(args)
+	if overlayFlag != "" {
+		goFlags = append(goFlags, overlayFlag)
+	}
 	newArgs, err := toolexecBuildArgs(args, execPath, vendored, goFlags...)
 	if err != nil {
 		return err
@@ -1013,9 +1079,6 @@ func runGoBuild(ctx context.Context, cmd *cli.Command) error {
 	ctx = contextWithStateManager(ctx, newStateManager())
 	logger := util.LoggerFromContext(ctx)
 
-	// Clean up import tracking files from previous builds at the start
-	// to prevent stale data from affecting this build.
-	instrument.CleanupImportTrackingFiles()
 	if err := cleanupDebugArtifacts(); err != nil {
 		return ex.Wrapf(err, "cleaning debug artifacts")
 	}

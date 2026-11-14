@@ -43,16 +43,20 @@ type runtimePackage struct {
 	testRuleSets []*rule.InstRuleSet
 	testMode     bool
 	fileTarget   bool
+	// addedImports are imports rules add to a file-target package. Only the
+	// files on the command line are compiled there, so they go into the
+	// generated runtime file.
+	addedImports []string
 }
 
 //nolint:gochecknoglobals // This is a constant
 var requiredImports = map[string]string{
 	"runtime/debug": "_otel_debug", // The getstack function depends on runtime/debug
 	"log":           "_otel_log",   // The printstack function depends on log
-	"unsafe":        "_",           // The golinkname tag depends on unsafe
+	unsafeImport:    "_",           // The golinkname tag depends on unsafe
 }
 
-func genImportDecl(funcRules []*rule.InstFuncRule, fileRules []*rule.InstFileRule) []dst.Decl {
+func genImportDecl(funcRules []*rule.InstFuncRule, fileRules []*rule.InstFileRule, added []string) []dst.Decl {
 	var imports map[string]string
 	if len(funcRules) > 0 {
 		imports = maps.Clone(requiredImports) // clone required imports to avoid mutating the global map
@@ -67,6 +71,11 @@ func genImportDecl(funcRules []*rule.InstFuncRule, fileRules []*rule.InstFileRul
 	for _, m := range fileRules {
 		if m.Path != util.InternalPath {
 			imports[m.Path] = ast.IdentIgnore
+		}
+	}
+	for _, path := range added {
+		if _, ok := imports[path]; !ok {
+			imports[path] = ast.IdentIgnore
 		}
 	}
 	importDecls := make([]dst.Decl, 0, len(imports))
@@ -439,12 +448,12 @@ func (sp *setupPhase) addDeps(
 		return err
 	}
 
-	if len(funcRules) == 0 && len(fileRules) == 0 {
+	if len(funcRules) == 0 && len(fileRules) == 0 && len(pkg.addedImports) == 0 {
 		return sp.removeRuntimeFile(ctx, pkg.dir)
 	}
 
 	// Add required imports.
-	importDecls := genImportDecl(funcRules, fileRules)
+	importDecls := genImportDecl(funcRules, fileRules, pkg.addedImports)
 
 	// Generate the variable declarations used by the runtime.
 	varDecls := genVarDecl(funcRules)

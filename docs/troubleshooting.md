@@ -219,7 +219,8 @@ Run `otelc cleanup` to remove them.
 | `debug/main/go.mod` | Copy of `go.mod` after `otelc` adds its `replace` directives. |
 | `debug/<package>/` | Instrumented source files as compiled, one directory per package; `/` and `.` in the import path become `_`. |
 | `gocache/` | Persistent Go build cache used across `otelc` builds. |
-| `added_imports.<pid>.json` | Per-process import tracking used during the link phase. |
+| `overlay.json`, `overlay/` | The `-overlay` that makes the go command build rule-added imports, and the files it maps in. |
+| `modreplace/` | Directory trees that stand in for module cache modules whose packages gain imports; their files come from `overlay.json`. |
 
 With `--debug`, `go build -work` is also passed, so Go's own temporary work directory is
 preserved after the build. The path is printed at the start of the build output as `WORK=...`.

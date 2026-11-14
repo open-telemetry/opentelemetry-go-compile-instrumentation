@@ -92,21 +92,33 @@ func ModuleAndWorkFile(ctx context.Context, dir string) (string, string, error) 
 // same buildFlags. It asks that command rather than using runtime.GOROOT, as
 // GOTOOLCHAIN may select a toolchain other than the one that built this tool.
 func GOROOT(ctx context.Context, buildFlags []string) (string, error) {
+	return goEnv(ctx, buildFlags, "GOROOT")
+}
+
+// GOMODCACHE returns the module cache directory of the go command the build
+// runs, from the -C directory in buildFlags.
+func GOMODCACHE(ctx context.Context, buildFlags []string) (string, error) {
+	return goEnv(ctx, buildFlags, "GOMODCACHE")
+}
+
+// goEnv returns the value of the go env variable key, run from the -C
+// directory in buildFlags.
+func goEnv(ctx context.Context, buildFlags []string, key string) (string, error) {
 	dir, _, err := loadDirFromBuildFlags(buildFlags)
 	if err != nil {
 		return "", err
 	}
-	cmd := exec.CommandContext(ctx, "go", "env", "GOROOT")
+	cmd := exec.CommandContext(ctx, "go", "env", key)
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
-		return "", ex.Wrapf(err, "running go env GOROOT in %s", dir)
+		return "", ex.Wrapf(err, "running go env %s in %s", key, dir)
 	}
-	goroot := strings.TrimSpace(string(out))
-	if goroot == "" {
-		return "", ex.Newf("go env GOROOT in %s printed nothing", dir)
+	value := strings.TrimSpace(string(out))
+	if value == "" {
+		return "", ex.Newf("go env %s in %s printed nothing", key, dir)
 	}
-	return goroot, nil
+	return value, nil
 }
 
 func loadDirFromBuildFlags(buildFlags []string) (string, []string, error) {

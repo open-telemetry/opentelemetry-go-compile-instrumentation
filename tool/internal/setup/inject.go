@@ -60,7 +60,7 @@ func (sp *setupPhase) fileRuleSourceImports(r *rule.InstFileRule) ([]string, err
 	paths := make([]string, 0, len(f.Imports))
 	for _, imp := range f.Imports {
 		unquoted, _ := strconv.Unquote(imp.Path.Value)
-		if unquoted == "" || unquoted == "C" || unquoted == "unsafe" {
+		if unquoted == "" || unquoted == "C" || unquoted == unsafeImport {
 			continue
 		}
 		paths = append(paths, unquoted)

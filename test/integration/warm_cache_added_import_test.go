@@ -37,20 +37,11 @@ func assertStatsCompiledPackage(t *testing.T, log, pkg string) {
 
 // assertStatsCacheHitPackage asserts from a stats log that no compile of
 // pkg ran: the build cache answered it, so a link that still works proves
-// the warm-cache recovery, not the compile-side tracking.
+// the warm build keeps the rule-added import.
 func assertStatsCacheHitPackage(t *testing.T, log, pkg string) {
 	t.Helper()
 	assert.NotContains(t, log, "package="+pkg,
 		"the build recompiled "+pkg+", so the run exercised cold recovery, not the cache-hit shape")
-}
-
-// assertStatsLinkRecovered asserts from a stats log that the link updated
-// its importcfg: the run holds no compile tracking file, so only the
-// matched.json recovery in the link can have supplied the imports.
-func assertStatsLinkRecovered(t *testing.T, log string) {
-	t.Helper()
-	assert.Contains(t, log, "Updated link importcfg",
-		"the link ran no importcfg update; the rule-added import was never recovered")
 }
 
 // TestWarmCacheKeepsRuleAddedImports covers the link step of a build whose
@@ -189,21 +180,16 @@ replace example.com/warmcache/extra => ./extra
 		// The warm run must not recompile dep: the restored cache answers
 		// its instrumented compile, so no toolexec compile of it runs.
 		assertStatsCacheHitPackage(t, log, "example.com/warmcache/dep")
-		// The fresh .otelc-build starts with no tracking files, so the only
-		// way the link importcfg gained the rule-added import is the
-		// matched.json recovery in the link phase.
-		assertStatsLinkRecovered(t, log)
 	})
 }
 
-// TestWarmCacheKeepsRuleAddedImportsWithPGO covers the warm-cache link
-// recovery under a PGO build. The cold compile of dep runs profiled, and so
-// does the nested build that resolves the import the rule adds to it. On the
-// warm build the compile of dep is a cache hit, so only the link resolves the
-// import, and the archives it resolves must be compiled with the same
-// profile: the link rejects export data whose fingerprint differs from what
-// the cached compile of dep recorded. The profile makes extra.Note hot, the
-// one shape in which profiled and unprofiled compiles of a package differ.
+// TestWarmCacheKeepsRuleAddedImportsWithPGO covers a warm build under PGO.
+// The cold compile of dep runs profiled, and so does the compile of the
+// package the rule adds to it, which the go command builds in the same build.
+// On the warm build the compile of dep is a cache hit, and the link rejects
+// export data whose fingerprint differs from what the cached compile of dep
+// recorded. The profile makes extra.Note hot, the one shape in which profiled
+// and unprofiled compiles of a package differ.
 func TestWarmCacheKeepsRuleAddedImportsWithPGO(t *testing.T) {
 	otelcPath, err := testutil.OtelcPath()
 	require.NoError(t, err)
@@ -376,8 +362,6 @@ func main() {
 
 	assertNoteInliningPremise(t, filepath.Join(appDir, "extra"), profile)
 
-	// The profile path must be absolute: the nested builds toolexec runs
-	// for the link resolution work from other directories.
 	baseEnv := append(
 		preparedBuildBaseEnvironment(),
 		"GOWORK=off",
@@ -411,13 +395,9 @@ func main() {
 		assert.Contains(t, runOtelcTest(), "PASS")
 
 		log := statsLog(t, appDir)
-		// The warm run must not recompile dep: with a compile of dep the
-		// tracking files would supply the profiled archive and the run would
-		// not prove the link-side profile.
+		// The warm run must not recompile dep, or it would not cover the
+		// cached profiled compile.
 		assertStatsCacheHitPackage(t, log, "example.com/warmcache/dep")
-		// The fresh .otelc-build holds no tracking files, so only the link
-		// recovery, run with the recorded profile, can have resolved extra.
-		assertStatsLinkRecovered(t, log)
 	})
 }
 

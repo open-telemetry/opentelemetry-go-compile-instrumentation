@@ -20,14 +20,14 @@ import (
 // updateImportConfigForFile ensures all imports in the given file's AST are present in the importcfg.
 // This is used when adding a new file (e.g., via file rules) that has its own imports which may
 // not be in the target package's importcfg.
-func (ip *instrumentPhase) updateImportConfigForFile(ctx context.Context, root *dst.File, ruleName string) error {
+func (ip *instrumentPhase) updateImportConfigForFile(root *dst.File, ruleName string) error {
 	paths := imports.CollectImportPaths(root)
 
 	if len(paths) == 0 {
 		return nil
 	}
 
-	if err := ip.updateImportConfig(ctx, paths); err != nil {
+	if err := ip.updateImportConfig(paths); err != nil {
 		return ex.Wrapf(err, "updating import config for file imports in %s", ruleName)
 	}
 
@@ -98,7 +98,7 @@ func (ip *instrumentPhase) addRuleImports(
 	}
 
 	// Update importcfg for the build
-	if err := ip.updateImportConfig(ctx, resolution.NewImports); err != nil {
+	if err := ip.updateImportConfig(resolution.NewImports); err != nil {
 		return ex.Wrapf(err, "updating import config for %s", ruleName)
 	}
 

@@ -62,50 +62,6 @@ func TestSetupPhaseStore_AllowsIgnoredCallFiles(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestSetupPhaseStorePGOProfile(t *testing.T) {
-	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
-	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
-	sp := newTestSetupPhase()
-	for _, tt := range []struct{ pgo, want string }{
-		{pgo: "profile.pgo", want: "profile.pgo"},
-		// A later setup without a profile clears the one recorded before.
-		{pgo: "off", want: ""},
-	} {
-		sp.pgo = tt.pgo
-		require.NoError(t, sp.store([]*rule.InstRuleSet{}))
-		data, err := os.ReadFile(util.GetPGOProfileFile())
-		require.NoError(t, err)
-		assert.Equal(t, tt.want, string(data))
-	}
-}
-
-func TestSetupPhaseStorePGOProfileAmbiguous(t *testing.T) {
-	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
-	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
-	sp := newTestSetupPhase()
-	sp.pgo = "auto"
-	for range 2 {
-		dir := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "default.pgo"), nil, 0o644))
-		sp.buildPackages = append(sp.buildPackages, &packages.Package{
-			Name:    "main",
-			GoFiles: []string{filepath.Join(dir, "main.go")},
-		})
-	}
-
-	require.NoError(t, sp.store([]*rule.InstRuleSet{}))
-	data, err := os.ReadFile(util.GetPGOProfileFile())
-	require.NoError(t, err)
-	assert.Empty(t, string(data))
-}
-
-func TestSetupPhaseStorePGOProfileWriteError(t *testing.T) {
-	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
-	require.NoError(t, os.MkdirAll(util.GetPGOProfileFile(), 0o755))
-	err := newTestSetupPhase().store([]*rule.InstRuleSet{})
-	require.ErrorContains(t, err, "failed to write PGO profile")
-}
-
 func TestSetupPhaseStoreResolvedNamesWriteError(t *testing.T) {
 	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
 	require.NoError(t, os.MkdirAll(util.GetImportNamesFile(), 0o755))
