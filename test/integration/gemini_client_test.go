@@ -68,16 +68,17 @@ func TestGeminiClient(t *testing.T) {
 			testutil.RequireGenAIClientSemconv(
 				t,
 				span,
-				"gemini",            // system
-				"chat",              // operationName
-				tc.model,            // requestModel
-				"gcp.gemini",        // providerName (Gemini Developer API backend)
-				"resp-test-123",     // responseID
-				tc.model+"-001",     // responseModel (modelVersion)
-				[]string{"STOP"},    // finishReasons
-				10,                  // inputTokens (promptTokenCount)
-				tc.wantOutputTokens, // outputTokens (candidates + thoughts)
-				tc.wantTotalTokens,  // totalTokens
+				"gemini",                        // system
+				"chat",                          // operationName
+				tc.model,                        // requestModel
+				"gcp.gemini",                    // providerName (Gemini Developer API backend)
+				server.Listener.Addr().String(), // serverEndpoint
+				"resp-test-123",                 // responseID
+				tc.model+"-001",                 // responseModel (modelVersion)
+				[]string{"STOP"},                // finishReasons
+				10,                              // inputTokens (promptTokenCount)
+				tc.wantOutputTokens,             // outputTokens (candidates + thoughts)
+				tc.wantTotalTokens,              // totalTokens
 			)
 
 			// Generation parameters come from the request body, which the
