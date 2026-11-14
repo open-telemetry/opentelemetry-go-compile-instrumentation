@@ -8,10 +8,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"go.opentelemetry.io/otelc/tool/ex"
@@ -76,6 +77,19 @@ func loadStateManager() (*stateManager, error) {
 	return s, nil
 }
 
+// checkInterruptedBuild prevents a new snapshot from replacing state left by
+// an interrupted build or standalone pin invocation.
+func checkInterruptedBuild() error {
+	previous, err := loadStateManager()
+	if err != nil {
+		return err
+	}
+	if previous != nil {
+		return ex.New("previous otelc invocation did not complete; run `otelc cleanup` before retrying")
+	}
+	return nil
+}
+
 type stateManagerKey struct{}
 
 // contextWithStateManager returns a copy of ctx containing s.
@@ -101,7 +115,7 @@ func getBackupFiles(ctx context.Context, moduleDirs []string) ([]string, error) 
 	dirs := normalizeModuleDirs(moduleDirs)
 	// Find all go.mod, go.sum, and tool files
 	for _, moduleDir := range dirs {
-		goModFile := filepath.Join(moduleDir, goModFileName)
+		goModFile := filepath.Join(moduleDir, "go.mod")
 		goSumFile := filepath.Join(moduleDir, "go.sum")
 		canonical := filepath.Join(moduleDir, toolFileCanonical)
 		alias := filepath.Join(moduleDir, toolFileAlias)
@@ -110,14 +124,7 @@ func getBackupFiles(ctx context.Context, moduleDirs []string) ([]string, error) 
 			files = append(files, goModFile)
 			files = append(files, goSumFile)
 
-			// If otelc.tool.go exists, use it (it may get modified)
-			// Otherwise, use the canonical path (it may get generated or modified)
-			toolFile := canonical
-			if !util.PathExists(canonical) && util.PathExists(alias) {
-				toolFile = alias
-			}
-
-			files = append(files, toolFile)
+			files = append(files, canonical, alias)
 		}
 	}
 
@@ -200,20 +207,16 @@ func (s *stateManager) Commit() error {
 		return nil
 	}
 
-	entries := make([]string, 0, len(s.files))
-
+	entries := make(map[string]bool, len(s.files))
 	for path, exists := range s.files {
 		if exists {
-			entries = append(entries, path)
+			entries[path] = true
 		} else {
-			entries = append(entries, "-"+path)
+			entries["-"+path] = true
 		}
 	}
 
-	// Sort the entries for deterministic behavior
-	sort.Strings(entries)
-
-	bs, err := json.Marshal(entries)
+	bs, err := json.Marshal(slices.Sorted(maps.Keys(entries)))
 	if err != nil {
 		return ex.Wrapf(err, "failed to marshal state to JSON")
 	}

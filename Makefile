@@ -4,19 +4,11 @@
 # Use bash for all shell commands (required for pipefail and other bash features)
 SHELL := /bin/bash
 
-# Many recipes use .ONESHELL, so that "set -euo pipefail" applies to all the
-# lines of the recipe. GNU Make 3.81 (the default on macOS) does not support
-# .ONESHELL: it runs each line in a different shell, and failures can be
-# hidden. Thus GNU Make 3.82 or later is required.
-ifeq ($(filter oneshell,$(.FEATURES)),)
-$(error GNU Make 3.82 or later is required (found $(MAKE_VERSION)). On macOS, run "brew install make", then use "gmake")
-endif
-
-.PHONY: all test test-unit test-integration test-e2e format lint build build-all build/pkg install package manifest verify-manifest clean setup-git \
+.PHONY: all test test-unit test-integration test-e2e format lint build build-all build/pkg install manifest verify-manifest clean \
         build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
         lint/action lint/makefile lint/license-header lint/license-header/fix lint/dockerfile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
-        ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed check-api-sync check-golden-files check-test-file-naming \
-        test-unit/update-golden test-unit/race test-unit/tool test-unit/pkg test-unit/instrumentation test-unit/demo test-unit/helper \
+        ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-api-sync check-golden-files check-test-file-naming \
+        test-unit/update-golden test-unit/tool test-unit/pkg test-unit/instrumentation test-unit/demo test-unit/helper \
         test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage test-unit/instrumentation/coverage \
         check-coverage test-integration/coverage test-e2e/coverage test-latestlibrun test-versionmatrix \
         weaver-install tidy/test-apps \
@@ -28,18 +20,17 @@ endif
 BINARY_NAME := otelc
 PLATFORMS := darwin/amd64 linux/amd64 windows/amd64 darwin/arm64 linux/arm64
 TOOL_DIR := tool/cmd/otelc
-INST_BUNDLE_ARCHIVE = otelc-bundle.tgz
-INST_BUNDLE_PKG_TMP = pkg_temp
-INST_BUNDLE_INST_TMP = instrumentation_temp
 API_SYNC_SOURCE = pkg/hook/context.go
 API_SYNC_TARGET = tool/internal/instrument/api.tmpl
 TOOLS_DIR = .tools
-GO_VERSION = 1.26
+GO_VERSION = 1.25
 INTEGRATION_TEST_RUN ?= .
 TOOL_COVERAGE_THRESHOLD ?= 68
 PKG_COVERAGE_THRESHOLD ?= 70
-RACE ?= 0
-RACE_FLAG := $(if $(filter 1 true,$(RACE)),-race,)
+
+# Temporary source-checkout bridge for built-in instrumentation modules.
+# Remove with #983 when these modules use versioned requirements.
+export OTELC_SOURCE_ROOT := $(CURDIR)
 
 # Modules/apps scanned by govulncheck for known Go CVEs (tool version pinned in
 # .tools/go.mod, Renovate-managed like every other .tools binary).
@@ -47,7 +38,10 @@ RACE_FLAG := $(if $(filter 1 true,$(RACE)),-race,)
 # Instrumentation is scanned separately via instrumented integration-test binaries
 # (see govulncheck/instrumentation): source scans skip //go:build ignore files and
 # cannot typecheck modules that need compile-time field injection (e.g. database/sql).
-# This coverage is only as complete as the top-level apps under test/apps.
+# Known gap: that makes instrumentation coverage only as good as the test apps.
+# An instrumentation module that no app under test/apps builds against is scanned
+# by neither job, so adding a module without an app leaves it uncovered (currently
+# instrumentation/github.com/openai/openai-go/v3).
 # Demos are intentionally excluded (pinned example deps).
 GOVULNCHECK_CORE_MODULES := . $(shell find pkg -type f -name 'go.mod' -exec dirname {} \; | sort)
 # Top-level integration apps only (skip nested modules such as
@@ -92,16 +86,8 @@ $(YAMLFMT): PACKAGE=github.com/google/yamlfmt/cmd/yamlfmt
 RATCHET = $(TOOLS)/ratchet
 $(RATCHET): PACKAGE=github.com/sethvargo/ratchet
 
-BUNDLE = $(TOOLS)/bundle
-# The sources are real prerequisites, not order-only: with only `| $(TOOLS)`
-# make never rebuilds an existing .bin/bundle, so editing the bundle tool (or
-# switching to a branch that changed it) silently keeps using the stale binary
-# and `make package` then writes an archive that fails Verify Bundle in CI.
-$(BUNDLE): $(wildcard $(TOOLS_DIR)/bundle/*.go) $(TOOLS_DIR)/bundle/go.mod | $(TOOLS)
-	cd $(TOOLS_DIR)/bundle && GOWORK=off go build -o $@
-
 EMBEDMD = $(TOOLS)/embedmd
-$(EMBEDMD): PACKAGE=github.com/campoy/embedmd/v2
+$(EMBEDMD): PACKAGE=github.com/campoy/embedmd
 
 CHECKMAKE = $(TOOLS)/checkmake
 $(CHECKMAKE): PACKAGE=github.com/checkmake/checkmake/cmd/checkmake
@@ -161,21 +147,21 @@ build/pkg: ## Build all pkg modules to verify compilation
 build/instrumentation: ## Build all instrumentation modules to verify compilation
 	@echo "Building instrumentation modules..."
 	@set -euo pipefail
-	@INSTR_MODULES=$$(find instrumentation -name "go.mod" -type f -exec dirname {} \; | grep -v "instrumentation/database/sql"); \
+	@INSTR_MODULES=$$(find instrumentation -name "go.mod" -type f -exec dirname {} \; | grep -v "instrumentation/runtime" | grep -v "instrumentation/database/sql"); \
 	for moddir in $$INSTR_MODULES; do \
 		echo "Building $$moddir..."; \
 		(cd $$moddir && go mod tidy && go build ./...); \
 	done
 	@echo "All instrumentation modules built successfully"
 
-build: build/pkg build/instrumentation package ## Build the instrumentation tool
+build: build/pkg build/instrumentation manifest ## Build the instrumentation tool
 	@echo "Building instrumentation tool..."
 	@cp $(API_SYNC_SOURCE) $(API_SYNC_TARGET)
 	@go mod tidy
 	@$(GO_BUILD_CMD) -o $(BINARY_NAME)$(EXT) ./$(TOOL_DIR)
 	@./$(BINARY_NAME)$(EXT) version
 
-build-all: build/pkg build/instrumentation package ## Build the instrumentation tool for all platforms
+build-all: build/pkg build/instrumentation manifest ## Build the instrumentation tool for all platforms
 	@echo "Building instrumentation tool for all platforms..."
 	@cp $(API_SYNC_SOURCE) $(API_SYNC_TARGET)
 	@go mod tidy
@@ -190,43 +176,11 @@ build-all: build/pkg build/instrumentation package ## Build the instrumentation 
 	done
 	@echo "All builds completed. Artifacts in dist/"
 
-.PHONY: setup-git
-setup-git: ## Register the git merge driver so otelc-bundle.tgz stops blocking rebases/merges
-	@git config merge.otelc-bundle.name "Keep current otelc-bundle.tgz (regenerate with make package)"
-	@git config merge.otelc-bundle.driver ".github/scripts/merge-bundle.sh %A"
-	@echo "Configured git merge driver 'otelc-bundle'. Rebase/merge no longer stops on the bundle;"
-	@echo "run 'make package' afterwards to refresh tool/data/otelc-bundle.tgz."
-
-install: package ## Install otelc to $$GOPATH/bin (auto-packages instrumentation)
+install: manifest ## Install otelc to $$GOPATH/bin
 	@echo "Installing otelc..."
 	@cp $(API_SYNC_SOURCE) $(API_SYNC_TARGET)
 	@go mod tidy
 	go install -ldflags "-X $(MODULE_PATH)/tool/util.Version=$(VERSION) -X $(MODULE_PATH)/tool/util.CommitHash=$(COMMIT_HASH) -X $(MODULE_PATH)/tool/util.BuildTime=$(BUILD_TIME)" ./$(TOOL_DIR)
-
-.ONESHELL:
-package: ## Package the instrumentation code into binary
-	@echo "Packaging instrumentation code into binary..."
-	@set -euo pipefail
-	@if [ ! -d pkg ]; then \
-		echo "Error: pkg directory does not exist"; \
-		exit 1; \
-	fi
-	@if [ ! -d instrumentation ]; then \
-		echo "Error: instrumentation directory does not exist"; \
-		exit 1; \
-	fi
-	@trap 'rm -rf $(INST_BUNDLE_PKG_TMP) $(INST_BUNDLE_INST_TMP)' EXIT
-	@mkdir -p $(INST_BUNDLE_PKG_TMP)
-	@cp -r pkg/runtime $(INST_BUNDLE_PKG_TMP)/runtime
-	@cp -r pkg/netutil $(INST_BUNDLE_PKG_TMP)/netutil
-	@cp -r instrumentation $(INST_BUNDLE_INST_TMP)
-	@(cd $(INST_BUNDLE_PKG_TMP)/runtime && go mod tidy)
-	@(cd $(INST_BUNDLE_PKG_TMP)/netutil && go mod tidy)
-	@(cd $(INST_BUNDLE_INST_TMP) && go mod tidy)
-	@mkdir -p tool/data/
-	@$(MAKE) $(BUNDLE)
-	@$(BUNDLE) tool/data/$(INST_BUNDLE_ARCHIVE) $(INST_BUNDLE_PKG_TMP) $(INST_BUNDLE_INST_TMP)
-	@echo "Package created successfully at tool/data/$(INST_BUNDLE_ARCHIVE)"
 
 manifest: ## Generate the instrumentation manifest
 	@echo "Generating instrumentation manifest..."
@@ -265,7 +219,6 @@ format/go: ## Format Go code only
 format/go: $(GOLANGCI_LINT)
 	@echo "Formatting Go code..."
 	$(GOLANGCI_LINT) fmt --config .tools/golangci.yml
-	cd $(TOOLS_DIR)/bundlerepair && GOWORK=off $(GOLANGCI_LINT) fmt --config ../golangci.yml
 
 format/yaml: ## Format YAML files only (excludes testdata and schemas/otelc/.deps)
 format/yaml: $(YAMLFMT)
@@ -284,30 +237,14 @@ lint/action: $(ACTIONLINT) ratchet/check
 	$(ACTIONLINT)
 
 lint/go: ## Run golangci-lint on Go code
-lint/go: $(GOLANGCI_LINT) package
+lint/go: $(GOLANGCI_LINT)
 	@echo "Linting Go code..."
 	$(GOLANGCI_LINT) run --config .tools/golangci.yml
-	cd $(TOOLS_DIR)/bundlerepair && GOWORK=off $(GOLANGCI_LINT) run --config ../golangci.yml
 
 lint/go/fix: ## Run golangci-lint on Go code and fix the issues
 lint/go/fix: $(GOLANGCI_LINT)
 	@echo "Linting Go code..."
 	$(GOLANGCI_LINT) run --config .tools/golangci.yml --fix
-	cd $(TOOLS_DIR)/bundlerepair && GOWORK=off $(GOLANGCI_LINT) run --config ../golangci.yml --fix
-
-.ONESHELL:
-lint/go/instrumentation: ## Lint new issues in instrumentation modules (golangci-lint only sees the root module via ./...)
-lint/go/instrumentation: $(GOLANGCI_LINT)
-	@echo "Linting instrumentation modules (new issues only)..."
-	@set -euo pipefail
-	@BASE_REV=$${LINT_BASE_REV:-origin/main}
-	@CONFIG=$(CURDIR)/.tools/golangci.yml
-	@INSTR_MODULES=$$(find instrumentation -name "go.mod" -type f -exec dirname {} \; | grep -v "instrumentation/database/sql"); \
-	for moddir in $$INSTR_MODULES; do \
-		echo "Linting $$moddir..."; \
-		(cd $$moddir && $(GOLANGCI_LINT) run --config $$CONFIG --new-from-rev="$$BASE_REV" ./...); \
-	done
-	@echo "All instrumentation modules linted successfully"
 
 lint/yaml: ## Lint YAML formatting
 lint/yaml: $(YAMLFMT)
@@ -326,8 +263,7 @@ lint/dockerfile: hadolint
 	elif [ -f /opt/homebrew/bin/hadolint ]; then \
 		HADOLINT_CMD="/opt/homebrew/bin/hadolint"; \
 	fi; \
-	DOCKERFILES=$$(find demo/app -name "Dockerfile" | sort); \
-	$$HADOLINT_CMD --failure-threshold warning -c .tools/hadolint.yaml $$DOCKERFILES
+	$$HADOLINT_CMD -c .tools/hadolint.yaml demo/app/grpc/client/Dockerfile demo/app/grpc/server/Dockerfile demo/app/http/client/Dockerfile demo/app/http/server/Dockerfile
 
 lint/makefile: ## Lint Makefile
 lint/makefile: $(CHECKMAKE)
@@ -444,15 +380,6 @@ adr-list: ## List all ADRs
 
 ##@ Validation
 
-check-embed: ## Verify that embedded files exist (required for tests)
-	@echo "Checking embedded files..."
-	@if [ ! -f tool/data/$(INST_BUNDLE_ARCHIVE) ]; then \
-		echo "Error: tool/data/$(INST_BUNDLE_ARCHIVE) does not exist"; \
-		echo "Run 'make package' to generate it"; \
-		exit 1; \
-	fi
-	@echo "All embedded files present"
-
 check-api-sync: ## Verify api.tmpl is in sync with pkg/hook/context.go
 	@echo "Checking api.tmpl sync with $(API_SYNC_SOURCE)..."
 	@if ! diff -q $(API_SYNC_SOURCE) $(API_SYNC_TARGET) > /dev/null 2>&1; then \
@@ -465,7 +392,6 @@ check-api-sync: ## Verify api.tmpl is in sync with pkg/hook/context.go
 
 .ONESHELL:
 check-golden-files: ## Verify golden test files are up to date
-check-golden-files: package
 	@echo "Checking golden files are up to date..."
 	set -euo pipefail
 	cd tool/internal/instrument && go test -v -timeout=5m -count=1 ./... -args -update
@@ -499,10 +425,6 @@ govulncheck: $(GOVULNCHECK) ## Scan core modules (root, pkg) for known Go vulner
 # Build each integration test app with otelc, then scan the resulting binary.
 # Binary mode sees injected instrumentation (including //go:build ignore sources
 # and field-injection modules like database/sql) that source mode cannot analyze.
-# echoserver uses echo v4.16.3. The upstream advisories list this version as fixed.
-# The Go vulnerability database still marks every echo v4 release as affected.
-# Ignore GO-2026-6872 and GO-2026-6875 for echoserver only.
-# After vuln.go.dev lists v4.16.3 as fixed, delete this ignore. See issue 1744.
 .ONESHELL:
 govulncheck/instrumentation: $(GOVULNCHECK) build ## Scan instrumented test apps (binary mode) for known Go vulnerabilities
 	@echo "Running govulncheck -mode=binary across $(words $(GOVULNCHECK_TEST_APPS)) instrumented test apps..."
@@ -520,20 +442,9 @@ govulncheck/instrumentation: $(GOVULNCHECK) build ## Scan instrumented test apps
 			continue; \
 		fi; \
 		echo "==> govulncheck -mode=binary $$app"; \
-		vuln_log=$$(mktemp); \
-		if "$(GOVULNCHECK)" -mode=binary "$$appdir/$$app_bin" >"$$vuln_log" 2>&1; then \
-			cat "$$vuln_log"; \
-		else \
-			cat "$$vuln_log"; \
-			ids=$$(sed -n 's/^Vulnerability #[0-9][0-9]*:[[:space:]]*//p' "$$vuln_log" | sed 's/[[:space:]]*$$//' | sort -u); \
-			extra=$$(printf '%s\n' "$$ids" | grep -vxF -e 'GO-2026-6872' -e 'GO-2026-6875' || true); \
-			if [ "$$app" = echoserver ] && [ -n "$$ids" ] && [ -z "$$extra" ]; then \
-				echo "govulncheck/instrumentation: ignored GO-2026-6872 and GO-2026-6875 for echoserver. vuln.go.dev still marks echo v4.16.3 as affected. See issue 1744."; \
-			else \
-				status=1; \
-			fi; \
+		if ! "$(GOVULNCHECK)" -mode=binary "$$appdir/$$app_bin"; then \
+			status=1; \
 		fi; \
-		rm -f "$$vuln_log"; \
 		rm -f "$$appdir/$$app_bin"; \
 		(cd "$$appdir" && "$$otelc" cleanup) || true; \
 	done; \
@@ -561,26 +472,13 @@ benchmark/threshold: build ## Enforce absolute otelc overhead ceiling (fails if 
 	go test -tags=overhead_check -run=TestOverheadCeiling -v -count=1 -timeout=30m
 
 ##@ Testing
-# NOTE: Tests require the 'package' target to run first because tool/data/export.go
-# uses //go:embed to embed otelc-bundle.tgz at compile time. If the file doesn't exist
-# when Go compiles the test packages, the embed will fail.
-
 test: ## Run all tests (unit + integration + e2e)
-test: test-bundle-workflows test-unit test-integration test-e2e
-
-.PHONY: test-bundle-workflows
-test-bundle-workflows: ## Test the bundle repair tool and check the repair workflows
-	@GOWORK=off go -C .tools test -count=1 ./workflows
-	@GOWORK=off go -C .tools/bundlerepair test -count=1 -race ./...
+test: test-unit test-integration test-e2e
 
 test-unit: test-unit/tool test-unit/pkg test-unit/instrumentation test-unit/demo test-unit/helper ## Run all unit tests (tool + pkg + demo + test helpers)
 
-test-unit/race: ## Run all unit tests with the Go race detector enabled
-	$(MAKE) test-unit RACE=1
-
 .ONESHELL:
 test-unit/update-golden: ## Run unit tests and update golden files
-test-unit/update-golden: package
 	@echo "Running unit tests and updating golden files..."
 	set -euo pipefail
 	cd tool/internal/instrument && go test -v -timeout=5m -count=1 ./... -args -update
@@ -589,13 +487,13 @@ test-unit/update-golden: package
 #   outputs build errors (JSON lines with ImportPath but no Package field).
 
 .ONESHELL:
-test-unit/tool: build package $(GOTESTFMT) ## Run unit tests for tool modules only
+test-unit/tool: build $(GOTESTFMT) ## Run unit tests for tool modules only
 	@echo "Running tool unit tests..."
 	set -euo pipefail
-	go test $(RACE_FLAG) -json -v -shuffle=on -timeout=5m -count=1 ./tool/... 2>&1 | tee ./gotest-unit-tool.log
+	go test -json -v -shuffle=on -timeout=5m -count=1 ./tool/... 2>&1 | tee ./gotest-unit-tool.log
 
 .ONESHELL:
-test-unit/pkg: package ## Run unit tests for pkg modules only
+test-unit/pkg: ## Run unit tests for pkg modules only
 	@echo "Running pkg unit tests..."
 	set -euo pipefail
 	rm -f ./gotest-unit-pkg.log
@@ -607,10 +505,11 @@ test-unit/pkg: package ## Run unit tests for pkg modules only
     	fi; \
 		echo "Testing $$moddir..."; \
 		(cd "$$moddir" && go mod tidy); \
-		go test -C "$$moddir" $(RACE_FLAG) -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee -a ./gotest-unit-pkg.log; \
+		go test -C "$$moddir" -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee -a ./gotest-unit-pkg.log; \
 	done
 
 # Notes on test-unit/instrumentation implementation:
+# - Excludes "runtime" entirely (compile-time field injection; no testable subpackages).
 # - "database/sql" root package also needs field injection, so ./... cannot type-check
 #   client.go. Safe subpackages (dsnparse, semconv) are tested explicitly afterwards.
 # - Skips modules without test files to avoid empty test output.
@@ -619,11 +518,11 @@ test-unit/pkg: package ## Run unit tests for pkg modules only
 #   outputs build errors (JSON lines with ImportPath but no Package field).
 #   Standard go test -v output is readable enough without formatting.
 .ONESHELL:
-test-unit/instrumentation: package ## Run unit tests for instrumentation modules only
+test-unit/instrumentation: ## Run unit tests for instrumentation modules only
 	@echo "Running instrumentation unit tests..."
 	set -euo pipefail
 	rm -f ./gotest-unit-instrumentation.log
-	INSTR_MODULES=$$(find instrumentation -name "go.mod" -type f -exec dirname {} \; | grep -v "instrumentation/database/sql"); \
+	INSTR_MODULES=$$(find instrumentation -name "go.mod" -type f -exec dirname {} \; | grep -v "instrumentation/runtime" | grep -v "instrumentation/database/sql"); \
 	for moddir in $$INSTR_MODULES; do \
 		if ! find "$$moddir" -name "*_test.go" -type f | grep -q .; then \
 			echo "Skipping $$moddir (no tests)..."; \
@@ -631,20 +530,20 @@ test-unit/instrumentation: package ## Run unit tests for instrumentation modules
 		fi; \
 		echo "Testing $$moddir..."; \
 		(cd "$$moddir" && go mod tidy); \
-		go test -C "$$moddir" $(RACE_FLAG) -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee -a ./gotest-unit-instrumentation.log; \
+		go test -C "$$moddir" -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee -a ./gotest-unit-instrumentation.log; \
 	done
 	# database/sql: root package references otelc-injected fields on database/sql
 	# types and cannot be built uninstrumented. dsnparse/semconv do not.
 	echo "Testing instrumentation/database/sql (dsnparse, semconv)..."
 	(cd instrumentation/database/sql && go mod tidy)
-	go test -C instrumentation/database/sql $(RACE_FLAG) -v -shuffle=on -timeout=5m -count=1 ./dsnparse/... ./semconv/... 2>&1 | tee -a ./gotest-unit-instrumentation.log
+	go test -C instrumentation/database/sql -v -shuffle=on -timeout=5m -count=1 ./dsnparse/... ./semconv/... 2>&1 | tee -a ./gotest-unit-instrumentation.log
 
 .ONESHELL:
 test-unit/helper: ## Run unit tests for test helper packages
 	@echo "Running test helper unit tests..."
 	set -euo pipefail
 	rm -f ./gotest-unit-helper.log
-	go test -C "test" $(RACE_FLAG) -v -shuffle=on -timeout=5m -count=1 ./testutil/... 2>&1 | tee ./gotest-unit-helper.log
+	go test -C "test" -v -shuffle=on -timeout=5m -count=1 ./testutil/... 2>&1 | tee ./gotest-unit-helper.log
 
 .ONESHELL:
 test-unit/demo: ## Run unit tests for demo applications
@@ -659,20 +558,20 @@ test-unit/demo: ## Run unit tests for demo applications
 		fi; \
 		echo "Testing $$moddir..."; \
 		(cd "$$moddir" && go mod tidy); \
-		go test -C "$$moddir" $(RACE_FLAG) -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee -a ./gotest-unit-demo.log; \
+		go test -C "$$moddir" -v -shuffle=on -timeout=5m -count=1 ./... 2>&1 | tee -a ./gotest-unit-demo.log; \
 	done
 
 
 test-unit/coverage: test-unit/tool/coverage test-unit/pkg/coverage test-unit/instrumentation/coverage ## Run all unit tests with coverage
 
 .ONESHELL:
-test-unit/tool/coverage: package ## Run unit tests with coverage for tool modules only
+test-unit/tool/coverage: ## Run unit tests with coverage for tool modules only
 	@echo "Running tool unit tests with coverage..."
 	set -euo pipefail
 	go test -json -v -shuffle=on -timeout=5m -count=1 ./tool/... -coverprofile=coverage-tool.txt -covermode=atomic 2>&1 | tee ./gotest-unit-tool.log
 
 .ONESHELL:
-test-unit/pkg/coverage: package ## Run unit tests with coverage for pkg modules only
+test-unit/pkg/coverage: ## Run unit tests with coverage for pkg modules only
 	@echo "Running pkg unit tests with coverage..."
 	set -euo pipefail
 	rm -f ./gotest-unit-pkg.log
@@ -694,11 +593,11 @@ test-unit/pkg/coverage: package ## Run unit tests with coverage for pkg modules 
 # Same implementation as test-unit/instrumentation but with coverage flags.
 # Coverage files from each module are merged into a single coverage-instrumentation.txt file.
 .ONESHELL:
-test-unit/instrumentation/coverage: package ## Run unit tests with coverage for instrumentation modules only
+test-unit/instrumentation/coverage: ## Run unit tests with coverage for instrumentation modules only
 	@echo "Running instrumentation unit tests with coverage..."
 	set -euo pipefail
 	rm -f ./gotest-unit-instrumentation.log
-	INSTR_MODULES=$$(find instrumentation -name "go.mod" -type f -exec dirname {} \; | grep -v "instrumentation/database/sql"); \
+	INSTR_MODULES=$$(find instrumentation -name "go.mod" -type f -exec dirname {} \; | grep -v "instrumentation/runtime" | grep -v "instrumentation/database/sql"); \
 	for moddir in $$INSTR_MODULES; do \
 		if ! find "$$moddir" -name "*_test.go" -type f | grep -q .; then \
 			echo "Skipping $$moddir (no tests)..."; \
@@ -791,33 +690,29 @@ test-integration/coverage: ## Run integration tests with coverage report
 test-integration/coverage: build build-demo
 	@echo "Running integration tests with coverage report..."
 	set -euo pipefail
-	# See test-integration: linodego builds need >20m when the suite is unsharded,
-	# and the unsharded suite can take more than 35m.
-	go -C "test" test -json -v -shuffle=on -timeout=50m -count=1 -tags integration ./integration/... -coverprofile=../coverage-integration.txt -covermode=atomic 2>&1 | tee ./gotest-integration.log
+	# See test-integration: linodego builds need >20m when the suite is unsharded.
+	go -C "test" test -json -v -shuffle=on -timeout=40m -count=1 -tags integration ./integration/... -coverprofile=../coverage-integration.txt -covermode=atomic 2>&1 | tee ./gotest-integration.log
 
 .ONESHELL:
 test-e2e: ## Run e2e tests
 test-e2e: build build-demo
 	@echo "Running e2e tests..."
 	set -euo pipefail
-	# 30m: multi-process e2e tests build demo binaries and spin up Kafka, database, and Docker
-	# containers; aggregate wall time regularly exceeds 10m on slower CI runners.
-	go -C "test" test -json -v -shuffle=on -timeout=30m -count=1 -tags e2e ./e2e/... 2>&1 | tee ./gotest-e2e.log
+	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./e2e/... 2>&1 | tee ./gotest-e2e.log
 
 .ONESHELL:
 test-e2e/coverage: ## Run e2e tests with coverage report
 test-e2e/coverage: build build-demo
 	@echo "Running e2e tests with coverage report..."
 	set -euo pipefail
-	# See test-e2e: same container and binary-build overhead applies under coverage.
-	go -C "test" test -json -v -shuffle=on -timeout=30m -count=1 -tags e2e ./e2e/... -coverprofile=../coverage-e2e.txt -covermode=atomic 2>&1 | tee ./gotest-e2e.log
+	go -C "test" test -json -v -shuffle=on -timeout=10m -count=1 -tags e2e ./e2e/... -coverprofile=../coverage-e2e.txt -covermode=atomic 2>&1 | tee ./gotest-e2e.log
 
 .PHONY: crosslink
 crosslink: $(CROSSLINK) ## Update intra-repository dependencies in all go modules
 	@# Clean .otel-build directories before generating go.work to avoid parsing generated go.mod
 	@find . -type d -name ".otel-build" -exec rm -rf {} + 2>/dev/null || true
 	@echo "Updating intra-repository dependencies in all go modules" \
-		&& $(CROSSLINK) --root=$(CURDIR) --exclude=go.opentelemetry.io/otelc/pkg --skip=go.opentelemetry.io/otelc/pkg
+		&& $(CROSSLINK) --root=$(CURDIR)
 
 .PHONY: go-work
 go-work: $(CROSSLINK) ## Generate go.work file for local development
@@ -829,7 +724,6 @@ go-work: $(CROSSLINK) ## Generate go.work file for local development
 	@# (e.g. old monolithic genproto vs. split genproto/googleapis/rpc).
 	@go work edit -dropuse ./.tools
 	@go work edit -dropuse ./.github/tools
-	@go work edit -dropuse ./pkg
 	@echo "go.work file generated successfully"
 
 .PHONY: go-mod-tidy
