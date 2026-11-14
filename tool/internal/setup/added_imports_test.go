@@ -250,3 +250,16 @@ func TestMatchDepsKeepsSources(t *testing.T) {
 	require.Len(t, matched, 1)
 	assert.Equal(t, []string{src}, matched[0].Sources)
 }
+
+func TestRuleSetAddedImportsMethodCallHasNoRequirement(t *testing.T) {
+	sp := &setupPhase{logger: slog.New(slog.DiscardHandler)}
+	set := rule.NewInstRuleSet("example.com/svc")
+	set.AddCallRule(fakeSrcFile("a.go"), &rule.InstCallRule{
+		InstBaseRule: baseRule("call", map[string]string{"w": "example.com/wrap"}),
+		MethodCall:   "(*example.com/client.Logger).Info",
+		ImportPath:   "example.com/client",
+	})
+
+	assert.Equal(t, []ruleImport{{path: "example.com/wrap"}}, sp.ruleSetAddedImports(set, false),
+		"a method call matches on the receiver type, so the file need not import its package")
+}

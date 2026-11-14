@@ -650,11 +650,15 @@ func (sp *setupPhase) writeBuildOverlay(
 	if err != nil {
 		return err
 	}
-	moduleDir, _, err := pkgload.ModuleAndWorkFile(ctx, dir)
+	moduleDir, workFile, err := pkgload.ModuleAndWorkFile(ctx, dir)
 	if err != nil {
 		return err
 	}
-	path, runtimeImports, err := sp.prepareImportOverlay(matched, filepath.Join(moduleDir, goModFileName),
+	modFile := workFile
+	if modFile == "" {
+		modFile = filepath.Join(moduleDir, goModFileName)
+	}
+	path, runtimeImports, err := sp.prepareImportOverlay(matched, modFile,
 		goroot, gomodcache, userOverlayPath(args, dir), util.GetBuildTempDir())
 	if err != nil {
 		return ex.Wrapf(err, "preparing the overlay for rule-added imports")

@@ -263,6 +263,9 @@ func (ip *instrumentPhase) updateImportConfig(newImports map[string]string) erro
 			// unsafe is built-in, C is the cgo pseudo-package; neither has an archive file
 			continue
 		}
+		if mapped, ok := ip.importConfig.ImportMap[importPath]; ok {
+			importPath = mapped
+		}
 		if _, ok := ip.importConfig.PackageFile[importPath]; ok {
 			continue
 		}

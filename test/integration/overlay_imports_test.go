@@ -310,3 +310,25 @@ func TestMain_(t *testing.T) { main() }
 	out := runOtelcCommand(t, app.dir, env, app.otelc, "go", "test", "-count=1", "-v", ".")
 	assert.Contains(t, out, "PASS")
 }
+
+func TestOverlayImportWorkspaceRootWithoutGoMod(t *testing.T) {
+	app := newOverlayApp(t, listRule("dep_list", overlayDepPath, "Hello", "dep-instrumented"))
+	root := filepath.Dir(app.dir)
+	writeTestFile(t, root, "go.work", "go 1.25.0\n\nuse ./"+filepath.Base(app.dir)+"\n")
+	writeTestFile(t, root, "rules.yml", readFile(t, filepath.Join(app.dir, "rules.yml")))
+	for i, entry := range app.env {
+		if entry == "GOWORK=off" {
+			app.env[i] = "GOWORK=" + filepath.Join(root, "go.work")
+		}
+	}
+
+	runOtelcCommand(t, root, app.env, app.otelc, "go", "build", "-o", app.binary, "example.com/ovapp")
+	assert.Contains(t, app.run(t), "dep: dep-instrumented")
+}
+
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	return string(data)
+}

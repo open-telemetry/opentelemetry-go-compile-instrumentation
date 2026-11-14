@@ -887,3 +887,15 @@ func TestUpdateImportConfigTestMainError(t *testing.T) {
 	assert.Contains(t, err.Error(), "testmain")
 	assert.NotContains(t, err.Error(), "-overlay", "no overlay can add imports to the generated testmain")
 }
+
+func TestUpdateImportConfigAcceptsImportMap(t *testing.T) {
+	ip := &instrumentPhase{
+		logger:           slog.Default(),
+		importConfigPath: filepath.Join(t.TempDir(), "importcfg"),
+		importConfig: imports.ImportConfig{
+			ImportMap:   map[string]string{"example.com/b": "example.com/b [example.com/a.test]"},
+			PackageFile: map[string]string{"example.com/b [example.com/a.test]": "/b.a"},
+		},
+	}
+	require.NoError(t, ip.updateImportConfig(map[string]string{"b": "example.com/b"}))
+}
