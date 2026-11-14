@@ -56,7 +56,7 @@ func (ip *instrumentPhase) applyFileRule(ctx context.Context, rule *rule.InstFil
 
 	// The file being added has its own imports that need to be in importcfg.
 	// Without this, the compiler will fail with "could not import X" errors.
-	if err = ip.updateImportConfigForFile(ctx, root, rule.Name); err != nil {
+	if err = ip.updateImportConfigForFile(root, rule.Name); err != nil {
 		return err
 	}
 

@@ -23,6 +23,9 @@ import (
 // packages when the build uses //otelc:ignore.
 const suppressHooksImport = "runtime"
 
+// unsafeImport is the built-in unsafe package, which has no archive.
+const unsafeImport = "unsafe"
+
 // ruleSetAddedImports returns the imports toolexec can add to set's target
 // package: every rule's declared imports, the imports of its add_file sources,
 // and the //otelc:ignore support package when usesIgnore is set. The go
@@ -34,7 +37,7 @@ func (sp *setupPhase) ruleSetAddedImports(set *rule.InstRuleSet, usesIgnore bool
 	seen := make(map[ruleImport]bool)
 	add := func(imports map[string]string, requires string) {
 		for _, path := range imports {
-			if path == set.ModulePath || path == "unsafe" || path == "C" {
+			if path == set.ModulePath || path == unsafeImport || path == "C" {
 				continue
 			}
 			seen[ruleImport{path: path, requires: requires}] = true
@@ -45,7 +48,11 @@ func (sp *setupPhase) ruleSetAddedImports(set *rule.InstRuleSet, usesIgnore bool
 	}
 	addRuleImports(set.RawRules, add, func(r *rule.InstRawRule) (map[string]string, string) { return declared(r) })
 	addRuleImports(set.FuncRules, add, func(r *rule.InstFuncRule) (map[string]string, string) { return declared(r) })
-	addRuleImports(set.StructRules, add, func(r *rule.InstStructRule) (map[string]string, string) { return declared(r) })
+	addRuleImports(
+		set.StructRules,
+		add,
+		func(r *rule.InstStructRule) (map[string]string, string) { return declared(r) },
+	)
 	addRuleImports(set.DirectiveRules, add, func(r *rule.InstDirectiveRule) (map[string]string, string) {
 		return declared(r)
 	})
@@ -199,7 +206,7 @@ func parseSources(sources []string) (string, map[string]bool) {
 			name = f.Name.Name
 		}
 		for _, imp := range f.Imports {
-			if path, err := strconv.Unquote(imp.Path.Value); err == nil {
+			if path, unquoteErr := strconv.Unquote(imp.Path.Value); unquoteErr == nil {
 				imports[path] = true
 			}
 		}

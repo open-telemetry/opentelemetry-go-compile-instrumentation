@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -373,13 +372,6 @@ func TestUpdateImportConfigPresentIsNoop(t *testing.T) {
 	got, err := os.ReadFile(cfgPath)
 	require.NoError(t, err)
 	assert.Equal(t, content, string(got))
-}
-
-func writeAddedImports(t *testing.T, packages map[string]string) {
-	t.Helper()
-	data, err := json.Marshal(packages)
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(util.GetBuildTempDir(), "added_imports.1.json"), data, 0o644))
 }
 
 func TestResolvePackageName(t *testing.T) {
@@ -792,83 +784,6 @@ func TestToolexecEmptyArgs(t *testing.T) {
 	err := Toolexec(t.Context(), []string{}, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no tool command specified")
-}
-
-// callRuleWithImports returns a call rule whose JSON unmarshals cleanly; the
-// selector must parse, so it names a real package function shape.
-func callRuleWithImports(imports map[string]string) *rule.InstCallRule {
-	return &rule.InstCallRule{
-		InstBaseRule: rule.InstBaseRule{
-			Name: "call-rule", Imports: imports,
-		},
-		FunctionCall: "example.com/b.New",
-	}
-}
-
-// writeMatchedRules stores matched.json the way setup does, so the link phase
-// can read the rule-added imports back.
-func writeMatchedRules(t *testing.T, sets []*rule.InstRuleSet) {
-	t.Helper()
-	content, err := json.Marshal(sets)
-	require.NoError(t, err)
-	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
-	require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), content, 0o600))
-}
-
-// linkArgs returns a minimal link command with importcfg at cfgPath.
-func linkArgs(cfgPath string) []string {
-	return []string{"link", "-o", "out.test", "-buildid=test", "-importcfg", cfgPath}
-}
-
-// chainLinkPackages returns stdlib packages for the depth-bound test below,
-// ordered so that no one of them imports a later one, verified against go's
-// own dependency graph: resolving any one of them never drags a later chain
-// element into the importcfg, so each recovery pass adds exactly one hop.
-func chainLinkPackages() []string {
-	return []string{
-		"cmp", "container/list", "unicode", "image/color", "unicode/utf16",
-		"container/ring", "unicode/utf8", "math/bits", "image/color/palette",
-		"math", "slices", "errors", "path", "strconv", "sort", "container/heap",
-		"hash/maphash", "hash/adler32", "hash/crc32", "hash/crc64", "hash/fnv",
-		"encoding/ascii85", "strings", "encoding/base32", "encoding/base64",
-		"encoding/hex", "text/scanner", "net/url", "crypto/rc4", "crypto/md5",
-		"crypto/des", "crypto/aes", "crypto/sha512", "crypto/sha256",
-	}
-}
-
-// chainLinkSets returns the rule sets that chain the first hops packages
-// into a d-hop chain: the set of package i declares an import of package
-// i+1, so a recovery pass resolves package i+1 only after package i joined
-// the importcfg, one hop per pass.
-func chainLinkSets(hops int) []*rule.InstRuleSet {
-	packages := chainLinkPackages()
-	sets := make([]*rule.InstRuleSet, hops)
-	for i := range sets {
-		sets[i] = &rule.InstRuleSet{
-			PackageName: "dep" + strconv.Itoa(i),
-			ModulePath:  packages[i],
-			FuncRules: map[string][]*rule.InstFuncRule{
-				"dep.go": {{InstBaseRule: rule.InstBaseRule{
-					Name:   "chain-rule",
-					Target: rule.NewTarget(packages[i]),
-					Imports: map[string]string{
-						"next": packages[i+1],
-					},
-				}}},
-			},
-		}
-	}
-	return sets
-}
-
-// linkToolPath returns a path that util.IsLinkCommandWithArgs accepts as the
-// link tool.
-func linkToolPath() string {
-	name := "link"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
-	return filepath.Join(string(filepath.Separator)+"go", "pkg", "tool", name)
 }
 
 func TestUpdateImportConfigTestMainError(t *testing.T) {

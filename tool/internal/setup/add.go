@@ -53,7 +53,7 @@ type runtimePackage struct {
 var requiredImports = map[string]string{
 	"runtime/debug": "_otel_debug", // The getstack function depends on runtime/debug
 	"log":           "_otel_log",   // The printstack function depends on log
-	"unsafe":        "_",           // The golinkname tag depends on unsafe
+	unsafeImport:    "_",           // The golinkname tag depends on unsafe
 }
 
 func genImportDecl(funcRules []*rule.InstFuncRule, fileRules []*rule.InstFileRule, added []string) []dst.Decl {

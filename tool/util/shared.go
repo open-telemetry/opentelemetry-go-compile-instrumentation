@@ -267,9 +267,12 @@ func ModFileChangedSinceSetup() (bool, error) {
 		return false, ex.Wrapf(err, "reading %s", record)
 	}
 	path, want, _ := strings.Cut(strings.TrimSpace(string(data)), "\n")
-	current, err := os.ReadFile(path)
-	if err != nil {
+	current, err := os.ReadFile(filepath.Clean(path))
+	if os.IsNotExist(err) {
 		return true, nil
+	}
+	if err != nil {
+		return false, ex.Wrapf(err, "reading %s", path)
 	}
 	sum := sha256.Sum256(current)
 	return hex.EncodeToString(sum[:]) != want, nil

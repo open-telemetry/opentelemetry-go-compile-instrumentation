@@ -233,7 +233,7 @@ func TestUpdateImportConfigForFile(t *testing.T) {
 		root := &dst.File{}
 
 		// Should not error - no imports to process
-		err := ip.updateImportConfigForFile(t.Context(), root, "test-rule")
+		err := ip.updateImportConfigForFile(root, "test-rule")
 		require.NoError(t, err)
 	})
 
@@ -255,7 +255,7 @@ func TestUpdateImportConfigForFile(t *testing.T) {
 		}
 
 		// Should not error - updateImportConfig returns early when no importcfg path
-		err := ip.updateImportConfigForFile(t.Context(), root, "test-rule")
+		err := ip.updateImportConfigForFile(root, "test-rule")
 		require.NoError(t, err)
 	})
 }

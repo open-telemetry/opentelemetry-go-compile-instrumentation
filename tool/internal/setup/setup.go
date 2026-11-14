@@ -661,10 +661,18 @@ func (sp *setupPhase) writeBuildOverlay(
 	if modFile == "" {
 		modFile = filepath.Join(moduleDir, goModFileName)
 	}
-	path, runtimeImports, err := sp.prepareImportOverlay(matched, modFile,
-		goroot, gomodcache, userOverlayPath(args, dir), util.GetBuildTempDir())
+	o, runtimeImports, err := sp.prepareImportOverlay(matched, modFile, goroot, gomodcache, util.GetBuildTempDir())
 	if err != nil {
 		return ex.Wrapf(err, "preparing the overlay for rule-added imports")
+	}
+	if len(o.Replace) > 0 {
+		if o, err = mergeUserOverlay(o, userOverlayPath(args, dir)); err != nil {
+			return err
+		}
+	}
+	path, err := writeImportOverlay(o, util.GetBuildTempDir())
+	if err != nil {
+		return err
 	}
 	sp.runtimeImports = runtimeImports
 	if path != "" && cmd.Name != "go" {
@@ -998,7 +1006,10 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 		// does over GOFLAGS.
 		goFlags = append(goFlags, flagJSON)
 	}
-	args, goFlags = withImportOverlay(args, goFlags)
+	args, overlayFlag := withImportOverlay(args)
+	if overlayFlag != "" {
+		goFlags = append(goFlags, overlayFlag)
+	}
 	newArgs, err := toolexecBuildArgs(args, execPath, vendored, goFlags...)
 	if err != nil {
 		return err
