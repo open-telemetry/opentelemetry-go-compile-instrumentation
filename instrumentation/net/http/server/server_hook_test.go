@@ -100,6 +100,54 @@ func TestBeforeServeHTTP(t *testing.T) {
 			},
 		},
 		{
+			name: "OTel exporter request is skipped",
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+			},
+			setupRequest: func() *http.Request {
+				req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/traces", nil)
+				req.Header.Set("User-Agent", "OTel OTLP Exporter Go/1.47.0")
+				return req
+			},
+			expectSpan: false,
+		},
+		{
+			name: "older OTel Go OTLP user agent is skipped",
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+			},
+			setupRequest: func() *http.Request {
+				req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/metrics", nil)
+				req.Header.Set("User-Agent", "OTel Go OTLP/0.20.0")
+				return req
+			},
+			expectSpan: false,
+		},
+		{
+			name: "OTel-Go-OTLP user agent is skipped",
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+			},
+			setupRequest: func() *http.Request {
+				req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/logs", nil)
+				req.Header.Set("User-Agent", "OTel-Go-OTLP-Exporter/1.0.0")
+				return req
+			},
+			expectSpan: false,
+		},
+		{
+			name: "OTLP ingest from another client creates a span",
+			setupEnv: func(t *testing.T) {
+				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
+			},
+			setupRequest: func() *http.Request {
+				req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/traces", nil)
+				req.Header.Set("User-Agent", "my-app/1.0")
+				return req
+			},
+			expectSpan: true,
+		},
+		{
 			name: "request with route pattern (Go 1.22+)",
 			setupEnv: func(t *testing.T) {
 				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
