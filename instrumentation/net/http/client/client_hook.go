@@ -71,6 +71,9 @@ type hookData struct {
 }
 
 func BeforeRoundTrip(ictx hook.HookContext, transport *http.Transport, req *http.Request) {
+	if !runtime.Ready() {
+		return
+	}
 	// This runs once per outbound request; keep the disabled path free of logging.
 	if !clientEnabler.Enable() {
 		return
@@ -145,6 +148,10 @@ func BeforeRoundTrip(ictx hook.HookContext, transport *http.Transport, req *http
 func AfterRoundTrip(ictx hook.HookContext, res *http.Response, err error) {
 	data, ok := ictx.GetData().(*hookData)
 	if !ok || data == nil || data.span == nil {
+		// The logger is nil for a call skipped during package initialization.
+		if !runtime.Ready() {
+			return
+		}
 		logger.Debug("AfterRoundTrip: no span from before hook")
 		return
 	}

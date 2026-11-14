@@ -30,6 +30,10 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
+func TestReadyAfterInit(t *testing.T) {
+	require.True(t, Ready())
+}
+
 func TestShutdownSignals(t *testing.T) {
 	signals := shutdownSignals()
 	require.Len(t, signals, 2)

@@ -167,6 +167,10 @@ func otelMiddleware(
 	isContentCaptureEnabled func() bool,
 ) func(*http.Request, func(*http.Request) (*http.Response, error)) (*http.Response, error) {
 	return func(req *http.Request, next func(*http.Request) (*http.Response, error)) (*http.Response, error) {
+		if !runtime.Ready() {
+			return next(req)
+		}
+		initInstrumentation()
 		if req.Body == nil {
 			return next(req)
 		}

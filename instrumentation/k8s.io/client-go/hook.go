@@ -54,6 +54,9 @@ func beforeProcessDeltas(
 	deltas cache.Deltas,
 	isInInitialList bool,
 ) {
+	if !runtime.Ready() {
+		return
+	}
 	if !k8SEnabler.Enable() {
 		logger.Debug("K8S client-go instrumentation disabled")
 		return
@@ -80,6 +83,10 @@ func beforeProcessDeltas(
 func afterProcessDeltas(ictx hook.HookContext, err error) {
 	span, ok := ictx.GetKeyData("span").(trace.Span)
 	if !ok || span == nil {
+		// The logger is nil for a call skipped during package initialization.
+		if !runtime.Ready() {
+			return
+		}
 		logger.Debug("afterProcessDeltas: no span from before hook")
 		return
 	}
@@ -98,6 +105,9 @@ func beforeProcessDeltasInBatch(
 	deltas []cache.Delta,
 	isInInitialList bool,
 ) {
+	if !runtime.Ready() {
+		return
+	}
 	if !k8SEnabler.Enable() {
 		logger.Debug("K8S client-go instrumentation disabled")
 		return
@@ -124,6 +134,10 @@ func beforeProcessDeltasInBatch(
 func afterProcessDeltasInBatch(ictx hook.HookContext, err error) {
 	span, ok := ictx.GetKeyData("span").(trace.Span)
 	if !ok || span == nil {
+		// The logger is nil for a call skipped during package initialization.
+		if !runtime.Ready() {
+			return
+		}
 		logger.Debug("afterProcessDeltasInBatch: no span from before hook")
 		return
 	}

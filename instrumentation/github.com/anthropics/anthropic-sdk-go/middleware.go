@@ -82,6 +82,10 @@ func operationName(op operationType) string {
 // API calls following GenAI semantic conventions.
 func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, error)) (*http.Response, error) {
 	return func(req *http.Request, next func(*http.Request) (*http.Response, error)) (*http.Response, error) {
+		if !runtime.Ready() {
+			return next(req)
+		}
+		initInstrumentation()
 		if req.Body == nil || req.URL == nil {
 			return next(req)
 		}

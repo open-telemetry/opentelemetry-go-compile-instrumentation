@@ -70,6 +70,9 @@ type hookData struct {
 }
 
 func BeforeServeHTTP(ictx hook.HookContext, recv interface{}, w http.ResponseWriter, r *http.Request) {
+	if !runtime.Ready() {
+		return
+	}
 	// This runs once per request; keep the disabled path free of logging.
 	if !serverEnabler.Enable() {
 		return
@@ -121,6 +124,10 @@ func BeforeServeHTTP(ictx hook.HookContext, recv interface{}, w http.ResponseWri
 func AfterServeHTTP(ictx hook.HookContext) {
 	data, ok := ictx.GetData().(*hookData)
 	if !ok || data == nil || data.span == nil {
+		// The logger is nil for a call skipped during package initialization.
+		if !runtime.Ready() {
+			return
+		}
 		logger.Debug("AfterServeHTTP: no span from before hook")
 		return
 	}

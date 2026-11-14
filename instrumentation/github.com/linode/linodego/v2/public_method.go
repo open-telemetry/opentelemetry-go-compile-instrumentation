@@ -12,6 +12,7 @@ import (
 
 	"go.opentelemetry.io/otelc/instrumentation/github.com/linode/linodego/v2/semconv"
 	"go.opentelemetry.io/otelc/pkg/hook"
+	"go.opentelemetry.io/otelc/pkg/runtime"
 )
 
 // Public API method hooks: shared beforeAPICall/afterAPICall implement the span
@@ -21,6 +22,9 @@ import (
 // Span names come from HookContext.GetFuncName().
 
 func beforeAPICall(ictx hook.HookContext, params ...interface{}) {
+	if !runtime.Ready() {
+		return
+	}
 	if !enabler.Enable() {
 		return
 	}
@@ -68,6 +72,10 @@ func beforeAPICall(ictx hook.HookContext, params ...interface{}) {
 func afterAPICall(ictx hook.HookContext, err error) {
 	span, ok := ictx.GetKeyData(keySpan).(trace.Span)
 	if !ok || span == nil {
+		// The logger is nil for a call skipped during package initialization.
+		if !runtime.Ready() {
+			return
+		}
 		logger.Debug("AfterAPICall: no span from before hook")
 		return
 	}
