@@ -64,6 +64,17 @@ you don't want to change.
    go build -o myapp .
    ```
 
+   When instrumentation adds imports to a package, `otelc setup` prints an
+   `-overlay=...` flag (it points at `.otelc-build/overlay.json`). Add it to
+   `GOFLAGS` as well, so the go command builds those imports:
+
+   ```bash
+   export GOFLAGS="${GOFLAGS} '-toolexec=otelc toolexec' -overlay=$PWD/.otelc-build/overlay.json"
+   ```
+
+   The overlay already includes the entries of any `-overlay` file you passed
+   to `otelc setup`.
+
 Run `go build` from the module directory (or any subdirectory); `otelc`
 locates the `.otelc-build` directory created by `otelc setup` from there. To
 run the build from somewhere else, set `OTELC_WORK_DIR` to the directory

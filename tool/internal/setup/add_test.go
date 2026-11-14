@@ -1020,3 +1020,18 @@ func TestAddDeps_TestRuleSetsGoToRuntimeTestFile(t *testing.T) {
 	assert.NotContains(t, string(runtimeTest), "example.com/libhook", "the runtime file already imports it")
 	assert.NotContains(t, string(runtimeTest), `_ "`+pkgPath+`"`, "a package cannot import itself")
 }
+
+func TestAddDepsWritesRuntimeFileTargetImports(t *testing.T) {
+	tmpDir := t.TempDir()
+	sp := newTestSetupPhase()
+	pkg := runtimePackage{
+		dir: tmpDir, importPath: "example.com/app", name: "main", fileTarget: true,
+		addedImports: []string{"container/list"},
+	}
+
+	require.NoError(t, sp.addDeps(contextWithStateManager(t.Context(), newStateManager()), nil, pkg))
+
+	data, err := os.ReadFile(filepath.Join(tmpDir, otelcRuntimeFile))
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `import _ "container/list"`)
+}

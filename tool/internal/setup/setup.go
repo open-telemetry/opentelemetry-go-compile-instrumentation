@@ -34,6 +34,9 @@ type setupPhase struct {
 	ruleConfig    string
 	buildPackages []*packages.Package
 	buildFlags    []string
+	// runtimeImports holds, by directory, the imports rules add to
+	// file-target packages (see prepareImportOverlay).
+	runtimeImports map[string][]string
 	// pgo is the build's effective -pgo value; see pgoValue.
 	pgo             string
 	rootModulePaths []string
@@ -380,6 +383,7 @@ func (sp *setupPhase) generateRuntimePerPackage(
 			testRuleSets:    pkgMatched.test,
 			testMode:        sp.testMode,
 			fileTarget:      pkg.PkgPath == pkgload.CommandLineArgumentsPackage,
+			addedImports:    sp.runtimeImports[pkgDir],
 		}); err != nil {
 			return ex.Wrapf(err, "adding deps for package at %s", pkgDir)
 		}
@@ -607,6 +611,11 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 
 	sp.warnIfNoInstrumentationMatched(matched)
 
+	// Make the imports rules add visible to the go command before the build.
+	if err = sp.writeBuildOverlay(ctx, cmd, args, matched); err != nil {
+		return err
+	}
+
 	// Generate otelc.runtime.go for all packages
 	if err = sp.generateRuntimePerPackage(ctx, buildPkgs, matched); err != nil {
 		return err
@@ -617,6 +626,47 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 	return sp.storeInjectedHash(ctx, matched)
+}
+
+// writeBuildOverlay writes the overlay that carries the imports the matched
+// rules add (see prepareImportOverlay). A standalone otelc setup cannot pass
+// it to the build the user runs, so it prints the flag to add to GOFLAGS.
+func (sp *setupPhase) writeBuildOverlay(
+	ctx context.Context,
+	cmd *cli.Command,
+	args []string,
+	matched []*rule.InstRuleSet,
+) error {
+	dir := util.GetOtelcWorkDir()
+	if c := commandBuildDir(cmd); c != "" {
+		if filepath.IsAbs(c) {
+			dir = c
+		} else {
+			dir = filepath.Join(dir, c)
+		}
+	}
+	goroot, err := pkgload.GOROOT(ctx, sp.buildFlags)
+	if err != nil {
+		return err
+	}
+	gomodcache, err := pkgload.GOMODCACHE(ctx, sp.buildFlags)
+	if err != nil {
+		return err
+	}
+	moduleDir, _, err := pkgload.ModuleAndWorkFile(ctx, dir)
+	if err != nil {
+		return err
+	}
+	path, runtimeImports, err := sp.prepareImportOverlay(matched, filepath.Join(moduleDir, goModFileName),
+		goroot, gomodcache, userOverlayPath(args, dir), util.GetBuildTempDir())
+	if err != nil {
+		return ex.Wrapf(err, "preparing the overlay for rule-added imports")
+	}
+	sp.runtimeImports = runtimeImports
+	if path != "" && cmd.Name != "go" {
+		_, _ = fmt.Fprintf(os.Stderr, "otelc: add -overlay=%s to GOFLAGS for the instrumented build\n", path)
+	}
+	return nil
 }
 
 // warnIfNoInstrumentationMatched reports the combined result. An individual
@@ -944,6 +994,7 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 		// does over GOFLAGS.
 		goFlags = append(goFlags, flagJSON)
 	}
+	args, goFlags = withImportOverlay(args, goFlags)
 	newArgs, err := toolexecBuildArgs(args, execPath, vendored, goFlags...)
 	if err != nil {
 		return err

@@ -19,6 +19,8 @@ import (
 	"golang.org/x/mod/module"
 
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 const (
@@ -184,19 +186,153 @@ func writeOverlaySource(srcDir, target string, content []byte) (string, error) {
 	return path, nil
 }
 
-// writeImportOverlay writes o as buildDir/overlay.json and returns its path,
-// or "" without writing anything when o is empty.
+// writeImportOverlay writes o as buildDir/overlay.json and returns its path.
+// When o is empty it removes any overlay an earlier setup left and returns "".
 func writeImportOverlay(o overlayFile, buildDir string) (string, error) {
+	path := filepath.Join(buildDir, overlayFileName)
 	if len(o.Replace) == 0 {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return "", ex.Wrapf(err, "removing stale %s", path)
+		}
 		return "", nil
 	}
 	data, err := json.Marshal(o)
 	if err != nil {
 		return "", ex.Wrapf(err, "encoding overlay")
 	}
-	path := filepath.Join(buildDir, overlayFileName)
 	if err = os.WriteFile(path, data, 0o644); err != nil {
 		return "", ex.Wrapf(err, "writing %s", path)
 	}
 	return path, nil
+}
+
+// mergeUserOverlay adds the entries of the user's overlay file at userPath to
+// ours. The go command takes one -overlay, so the build passes the merged one.
+// A path both overlays replace is an error.
+func mergeUserOverlay(ours overlayFile, userPath string) (overlayFile, error) {
+	if userPath == "" {
+		return ours, nil
+	}
+	data, err := os.ReadFile(userPath)
+	if err != nil {
+		return ours, ex.Wrapf(err, "reading -overlay file %s", userPath)
+	}
+	var user overlayFile
+	if err = json.Unmarshal(data, &user); err != nil {
+		return ours, ex.Wrapf(err, "parsing -overlay file %s", userPath)
+	}
+	merged := overlayFile{Replace: make(map[string]string, len(ours.Replace)+len(user.Replace))}
+	for from, to := range user.Replace {
+		merged.Replace[from] = to
+	}
+	for from, to := range ours.Replace {
+		if _, clash := merged.Replace[from]; clash {
+			return ours, ex.Newf("the -overlay file %s replaces %s, which otelc also has to replace", userPath, from)
+		}
+		merged.Replace[from] = to
+	}
+	return merged, nil
+}
+
+// isOverlayFlag reports whether arg is an -overlay flag and whether its value
+// is the next argument.
+func isOverlayFlag(arg string) (bool, bool) {
+	name := strings.TrimPrefix(strings.TrimPrefix(arg, "-"), "-")
+	if name == "overlay" {
+		return true, true
+	}
+	return strings.HasPrefix(name, "overlay="), false
+}
+
+// stripOverlayFlag removes -overlay flags from build arguments; arguments
+// after -args go to the test binary and stay.
+func stripOverlayFlag(args []string) []string {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		if args[i] == "-args" || args[i] == "--args" {
+			return append(out, args[i:]...)
+		}
+		if ok, takesNext := isOverlayFlag(args[i]); ok {
+			if takesNext {
+				i++
+			}
+			continue
+		}
+		out = append(out, args[i])
+	}
+	return out
+}
+
+// userOverlayPath returns the absolute path of the -overlay file the user
+// gave on the command line or in GOFLAGS, or "". A relative path resolves
+// against dir, the directory the go command runs in.
+func userOverlayPath(args []string, dir string) string {
+	find := func(args []string) string {
+		value := ""
+		for i := 0; i < len(args); i++ {
+			if args[i] == "-args" || args[i] == "--args" {
+				break
+			}
+			ok, takesNext := isOverlayFlag(args[i])
+			switch {
+			case ok && takesNext && i+1 < len(args):
+				value = args[i+1]
+				i++
+			case ok && !takesNext:
+				_, value, _ = strings.Cut(args[i], "=")
+			}
+		}
+		return value
+	}
+	path := find(args)
+	if path == "" {
+		path = find(util.SplitGoflags(os.Getenv("GOFLAGS")))
+	}
+	if path == "" || filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(dir, path)
+}
+
+// prepareImportOverlay writes the overlay that makes the go command see the
+// imports the matched rules add, merged with the user's overlay. It returns
+// the overlay path ("" when nothing needs one) and, keyed by directory, the
+// imports of file-target packages, which go into their otelc.runtime.go.
+func (sp *setupPhase) prepareImportOverlay(
+	matched []*rule.InstRuleSet,
+	goModPath, goroot, gomodcache, userOverlay, buildDir string,
+) (string, map[string][]string, error) {
+	targets, err := sp.importTargets(matched, goroot, gomodcache)
+	if err != nil {
+		return "", nil, err
+	}
+	runtimeImports := make(map[string][]string)
+	for _, t := range targets {
+		if t.Kind == kindRuntimeFile {
+			runtimeImports[t.Dir] = t.Imports
+		}
+	}
+	o, err := buildImportOverlay(targets, goModPath, buildDir)
+	if err != nil {
+		return "", nil, err
+	}
+	if len(o.Replace) > 0 {
+		if o, err = mergeUserOverlay(o, userOverlay); err != nil {
+			return "", nil, err
+		}
+	}
+	path, err := writeImportOverlay(o, buildDir)
+	return path, runtimeImports, err
+}
+
+// withImportOverlay points the instrumented build at the overlay setup wrote,
+// if any. The overlay already holds the user's entries, so the user's own
+// -overlay flag is dropped; a command-line flag would win over goFlags.
+func withImportOverlay(args, goFlags []string) ([]string, []string) {
+	path := filepath.Join(util.GetBuildTempDir(), overlayFileName)
+	if !util.PathExists(path) {
+		return args, goFlags
+	}
+	args = append([]string{args[0]}, stripOverlayFlag(args[1:])...)
+	return args, append(goFlags, "-overlay="+path)
 }
