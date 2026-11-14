@@ -29,7 +29,6 @@ const (
 )
 
 var (
-	logger     = runtime.Logger()
 	tracer     trace.Tracer
 	propagator propagation.TextMapPropagator
 	initOnce   sync.Once
@@ -42,7 +41,7 @@ func initInstrumentation() {
 			trace.WithInstrumentationVersion(runtime.ModuleVersion()),
 		)
 		propagator = otel.GetTextMapPropagator()
-		logger.Info("HTTP server instrumentation initialized")
+		runtime.Logger().Info("HTTP server instrumentation initialized")
 	})
 }
 
@@ -50,7 +49,7 @@ func initInstrumentation() {
 // checking the level, so an unguarded call pays for r.URL.String() and
 // attribute boxing on every request even when debug logging is off.
 func debugEnabled(ctx context.Context) bool {
-	return logger.Enabled(ctx, slog.LevelDebug)
+	return runtime.Logger().Enabled(ctx, slog.LevelDebug)
 }
 
 // netHttpServerEnabler controls whether server instrumentation is enabled
@@ -90,7 +89,8 @@ func BeforeServeHTTP(ictx hook.HookContext, recv interface{}, w http.ResponseWri
 	// again, so the loop never stops. The client hook skips the same agents.
 	if r != nil && isOTelExporterRequest(r) {
 		if debugEnabled(r.Context()) {
-			logger.DebugContext(r.Context(), "Skipping OTel exporter request", "user_agent", r.Header.Get("User-Agent"))
+			runtime.Logger().DebugContext(r.Context(), "Skipping OTel exporter request",
+				"user_agent", r.Header.Get("User-Agent"))
 		}
 		return
 	}
@@ -98,7 +98,7 @@ func BeforeServeHTTP(ictx hook.HookContext, recv interface{}, w http.ResponseWri
 	initInstrumentation()
 
 	if debugEnabled(r.Context()) {
-		logger.DebugContext(r.Context(), "BeforeServeHTTP called",
+		runtime.Logger().DebugContext(r.Context(), "BeforeServeHTTP called",
 			"method", r.Method,
 			"url", r.URL.String(),
 			"remote_addr", r.RemoteAddr)
@@ -147,7 +147,7 @@ func AfterServeHTTP(ictx hook.HookContext) {
 
 	data, ok := ictx.GetData().(*hookData)
 	if !ok || data == nil || data.span == nil {
-		logger.DebugContext(ctx, "AfterServeHTTP: no span from before hook")
+		runtime.Logger().DebugContext(ctx, "AfterServeHTTP: no span from before hook")
 		return
 	}
 	span := data.span
@@ -181,7 +181,7 @@ func AfterServeHTTP(ictx hook.HookContext) {
 	}
 
 	if debugEnabled(ctx) {
-		logger.DebugContext(ctx, "AfterServeHTTP called",
+		runtime.Logger().DebugContext(ctx, "AfterServeHTTP called",
 			"status_code", statusCode,
 			"duration_ms", time.Since(data.start).Milliseconds())
 	}
