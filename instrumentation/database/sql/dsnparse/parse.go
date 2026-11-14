@@ -135,9 +135,10 @@ func builtinParser(driverName string) (DSNParser, bool) {
 	return nil, false
 }
 
-// RegisterDSNParser registers a custom DSN parser for driverName. Built-in
-// parsers are registered automatically; registering an already-known name
-// overwrites the previous parser. It is safe to call from init().
+// RegisterDSNParser registers a custom DSN parser for driverName. A parser
+// registered for a built-in driver name takes precedence over the built-in
+// one, and registering a name again overwrites the previous parser. It is
+// safe to call from init().
 func RegisterDSNParser(driverName string, parser DSNParser) {
 	defaultRegistry.register(driverName, parser)
 }

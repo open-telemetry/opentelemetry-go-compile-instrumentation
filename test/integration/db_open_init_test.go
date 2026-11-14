@@ -25,10 +25,11 @@ func TestDBOpenedDuringInit(t *testing.T) {
 	output := f.Run("dbopeninit")
 
 	require.NotContains(t, output, "failed to exec")
-	f.WaitForSpans(2)
+	f.WaitForSpans(3)
 	pingSpan := testutil.RequireSpan(t, f.Traces(),
 		testutil.IsClient,
 		testutil.HasAttribute(string(semconv.DBOperationNameKey), "PING"),
+		testutil.HasAttribute(string(semconv.DBNamespaceKey), "testdb"),
 	)
 	testutil.RequireDBClientSemconv(t, pingSpan, "PING", "ping", "unknown", 0, "testdb")
 	execSpan := testutil.RequireSpan(t, f.Traces(),
@@ -37,4 +38,11 @@ func TestDBOpenedDuringInit(t *testing.T) {
 	)
 	testutil.RequireDBClientSemconv(t, execSpan,
 		"INSERT", "INSERT INTO users (name) VALUES ('x')", "unknown", 0, "testdb")
+	mysqlSpan := testutil.RequireSpan(t, f.Traces(),
+		testutil.IsClient,
+		testutil.HasAttribute(string(semconv.DBOperationNameKey), "PING"),
+		testutil.HasAttribute(string(semconv.DBNamespaceKey), "inventory"),
+	)
+	testutil.RequireDBClientSemconv(t, mysqlSpan, "PING", "ping", "localhost", 3306, "inventory")
+	testutil.RequireAttribute(t, mysqlSpan, "db.system.name", "mysql")
 }
