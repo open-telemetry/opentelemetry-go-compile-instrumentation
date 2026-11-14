@@ -469,7 +469,7 @@ func TestShutdown_RemovesChannelMapEntries(t *testing.T) {
 	setupTest(t)
 
 	ch := &amqp.Channel{}
-	stashPublishParent(ch, context.Background())
+	stashPublishParent(context.Background(), ch)
 	_ = acksFor(ch)
 
 	_, publishParentsOK := publishParents.Load(ch)
@@ -527,7 +527,7 @@ func TestShutdown_DoesNotAffectOtherChannels(t *testing.T) {
 	closed := &amqp.Channel{}
 	other := &amqp.Channel{}
 
-	stashPublishParent(other, context.Background())
+	stashPublishParent(context.Background(), other)
 	ictx := hooktest.NewMockHookContext()
 	ictx.SetData(&consumeData{ch: other, queue: "orders", autoAck: false})
 	AfterGet(ictx, amqp.Delivery{Acknowledger: stubAck{}, DeliveryTag: 1}, true, nil)
@@ -611,4 +611,43 @@ func TestPublishAfterCanceledPublishWithContext_DoesNotReuseItsParent(t *testing
 			require.False(t, send.Parent().IsValid(), "send span must not use the canceled call's span as parent")
 		})
 	}
+}
+
+func TestAfterPublishWithContext_KeepsALaterCallsParent(t *testing.T) {
+	sr := setupTest(t)
+
+	ch := &amqp.Channel{}
+	msg := amqp.Publishing{Body: []byte("hello")}
+
+	// Call A stashes its context and its inner hook takes it.
+	ctxA, spanA := tracer.Start(context.Background(), "request A")
+	a := hooktest.NewMockHookContext()
+	BeforePublishWithContext(a, ch, ctxA, "ex", "rk", false, false, msg)
+	pubA := hooktest.NewMockHookContext(ch, "ex", "rk", false, false, msg)
+	BeforePublishWithDeferredConfirm(pubA, ch, "ex", "rk", false, false, msg)
+
+	// Call B stashes its context before A's after hooks run.
+	ctxB, spanB := tracer.Start(context.Background(), "request B")
+	b := hooktest.NewMockHookContext()
+	BeforePublishWithContext(b, ch, ctxB, "ex", "rk", false, false, msg)
+
+	AfterPublishWithDeferredConfirm(pubA, nil, nil)
+	AfterPublishWithContext(a, nil)
+
+	pubB := hooktest.NewMockHookContext(ch, "ex", "rk", false, false, msg)
+	BeforePublishWithDeferredConfirm(pubB, ch, "ex", "rk", false, false, msg)
+	AfterPublishWithDeferredConfirm(pubB, nil, nil)
+	AfterPublishWithContext(b, nil)
+	spanA.End()
+	spanB.End()
+
+	var parents []trace.SpanID
+	for _, s := range sr.Ended() {
+		if s.Name() == "ex send" {
+			parents = append(parents, s.Parent().SpanID())
+		}
+	}
+	require.Equal(t, []trace.SpanID{spanA.SpanContext().SpanID(), spanB.SpanContext().SpanID()}, parents)
+	_, ok := publishParents.Load(ch)
+	require.False(t, ok, "both calls must leave no stashed context behind")
 }

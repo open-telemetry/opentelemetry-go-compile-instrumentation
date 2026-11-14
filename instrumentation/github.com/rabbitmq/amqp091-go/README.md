@@ -20,9 +20,10 @@ map. The copy is shallow. Only top-level keys are added.
 The library drops the `PublishWithContext` context before
 `PublishWithDeferredConfirm`. The WithContext before-hooks store that
 context so the send span uses it as the parent. If that context has no span,
-the send span uses the GLS span (inbound HTTP or gRPC). The WithContext
-after-hooks drop the stored context when the library returns before
-publishing, for example because the context is already done.
+the send span uses the GLS span (inbound HTTP or gRPC). The library returns
+without publishing when the context is already done. The WithContext
+after-hooks then drop the stored context, so a later publish on the Channel
+does not use it.
 
 `publishParents` holds one context per `*Channel`. Two goroutines calling
 `PublishWithContext` on the same Channel can use each other's context as

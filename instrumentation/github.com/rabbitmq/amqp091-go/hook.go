@@ -65,9 +65,9 @@ func initInstrumentation() {
 func parentContext(ch *amqp.Channel) context.Context {
 	if ch != nil {
 		if v, ok := publishParents.LoadAndDelete(ch); ok {
-			if ctx, ok := v.(context.Context); ok && ctx != nil {
-				if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {
-					return ctx
+			if p, isParent := v.(*publishParent); isParent && p != nil && p.ctx != nil {
+				if span := trace.SpanFromContext(p.ctx); span.SpanContext().IsValid() {
+					return p.ctx
 				}
 			}
 		}
@@ -97,11 +97,27 @@ func cloneTable(t amqp.Table) amqp.Table {
 	return out
 }
 
-func stashPublishParent(ch *amqp.Channel, ctx context.Context) {
+// publishParent is the context one WithContext call stashed for its channel.
+// publishParents maps each *amqp.Channel to one.
+// The pointer identifies the call, so its after hook removes only its own
+// entry and not one stashed by a later publish on the same channel.
+type publishParent struct {
+	ctx context.Context
+}
+
+// stashedParent is what a WithContext before hook passes to its after hook.
+type stashedParent struct {
+	ch     *amqp.Channel
+	parent *publishParent
+}
+
+func stashPublishParent(ctx context.Context, ch *amqp.Channel) *publishParent {
 	if !enabler.Enable() || ch == nil || ctx == nil {
-		return
+		return nil
 	}
-	publishParents.Store(ch, ctx)
+	p := &publishParent{ctx: ctx}
+	publishParents.Store(ch, p)
+	return p
 }
 
 func acksFor(ch *amqp.Channel) *pendingAcks {
@@ -134,8 +150,9 @@ func BeforePublishWithContext(
 	_ /*mandatory*/, _ /*immediate*/ bool,
 	_ amqp.Publishing,
 ) {
-	stashPublishParent(ch, ctx)
-	ictx.SetData(ch)
+	if p := stashPublishParent(ctx, ch); p != nil {
+		ictx.SetData(stashedParent{ch: ch, parent: p})
+	}
 }
 
 // AfterPublishWithContext drops the stashed context if the inner
@@ -156,8 +173,9 @@ func BeforePublishWithDeferredConfirmWithContext(
 	_ /*mandatory*/, _ /*immediate*/ bool,
 	_ amqp.Publishing,
 ) {
-	stashPublishParent(ch, ctx)
-	ictx.SetData(ch)
+	if p := stashPublishParent(ctx, ch); p != nil {
+		ictx.SetData(stashedParent{ch: ch, parent: p})
+	}
 }
 
 // AfterPublishWithDeferredConfirmWithContext drops the stashed context if the
@@ -166,10 +184,11 @@ func AfterPublishWithDeferredConfirmWithContext(ictx hook.HookContext, _ *amqp.D
 	dropPublishParent(ictx)
 }
 
-// dropPublishParent removes the context stashed by the matching before hook.
+// dropPublishParent removes the context stashed by the matching before hook,
+// unless another publish on the channel has replaced it since.
 func dropPublishParent(ictx hook.HookContext) {
-	if ch, ok := ictx.GetData().(*amqp.Channel); ok && ch != nil {
-		publishParents.Delete(ch)
+	if s, ok := ictx.GetData().(stashedParent); ok {
+		publishParents.CompareAndDelete(s.ch, s.parent)
 	}
 }
 
