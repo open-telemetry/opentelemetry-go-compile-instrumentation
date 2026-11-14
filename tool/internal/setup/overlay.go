@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -222,9 +223,7 @@ func mergeUserOverlay(ours overlayFile, userPath string) (overlayFile, error) {
 		return ours, ex.Wrapf(err, "parsing -overlay file %s", userPath)
 	}
 	merged := overlayFile{Replace: make(map[string]string, len(ours.Replace)+len(user.Replace))}
-	for from, to := range user.Replace {
-		merged.Replace[from] = to
-	}
+	maps.Copy(merged.Replace, user.Replace)
 	for from, to := range ours.Replace {
 		if _, clash := merged.Replace[from]; clash {
 			return ours, ex.Newf("the -overlay file %s replaces %s, which otelc also has to replace", userPath, from)
