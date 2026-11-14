@@ -42,5 +42,6 @@ func matchRuntimeGLS(deps []*Dependency) ([]*rule.InstRuleSet, error) {
 		}
 	}
 	rset := toolruntime.BuildRuleSet(runtime2File, procFile, glsDir)
+	rset.Sources = runtimeDep.Sources
 	return []*rule.InstRuleSet{rset}, nil
 }

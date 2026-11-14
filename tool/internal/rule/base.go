@@ -112,6 +112,10 @@ type InstRuleSet struct {
 	// IsTest reports whether the set was matched against a test build of the
 	// package. A go test run can compile the same import path both ways.
 	IsTest bool `json:"is_test,omitempty"`
+	// Sources lists the files the go command compiles for the package. Setup
+	// reads them to find the package's directory, name and imports; it is
+	// not stored in matched.json.
+	Sources []string `json:"-"`
 }
 
 func NewInstRuleSet(importPath string) *InstRuleSet {

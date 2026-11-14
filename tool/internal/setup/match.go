@@ -145,6 +145,7 @@ func (sp *setupPhase) runMatch(
 	sp = sp.withMatchDiagnostics(dep)
 	set := rule.NewInstRuleSet(dep.ImportPath)
 	set.IsTest = dep.IsTest
+	set.Sources = dep.Sources
 
 	if len(dep.CgoFiles) > 0 {
 		set.SetCgoFileMap(dep.CgoFiles)
