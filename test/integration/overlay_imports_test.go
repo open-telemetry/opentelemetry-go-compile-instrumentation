@@ -332,3 +332,12 @@ func readFile(t *testing.T, path string) string {
 	require.NoError(t, err)
 	return string(data)
 }
+
+func TestOverlayImportModFile(t *testing.T) {
+	app := newOverlayApp(t, listRule("dep_list", overlayDepPath, "Hello", "dep-instrumented"))
+	writeTestFile(t, app.dir, "alt.mod", readFile(t, filepath.Join(app.dir, "go.mod")))
+	writeTestFile(t, app.dir, "alt.sum", readFile(t, filepath.Join(app.dir, "go.sum")))
+
+	app.build(t, "-modfile=alt.mod", ".")
+	assert.Contains(t, app.run(t), "dep: dep-instrumented")
+}
