@@ -4,7 +4,6 @@
 package instrument
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -21,7 +20,7 @@ import (
 )
 
 // applyFileRule introduces the new file to the target package at compile time.
-func (ip *instrumentPhase) applyFileRule(ctx context.Context, fileRule *rule.InstFileRule, pkgName string) error {
+func (ip *instrumentPhase) applyFileRule(fileRule *rule.InstFileRule, pkgName string) error {
 	if pkgName == "" {
 		return ex.Newf("cannot resolve the package name for rule %q; refusing to add %s",
 			fileRule.Name, fileRule.File)
