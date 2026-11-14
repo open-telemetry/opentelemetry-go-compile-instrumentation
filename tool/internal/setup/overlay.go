@@ -140,10 +140,10 @@ func mapModule(o overlayFile, mod moduleRoot, buildDir string) (string, error) {
 	}
 	if !hasGoMod {
 		goMod := filepath.Join(replaceDir, "go.mod")
-		src, err := writeOverlaySource(filepath.Join(buildDir, overlaySourcesDir), goMod,
+		src, writeErr := writeOverlaySource(filepath.Join(buildDir, overlaySourcesDir), goMod,
 			[]byte("module "+mod.Path+"\n"))
-		if err != nil {
-			return "", err
+		if writeErr != nil {
+			return "", writeErr
 		}
 		o.Replace[goMod] = src
 	}
@@ -207,7 +207,7 @@ func replacedGoMod(modFilePath string, replaced map[moduleRoot]string, srcDir st
 func writeOverlaySource(srcDir, target string, content []byte) (string, error) {
 	sum := sha256.Sum256([]byte(target))
 	path := filepath.Join(srcDir, hex.EncodeToString(sum[:8])+"-"+filepath.Base(target))
-	if err := os.WriteFile(path, content, 0o644); err != nil {
+	if err := os.WriteFile(path, content, 0o600); err != nil {
 		return "", ex.Wrapf(err, "writing overlay file for %s", target)
 	}
 	return path, nil
@@ -227,7 +227,7 @@ func writeImportOverlay(o overlayFile, buildDir string) (string, error) {
 	if err != nil {
 		return "", ex.Wrapf(err, "encoding overlay")
 	}
-	if err = os.WriteFile(path, data, 0o644); err != nil {
+	if err = os.WriteFile(path, data, 0o600); err != nil {
 		return "", ex.Wrapf(err, "writing %s", path)
 	}
 	return path, nil
@@ -259,14 +259,18 @@ func mergeUserOverlay(ours overlayFile, userPath string) (overlayFile, error) {
 	return merged, nil
 }
 
-// isFlag reports whether arg is the build flag -name and whether its value is
-// the next argument.
-func isFlag(arg, name string) (bool, bool) {
-	trimmed := strings.TrimPrefix(strings.TrimPrefix(arg, "-"), "-")
+// flagAt reports whether args[i] is the build flag -name. It returns the
+// flag's value and the index of the last argument the flag uses.
+func flagAt(args []string, i int, name string) (string, int, bool) {
+	trimmed := strings.TrimPrefix(strings.TrimPrefix(args[i], "-"), "-")
 	if trimmed == name {
-		return true, true
+		if i+1 < len(args) {
+			return args[i+1], i + 1, true
+		}
+		return "", i, true
 	}
-	return strings.HasPrefix(trimmed, name+"="), false
+	value, ok := strings.CutPrefix(trimmed, name+"=")
+	return value, i, ok
 }
 
 // stripOverlayFlag removes -overlay flags from build arguments; arguments
@@ -277,10 +281,8 @@ func stripOverlayFlag(args []string) []string {
 		if args[i] == "-args" || args[i] == "--args" {
 			return append(out, args[i:]...)
 		}
-		if ok, takesNext := isFlag(args[i], "overlay"); ok {
-			if takesNext {
-				i++
-			}
+		if _, last, ok := flagAt(args, i, "overlay"); ok {
+			i = last
 			continue
 		}
 		out = append(out, args[i])
@@ -309,13 +311,8 @@ func userFlagPath(args []string, dir, flag string) string {
 			if args[i] == "-args" || args[i] == "--args" {
 				break
 			}
-			ok, takesNext := isFlag(args[i], flag)
-			switch {
-			case ok && takesNext && i+1 < len(args):
-				value = args[i+1]
-				i++
-			case ok && !takesNext:
-				_, value, _ = strings.Cut(args[i], "=")
+			if v, last, ok := flagAt(args, i, flag); ok {
+				value, i = v, last
 			}
 		}
 		return value
@@ -330,17 +327,16 @@ func userFlagPath(args []string, dir, flag string) string {
 	return filepath.Join(dir, path)
 }
 
-// prepareImportOverlay writes the overlay that makes the go command see the
-// imports the matched rules add, merged with the user's overlay. It returns
-// the overlay path ("" when nothing needs one) and, keyed by directory, the
+// prepareImportOverlay builds the overlay that makes the go command see the
+// imports the matched rules add. It also returns, keyed by directory, the
 // imports of file-target packages, which go into their otelc.runtime.go.
 func (sp *setupPhase) prepareImportOverlay(
 	matched []*rule.InstRuleSet,
-	goModPath, goroot, gomodcache, userOverlay, buildDir string,
-) (string, map[string][]string, error) {
+	modFile, goroot, gomodcache, buildDir string,
+) (overlayFile, map[string][]string, error) {
 	targets, err := sp.importTargets(matched, goroot, gomodcache)
 	if err != nil {
-		return "", nil, err
+		return overlayFile{}, nil, err
 	}
 	runtimeImports := make(map[string][]string)
 	for _, t := range targets {
@@ -348,27 +344,18 @@ func (sp *setupPhase) prepareImportOverlay(
 			runtimeImports[t.Dir] = t.Imports
 		}
 	}
-	o, err := buildImportOverlay(targets, goModPath, buildDir)
-	if err != nil {
-		return "", nil, err
-	}
-	if len(o.Replace) > 0 {
-		if o, err = mergeUserOverlay(o, userOverlay); err != nil {
-			return "", nil, err
-		}
-	}
-	path, err := writeImportOverlay(o, buildDir)
-	return path, runtimeImports, err
+	o, err := buildImportOverlay(targets, modFile, buildDir)
+	return o, runtimeImports, err
 }
 
-// withImportOverlay points the instrumented build at the overlay setup wrote,
-// if any. The overlay already holds the user's entries, so the user's own
-// -overlay flag is dropped; a command-line flag would win over goFlags.
-func withImportOverlay(args, goFlags []string) ([]string, []string) {
+// withImportOverlay returns the build arguments and the -overlay flag that
+// point the instrumented build at the overlay setup wrote, or args unchanged
+// and "" when there is none. The overlay already holds the user's entries, so
+// the user's own -overlay flag is dropped.
+func withImportOverlay(args []string) ([]string, string) {
 	path := filepath.Join(util.GetBuildTempDir(), overlayFileName)
 	if !util.PathExists(path) {
-		return args, goFlags
+		return args, ""
 	}
-	args = append([]string{args[0]}, stripOverlayFlag(args[1:])...)
-	return args, append(goFlags, "-overlay="+path)
+	return append([]string{args[0]}, stripOverlayFlag(args[1:])...), "-overlay=" + path
 }

@@ -74,7 +74,10 @@ func newOverlayApp(t *testing.T, rules string) *overlayApp {
 	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
 	require.NoError(t, err)
 
-	app := &overlayApp{dir: t.TempDir(), otelc: otelcPath}
+	// macOS temp dirs sit behind a symlink; the go command reports resolved paths.
+	appDir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	app := &overlayApp{dir: appDir, otelc: otelcPath}
 	app.binary = filepath.Join(app.dir, "app")
 	if util.IsWindows() {
 		app.binary += ".exe"

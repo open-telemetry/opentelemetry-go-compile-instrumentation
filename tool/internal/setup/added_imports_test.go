@@ -33,8 +33,13 @@ func TestRuleSetAddedImportsCollectsEveryRuleKind(t *testing.T) {
 	set.AddDeclRule(src, &rule.InstDeclRule{InstBaseRule: baseRule("decl", map[string]string{"_": "example.com/decl"})})
 
 	assert.Equal(t, []ruleImport{
-		{path: "example.com/call"}, {path: "example.com/decl"}, {path: "example.com/dir"},
-		{path: "example.com/fn"}, {path: "example.com/lit"}, {path: "example.com/raw"}, {path: "example.com/st"},
+		{path: "example.com/call"},
+		{path: "example.com/decl"},
+		{path: "example.com/dir"},
+		{path: "example.com/fn"},
+		{path: "example.com/lit"},
+		{path: "example.com/raw"},
+		{path: "example.com/st"},
 	}, sp.ruleSetAddedImports(set, false))
 }
 
@@ -57,7 +62,11 @@ func TestRuleSetAddedImportsIncludesFileRuleSourceImports(t *testing.T) {
 func TestRuleSetAddedImportsAddsRuntimeForIgnore(t *testing.T) {
 	sp := &setupPhase{logger: slog.New(slog.DiscardHandler)}
 
-	assert.Equal(t, []ruleImport{{path: "runtime"}}, sp.ruleSetAddedImports(rule.NewInstRuleSet("example.com/svc"), true))
+	assert.Equal(
+		t,
+		[]ruleImport{{path: "runtime"}},
+		sp.ruleSetAddedImports(rule.NewInstRuleSet("example.com/svc"), true),
+	)
 	assert.Empty(t, sp.ruleSetAddedImports(rule.NewInstRuleSet("runtime"), true))
 	assert.Empty(t, sp.ruleSetAddedImports(rule.NewInstRuleSet("example.com/svc"), false))
 }
@@ -236,7 +245,11 @@ func TestImportTargetsStdGainsNonStdImport(t *testing.T) {
 
 func TestMatchDepsKeepsSources(t *testing.T) {
 	ruleFile := filepath.Join(t.TempDir(), "rules.yaml")
-	mustWriteFile(t, ruleFile, "hook:\n  target: example.com/svc\n  func: Handler\n  before: Before\n  path: \"example.com/hooks\"\n")
+	mustWriteFile(
+		t,
+		ruleFile,
+		"hook:\n  target: example.com/svc\n  func: Handler\n  before: Before\n  path: \"example.com/hooks\"\n",
+	)
 	src := writeGoSource(t, "svc.go", "package svc\n\nfunc Handler() {}\n")
 	sp := newTestSetupPhase()
 	sp.ruleConfig = ruleFile
