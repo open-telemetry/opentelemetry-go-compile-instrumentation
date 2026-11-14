@@ -109,6 +109,10 @@ Field notes:
 
 `otelc setup` passes every rule-added import to the go command through `-overlay`, so the go command builds those packages itself. When the rule for `p` adds an import of `q` and `q` imports `p` (directly, or because a rule adds that import too), the go command reports the import cycle before the build starts. The added imports must not form a cycle. This applies to the `imports` field and to function hook rules alike.
 
+#### Imports into the test main package
+
+Under `go test`, `target: main` matches the test main package that the go command generates. The go command fixes the imports of that package, so a rule that targets it cannot add new imports. Reach such packages through `//go:linkname` instead, as the bundled `init_sdk` rule does.
+
 ### Quick demo
 
 A single rule that instruments `(*sql.DB).Exec` — but only in files that also define an `init` function:
