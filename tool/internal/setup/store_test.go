@@ -4,8 +4,10 @@
 package setup
 
 import (
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -292,4 +294,170 @@ func TestResolveRulePaths_DuplicateAndUnsortedModuleDirs(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, hooksDir, rs.AllFuncRules()[0].ResolvedPath)
 	assert.Equal(t, callerOrig, callerDirs, "caller slice must not be mutated")
+}
+
+func TestSetupPhaseInjectedHash(t *testing.T) {
+	modDir := t.TempDir()
+	writeFile := func(name, content string) {
+		t.Helper()
+		path := filepath.Join(modDir, name)
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+	}
+	writeFile("go.mod", "module example.com/m\n\ngo 1.25.0\n")
+	writeFile("extra/extra.go",
+		"package extra\n\nimport \"example.com/m/extra2\"\n\nfunc Marker() string { return extra2.Tag }\n")
+	writeFile("extra2/extra2.go", "package extra2\n\nconst Tag = \"v1\"\n")
+	writeFile("hooks/added.go", "//go:build ignore\n\npackage hooks\n")
+	t.Chdir(modDir)
+
+	set := rule.NewInstRuleSet("example.com/m/dep")
+	set.AddCallRule(fakeSrcFile("dep.go"), &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Imports: map[string]string{"extra": "example.com/m/extra"}},
+	})
+	set.AddFileRule(&rule.InstFileRule{File: "added.go", ResolvedPath: filepath.Join(modDir, "hooks")})
+	matched := []*rule.InstRuleSet{set}
+
+	sp := newTestSetupPhase()
+	hash := func() string {
+		t.Helper()
+		h, err := sp.injectedHash(t.Context(), matched)
+		require.NoError(t, err)
+		return h
+	}
+
+	first := hash()
+	assert.Equal(t, first, hash(), "an unchanged build must keep its hash")
+
+	// extra2 is only a dependency of the package the rule imports.
+	writeFile("extra2/extra2.go", "package extra2\n\nconst Tag = \"v2\"\n")
+	second := hash()
+	assert.NotEqual(t, first, second)
+
+	writeFile("hooks/added.go", "//go:build ignore\n\npackage hooks\n\nvar _ = 1\n")
+	third := hash()
+	assert.NotEqual(t, second, third)
+
+	writeFile("go.mod", "module example.com/m\n\ngo 1.24.0\n")
+	assert.NotEqual(t, third, hash(), "a change of the go directive alone must change the hash")
+
+	require.NoError(t, os.Remove(filepath.Join(modDir, "hooks", "added.go")))
+	_, err := sp.injectedHash(t.Context(), matched)
+	require.ErrorContains(t, err, "added.go", "a missing add_file source must fail the hash")
+}
+
+func TestStoreInjectedHashFailsOnLoadError(t *testing.T) {
+	modDir := t.TempDir()
+	goMod := []byte("module example.com/m\n\ngo 1.25.0\n")
+	require.NoError(t, os.WriteFile(filepath.Join(modDir, "go.mod"), goMod, 0o644))
+	t.Chdir(modDir)
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	require.NoError(t, os.MkdirAll(filepath.Join(workDir, util.BuildTempDir), 0o755))
+
+	set := rule.NewInstRuleSet("example.com/m/dep")
+	set.AddCallRule(fakeSrcFile("dep.go"), &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Imports: map[string]string{"missing": "example.com/m/missing"}},
+	})
+
+	err := newTestSetupPhase().storeInjectedHash(t.Context(), []*rule.InstRuleSet{set})
+	require.ErrorContains(t, err, "example.com/m/missing")
+	assert.NoFileExists(t, util.GetInjectedHashFile(), "an incomplete hash must not be stored")
+}
+
+func TestHashPackages(t *testing.T) {
+	goroot := t.TempDir()
+	hashOf := func(pkgs ...*packages.Package) string {
+		t.Helper()
+		var b strings.Builder
+		require.NoError(t, hashPackages(&b, goroot, pkgs))
+		return b.String()
+	}
+
+	// A versioned module in the module cache is identified by its version, so its files are not read.
+	modCache := t.TempDir()
+	versioned := &packages.Package{
+		PkgPath: "example.com/v/p",
+		Module:  &packages.Module{Path: "example.com/v", Version: "v1.2.3", Dir: modCache},
+		GoFiles: []string{filepath.Join(modCache, "missing.go")},
+	}
+	assert.Equal(t, "example.com/v/p example.com/v@v1.2.3\n", hashOf(versioned))
+
+	replaced := &packages.Package{
+		PkgPath: "example.com/v/p",
+		Module: &packages.Module{
+			Path: "example.com/v", Version: "v1.2.3",
+			Replace: &packages.Module{Path: "example.com/fork", Version: "v1.2.4", Dir: modCache},
+		},
+	}
+	assert.Equal(t, "example.com/v/p example.com/fork@v1.2.4\n", hashOf(replaced))
+
+	// Under -mod=vendor the version comes from vendor/modules.txt but Dir is empty,
+	// and the vendored files can change without a version bump.
+	vendorFile := filepath.Join(t.TempDir(), "vendor", "example.com", "v", "p", "p.go")
+	require.NoError(t, os.MkdirAll(filepath.Dir(vendorFile), 0o755))
+	require.NoError(t, os.WriteFile(vendorFile, []byte("package p\n"), 0o644))
+	vendored := &packages.Package{
+		PkgPath: "example.com/v/p",
+		Module:  &packages.Module{Path: "example.com/v", Version: "v1.2.3"},
+		GoFiles: []string{vendorFile},
+	}
+	vendoredBefore := hashOf(vendored)
+	assert.Contains(t, vendoredBefore, vendorFile)
+	require.NoError(t, os.WriteFile(vendorFile, []byte("package p\n\nconst X = 1\n"), 0o644))
+	assert.NotEqual(t, vendoredBefore, hashOf(vendored))
+
+	// The standard library is covered by the toolchain version, so its files are not read.
+	std := &packages.Package{PkgPath: "fmt", GoFiles: []string{filepath.Join(goroot, "src", "fmt", "missing.go")}}
+	assert.Empty(t, hashOf(std))
+
+	// A package with no module outside GOROOT, as from GOPATH, is hashed by content.
+	gopathFile := filepath.Join(t.TempDir(), "src", "fmtx", "fmtx.go")
+	require.NoError(t, os.MkdirAll(filepath.Dir(gopathFile), 0o755))
+	require.NoError(t, os.WriteFile(gopathFile, []byte("package fmtx\n"), 0o644))
+	gopath := &packages.Package{PkgPath: "fmtx", GoFiles: []string{gopathFile}}
+	gopathBefore := hashOf(gopath)
+	assert.Contains(t, gopathBefore, gopathFile)
+	assert.Equal(t, gopathBefore, hashOf(std, gopath), "the standard library must stay skipped beside it")
+	require.NoError(t, os.WriteFile(gopathFile, []byte("package fmtx\n\nconst X = 1\n"), 0o644))
+	assert.NotEqual(t, gopathBefore, hashOf(gopath))
+
+	// A GOROOT that is only a prefix of the directory name does not make a package standard.
+	lookalike := filepath.Join(goroot+"x", "src", "fmt", "print.go")
+	require.NoError(t, os.MkdirAll(filepath.Dir(lookalike), 0o755))
+	require.NoError(t, os.WriteFile(lookalike, []byte("package fmt\n"), 0o644))
+	t.Cleanup(func() { _ = os.RemoveAll(goroot + "x") })
+	assert.Contains(t, hashOf(&packages.Package{PkgPath: "fmt", GoFiles: []string{lookalike}}), lookalike)
+
+	// A local replace has no version, so its file content is what counts.
+	file := filepath.Join(t.TempDir(), "local.go")
+	require.NoError(t, os.WriteFile(file, []byte("package local\n"), 0o644))
+	local := &packages.Package{
+		PkgPath: "example.com/local",
+		Module: &packages.Module{
+			Path: "example.com/local", Version: "v0.0.0",
+			Replace: &packages.Module{Path: filepath.Dir(file)},
+		},
+		GoFiles: []string{file},
+	}
+	before := hashOf(local)
+	require.NoError(t, os.WriteFile(file, []byte("package local\n\nconst X = 1\n"), 0o644))
+	assert.NotEqual(t, before, hashOf(local))
+
+	// The go directive of a local module can change behavior with the same files.
+	before = hashOf(local)
+	local.Module.Replace.GoVersion = "1.21"
+	assert.NotEqual(t, before, hashOf(local))
+
+	// A dependency that failed to load may be missing files, so it fails the hash.
+	broken := &packages.Package{PkgPath: "example.com/broken", Errors: []packages.Error{{Msg: "no Go files"}}}
+	withBroken := &packages.Package{
+		PkgPath: "example.com/top",
+		Imports: map[string]*packages.Package{"example.com/broken": broken},
+	}
+	require.ErrorContains(t, hashPackages(io.Discard, goroot, []*packages.Package{withBroken}), "example.com/broken")
+
+	// A file hashed by content must be readable.
+	gone := &packages.Package{PkgPath: "example.com/gone", GoFiles: []string{filepath.Join(t.TempDir(), "gone.go")}}
+	require.ErrorContains(t, hashPackages(io.Discard, goroot, []*packages.Package{gone}), "gone.go")
 }
