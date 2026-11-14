@@ -163,6 +163,9 @@ Notes:
   whatever they gate together.
 - Cover the gate in unit tests with `t.Setenv`, asserting both that a disabled
   instrumentation emits nothing and that an explicitly enabled one still works.
+- A hook that starts telemetry also checks `runtime.Ready()`, and a hook that attaches
+  instrumentation checks it when the attached code runs. See Package Initialization Order
+  under [Limitations](#limitations).
 
 ### Limitations
 
