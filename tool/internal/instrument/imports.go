@@ -27,7 +27,7 @@ func (ip *instrumentPhase) updateImportConfigForFile(ctx context.Context, root *
 		return nil
 	}
 
-	if err := ip.updateImportConfig(ctx, paths); err != nil {
+	if err := ip.updateImportConfig(paths); err != nil {
 		return ex.Wrapf(err, "updating import config for file imports in %s", ruleName)
 	}
 
@@ -98,7 +98,7 @@ func (ip *instrumentPhase) addRuleImports(
 	}
 
 	// Update importcfg for the build
-	if err := ip.updateImportConfig(ctx, resolution.NewImports); err != nil {
+	if err := ip.updateImportConfig(resolution.NewImports); err != nil {
 		return ex.Wrapf(err, "updating import config for %s", ruleName)
 	}
 

@@ -136,27 +136,7 @@ func (sp *setupPhase) store(matched []*rule.InstRuleSet) error {
 	}
 	sp.Info("Stored matched sets", "path", f)
 
-	if err = sp.storeResolvedNames(); err != nil {
-		return err
-	}
-	return sp.storePGOProfile()
-}
-
-// storePGOProfile records the PGO profile the build applies, for the nested
-// builds toolexec runs. It always writes the file, empty when there is no
-// profile, so a profile recorded by an earlier setup never applies to a later
-// build.
-func (sp *setupPhase) storePGOProfile() error {
-	profile, ambiguous := pgoProfile(sp.pgo, sp.buildPackages)
-	if ambiguous {
-		sp.Warn("cannot pick a PGO profile for nested builds: main packages have different default.pgo files")
-	}
-	f := util.GetPGOProfileFile()
-	if err := util.WriteFileAtomic(f, []byte(profile)); err != nil {
-		return ex.Wrapf(err, "failed to write PGO profile to file %s", f)
-	}
-	sp.Info("Stored PGO profile", "path", f, "profile", profile)
-	return nil
+	return sp.storeResolvedNames()
 }
 
 // storeInjectedHash records a hash of the packages that rules add to the build.
