@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"go/parser"
 	"go/token"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -14,6 +15,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 func TestImportsFileSource(t *testing.T) {
@@ -173,4 +177,103 @@ func TestWriteImportOverlay(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(buildDir, overlayFileName), path)
 	assert.JSONEq(t, `{"Replace":{"/a.go":"/b.go"}}`, readOverlayFile(t, path))
+}
+
+func TestWriteImportOverlayRemovesStaleFile(t *testing.T) {
+	buildDir := t.TempDir()
+	stale := filepath.Join(buildDir, overlayFileName)
+	mustWriteFile(t, stale, `{"Replace":{"/old.go":"/x.go"}}`)
+
+	path, err := writeImportOverlay(overlayFile{}, buildDir)
+	require.NoError(t, err)
+	assert.Empty(t, path)
+	assert.NoFileExists(t, stale, "an overlay left from an earlier setup must not reach the next build")
+}
+
+func TestMergeUserOverlay(t *testing.T) {
+	user := filepath.Join(t.TempDir(), "user.json")
+	mustWriteFile(t, user, `{"Replace":{"/app/a.go":"/tmp/a.go"}}`)
+	ours := overlayFile{Replace: map[string]string{"/app/otelc.imports.go": "/b/x.go"}}
+
+	merged, err := mergeUserOverlay(ours, user)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"/app/a.go": "/tmp/a.go", "/app/otelc.imports.go": "/b/x.go"}, merged.Replace)
+
+	mustWriteFile(t, user, `{"Replace":{"/app/otelc.imports.go":"/tmp/mine.go"}}`)
+	_, err = mergeUserOverlay(ours, user)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "/app/otelc.imports.go")
+}
+
+func TestMergeUserOverlayNoUserFile(t *testing.T) {
+	ours := overlayFile{Replace: map[string]string{"/a": "/b"}}
+
+	merged, err := mergeUserOverlay(ours, "")
+	require.NoError(t, err)
+	assert.Equal(t, ours, merged)
+}
+
+func TestStripOverlayFlag(t *testing.T) {
+	assert.Equal(t,
+		[]string{"-C", "dir", "-v", "./..."},
+		stripOverlayFlag([]string{"-C", "dir", "-overlay", "u.json", "-v", "--overlay=v.json", "./..."}))
+	assert.Equal(t,
+		[]string{"./pkg", "-args", "-overlay", "x"},
+		stripOverlayFlag([]string{"-overlay=u.json", "./pkg", "-args", "-overlay", "x"}),
+		"arguments after -args belong to the test binary")
+}
+
+func TestUserOverlayPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GOFLAGS", "")
+
+	assert.Empty(t, userOverlayPath([]string{"./..."}, dir))
+	assert.Equal(t, filepath.Join(dir, "u.json"), userOverlayPath([]string{"-overlay", "u.json", "."}, dir))
+	assert.Equal(t, "/abs/u.json", userOverlayPath([]string{"--overlay=/abs/u.json", "."}, dir))
+
+	t.Setenv("GOFLAGS", "-overlay=/flags/u.json")
+	assert.Equal(t, "/flags/u.json", userOverlayPath([]string{"."}, dir))
+	assert.Equal(t, filepath.Join(dir, "cli.json"), userOverlayPath([]string{"-overlay=cli.json", "."}, dir),
+		"a command-line flag wins over GOFLAGS")
+}
+
+func TestPrepareImportOverlay(t *testing.T) {
+	sp := &setupPhase{logger: slog.New(slog.DiscardHandler)}
+	buildDir := t.TempDir()
+	appDir := t.TempDir()
+	goMod := filepath.Join(appDir, "go.mod")
+	mustWriteFile(t, goMod, "module example.com/app\n")
+	libSrc := filepath.Join(appDir, "lib", "lib.go")
+	mustWriteFile(t, libSrc, "package lib\n")
+	mainSrc := filepath.Join(appDir, "cmd", "main.go")
+	mustWriteFile(t, mainSrc, "package main\n")
+
+	lib := rawSet("example.com/app/lib", []string{libSrc}, map[string]string{"list": "container/list"})
+	fileTarget := rawSet("command-line-arguments", []string{mainSrc}, map[string]string{"ring": "container/ring"})
+
+	path, runtimeImports, err := sp.prepareImportOverlay(
+		[]*rule.InstRuleSet{lib, fileTarget}, goMod, "/g", "/m", "", buildDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, map[string][]string{filepath.Dir(mainSrc): {"container/ring"}}, runtimeImports)
+	var o overlayFile
+	require.NoError(t, json.Unmarshal([]byte(readOverlayFile(t, path)), &o))
+	assert.Contains(t, o.Replace, filepath.Join(appDir, "lib", "otelc.imports.go"))
+	assert.Len(t, o.Replace, 1)
+}
+
+func TestWithImportOverlay(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	args := []string{"build", "-overlay", "user.json", "./..."}
+
+	gotArgs, gotFlags := withImportOverlay(args, []string{"-work"})
+	assert.Equal(t, args, gotArgs, "no overlay from setup: the user's flags reach the build unchanged")
+	assert.Equal(t, []string{"-work"}, gotFlags)
+
+	overlay := filepath.Join(util.GetBuildTempDir(), overlayFileName)
+	mustWriteFile(t, overlay, `{"Replace":{}}`)
+	gotArgs, gotFlags = withImportOverlay(args, []string{"-work"})
+	assert.Equal(t, []string{"build", "./..."}, gotArgs)
+	assert.Equal(t, []string{"-work", "-overlay=" + overlay}, gotFlags)
 }

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -883,4 +884,16 @@ func TestResolveExportFilesBatch_KeepsDependenciesOfFailedRoot(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, failedRoots, "example.com/batch/broken")
 	assert.Empty(t, closures)
+}
+
+func TestGOMODCACHE(t *testing.T) {
+	modcache, err := GOMODCACHE(t.Context(), nil)
+	require.NoError(t, err)
+
+	pkgs, err := LoadPackages(t.Context(), packages.NeedModule, nil, false, "golang.org/x/mod/modfile")
+	require.NoError(t, err)
+	require.Len(t, pkgs, 1)
+	require.NotNil(t, pkgs[0].Module)
+	assert.True(t, strings.HasPrefix(pkgs[0].Module.Dir, modcache+string(filepath.Separator)),
+		"%s is not under %s", pkgs[0].Module.Dir, modcache)
 }
