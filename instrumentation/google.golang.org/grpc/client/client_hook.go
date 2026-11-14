@@ -126,18 +126,22 @@ func withClientStatsHandler(opts []grpc.DialOption) []grpc.DialOption {
 // BeforeNewClient hooks before grpc.NewClient (v1.63+)
 func BeforeNewClient(ictx hook.HookContext, target string, opts ...grpc.DialOption) {
 	if !clientEnabler.Enable() {
-		if runtime.Ready() {
-			logger.Debug("gRPC client instrumentation disabled")
+		if !runtime.Ready() {
+			return
 		}
+		logger.Debug("gRPC client instrumentation disabled")
 		return
 	}
 
 	// The stats handler initializes the instrumentation in TagRPC, so a client
-	// created during package initialization keeps it. The logger is not set
-	// up that early.
-	if runtime.Ready() {
-		logger.Debug("BeforeNewClient called", "target", target)
+	// created during package initialization keeps it. The logger is not set up
+	// that early, so that case returns before logging.
+	if !runtime.Ready() {
+		ictx.SetParam(newClientOptionsParamIndex, withClientStatsHandler(opts))
+		return
 	}
+
+	logger.Debug("BeforeNewClient called", "target", target)
 
 	ictx.SetParam(newClientOptionsParamIndex, withClientStatsHandler(opts))
 }
@@ -160,16 +164,20 @@ func AfterNewClient(ictx hook.HookContext, conn *grpc.ClientConn, err error) {
 // BeforeDialContext hooks before grpc.DialContext (v1.44-1.63)
 func BeforeDialContext(ictx hook.HookContext, ctx context.Context, target string, opts ...grpc.DialOption) {
 	if !clientEnabler.Enable() {
-		if runtime.Ready() {
-			logger.Debug("gRPC client instrumentation disabled")
+		if !runtime.Ready() {
+			return
 		}
+		logger.Debug("gRPC client instrumentation disabled")
 		return
 	}
 
 	// See BeforeNewClient.
-	if runtime.Ready() {
-		logger.Debug("BeforeDialContext called", "target", target)
+	if !runtime.Ready() {
+		ictx.SetParam(dialOptionsParamIndex, withClientStatsHandler(opts))
+		return
 	}
+
+	logger.Debug("BeforeDialContext called", "target", target)
 
 	ictx.SetParam(dialOptionsParamIndex, withClientStatsHandler(opts))
 }

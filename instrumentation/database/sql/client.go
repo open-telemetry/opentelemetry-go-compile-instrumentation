@@ -675,9 +675,10 @@ func instrumentEnd(ictx hook.HookContext, err error) {
 	st, ok := ictx.GetData().(*queryState)
 	if !ok || st.span == nil {
 		// The logger is nil for a call skipped during package initialization.
-		if runtime.Ready() {
-			logger.Debug("instrumentEnd: no span from before hook")
+		if !runtime.Ready() {
+			return
 		}
+		logger.Debug("instrumentEnd: no span from before hook")
 		return
 	}
 	span := st.span

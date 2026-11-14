@@ -107,18 +107,23 @@ var serverEnabler = grpcServerEnabler{}
 // BeforeNewServer hooks before grpc.NewServer to inject stats handler
 func BeforeNewServer(ictx hook.HookContext, opts ...grpc.ServerOption) {
 	if !serverEnabler.Enable() {
-		if runtime.Ready() {
-			logger.Debug("gRPC server instrumentation disabled")
+		if !runtime.Ready() {
+			return
 		}
+		logger.Debug("gRPC server instrumentation disabled")
 		return
 	}
 
 	// The stats handler initializes the instrumentation in TagRPC, so a server
-	// created during package initialization keeps it. The logger is not set
-	// up that early.
-	if runtime.Ready() {
-		logger.Debug("BeforeNewServer called")
+	// created during package initialization keeps it. The logger is not set up
+	// that early, so that case returns before logging.
+	if !runtime.Ready() {
+		ictx.SetParam(optionsParamIndex,
+			append([]grpc.ServerOption{grpc.StatsHandler(newServerStatsHandler())}, opts...))
+		return
 	}
+
+	logger.Debug("BeforeNewServer called")
 
 	// Create and inject stats handler
 	handler := newServerStatsHandler()

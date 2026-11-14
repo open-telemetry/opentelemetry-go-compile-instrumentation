@@ -73,9 +73,10 @@ func afterAPICall(ictx hook.HookContext, err error) {
 	span, ok := ictx.GetKeyData(keySpan).(trace.Span)
 	if !ok || span == nil {
 		// The logger is nil for a call skipped during package initialization.
-		if runtime.Ready() {
-			logger.Debug("AfterAPICall: no span from before hook")
+		if !runtime.Ready() {
+			return
 		}
+		logger.Debug("AfterAPICall: no span from before hook")
 		return
 	}
 	defer span.End()

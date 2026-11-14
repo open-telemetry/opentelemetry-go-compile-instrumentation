@@ -84,9 +84,10 @@ func afterProcessDeltas(ictx hook.HookContext, err error) {
 	span, ok := ictx.GetKeyData("span").(trace.Span)
 	if !ok || span == nil {
 		// The logger is nil for a call skipped during package initialization.
-		if runtime.Ready() {
-			logger.Debug("afterProcessDeltas: no span from before hook")
+		if !runtime.Ready() {
+			return
 		}
+		logger.Debug("afterProcessDeltas: no span from before hook")
 		return
 	}
 	defer span.End()
@@ -134,9 +135,10 @@ func afterProcessDeltasInBatch(ictx hook.HookContext, err error) {
 	span, ok := ictx.GetKeyData("span").(trace.Span)
 	if !ok || span == nil {
 		// The logger is nil for a call skipped during package initialization.
-		if runtime.Ready() {
-			logger.Debug("afterProcessDeltasInBatch: no span from before hook")
+		if !runtime.Ready() {
+			return
 		}
+		logger.Debug("afterProcessDeltasInBatch: no span from before hook")
 		return
 	}
 	defer span.End()
