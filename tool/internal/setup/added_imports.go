@@ -51,6 +51,10 @@ func (sp *setupPhase) ruleSetAddedImports(set *rule.InstRuleSet, usesIgnore bool
 	})
 	addRuleImports(set.DeclRules, add, func(r *rule.InstDeclRule) (map[string]string, string) { return declared(r) })
 	addRuleImports(set.CallRules, add, func(r *rule.InstCallRule) (map[string]string, string) {
+		if r.MethodCall != "" {
+			// A method call matches on its receiver type, not on the file's imports.
+			return r.Imports, ""
+		}
 		return r.Imports, r.ImportPath
 	})
 	addRuleImports(set.LitRules, add, func(r *rule.InstLitRule) (map[string]string, string) {

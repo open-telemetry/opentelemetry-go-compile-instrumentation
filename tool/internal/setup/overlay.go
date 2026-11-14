@@ -110,6 +110,9 @@ func buildImportOverlay(targets []*importTarget, goModPath, buildDir string) (ov
 // mapModule maps every file of mod into a replacement directory under
 // buildDir and creates that directory's tree on disk: cgo and asm run inside
 // the package directory, so it has to exist.
+// shortcut: cgo flags or includes that reach files outside the package dir
+// (${SRCDIR}/../x.h) find nothing on disk; link or copy those files if a rule
+// ever adds imports to such a package.
 func mapModule(o overlayFile, mod moduleRoot, buildDir string) (string, error) {
 	escaped, err := module.EscapePath(mod.Path)
 	if err != nil {
@@ -144,36 +147,56 @@ func mapModule(o overlayFile, mod moduleRoot, buildDir string) (string, error) {
 	return replaceDir, nil
 }
 
-// replacedGoMod writes a copy of goModPath that replaces each module in
-// replaced with its replacement directory.
-func replacedGoMod(goModPath string, replaced map[moduleRoot]string, srcDir string) (string, error) {
-	data, err := os.ReadFile(goModPath)
+// replacedGoMod writes a copy of modFilePath, the main module's go.mod or the
+// active go.work, that replaces each module in replaced with its replacement
+// directory. In a workspace the replace goes into go.work: its replaces win,
+// and a workspace root need not hold a go.mod.
+func replacedGoMod(modFilePath string, replaced map[moduleRoot]string, srcDir string) (string, error) {
+	data, err := os.ReadFile(modFilePath)
 	if err != nil {
-		return "", ex.Wrapf(err, "reading %s", goModPath)
+		return "", ex.Wrapf(err, "reading %s", modFilePath)
 	}
-	f, err := modfile.Parse(goModPath, data, nil)
-	if err != nil {
-		return "", ex.Wrapf(err, "parsing %s", goModPath)
+	var (
+		existing   []*modfile.Replace
+		addReplace func(oldPath, newPath string) error
+		format     func() ([]byte, error)
+	)
+	if filepath.Base(modFilePath) == "go.work" {
+		f, parseErr := modfile.ParseWork(modFilePath, data, nil)
+		if parseErr != nil {
+			return "", ex.Wrapf(parseErr, "parsing %s", modFilePath)
+		}
+		existing = f.Replace
+		addReplace = func(oldPath, newPath string) error { return f.AddReplace(oldPath, "", newPath, "") }
+		format = func() ([]byte, error) { f.Cleanup(); return modfile.Format(f.Syntax), nil }
+	} else {
+		f, parseErr := modfile.Parse(modFilePath, data, nil)
+		if parseErr != nil {
+			return "", ex.Wrapf(parseErr, "parsing %s", modFilePath)
+		}
+		existing = f.Replace
+		addReplace = func(oldPath, newPath string) error { return f.AddReplace(oldPath, "", newPath, "") }
+		format = func() ([]byte, error) { f.Cleanup(); return f.Format() }
 	}
-	for mod, dir := range replaced {
+	mods := slices.SortedFunc(maps.Keys(replaced), func(a, b moduleRoot) int { return strings.Compare(a.Dir, b.Dir) })
+	for _, mod := range mods {
 		// The build list names a module replaced by another module version by
 		// its original path.
 		oldPath := mod.Path
-		for _, r := range f.Replace {
+		for _, r := range existing {
 			if r.New.Path == mod.Path && r.New.Version == mod.Version {
 				oldPath = r.Old.Path
 			}
 		}
-		if err = f.AddReplace(oldPath, "", dir, ""); err != nil {
-			return "", ex.Wrapf(err, "replacing %s in %s", oldPath, goModPath)
+		if err = addReplace(oldPath, replaced[mod]); err != nil {
+			return "", ex.Wrapf(err, "replacing %s in %s", oldPath, modFilePath)
 		}
 	}
-	f.Cleanup()
-	out, err := f.Format()
+	out, err := format()
 	if err != nil {
-		return "", ex.Wrapf(err, "formatting %s", goModPath)
+		return "", ex.Wrapf(err, "formatting %s", modFilePath)
 	}
-	return writeOverlaySource(srcDir, goModPath, out)
+	return writeOverlaySource(srcDir, modFilePath, out)
 }
 
 // writeOverlaySource writes content for the overlay entry target into srcDir,
