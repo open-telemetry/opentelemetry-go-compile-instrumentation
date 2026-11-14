@@ -49,8 +49,8 @@ func initInstrumentation() {
 // debugEnabled gates per-request Debug calls: slog evaluates arguments before
 // checking the level, so an unguarded call pays for r.URL.String() and
 // attribute boxing on every request even when debug logging is off.
-func debugEnabled() bool {
-	return logger.Enabled(context.Background(), slog.LevelDebug)
+func debugEnabled(ctx context.Context) bool {
+	return logger.Enabled(ctx, slog.LevelDebug)
 }
 
 // netHttpServerEnabler controls whether server instrumentation is enabled
@@ -89,16 +89,16 @@ func BeforeServeHTTP(ictx hook.HookContext, recv interface{}, w http.ResponseWri
 	// points at this process. A server span for that request is exported
 	// again, so the loop never stops. The client hook skips the same agents.
 	if r != nil && isOTelExporterRequest(r) {
-		if debugEnabled() {
-			logger.Debug("Skipping OTel exporter request", "user_agent", r.Header.Get("User-Agent"))
+		if debugEnabled(r.Context()) {
+			logger.DebugContext(r.Context(), "Skipping OTel exporter request", "user_agent", r.Header.Get("User-Agent"))
 		}
 		return
 	}
 
 	initInstrumentation()
 
-	if debugEnabled() {
-		logger.Debug("BeforeServeHTTP called",
+	if debugEnabled(r.Context()) {
+		logger.DebugContext(r.Context(), "BeforeServeHTTP called",
 			"method", r.Method,
 			"url", r.URL.String(),
 			"remote_addr", r.RemoteAddr)
@@ -139,9 +139,15 @@ func BeforeServeHTTP(ictx hook.HookContext, recv interface{}, w http.ResponseWri
 }
 
 func AfterServeHTTP(ictx hook.HookContext) {
+	ctx := context.Background()
+	r, _ := ictx.GetParam(requestIndex).(*http.Request)
+	if r != nil {
+		ctx = r.Context()
+	}
+
 	data, ok := ictx.GetData().(*hookData)
 	if !ok || data == nil || data.span == nil {
-		logger.Debug("AfterServeHTTP: no span from before hook")
+		logger.DebugContext(ctx, "AfterServeHTTP: no span from before hook")
 		return
 	}
 	span := data.span
@@ -149,7 +155,7 @@ func AfterServeHTTP(ictx hook.HookContext) {
 
 	// ServeMux fills in r.Pattern on the same request after the span was created.
 	// Stays empty for routers that name the span themselves (gin, chi).
-	if r, ok := ictx.GetParam(requestIndex).(*http.Request); ok && r != nil && span.IsRecording() {
+	if r != nil && span.IsRecording() {
 		if route := semconv.HTTPRoute(r.Pattern); route != "" {
 			span.SetName(semconv.HTTPServerSpanName(r.Method, route))
 			span.SetAttributes(semconv.HTTPServerRoute(route))
@@ -174,8 +180,8 @@ func AfterServeHTTP(ictx hook.HookContext) {
 		span.SetStatus(code, desc)
 	}
 
-	if debugEnabled() {
-		logger.Debug("AfterServeHTTP called",
+	if debugEnabled(ctx) {
+		logger.DebugContext(ctx, "AfterServeHTTP called",
 			"status_code", statusCode,
 			"duration_ms", time.Since(data.start).Milliseconds())
 	}
