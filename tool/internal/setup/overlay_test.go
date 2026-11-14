@@ -318,3 +318,40 @@ func TestBuildImportOverlayModCacheWorkspace(t *testing.T) {
 	assert.Contains(t, got, "use ./app")
 	assert.Contains(t, got, "replace example.com/dep => "+replaceDir)
 }
+
+func TestUserModFilePath(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GOFLAGS", "")
+
+	assert.Empty(t, userModFilePath([]string{"."}, dir))
+	assert.Equal(t, filepath.Join(dir, "alt.mod"), userModFilePath([]string{"-modfile=alt.mod", "."}, dir))
+	assert.Equal(t, "/abs/alt.mod", userModFilePath([]string{"-modfile", "/abs/alt.mod", "."}, dir))
+
+	t.Setenv("GOFLAGS", "-modfile=/flags/alt.mod")
+	assert.Equal(t, "/flags/alt.mod", userModFilePath([]string{"."}, dir))
+}
+
+func TestBuildImportOverlayRecordsModFile(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	buildDir := util.GetBuildTempDir()
+	changed, err := util.ModFileChangedSinceSetup()
+	require.NoError(t, err)
+	assert.False(t, changed, "no record: nothing to compare")
+
+	mod := fakeModCacheModule(t, true)
+	goMod := filepath.Join(t.TempDir(), "go.mod")
+	mustWriteFile(t, goMod, "module example.com/app\n")
+	_, err = buildImportOverlay([]*importTarget{{
+		ImportPath: "example.com/dep", Name: "dep", Dir: mod.Dir, Kind: kindModCache, Module: mod, Imports: []string{"fmt"},
+	}}, goMod, buildDir)
+	require.NoError(t, err)
+
+	changed, err = util.ModFileChangedSinceSetup()
+	require.NoError(t, err)
+	assert.False(t, changed)
+
+	mustWriteFile(t, goMod, "module example.com/app\n\nrequire example.com/x v1.0.0\n")
+	changed, err = util.ModFileChangedSinceSetup()
+	require.NoError(t, err)
+	assert.True(t, changed)
+}

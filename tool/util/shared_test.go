@@ -286,3 +286,10 @@ func TestDiscoverWorkDir(t *testing.T) {
 		}
 	})
 }
+
+func TestModFileChangedSinceSetupWithoutRecord(t *testing.T) {
+	t.Setenv(EnvOtelcWorkDir, t.TempDir())
+	changed, err := ModFileChangedSinceSetup()
+	require.NoError(t, err)
+	assert.False(t, changed)
+}

@@ -4,6 +4,8 @@
 package util
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -230,4 +232,45 @@ func VersionInRange(version, versionRange string) bool {
 func EscapePackagePath(s string) string {
 	s = strings.ReplaceAll(s, "/", "_")
 	return strings.ReplaceAll(s, ".", "_")
+}
+
+// modFileRecord is the file under buildDir where setup records the go.mod (or
+// go.work) whose overlaid copy carries otelc's replace directives.
+func modFileRecord(buildDir string) string {
+	return filepath.Join(buildDir, "overlay", "modfile")
+}
+
+// RecordModFile records, under buildDir, path and the hash of its content, so
+// a build can tell when the file changed after setup copied it into the overlay.
+func RecordModFile(buildDir, path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ex.Wrapf(err, "reading %s", path)
+	}
+	sum := sha256.Sum256(data)
+	record := modFileRecord(buildDir)
+	if err = os.MkdirAll(filepath.Dir(record), 0o755); err != nil {
+		return ex.Wrapf(err, "creating %s", filepath.Dir(record))
+	}
+	return WriteFileAtomic(record, []byte(path+"\n"+hex.EncodeToString(sum[:])+"\n"))
+}
+
+// ModFileChangedSinceSetup reports whether the file RecordModFile recorded
+// changed since. Without a record it reports false.
+func ModFileChangedSinceSetup() (bool, error) {
+	record := modFileRecord(GetBuildTempDir())
+	data, err := os.ReadFile(record)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, ex.Wrapf(err, "reading %s", record)
+	}
+	path, want, _ := strings.Cut(strings.TrimSpace(string(data)), "\n")
+	current, err := os.ReadFile(path)
+	if err != nil {
+		return true, nil
+	}
+	sum := sha256.Sum256(current)
+	return hex.EncodeToString(sum[:]) != want, nil
 }

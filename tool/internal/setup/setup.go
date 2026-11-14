@@ -656,6 +656,9 @@ func (sp *setupPhase) writeBuildOverlay(
 	}
 	modFile := workFile
 	if modFile == "" {
+		modFile = userModFilePath(args, dir)
+	}
+	if modFile == "" {
 		modFile = filepath.Join(moduleDir, goModFileName)
 	}
 	path, runtimeImports, err := sp.prepareImportOverlay(matched, modFile,

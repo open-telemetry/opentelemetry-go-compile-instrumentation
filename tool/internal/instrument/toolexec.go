@@ -273,6 +273,10 @@ func (ip *instrumentPhase) updateImportConfig(newImports map[string]string) erro
 			return ex.Newf("rule import %q cannot be added to the testmain that go test generates: the go "+
 				"command fixes its imports; reach the package through //go:linkname instead", importPath)
 		}
+		if changed, _ := util.ModFileChangedSinceSetup(); changed {
+			return ex.Newf("rule import %q is not in the importcfg of %s: go.mod changed since otelc setup "+
+				"wrote the overlay; run otelc setup again", importPath, util.FindFlagValue(ip.compileArgs, "-p"))
+		}
 		return ex.Newf("rule import %q is not in the importcfg of %s; the build is missing otelc's "+
 			"-overlay (run it through otelc go, or add the -overlay that otelc setup printed to GOFLAGS)",
 			importPath, util.FindFlagValue(ip.compileArgs, "-p"))

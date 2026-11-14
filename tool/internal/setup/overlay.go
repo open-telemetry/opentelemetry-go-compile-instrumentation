@@ -103,6 +103,9 @@ func buildImportOverlay(targets []*importTarget, goModPath, buildDir string) (ov
 			return o, err
 		}
 		o.Replace[goModPath] = src
+		if err = util.RecordModFile(buildDir, goModPath); err != nil {
+			return o, err
+		}
 	}
 	return o, nil
 }
@@ -256,14 +259,14 @@ func mergeUserOverlay(ours overlayFile, userPath string) (overlayFile, error) {
 	return merged, nil
 }
 
-// isOverlayFlag reports whether arg is an -overlay flag and whether its value
-// is the next argument.
-func isOverlayFlag(arg string) (bool, bool) {
-	name := strings.TrimPrefix(strings.TrimPrefix(arg, "-"), "-")
-	if name == "overlay" {
+// isFlag reports whether arg is the build flag -name and whether its value is
+// the next argument.
+func isFlag(arg, name string) (bool, bool) {
+	trimmed := strings.TrimPrefix(strings.TrimPrefix(arg, "-"), "-")
+	if trimmed == name {
 		return true, true
 	}
-	return strings.HasPrefix(name, "overlay="), false
+	return strings.HasPrefix(trimmed, name+"="), false
 }
 
 // stripOverlayFlag removes -overlay flags from build arguments; arguments
@@ -274,7 +277,7 @@ func stripOverlayFlag(args []string) []string {
 		if args[i] == "-args" || args[i] == "--args" {
 			return append(out, args[i:]...)
 		}
-		if ok, takesNext := isOverlayFlag(args[i]); ok {
+		if ok, takesNext := isFlag(args[i], "overlay"); ok {
 			if takesNext {
 				i++
 			}
@@ -289,13 +292,24 @@ func stripOverlayFlag(args []string) []string {
 // gave on the command line or in GOFLAGS, or "". A relative path resolves
 // against dir, the directory the go command runs in.
 func userOverlayPath(args []string, dir string) string {
+	return userFlagPath(args, dir, "overlay")
+}
+
+// userModFilePath is userOverlayPath for -modfile.
+func userModFilePath(args []string, dir string) string {
+	return userFlagPath(args, dir, "modfile")
+}
+
+// userFlagPath returns the absolute path the build flag -name names on the
+// command line or, failing that, in GOFLAGS.
+func userFlagPath(args []string, dir, flag string) string {
 	find := func(args []string) string {
 		value := ""
 		for i := 0; i < len(args); i++ {
 			if args[i] == "-args" || args[i] == "--args" {
 				break
 			}
-			ok, takesNext := isOverlayFlag(args[i])
+			ok, takesNext := isFlag(args[i], flag)
 			switch {
 			case ok && takesNext && i+1 < len(args):
 				value = args[i+1]

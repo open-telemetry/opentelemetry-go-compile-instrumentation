@@ -899,3 +899,21 @@ func TestUpdateImportConfigAcceptsImportMap(t *testing.T) {
 	}
 	require.NoError(t, ip.updateImportConfig(map[string]string{"b": "example.com/b"}))
 }
+
+func TestUpdateImportConfigModFileChangedSinceSetup(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	goMod := filepath.Join(t.TempDir(), "go.mod")
+	require.NoError(t, os.WriteFile(goMod, []byte("module example.com/app\n"), 0o644))
+	require.NoError(t, util.RecordModFile(util.GetBuildTempDir(), goMod))
+	require.NoError(t, os.WriteFile(goMod, []byte("module example.com/app\n\nrequire example.com/x v1.0.0\n"), 0o644))
+
+	ip := &instrumentPhase{
+		logger:           slog.Default(),
+		importConfigPath: filepath.Join(t.TempDir(), "importcfg"),
+		compileArgs:      []string{"compile", "-p", "example.com/dep"},
+		importConfig:     imports.ImportConfig{PackageFile: map[string]string{}},
+	}
+	err := ip.updateImportConfig(map[string]string{"x": "example.com/x"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "changed since otelc setup")
+}
