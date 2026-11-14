@@ -43,7 +43,7 @@ func Helper() string {
 	}
 	fileRule.Name = "test_file_rule"
 
-	err := ip.applyFileRule(t.Context(), fileRule, "targetpkg")
+	err := ip.applyFileRule(fileRule, "targetpkg")
 	require.NoError(t, err)
 
 	outPath := filepath.Join(workDir, "otelc.helper.go")
@@ -82,7 +82,7 @@ func OrigHelper() {}
 	}
 	fileRule.Name = "test_file_rule"
 
-	err := ip.applyFileRule(t.Context(), fileRule, "targetpkg")
+	err := ip.applyFileRule(fileRule, "targetpkg")
 	require.NoError(t, err)
 
 	outPath := filepath.Join(workDir, "otelc.helper.go")
@@ -110,7 +110,7 @@ func TestApplyFileRule_FileNotFound(t *testing.T) {
 	}
 	fileRule.Name = "test_missing_file_rule"
 
-	err := ip.applyFileRule(t.Context(), fileRule, "targetpkg")
+	err := ip.applyFileRule(fileRule, "targetpkg")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "file nonexistent.go not found in")
 }
@@ -136,7 +136,7 @@ func TestApplyFileRule_EmptyPackageName(t *testing.T) {
 	}
 	fileRule.Name = "test_empty_package_name"
 
-	err := ip.applyFileRule(t.Context(), fileRule, "")
+	err := ip.applyFileRule(fileRule, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cannot resolve the package name")
 
@@ -170,7 +170,7 @@ func SubHelper() {}
 	}
 	fileRule.Name = "test_sub_file_rule"
 
-	err := ip.applyFileRule(t.Context(), fileRule, "targetpkg")
+	err := ip.applyFileRule(fileRule, "targetpkg")
 	require.NoError(t, err)
 
 	outPath := filepath.Join(workDir, "otelc.helper.go")
@@ -206,7 +206,7 @@ func TestApplyFileRule_CombinedIgnoreAndPlatformTag(t *testing.T) {
 	}
 	fileRule.Name = "test_linux_combined_rule"
 
-	err := ip.applyFileRule(t.Context(), fileRule, "targetpkg")
+	err := ip.applyFileRule(fileRule, "targetpkg")
 	require.NoError(t, err)
 
 	outPath := filepath.Join(workDir, "otelc.helper.go")
@@ -247,7 +247,7 @@ func TestApplyFileRule_PlatformConstraintMatching(t *testing.T) {
 		}
 		fileRule.Name = "test_linux_on_windows"
 
-		err := ip.applyFileRule(t.Context(), fileRule, "targetpkg")
+		err := ip.applyFileRule(fileRule, "targetpkg")
 		require.NoError(t, err)
 
 		outPath := filepath.Join(workDir, "otelc.helper.go")
@@ -275,7 +275,7 @@ func TestApplyFileRule_PlatformConstraintMatching(t *testing.T) {
 		}
 		fileRule.Name = "test_unix_on_darwin"
 
-		err := ip.applyFileRule(t.Context(), fileRule, "targetpkg")
+		err := ip.applyFileRule(fileRule, "targetpkg")
 		require.NoError(t, err)
 
 		outPath := filepath.Join(workDir, "otelc.helper.go")
@@ -308,7 +308,7 @@ func TestApplyFileRule_PlatformConstraintMatching(t *testing.T) {
 		}
 		fileRule.Name = "test_linux_suffix_on_windows"
 
-		err := ip.applyFileRule(t.Context(), fileRule, "targetpkg")
+		err := ip.applyFileRule(fileRule, "targetpkg")
 		require.NoError(t, err)
 
 		outPath := filepath.Join(workDir, "otelc.helper_linux.go")
@@ -330,7 +330,7 @@ func TestApplyFileRule_InvalidBuildConstraint(t *testing.T) {
 	fileRule := &rule.InstFileRule{File: "helper.go", Path: "example.com/mypkg", ResolvedPath: srcDir}
 	fileRule.Name = "test_invalid_constraint"
 
-	err := ip.applyFileRule(t.Context(), fileRule, "targetpkg")
+	err := ip.applyFileRule(fileRule, "targetpkg")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "matching build constraints")
 }
@@ -350,7 +350,7 @@ func TestApplyFileRule_UsesForwardedBuildTags(t *testing.T) {
 		ip := &instrumentPhase{logger: slog.New(slog.DiscardHandler), workDir: workDir}
 		fileRule := &rule.InstFileRule{File: "helper.go", Path: "example.com/mypkg", ResolvedPath: srcDir}
 		fileRule.Name = "test_enterprise_tag"
-		require.NoError(t, ip.applyFileRule(t.Context(), fileRule, "targetpkg"))
+		require.NoError(t, ip.applyFileRule(fileRule, "targetpkg"))
 		return filepath.Join(workDir, "otelc.helper.go"), ip
 	}
 
@@ -394,7 +394,7 @@ func Helper() string {
 	}
 	fileRule.Name = "test_file_rule"
 
-	err := ip.applyFileRule(t.Context(), fileRule, "targetpkg")
+	err := ip.applyFileRule(fileRule, "targetpkg")
 	require.NoError(t, err)
 
 	outPath := filepath.Join(workDir, "otelc.helper.go")

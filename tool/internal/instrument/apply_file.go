@@ -4,7 +4,6 @@
 package instrument
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,7 +15,7 @@ import (
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
-func (ip *instrumentPhase) applyFileRule(ctx context.Context, rule *rule.InstFileRule, pkgName string) error {
+func (ip *instrumentPhase) applyFileRule(rule *rule.InstFileRule, pkgName string) error {
 	if pkgName == "" {
 		return ex.Newf("cannot resolve the package name for rule %q; refusing to add %s",
 			rule.Name, rule.File)
