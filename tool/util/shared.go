@@ -5,7 +5,6 @@ package util
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,11 +37,6 @@ const (
 	// invocation that uses one of them fails, because it would overwrite the
 	// .otelc-build of that parent.
 	EnvOtelcParentWorkDirs = "OTELC_PARENT_WORK_DIRS"
-	// EnvOtelcNestedResolving lists, outermost first, the compiles waiting on
-	// a nested build to resolve an import a rule added, as comma-separated
-	// "package>added import" entries. Import paths cannot contain "," or ">",
-	// so the entries need no escaping.
-	EnvOtelcNestedResolving = "OTELC_NESTED_RESOLVING"
 	// EnvOtelcSessionDir names the session directory the outermost otelc
 	// build owns and every otelc process under it inherits: its toolexec
 	// processes, nested go commands, and nested otelc builds such as the
@@ -112,25 +106,11 @@ func GetImportNamesFile() string {
 	return GetBuildTemp(importNamesFile)
 }
 
-// GetPGOProfileFile returns the path to the file that records the build's PGO
-// profile for the nested builds toolexec runs.
-func GetPGOProfileFile() string {
-	const pgoProfileFile = "pgo_profile"
-	return GetBuildTemp(pgoProfileFile)
-}
-
 // GetInjectedHashFile returns the path to the file that records the content
 // hash of the packages rules add to the build.
 func GetInjectedHashFile() string {
 	const injectedHashFile = "injected_hash"
 	return GetBuildTemp(injectedHashFile)
-}
-
-// GetAddedImportsFileForProcess returns the per-process import tracking file.
-// Each compile process writes to its own file to avoid inter-process race conditions.
-func GetAddedImportsFileForProcess() string {
-	pid := os.Getpid()
-	return GetBuildTemp(fmt.Sprintf("added_imports.%d.json", pid))
 }
 
 // FormatBuildDeadline encodes deadline for EnvOtelcBuildDeadline.

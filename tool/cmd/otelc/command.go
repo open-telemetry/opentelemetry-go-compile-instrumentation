@@ -95,8 +95,7 @@ var commandToolexec = cli.Command{
 		// Here, not in instrument.Toolexec, so os.Executable resolves to this
 		// binary for the go commands it spawns. A nested invocation needs it
 		// too: startup stripped -toolexec from GOFLAGS, and a compile it
-		// instruments can resolve an added import with a nested build of its
-		// own.
+		// instruments can run go list -export for method_call type info.
 		if err := instrument.EnableNestedToolexec(); err != nil {
 			return err
 		}

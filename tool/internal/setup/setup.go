@@ -37,9 +37,7 @@ type setupPhase struct {
 	buildFlags    []string
 	// runtimeImports holds, by directory, the imports rules add to
 	// file-target packages (see prepareImportOverlay).
-	runtimeImports map[string][]string
-	// pgo is the build's effective -pgo value; see pgoValue.
-	pgo             string
+	runtimeImports  map[string][]string
 	rootModulePaths []string
 	// resolvedNames maps an import path to a package name, built from
 	// buildPackages' dependency graph.
@@ -565,7 +563,6 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		logger:     logger,
 		ruleConfig: cmd.String("rules"),
 		buildFlags: extractBuildFlags(subcommand, args),
-		pgo:        pgoValue(subcommand, args),
 		testMode:   subcommand == subcmdTest,
 	}
 
@@ -1117,9 +1114,6 @@ func runGoBuild(ctx context.Context, cmd *cli.Command) error {
 	ctx = contextWithStateManager(ctx, newStateManager())
 	logger := util.LoggerFromContext(ctx)
 
-	// Clean up import tracking files from previous builds at the start
-	// to prevent stale data from affecting this build.
-	instrument.CleanupImportTrackingFiles()
 	if err := cleanupOwnedSession(); err != nil {
 		return ex.Wrapf(err, "cleaning the session directory")
 	}
