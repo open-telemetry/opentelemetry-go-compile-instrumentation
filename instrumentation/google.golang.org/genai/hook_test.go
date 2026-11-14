@@ -4,6 +4,7 @@
 package genai
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -25,6 +26,11 @@ import (
 func newTestClient(t *testing.T, backend genaisdk.Backend, httpClient *http.Client) *genaisdk.Client {
 	t.Helper()
 
+	return newInstrumentedClient(t, testClientConfig(backend, httpClient))
+}
+
+// testClientConfig returns the config newTestClient uses.
+func testClientConfig(backend genaisdk.Backend, httpClient *http.Client) *genaisdk.ClientConfig {
 	config := &genaisdk.ClientConfig{
 		APIKey:      "test-key",
 		Backend:     backend,
@@ -36,18 +42,29 @@ func newTestClient(t *testing.T, backend genaisdk.Backend, httpClient *http.Clie
 		config.Location = "us-central1"
 	}
 
-	return newInstrumentedClient(t, config)
+	return config
 }
 
 func newInstrumentedClient(t *testing.T, config *genaisdk.ClientConfig) *genaisdk.Client {
 	t.Helper()
 
-	BeforeNewClient(hooktest.NewMockHookContext(), t.Context(), config)
-	client, err := genaisdk.NewClient(t.Context(), config)
+	client, err := buildInstrumentedClient(t.Context(), config)
 	require.NoError(t, err)
-	AfterNewClient(hooktest.NewMockHookContext(), client, nil)
 
 	return client
+}
+
+// buildInstrumentedClient runs the hooks around genai.NewClient. It takes no
+// *testing.T, so it is safe to call from worker goroutines.
+func buildInstrumentedClient(ctx context.Context, config *genaisdk.ClientConfig) (*genaisdk.Client, error) {
+	BeforeNewClient(hooktest.NewMockHookContext(), ctx, config)
+	client, err := genaisdk.NewClient(ctx, config)
+	if err != nil {
+		return nil, err
+	}
+	AfterNewClient(hooktest.NewMockHookContext(), client, nil)
+
+	return client, nil
 }
 
 // sdkTransport returns the transport the SDK will issue requests through.
@@ -219,14 +236,21 @@ func TestNewClient_ConcurrentUseOfCallerClientIsRaceFree(t *testing.T) {
 			}
 		}()
 	}
+	errs := make(chan error, 4)
 	for range 4 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			newTestClient(t, genaisdk.BackendGeminiAPI, httpClient)
+			_, err := buildInstrumentedClient(
+				t.Context(), testClientConfig(genaisdk.BackendGeminiAPI, httpClient))
+			errs <- err
 		}()
 	}
 	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
 
 	assert.Nil(t, httpClient.Transport)
 }
