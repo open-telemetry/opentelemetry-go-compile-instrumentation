@@ -293,3 +293,26 @@ func TestModFileChangedSinceSetupWithoutRecord(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, changed)
 }
+
+func TestRecordModFileDetectsChange(t *testing.T) {
+	t.Setenv(EnvOtelcWorkDir, t.TempDir())
+	goMod := filepath.Join(t.TempDir(), "go.mod")
+	require.NoError(t, os.WriteFile(goMod, []byte("module example.com/app\n"), 0o644))
+	require.NoError(t, RecordModFile(GetBuildTempDir(), goMod))
+
+	changed, err := ModFileChangedSinceSetup()
+	require.NoError(t, err)
+	assert.False(t, changed)
+
+	require.NoError(t, os.WriteFile(goMod, []byte("module example.com/other\n"), 0o644))
+	changed, err = ModFileChangedSinceSetup()
+	require.NoError(t, err)
+	assert.True(t, changed)
+
+	require.NoError(t, os.Remove(goMod))
+	changed, err = ModFileChangedSinceSetup()
+	require.NoError(t, err)
+	assert.True(t, changed, "a removed mod file counts as changed")
+
+	require.Error(t, RecordModFile(GetBuildTempDir(), goMod), "recording a missing file fails")
+}
