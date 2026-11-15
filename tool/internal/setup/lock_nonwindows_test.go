@@ -6,7 +6,9 @@
 package setup
 
 import (
+	"bytes"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -15,7 +17,45 @@ import (
 	"github.com/gofrs/flock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"go.opentelemetry.io/otelc/tool/util"
 )
+
+func TestBuildLockPathsWithoutGoEnv(t *testing.T) {
+	lockTestModule(t)
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	// When go env fails, the invocation still takes the work dir lock.
+	goDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(goDir, "go"), []byte("#!/bin/sh\nexit 1\n"), 0o755))
+	t.Setenv("PATH", goDir)
+
+	assert.Equal(t, []string{lockPathIn(workDir)}, buildLockPaths(t.Context(), ""))
+}
+
+func TestRegisterWaitWarnsWithoutWaitFile(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can create files in a read-only directory")
+	}
+	// The wait file goes next to the lock, so it cannot be created in a
+	// read-only directory.
+	dir := t.TempDir()
+	require.NoError(t, os.Chmod(dir, 0o555))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	var logs bytes.Buffer
+	ctx := util.ContextWithLogger(t.Context(), slog.New(slog.NewTextHandler(&logs, nil)))
+	self, unregister := registerWait(ctx, lockPathIn(dir), []string{lockPathIn(t.TempDir())})
+	unregister()
+
+	assert.Empty(t, self.file)
+	// Without a wait file, other invocations cannot find a deadlock with this
+	// wait, so the failure must be visible at the default log level.
+	assert.Contains(t, logs.String(), "level=WARN")
+	assert.Contains(t, logs.String(), "failed to write a wait file")
+	assert.Contains(t, logs.String(), "permission denied")
+}
 
 func TestIsTransientLockFileError(t *testing.T) {
 	// POSIX has no sharing violations: nothing is transient, every open or
@@ -27,7 +67,7 @@ func TestIsTransientLockFileError(t *testing.T) {
 func TestTryAcquireStaleLockCleanup(t *testing.T) {
 	lockTestDir(t)
 	tmpDir := t.TempDir()
-	path := buildLockPath()
+	path := workDirLockPath()
 
 	// 1. Verify lockFileIsCurrent returns false for stale lock handles
 	lockA := flock.New(path)

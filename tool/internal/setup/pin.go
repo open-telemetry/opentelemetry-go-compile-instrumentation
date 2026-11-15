@@ -692,7 +692,8 @@ type PinResult struct {
 // re-parsing compile commands again.
 func Pin(ctx context.Context, opts PinOptions) (*PinResult, error) {
 	var result *PinResult
-	err := withBuildLock(ctx, func(ctx context.Context) error {
+	dir, _ := leadingDirFlag(opts.Args)
+	err := withBuildLock(ctx, dir, func(ctx context.Context) error {
 		var pinErr error
 		result, pinErr = pinLocked(ctx, opts)
 		return pinErr
