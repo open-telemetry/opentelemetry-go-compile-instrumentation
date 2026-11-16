@@ -89,10 +89,10 @@ func BeforeNewClient(ictx hook.HookContext, opts ...option.RequestOption) {
 	if v := os.Getenv(sdkOpenTelemetryEnv); v != "" && !strings.EqualFold(v, "false") {
 		return
 	}
-	// The middleware initializes the instrumentation, so a client created during
-	// package initialization keeps it.
 	disableSDKOpenTelemetry()
 
+	// The middleware initializes the instrumentation, so a client created during
+	// package initialization keeps it.
 	newOpts := make([]option.RequestOption, 0, len(opts)+1)
 	newOpts = append(newOpts, option.WithMiddleware(OtelMiddleware()))
 	newOpts = append(newOpts, opts...)
