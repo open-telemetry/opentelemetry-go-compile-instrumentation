@@ -32,13 +32,81 @@ path: github.com/example/pkg
 			},
 		},
 		{
+			name: "valid nested rule",
+			yaml: `
+file: sub/nested/my_file.go
+target: example.com/pkg
+path: github.com/example/pkg
+`,
+			check: func(t *testing.T, r *InstFileRule) {
+				assert.Equal(t, "sub/nested/my_file.go", r.File)
+				assert.Equal(t, "example.com/pkg", r.Target.String())
+				assert.Equal(t, "github.com/example/pkg", r.Path)
+			},
+		},
+		{
 			name:    "missing file field",
-			yaml:    `target: example.com/pkg\npath: github.com/example/pkg`,
+			yaml:    "target: example.com/pkg\npath: github.com/example/pkg",
 			wantErr: true,
 		},
 		{
 			name:    "missing path field",
-			yaml:    `target: example.com/pkg\nfile: my_file.go`,
+			yaml:    "target: example.com/pkg\nfile: my_file.go",
+			wantErr: true,
+		},
+		{
+			name:    "dot file rejected",
+			yaml:    "target: example.com/pkg\npath: github.com/example/pkg\nfile: .",
+			wantErr: true,
+		},
+		{
+			name:    "posix absolute path rejected",
+			yaml:    "target: example.com/pkg\npath: github.com/example/pkg\nfile: /etc/passwd",
+			wantErr: true,
+		},
+		{
+			name:    "windows absolute path with backslash rejected",
+			yaml:    "target: example.com/pkg\npath: github.com/example/pkg\nfile: C:\\secret.go",
+			wantErr: true,
+		},
+		{
+			name:    "windows absolute path with forward slash rejected",
+			yaml:    "target: example.com/pkg\npath: github.com/example/pkg\nfile: C:/secret.go",
+			wantErr: true,
+		},
+		{
+			name:    "windows drive-relative path rejected",
+			yaml:    "target: example.com/pkg\npath: github.com/example/pkg\nfile: C:secret.go",
+			wantErr: true,
+		},
+		{
+			name:    "windows rooted path rejected",
+			yaml:    "target: example.com/pkg\npath: github.com/example/pkg\nfile: \\secret.go",
+			wantErr: true,
+		},
+		{
+			name:    "unc path rejected",
+			yaml:    "target: example.com/pkg\npath: github.com/example/pkg\nfile: \\\\server\\share\\secret.go",
+			wantErr: true,
+		},
+		{
+			name:    "parent traversal rejected",
+			yaml:    "target: example.com/pkg\npath: github.com/example/pkg\nfile: ../secret.go",
+			wantErr: true,
+		},
+		{
+			name:    "multi-level parent traversal rejected",
+			yaml:    "target: example.com/pkg\npath: github.com/example/pkg\nfile: ../../secret.go",
+			wantErr: true,
+		},
+		{
+			name:    "nested parent traversal rejected",
+			yaml:    "target: example.com/pkg\npath: github.com/example/pkg\nfile: sub/../../secret.go",
+			wantErr: true,
+		},
+		{
+			name:    "backslash parent traversal rejected",
+			yaml:    "target: example.com/pkg\npath: github.com/example/pkg\nfile: ..\\secret.go",
 			wantErr: true,
 		},
 	}
