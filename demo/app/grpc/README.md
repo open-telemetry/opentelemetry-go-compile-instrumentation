@@ -104,7 +104,7 @@ To send multiple requests:
 
 #### Telemetry Export Note
 
-The instrumentation layer flushes the OpenTelemetry SDK when the application receives SIGINT or SIGTERM, so telemetry buffered by the batch processors is exported during shutdown. It does not stop the process or change its exit code — the application stays in control of its own shutdown and exit path.
+The instrumentation layer flushes the OpenTelemetry SDK when the application receives SIGINT or SIGTERM, and again when `main` returns or the application calls `os.Exit`, so telemetry buffered by the batch processors is exported during shutdown, including after `./client -shutdown`. It does not stop the process or change its exit code — the application stays in control of its own shutdown and exit path.
 
 ## Regenerating Protocol Buffer Code
 

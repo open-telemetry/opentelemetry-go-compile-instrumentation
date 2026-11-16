@@ -7,6 +7,37 @@ init_sdk:
         file: init_otelsdk.go
         path: "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/init"
 
+# The batch span processor holds spans for up to its schedule delay, and the
+# process exits when main returns. Flush the SDK then, so a program that ends by
+# returning from main, or that handles SIGINT or SIGTERM itself and returns
+# right after, does not lose them. init_sdk adds otelcShutdownOnExit to main.
+shutdown_on_main_return:
+  target: main
+  where:
+    func: main
+  do:
+    - inject_code:
+        raw: |
+          defer otelcShutdownOnExit()
+
+# os.Exit skips deferred calls, so a program that ends with os.Exit, including
+# the common os.Exit(run()) pattern and log.Fatal, is flushed here instead.
+os_exit_linker:
+  target: os
+  do:
+    - add_file:
+        file: "exit_hook.go"
+        path: "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/init"
+
+os_exit_flush:
+  target: os
+  where:
+    func: Exit
+  do:
+    - inject_code:
+        raw: |
+          otelcShutdownOnExit()
+
 # The rules below report every signal.Notify call to pkg/runtime, which the
 # init_sdk rule links in. pkg/runtime re-raises a shutdown signal after
 # flushing telemetry only when the application never registered for it.

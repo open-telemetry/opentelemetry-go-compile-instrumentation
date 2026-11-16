@@ -121,6 +121,10 @@
   },
   {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/init",
+    "target": "os"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/init",
     "target": "os/signal"
   },
   {

@@ -15,6 +15,7 @@ import (
 	stdruntime "runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -90,6 +91,67 @@ func TestHandleShutdownSignalLogsFlushError(t *testing.T) {
 
 	assert.Contains(t, buf.String(), "shutdown failed",
 		"flush errors should be logged during shutdown")
+}
+
+func TestShutdownOnExitFlushesProviders(t *testing.T) {
+	restoreProviders(t)
+	rp := &recordingProcessor{}
+	tracerProvider = sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rp))
+	meterProvider, loggerProvider = nil, nil
+
+	ShutdownOnExit()
+
+	assert.True(t, rp.shutdownCalled, "ShutdownOnExit should flush the tracer provider")
+}
+
+// blockingProcessor holds Shutdown until release is closed, standing in for a
+// slow export, and counts the calls.
+type blockingProcessor struct {
+	entered chan struct{}
+	release chan struct{}
+	calls   atomic.Int32
+}
+
+func (*blockingProcessor) OnStart(context.Context, sdktrace.ReadWriteSpan) {}
+func (*blockingProcessor) OnEnd(sdktrace.ReadOnlySpan)                     {}
+func (*blockingProcessor) ForceFlush(context.Context) error                { return nil }
+func (p *blockingProcessor) Shutdown(context.Context) error {
+	if p.calls.Add(1) == 1 {
+		close(p.entered)
+	}
+	<-p.release
+	return nil
+}
+
+func TestShutdownOnExitWaitsForSignalFlush(t *testing.T) {
+	restoreProviders(t)
+	bp := &blockingProcessor{entered: make(chan struct{}), release: make(chan struct{})}
+	tracerProvider = sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(bp))
+	meterProvider, loggerProvider = nil, nil
+
+	go runShutdownHandler(t)
+	<-bp.entered
+
+	// main returns while the signal handler is still flushing.
+	returned := make(chan struct{})
+	go func() {
+		ShutdownOnExit()
+		close(returned)
+	}()
+
+	select {
+	case <-returned:
+		t.Fatal("ShutdownOnExit returned while the signal handler was still flushing")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(bp.release)
+	select {
+	case <-returned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("ShutdownOnExit did not return after the flush finished")
+	}
+	assert.Equal(t, int32(1), bp.calls.Load(), "the SDK should be shut down once")
 }
 
 // resetSignalOwners clears the signal.Notify record before and after the test.
@@ -394,7 +456,12 @@ func TestShutdownMultipleErrors(t *testing.T) {
 // restoreProviders resets the global providers after a test that configures them.
 func restoreProviders(t *testing.T) {
 	origTracer, origMeter, origLogger := tracerProvider, meterProvider, loggerProvider
-	t.Cleanup(func() { tracerProvider, meterProvider, loggerProvider = origTracer, origMeter, origLogger })
+	origShutdown := finalShutdown
+	finalShutdown = new(sync.Once)
+	t.Cleanup(func() {
+		tracerProvider, meterProvider, loggerProvider = origTracer, origMeter, origLogger
+		finalShutdown = origShutdown
+	})
 }
 
 func TestNewResourceIncludesTelemetrySDK(t *testing.T) {

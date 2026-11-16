@@ -16,3 +16,10 @@ func init() {
 	// Start runtime metrics (respects OTEL_GO_ENABLED/DISABLED_INSTRUMENTATIONS)
 	runtime.StartRuntimeMetrics()
 }
+
+// otelcShutdownOnExit is deferred at the start of main by the
+// shutdown_on_main_return rule, so buffered telemetry is exported when main
+// returns.
+func otelcShutdownOnExit() {
+	runtime.ShutdownOnExit()
+}
