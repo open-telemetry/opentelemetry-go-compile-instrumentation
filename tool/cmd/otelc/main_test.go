@@ -425,7 +425,7 @@ func TestCancelDeadline(t *testing.T) {
 
 		cancelDeadline(ctx)
 
-		if err := ctx.Err(); err == nil {
+		if ctxErr := ctx.Err(); ctxErr == nil {
 			t.Error("ctx.Err() = nil, want context.Canceled after cancelDeadline")
 		}
 	})
