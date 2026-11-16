@@ -408,6 +408,29 @@ func TestInitDeadline(t *testing.T) {
 	})
 }
 
+func TestCancelDeadline(t *testing.T) {
+	t.Run("no-op on a context initDeadline never touched", func(t *testing.T) {
+		// Must not panic on the type assertion when no cancel func is stored.
+		cancelDeadline(context.Background())
+	})
+
+	t.Run("releases the deadline initDeadline derived", func(t *testing.T) {
+		ctx, err := withDeadline(context.Background(), time.Now().Add(time.Hour), "test")
+		if err != nil {
+			t.Fatalf("withDeadline() error = %v", err)
+		}
+		if _, ok := ctx.Deadline(); !ok {
+			t.Fatal("ctx has no deadline, want one from withDeadline")
+		}
+
+		cancelDeadline(ctx)
+
+		if err := ctx.Err(); err == nil {
+			t.Error("ctx.Err() = nil, want context.Canceled after cancelDeadline")
+		}
+	})
+}
+
 func TestCloseLoggerNoWriter(t *testing.T) {
 	// When initLogger never ran (e.g. it failed early), the context holds no log
 	// writer and closeLogger must be a no-op rather than panic.

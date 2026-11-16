@@ -104,9 +104,7 @@ func main() {
 		},
 		Before: initRoot,
 		After: func(ctx context.Context, cmd *cli.Command) error {
-			if cancel, ok := ctx.Value(deadlineCancelKey{}).(context.CancelFunc); ok {
-				cancel()
-			}
+			cancelDeadline(ctx)
 			return ex.Join(stopProfiling(ctx, cmd), closeLogger(ctx))
 		},
 	}
@@ -168,6 +166,15 @@ func withDeadline(ctx context.Context, deadline time.Time, cause string) (contex
 	ctx, cancel := context.WithDeadlineCause(ctx, deadline, ex.New(cause))
 	ctx = context.WithValue(ctx, deadlineCancelKey{}, cancel)
 	return ctx, nil
+}
+
+// cancelDeadline releases the deadline initDeadline derived, when it derived
+// one: a no-op ctx (no --timeout, no inherited deadline) holds no cancel
+// func.
+func cancelDeadline(ctx context.Context) {
+	if cancel, ok := ctx.Value(deadlineCancelKey{}).(context.CancelFunc); ok {
+		cancel()
+	}
 }
 
 // initGoflags removes the GOFLAGS entries that the go commands otelc spawns
