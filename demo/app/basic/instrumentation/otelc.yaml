@@ -1,5 +1,13 @@
 version: "v1.0.0"
 
+wrap_nested_calls:
+  target: main
+  where:
+    function_call: strings.TrimSpace
+  do:
+    - wrap_call:
+        replace: 'recordNestedCall({{ . }})'
+
 hook_helloworld:
   target: main
   where:
@@ -152,6 +160,15 @@ hook_ellipsis:
   do:
     - inject_hooks:
         before: MyHookEllipsisBefore
+        path: "go.opentelemetry.io/otelc/demo/app/basic/instrumentation"
+
+hook_before_only_retvals:
+  target: main
+  where:
+    func: ReturnsValue
+  do:
+    - inject_hooks:
+        before: MyHookRetValsBefore
         path: "go.opentelemetry.io/otelc/demo/app/basic/instrumentation"
 
 hook_function_a:

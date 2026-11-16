@@ -22,7 +22,7 @@ import (
 // Cleanup runs under the build lock; GoBuild's deferred call reuses the
 // surrounding lock via the context marker instead of re-acquiring it.
 func Cleanup(ctx context.Context, cleanAll bool) error {
-	return withBuildLock(ctx, func(ctx context.Context) error {
+	return withBuildLock(ctx, "", func(ctx context.Context) error {
 		return cleanupLocked(ctx, cleanAll)
 	})
 }

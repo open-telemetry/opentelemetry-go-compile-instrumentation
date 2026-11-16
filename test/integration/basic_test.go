@@ -47,10 +47,12 @@ func TestBasic(t *testing.T) {
 		"returnValCount:0",
 		"isSkipCall:false",
 		"Ellipsis",
+		"retValCount:0 retVal0:<nil>",
 		"Hello from stdio",
 		"Underscore",
 		"AutoDetect: 00000000-0000-0000-0000-000000000000",
 		"UnnamedBefore 42 2.7",
+		"Nested call wrappers: [[x]]",
 	}
 	for _, e := range expect {
 		require.Contains(t, output, e)

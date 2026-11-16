@@ -1,4 +1,4 @@
-version: "v1.0.0"
+version: "v1.2.0"
 
 # (*Client).PerformRequest is the shared HTTP path for Search, Index, Bulk,
 # Delete, and the rest of the public olivere/elastic v7 API.

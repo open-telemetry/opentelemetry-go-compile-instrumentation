@@ -274,7 +274,7 @@ func TestListFiles_HiddenFileDoesNotSkipSiblings(t *testing.T) {
 		case "visible2.txt":
 			foundVisible2 = true
 		case ".hidden":
-			t.Fatalf("hidden file should not be returned")
+			t.Fatal("hidden file should not be returned")
 		}
 	}
 
@@ -323,7 +323,7 @@ func TestListFiles_SkipsHiddenDirectories(t *testing.T) {
 	}
 
 	if !foundVisible {
-		t.Fatalf("expected visible file to be returned")
+		t.Fatal("expected visible file to be returned")
 	}
 }
 

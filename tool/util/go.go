@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"go.opentelemetry.io/otelc/tool/ex"
@@ -136,6 +137,31 @@ func StripToolexecFromGoflags(goflags string) string {
 		return unquoted == "-toolexec" || strings.HasPrefix(unquoted, "-toolexec=") ||
 			unquoted == "--toolexec" || strings.HasPrefix(unquoted, "--toolexec=")
 	})
+}
+
+// StripJSONFromGoflags returns goflags without any -json entry, and whether the
+// last one turned JSON output on. otelc reads the text output of the go
+// commands it runs for itself, such as go list -f, go env and the build plan of
+// go build -n, and -json makes the go command print JSON instead. A -json entry
+// with a value that is not a boolean is kept, so the go command reports it.
+func StripJSONFromGoflags(goflags string) (string, bool) {
+	jsonOutput := false
+	stripped := filterGoflags(goflags, func(unquoted string) bool {
+		name, value, hasValue := strings.Cut(unquoted, "=")
+		if name != "-json" && name != "--json" {
+			return false
+		}
+		enabled := true
+		if hasValue {
+			var err error
+			if enabled, err = strconv.ParseBool(value); err != nil {
+				return false
+			}
+		}
+		jsonOutput = enabled
+		return true
+	})
+	return stripped, jsonOutput
 }
 
 // HasPackagePattern reports whether a per-package flag value starts with a

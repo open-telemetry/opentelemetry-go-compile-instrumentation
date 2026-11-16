@@ -322,8 +322,8 @@ func (a app) identity(ctx context.Context, args []string) error {
 func (a app) reportMissingToken(files ghaction.Files) error {
 	for _, line := range []string{
 		"::error::Missing publisher token in bundle-publisher.",
-		"Configure OTELC_BUNDLE_PUSH_TOKEN as an environment secret.",
-		"The App remains supported for repository branches.",
+		"Configure the OTELBOT_GO_COMPILE_INSTRUMENTATION_* App credentials",
+		"or OTELC_BUNDLE_PUSH_TOKEN as an environment secret.",
 	} {
 		if err := a.sayLine(line); err != nil {
 			return err
@@ -341,30 +341,35 @@ func (a app) reportMissingToken(files ghaction.Files) error {
 }
 
 // credentials chooses between the App token and the environment token. It
-// reads CLIENT_ID, PRIVATE_KEY and IS_CROSS_REPOSITORY and never prints the key.
-// A variable that the decision needs must be set, even if empty. The variables
-// are read in this order and the decision stops at the first one that rules
-// out the App: IS_CROSS_REPOSITORY, CLIENT_ID, PRIVATE_KEY.
+// reads REPO, HEAD_REPO_FULL, CLIENT_ID, and PRIVATE_KEY in this order and
+// stops at the first variable that rules out the App. A variable read before
+// the stop must be set, even if empty. The App serves a branch only when the
+// head repository equals REPO and both App credentials are set. Fork branches
+// use the environment token, because GitHub does not let an App write workflow
+// files to a fork. The key is never printed.
 func (a app) credentials(args []string) error {
 	if len(args) != 0 {
 		return errors.New("credentials takes no arguments")
 	}
-	useApp := true
-	for _, rule := range []struct {
-		name string
-		ok   func(string) bool
-	}{
-		{"IS_CROSS_REPOSITORY", func(v string) bool { return v == "false" }},
-		{"CLIENT_ID", func(v string) bool { return v != "" }},
-		{"PRIVATE_KEY", func(v string) bool { return v != "" }},
-	} {
-		value, set := a.lookup(rule.name)
-		if !set {
-			return errors.New(rule.name + " must be set")
-		}
-		if !rule.ok(value) {
-			useApp = false
-			break
+	repo, set := a.lookup("REPO")
+	if !set {
+		return errors.New("REPO must be set")
+	}
+	headRepo, set := a.lookup("HEAD_REPO_FULL")
+	if !set {
+		return errors.New("HEAD_REPO_FULL must be set")
+	}
+	useApp := headRepo == repo
+	if useApp {
+		for _, name := range []string{"CLIENT_ID", "PRIVATE_KEY"} {
+			value, ok := a.lookup(name)
+			if !ok {
+				return errors.New(name + " must be set")
+			}
+			if value == "" {
+				useApp = false
+				break
+			}
 		}
 	}
 	return ghaction.FromEnv(a.getenv).SetOutput("use_app", strconv.FormatBool(useApp))

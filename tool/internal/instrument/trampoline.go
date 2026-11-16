@@ -46,6 +46,7 @@ const (
 	trampolineGetParamName          = "GetParam"
 	trampolineSetReturnValName      = "SetReturnVal"
 	trampolineGetReturnValName      = "GetReturnVal"
+	trampolineGetReturnValCountName = "GetReturnValCount"
 	trampolineSetSkipCallName       = "SetSkipCall"
 	trampolineAnyItemsIdentifier    = "_otel_anyItems"
 	trampolineAnyIndexIdentifier    = "_otel_anyIndex"
@@ -194,22 +195,6 @@ func hookLinkName(path, fnName string) string {
 	return "otelc_hook_" + util.CRC32(path) + "_" + fnName
 }
 
-func isHookDefined(root *dst.File, rule *rule.InstFuncRule) bool {
-	if rule.Before != "" {
-		decl := ast.FindFuncDeclWithoutRecv(root, rule.Before)
-		if decl == nil {
-			return false
-		}
-	}
-	if rule.After != "" {
-		decl := ast.FindFuncDeclWithoutRecv(root, rule.After)
-		if decl == nil {
-			return false
-		}
-	}
-	return true
-}
-
 // parseHookFileCached parses file once per process and reuses the result
 // across every hook lookup that touches it, whether for the same func rule
 // looked up twice (createTrampoline and optimizeTJumps) or a different rule
@@ -229,13 +214,14 @@ func (ip *instrumentPhase) parseHookFileCached(file string) (*dst.File, error) {
 	return root, nil
 }
 
-// findHookFile locates the file in rule.ResolvedPath defining rule's hooks
-// and returns it already parsed, since the caller needs both. The hooks are
-// linked by the import path of rule.Path, so only the files the go command
-// compiles into that package are searched: a subdirectory is another package,
-// testdata is no package at all, and test files and files starting with "." or
-// "_" are never built into it.
-func (ip *instrumentPhase) findHookFile(rule *rule.InstFuncRule) (string, *dst.File, error) {
+// findHookFile locates the file in rule.ResolvedPath that declares the hook
+// function hookName and returns it with the declaration. The hooks are linked
+// by the import path of rule.Path, so only the files the go command compiles
+// into that package are searched: a subdirectory is another package, testdata
+// is no package at all, and test files and files starting with "." or "_" are
+// never built into it. Any of those files can declare the hook, so the before
+// and after hooks of one rule may live in different files.
+func (ip *instrumentPhase) findHookFile(rule *rule.InstFuncRule, hookName string) (string, *dst.FuncDecl, error) {
 	entries, err0 := os.ReadDir(rule.ResolvedPath)
 	if err0 != nil {
 		return "", nil, ex.Wrapf(err0, "reading hook directory %s", rule.ResolvedPath)
@@ -254,26 +240,17 @@ func (ip *instrumentPhase) findHookFile(rule *rule.InstFuncRule) (string, *dst.F
 		if err != nil {
 			return "", nil, err
 		}
-		if isHookDefined(root, rule) {
-			return file, root, nil
+		if decl := ast.FindFuncDeclWithoutRecv(root, hookName); decl != nil {
+			return file, decl, nil
 		}
 	}
-	return "", nil, ex.Newf("no hook {%s,%s} found for %s from %v",
-		rule.Before, rule.After, rule.Func, files)
+	return "", nil, ex.Newf("no hook %s found for %s from %v", hookName, rule.Func, files)
 }
 
 // getHookFunc resolves the Before/After hook function declaration for t.
 func (ip *instrumentPhase) getHookFunc(t *rule.InstFuncRule, before bool) (*dst.FuncDecl, error) {
-	file, root, err := ip.findHookFile(t)
-	if err != nil {
-		return nil, err
-	}
-	target := ast.FindFuncDeclWithoutRecv(root, getHookFuncName(t, before))
-	if target == nil {
-		return nil, ex.Newf("hook %s or %s not found from %s",
-			t.Before, t.After, file)
-	}
-	return target, nil
+	_, hookFunc, err := ip.findHookFile(t, getHookFuncName(t, before))
+	return hookFunc, err
 }
 
 func arrayTypeName(t *dst.ArrayType) string {
@@ -374,9 +351,11 @@ func interfaceTypeName(t *dst.InterfaceType) string {
 }
 
 // baseTypeName normalizes a type expression for signature matching by stripping
-// package qualifiers and the outermost pointer while preserving composite type
-// constructors, so trampoline and hook parameter types can be compared directly.
-// Examples: *pkg.Type → Type, []int → []int, ...string → ...string
+// package qualifiers while preserving pointers and composite type constructors,
+// so hook parameter types can be compared with the target's. Pointers are kept
+// because the hook is linked to a declaration typed after the target (see
+// addHookDecl): a hook that drops or adds a pointer would be handed a value of
+// the wrong layout. Examples: *pkg.Type is *Type, []*int is []*int.
 func baseTypeName(expr dst.Expr) string {
 	switch t := expr.(type) {
 	case *dst.Ident:
@@ -385,7 +364,7 @@ func baseTypeName(expr dst.Expr) string {
 		}
 		return t.Name
 	case *dst.StarExpr:
-		return baseTypeName(t.X)
+		return "*" + baseTypeName(t.X)
 	case *dst.SelectorExpr:
 		return t.Sel.Name
 	case *dst.ArrayType:
@@ -409,6 +388,17 @@ func baseTypeName(expr dst.Expr) string {
 	default:
 		return ""
 	}
+}
+
+// trampParamTypeName normalizes the type of a trampoline parameter for
+// comparison with a hook parameter. The trampoline takes each target parameter
+// by pointer (see buildTrampSignature), so that one pointer is not part of the
+// type the hook receives.
+func trampParamTypeName(expr dst.Expr) string {
+	if star, ok := expr.(*dst.StarExpr); ok {
+		return baseTypeName(star.X)
+	}
+	return baseTypeName(expr)
 }
 
 // indexListType builds a normalized name for a generic type instantiation
@@ -533,7 +523,7 @@ func (ip *instrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, targetParams *d
 	// All params must match (first is HookContext, rest are dereferenced)
 	// (interface{} or any in hook accepts any type, used for generics)
 	for i, trampField := range afterTrampParams.List {
-		trampBase := baseTypeName(trampField.Type)
+		trampBase := trampParamTypeName(trampField.Type)
 		hookBase := baseTypeName(afterHookParams.List[i].Type)
 		if !matchBaseType(trampBase, hookBase) {
 			return ex.Newf("hook func param %d type mismatch, expected %s, got %s",
@@ -579,7 +569,7 @@ func (ip *instrumentPhase) checkBeforeHookDecl(hookFunc *dst.FuncDecl, targetPar
 				return err
 			}
 		}
-		trampBase := baseTypeName(trampField.Type)
+		trampBase := trampParamTypeName(trampField.Type)
 		hookBase := baseTypeName(hookType)
 		if !matchBaseType(trampBase, hookBase) {
 			return ex.Newf("hook func param %d type mismatch, expected %s, got %s",
