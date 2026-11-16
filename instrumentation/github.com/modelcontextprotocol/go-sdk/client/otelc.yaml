@@ -1,4 +1,4 @@
-version: "v1.0.0"
+version: "v1.2.0"
 
 # Capture the concrete Transport passed to (*Client).Connect so that the
 # resulting *ClientSession can be annotated with network.transport on every
