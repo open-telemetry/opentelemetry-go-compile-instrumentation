@@ -212,6 +212,41 @@ func TestParseDSN_MySQL(t *testing.T) {
 			wantDB:   "mydb",
 		},
 		{
+			name:     "password with opening parenthesis",
+			dsn:      "user:pa(ss@tcp(db.example.com:3306)/app",
+			wantHost: "db.example.com",
+			wantPort: "3306",
+			wantDB:   "app",
+		},
+		{
+			name:     "password with multiple delimiters",
+			dsn:      "user:p@secret/hidden?tail@tcp(db.example.com:3306)/app",
+			wantHost: "db.example.com",
+			wantPort: "3306",
+			wantDB:   "app",
+		},
+		{
+			name:     "missing database separator is not parsed",
+			dsn:      "user:pa(ss@tcp(db.example.com:3306)",
+			wantHost: "",
+			wantPort: "",
+			wantDB:   "",
+		},
+		{
+			name:     "password with slash and no database separator",
+			dsn:      "user:pa/ss@host:3306",
+			wantHost: "",
+			wantPort: "",
+			wantDB:   "",
+		},
+		{
+			name:     "query param with at sign",
+			dsn:      "user:pass@tcp(host:3306)/db?x=a@b/c",
+			wantHost: "b",
+			wantPort: "3306",
+			wantDB:   "c",
+		},
+		{
 			name:     "unix socket",
 			dsn:      "user:pass@unix(/tmp/mysql.sock)/mydb",
 			wantHost: "/tmp/mysql.sock",
@@ -491,6 +526,16 @@ func TestRegisterDSNParsers(t *testing.T) {
 	})
 	assert.Equal(t, "h1:11", ParseDSN("batchdriver1", "x").Addr())
 	assert.Equal(t, "h2:22", ParseDSN("batchdriver2", "x").Addr())
+}
+
+func TestHasParser(t *testing.T) {
+	for _, driver := range []string{"mysql", "postgres", "godror", "sqlserver"} {
+		assert.True(t, HasParser(driver), "driver=%s", driver)
+	}
+	assert.False(t, HasParser("hasparser-unregistered"))
+
+	RegisterDSNParser("hasparser-custom", DSNParserFunc(func(string) DSNInfo { return DSNInfo{} }))
+	assert.True(t, HasParser("hasparser-custom"))
 }
 
 func TestParseDSN_PostgresAliases(t *testing.T) {

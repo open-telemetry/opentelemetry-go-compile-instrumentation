@@ -15,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otelc/instrumentation/database/sql/dsnparse"
 	"go.opentelemetry.io/otelc/instrumentation/database/sql/semconv"
 	"go.opentelemetry.io/otelc/pkg/hook"
 	"go.opentelemetry.io/otelc/pkg/runtime"
@@ -53,7 +54,9 @@ func beforeOpenInstrumentation(ictx hook.HookContext, driverName, dataSourceName
 		addr = "unknown"
 	}
 	dbName := info.DBName
-	if dbName == "" && dataSourceName != "" {
+	// A registered parser already knows the DSN's credential boundaries; the
+	// generic fallback does not and would export password bytes.
+	if dbName == "" && dataSourceName != "" && !dsnparse.HasParser(driverName) {
 		dbName = ParseDbName(dataSourceName)
 	}
 	ictx.SetData(map[string]string{
@@ -159,7 +162,7 @@ func beforeOpenDBInstrumentation(ictx hook.HookContext, c driver.Connector) {
 		addr = "unknown"
 	}
 	dbName := info.DBName
-	if dbName == "" && dsn != "" {
+	if dbName == "" && dsn != "" && !dsnparse.HasParser(driverName) {
 		dbName = ParseDbName(dsn)
 	}
 
