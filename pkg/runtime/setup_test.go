@@ -422,7 +422,11 @@ func TestNewResourceIncludesTelemetrySDK(t *testing.T) {
 	// happy path from the fallback. process.pid is only set on the happy
 	// path and the environment cannot remove it.
 	pid, ok := set.Value(attribute.Key("process.pid"))
-	require.True(t, ok, "resource must include detector attributes; this fails if newResource fell back to resource.Default()")
+	require.True(
+		t,
+		ok,
+		"resource must include detector attributes; this fails if newResource fell back to resource.Default()",
+	)
 	assert.NotZero(t, pid.AsInt64())
 }
 

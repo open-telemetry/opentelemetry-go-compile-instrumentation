@@ -20,7 +20,7 @@ endif
         test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage test-unit/instrumentation/coverage \
         check-coverage test-integration/coverage test-e2e/coverage test-latestlibrun test-versionmatrix \
         weaver-install tidy/test-apps \
-        fetch-upstream-semconv lint-schema \
+        fetch-upstream-semconv lint-schema generate \
         adr-tools adr-new adr-list \
         benchmark/codspeed benchmark/threshold govulncheck govulncheck/instrumentation
 
@@ -219,9 +219,11 @@ package: ## Package the instrumentation code into binary
 	@mkdir -p $(INST_BUNDLE_PKG_TMP)
 	@cp -r pkg/runtime $(INST_BUNDLE_PKG_TMP)/runtime
 	@cp -r pkg/netutil $(INST_BUNDLE_PKG_TMP)/netutil
+	@cp -r pkg/otelcconv $(INST_BUNDLE_PKG_TMP)/otelcconv
 	@cp -r instrumentation $(INST_BUNDLE_INST_TMP)
 	@(cd $(INST_BUNDLE_PKG_TMP)/runtime && go mod tidy)
 	@(cd $(INST_BUNDLE_PKG_TMP)/netutil && go mod tidy)
+	@(cd $(INST_BUNDLE_PKG_TMP)/otelcconv && go mod tidy)
 	@(cd $(INST_BUNDLE_INST_TMP) && go mod tidy)
 	@mkdir -p tool/data/
 	@$(MAKE) $(BUNDLE)
@@ -499,6 +501,10 @@ govulncheck: $(GOVULNCHECK) ## Scan core modules (root, pkg) for known Go vulner
 # Build each integration test app with otelc, then scan the resulting binary.
 # Binary mode sees injected instrumentation (including //go:build ignore sources
 # and field-injection modules like database/sql) that source mode cannot analyze.
+# echoserver uses echo v4.16.3. The upstream advisories list this version as fixed.
+# The Go vulnerability database still marks every echo v4 release as affected.
+# Ignore GO-2026-6872 and GO-2026-6875 for echoserver only.
+# After vuln.go.dev lists v4.16.3 as fixed, delete this ignore. See issue 1744.
 .ONESHELL:
 govulncheck/instrumentation: $(GOVULNCHECK) build ## Scan instrumented test apps (binary mode) for known Go vulnerabilities
 	@echo "Running govulncheck -mode=binary across $(words $(GOVULNCHECK_TEST_APPS)) instrumented test apps..."
@@ -516,9 +522,20 @@ govulncheck/instrumentation: $(GOVULNCHECK) build ## Scan instrumented test apps
 			continue; \
 		fi; \
 		echo "==> govulncheck -mode=binary $$app"; \
-		if ! "$(GOVULNCHECK)" -mode=binary "$$appdir/$$app_bin"; then \
-			status=1; \
+		vuln_log=$$(mktemp); \
+		if "$(GOVULNCHECK)" -mode=binary "$$appdir/$$app_bin" >"$$vuln_log" 2>&1; then \
+			cat "$$vuln_log"; \
+		else \
+			cat "$$vuln_log"; \
+			ids=$$(sed -n 's/^Vulnerability #[0-9][0-9]*:[[:space:]]*//p' "$$vuln_log" | sed 's/[[:space:]]*$$//' | sort -u); \
+			extra=$$(printf '%s\n' "$$ids" | grep -vxF -e 'GO-2026-6872' -e 'GO-2026-6875' || true); \
+			if [ "$$app" = echoserver ] && [ -n "$$ids" ] && [ -z "$$extra" ]; then \
+				echo "govulncheck/instrumentation: ignored GO-2026-6872 and GO-2026-6875 for echoserver. vuln.go.dev still marks echo v4.16.3 as affected. See issue 1744."; \
+			else \
+				status=1; \
+			fi; \
 		fi; \
+		rm -f "$$vuln_log"; \
 		rm -f "$$appdir/$$app_bin"; \
 		(cd "$$appdir" && "$$otelc" cleanup) || true; \
 	done; \
@@ -776,8 +793,9 @@ test-integration/coverage: ## Run integration tests with coverage report
 test-integration/coverage: build build-demo
 	@echo "Running integration tests with coverage report..."
 	set -euo pipefail
-	# See test-integration: linodego builds need >20m when the suite is unsharded.
-	go -C "test" test -json -v -shuffle=on -timeout=40m -count=1 -tags integration ./integration/... -coverprofile=../coverage-integration.txt -covermode=atomic 2>&1 | tee ./gotest-integration.log
+	# See test-integration: linodego builds need >20m when the suite is unsharded,
+	# and the unsharded suite can take more than 35m.
+	go -C "test" test -json -v -shuffle=on -timeout=50m -count=1 -tags integration ./integration/... -coverprofile=../coverage-integration.txt -covermode=atomic 2>&1 | tee ./gotest-integration.log
 
 .ONESHELL:
 test-e2e: ## Run e2e tests
@@ -960,6 +978,11 @@ lint-schema: fetch-upstream-semconv
 	fi; \
 	echo "Upstream semconv dependency: v$$MANIFEST_VERSION (matches .semconv-version)"
 	@scripts/semconv/lint-schema.sh $(OCI_BIN) $(WEAVER_IMAGE) "$(OTELC_REGISTRY_DIR)"
+
+generate: ## Generate pkg/otelcconv from the attributes declared with `id:` in schemas/otelc/
+generate: fetch-upstream-semconv
+	@scripts/semconv/generate.sh $(OCI_BIN) $(WEAVER_IMAGE) "$(OTELC_REGISTRY_DIR)" \
+		"$(CURDIR)/schemas/templates/registry" "$(CURDIR)/pkg/otelcconv"
 
 # `lint/semantic-conventions` is the umbrella entry point used by CI and the
 # top-level `lint` target; it now validates the project's own registry.

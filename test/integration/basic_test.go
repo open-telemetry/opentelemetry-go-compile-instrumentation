@@ -47,6 +47,7 @@ func TestBasic(t *testing.T) {
 		"returnValCount:0",
 		"isSkipCall:false",
 		"Ellipsis",
+		"retValCount:0 retVal0:<nil>",
 		"Hello from stdio",
 		"Underscore",
 		"AutoDetect: 00000000-0000-0000-0000-000000000000",

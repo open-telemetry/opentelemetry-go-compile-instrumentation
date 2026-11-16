@@ -807,6 +807,10 @@ func TestClientStatsHandler_HandleRPC_UsesStatsEndTime(t *testing.T) {
 		spans := exporter.GetSpans()
 		require.Len(t, spans, 1)
 		assert.False(t, spans[0].EndTime.IsZero(), "span EndTime should not be zero")
-		assert.True(t, !spans[0].EndTime.Before(before) && !spans[0].EndTime.After(after), "span EndTime should be set to current time")
+		assert.True(
+			t,
+			!spans[0].EndTime.Before(before) && !spans[0].EndTime.After(after),
+			"span EndTime should be set to current time",
+		)
 	})
 }
