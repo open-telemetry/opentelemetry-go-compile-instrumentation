@@ -5,11 +5,13 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/urfave/cli/v3"
 
@@ -21,6 +23,11 @@ import (
 const (
 	debugLogFilename = "debug.log"
 	flagWorkDir      = "work-dir"
+	flagTimeout      = "timeout"
+	// envBuildTimeout is the user-facing env var for --timeout. It is
+	// distinct from util.EnvOtelcBuildDeadline, which carries the absolute
+	// deadline --timeout computes once resolved, not the duration itself.
+	envBuildTimeout = "OTELC_BUILD_TIMEOUT"
 )
 
 func rootFlags() []cli.Flag {
@@ -69,6 +76,15 @@ func rootFlags() []cli.Flag {
 			Usage:   "Log per-tool wall-clock duration for toolexec commands",
 			Hidden:  true,
 		},
+		&cli.DurationFlag{
+			Name:    flagTimeout,
+			Sources: cli.EnvVars(envBuildTimeout),
+			Usage: "Limit the whole build (setup, the go command, and every toolexec " +
+				"it spawns) to this duration; 0 disables it. For `otelc go test`, " +
+				"this also bounds running the tests, which overlaps with -timeout " +
+				"passed to go test itself.",
+			Value: 0,
+		},
 	}
 }
 
@@ -88,6 +104,9 @@ func main() {
 		},
 		Before: initRoot,
 		After: func(ctx context.Context, cmd *cli.Command) error {
+			if cancel, ok := ctx.Value(deadlineCancelKey{}).(context.CancelFunc); ok {
+				cancel()
+			}
 			return ex.Join(stopProfiling(ctx, cmd), closeLogger(ctx))
 		},
 	}
@@ -104,11 +123,50 @@ func main() {
 // initRoot prepares the process before any subcommand runs.
 func initRoot(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 	var err error
-	for _, step := range []cli.BeforeFunc{initGoflags, initLogger, initProfiling, initStats} {
+	for _, step := range []cli.BeforeFunc{initGoflags, initLogger, initProfiling, initStats, initDeadline} {
 		if ctx, err = step(ctx, cmd); err != nil {
 			return ctx, err
 		}
 	}
+	return ctx, nil
+}
+
+// deadlineCancelKey holds the cancel func for the context initDeadline
+// derives, so the app's After hook can release it once the command returns.
+type deadlineCancelKey struct{}
+
+// initDeadline bounds ctx to the whole build's deadline, when one applies.
+//
+// A deadline set by an ancestor otelc process (the go command this process
+// runs under, or the otelc process that spawned a nested build) arrives in
+// EnvOtelcBuildDeadline and always wins, so every process under one `otelc
+// go` build shares one absolute cutoff rather than each layer restarting its
+// own --timeout. Only the outermost `otelc go` invocation computes a new
+// deadline from --timeout/OTELC_BUILD_TIMEOUT (0, the default, leaves ctx
+// alone) and publishes it to EnvOtelcBuildDeadline, which os.Environ picks
+// up for the go command it runs and, through that, for every toolexec
+// process the go command spawns.
+func initDeadline(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+	if deadline, ok := util.BuildDeadlineFromEnv(); ok {
+		return withDeadline(ctx, deadline, "an ancestor otelc process already set "+util.EnvOtelcBuildDeadline)
+	}
+	if cmd.Args().First() != "go" {
+		return ctx, nil
+	}
+	timeout := cmd.Duration(flagTimeout)
+	if timeout <= 0 {
+		return ctx, nil
+	}
+	deadline := time.Now().Add(timeout)
+	if err := os.Setenv(util.EnvOtelcBuildDeadline, util.FormatBuildDeadline(deadline)); err != nil {
+		return ctx, ex.Wrapf(err, "setting %s", util.EnvOtelcBuildDeadline)
+	}
+	return withDeadline(ctx, deadline, fmt.Sprintf("the %s build timeout (%s) elapsed", "--"+flagTimeout, timeout))
+}
+
+func withDeadline(ctx context.Context, deadline time.Time, cause string) (context.Context, error) {
+	ctx, cancel := context.WithDeadlineCause(ctx, deadline, ex.New(cause))
+	ctx = context.WithValue(ctx, deadlineCancelKey{}, cancel)
 	return ctx, nil
 }
 

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/urfave/cli/v3"
 	"go.opentelemetry.io/otelc/tool/internal/setup"
@@ -320,6 +321,89 @@ func TestInitRoot(t *testing.T) {
 		_, err := run(t, "--profile", "cpu")
 		if err == nil || !strings.Contains(err.Error(), "--profile-path is required") {
 			t.Fatalf("err = %v, want the --profile-path error", err)
+		}
+	})
+}
+
+func TestInitDeadline(t *testing.T) {
+	run := func(t *testing.T, args ...string) context.Context {
+		t.Helper()
+		ctxCh := make(chan context.Context, 1)
+		app := &cli.Command{
+			Name:   "otelc",
+			Flags:  rootFlags(),
+			Before: initDeadline,
+			Action: func(ctx context.Context, _ *cli.Command) error {
+				ctxCh <- ctx
+				return nil
+			},
+		}
+		if err := app.Run(t.Context(), append([]string{"otelc"}, args...)); err != nil {
+			t.Fatal(err)
+		}
+		return <-ctxCh
+	}
+
+	t.Run("no timeout leaves the context without a deadline", func(t *testing.T) {
+		t.Setenv(util.EnvOtelcBuildDeadline, "")
+
+		ctx := run(t, "go")
+
+		if _, ok := ctx.Deadline(); ok {
+			t.Error("ctx has a deadline, want none")
+		}
+		if got := os.Getenv(util.EnvOtelcBuildDeadline); got != "" {
+			t.Errorf("%s = %q, want unset", util.EnvOtelcBuildDeadline, got)
+		}
+	})
+
+	t.Run("a non-go subcommand ignores --timeout", func(t *testing.T) {
+		t.Setenv(util.EnvOtelcBuildDeadline, "")
+
+		ctx := run(t, "--timeout", "1h", "version")
+
+		if _, ok := ctx.Deadline(); ok {
+			t.Error("ctx has a deadline, want none")
+		}
+		if got := os.Getenv(util.EnvOtelcBuildDeadline); got != "" {
+			t.Errorf("%s = %q, want unset", util.EnvOtelcBuildDeadline, got)
+		}
+	})
+
+	t.Run("--timeout sets a deadline and publishes it for child processes", func(t *testing.T) {
+		t.Setenv(util.EnvOtelcBuildDeadline, "")
+		before := time.Now()
+
+		ctx := run(t, "--timeout", "1h", "go")
+
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("ctx has no deadline, want one")
+		}
+		if d := deadline.Sub(before); d < 59*time.Minute || d > 61*time.Minute {
+			t.Errorf("deadline is %s from now, want ~1h", d)
+		}
+		published, ok := util.BuildDeadlineFromEnv()
+		if !ok {
+			t.Fatal(util.EnvOtelcBuildDeadline + " not set, want it published for child processes")
+		}
+		if !published.Equal(deadline) {
+			t.Errorf("published deadline %s != ctx deadline %s", published, deadline)
+		}
+	})
+
+	t.Run("an inherited deadline wins over --timeout", func(t *testing.T) {
+		inherited := time.Now().Add(5 * time.Minute)
+		t.Setenv(util.EnvOtelcBuildDeadline, util.FormatBuildDeadline(inherited))
+
+		ctx := run(t, "--timeout", "1h", "go")
+
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("ctx has no deadline, want the inherited one")
+		}
+		if !deadline.Equal(inherited) {
+			t.Errorf("deadline = %s, want the inherited %s", deadline, inherited)
 		}
 	})
 }
