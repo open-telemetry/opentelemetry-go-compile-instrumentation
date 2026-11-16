@@ -6,6 +6,7 @@
 package test
 
 import (
+	"fmt"
 	"net"
 	"testing"
 
@@ -101,4 +102,23 @@ func TestMongoClientsCreatedDuringInit(t *testing.T) {
 			testutil.HasAttribute("db.collection.name", collection),
 		)
 	}
+}
+
+// An AWS config loaded in a package-level variable runs the
+// config.LoadDefaultConfig hook before the OpenTelemetry API has initialized.
+// Clients made from that config must still trace calls made later.
+func TestAWSConfigLoadedDuringInit(t *testing.T) {
+	t.Parallel()
+	testutil.Build(t, "", "awsinit", "go", "build", "-a")
+	f := testutil.NewTestFixture(t)
+	server := startMockDynamoDBServer(t)
+
+	output := f.Run("awsinit", fmt.Sprintf("-endpoint=%s", server.URL))
+
+	require.NotContains(t, output, "failed to exec")
+	span := testutil.RequireSpan(t, f.Traces(),
+		testutil.HasName("DynamoDB.ListTables"),
+		testutil.IsClient,
+	)
+	testutil.RequireAWSClientSemconv(t, span, awsMockRequestID)
 }
