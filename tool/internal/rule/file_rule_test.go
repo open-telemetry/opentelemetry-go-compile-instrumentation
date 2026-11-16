@@ -32,6 +32,61 @@ path: github.com/example/pkg
 			},
 		},
 		{
+			name: "file in a subdirectory",
+			yaml: `
+file: sub/my_file.go
+target: example.com/pkg
+path: github.com/example/pkg
+`,
+			check: func(t *testing.T, r *InstFileRule) {
+				assert.Equal(t, "sub/my_file.go", r.File)
+			},
+		},
+		{
+			name: "dot dot that stays inside the directory",
+			yaml: `
+file: sub/../my_file.go
+target: example.com/pkg
+path: github.com/example/pkg
+`,
+		},
+		{
+			name: "file escapes with a leading dot dot",
+			yaml: `
+file: ../../outside.go
+target: example.com/pkg
+path: github.com/example/pkg
+`,
+			wantErr: true,
+		},
+		{
+			name: "file escapes after a subdirectory",
+			yaml: `
+file: sub/../../../outside.go
+target: example.com/pkg
+path: github.com/example/pkg
+`,
+			wantErr: true,
+		},
+		{
+			name: "file is just dot dot",
+			yaml: `
+file: ..
+target: example.com/pkg
+path: github.com/example/pkg
+`,
+			wantErr: true,
+		},
+		{
+			name: "file is an absolute path",
+			yaml: `
+file: /etc/passwd
+target: example.com/pkg
+path: github.com/example/pkg
+`,
+			wantErr: true,
+		},
+		{
 			name:    "missing file field",
 			yaml:    `target: example.com/pkg\npath: github.com/example/pkg`,
 			wantErr: true,
