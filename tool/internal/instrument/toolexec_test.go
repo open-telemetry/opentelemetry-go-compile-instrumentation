@@ -2753,6 +2753,7 @@ func TestDeterministicLoadFailure(t *testing.T) {
 		want bool
 	}{
 		{"missing module package", listErr("no required module provides package example.invalid/zzz; to add it:\n\tgo get example.invalid/zzz"), true},
+		{"go mod updates needed", listErr("updates to go.mod needed; to update it:\n\tgo mod tidy"), true},
 		{"not in std", listErr("package fmtx is not in std (/usr/local/go/src/fmtx)"), true},
 		{"build constraints", listErr("package example.com/p/ex: build constraints exclude all Go files in /tmp/p/ex"), true},
 		{"no export file", errors.New(`package "unsafe" has no export file`), true},

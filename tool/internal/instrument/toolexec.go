@@ -926,6 +926,7 @@ func deterministicLoadFailure(err error) bool {
 func deterministicFailurePatterns() []string {
 	return []string{
 		"no required module provides package",
+		"updates to go.mod needed",
 		"cannot find module providing package",
 		"cannot find package",
 		"is not in std",
@@ -1000,6 +1001,9 @@ func (lr *linkResolution) resolveBatch(
 		return resolved, resolveFailed, err
 	}
 	if len(roots) == 1 {
+		if !deterministicLoadFailure(err) {
+			return nil, nil, err
+		}
 		return nil, map[string]error{roots[0]: err}, nil
 	}
 
@@ -1008,7 +1012,7 @@ func (lr *linkResolution) resolveBatch(
 	for _, root := range roots {
 		var one map[string]map[string]string
 		var oneFailed map[string]error
-		err := session.WithLoadSlot(ctx, func(ctx context.Context) error {
+		rootErr := session.WithLoadSlot(ctx, func(ctx context.Context) error {
 			var loadErr error
 			one, oneFailed, loadErr = lr.resolve(ctx, []string{root}, lr.buildFlags...)
 			return loadErr
@@ -1017,8 +1021,11 @@ func (lr *linkResolution) resolveBatch(
 		if ctx.Err() != nil {
 			return nil, nil, ctx.Err()
 		}
-		if err != nil {
-			resolveFailed[root] = err
+		if rootErr != nil {
+			if !deterministicLoadFailure(rootErr) {
+				return nil, nil, rootErr
+			}
+			resolveFailed[root] = rootErr
 			continue
 		}
 		maps.Copy(resolved, one)
