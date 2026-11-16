@@ -8,7 +8,7 @@ Tests are organized in six categories, each with a distinct purpose and scope.
 | :------- | :------- | :-------- | :---- |
 | Unit | `tool/**/*_test.go`, `pkg/**/*_test.go` | none | Single function or component in isolation. |
 | Integration | `test/integration/` | `integration` | Instrumented binary against a local or in-process dependency. |
-| E2E | `test/e2e/` | `e2e` | Multiple processes (e.g. client + server). |
+| E2E | `test/e2e/` | `e2e` | Multiple processes (e.g. client + server), or an instrumented binary against a real external dependency. |
 | LatestLibBuild | `test/latestlibbuild/` | `latestlibbuild` | Compile instrumented app against `@latest` of each instrumented library. |
 | LatestLibRun | `test/latestlibrun/` | `latestlibrun` | Run integration suite after bumping each instrumented library to `@latest`. |
 | VersionMatrix | `test/versionmatrix/` | `versionmatrix` | Run integration suite after pinning each instrumented library to the lower and upper bounds of its declared version ranges. |
@@ -92,9 +92,9 @@ Each test follows the same pattern:
 ## E2E Tests
 
 > [!IMPORTANT]
-> **When to write an E2E test.** When the scenario involves multiple instrumented processes or services. Typical cases include context propagation across services, multi-service interactions or complex scenarios.
+> **When to write an E2E test.** When the scenario involves multiple instrumented processes or services, or when it needs a real external dependency (e.g. a database server in a container) whose behavior an in-process or mock dependency cannot reproduce. Typical cases include context propagation across services, multi-service interactions, real server/driver fidelity or complex scenarios.
 
-E2E tests spin up multiple processes (e.g. an instrumented client and an instrumented server) and verify they produce a coherent trace with spans from every participant sharing the same trace ID.
+E2E tests spin up multiple processes (e.g. an instrumented client and an instrumented server) and verify they produce a coherent trace with spans from every participant sharing the same trace ID. Tests that target a real dependency (e.g. `mongo_test.go` against a `mongod` container) instead assert on attributes that only a real server and network path produce, such as non-loopback peer addresses.
 
 ## Test Applications
 
