@@ -77,14 +77,7 @@ func main() {
 		Usage:       "OpenTelemetry Go Compile-Time Instrumentation Tool",
 		HideVersion: true,
 		Flags:       rootFlags(),
-		Commands: []*cli.Command{
-			&commandPin,
-			&commandSetup,
-			&commandGo,
-			&commandCleanup,
-			&commandToolexec,
-			&commandVersion,
-		},
+		Commands:    appCommands(),
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 			// In drop-in mode (otelc is the GOFLAGS -toolexec tool) the go
 			// children otelc spawns would inherit the flag and recurse, so

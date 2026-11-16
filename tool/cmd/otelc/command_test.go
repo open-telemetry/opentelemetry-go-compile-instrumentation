@@ -38,11 +38,7 @@ func TestCommandVersion(t *testing.T) {
 // urfave/cli renders Usage there and Description only on a command's own help
 // page, so a command with Description alone is listed with no text at all.
 func TestCommandsHaveUsage(t *testing.T) {
-	commands := []*cli.Command{
-		&commandPin, &commandSetup, &commandGo,
-		&commandCleanup, &commandToolexec, &commandVersion,
-	}
-	for _, cmd := range commands {
+	for _, cmd := range appCommands() {
 		t.Run(cmd.Name, func(t *testing.T) {
 			assert.NotEmpty(t, cmd.Usage,
 				"Usage is what --help lists; without it the command appears blank")

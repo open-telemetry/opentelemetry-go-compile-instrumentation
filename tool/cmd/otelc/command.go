@@ -17,6 +17,19 @@ import (
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
+// appCommands is the otelc subcommand registry. main and the tests share it so
+// a newly added command is covered by TestCommandsHaveUsage.
+func appCommands() []*cli.Command {
+	return []*cli.Command{
+		&commandPin,
+		&commandSetup,
+		&commandGo,
+		&commandCleanup,
+		&commandToolexec,
+		&commandVersion,
+	}
+}
+
 //nolint:gochecknoglobals // Implementation of a CLI command
 var commandCleanup = cli.Command{
 	Name:        "cleanup",
