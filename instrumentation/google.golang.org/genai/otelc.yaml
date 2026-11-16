@@ -1,3 +1,5 @@
+version: "v1.2.0"
+
 genai_v1_new_client:
   target: google.golang.org/genai
   version: v1.0.0
