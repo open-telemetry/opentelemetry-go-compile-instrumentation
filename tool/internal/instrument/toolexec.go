@@ -921,6 +921,13 @@ func deterministicLoadFailure(err error) bool {
 	return false
 }
 
+// candidateLoadFailure reports an error that means a root could not be loaded
+// as a package, rather than that the resolver itself could not run. These
+// errors can be skipped for this link; only deterministic ones are memoized.
+func candidateLoadFailure(err error) bool {
+	return deterministicLoadFailure(err) || strings.Contains(err.Error(), "no packages found")
+}
+
 // deterministicFailurePatterns are the messages of the failures
 // deterministicLoadFailure stores.
 func deterministicFailurePatterns() []string {
@@ -997,11 +1004,11 @@ func (lr *linkResolution) resolveBatch(
 		return loadErr
 	})
 	lr.goListCalls++
-	if err == nil || ctx.Err() != nil {
+	if err == nil || ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return resolved, resolveFailed, err
 	}
 	if len(roots) == 1 {
-		if !deterministicLoadFailure(err) {
+		if !candidateLoadFailure(err) {
 			return nil, nil, err
 		}
 		return nil, map[string]error{roots[0]: err}, nil
@@ -1022,7 +1029,7 @@ func (lr *linkResolution) resolveBatch(
 			return nil, nil, ctx.Err()
 		}
 		if rootErr != nil {
-			if !deterministicLoadFailure(rootErr) {
+			if errors.Is(rootErr, context.Canceled) || errors.Is(rootErr, context.DeadlineExceeded) || !candidateLoadFailure(rootErr) {
 				return nil, nil, rootErr
 			}
 			resolveFailed[root] = rootErr

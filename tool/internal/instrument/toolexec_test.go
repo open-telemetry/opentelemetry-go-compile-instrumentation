@@ -2481,7 +2481,7 @@ func (b *batchFailingResolver) resolve(
 		return nil, nil, errors.New("no packages found for " + strings.Join(roots, ", "))
 	}
 	if b.whole[roots[0]] {
-		return nil, nil, errors.New("updates to go.mod needed")
+		return nil, nil, errors.New("no packages found for " + roots[0])
 	}
 	return b.inner.resolve(ctx, roots, flags...)
 }
@@ -2518,6 +2518,16 @@ func TestLinkResolutionSkipsLoneFailingCandidate(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, updated)
 	assert.NotContains(t, cfg.PackageFile, "example.invalid/bad")
+}
+
+func TestLinkResolutionReturnsContextErrorForLoneCandidate(t *testing.T) {
+	setupLinkMemo(t, "example.invalid/bad")
+	resolver := func(context.Context, []string, ...string) (map[string]map[string]string, map[string]error, error) {
+		return nil, nil, context.Canceled
+	}
+
+	_, err := resolveRuleAddedImportsWith(t.Context(), nil, freshLinkConfig(), resolver)
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 // TestLinkResolutionSkipsLoneFailureAfterMemoizedSuccess covers a later link
