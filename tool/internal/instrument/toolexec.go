@@ -104,6 +104,9 @@ type instrumentPhase struct {
 	// buildUsesIgnoreDirective is true when some package in this build has a
 	// //otelc:ignore comment above a call, found during setup.
 	buildUsesIgnoreDirective bool
+	// suppressHooksQualifier is the name the current file's trampolines use
+	// for the runtime package (see suppressHooksAlias).
+	suppressHooksQualifier string
 	// resolveExportFiles looks up go list -export files for type-checking;
 	// nil means pkgload.ResolveExportFilesBatch. Tests replace it.
 	resolveExportFiles func(

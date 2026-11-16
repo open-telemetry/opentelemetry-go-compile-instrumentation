@@ -775,12 +775,16 @@ func (ip *instrumentPhase) applyIgnoredCallSites(ctx context.Context, root *dst.
 
 	stmtLists := findStmtLists(root)
 
-	selfPackage := ip.isSuppressHooksPackage()
+	// Calls in package runtime itself stay unqualified.
+	qualifier := ""
+	if !ip.isSuppressHooksPackage() {
+		qualifier = suppressHooksAlias(ctx, root)
+	}
 
 	bracketed := 0
 	nextFlag := 0
 	for _, list := range stmtLists {
-		n, err := bracketMarkedStmts(list, marked, selfPackage, &nextFlag)
+		n, err := bracketMarkedStmts(list, marked, qualifier, &nextFlag)
 		if err != nil {
 			return false, err
 		}
@@ -790,10 +794,10 @@ func (ip *instrumentPhase) applyIgnoredCallSites(ctx context.Context, root *dst.
 		return false, nil
 	}
 
-	if selfPackage {
+	if qualifier == "" {
 		return true, nil
 	}
-	suppressImport := map[string]string{suppressHooksPackage: suppressHooksPackage}
+	suppressImport := map[string]string{qualifier: suppressHooksPackage}
 	if err := ip.addRuleImports(ctx, root, suppressImport, "otelc:ignore"); err != nil {
 		return false, err
 	}
@@ -835,14 +839,14 @@ func findStmtLists(root *dst.File) []*[]dst.Stmt {
 }
 
 // bracketMarkedStmts brackets every statement in *list that appears in
-// marked and reports how many it bracketed. selfPackage decides whether the
-// inserted calls need a "runtime" qualifier. nextFlag numbers each inserted
+// marked and reports how many it bracketed. qualifier is the name the inserted
+// calls use for the runtime package, empty for no qualifier. nextFlag numbers each inserted
 // guard variable so that two bracketed statements in the same function never
 // collide; callers share one counter across every list in the file.
 func bracketMarkedStmts(
 	list *[]dst.Stmt,
 	marked map[dst.Stmt]bool,
-	selfPackage bool,
+	qualifier string,
 	nextFlag *int,
 ) (int, error) {
 	stmts := *list
@@ -868,7 +872,7 @@ func bracketMarkedStmts(
 					"for the other calls. Give each other call its own statement, then use " +
 					"its result here")
 		}
-		before, after := suppressHooksStmts(selfPackage, *nextFlag)
+		before, after := suppressHooksStmts(qualifier, *nextFlag)
 		*nextFlag++
 		stmts = append(stmts[:i], append(before, stmts[i:]...)...)
 		i += len(before)
@@ -886,12 +890,12 @@ func bracketMarkedStmts(
 // A deferred statement also turns suppression off if the call panics.
 
 //nolint:revive // nonamedreturns conflicts with confusing-results
-func suppressHooksStmts(selfPackage bool, id int) ([]dst.Stmt, []dst.Stmt) {
+func suppressHooksStmts(qualifier string, id int) ([]dst.Stmt, []dst.Stmt) {
 	flag := fmt.Sprintf("otelcIgnoreDone%d", id)
 
 	fallback := &dst.IfStmt{
 		Cond: &dst.UnaryExpr{Op: token.NOT, X: ast.Ident(flag)},
-		Body: ast.Block(ast.ExprStmt(suppressHooksCall(unsuppressHooksFuncName, selfPackage))),
+		Body: ast.Block(ast.ExprStmt(suppressHooksCall(unsuppressHooksFuncName, qualifier))),
 	}
 	deferFallback := ast.DeferStmt(&dst.CallExpr{
 		Fun: &dst.FuncLit{
@@ -901,13 +905,13 @@ func suppressHooksStmts(selfPackage bool, id int) ([]dst.Stmt, []dst.Stmt) {
 	})
 
 	before := []dst.Stmt{
-		ast.ExprStmt(suppressHooksCall(suppressHooksFuncName, selfPackage)),
+		ast.ExprStmt(suppressHooksCall(suppressHooksFuncName, qualifier)),
 		ast.DefineStmts([]dst.Expr{ast.Ident(flag)}, []dst.Expr{ast.BoolFalse()}),
 		deferFallback,
 	}
 	after := []dst.Stmt{
 		ast.AssignStmt(ast.Ident(flag), ast.BoolTrue()),
-		ast.ExprStmt(suppressHooksCall(unsuppressHooksFuncName, selfPackage)),
+		ast.ExprStmt(suppressHooksCall(unsuppressHooksFuncName, qualifier)),
 	}
 	return before, after
 }
