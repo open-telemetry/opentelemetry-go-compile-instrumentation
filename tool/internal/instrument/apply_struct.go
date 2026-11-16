@@ -25,11 +25,13 @@ func (ip *instrumentPhase) applyStructRule(ctx context.Context, rule *rule.InstS
 	for _, f := range structType.Fields.List {
 		if len(f.Names) == 0 {
 			// Embedded field: its effective name is the type name itself.
-			existingFields[embeddedFieldName(f.Type)] = true
+			if name := embeddedFieldName(f.Type); name != "" && name != ast.IdentIgnore {
+				existingFields[name] = true
+			}
 			continue
 		}
 		for _, name := range f.Names {
-			if name.Name == "_" {
+			if name.Name == ast.IdentIgnore {
 				continue
 			}
 			existingFields[name.Name] = true
@@ -37,7 +39,7 @@ func (ip *instrumentPhase) applyStructRule(ctx context.Context, rule *rule.InstS
 	}
 
 	for _, field := range rule.NewField {
-		if field.Name != "_" && existingFields[field.Name] {
+		if field.Name != ast.IdentIgnore && existingFields[field.Name] {
 			return ex.Newf("struct %q already has a field named %q", rule.Struct, field.Name)
 		}
 		typeExpr, err := parseGoTypeExpression(field.Type)
@@ -46,7 +48,7 @@ func (ip *instrumentPhase) applyStructRule(ctx context.Context, rule *rule.InstS
 		}
 		replaceQualifierAliases(typeExpr, aliasOverrides)
 		structType.Fields.List = append(structType.Fields.List, ast.Field(field.Name, typeExpr))
-		if field.Name != "_" {
+		if field.Name != ast.IdentIgnore {
 			existingFields[field.Name] = true
 		}
 	}

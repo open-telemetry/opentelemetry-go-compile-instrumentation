@@ -111,21 +111,23 @@ func TestApplyStructRule_CollidesWithEmbeddedField_ReturnsError(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		target := &dst.StructType{Fields: &dst.FieldList{
-			List: []*dst.Field{{Type: c.embedded}},
-		}}
-		file := typeDeclFile(&dst.TypeSpec{Name: &dst.Ident{Name: "Target"}, Type: target})
-		r := &rule.InstStructRule{
-			InstBaseRule: rule.InstBaseRule{Name: "add_field"},
-			Struct:       "Target",
-			NewField:     []*rule.InstStructField{{Name: c.newField, Type: "bool"}},
-		}
+		t.Run(c.name, func(t *testing.T) {
+			target := &dst.StructType{Fields: &dst.FieldList{
+				List: []*dst.Field{{Type: c.embedded}},
+			}}
+			file := typeDeclFile(&dst.TypeSpec{Name: &dst.Ident{Name: "Target"}, Type: target})
+			r := &rule.InstStructRule{
+				InstBaseRule: rule.InstBaseRule{Name: "add_field"},
+				Struct:       "Target",
+				NewField:     []*rule.InstStructField{{Name: c.newField, Type: "bool"}},
+			}
 
-		err := newTestPhase().applyStructRule(context.Background(), r, file)
+			err := newTestPhase().applyStructRule(context.Background(), r, file)
 
-		require.Errorf(t, err, "case %q", c.name)
-		assert.Containsf(t, err.Error(), `already has a field named "`+c.newField+`"`, "case %q", c.name)
-		require.Lenf(t, target.Fields.List, 1, "case %q", c.name)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), `already has a field named "`+c.newField+`"`)
+			require.Len(t, target.Fields.List, 1)
+		})
 	}
 }
 
@@ -147,7 +149,9 @@ func TestEmbeddedFieldName(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		assert.Equalf(t, c.want, embeddedFieldName(c.expr), "case %q", c.name)
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, embeddedFieldName(c.expr))
+		})
 	}
 }
 
