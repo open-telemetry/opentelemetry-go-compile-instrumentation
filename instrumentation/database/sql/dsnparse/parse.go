@@ -149,6 +149,12 @@ func RegisterDSNParsers(parsers map[string]DSNParser) {
 	defaultRegistry.registerAll(parsers)
 }
 
+// HasParser reports whether a DSN parser is registered for driverName.
+func HasParser(driverName string) bool {
+	_, ok := defaultRegistry.lookup(driverName)
+	return ok
+}
+
 // ParseDSN parses a driver-specific data source name and returns structured
 // connection information. Registered drivers use their dedicated parser;
 // unregistered drivers fall back to a best-effort URL parse rather than
@@ -300,20 +306,26 @@ func parseLibpqKV(dsn string) DSNInfo {
 // It also handles the non-standard form where the address is not wrapped in
 // parentheses (e.g. user:pass@tcp:3306/dbname or user:pass@host:3306/dbname).
 func parseMySQLDSN(dsn string) DSNInfo {
-	// Find the last @ that precedes the first '(' so we skip '@' inside passwords.
-	atIdx := -1
-	for i := 0; i < len(dsn); i++ {
-		if dsn[i] == '@' {
-			atIdx = i
-		}
-		if dsn[i] == '(' {
-			break
-		}
+	// Match go-sql-driver/mysql's credential boundary: passwords may contain
+	// any DSN delimiter, so credentials end at the last '@' before the last '/'.
+	// The driver rejects a non-empty DSN without '/'; such DSNs return DSNInfo{}.
+	//
+	// dbSep only bounds the credentials search and the no-'/' gate. It can
+	// fall inside a query string and is never the database split.
+	dbSep := strings.LastIndexByte(dsn, '/')
+	if dbSep < 0 {
+		return DSNInfo{}
 	}
-	rest := dsn
-	if atIdx >= 0 {
-		rest = dsn[atIdx+1:]
+	// The last '/' fell inside the credentials: an '@' follows the separator
+	// but none precedes it, so the driver rejects the DSN as malformed.
+	if strings.IndexByte(dsn[:dbSep], '@') < 0 && strings.IndexByte(dsn[dbSep:], '@') >= 0 {
+		return DSNInfo{}
 	}
+	addressStart := 0
+	if credentialsEnd := strings.LastIndexByte(dsn[:dbSep], '@'); credentialsEnd >= 0 {
+		addressStart = credentialsEnd + 1
+	}
+	rest := dsn[addressStart:]
 
 	var addrStr, dbPart string
 

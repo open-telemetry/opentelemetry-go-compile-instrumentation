@@ -273,3 +273,24 @@ func TestInstRuleSetIsInternal(t *testing.T) {
 	externalSet.AddFileRule(&InstFileRule{Path: "example.com/hooks"})
 	assert.False(t, externalSet.IsInternal())
 }
+
+func TestInstRuleSet_MaxRequiredLang(t *testing.T) {
+	var nilSet *InstRuleSet
+	assert.Empty(t, nilSet.MaxRequiredLang())
+
+	irs := NewInstRuleSet("example.com/mod")
+	assert.Empty(t, irs.MaxRequiredLang())
+
+	dir := t.TempDir()
+	fileA := filepath.Join(dir, "a.go")
+	fileB := filepath.Join(dir, "b.go")
+
+	irs.AddRawRule(fileA, &InstRawRule{Func: "Foo", Raw: "_ = 1", Lang: "go1.18"})
+	assert.Equal(t, "go1.18", irs.MaxRequiredLang())
+
+	irs.AddRawRule(fileB, &InstRawRule{Func: "Bar", Raw: "_ = 2", Lang: "go1.21"})
+	assert.Equal(t, "go1.21", irs.MaxRequiredLang())
+
+	irs.AddRawRule(fileA, &InstRawRule{Func: "Baz", Raw: "_ = 3", Lang: "go1.16"})
+	assert.Equal(t, "go1.21", irs.MaxRequiredLang())
+}
