@@ -84,6 +84,30 @@ func TestDBClient(t *testing.T) {
 		)
 	})
 
+	t.Run("QueryWithBatchSpanProcessor", func(t *testing.T) {
+		// The default batch span processor still holds the span when main
+		// returns, so it must be flushed on the way out.
+		f := testutil.NewTestFixture(t)
+		f.SetEnv("OTEL_GO_SIMPLE_SPAN_PROCESSOR", "false")
+
+		f.Run("dbclient", "-op=query")
+
+		span := f.RequireSingleSpan()
+		require.Equal(t, "SELECT", span.Name())
+	})
+
+	t.Run("QueryWithBatchSpanProcessorAndOSExit", func(t *testing.T) {
+		// os.Exit skips deferred calls, so the flush on the way out must not
+		// depend on main returning.
+		f := testutil.NewTestFixture(t)
+		f.SetEnv("OTEL_GO_SIMPLE_SPAN_PROCESSOR", "false")
+
+		f.Run("dbclient", "-op=query", "-exit")
+
+		span := f.RequireSingleSpan()
+		require.Equal(t, "SELECT", span.Name())
+	})
+
 	t.Run("PrepareAndQuery", func(t *testing.T) {
 		f := testutil.NewTestFixture(t)
 
