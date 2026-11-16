@@ -4,6 +4,7 @@
 package pkgload
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -781,4 +782,58 @@ func TestResolveExportFilesBatch_NoPackages(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no packages found")
+}
+
+func TestResolveExportClosures_PerRootClosures(t *testing.T) {
+	writeBatchFixture(t)
+
+	closures, failed, err := ResolveExportClosures(t.Context(),
+		[]string{"example.com/batch/a", "example.com/batch/c", "example.invalid/nonexistent"})
+
+	require.NoError(t, err)
+	require.Contains(t, failed, "example.invalid/nonexistent")
+	assert.NotContains(t, closures, "example.invalid/nonexistent")
+	require.Contains(t, closures, "example.com/batch/a")
+	require.Contains(t, closures, "example.com/batch/c")
+	// Each root carries its own closure: a's closure holds a and b, not c.
+	assert.Contains(t, closures["example.com/batch/a"], "example.com/batch/a")
+	assert.Contains(t, closures["example.com/batch/a"], "example.com/batch/b")
+	assert.NotContains(t, closures["example.com/batch/a"], "example.com/batch/c")
+	assert.Contains(t, closures["example.com/batch/c"], "example.com/batch/c")
+	assert.NotContains(t, closures["example.com/batch/c"], "example.com/batch/a")
+
+	union, _, err := ResolveExportFilesBatch(t.Context(),
+		[]string{"example.com/batch/a", "example.com/batch/c"})
+	require.NoError(t, err)
+	merged := map[string]string{}
+	for _, root := range []string{"example.com/batch/a", "example.com/batch/c"} {
+		maps.Copy(merged, closures[root])
+	}
+	assert.Equal(t, union, merged)
+}
+
+// TestResolveExportFilesBatch_KeepsDependenciesOfFailedRoot pins the union's
+// behavior for a root that fails to load: the root is reported as failed,
+// but its error-free dependencies still resolve. Per-root closures leave the
+// failed root out entirely.
+func TestResolveExportFilesBatch_KeepsDependenciesOfFailedRoot(t *testing.T) {
+	writeBatchFixture(t)
+	require.NoError(t, os.MkdirAll("broken", 0o755))
+	broken := "package broken\n\n" +
+		"import (\n\t\"example.com/batch/b\"\n\t_ \"example.com/batch/missing\"\n)\n\n" +
+		"var _ = b.B\n"
+	require.NoError(t, os.WriteFile(filepath.Join("broken", "broken.go"), []byte(broken), 0o644))
+
+	resolved, failed, err := ResolveExportFilesBatch(t.Context(), []string{"example.com/batch/broken"})
+	require.NoError(t, err)
+	require.Contains(t, failed, "example.com/batch/broken")
+	assert.NotContains(t, resolved, "example.com/batch/broken")
+	require.Contains(t, resolved, "example.com/batch/b",
+		"a failed root's error-free dependency must still resolve")
+	assert.FileExists(t, resolved["example.com/batch/b"])
+
+	closures, failedRoots, err := ResolveExportClosures(t.Context(), []string{"example.com/batch/broken"})
+	require.NoError(t, err)
+	assert.Contains(t, failedRoots, "example.com/batch/broken")
+	assert.Empty(t, closures)
 }
