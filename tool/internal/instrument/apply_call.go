@@ -342,6 +342,8 @@ func appendParsedCallArgs(
 //   - redis.Get() after "import redis 'github.com/redis/go-redis/v9'" matches "github.com/redis/go-redis/v9.Get"
 //   - sql.Open() after "import 'database/sql'" matches "database/sql.Open"
 //
+// An explicit instantiation such as pkg.Function[int]() matches like pkg.Function().
+//
 // What does NOT match:
 //   - Get() without package qualifier (unqualified calls not supported)
 //   - other.Get() where other is from a different package
@@ -350,8 +352,9 @@ func matchesCallRule(call *dst.CallExpr, r *rule.InstCallRule, importAliases map
 	importPath := r.ImportPath
 	funcName := r.FuncName
 
-	// Only match qualified calls: pkg.Function()
-	sel, ok := call.Fun.(*dst.SelectorExpr)
+	// Only match qualified calls: pkg.Function(), or pkg.Function[T]() when the
+	// type arguments are written out.
+	sel, ok := withoutTypeArguments(call.Fun).(*dst.SelectorExpr)
 	if !ok {
 		return false
 	}
@@ -375,6 +378,20 @@ func matchesCallRule(call *dst.CallExpr, r *rule.InstCallRule, importAliases map
 
 	resolvedPath, ok := importAliases[ident.Name]
 	return ok && resolvedPath == importPath
+}
+
+// withoutTypeArguments returns the generic function or type that expr
+// instantiates, so pkg.Name[int] gives pkg.Name. Any other expression is
+// returned unchanged.
+func withoutTypeArguments(expr dst.Expr) dst.Expr {
+	switch e := expr.(type) {
+	case *dst.IndexExpr:
+		return e.X
+	case *dst.IndexListExpr:
+		return e.X
+	default:
+		return expr
+	}
 }
 
 // matchesRule dispatches by selector: function_call or method_call.
