@@ -7,8 +7,9 @@ Go client for [NATS](https://nats.io).
 Every publish path — `Publish`, `PublishMsg`, `PublishRequest`, `Request`,
 `RespondMsg` and the JetStream `Publish*` methods — funnels through the
 unexported `(*Conn).publish` method. Hooking that single point emits one `send`
-span per publish and appends the W3C trace context to the encoded NATS header
-block, so the message carries it over the wire. Consuming is covered at the
+span per publish and appends the headers injected by the configured propagator
+to the encoded NATS header block, so the message carries them over the wire.
+Consuming is covered at the
 callback boundary for async subscriptions and at `Subscription.NextMsg` for
 sync pulls.
 
@@ -30,12 +31,14 @@ instrumented callback extracts the trace context from the message headers,
 starts the span, runs the application callback, and ends it. `NextMsg` spans
 measure the fetch and end before the caller processes the message.
 
-Trace context is injected at the byte level into the encoded NATS header block
-(`NATS/1.0\r\n` …) only when the connected server advertises header support
-(`Conn.HeadersSupported()`); an empty header block is upgraded to a header
-publish, exactly like the community otelnats wrapper's `PublishMsg` approach.
-The trace context therefore never appears in the application's own
-`*nats.Msg.Header` after `PublishMsg` — it is observable by the consumer over
+Every header the configured text-map propagator injects (e.g. W3C
+`traceparent`/`tracestate`, or the B3 `x-b3-*` headers) is written at the byte
+level into the encoded NATS header block (`NATS/1.0\r\n` …) only when the
+connected server advertises header support (`Conn.HeadersSupported()`); an
+empty header block is upgraded to a header publish, exactly like the community
+otelnats wrapper's `PublishMsg` approach. The injected headers therefore never
+appear in the application's own
+`*nats.Msg.Header` after `PublishMsg` — they are observable by the consumer over
 the wire. `ChanSubscribe` is intentionally not instrumented: replacing the
 channel delivery would change the library's back-pressure and close semantics.
 

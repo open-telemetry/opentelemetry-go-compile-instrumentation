@@ -9,6 +9,8 @@ package nats
 import (
 	"context"
 	"net/textproto"
+	"sort"
+	"strings"
 	"sync"
 
 	"github.com/nats-io/nats.go"
@@ -98,8 +100,8 @@ func startSpan(ctx context.Context, req semconv.Request, kind trace.SpanKind) (c
 }
 
 // mapCarrier is a minimal propagation.TextMapCarrier over a string map, used
-// to capture the traceparent/tracestate values the configured propagator
-// wants to write before they are spliced into the encoded NATS header block.
+// to capture every header the configured propagator wants to write before
+// they are spliced into the encoded NATS header block.
 type mapCarrier map[string]string
 
 func (m mapCarrier) Get(key string) string { return m[key] }
@@ -143,8 +145,9 @@ func (h headerCarrier) Keys() []string {
 // PublishRequest, Request, and JetStream publishes)
 // -----------------------------------------------------------------------------
 
-// BeforePublish starts a send span and appends the W3C trace context to the
-// encoded NATS header block. Hooking the internal publish — the one call every
+// BeforePublish starts a send span and appends the headers injected by the
+// configured propagator to the encoded NATS header block. Hooking the internal
+// publish — the one call every
 // publish path funnels through — means a plain Publish is upgraded to a header
 // publish (HPUB) exactly like the community otelnats wrapper does by calling
 // PublishMsg internally, so every publish path carries the trace.
@@ -198,24 +201,31 @@ func AfterPublish(ictx hook.HookContext, err error) {
 	span.End()
 }
 
-// appendTraceparent appends the trace lines the configured propagator wants to
-// write (traceparent, and tracestate when present) to an encoded NATS header
-// block. The block is self-delimiting: it ends with the empty line "\r\n",
-// which is replaced by the new lines plus a fresh empty line. When hdr is
-// empty a fresh block is built; a non-empty block that does not end with the
-// delimiter is left untouched rather than corrupted.
+// appendTraceparent appends every header the configured propagator injects
+// (traceparent, and tracestate when present, for the W3C TraceContext
+// propagator; the x-b3-* headers for B3; and any other configured propagator
+// headers) to an encoded NATS header block. The block is self-delimiting: it
+// ends with the empty line "\r\n", which is replaced by the new lines plus a
+// fresh empty line. When hdr is empty a fresh block is built; a non-empty block
+// that does not end with the delimiter is left untouched rather than
+// corrupted. When the propagator writes nothing for the context, the block is
+// left untouched.
 func appendTraceparent(ctx context.Context, hdr []byte) []byte {
 	carrier := mapCarrier{}
 	propagator.Inject(ctx, carrier)
-	tp := carrier["traceparent"]
-	if tp == "" {
+
+	keys := carrier.Keys()
+	sort.Strings(keys)
+	lines := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if value := carrier.Get(key); value != "" {
+			lines = append(lines, key+": "+value)
+		}
+	}
+	if len(lines) == 0 {
 		return nil
 	}
-	line := "traceparent: " + tp
-	if ts := carrier["tracestate"]; ts != "" {
-		line += crlf + "tracestate: " + ts
-	}
-	line += crlf
+	line := strings.Join(lines, crlf) + crlf
 
 	if len(hdr) >= len(crlf) && string(hdr[len(hdr)-len(crlf):]) == crlf {
 		out := make([]byte, 0, len(hdr)+len(line))

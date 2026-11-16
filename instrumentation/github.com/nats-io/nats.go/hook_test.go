@@ -11,6 +11,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/contrib/propagators/b3"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -195,6 +196,131 @@ func TestAppendTraceparent_MalformedBlockUntouched(t *testing.T) {
 	// block; leave the message untouched rather than corrupting it.
 	bad := []byte("NATS/1.0\r\nFoo: bar")
 	assert.Nil(t, appendTraceparent(context.Background(), bad))
+}
+
+// TestAppendTraceparent_B3Propagator proves a B3-configured propagator's headers
+// are preserved on the producer path, instead of being dropped like the W3C-only
+// extraction did before the fix. Both B3 encodings are enabled so the check
+// covers the single `b3` header and the `x-b3-*` multiple headers.
+func TestAppendTraceparent_B3Propagator(t *testing.T) {
+	setupTest(t)
+	propagator = b3.New(b3.WithInjectEncoding(b3.B3MultipleHeader | b3.B3SingleHeader))
+
+	ctx, span := tracer.Start(context.Background(), "test")
+	defer span.End()
+
+	out := appendTraceparent(ctx, nil)
+	require.NotNil(t, out, "a valid trace context must always inject")
+
+	h, err := nats.DecodeHeadersMsg(out)
+	require.NoError(t, err, "the mutated block must remain a valid NATS header block")
+	require.NotEmpty(t, h.Get("b3"), "the B3 single header must survive")
+	require.NotEmpty(t, h.Get("x-b3-traceid"), "the B3 trace id must survive")
+	require.NotEmpty(t, h.Get("x-b3-spanid"), "the B3 span id must survive")
+	require.NotEmpty(t, h.Get("x-b3-sampled"), "the B3 sampling state must survive")
+	_, hasTraceparent := h["traceparent"]
+	assert.False(t, hasTraceparent, "the B3 propagator does not write a W3C traceparent")
+}
+
+// TestAppendTraceparent_CompositePropagator checks that a composite propagator
+// contributes every header it writes: W3C keys and B3 keys coexist in the block,
+// and the pre-existing application header survives the append.
+func TestAppendTraceparent_CompositePropagator(t *testing.T) {
+	setupTest(t)
+	propagator = propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		b3.New(b3.WithInjectEncoding(b3.B3MultipleHeader|b3.B3SingleHeader)),
+	)
+
+	ctx, span := tracer.Start(context.Background(), "test")
+	defer span.End()
+
+	out := appendTraceparent(ctx, []byte("NATS/1.0\r\nFoo: bar\r\n\r\n"))
+	require.NotNil(t, out)
+
+	h, err := nats.DecodeHeadersMsg(out)
+	require.NoError(t, err)
+	require.NotEmpty(t, h.Get("traceparent"), "the W3C trace context must survive")
+	require.NotEmpty(t, h.Get("x-b3-traceid"), "the B3 trace id must survive")
+	require.NotEmpty(t, h.Get("x-b3-spanid"), "the B3 span id must survive")
+	assert.Equal(t, "bar", h.Get("Foo"), "the original header must survive")
+}
+
+// stubPropagator writes nothing and extracts nothing, used to exercise the
+// empty-carrier path independent of any concrete propagator's defaults.
+type stubPropagator struct{}
+
+func (stubPropagator) Inject(context.Context, propagation.TextMapCarrier) {}
+
+func (stubPropagator) Fields() []string { return nil }
+
+func (stubPropagator) Extract(ctx context.Context, _ propagation.TextMapCarrier) context.Context {
+	return ctx
+}
+
+// TestAppendTraceparent_NoTraceContextLeftUntouched: when the propagator writes
+// nothing for the context, the original block is left untouched.
+func TestAppendTraceparent_NoTraceContextLeftUntouched(t *testing.T) {
+	setupTest(t)
+	propagator = stubPropagator{}
+
+	assert.Nil(t, appendTraceparent(context.Background(), nil))
+}
+
+// TestBeforeSubscribe_ExtractsB3Headers round-trips a B3 trace from the producer
+// header block through the wrapped async subscription callback.
+func TestBeforeSubscribe_ExtractsB3Headers(t *testing.T) {
+	sr := setupTest(t)
+	propagator = b3.New()
+
+	ctx, span := tracer.Start(context.Background(), "producer")
+	sc := span.SpanContext()
+	span.End()
+	sr.Reset()
+
+	out := appendTraceparent(ctx, nil)
+	require.NotNil(t, out)
+	hdr, err := nats.DecodeHeadersMsg(out)
+	require.NoError(t, err)
+
+	cb := func(*nats.Msg) {}
+	ictx := hooktest.NewMockHookContext(&nats.Conn{}, "orders.created", cb)
+	BeforeSubscribe(ictx, &nats.Conn{}, "orders.created", cb)
+
+	wrapped, ok := ictx.GetParam(subscribeCbIndex).(nats.MsgHandler)
+	require.True(t, ok)
+	wrapped(&nats.Msg{Subject: "orders.created", Header: hdr, Data: []byte("hi")})
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	assert.Equal(t, sc.TraceID(), spans[0].SpanContext().TraceID(),
+		"the async consumer must continue the B3 trace")
+}
+
+// TestAfterNextMsg_ExtractsB3Headers round-trips a B3 trace from the producer
+// header block through the sync NextMsg path.
+func TestAfterNextMsg_ExtractsB3Headers(t *testing.T) {
+	sr := setupTest(t)
+	propagator = b3.New()
+
+	ctx, span := tracer.Start(context.Background(), "producer")
+	sc := span.SpanContext()
+	span.End()
+	sr.Reset()
+
+	out := appendTraceparent(ctx, nil)
+	require.NotNil(t, out)
+	hdr, err := nats.DecodeHeadersMsg(out)
+	require.NoError(t, err)
+
+	msg := &nats.Msg{Subject: "orders.created", Header: hdr, Data: []byte("hi")}
+	ictx := hooktest.NewMockHookContext((*nats.Subscription)(nil), msg, nil)
+	AfterNextMsg(ictx, msg, nil)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	assert.Equal(t, sc.TraceID(), spans[0].SpanContext().TraceID(),
+		"the sync consumer must continue the B3 trace")
 }
 
 func TestBeforeSubscribe_WrapsCallback(t *testing.T) {
