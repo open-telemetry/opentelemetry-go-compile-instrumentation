@@ -319,7 +319,10 @@ Rules:
 
 ### Special `target` values
 
-- `target: main` — matches the compile-time package named `main`.
+- `target: main` — matches the compile-time package named `main`. Under
+  `otelc go test`, the main package compiles under its import path instead, so
+  `target: main` does not reach it or its `_test.go` files. List `main` together
+  with `$root` (or the import path) to cover both builds and tests.
 - `target: test_main` — not currently supported; reserved for future work.
 - `target: $root` — matches the root module of the build and every package
   below it. If a build spans multiple modules, it matches the union of all
@@ -716,6 +719,8 @@ This rule injects a string of raw Go code at the beginning of a target function.
 **Modifier (`do: - inject_code:`):**
 
 - `raw` (string, required): The raw Go code to be injected. The code will be inserted at the beginning of the target function. If the string contains `{{`, it is additionally rendered as a Go standard [text/template](https://pkg.go.dev/text/template) template using the shared function template variables below before being parsed; code with no `{{` is injected verbatim, unaffected by this rendering step.
+
+- `lang` (string, optional): The minimum Go language version required by the injected code (e.g. `go1.18` or `go1.21`). When set, `otelc` raises the `-lang` flag on the compile command when the target module declares an older Go version. This allows modern language features like `any` or generics to compile. Language versions higher than `lang` are never lowered.
 
 Top-level `imports` (map[string]string, optional): A map of imports to inject into the target file. Required when the injected code references packages not already imported by the target. Same format as [Top-level fields](#top-level-fields).
 

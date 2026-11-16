@@ -110,7 +110,7 @@ func insertRawAtPattern(
 			return true
 		}
 
-		if _, ok := cursor.Parent().(*dst.BlockStmt); !ok {
+		if !inStatementList(cursor) {
 			return true
 		}
 
@@ -147,6 +147,26 @@ func insertRawAtPattern(
 	}, nil)
 
 	return inserted, shadowErr
+}
+
+// inStatementList reports whether the cursor sits on a statement that raw
+// code can be inserted next to: an entry of a block or of the body of a case
+// or select clause. A clause is skipped because nothing but another clause
+// may appear in a switch or select body, so the walk looks inside it instead.
+// The communication statement of a select clause is a single field, not a
+// list entry, so nothing can be inserted beside it either.
+func inStatementList(cursor *dstutil.Cursor) bool {
+	switch cursor.Node().(type) {
+	case *dst.CaseClause, *dst.CommClause:
+		return false
+	}
+	switch cursor.Parent().(type) {
+	case *dst.BlockStmt:
+		return true
+	case *dst.CaseClause, *dst.CommClause:
+		return cursor.Index() >= 0
+	}
+	return false
 }
 
 // rawAliasContext bundles the file's import aliases, the rule-import
