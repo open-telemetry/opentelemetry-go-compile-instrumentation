@@ -4,6 +4,7 @@
 package pkgload
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -111,6 +112,24 @@ func TestLoadPackagesWithChangeDirectoryFlag(t *testing.T) {
 		require.NotNil(t, pkgs[0].Module)
 		assert.Equal(t, "example.com/app", pkgs[0].Module.Path)
 	}
+}
+
+func TestGOROOT(t *testing.T) {
+	goroot, err := GOROOT(t.Context(), nil)
+	require.NoError(t, err)
+
+	pkgs, err := LoadPackages(t.Context(), packages.NeedFiles|packages.NeedModule, nil, false, "fmt")
+	require.NoError(t, err)
+	require.Len(t, pkgs, 1)
+	require.Nil(t, pkgs[0].Module)
+	require.NotEmpty(t, pkgs[0].GoFiles)
+	assert.Equal(t, filepath.Join(goroot, "src", "fmt"), filepath.Dir(pkgs[0].GoFiles[0]))
+
+	_, err = GOROOT(t.Context(), []string{"-C"})
+	require.ErrorContains(t, err, "missing value for -C")
+
+	_, err = GOROOT(t.Context(), []string{"-C", filepath.Join(t.TempDir(), "missing")})
+	require.ErrorContains(t, err, "go env GOROOT")
 }
 
 func TestResolvePackageName(t *testing.T) {
@@ -340,7 +359,7 @@ func TestResolveModuleDir(t *testing.T) {
 			expectError: true,
 		},
 		{
-			name: "fails for build-tag-excluded package",
+			name: "finds module of build-tag-excluded package",
 			setup: func(t *testing.T, root string) string {
 				err := os.WriteFile(
 					filepath.Join(root, "go.mod"),
@@ -358,7 +377,32 @@ func TestResolveModuleDir(t *testing.T) {
 
 				return root
 			},
-			expectError: true,
+			expectedDir: ".",
+		},
+		{
+			name: "finds module of package marked go:build ignore",
+			setup: func(t *testing.T, root string) string {
+				err := os.WriteFile(
+					filepath.Join(root, "go.mod"),
+					[]byte("module example.com/test\n"),
+					0o644,
+				)
+				require.NoError(t, err)
+
+				gen := filepath.Join(root, "gen")
+				err = os.MkdirAll(gen, 0o755)
+				require.NoError(t, err)
+
+				err = os.WriteFile(
+					filepath.Join(gen, "gen.go"),
+					[]byte("//go:build ignore\n\npackage main\n\nfunc main() {}\n"),
+					0o644,
+				)
+				require.NoError(t, err)
+
+				return gen
+			},
+			expectedDir: ".",
 		},
 	}
 
@@ -519,6 +563,16 @@ func TestFindModuleDirs(t *testing.T) {
 		0o644,
 	))
 
+	// A file only a tagged build compiles, as in go build -tags tools tool.go.
+	toolDir := filepath.Join(tmp, "tool")
+	require.NoError(t, os.MkdirAll(toolDir, 0o755))
+	toolFile := filepath.Join(toolDir, "tool.go")
+	require.NoError(t, os.WriteFile(
+		toolFile,
+		[]byte("//go:build tools\n\npackage main\n\nfunc main() {}\n"),
+		0o644,
+	))
+
 	tests := []struct {
 		name    string
 		pkgs    []*packages.Package
@@ -628,6 +682,18 @@ func TestFindModuleDirs(t *testing.T) {
 				{
 					PkgPath: CommandLineArgumentsPackage,
 					GoFiles: []string{mainFile},
+				},
+			},
+			want: []string{
+				tmp,
+			},
+		},
+		{
+			name: "resolves module dir for command line file that needs a build tag",
+			pkgs: []*packages.Package{
+				{
+					PkgPath: CommandLineArgumentsPackage,
+					GoFiles: []string{toolFile},
 				},
 			},
 			want: []string{
@@ -763,4 +829,58 @@ func TestResolveExportFilesBatch_NoPackages(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no packages found")
+}
+
+func TestResolveExportClosures_PerRootClosures(t *testing.T) {
+	writeBatchFixture(t)
+
+	closures, failed, err := ResolveExportClosures(t.Context(),
+		[]string{"example.com/batch/a", "example.com/batch/c", "example.invalid/nonexistent"})
+
+	require.NoError(t, err)
+	require.Contains(t, failed, "example.invalid/nonexistent")
+	assert.NotContains(t, closures, "example.invalid/nonexistent")
+	require.Contains(t, closures, "example.com/batch/a")
+	require.Contains(t, closures, "example.com/batch/c")
+	// Each root carries its own closure: a's closure holds a and b, not c.
+	assert.Contains(t, closures["example.com/batch/a"], "example.com/batch/a")
+	assert.Contains(t, closures["example.com/batch/a"], "example.com/batch/b")
+	assert.NotContains(t, closures["example.com/batch/a"], "example.com/batch/c")
+	assert.Contains(t, closures["example.com/batch/c"], "example.com/batch/c")
+	assert.NotContains(t, closures["example.com/batch/c"], "example.com/batch/a")
+
+	union, _, err := ResolveExportFilesBatch(t.Context(),
+		[]string{"example.com/batch/a", "example.com/batch/c"})
+	require.NoError(t, err)
+	merged := map[string]string{}
+	for _, root := range []string{"example.com/batch/a", "example.com/batch/c"} {
+		maps.Copy(merged, closures[root])
+	}
+	assert.Equal(t, union, merged)
+}
+
+// TestResolveExportFilesBatch_KeepsDependenciesOfFailedRoot pins the union's
+// behavior for a root that fails to load: the root is reported as failed,
+// but its error-free dependencies still resolve. Per-root closures leave the
+// failed root out entirely.
+func TestResolveExportFilesBatch_KeepsDependenciesOfFailedRoot(t *testing.T) {
+	writeBatchFixture(t)
+	require.NoError(t, os.MkdirAll("broken", 0o755))
+	broken := "package broken\n\n" +
+		"import (\n\t\"example.com/batch/b\"\n\t_ \"example.com/batch/missing\"\n)\n\n" +
+		"var _ = b.B\n"
+	require.NoError(t, os.WriteFile(filepath.Join("broken", "broken.go"), []byte(broken), 0o644))
+
+	resolved, failed, err := ResolveExportFilesBatch(t.Context(), []string{"example.com/batch/broken"})
+	require.NoError(t, err)
+	require.Contains(t, failed, "example.com/batch/broken")
+	assert.NotContains(t, resolved, "example.com/batch/broken")
+	require.Contains(t, resolved, "example.com/batch/b",
+		"a failed root's error-free dependency must still resolve")
+	assert.FileExists(t, resolved["example.com/batch/b"])
+
+	closures, failedRoots, err := ResolveExportClosures(t.Context(), []string{"example.com/batch/broken"})
+	require.NoError(t, err)
+	assert.Contains(t, failedRoots, "example.com/batch/broken")
+	assert.Empty(t, closures)
 }
