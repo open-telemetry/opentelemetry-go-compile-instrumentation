@@ -151,6 +151,20 @@ func RequireRedisClientSemconv(
 	}
 }
 
+// RequireMongoClientSemconv verifies that a MongoDB client span follows semantic conventions.
+// Reference: https://opentelemetry.io/docs/specs/semconv/database/mongodb/
+func RequireMongoClientSemconv(
+	t *testing.T,
+	span ptrace.Span,
+	operationName, dbNamespace, collectionName string,
+) {
+	RequireAttribute(t, span, string(semconv.DBSystemNameKey), "mongodb")
+	RequireAttribute(t, span, string(semconv.DBOperationNameKey), operationName)
+	RequireAttribute(t, span, string(semconv.DBNamespaceKey), dbNamespace)
+	RequireAttribute(t, span, string(semconv.DBCollectionNameKey), collectionName)
+	RequireAttribute(t, span, string(semconv.NetworkTransportKey), "tcp")
+}
+
 // RequireGenAIClientSemconv verifies that a GenAI client span follows semantic conventions.
 // Reference: https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/
 func RequireGenAIClientSemconv(
