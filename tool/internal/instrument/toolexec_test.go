@@ -2465,6 +2465,39 @@ func TestLinkResolutionListsFailedCandidateOnce(t *testing.T) {
 	assert.Equal(t, 1, resolver.calls)
 }
 
+// batchFailingResolver fails any load of several roots as a whole, as go list
+// does when one root's module is missing from go.mod, and otherwise delegates.
+type batchFailingResolver struct {
+	inner *countingResolver
+}
+
+func (b *batchFailingResolver) resolve(
+	ctx context.Context, roots []string, flags ...string,
+) (map[string]map[string]string, map[string]error, error) {
+	if len(roots) > 1 {
+		return nil, nil, errors.New("no packages found for " + strings.Join(roots, ", "))
+	}
+	return b.inner.resolve(ctx, roots, flags...)
+}
+
+// TestLinkResolutionResolvesEachCandidateWhenBatchFails covers a link whose
+// batch go list fails as a whole: the resolvable candidate must still be added
+// and the unresolvable one skipped, instead of failing the link.
+func TestLinkResolutionResolvesEachCandidateWhenBatchFails(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra", "example.invalid/bad")
+	resolver := &batchFailingResolver{inner: &countingResolver{
+		dir: t.TempDir(),
+		bad: map[string]bool{"example.invalid/bad": true},
+	}}
+
+	cfg := freshLinkConfig()
+	updated, err := resolveRuleAddedImportsWith(t.Context(), nil, cfg, resolver.resolve)
+	require.NoError(t, err)
+	assert.True(t, updated)
+	assert.Contains(t, cfg.PackageFile, "example.com/extra")
+	assert.NotContains(t, cfg.PackageFile, "example.invalid/bad")
+}
+
 func TestLinkResolutionSkipsGoListWhenNothingIsMissing(t *testing.T) {
 	setupLinkMemo(t, "example.com/extra")
 	resolver := &countingResolver{dir: t.TempDir()}

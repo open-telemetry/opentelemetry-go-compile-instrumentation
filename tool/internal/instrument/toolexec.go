@@ -957,14 +957,7 @@ func (lr *linkResolution) resolveMisses(
 	if len(misses) == 0 {
 		return nil
 	}
-	var resolved map[string]map[string]string
-	var resolveFailed map[string]error
-	err = session.WithLoadSlot(ctx, func(ctx context.Context) error {
-		var loadErr error
-		resolved, resolveFailed, loadErr = lr.resolve(ctx, misses, lr.buildFlags...)
-		return loadErr
-	})
-	lr.goListCalls++
+	resolved, resolveFailed, err := lr.resolveBatch(ctx, misses)
 	if err != nil {
 		return err
 	}
@@ -982,6 +975,52 @@ func (lr *linkResolution) resolveMisses(
 		}
 	}
 	return nil
+}
+
+// resolveBatch runs one nested go list for the roots. When that load fails as
+// a whole, as it does when go list cannot resolve one root's module (for
+// example "updates to go.mod needed") and so returns no packages for any of
+// them, it resolves each root on its own. A root that fails alone lands in the
+// failed map, so one unresolvable candidate does not fail the whole link. An
+// error is returned only when the context is done.
+func (lr *linkResolution) resolveBatch(
+	ctx context.Context,
+	roots []string,
+) (map[string]map[string]string, map[string]error, error) {
+	var resolved map[string]map[string]string
+	var resolveFailed map[string]error
+	err := session.WithLoadSlot(ctx, func(ctx context.Context) error {
+		var loadErr error
+		resolved, resolveFailed, loadErr = lr.resolve(ctx, roots, lr.buildFlags...)
+		return loadErr
+	})
+	lr.goListCalls++
+	if err == nil || len(roots) < 2 || ctx.Err() != nil {
+		return resolved, resolveFailed, err
+	}
+
+	resolved = make(map[string]map[string]string, len(roots))
+	resolveFailed = make(map[string]error)
+	for _, root := range roots {
+		var one map[string]map[string]string
+		var oneFailed map[string]error
+		err := session.WithLoadSlot(ctx, func(ctx context.Context) error {
+			var loadErr error
+			one, oneFailed, loadErr = lr.resolve(ctx, []string{root}, lr.buildFlags...)
+			return loadErr
+		})
+		lr.goListCalls++
+		if ctx.Err() != nil {
+			return nil, nil, ctx.Err()
+		}
+		if err != nil {
+			resolveFailed[root] = err
+			continue
+		}
+		maps.Copy(resolved, one)
+		maps.Copy(resolveFailed, oneFailed)
+	}
+	return resolved, resolveFailed, nil
 }
 
 // linkRuleImports holds the rule-added import candidates of one link,
