@@ -523,7 +523,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	// GOFLAGS for the later buildWithToolexec, and before the findDeps dry run
 	// further down. Computed here rather than threaded in because Setup is also
 	// a standalone command action (otelc setup).
-	if vendoringActive(ctx, util.GetOtelcWorkDir()) {
+	if vendoringActive(ctx, buildDir(subcommand, args)) {
 		logger.InfoContext(ctx, "vendored project detected; building with -mod=mod")
 		// Mutates GOFLAGS process-wide with no restore. Fine for the one-shot
 		// CLI; a second in-process GoBuild would inherit this -mod=mod.
@@ -1035,8 +1035,7 @@ func runGoBuild(ctx context.Context, cmd *cli.Command) error {
 	// entry points, otelc setup and otelc go build). vendored is still computed
 	// here too so buildWithToolexec can rewrite an explicit CLI -mod=vendor,
 	// which beats GOFLAGS.
-	pwd := util.GetOtelcWorkDir()
-	vendored := vendoringActive(ctx, pwd)
+	vendored := vendoringActive(ctx, buildDir(cmd.Args().First(), cmd.Args().Tail()))
 
 	setupStart := time.Now()
 	err := Setup(ctx, cmd)
