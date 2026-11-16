@@ -27,8 +27,7 @@ schemas/otelc/
 │   ├── linodego.yaml        # linode/linodego (v2) client spans + operation-duration metric
 │   ├── stripe.yaml          # stripe/stripe-go (v81/v82) client spans + request metric
 │   ├── otel-sdk.yaml        # go.opentelemetry.io/otel* — Go runtime metrics
-│   ├── logs.yaml            # log, log/slog, logrus, zap — no telemetry (correlation only)
-│   └── runtime.yaml         # runtime — no telemetry (GLS context propagation)
+│   └── logs.yaml            # log, log/slog, logrus, zap — no telemetry (correlation only)
 └── .deps/                   # pre-fetched upstream semconv (git-ignored, generated)
 ```
 
@@ -70,7 +69,6 @@ signals an undeclared instrumentation.
 | `go.opentelemetry.io/otel/sdk/trace`                | `otel-sdk.yaml`     | nothing — maintains the GLS span chain                                 |
 | `go.opentelemetry.io/otel/trace`                    | `otel-sdk.yaml`     | nothing — GLS fallback for `SpanFromContext`                           |
 | `log`, `log/slog`, `github.com/sirupsen/logrus`, `go.uber.org/zap` | `logs.yaml`         | nothing — injects `trace_id`/`span_id` into the application's own logs |
-| `runtime`                                           | `runtime.yaml`      | nothing — goroutine-local context propagation                          |
 
 ## Validate locally
 

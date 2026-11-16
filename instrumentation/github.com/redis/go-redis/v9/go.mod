@@ -8,7 +8,7 @@ require (
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/sdk v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
-	go.opentelemetry.io/otelc/pkg v0.0.0-00010101000000-000000000000
+	go.opentelemetry.io/otelc/pkg v0.1.0
 	go.opentelemetry.io/otelc/pkg/runtime v0.0.0-00010101000000-000000000000
 )
 
@@ -62,7 +62,5 @@ require (
 	google.golang.org/grpc v1.85.0-dev.0.20260825072537-93e31b48545e // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )
-
-replace go.opentelemetry.io/otelc/pkg => ../../../../../pkg
 
 replace go.opentelemetry.io/otelc/pkg/runtime => ../../../../../pkg/runtime

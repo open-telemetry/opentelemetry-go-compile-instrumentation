@@ -58,8 +58,7 @@ schemas/otelc/
 │   ├── fiber.yaml           # gofiber/fiber (v2) server spans
 │   ├── echo.yaml            # labstack/echo/v4 server-span enrichment
 │   ├── otel-sdk.yaml        # go.opentelemetry.io/otel* — Go runtime metrics
-│   ├── logs.yaml            # log, log/slog, logrus, zap — no telemetry (correlation only)
-│   └── runtime.yaml         # runtime — no telemetry (GLS context propagation)
+│   └── logs.yaml            # log, log/slog, logrus, zap — no telemetry (correlation only)
 └── .deps/                   # pre-fetched upstream semconv (git-ignored, generated)
 ```
 

@@ -106,12 +106,17 @@ func TestToolexecPassesThroughLinkWithoutAddedImports(t *testing.T) {
 	ctx := util.ContextWithLogger(t.Context(), slog.Default())
 	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
 
-	// A link command with no recorded added-imports needs no importcfg
-	// rewrite, so the wrapper runs it unchanged. -importcfg only has to be
-	// present for the command to be recognized as a link.
+	// A link command whose importcfg already lists every package, with no
+	// recorded added-imports and no matched rules, needs no importcfg
+	// rewrite, so the wrapper runs it unchanged. The importcfg file itself
+	// must exist: the wrapper reads it to decide whether anything is
+	// missing.
+	cfgPath := filepath.Join(t.TempDir(), "importcfg.link")
+	require.NoError(t, os.WriteFile(cfgPath, []byte("packagefile fmt=/unused/fmt.a\n"), 0o644))
+
 	marker := filepath.Join(t.TempDir(), "ran")
 	stub := writeStub(t, "link", "touch "+marker)
-	linkArgs := []string{stub, "-o", "exe", "-buildid", "id", "-importcfg", "importcfg.link"}
+	linkArgs := []string{stub, "-o", "exe", "-buildid", "id", "-importcfg", cfgPath}
 	require.True(t, util.IsLinkCommandWithArgs(linkArgs), "stub must look like a link command")
 
 	require.NoError(t, Toolexec(ctx, linkArgs, false))

@@ -129,6 +129,34 @@ param: string
 			},
 		},
 		{
+			name: "rule with implements sub-filters",
+			yaml: `
+func: MyFunc
+target: example.com/pkg
+before: MyBefore
+path: example.com/pkg
+param_implements: context.Context
+result_implements: io.Reader
+last_result_implements: error
+`,
+			check: func(t *testing.T, r *InstFuncRule) {
+				assert.Equal(t, "context.Context", r.ParamImplements)
+				assert.Equal(t, "io.Reader", r.ResultImplements)
+				assert.Equal(t, "error", r.LastResultImplements)
+				assert.True(t, r.HasImplementsFilters())
+			},
+		},
+		{
+			name:    "param_implements with a pointer type",
+			yaml:    "func: MyFunc\ntarget: example.com/pkg\nbefore: MyBefore\npath: example.com/pkg\nparam_implements: \"*ctx.T\"",
+			wantErr: true,
+		},
+		{
+			name:    "last_result_implements with a pointer type",
+			yaml:    "func: MyFunc\ntarget: example.com/pkg\nbefore: MyBefore\npath: example.com/pkg\nlast_result_implements: \"*E\"",
+			wantErr: true,
+		},
+		{
 			name:    "missing func field",
 			yaml:    `target: example.com/pkg\nbefore: MyBefore`,
 			wantErr: true,
@@ -232,4 +260,29 @@ func TestInstFuncRule_Identity(t *testing.T) {
 	sigC["signature"] = map[string]any{"args": []any{"context.Context"}, "returns": []any{"error"}}
 	assert.Equal(t, ruleIdentity(t, "sig", sigA), ruleIdentity(t, "sig", sigC),
 		"identical signature filters must yield identical identity")
+
+	// (e) The *_implements filters participate in identity, and a rule
+	// without them keeps the identity it had before they existed.
+	plain := base()
+	plain["before"] = "H1"
+	assert.Equal(t, "2522548913", ruleIdentity(t, "plain", plain),
+		"a rule without *_implements filters must keep its identity")
+	for _, key := range []string{"param_implements", "result_implements", "last_result_implements"} {
+		implA := base()
+		implA["before"] = "H1"
+		implA[key] = "error"
+		implB := base()
+		implB["before"] = "H1"
+		implB[key] = "fmt.Stringer"
+		assert.NotEqual(t, ruleIdentity(t, "impl", plain), ruleIdentity(t, "impl", implA), key)
+		assert.NotEqual(t, ruleIdentity(t, "impl", implA), ruleIdentity(t, "impl", implB), key)
+	}
+	paramImpl := base()
+	paramImpl["before"] = "H1"
+	paramImpl["param_implements"] = "error"
+	resultImpl := base()
+	resultImpl["before"] = "H1"
+	resultImpl["result_implements"] = "error"
+	assert.NotEqual(t, ruleIdentity(t, "impl", paramImpl), ruleIdentity(t, "impl", resultImpl),
+		"the same name in different *_implements filters must have distinct identities")
 }

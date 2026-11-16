@@ -1,4 +1,4 @@
-version: "v1.0.0"
+version: "v1.2.0"
 
 # Publish, PublishMsg, PublishRequest, Request, RequestWithContext,
 # RespondMsg (via PublishMsg), and JetStream publishes all funnel through the

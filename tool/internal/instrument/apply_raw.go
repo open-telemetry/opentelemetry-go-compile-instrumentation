@@ -28,12 +28,12 @@ const (
 	// Blank named returns get their own prefix; sharing ignoredParam with a blank
 	// param or receiver would collide, since both live in the same scope.
 	ignoredRetValName = "_ignoredRetVal"
+	ignoredTypeParam  = "_ignoredTypeParam"
 )
 
 // renameReturnValues assigns referenceable names to funcDecl's unnamed return
-// values. Raw and directive rules reference these by the resulting bare
-// "_unnamedRetValN" name in their injected code (e.g. the runtime
-// instrumentation's goroutine_propagate rule), so the naming here is a
+// values. Raw and directive rules can reference these by the resulting bare
+// "_unnamedRetValN" name in their injected code, so the naming here is a
 // stable, positional convention and intentionally not salted with a rule
 // hash the way collectReturnValues/collectArguments are for func rules.
 func renameReturnValues(funcDecl *dst.FuncDecl) {
@@ -58,8 +58,11 @@ func renameReturnValues(funcDecl *dst.FuncDecl) {
 // importAliases maps a use site's local identifier to its real import
 // path, for {{.FuncArgumentOfType}} and {{.FuncReturnOfType}}. Passing
 // nil forces those template functions to guess the package name, even
-// when the real name is known.
-func renderRawCode(raw string, decl *dst.FuncDecl, importAliases map[string]string, hash string) (string, error) {
+// when the real name is known. typeInfo is for the ThatImplements helpers,
+// and nil makes them match the type name only.
+func renderRawCode(
+	raw string, decl *dst.FuncDecl, importAliases map[string]string, hash string, typeInfo *funcTypes,
+) (string, error) {
 	if !strings.Contains(raw, "{{") {
 		return raw, nil
 	}
@@ -67,7 +70,9 @@ func renderRawCode(raw string, decl *dst.FuncDecl, importAliases map[string]stri
 	if err != nil {
 		return "", err
 	}
-	return tmpl.Execute(renderingFuncTemplateData{newFuncTemplateData(decl, nil, importAliases, hash)})
+	data := newFuncTemplateData(decl, nil, importAliases, hash)
+	data.typeInfo = typeInfo
+	return tmpl.Execute(renderingFuncTemplateData{data})
 }
 
 type insertPos struct {
@@ -144,12 +149,13 @@ func insertRawAtPattern(
 	return inserted, shadowErr
 }
 
-// rawAliasContext bundles the file's import aliases and the rule-import
-// overrides insertRaw needs, keeping insertRaw's parameter count within the
-// linter's limit.
+// rawAliasContext bundles the file's import aliases, the rule-import
+// overrides and the file's type information that insertRaw needs, keeping
+// insertRaw's parameter count within the linter's limit.
 type rawAliasContext struct {
 	imports   map[string]string
 	overrides map[string]string
+	typeInfo  *funcTypes
 }
 
 func insertRaw(
@@ -165,7 +171,7 @@ func insertRaw(
 	// Rename the unnamed return values so that the raw code can reference them
 	renameReturnValues(decl)
 
-	raw, err := renderRawCode(r.Raw, decl, aliases.imports, r.Identity())
+	raw, err := renderRawCode(r.Raw, decl, aliases.imports, r.Identity(), aliases.typeInfo)
 	if err != nil {
 		return ex.Wrapf(err, "rendering template for func %s", decl.Name.Name)
 	}
@@ -222,11 +228,19 @@ func insertRaw(
 // of the function.
 func (ip *instrumentPhase) applyRawRule(ctx context.Context, rule *rule.InstRawRule, root *dst.File) error {
 	// Find the target function to be instrumented
-	funcDecl, ok, err := ast.FindFuncDecl(root, rule, ip.importNames)
+	var reason string
+	var rejection *string
+	if DiffDebugEnabled() {
+		rejection = &reason
+	}
+	funcDecl, ok, err := ast.FindFuncDeclReporting(root, rule, ip.importNames, rejection)
 	if err != nil {
 		return err
 	}
 	if !ok {
+		if rejection != nil {
+			ip.reportDecision(rule, reason)
+		}
 		return ex.Newf("can not find function %s", rule.Func)
 	}
 
@@ -248,7 +262,7 @@ func (ip *instrumentPhase) applyRawRule(ctx context.Context, rule *rule.InstRawR
 		return err
 	}
 
-	aliases := rawAliasContext{imports: importAliases, overrides: aliasOverrides}
+	aliases := rawAliasContext{imports: importAliases, overrides: aliasOverrides, typeInfo: ip.fileTypes()}
 	if err = insertRaw(ctx, rule, funcDecl, root, aliases); err != nil {
 		return err
 	}

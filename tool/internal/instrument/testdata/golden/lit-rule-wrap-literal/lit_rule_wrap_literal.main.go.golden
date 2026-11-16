@@ -1,0 +1,49 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+//line /golden/work/main.go:6
+import "io"
+
+func track(r *io.LimitedReader) *io.LimitedReader { return r }
+
+func copyOf(r io.LimitedReader) io.LimitedReader { return r }
+
+// A package-level literal is wrapped too.
+var global = track(&io.LimitedReader{N: (1) * 2})
+
+// &T{...} takes the pointer template.
+//line /golden/work/main.go:16
+func Pointer(r io.Reader) *io.LimitedReader {
+	return track(&io.LimitedReader{R: r, N: (10) * 2}) /*line /golden/work/main.go:17*/
+}
+
+// T{...} takes the value template.
+func Value() io.LimitedReader {
+	return copyOf(io.LimitedReader{N: (20) * 2}) /*line /golden/work/main.go:22*/
+}
+
+// &(T{...}) is a pointer too; wrapping the inner literal would not compile.
+func ParenPointer() *io.LimitedReader {
+	return track(&(io.LimitedReader{N: (30) * 2})) /*line /golden/work/main.go:27*/
+}
+
+// set_fields skips a positional literal, but the literal is still wrapped.
+func Positional() io.LimitedReader {
+	return copyOf(io.LimitedReader{nil, 40}) /*line /golden/work/main.go:32*/
+}
+
+// The inner literal is wrapped before the outer one.
+func Nested() *io.LimitedReader {
+	return track(&io.LimitedReader{R: track(&io.LimitedReader{N: (5) * 2}), N: (50) * 2}) /*line /golden/work/main.go:37*/
+}
+
+func main() {
+	_ = global
+	_ = Pointer(nil)
+	_ = Value()
+	_ = ParenPointer()
+	_ = Positional()
+	_ = Nested()
+}

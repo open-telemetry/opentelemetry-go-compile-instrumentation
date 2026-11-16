@@ -1,4 +1,4 @@
-version: "v1.0.0"
+version: "v1.2.0"
 
 # Publish, PublishWithContext, and PublishWithDeferredConfirmWithContext all
 # call PublishWithDeferredConfirm. Hook that one path so a publish is one span.

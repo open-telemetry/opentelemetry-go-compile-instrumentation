@@ -28,7 +28,7 @@ instrumentation/google.golang.org/grpc/client/client.otelc.yaml
 Below is an example configuration for instrumenting a function `NewServer`:
 
 ```yaml
-version: "v1.0.0"
+version: "v1.2.0"
 
 inject_to_grpc_newserver:
   target: google.golang.org/grpc
@@ -51,6 +51,10 @@ inject_to_grpc_newserver:
   - `path`: import path where the hook functions are defined.
 
 > [!NOTE]
+> Rule files under `instrumentation/` must declare the top-level `version` key.
+> Use `v1.2.0`, the first `otelc` release that supports the key, unless the rules
+> need functionality from a later release. See [rules.md](rules.md#rule-shape).
+>
 > The 2-tier `where`/`do` schema and all other rule types are documented in [rules.md](rules.md). The schema invariants are recorded in [ADR-0003](adr/0003-structured-rule-schema.md).
 
 ## 2. Implement Hooks
@@ -92,6 +96,23 @@ func AfterNewServer(ictx hook.HookContext, server *grpc.Server) {
 ```
 
 If we cannot import a specific type (e.g., it is unexported), we can use `interface{}` in the hook signature.
+
+For a variadic parameter, use `...any` instead of `any` or `[]any`:
+
+```go
+// Target: func NewClient(opts ...*option) *Client, where *option is unexported.
+
+// Before hook: match the variadic with ...any.
+func BeforeNewClient(ictx hook.HookContext, opts ...any) {
+	for _, opt := range opts {
+		// opt is one variadic argument, copied into a new []any.
+	}
+}
+```
+
+A plain `any` or `[]any` is rejected for a variadic of a concrete type with `use ...any instead of any` or `use ...any instead of []any`. `[]any` and `...any` are interchangeable when the target is already an any-element slice or variadic, and a plain `any` is still valid for a variadic of a type parameter (`...T`), where the hook receives the whole `[]T` as one value.
+
+The hook receives a copy of the variadic arguments (one allocation and an `O(n)` copy per call), so mutating the slice does not change the target's arguments; use `HookContext.SetParam` to change them. Match the target's exact element type when it is accessible to avoid the copy.
 
 ### Runtime Enable/Disable Gate
 
@@ -176,6 +197,47 @@ When implementing hooks, we must adhere to certain limitations:
    Nothing catches this at build time: a hook that calls one of these four methods on a
    generic target compiles cleanly, and only panics once the instrumented function runs.
 
+3. **Package Initialization Order**: A hook can run before its own package is initialized.
+
+   The target package calls the hook through a `//go:linkname` declaration, which does not
+   create an import of the hook package. The only import of the hook package is in the
+   generated `otelc.runtime.go` file of package `main`, so Go only guarantees that the hook
+   package is initialized before `main`, not before the other packages `main` imports. When
+   the target function is called during package initialization, for example
+   `sql.Register` called from a database driver's `init()`, the hook runs before the
+   package-level variable initializers and `init()` functions of its own package.
+
+   The trampoline recovers the resulting panic and prints `failed to exec Before hook` or
+   `failed to exec After hook`, so the build and the tests still pass while the hook does
+   nothing for that call.
+
+   A hook must therefore not depend on state that is set up at initialization time. Leave
+   package-level variables at their zero value and create the state on first use:
+
+   ```go
+   // Not safe: seen is still nil when the hook runs during package initialization.
+   var seen = make(map[string]bool)
+
+   // Safe: the zero values of sync.Mutex and the map are ready before any
+   // initialization runs.
+   var (
+       mu   sync.Mutex
+       seen map[string]bool
+   )
+
+   func AfterRegister(ictx hook.HookContext) {
+       mu.Lock()
+       defer mu.Unlock()
+       if seen == nil {
+           seen = make(map[string]bool)
+       }
+       seen[ictx.GetParam(0).(string)] = true
+   }
+   ```
+
+   The logrus instrumentation uses this pattern for the logger created by logrus's own
+   package initialization.
+
 ### GLS Operation for OTel SDK Instrumentation
 
 This section explains how goroutine-local storage (GLS) is used by the OTel SDK instrumentation.
@@ -204,7 +266,7 @@ At runtime:
 
 ##### 1) Runtime GLS accessors
 
-`instrumentation/runtime/runtime_gls.go` provides low-level accessors:
+`tool/internal/runtime/runtime_gls.go` (embedded into `otelc`) provides low-level accessors:
 
 - `GetTraceContextFromGLS()`
 - `SetTraceContextToGLS(interface{})`

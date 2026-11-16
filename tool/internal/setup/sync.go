@@ -38,8 +38,8 @@ func writeGoMod(gomod string, modfile *modfile.File) error {
 	if err != nil {
 		return ex.Wrapf(err, "failed to format go.mod file")
 	}
-	// The mode of an existing go.mod file is kept (0644 for a new file).
-	return util.WriteFileAtomic(gomod, data)
+	const perm = 0o644
+	return util.WriteFileAtomic(gomod, data, perm)
 }
 
 func runModTidy(ctx context.Context, moduleDir string) error {
@@ -164,11 +164,21 @@ func discoverNestedModuleReplaces(dir string) (map[string]string, error) {
 	return nested, nil
 }
 
-// otelcReplaces returns the replace directives that the modules of otelc
-// need: the otelc modules are not published, so each one is replaced by its
-// copy in the build temp directory. modPaths are the imports of
-// otel.instrumentation.go. The map goes from module path to directory.
-func otelcReplaces(modPaths map[string]bool) (map[string]string, error) {
+func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) error {
+	if len(modPaths) == 0 {
+		return nil
+	}
+
+	logger := util.LoggerFromContext(ctx)
+
+	goModFile := filepath.Join(moduleDir, goModFileName)
+	modfile, err := parseGoMod(goModFile)
+	if err != nil {
+		return err
+	}
+
+	before := snapshotVersion(modfile)
+
 	// Add replace directives for modules imported to otel.instrumentation.go
 	replaces := make(map[string]string, len(modPaths))
 	for m := range modPaths {
@@ -198,48 +208,22 @@ func otelcReplaces(modPaths map[string]bool) (map[string]string, error) {
 	for dir := range walkDirs {
 		nested, nestedErr := discoverNestedModuleReplaces(dir)
 		if nestedErr != nil {
-			return nil, ex.Wrapf(nestedErr, "discovering nested modules under %s", dir)
+			return ex.Wrapf(nestedErr, "discovering nested modules under %s", dir)
 		}
 		maps.Copy(replaces, nested)
 	}
-
-	// Add replace directive for special pkg module
-	// TODO: Since we haven't published the instrumentation packages yet,
-	// we need to add the replace directive to the local path.
-	// Once the instrumentation packages are published, we can remove this.
-	replaces[util.OtelcPkgRoot] = filepath.Join(util.GetBuildTempDir(), unzippedPkgDir)
 
 	// Add replace directive for special runtime module
 	// runtime module initializes the OpenTelemetry SDK. It is required by all
 	// hook code to be present.
 	replaces[util.OtelcPkgRoot+"/runtime"] = filepath.Join(util.GetBuildTempDir(), unzippedPkgDir, "runtime")
 
+	// Add replace directive for special netutil module
+	replaces[util.OtelcPkgRoot+"/netutil"] = filepath.Join(util.GetBuildTempDir(), unzippedPkgDir, "netutil")
+
 	// Add replace directive for instrumentation module
 	// instrumentation module contains shared semconv packages.
 	replaces[util.OtelcInstRoot] = filepath.Join(util.GetBuildTempDir(), unzippedInstDir)
-
-	return replaces, nil
-}
-
-func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) error {
-	if len(modPaths) == 0 {
-		return nil
-	}
-
-	logger := util.LoggerFromContext(ctx)
-
-	goModFile := filepath.Join(moduleDir, goModFileName)
-	modfile, err := parseGoMod(goModFile)
-	if err != nil {
-		return err
-	}
-
-	before := snapshotVersion(modfile)
-
-	replaces, err := otelcReplaces(modPaths)
-	if err != nil {
-		return err
-	}
 
 	// Okay, now add all the replace directives to go.mod in deterministic sorted order
 	changed := false

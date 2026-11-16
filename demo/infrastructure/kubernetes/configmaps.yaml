@@ -1,0 +1,224 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: otel-demo
+data:
+  config.yaml: |
+    connectors:
+      spanmetrics:
+        histogram:
+          explicit:
+            buckets: [100us, 1ms, 2ms, 6ms, 10ms, 100ms, 250ms]
+        dimensions:
+          - name: http.method
+            default: GET
+          - name: http.status_code
+          - name: http.route
+            default: ""
+          - name: service.version
+        exemplars:
+          enabled: true
+        metrics_flush_interval: 15s
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: jaeger
+              scrape_interval: 15s
+              static_configs:
+                - targets: ["jaeger:8888"]
+                  labels:
+                    service: jaeger
+                    component: tracing
+    processors:
+      batch:
+        send_batch_size: 1024
+        timeout: 5s
+        send_batch_max_size: 2048
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 512
+    exporters:
+      debug:
+        verbosity: detailed
+        sampling_initial: 5
+        sampling_thereafter: 200
+      otlp/jaeger:
+        endpoint: jaeger:4317
+        tls:
+          insecure: true
+      prometheus:
+        endpoint: 0.0.0.0:8889
+        const_labels:
+          environment: demo
+    service:
+      extensions: [health_check]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [debug, otlp/jaeger, spanmetrics]
+        metrics:
+          receivers: [otlp, prometheus]
+          processors: [memory_limiter, batch]
+          exporters: [debug, prometheus]
+        metrics/spanmetrics:
+          receivers: [spanmetrics]
+          processors: [batch]
+          exporters: [prometheus]
+      telemetry:
+        logs:
+          level: info
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jaeger-config
+  namespace: otel-demo
+data:
+  config.yaml: |
+    extensions:
+      jaeger_storage:
+        backends:
+          memory:
+            memory:
+              max_traces: 100000
+        metric_backends:
+          prometheus_metrics:
+            prometheus:
+              endpoint: http://prometheus:9090
+              normalize_calls: true
+              normalize_duration: true
+      jaeger_query:
+        storage:
+          traces: memory
+          metrics: prometheus_metrics
+        ui:
+          config_file: /etc/jaeger/ui-config.json
+      healthcheckv2:
+        http:
+          endpoint: 0.0.0.0:13133
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    processors:
+      batch:
+        timeout: 5s
+        send_batch_size: 1024
+    exporters:
+      jaeger_storage_exporter:
+        trace_storage: memory
+      otlp:
+        endpoint: otel-collector:4317
+        tls:
+          insecure: true
+    service:
+      extensions: [jaeger_storage, jaeger_query, healthcheckv2]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [jaeger_storage_exporter, otlp]
+  ui-config.json: |
+    {
+      "monitor": {
+        "menuEnabled": true
+      }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: otel-demo
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+      external_labels:
+        environment: demo
+        cluster: local
+    tracing:
+      endpoint: otel-collector:4317
+      insecure: true
+      sampling_fraction: 1.0
+    otlp:
+      promote_resource_attributes:
+        - service.name
+        - service.namespace
+        - service.instance.id
+      translation_strategy: NoTranslation
+    scrape_configs:
+      - job_name: prometheus
+        static_configs:
+          - targets: ["localhost:9090"]
+            labels:
+              service: prometheus
+      - job_name: otel-collector
+        scrape_interval: 10s
+        static_configs:
+          - targets: ["otel-collector:8888"]
+            labels:
+              service: otel-collector
+              component: collector
+      - job_name: otel-metrics
+        scrape_interval: 15s
+        static_configs:
+          - targets: ["otel-collector:8889"]
+            labels:
+              component: applications
+    storage:
+      tsdb:
+        out_of_order_time_window: 30m
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: otel-demo
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        uid: prometheus
+        access: proxy
+        url: http://prometheus:9090
+        isDefault: true
+        editable: true
+        jsonData:
+          httpMethod: POST
+          exemplarTraceIdDestinations:
+            - name: traceID
+              datasourceUid: jaeger
+          timeInterval: 15s
+      - name: Jaeger
+        type: jaeger
+        uid: jaeger
+        access: proxy
+        url: http://jaeger:16686
+        editable: true
+        jsonData:
+          tracesToMetrics:
+            datasourceUid: prometheus
+            tags:
+              - key: service.name
+                value: job
+          nodeGraph:
+            enabled: true

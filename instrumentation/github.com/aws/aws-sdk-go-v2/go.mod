@@ -7,7 +7,7 @@ require (
 	github.com/aws/smithy-go v1.28.6
 	github.com/stretchr/testify v1.12.1
 	go.opentelemetry.io/contrib/instrumentation/github.com/aws/aws-sdk-go-v2/otelaws v0.72.0
-	go.opentelemetry.io/otelc/pkg v0.0.0-00010101000000-000000000000
+	go.opentelemetry.io/otelc/pkg v0.1.0
 	go.opentelemetry.io/otelc/pkg/runtime v0.0.0-00010101000000-000000000000
 )
 
@@ -77,7 +77,4 @@ require (
 	google.golang.org/protobuf v1.36.12 // indirect
 )
 
-replace (
-	go.opentelemetry.io/otelc/pkg => ../../../../pkg
-	go.opentelemetry.io/otelc/pkg/runtime => ../../../../pkg/runtime
-)
+replace go.opentelemetry.io/otelc/pkg/runtime => ../../../../pkg/runtime

@@ -52,16 +52,26 @@ func LoadPackages(
 // consistency check while go.mod is mid-edit. moduleDir is empty when dir is
 // outside any module.
 func ModuleAndWorkspace(ctx context.Context, dir string) (string, bool, error) {
+	moduleDir, workFile, err := ModuleAndWorkFile(ctx, dir)
+	return moduleDir, workFile != "", err
+}
+
+// ModuleAndWorkFile is ModuleAndWorkspace, but returns the path of the active
+// go.work file instead of a flag. workFile is empty when dir is not inside an
+// active workspace.
+//
+//nolint:revive // if we add named returns then nonamedreturns will complain
+func ModuleAndWorkFile(ctx context.Context, dir string) (string, string, error) {
 	cmd := exec.CommandContext(ctx, "go", "env", "GOMOD", "GOWORK")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
-		return "", false, ex.Wrapf(err, "running go env GOMOD GOWORK in %s", dir)
+		return "", "", ex.Wrapf(err, "running go env GOMOD GOWORK in %s", dir)
 	}
 	// go env prints one line per requested var, in order: GOMOD then GOWORK.
 	goModLine, goWorkLine, ok := strings.Cut(string(out), "\n")
 	if !ok {
-		return "", false, ex.Newf("unexpected output from go env GOMOD GOWORK in %s: %q", dir, out)
+		return "", "", ex.Newf("unexpected output from go env GOMOD GOWORK in %s: %q", dir, out)
 	}
 	goMod := strings.TrimSpace(goModLine)
 	goWork := strings.TrimSpace(goWorkLine)
@@ -72,27 +82,38 @@ func ModuleAndWorkspace(ctx context.Context, dir string) (string, bool, error) {
 	}
 	// GOWORK is the path to the resolved go.work file, "off" when workspace
 	// mode is explicitly disabled, or empty when none applies.
-	workspace := goWork != "" && goWork != "off"
-	return moduleDir, workspace, nil
+	if goWork == "off" {
+		goWork = ""
+	}
+	return moduleDir, goWork, nil
 }
 
-// BuildDir returns the absolute -C directory of buildFlags, or "" when
-// buildFlags has no -C flag. The flag can have one or two dashes (-C or --C),
-// as for the go command. LoadPackages loads the packages in this directory.
-func BuildDir(buildFlags []string) (string, error) {
+// GOROOT returns the GOROOT of the go command that LoadPackages runs with the
+// same buildFlags. It asks that command rather than using runtime.GOROOT, as
+// GOTOOLCHAIN may select a toolchain other than the one that built this tool.
+func GOROOT(ctx context.Context, buildFlags []string) (string, error) {
 	dir, _, err := loadDirFromBuildFlags(buildFlags)
-	return dir, err
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, "go", "env", "GOROOT")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", ex.Wrapf(err, "running go env GOROOT in %s", dir)
+	}
+	goroot := strings.TrimSpace(string(out))
+	if goroot == "" {
+		return "", ex.Newf("go env GOROOT in %s printed nothing", dir)
+	}
+	return goroot, nil
 }
 
 func loadDirFromBuildFlags(buildFlags []string) (string, []string, error) {
 	var dir string
 	filtered := make([]string, 0, len(buildFlags))
 	for i := 0; i < len(buildFlags); i++ {
-		// The go command accepts each flag with one or two dashes.
 		flag := buildFlags[i]
-		if strings.HasPrefix(flag, "--") {
-			flag = flag[1:]
-		}
 
 		switch {
 		case flag == "-C":
@@ -104,7 +125,7 @@ func loadDirFromBuildFlags(buildFlags []string) (string, []string, error) {
 		case strings.HasPrefix(flag, "-C="):
 			dir = strings.TrimPrefix(flag, "-C=")
 		default:
-			filtered = append(filtered, buildFlags[i])
+			filtered = append(filtered, flag)
 		}
 	}
 	if dir == "" {
@@ -192,6 +213,67 @@ func ResolveExportFiles(ctx context.Context, importPath string, buildFlags ...st
 	return result, nil
 }
 
+// ResolveExportFilesBatch resolves several import paths with one packages.Load
+// call. It returns importPath -> exportFile for every requested package that
+// loaded cleanly and for all their transitive dependencies. Load failures are
+// reported per requested import path in failed, so a caller can treat one
+// unresolvable candidate as non-fatal while keeping the rest.
+func ResolveExportFilesBatch(
+	ctx context.Context,
+	importPaths []string,
+	buildFlags ...string,
+) (map[string]string, map[string]error, error) {
+	if len(importPaths) == 0 {
+		return map[string]string{}, nil, nil
+	}
+
+	mode := packages.NeedName | packages.NeedImports | packages.NeedDeps | packages.NeedExportFile
+	pkgs, err := LoadPackages(ctx, mode, buildFlags, false, importPaths...)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(pkgs) == 0 {
+		return nil, nil, ex.Newf("no packages found for %v", importPaths)
+	}
+
+	requested := make(map[string]bool, len(importPaths))
+	for _, path := range importPaths {
+		requested[path] = true
+	}
+
+	resolved := make(map[string]string)
+	failed := make(map[string]error)
+	visited := make(map[string]bool)
+
+	var walk func(pkg *packages.Package)
+	walk = func(pkg *packages.Package) {
+		if visited[pkg.PkgPath] {
+			return
+		}
+		visited[pkg.PkgPath] = true
+		if len(pkg.Errors) == 0 && pkg.ExportFile != "" {
+			resolved[pkg.PkgPath] = pkg.ExportFile
+		}
+		for _, dep := range pkg.Imports {
+			walk(dep)
+		}
+	}
+
+	for _, pkg := range pkgs {
+		walk(pkg)
+		if !requested[pkg.PkgPath] {
+			continue
+		}
+		if len(pkg.Errors) > 0 {
+			failed[pkg.PkgPath] = pkg.Errors[0]
+		} else if _, ok := resolved[pkg.PkgPath]; !ok {
+			failed[pkg.PkgPath] = ex.Newf("package %q has no export file", pkg.PkgPath)
+		}
+	}
+
+	return resolved, failed, nil
+}
+
 // CollectPackageNames walks pkgs and their transitive imports, mapping
 // each import path to its declared package name. Load pkgs with
 // packages.NeedImports and packages.NeedDeps, or the walk finds no
@@ -210,17 +292,19 @@ func CollectPackageNames(pkgs []*packages.Package) map[string]string {
 	return result
 }
 
+// PackageDir returns the directory of pkg. A package with only _test.go files
+// has no GoFiles, so PackageDir falls back to the directory that go list
+// reports. Load pkg with packages.NeedFiles, or that directory is empty.
 func PackageDir(pkg *packages.Package) string {
 	if len(pkg.GoFiles) > 0 {
 		return filepath.Dir(pkg.GoFiles[0])
 	}
-	return ""
+	return pkg.Dir
 }
 
-// ResolveModule returns the module for a given package directory. buildFlags
-// go to the package load (for example a -mod flag).
-func ResolveModule(ctx context.Context, pkgDir string, buildFlags ...string) (*packages.Module, error) {
-	pkgs, err := LoadPackages(ctx, packages.NeedModule, buildFlags, false, pkgDir)
+// ResolveModule returns the module for a given package directory.
+func ResolveModule(ctx context.Context, pkgDir string) (*packages.Module, error) {
+	pkgs, err := LoadPackages(ctx, packages.NeedModule, nil, false, pkgDir)
 	if err != nil {
 		return nil, err
 	}
@@ -262,16 +346,15 @@ func FindModuleDirs(ctx context.Context, pkgs []*packages.Package) ([]string, er
 			continue
 		}
 
-		pkgDir := PackageDir(pkg)
-		if pkgDir == "" {
-			logger.WarnContext(ctx, "skipping package without Go files", "package", pkg.PkgPath)
-			continue
-		}
-
 		var moduleDir string
 		if pkg.Module != nil {
 			moduleDir = pkg.Module.Dir
 		} else {
+			pkgDir := PackageDir(pkg)
+			if pkgDir == "" {
+				return nil, ex.Newf("cannot find the directory of package %s", pkg.PkgPath)
+			}
+
 			modDir, err := resolveModuleDir(ctx, pkgDir)
 			if err != nil {
 				return nil, err

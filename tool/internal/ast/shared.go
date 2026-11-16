@@ -79,8 +79,14 @@ func stripGenericTypes(recvTypeExpr dst.Expr) string {
 	return ""
 }
 
-func findFuncDecl(root *dst.File, funcName, recv string) *dst.FuncDecl {
+// findFuncDecl finds the declaration named funcName with receiver recv. When
+// reason is non-nil and a declaration has the name but not the receiver, it
+// is set to "receiver_mismatch".
+func findFuncDecl(root *dst.File, funcName, recv string, reason *string) *dst.FuncDecl {
 	decls := findFuncDecls(root, func(funcDecl *dst.FuncDecl) bool {
+		if reason != nil && funcDecl.Name.Name == funcName {
+			*reason = "receiver_mismatch"
+		}
 		// Receiver type is ignored, match func name only
 		name := funcDecl.Name.Name
 		if recv == "" {
@@ -131,6 +137,14 @@ func FindFuncDecl[R rule.InstFuncRule | rule.InstRawRule | rule.FilterDef](
 	r *R,
 	resolvedNames map[string]string,
 ) (*dst.FuncDecl, bool, error) {
+	return FindFuncDeclReporting(root, r, resolvedNames, nil)
+}
+
+// FindFuncDeclReporting uses the same matcher and optionally reports its rejection reason.
+// An empty reason means the declaration matched. Errors remain build errors.
+func FindFuncDeclReporting[R rule.InstFuncRule | rule.InstRawRule | rule.FilterDef](
+	root *dst.File, r *R, resolvedNames map[string]string, reason *string,
+) (*dst.FuncDecl, bool, error) {
 	var (
 		funcName string
 		recv     string
@@ -144,16 +158,32 @@ func FindFuncDecl[R rule.InstFuncRule | rule.InstRawRule | rule.FilterDef](
 	case *rule.InstRawRule:
 		funcName = rr.Func
 		recv = rr.Recv
+		// InstRawRule carries the same signature sub-filters as InstFuncRule.
+		// Reuse the InstFuncRule matcher rather than duplicating the five
+		// fields' evaluation. FilterDef stays name/receiver-only.
+		funcRule = &rule.InstFuncRule{
+			Signature:         rr.Signature,
+			SignatureContains: rr.SignatureContains,
+			Result:            rr.Result,
+			LastResult:        rr.LastResult,
+			Param:             rr.Param,
+		}
 	case *rule.FilterDef:
 		funcName = rr.HasFunc
 		recv = rr.HasRecv
 	}
 
-	funcDecl := findFuncDecl(root, funcName, recv)
+	if reason != nil {
+		*reason = "function_not_found"
+	}
+	funcDecl := findFuncDecl(root, funcName, recv, reason)
 	if funcDecl == nil {
 		return nil, false, nil
 	}
 
+	if reason != nil {
+		*reason = ""
+	}
 	if funcRule == nil {
 		return funcDecl, true, nil
 	}
@@ -163,6 +193,9 @@ func FindFuncDecl[R rule.InstFuncRule | rule.InstRawRule | rule.FilterDef](
 		return nil, false, err
 	}
 	if !ok {
+		if reason != nil {
+			*reason = "signature_mismatch"
+		}
 		return nil, false, nil
 	}
 	return funcDecl, true, nil

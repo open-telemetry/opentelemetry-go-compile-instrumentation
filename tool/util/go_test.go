@@ -931,6 +931,34 @@ func TestStripToolexecFromGoflags(t *testing.T) {
 	}
 }
 
+func TestStripJSONFromGoflags(t *testing.T) {
+	tests := []struct {
+		name       string
+		goflags    string
+		expected   string
+		jsonOutput bool
+	}{
+		{name: "empty", goflags: "", expected: ""},
+		{name: "no json flag", goflags: "-mod=mod -race", expected: "-mod=mod -race"},
+		{name: "bare json flag", goflags: "-mod=mod -json -race", expected: "-mod=mod -race", jsonOutput: true},
+		{name: "double-dash json flag", goflags: "--json", expected: "", jsonOutput: true},
+		{name: "json flag set to true", goflags: "-json=true", expected: "", jsonOutput: true},
+		{name: "json flag set to false", goflags: "-mod=mod -json=false", expected: "-mod=mod"},
+		{name: "quoted json flag", goflags: "'-json' '-tags=a b'", expected: "'-tags=a b'", jsonOutput: true},
+		{name: "last json flag wins", goflags: "-json -json=false", expected: ""},
+		{name: "invalid json value is kept", goflags: "-json=maybe", expected: "-json=maybe"},
+		{name: "other flags with a json prefix are kept", goflags: "-jsonfoo", expected: "-jsonfoo"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, jsonOutput := StripJSONFromGoflags(tt.goflags)
+			assert.Equal(t, tt.expected, got)
+			assert.Equal(t, tt.jsonOutput, jsonOutput)
+		})
+	}
+}
+
 func TestUserBuildTags(t *testing.T) {
 	tests := []struct {
 		name       string

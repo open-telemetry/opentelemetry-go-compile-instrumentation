@@ -57,6 +57,11 @@ create a pull request proposing yourself for that release.
 1. Go to the [Actions tab](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/actions/workflows/release-prepare.yml).
 2. Click **Run workflow**.
 3. Enter the version (e.g. `v1.3.0`) and target branch (default: `main`).
+   - If releasing `go.opentelemetry.io/otelc/pkg` alongside `otelc`, enable
+     **Also release go.opentelemetry.io/otelc/pkg** (`release_pkg: true`) and
+     specify **The pkg/ version to release** (`pkg_version`, e.g. `v0.1.0`).
+     Releasing `pkg/` is optional because `pkg/hook` changes infrequently (see
+     [Releasing the pkg Module](#releasing-the-pkg-module-goopentelemetryiootelcpkg)).
 4. The workflow creates a temporary `release/<version>` branch, generates
    release notes into `.github/release-notes.md`, and opens a **draft PR**. The
    branch is used only for this release PR and can be deleted after the release
@@ -79,12 +84,15 @@ create a pull request proposing yourself for that release.
 Merging the approved release PR automatically triggers the
 [Release workflow](../.github/workflows/release.yml), which:
 
-1. Cross-compiles `otelc` for all supported platforms (see
+1. Tests the `pkg` module (`go test -C pkg ./...`) and creates/pushes the
+   annotated git tag `pkg/<pkg_version>` if `pkg/` was included in the release PR
+2. Cross-compiles `otelc` for all supported platforms (see
    [Cross-Compilation Targets](#cross-compilation-targets))
-2. Generates SHA256 checksums for all binaries
-3. Tags the merge commit with the version
-4. Publishes the GitHub release with binaries, checksums, and the curated
-   release notes
+3. Generates SHA256 checksums for all binaries
+4. Tags the merge commit with the version
+5. Publishes the GitHub release with binaries, checksums, and the curated
+   release notes. When `pkg/` is included, the release title combines both
+   versions separated by `/` (e.g. `v1.3.0/v0.1.0`).
 
 ## Pre-Releases
 
@@ -120,6 +128,48 @@ releases:
    `release/v1.2.x`, review and merge the resulting release PR into
    `release/v1.2.x`, and delete the temporary branch once the release is
    published and verified.
+
+## Releasing the pkg Module (`go.opentelemetry.io/otelc/pkg`)
+
+The `go.opentelemetry.io/otelc/pkg` module contains `pkg/hook` and
+`pkg/hook/hooktest`. Because `pkg/hook` has a strict additive compatibility
+guarantee (see [`pkg/hook/README.md`](../pkg/hook/README.md)) and changes
+infrequently, it is not tied to every `otelc` binary release. Releasing `pkg/`
+is optional and requires explicitly providing a `pkg_version`.
+
+There are two ways to release `pkg/`:
+
+### 1. Alongside an `otelc` Binary Release
+
+When running the [Prepare Release workflow](../.github/workflows/release-prepare.yml):
+
+1. Set `release_pkg` to `true`.
+2. Provide `pkg_version` (e.g. `v0.1.0`).
+3. The workflow validates the version format, includes the `pkg/` release in the
+   release PR title (e.g. `release: v1.3.0/v0.1.0`), and records the pkg version.
+4. When the release PR is merged, the Release workflow runs `go test -C pkg ./...`,
+   creates and pushes the annotated git tag `pkg/<pkg_version>`, and sets the GitHub
+   release title to `<otelc_version>/<pkg_version>` (e.g. `v1.3.0/v0.1.0`).
+
+### 2. Standalone Release (Manual Tagging)
+
+Maintainers can also release `pkg/` independently at any time without cutting full
+`otelc` platform binaries by testing and tagging the commit directly:
+
+```sh
+# 1. Run unit tests for pkg
+go test -C pkg ./...
+
+# 2. Create and push the annotated tag
+git tag -a "pkg/v0.1.0" -m "Release pkg/v0.1.0"
+git push origin "pkg/v0.1.0"
+
+# 3. (Optional) Create a GitHub release for the tag
+gh release create "pkg/v0.1.0" --title "pkg/v0.1.0" --generate-notes
+```
+
+This manual tagging approach can also be used if a `pkg/` release was omitted during
+an earlier `otelc` binary release PR.
 
 ## Cross-Compilation Targets
 

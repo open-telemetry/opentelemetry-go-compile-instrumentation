@@ -1,0 +1,24 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+//line /golden/work/main.go:6
+import "io"
+
+func track(r *io.LimitedReader) *io.LimitedReader { return r }
+
+// &T{...} is wrapped.
+func Pointer() *io.LimitedReader {
+	return track(&io.LimitedReader{N: 10}) /*line /golden/work/main.go:12*/
+}
+
+// T{...} has no value template, so it is left alone.
+func Value() io.LimitedReader {
+	return io.LimitedReader{N: 20}
+}
+
+func main() {
+	_ = Pointer()
+	_ = Value()
+}

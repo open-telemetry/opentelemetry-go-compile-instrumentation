@@ -23,7 +23,9 @@ import (
 const (
 	instrumentationName = "go.opentelemetry.io/otelc/" +
 		"instrumentation/github.com/segmentio/kafka-go"
-	instrumentationKey = "KAFKA"
+	instrumentationKey   = "KAFKA"
+	messagesParamIndex   = 2
+	propagatedHeadersCap = 2 // traceparent + baggage
 )
 
 // kafkaEnablerImpl controls whether the kafka-go producer instrumentation is enabled.
@@ -109,8 +111,15 @@ func BeforeWriteMessages(
 		endpoint = w.Addr.String()
 	}
 
+	// WriteMessages only reads msgs, so callers can reuse messages and share
+	// header slices across calls and goroutines. Inject into copies instead.
+	out := make([]kafka.Message, len(msgs))
 	spans := make([]trace.Span, len(msgs))
 	for i := range msgs {
+		out[i] = msgs[i]
+		out[i].Headers = make([]kafka.Header, len(msgs[i].Headers), len(msgs[i].Headers)+propagatedHeadersCap)
+		copy(out[i].Headers, msgs[i].Headers)
+
 		topic := msgs[i].Topic
 		if topic == "" {
 			topic = w.Topic
@@ -127,12 +136,12 @@ func BeforeWriteMessages(
 			trace.WithSpanKind(trace.SpanKindProducer),
 			trace.WithAttributes(semconv.KafkaRequestTraceAttrs(req)...),
 		)
-		propagator.Inject(msgCtx, kafkaprop.NewHeaderCarrier(&msgs[i].Headers))
+		propagator.Inject(msgCtx, kafkaprop.NewHeaderCarrier(&out[i].Headers))
 		spans[i] = span
 	}
 
 	// Propagate the header-injected messages to the real WriteMessages call.
-	ictx.SetParam(2, msgs)
+	ictx.SetParam(messagesParamIndex, out)
 	ictx.SetData(spans)
 }
 
