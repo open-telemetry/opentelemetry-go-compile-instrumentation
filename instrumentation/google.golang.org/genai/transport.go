@@ -32,7 +32,7 @@ const (
 
 // responseTruncatedWarnOnce logs the size-cap warning once per process rather
 // than once per oversized response.
-var responseTruncatedWarnOnce sync.Once
+var responseTruncatedWarnOnce sync.Once //nolint:gochecknoglobals // process-wide by design
 
 // otelTransport wraps the round tripper the GenAI SDK issues requests through
 // and emits one client span per non-streaming generateContent call.
@@ -209,17 +209,18 @@ func requestConfigAttrs(req *http.Request) []attribute.KeyValue {
 }
 
 // readBounded reads up to limit bytes from body for attribute parsing while
-// preserving the full stream for the SDK. truncated reports whether body held
-// more than limit bytes; in that case bodyBytes is nil so no caller can parse a
-// cut-off prefix as JSON.
-func readBounded(body io.ReadCloser, limit int64) (bodyBytes []byte, truncated bool, reassembled io.ReadCloser, err error) {
+// preserving the full stream for the SDK. It returns the bytes read, whether
+// body held more than limit bytes, the reassembled body for the caller, and any
+// read error. When body is over the limit the returned bytes are nil, so no
+// caller can parse a cut-off prefix as JSON.
+func readBounded(body io.ReadCloser, limit int64) ([]byte, bool, io.ReadCloser, error) {
 	var buf bytes.Buffer
 	tee := io.TeeReader(body, &buf)
 	// Read one byte past the limit so a body of exactly limit bytes can be
 	// told apart from a longer one. The tee captures that byte too, so the
 	// reassembled stream is complete either way.
 	read, err := io.ReadAll(io.LimitReader(tee, limit+1))
-	reassembled = struct {
+	reassembled := struct {
 		io.Reader
 		io.Closer
 	}{io.MultiReader(&buf, body), body}
@@ -244,7 +245,7 @@ func recordResponse(resp *http.Response, span trace.Span) {
 	}
 	if truncated {
 		responseTruncatedWarnOnce.Do(func() {
-			logger.Warn("Gemini response body exceeds the size cap; response attributes omitted",
+			runtime.Logger().Warn("Gemini response body exceeds the size cap; response attributes omitted",
 				"limit_bytes", maxResponseBodySize)
 		})
 		return

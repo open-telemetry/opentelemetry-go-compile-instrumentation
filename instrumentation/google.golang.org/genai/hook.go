@@ -20,19 +20,17 @@ const (
 	instrumentationKey  = "GEMINI"
 )
 
+// tracer is created on first use, after the application has had a chance to
+// install its tracer provider.
 var (
-	logger   = runtime.Logger()
-	tracer   trace.Tracer
-	initOnce sync.Once
+	tracer   trace.Tracer //nolint:gochecknoglobals // set once by initInstrumentation
+	initOnce sync.Once    //nolint:gochecknoglobals // guards the tracer initialisation
 )
 
-type geminiEnabler struct{}
-
-func (geminiEnabler) Enable() bool {
+// enabled reports whether the Gemini instrumentation is switched on.
+func enabled() bool {
 	return runtime.Instrumented(instrumentationKey)
 }
-
-var enabler = geminiEnabler{}
 
 func initInstrumentation() {
 	initOnce.Do(func() {
@@ -41,7 +39,7 @@ func initInstrumentation() {
 			trace.WithInstrumentationVersion(runtime.ModuleVersion()),
 		)
 
-		logger.Info("Gemini instrumentation initialized")
+		runtime.Logger().Info("Gemini instrumentation initialized")
 	})
 }
 
@@ -56,15 +54,25 @@ const (
 	systemVertexAI = "vertex_ai"
 )
 
-// providerAndSystem maps the SDK backend onto the gen_ai.provider.name and
-// gen_ai.system values. Reading the backend off the client is exact, unlike the
-// request-host keyword matching the openai-go and anthropic-sdk-go
-// instrumentations fall back on, because the SDK records which API it targets.
-func providerAndSystem(backend genaisdk.Backend) (provider, system string) {
+// providerName maps the SDK backend onto the gen_ai.provider.name value.
+// Reading the backend off the client is exact, unlike the request-host keyword
+// matching the openai-go and anthropic-sdk-go instrumentations fall back on,
+// because the SDK records which API it targets. An unset backend defaults to
+// the Gemini Developer API, as it does in the SDK.
+func providerName(backend genaisdk.Backend) string {
 	if backend == genaisdk.BackendVertexAI {
-		return providerVertexAI, systemVertexAI
+		return providerVertexAI
 	}
-	return providerGemini, systemGemini
+	return providerGemini
+}
+
+// systemName maps the SDK backend onto the deprecated gen_ai.system value,
+// following the same rules as providerName.
+func systemName(backend genaisdk.Backend) string {
+	if backend == genaisdk.BackendVertexAI {
+		return systemVertexAI
+	}
+	return systemGemini
 }
 
 // BeforeNewClient matches the parameters of genai.NewClient. When the caller
@@ -76,8 +84,10 @@ func providerAndSystem(backend genaisdk.Backend) (provider, system string) {
 // The copy replaces cc.HTTPClient. NewClient itself already writes to the
 // config it is given (it fills in HTTPClient, HTTPOptions.BaseURL and
 // HTTPOptions.APIVersion), so this does not change what callers can rely on.
+//
+//nolint:revive // the parameters must mirror genai.NewClient(ctx, cc), which follow the HookContext
 func BeforeNewClient(_ hook.HookContext, _ context.Context, cc *genaisdk.ClientConfig) {
-	if !enabler.Enable() {
+	if !enabled() {
 		return
 	}
 	if cc == nil || cc.HTTPClient == nil {
@@ -108,8 +118,8 @@ func BeforeNewClient(_ hook.HookContext, _ context.Context, cc *genaisdk.ClientC
 // swapping the transport through it takes effect for every subsequent call.
 // That pointer is either the copy BeforeNewClient made or a client NewClient
 // built itself, so no other goroutine can be using it while it is written.
-func AfterNewClient(ictx hook.HookContext, client *genaisdk.Client, err error) {
-	if !enabler.Enable() {
+func AfterNewClient(_ hook.HookContext, client *genaisdk.Client, err error) {
+	if !enabled() {
 		return
 	}
 	if err != nil || client == nil {
@@ -123,7 +133,7 @@ func AfterNewClient(ictx hook.HookContext, client *genaisdk.Client, err error) {
 		// NewClient always populates HTTPClient on success, so this only
 		// happens if that contract changes upstream. Skip rather than
 		// substitute a client the SDK did not build.
-		logger.Debug("Gemini client has no HTTP client; skipping instrumentation")
+		runtime.Logger().Debug("Gemini client has no HTTP client; skipping instrumentation")
 		return
 	}
 	if _, ok := httpClient.Transport.(*otelTransport); ok {
@@ -133,10 +143,9 @@ func AfterNewClient(ictx hook.HookContext, client *genaisdk.Client, err error) {
 		return
 	}
 
-	provider, system := providerAndSystem(config.Backend)
 	httpClient.Transport = &otelTransport{
 		base:     httpClient.Transport,
-		provider: provider,
-		system:   system,
+		provider: providerName(config.Backend),
+		system:   systemName(config.Backend),
 	}
 }

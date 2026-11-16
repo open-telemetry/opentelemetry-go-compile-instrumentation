@@ -72,19 +72,16 @@ func sdkTransport(client *genaisdk.Client) http.RoundTripper {
 	return client.ClientConfig().HTTPClient.Transport
 }
 
-func TestProviderAndSystem(t *testing.T) {
-	provider, system := providerAndSystem(genaisdk.BackendVertexAI)
-	assert.Equal(t, providerVertexAI, provider)
-	assert.Equal(t, systemVertexAI, system)
+func TestProviderAndSystemName(t *testing.T) {
+	assert.Equal(t, providerVertexAI, providerName(genaisdk.BackendVertexAI))
+	assert.Equal(t, systemVertexAI, systemName(genaisdk.BackendVertexAI))
 
-	provider, system = providerAndSystem(genaisdk.BackendGeminiAPI)
-	assert.Equal(t, providerGemini, provider)
-	assert.Equal(t, systemGemini, system)
+	assert.Equal(t, providerGemini, providerName(genaisdk.BackendGeminiAPI))
+	assert.Equal(t, systemGemini, systemName(genaisdk.BackendGeminiAPI))
 
 	// An unset backend defaults to the Gemini Developer API, matching the SDK.
-	provider, system = providerAndSystem(genaisdk.BackendUnspecified)
-	assert.Equal(t, providerGemini, provider)
-	assert.Equal(t, systemGemini, system)
+	assert.Equal(t, providerGemini, providerName(genaisdk.BackendUnspecified))
+	assert.Equal(t, systemGemini, systemName(genaisdk.BackendUnspecified))
 }
 
 func TestNewClient_Enabled(t *testing.T) {
@@ -225,26 +222,22 @@ func TestNewClient_ConcurrentUseOfCallerClientIsRaceFree(t *testing.T) {
 	httpClient := &http.Client{}
 	var wg sync.WaitGroup
 	for range 4 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 20 {
 				resp, err := httpClient.Get(server.URL)
 				if assert.NoError(t, err) {
 					_ = resp.Body.Close()
 				}
 			}
-		}()
+		})
 	}
 	errs := make(chan error, 4)
 	for range 4 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, err := buildInstrumentedClient(
 				t.Context(), testClientConfig(genaisdk.BackendGeminiAPI, httpClient))
 			errs <- err
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)
