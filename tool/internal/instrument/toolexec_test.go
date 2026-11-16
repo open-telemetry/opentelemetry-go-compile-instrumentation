@@ -2467,8 +2467,11 @@ func TestLinkResolutionListsFailedCandidateOnce(t *testing.T) {
 
 // batchFailingResolver fails any load of several roots as a whole, as go list
 // does when one root's module is missing from go.mod, and otherwise delegates.
+// A root in whole also fails as a whole when it is loaded alone, with a
+// top-level error rather than a per-root failure.
 type batchFailingResolver struct {
 	inner *countingResolver
+	whole map[string]bool
 }
 
 func (b *batchFailingResolver) resolve(
@@ -2476,6 +2479,9 @@ func (b *batchFailingResolver) resolve(
 ) (map[string]map[string]string, map[string]error, error) {
 	if len(roots) > 1 {
 		return nil, nil, errors.New("no packages found for " + strings.Join(roots, ", "))
+	}
+	if b.whole[roots[0]] {
+		return nil, nil, errors.New("updates to go.mod needed")
 	}
 	return b.inner.resolve(ctx, roots, flags...)
 }
@@ -2496,6 +2502,49 @@ func TestLinkResolutionResolvesEachCandidateWhenBatchFails(t *testing.T) {
 	assert.True(t, updated)
 	assert.Contains(t, cfg.PackageFile, "example.com/extra")
 	assert.NotContains(t, cfg.PackageFile, "example.invalid/bad")
+}
+
+// TestLinkResolutionSkipsLoneFailingCandidate covers a single rule-added import
+// whose load fails as a whole, as in #1788: the link must skip it, not fail.
+func TestLinkResolutionSkipsLoneFailingCandidate(t *testing.T) {
+	setupLinkMemo(t, "example.invalid/bad")
+	resolver := &batchFailingResolver{
+		inner: &countingResolver{dir: t.TempDir()},
+		whole: map[string]bool{"example.invalid/bad": true},
+	}
+
+	cfg := freshLinkConfig()
+	updated, err := resolveRuleAddedImportsWith(t.Context(), nil, cfg, resolver.resolve)
+	require.NoError(t, err)
+	assert.False(t, updated)
+	assert.NotContains(t, cfg.PackageFile, "example.invalid/bad")
+}
+
+// TestLinkResolutionSkipsLoneFailureAfterMemoizedSuccess covers a later link
+// whose only miss is a candidate that fails as a whole. The earlier link's
+// successes come from the memo, so the lone failing root is loaded alone and
+// must be skipped rather than fail the link. Its failure is not memoized, so
+// the later link loads it again.
+func TestLinkResolutionSkipsLoneFailureAfterMemoizedSuccess(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra", "example.invalid/bad")
+	resolver := &batchFailingResolver{
+		inner: &countingResolver{dir: t.TempDir()},
+		whole: map[string]bool{"example.invalid/bad": true},
+	}
+
+	first := freshLinkConfig()
+	updated, err := resolveRuleAddedImportsWith(t.Context(), nil, first, resolver.resolve)
+	require.NoError(t, err)
+	require.True(t, updated)
+	require.Contains(t, first.PackageFile, "example.com/extra")
+
+	second := freshLinkConfig()
+	updated, err = resolveRuleAddedImportsWith(t.Context(), nil, second, resolver.resolve)
+	require.NoError(t, err)
+	assert.True(t, updated)
+	assert.Equal(t, first.PackageFile["example.com/extra"], second.PackageFile["example.com/extra"],
+		"the second link must take the memoized closure")
+	assert.NotContains(t, second.PackageFile, "example.invalid/bad")
 }
 
 func TestLinkResolutionSkipsGoListWhenNothingIsMissing(t *testing.T) {

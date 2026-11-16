@@ -980,9 +980,10 @@ func (lr *linkResolution) resolveMisses(
 // resolveBatch runs one nested go list for the roots. When that load fails as
 // a whole, as it does when go list cannot resolve one root's module (for
 // example "updates to go.mod needed") and so returns no packages for any of
-// them, it resolves each root on its own. A root that fails alone lands in the
-// failed map, so one unresolvable candidate does not fail the whole link. An
-// error is returned only when the context is done.
+// them, it resolves each root on its own. A root whose load fails alone lands
+// in the failed map, so one unresolvable candidate does not fail the whole
+// link, including when it is the only root left after the others are memoized.
+// An error is returned only when the context is done.
 func (lr *linkResolution) resolveBatch(
 	ctx context.Context,
 	roots []string,
@@ -995,8 +996,11 @@ func (lr *linkResolution) resolveBatch(
 		return loadErr
 	})
 	lr.goListCalls++
-	if err == nil || len(roots) < 2 || ctx.Err() != nil {
+	if err == nil || ctx.Err() != nil {
 		return resolved, resolveFailed, err
+	}
+	if len(roots) == 1 {
+		return nil, map[string]error{roots[0]: err}, nil
 	}
 
 	resolved = make(map[string]map[string]string, len(roots))
