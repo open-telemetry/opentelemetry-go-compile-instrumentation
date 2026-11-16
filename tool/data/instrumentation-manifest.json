@@ -170,9 +170,5 @@
   {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/net/http/server",
     "target": "net/http"
-  },
-  {
-    "modulePath": "go.opentelemetry.io/otelc/instrumentation/runtime",
-    "target": "runtime"
   }
 ]

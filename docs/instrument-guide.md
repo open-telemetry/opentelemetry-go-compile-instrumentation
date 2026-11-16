@@ -28,7 +28,7 @@ instrumentation/google.golang.org/grpc/client/client.otelc.yaml
 Below is an example configuration for instrumenting a function `NewServer`:
 
 ```yaml
-version: "v1.0.0"
+version: "v1.2.0"
 
 inject_to_grpc_newserver:
   target: google.golang.org/grpc
@@ -51,6 +51,10 @@ inject_to_grpc_newserver:
   - `path`: import path where the hook functions are defined.
 
 > [!NOTE]
+> Rule files under `instrumentation/` must declare the top-level `version` key.
+> Use `v1.2.0`, the first `otelc` release that supports the key, unless the rules
+> need functionality from a later release. See [rules.md](rules.md#rule-shape).
+>
 > The 2-tier `where`/`do` schema and all other rule types are documented in [rules.md](rules.md). The schema invariants are recorded in [ADR-0003](adr/0003-structured-rule-schema.md).
 
 ## 2. Implement Hooks
@@ -262,7 +266,7 @@ At runtime:
 
 ##### 1) Runtime GLS accessors
 
-`instrumentation/runtime/runtime_gls.go` provides low-level accessors:
+`tool/internal/runtime/runtime_gls.go` (embedded into `otelc`) provides low-level accessors:
 
 - `GetTraceContextFromGLS()`
 - `SetTraceContextToGLS(interface{})`

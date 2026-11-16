@@ -1,4 +1,4 @@
-version: "v1.0.0"
+version: "v1.2.0"
 
 # Echo has no Context.Next. ServeHTTP matches the route with Router.Find,
 # then runs the handler chain. After Find, Context.Path() is the template.

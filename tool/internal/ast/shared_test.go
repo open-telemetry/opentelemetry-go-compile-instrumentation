@@ -1278,6 +1278,62 @@ func (r pkg.T) Method() error { return nil }
 	// Both the function name and the receiver base name are the ones this
 	// declaration would match on if the shape were recognised, so returning nil
 	// can only come from the guard rather than from a name mismatch.
-	assert.Nil(t, findFuncDecl(file, "Method", "T"),
+	assert.Nil(t, findFuncDecl(file, "Method", "T", nil),
 		"an unrecognized receiver should be a no match, not a build abort")
+}
+
+func TestFindFuncDeclReportingReasons(t *testing.T) {
+	file, err := NewAstParser().ParseSource(`package p
+type T struct{}
+func F(x int) {}
+func (T) M() {}
+`)
+	require.NoError(t, err)
+	stringArgs := &rule.FuncSignature{Args: []string{"string"}}
+	tests := []struct {
+		name   string
+		find   func(reason *string) (*dst.FuncDecl, bool, error)
+		reason string
+	}{
+		{"func rule matches", func(reason *string) (*dst.FuncDecl, bool, error) {
+			return FindFuncDeclReporting(file, &rule.InstFuncRule{Func: "F"}, nil, reason)
+		}, ""},
+		{"func rule misses the name", func(reason *string) (*dst.FuncDecl, bool, error) {
+			return FindFuncDeclReporting(file, &rule.InstFuncRule{Func: "Missing"}, nil, reason)
+		}, "function_not_found"},
+		{"func rule wants a receiver", func(reason *string) (*dst.FuncDecl, bool, error) {
+			return FindFuncDeclReporting(file, &rule.InstFuncRule{Func: "F", Recv: "T"}, nil, reason)
+		}, "receiver_mismatch"},
+		{"func rule wants no receiver", func(reason *string) (*dst.FuncDecl, bool, error) {
+			return FindFuncDeclReporting(file, &rule.InstFuncRule{Func: "M"}, nil, reason)
+		}, "receiver_mismatch"},
+		{"func rule signature differs", func(reason *string) (*dst.FuncDecl, bool, error) {
+			return FindFuncDeclReporting(file, &rule.InstFuncRule{Func: "F", Signature: stringArgs}, nil, reason)
+		}, "signature_mismatch"},
+		{"raw rule misses the name", func(reason *string) (*dst.FuncDecl, bool, error) {
+			return FindFuncDeclReporting(file, &rule.InstRawRule{Func: "Missing"}, nil, reason)
+		}, "function_not_found"},
+		{"raw rule signature differs", func(reason *string) (*dst.FuncDecl, bool, error) {
+			return FindFuncDeclReporting(file, &rule.InstRawRule{Func: "F", Signature: stringArgs}, nil, reason)
+		}, "signature_mismatch"},
+		{"filter matches", func(reason *string) (*dst.FuncDecl, bool, error) {
+			return FindFuncDeclReporting(file, &rule.FilterDef{HasFunc: "M", HasRecv: "T"}, nil, reason)
+		}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// A stale value must be overwritten, including by a match.
+			reason := "stale"
+			decl, found, findErr := tt.find(&reason)
+			require.NoError(t, findErr)
+			assert.Equal(t, tt.reason, reason)
+			assert.Equal(t, tt.reason == "", found)
+			assert.Equal(t, tt.reason == "", decl != nil)
+			// Without a reason pointer the result is the same.
+			decl, found, findErr = tt.find(nil)
+			require.NoError(t, findErr)
+			assert.Equal(t, tt.reason == "", found)
+			assert.Equal(t, tt.reason == "", decl != nil)
+		})
+	}
 }

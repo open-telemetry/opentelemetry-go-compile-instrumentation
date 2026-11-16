@@ -20,19 +20,25 @@ func TestOpenAIClient(t *testing.T) {
 	testutil.Build(t, "", "openaiclient", "go", "build", "-a")
 
 	testCases := []struct {
-		name  string
-		model string
+		name         string
+		model        string
+		cachedTokens int64
 	}{
 		{
 			name:  "chat_completion",
 			model: "gpt-4",
+		},
+		{
+			name:         "chat_completion_with_prompt_cache",
+			model:        "gpt-4o-mini",
+			cachedTokens: 8,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := testutil.NewTestFixture(t)
-			server := startMockOpenAIServer(t)
+			server := startMockOpenAIServer(t, tc.cachedTokens)
 
 			f.Run("openaiclient",
 				fmt.Sprintf("-addr=%s/v1", server.URL),
@@ -56,6 +62,14 @@ func TestOpenAIClient(t *testing.T) {
 				20,                              // outputTokens
 				30,                              // totalTokens
 			)
+
+			// Cached prompt tokens appear only when the response reports a
+			// cache hit. OpenAI already counts them inside prompt_tokens, so
+			// inputTokens above stays at 10 rather than growing by the cached
+			// count the way the Anthropic instrumentation's does.
+			if tc.cachedTokens > 0 {
+				testutil.RequireAttribute(t, span, "gen_ai.usage.cache_read.input_tokens", tc.cachedTokens)
+			}
 		})
 	}
 }
@@ -72,7 +86,7 @@ func TestOpenAIClientV2(t *testing.T) {
 	testutil.Build(t, "", "openaiclientv2", "go", "build", "-a")
 
 	f := testutil.NewTestFixture(t)
-	server := startMockOpenAIServer(t)
+	server := startMockOpenAIServer(t, 0)
 
 	f.Run("openaiclientv2",
 		fmt.Sprintf("-addr=%s/v1", server.URL),
@@ -106,7 +120,7 @@ func TestOpenAIClientV3(t *testing.T) {
 	testutil.Build(t, "", "openaiclientv3", "go", "build", "-a")
 
 	f := testutil.NewTestFixture(t)
-	server := startMockOpenAIServer(t)
+	server := startMockOpenAIServer(t, 0)
 
 	f.Run("openaiclientv3",
 		fmt.Sprintf("-addr=%s/v1", server.URL),
@@ -132,8 +146,10 @@ func TestOpenAIClientV3(t *testing.T) {
 	)
 }
 
-// startMockOpenAIServer creates a mock OpenAI API server for testing.
-func startMockOpenAIServer(t *testing.T) *httptest.Server {
+// startMockOpenAIServer creates a mock OpenAI API server for testing. A
+// non-zero cachedTokens is reported under usage.prompt_tokens_details to
+// exercise the prompt-cache attribute path.
+func startMockOpenAIServer(t *testing.T, cachedTokens int64) *httptest.Server {
 	t.Helper()
 
 	mux := http.NewServeMux()
@@ -145,6 +161,15 @@ func startMockOpenAIServer(t *testing.T) *httptest.Server {
 		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
+		}
+
+		usage := map[string]any{
+			"prompt_tokens":     10,
+			"completion_tokens": 20,
+			"total_tokens":      30,
+		}
+		if cachedTokens > 0 {
+			usage["prompt_tokens_details"] = map[string]any{"cached_tokens": cachedTokens}
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -162,11 +187,7 @@ func startMockOpenAIServer(t *testing.T) *httptest.Server {
 					"finish_reason": "stop",
 				},
 			},
-			"usage": map[string]any{
-				"prompt_tokens":     10,
-				"completion_tokens": 20,
-				"total_tokens":      30,
-			},
+			"usage": usage,
 		}
 		if err := json.NewEncoder(w).Encode(resp); err != nil {
 			t.Errorf("failed to encode response: %v", err)

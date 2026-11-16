@@ -33,6 +33,9 @@ const (
 	defaultVer   = "v2.4.1"
 	outHooksGo   = "public_methods_gen.go"
 	outRulesYAML = "public_methods.otelc.yaml"
+	// minOtelcVer is the minimum otelc release that can read the generated
+	// rules file; see the top-level version key in docs/rules.md.
+	minOtelcVer = "v1.2.0"
 )
 
 type method struct {
@@ -239,7 +242,9 @@ import "go.opentelemetry.io/otelc/pkg/hook"
 
 func renderRulesYAML(version string, methods []method) []byte {
 	var b bytes.Buffer
-	b.WriteString(`# Code generated from ` + modulePath + `@` + version + `.
+	b.WriteString(`version: "` + minOtelcVer + `"
+
+# Code generated from ` + modulePath + `@` + version + `.
 # One rule per public *Client method (context + error). Unique hook names avoid
 # //go:linkname redeclaration across package files.
 #

@@ -78,7 +78,12 @@ func TestVendoredBuild(t *testing.T) {
 
 	testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", port))
 
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/hello/OpenTelemetry", port), nil)
+	req, err := http.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("http://127.0.0.1:%d/hello/OpenTelemetry", port),
+		nil,
+	)
 	require.NoError(t, err)
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)

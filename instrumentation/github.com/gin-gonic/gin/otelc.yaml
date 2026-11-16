@@ -1,4 +1,4 @@
-version: "v1.0.0"
+version: "v1.2.0"
 
 gin_context_next_hook:
   target: github.com/gin-gonic/gin

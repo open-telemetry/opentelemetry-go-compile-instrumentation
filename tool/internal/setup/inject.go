@@ -17,8 +17,8 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
-	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // fileRuleSourceImports returns the import paths declared in the source file of an InstFileRule.
@@ -79,7 +79,7 @@ func (sp *setupPhase) hookPackagePaths(matched []*rule.InstRuleSet) []string {
 	seen := make(map[string]bool)
 	paths := make([]string, 0)
 	add := func(path string) {
-		if path == "" || seen[path] {
+		if path == "" || path == util.InternalPath || seen[path] {
 			return
 		}
 		seen[path] = true
@@ -90,6 +90,9 @@ func (sp *setupPhase) hookPackagePaths(matched []*rule.InstRuleSet) []string {
 			add(r.Path)
 		}
 		for _, r := range m.FileRules {
+			if r.Path == util.InternalPath {
+				continue
+			}
 			add(r.Path)
 			srcImps, err := sp.fileRuleSourceImports(r)
 			if err != nil {
@@ -119,17 +122,28 @@ func injectedDeps(
 	known map[string]bool,
 	buildFlags []string,
 ) ([]*Dependency, error) {
+	return injectedDepsFrom(
+		ctx,
+		hookPaths,
+		known,
+		func(ctx context.Context, paths []string) ([]*packages.Package, error) {
+			return loadGraphPackages(ctx, buildFlags, paths)
+		},
+	)
+}
+
+// injectedDepsFrom is injectedDeps with the package graph from load.
+func injectedDepsFrom(
+	ctx context.Context,
+	hookPaths []string,
+	known map[string]bool,
+	load graphLoader,
+) ([]*Dependency, error) {
 	if len(hookPaths) == 0 {
 		return nil, nil
 	}
 
-	pkgs, err := pkgload.LoadPackages(
-		ctx,
-		packages.NeedName|packages.NeedFiles|packages.NeedImports|packages.NeedDeps,
-		buildFlags,
-		false,
-		hookPaths...,
-	)
+	pkgs, err := load(ctx, hookPaths)
 	if err != nil {
 		return nil, ex.Wrapf(err, "loading hook packages to complete the build plan")
 	}
@@ -237,7 +251,7 @@ func (sp *setupPhase) matchInjectedDeps(
 
 	pass := injectionPass{
 		load: func(ctx context.Context, hookPaths []string, known map[string]bool) ([]*Dependency, error) {
-			injected, err := injectedDeps(ctx, hookPaths, known, buildFlags)
+			injected, err := injectedDepsFrom(ctx, hookPaths, known, sp.graphLoader(buildFlags))
 			if err != nil {
 				// Completing the plan is an improvement on it, not a
 				// precondition for building, so a closure that will not resolve

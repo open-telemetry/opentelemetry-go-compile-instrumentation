@@ -32,5 +32,13 @@ func newStreamingReader(
 	case opCompletion:
 		streamingOp = streaming.OpCompletion
 	}
-	return streaming.NewStreamingReader(body, span, start, streamingOp, captureContent, streaming.ContentCaptureLimit, onDone)
+	return streaming.NewStreamingReader(
+		body,
+		span,
+		start,
+		streamingOp,
+		captureContent,
+		streaming.ContentCaptureLimit,
+		onDone,
+	)
 }
