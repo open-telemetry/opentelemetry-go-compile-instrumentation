@@ -12,6 +12,7 @@ import (
 	"go/build"
 	"go/parser"
 	"go/token"
+	"go/version"
 	"io/fs"
 	"log/slog"
 	"maps"
@@ -158,6 +159,41 @@ func stripCompleteFlag(args []string) []string {
 	return args
 }
 
+// raiseLangFlag updates or inserts the -lang flag on the compile command so it
+// is at least targetLang. It never lowers an existing -lang setting.
+func raiseLangFlag(args []string, targetLang string) []string {
+	if targetLang == "" {
+		return args
+	}
+	if len(args) == 0 {
+		return args
+	}
+	currentLang := util.FindFlagValue(args, "-lang")
+	if currentLang != "" {
+		currentNorm := currentLang
+		if !strings.HasPrefix(currentNorm, "go") {
+			currentNorm = "go" + currentNorm
+		}
+		if version.Compare(currentNorm, targetLang) >= 0 {
+			return args
+		}
+		res := slices.Clone(args)
+		for i, arg := range res {
+			if arg == "-lang" && i+1 < len(res) {
+				res[i+1] = targetLang
+				break
+			}
+			if strings.HasPrefix(arg, "-lang=") {
+				res[i] = "-lang=" + targetLang
+				break
+			}
+		}
+		return res
+	}
+
+	return append([]string{args[0], "-lang", targetLang}, args[1:]...)
+}
+
 // resolvePackageName reads the package clause from the compile command's own
 // sources. Setup's build-plan dry run lists no readable source for the
 // go-test-generated main, so setup leaves the rule set unnamed and this method
@@ -250,6 +286,9 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 		// Strip -complete flag as we may insert some hook points that are
 		// not ready yet, i.e. they don't have function body
 		ip.compileArgs = stripCompleteFlag(ip.compileArgs)
+		if reqLang := matched.MaxRequiredLang(); reqLang != "" {
+			ip.compileArgs = raiseLangFlag(ip.compileArgs, reqLang)
+		}
 		ip.Info("Run instrumented command", "args", ip.compileArgs)
 	}
 
