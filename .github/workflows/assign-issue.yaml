@@ -6,6 +6,13 @@ on:
 
 permissions: {}
 
+# Serialize claims per issue so the read-then-assign below is atomic: a second
+# /assign waits for the first to finish and then sees the owner, instead of both
+# runs reading an empty assignee list and each adding itself.
+concurrency:
+  group: assign-issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
 jobs:
   assign:
     name: Assign Issue
