@@ -10,7 +10,6 @@ import (
 
 	"golang.org/x/tools/go/packages"
 
-	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
@@ -188,13 +187,7 @@ func (sp *setupPhase) addedPackageDeps(
 	}
 
 	slices.Sort(missing)
-	loaded, err := pkgload.LoadPackages(
-		ctx,
-		packages.NeedName|packages.NeedImports|packages.NeedDeps,
-		sp.buildFlags,
-		false,
-		missing...,
-	)
+	loaded, err := sp.loadGraph(ctx, sp.buildFlags, missing)
 	if err != nil {
 		return nil, err
 	}

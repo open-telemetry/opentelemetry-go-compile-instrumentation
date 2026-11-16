@@ -739,7 +739,12 @@ func TestOtelMiddleware_TruncatedBodyWarnsOncePerOperation(t *testing.T) {
 
 	assert.Equal(t, 1, requestChatWarns, "three oversized chat requests must warn once, not three times")
 	assert.Equal(t, 1, requestEmbedWarns, "a distinct operation must still get its own warning")
-	assert.Equal(t, 1, responseChatWarns, "the response warning must fire independently of the request warning for the same operation")
+	assert.Equal(
+		t,
+		1,
+		responseChatWarns,
+		"the response warning must fire independently of the request warning for the same operation",
+	)
 }
 
 func TestOtelMiddleware_AzurePath(t *testing.T) {
