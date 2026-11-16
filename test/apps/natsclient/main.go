@@ -76,8 +76,11 @@ func main() {
 		select {
 		case m := <-received:
 			w.WriteHeader(http.StatusOK)
-			_, _ = fmt.Fprintf(w, "received subject=%s value=%s traceparent=%s\n",
-				m.Subject, string(m.Data), m.Header.Get("traceparent"))
+			// The response exposes both the W3C traceparent and the B3 single
+			// header so integration tests can assert whichever propagator the
+			// app is configured with via OTEL_PROPAGATORS.
+			_, _ = fmt.Fprintf(w, "received subject=%s value=%s traceparent=%s b3=%s\n",
+				m.Subject, string(m.Data), m.Header.Get("traceparent"), m.Header.Get("b3"))
 		case <-time.After(5 * time.Second):
 			http.Error(w, "timed out waiting for message", http.StatusGatewayTimeout)
 		}
