@@ -131,6 +131,29 @@ func GenAIUsageTotalTokens(val int) attribute.KeyValue {
 	return GenAIUsageTotalTokensKey.Int(val)
 }
 
+// Namespace: jsonrpc
+const (
+	// JSONRPCRequestIDKey is the attribute Key conforming to the
+	// "jsonrpc.request.id" semantic conventions. It represents the JSON-RPC request
+	// identifier, rendered the way it travels on the wire (an integer id is
+	// rendered as its decimal string, a string id passes through).
+	//
+	// Type: string
+	// RequirementLevel: Recommended
+	// Stability: Development
+	//
+	// Examples: "42", "req-7"
+	JSONRPCRequestIDKey = attribute.Key("jsonrpc.request.id")
+)
+
+// JSONRPCRequestID returns an attribute KeyValue conforming to the
+// "jsonrpc.request.id" semantic conventions. It represents the JSON-RPC request
+// identifier, rendered the way it travels on the wire (an integer id is rendered
+// as its decimal string, a string id passes through).
+func JSONRPCRequestID(val string) attribute.KeyValue {
+	return JSONRPCRequestIDKey.String(val)
+}
+
 // Namespace: k8s
 const (
 	// K8SObjectAPIVersionKey is the attribute Key conforming to the
@@ -243,6 +266,45 @@ func K8SObjectsIsInInitialList(val bool) attribute.KeyValue {
 	return K8SObjectsIsInInitialListKey.Bool(val)
 }
 
+// Namespace: mcp
+const (
+	// McpMethodNameKey is the attribute Key conforming to the "mcp.method.name"
+	// semantic conventions. It represents the JSON-RPC request method of the MCP
+	// call.
+	//
+	// Type: string
+	// RequirementLevel: Recommended
+	// Stability: Development
+	//
+	// Examples: "tools/call"
+	McpMethodNameKey = attribute.Key("mcp.method.name")
+
+	// McpSessionIDKey is the attribute Key conforming to the "mcp.session.id"
+	// semantic conventions. It represents the MCP session identifier negotiated at
+	// initialize time (ClientSession.ID()).
+	//
+	// Type: string
+	// RequirementLevel: Recommended
+	// Stability: Development
+	//
+	// Examples: "session-42"
+	McpSessionIDKey = attribute.Key("mcp.session.id")
+)
+
+// McpMethodName returns an attribute KeyValue conforming to the
+// "mcp.method.name" semantic conventions. It represents the JSON-RPC request
+// method of the MCP call.
+func McpMethodName(val string) attribute.KeyValue {
+	return McpMethodNameKey.String(val)
+}
+
+// McpSessionID returns an attribute KeyValue conforming to the "mcp.session.id"
+// semantic conventions. It represents the MCP session identifier negotiated at
+// initialize time (ClientSession.ID()).
+func McpSessionID(val string) attribute.KeyValue {
+	return McpSessionIDKey.String(val)
+}
+
 // Namespace: messaging
 const (
 	// MessagingKafkaAsyncKey is the attribute Key conforming to the
@@ -276,6 +338,19 @@ func MessagingKafkaAsync(val bool) attribute.KeyValue {
 
 // Namespace: rpc
 const (
+	// RPCResponseStatusCodeKey is the attribute Key conforming to the
+	// "rpc.response.status_code" semantic conventions. It represents the JSON-RPC
+	// error code of a failed tools/call, rendered as its decimal wire code string.
+	// Absent on success and on logical tool failures (IsError), which carry no
+	// JSON-RPC error.
+	//
+	// Type: string
+	// RequirementLevel: Recommended
+	// Stability: Development
+	//
+	// Examples: "-32601", "-32602"
+	RPCResponseStatusCodeKey = attribute.Key("rpc.response.status_code")
+
 	// RPCSystemNameKey is the attribute Key conforming to the "rpc.system.name"
 	// semantic conventions. It represents the identifies the RPC system as the AWS
 	// API. This is the merged form of the older upstream `rpc.system` attribute,
@@ -288,6 +363,15 @@ const (
 	// Examples: "aws-api"
 	RPCSystemNameKey = attribute.Key("rpc.system.name")
 )
+
+// RPCResponseStatusCode returns an attribute KeyValue conforming to the
+// "rpc.response.status_code" semantic conventions. It represents the JSON-RPC
+// error code of a failed tools/call, rendered as its decimal wire code string.
+// Absent on success and on logical tool failures (IsError), which carry no
+// JSON-RPC error.
+func RPCResponseStatusCode(val string) attribute.KeyValue {
+	return RPCResponseStatusCodeKey.String(val)
+}
 
 // RPCSystemName returns an attribute KeyValue conforming to the
 // "rpc.system.name" semantic conventions. It represents the identifies the RPC
