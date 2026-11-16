@@ -319,7 +319,10 @@ Rules:
 
 ### Special `target` values
 
-- `target: main` — matches the compile-time package named `main`.
+- `target: main` — matches the compile-time package named `main`. Under
+  `otelc go test`, the main package compiles under its import path instead, so
+  `target: main` does not reach it or its `_test.go` files. List `main` together
+  with `$root` (or the import path) to cover both builds and tests.
 - `target: test_main` — not currently supported; reserved for future work.
 - `target: $root` — matches the root module of the build and every package
   below it. If a build spans multiple modules, it matches the union of all

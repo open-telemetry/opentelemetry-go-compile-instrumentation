@@ -649,7 +649,7 @@ func prepareVendoredBuild(
 	subcommand string,
 	args []string,
 ) ([]string, error) {
-	if !vendoringActive(ctx, util.GetOtelcWorkDir()) {
+	if !vendoringActive(ctx, buildDir(subcommand, args)) {
 		return args, nil
 	}
 
