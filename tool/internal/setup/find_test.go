@@ -1064,12 +1064,23 @@ func TestListBuildPlan_KeepsTestOutputOffStdout(t *testing.T) {
 // a function that reads what was written to it.
 func captureStdout(t *testing.T) func() string {
 	t.Helper()
-	f, err := os.CreateTemp(t.TempDir(), "stdout")
+	return captureOutput(t, &os.Stdout)
+}
+
+// captureStderr is captureStdout for os.Stderr.
+func captureStderr(t *testing.T) func() string {
+	t.Helper()
+	return captureOutput(t, &os.Stderr)
+}
+
+func captureOutput(t *testing.T, out **os.File) func() string {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "output")
 	require.NoError(t, err)
-	oldStdout := os.Stdout
-	os.Stdout = f //nolint:reassign // listBuildPlan must not write to os.Stdout; capture it to check
+	old := *out
+	*out = f
 	t.Cleanup(func() {
-		os.Stdout = oldStdout //nolint:reassign // restore the original os.Stdout
+		*out = old
 		_ = f.Close()
 	})
 	return func() string {
