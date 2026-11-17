@@ -7,7 +7,6 @@ import (
 	goast "go/ast"
 	"go/parser"
 	"go/token"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -78,41 +77,35 @@ func TestRules(t *testing.T) {
 	assert.Contains(t, rr.Raw, "propagateGoroutineContext")
 	assert.Contains(t, rr.Raw, "{{.FuncReturn 0}}")
 
-	testDir := filepath.Join(t.TempDir(), "test")
-	fr := FileRule(testDir)
+	fr := FileRule()
 	require.NotNil(t, fr)
 	assert.Equal(t, "gls_linker", fr.Name)
 	assert.Equal(t, GLSFileName, fr.File)
 	assert.Equal(t, util.InternalPath, fr.Path)
-	assert.Equal(t, testDir, fr.ResolvedPath)
+	assert.Empty(t, fr.ResolvedPath)
 }
 
-func TestMaterializeGLSSource(t *testing.T) {
-	tmpDir := t.TempDir()
-	targetDir := filepath.Join(tmpDir, "runtime")
-
-	err := MaterializeGLSSource(targetDir)
-	require.NoError(t, err)
-
-	destFile := filepath.Join(targetDir, GLSFileName)
-	assert.True(t, util.PathExists(destFile))
-
-	content, err := os.ReadFile(destFile)
+func TestReadInternalFile(t *testing.T) {
+	content, err := ReadInternalFile(GLSFileName)
 	require.NoError(t, err)
 	assert.Equal(t, RuntimeGLSSource, content)
+
+	_, err = ReadInternalFile("unknown.go")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown internal runtime file")
 }
 
 func TestBuildRuleSet(t *testing.T) {
 	runtime2File := filepath.Join(t.TempDir(), "runtime2.go")
 	procFile := filepath.Join(t.TempDir(), "proc.go")
-	glsDir := t.TempDir()
 
-	rset := BuildRuleSet(runtime2File, procFile, glsDir)
+	rset := BuildRuleSet(runtime2File, procFile)
 	require.NotNil(t, rset)
 	assert.Equal(t, TargetRuntime, rset.ModulePath)
 	assert.Equal(t, TargetRuntime, rset.PackageName)
 	assert.False(t, rset.IsTest)
 	assert.Len(t, rset.StructRules[runtime2File], 1)
 	assert.Len(t, rset.RawRules[procFile], 1)
-	assert.Len(t, rset.FileRules, 1)
+	require.Len(t, rset.FileRules, 1)
+	assert.Empty(t, rset.FileRules[0].ResolvedPath)
 }

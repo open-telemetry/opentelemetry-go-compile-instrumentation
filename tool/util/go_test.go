@@ -971,6 +971,8 @@ func TestUserBuildTags(t *testing.T) {
 		{name: "tags in goflags with space", goflags: []string{"-tags", "a,b"}, expected: []string{"a", "b"}},
 		{name: "tags in goflags with double dash", goflags: []string{"--tags=a,b"}, expected: []string{"a", "b"}},
 		{name: "space-separated tags", goflags: []string{"-tags=a b"}, expected: []string{"a", "b"}},
+		{name: "fully quoted goflags token", goflags: []string{`'-tags=a b'`}, expected: []string{"a", "b"}},
+		{name: "double quoted goflags token", goflags: []string{`"-tags=a,b"`}, expected: []string{"a", "b"}},
 		{name: "quoted tags value", goflags: []string{`-tags="a,b"`}, expected: []string{"a", "b"}},
 		{
 			name:       "buildFlags overrides goflags",

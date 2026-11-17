@@ -93,10 +93,13 @@ func warnVersion(ctx context.Context, goModPath string, before versionSnapshot) 
 		return ex.Wrapf(err, "unable to check for version bumps after go mod tidy")
 	}
 
+	// The notices go to stderr, like the go command's own diagnostics. Stdout
+	// carries the output of the build, such as the JSON events of go test -json.
+	//
 	// Go directives use Go toolchain syntax ("1.21"), not module semver.
 	if after.Go != nil && before.goVersion != "" {
 		if goversion.Compare("go"+after.Go.Version, "go"+before.goVersion) > 0 {
-			_, _ = fmt.Fprintf(os.Stdout, "Bumped go version (%s -> %s)\n", before.goVersion, after.Go.Version)
+			_, _ = fmt.Fprintf(os.Stderr, "Bumped go version (%s -> %s)\n", before.goVersion, after.Go.Version)
 			logger.WarnContext(ctx, "bumped go version", "old", before.goVersion, "new", after.Go.Version)
 		}
 	}
@@ -104,7 +107,7 @@ func warnVersion(ctx context.Context, goModPath string, before versionSnapshot) 
 	for _, req := range after.Require {
 		if oldVer, tracked := before.deps[req.Mod.Path]; tracked {
 			if semver.Compare(req.Mod.Version, oldVer) > 0 {
-				_, _ = fmt.Fprintf(os.Stdout, "Bumped dependency %s (%s -> %s)\n",
+				_, _ = fmt.Fprintf(os.Stderr, "Bumped dependency %s (%s -> %s)\n",
 					req.Mod.Path, oldVer, req.Mod.Version)
 				logger.WarnContext(ctx, "bumped dependency",
 					"module", req.Mod.Path,

@@ -139,6 +139,24 @@ new_field:
 			wantErr:     true,
 			errContains: `new_field "A" is declared more than once`,
 		},
+		{
+			name:   "duplicate blank new_field is allowed",
+			ruleID: "struct_dup_blank",
+			yaml: `
+target: main
+struct: MyStruct
+new_field:
+  - name: "_"
+    type: string
+  - name: "_"
+    type: int
+`,
+			check: func(t *testing.T, r *InstStructRule) {
+				require.Len(t, r.NewField, 2)
+				assert.Equal(t, "_", r.NewField[0].Name)
+				assert.Equal(t, "_", r.NewField[1].Name)
+			},
+		},
 	}
 
 	for _, tt := range tests {

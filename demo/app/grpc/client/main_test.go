@@ -159,7 +159,7 @@ func TestRunUnary(t *testing.T) {
 			count = &testCount
 			name = &testName
 
-			ctx := context.Background()
+			ctx := t.Context()
 
 			// Run the function
 			runUnary(ctx, mockClient)
@@ -219,7 +219,7 @@ func TestRunStream(t *testing.T) {
 			count = &testCount
 			name = &testName
 
-			ctx := context.Background()
+			ctx := t.Context()
 
 			// Run the function
 			runStream(ctx, mockClient)
@@ -257,7 +257,7 @@ func TestRunStreamWithErrors(t *testing.T) {
 		count = &testCount
 		name = &testName
 
-		ctx := context.Background()
+		ctx := t.Context()
 
 		// Should not panic
 		runStream(ctx, mockClient)
@@ -282,7 +282,7 @@ func TestRunStreamWithErrors(t *testing.T) {
 		count = &testCount
 		name = &testName
 
-		ctx := context.Background()
+		ctx := t.Context()
 
 		// Should not panic
 		runStream(ctx, mockClient)
