@@ -7,7 +7,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -74,6 +76,39 @@ func TestRunReportsFlagErrors(t *testing.T) {
 	assert.Contains(t, stderr.String(), "flag provided but not defined: -unknown")
 }
 
+func TestRunReportsFetcherErrors(t *testing.T) {
+	var stderr bytes.Buffer
+
+	code := runWithFetcher(nil, &stderr, func(context.Context) ([]byte, error) {
+		return nil, errors.New("upstream unavailable")
+	})
+
+	assert.Equal(t, 1, code)
+	assert.Contains(t, stderr.String(), "upstream unavailable")
+}
+
+func TestRunReportsPreviousCatalogErrors(t *testing.T) {
+	var stderr bytes.Buffer
+
+	code := runWithFetcher([]string{"-previous", filepath.Join(t.TempDir(), "missing.yaml")}, &stderr,
+		func(context.Context) ([]byte, error) { return testUpstreamSchema(), nil })
+
+	assert.Equal(t, 1, code)
+	assert.Contains(t, stderr.String(), "read previous catalog")
+}
+
+func TestRunReportsCatalogGenerationErrors(t *testing.T) {
+	previous := filepath.Join(t.TempDir(), "invalid.yaml")
+	require.NoError(t, os.WriteFile(previous, []byte("not: a catalog"), 0o600))
+	var stderr bytes.Buffer
+
+	code := runWithFetcher([]string{"-previous", previous}, &stderr,
+		func(context.Context) ([]byte, error) { return testUpstreamSchema(), nil })
+
+	assert.Equal(t, 1, code)
+	assert.NotEmpty(t, stderr.String())
+}
+
 func TestRunShowsHelpWithoutError(t *testing.T) {
 	var stderr bytes.Buffer
 
@@ -129,6 +164,68 @@ func TestFetchSchemaRejectsNonSuccessStatus(t *testing.T) {
 	_, err := fetchSchema(t.Context(), server.Client(), server.URL, upstreamSchemaSHA)
 	require.ErrorContains(t, err, "unexpected HTTP status")
 }
+
+func TestFetchSchemaRejectsOversizedResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(make([]byte, maxSchemaSize+1))
+	}))
+	defer server.Close()
+
+	_, err := fetchSchema(t.Context(), server.Client(), server.URL, upstreamSchemaSHA)
+	require.ErrorContains(t, err, "exceeds")
+}
+
+func TestFetchSchemaRejectsChecksumMismatch(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("schema fixture"))
+	}))
+	defer server.Close()
+
+	_, err := fetchSchema(t.Context(), server.Client(), server.URL, "wrong checksum")
+	require.ErrorContains(t, err, "checksum mismatch")
+}
+
+func TestFetchSchemaRejectsInvalidURL(t *testing.T) {
+	_, err := fetchSchema(t.Context(), http.DefaultClient, "://invalid", upstreamSchemaSHA)
+	require.ErrorContains(t, err, "create upstream schema request")
+}
+
+func TestFetchSchemaReportsTransportError(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("connection refused")
+	})}
+
+	_, err := fetchSchema(t.Context(), client, "https://example.com/schema", upstreamSchemaSHA)
+	require.ErrorContains(t, err, "fetch pinned upstream schema")
+}
+
+func TestFetchSchemaReportsReadError(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Body:       io.NopCloser(errorReader{}),
+		}, nil
+	})}
+
+	_, err := fetchSchema(t.Context(), client, "https://example.com/schema", upstreamSchemaSHA)
+	require.ErrorContains(t, err, "read pinned upstream schema")
+}
+
+func TestWriteGeneratedCatalogReportsRootErrors(t *testing.T) {
+	err := writeGeneratedCatalog(filepath.Join(t.TempDir(), "missing", "catalog.yaml"), []byte("catalog"))
+	require.ErrorContains(t, err, "open catalog output root")
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
+type errorReader struct{}
+
+func (errorReader) Read([]byte) (int, error) { return 0, errors.New("read failed") }
 
 func testUpstreamSchema() []byte {
 	return []byte(`properties:
