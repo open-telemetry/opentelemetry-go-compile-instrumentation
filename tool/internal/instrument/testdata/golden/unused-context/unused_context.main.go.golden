@@ -335,28 +335,13 @@ func (c *HookContextImpl1412719616) SetParam(idx int, val interface{}) {
 	}
 }
 
-func (c *HookContextImpl1412719616) GetReturnVal(idx int) interface{} {
-	switch idx {
-	case 0:
-		return *(c.returnVals[0].(*int))
-	}
-	return nil
-}
+func (c *HookContextImpl1412719616) GetReturnVal(idx int) interface{} { return nil }
 
-func (c *HookContextImpl1412719616) SetReturnVal(idx int, val interface{}) {
-	switch idx {
-	case 0:
-		if val == nil {
-			*(c.returnVals[0].(*int)) = *new(int)
-		} else {
-			*(c.returnVals[0].(*int)) = val.(int)
-		}
-	}
-}
-func (c *HookContextImpl1412719616) GetParamCount() int     { return len(c.params) }
-func (c *HookContextImpl1412719616) GetReturnValCount() int { return len(c.returnVals) }
-func (c *HookContextImpl1412719616) GetFuncName() string    { return c.funcName }
-func (c *HookContextImpl1412719616) GetPackageName() string { return c.packageName }
+func (c *HookContextImpl1412719616) SetReturnVal(idx int, val interface{}) {}
+func (c *HookContextImpl1412719616) GetParamCount() int                    { return len(c.params) }
+func (c *HookContextImpl1412719616) GetReturnValCount() int                { return 0 }
+func (c *HookContextImpl1412719616) GetFuncName() string                   { return c.funcName }
+func (c *HookContextImpl1412719616) GetPackageName() string                { return c.packageName }
 
 // Trampoline Template
 func OtelBeforeTrampoline_BeforeOnly1412719616(param0 *int) (hookContext *HookContextImpl1412719616, skipCall bool) {
