@@ -22,6 +22,8 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	otelsemconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 	"go.opentelemetry.io/otel/trace"
+
+	"go.opentelemetry.io/otelc/pkg/otelcconv"
 )
 
 const (
@@ -234,25 +236,25 @@ func (r *StreamingReader) finalize(flush bool, err error) {
 		}
 	}
 	r.span.SetAttributes(
-		genAIResponseFinishReasonsKey.StringSlice(r.reasons),
-		genAIUsageInputTokensKey.Int64(r.inputTokens),
-		genAIUsageOutputTokensKey.Int64(r.outputTokens),
-		genAIUsageTotalTokensKey.Int64(r.totalTokens),
+		otelsemconv.GenAIResponseFinishReasonsKey.StringSlice(r.reasons),
+		otelsemconv.GenAIUsageInputTokensKey.Int64(r.inputTokens),
+		otelsemconv.GenAIUsageOutputTokensKey.Int64(r.outputTokens),
+		otelcconv.GenAIUsageTotalTokensKey.Int64(r.totalTokens),
 	)
 	if r.id != "" {
-		r.span.SetAttributes(genAIResponseIDKey.String(r.id))
+		r.span.SetAttributes(otelsemconv.GenAIResponseIDKey.String(r.id))
 	}
 	if r.responseModel != "" {
-		r.span.SetAttributes(genAIResponseModelKey.String(r.responseModel))
+		r.span.SetAttributes(otelsemconv.GenAIResponseModelKey.String(r.responseModel))
 	}
 	if !r.first.IsZero() {
 		firstTokenUs := r.first.Sub(r.start).Microseconds()
-		r.span.SetAttributes(genAIResponseTimeToFirstTokenKey.Int64(firstTokenUs))
+		r.span.SetAttributes(otelcconv.GenAIResponseTimeToFirstTokenKey.Int64(firstTokenUs))
 	}
 	// Recorded only when the request actually hit the cache, matching the
 	// non-streaming path and the anthropic-sdk-go instrumentation.
 	if r.cacheReadTokens > 0 {
-		r.span.SetAttributes(genAIUsageCacheReadInputTokensKey.Int64(r.cacheReadTokens))
+		r.span.SetAttributes(otelcconv.GenAIUsageCacheReadInputTokensKey.Int64(r.cacheReadTokens))
 	}
 
 	r.recordCapturedContent()
