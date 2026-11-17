@@ -117,14 +117,10 @@ func OtelBeforeTrampoline_ProcessRequest3868073204(param0 *string) (hookContext 
 			}
 		}
 	}()
-	hookContext = &HookContextImpl3868073204{}
-	hookContext.params = []interface{}{param0}
-	hookContext.funcName = "ProcessRequest"
-	hookContext.packageName = "main_test"
 	if otelc_hook_638528408_BeforeProcessRequest != nil {
-		otelc_hook_638528408_BeforeProcessRequest(hookContext, *param0)
+		otelc_hook_638528408_BeforeProcessRequest(nil, *param0)
 	}
-	return hookContext, hookContext.skipCall
+	return nil, false
 }
 
 func OtelAfterTrampoline_ProcessRequest3868073204(hookContext HookContext, arg0 *error) {
@@ -140,9 +136,8 @@ func OtelAfterTrampoline_ProcessRequest3868073204(hookContext HookContext, arg0 
 			}
 		}
 	}()
-	hookContext.(*HookContextImpl3868073204).returnVals = []interface{}{arg0}
 	if otelc_hook_638528408_AfterProcessRequest != nil {
-		otelc_hook_638528408_AfterProcessRequest(hookContext, *arg0)
+		otelc_hook_638528408_AfterProcessRequest(nil, *arg0)
 	}
 }
 

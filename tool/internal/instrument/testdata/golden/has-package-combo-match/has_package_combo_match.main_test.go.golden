@@ -108,14 +108,10 @@ func OtelBeforeTrampoline_ExternalHelper2215449730() (hookContext *HookContextIm
 			}
 		}
 	}()
-	hookContext = &HookContextImpl2215449730{}
-	hookContext.params = []interface{}{}
-	hookContext.funcName = "ExternalHelper"
-	hookContext.packageName = "main_test"
 	if otelc_hook_3504338147_BeforeExternalHelper != nil {
-		otelc_hook_3504338147_BeforeExternalHelper(hookContext)
+		otelc_hook_3504338147_BeforeExternalHelper(nil)
 	}
-	return hookContext, hookContext.skipCall
+	return nil, false
 }
 
 func OtelAfterTrampoline_ExternalHelper2215449730(hookContext HookContext, arg0 *error) {
@@ -131,9 +127,8 @@ func OtelAfterTrampoline_ExternalHelper2215449730(hookContext HookContext, arg0 
 			}
 		}
 	}()
-	hookContext.(*HookContextImpl2215449730).returnVals = []interface{}{arg0}
 	if otelc_hook_3504338147_AfterExternalHelper != nil {
-		otelc_hook_3504338147_AfterExternalHelper(hookContext, *arg0)
+		otelc_hook_3504338147_AfterExternalHelper(nil, *arg0)
 	}
 }
 

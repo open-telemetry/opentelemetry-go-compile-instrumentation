@@ -1,0 +1,85 @@
+version: "v1.0.0"
+
+hook_before0:
+  target: main
+  where:
+    func: Before0
+  do:
+    - inject_hooks:
+        before: Before0
+        path: go.opentelemetry.io/otelc/test/bench/hookcontext/hooks
+
+hook_after0:
+  target: main
+  where:
+    func: After0
+  do:
+    - inject_hooks:
+        after: After0
+        path: go.opentelemetry.io/otelc/test/bench/hookcontext/hooks
+
+hook_both0:
+  target: main
+  where:
+    func: Both0
+  do:
+    - inject_hooks:
+        before: Before0
+        after: After0
+        path: go.opentelemetry.io/otelc/test/bench/hookcontext/hooks
+
+hook_before3:
+  target: main
+  where:
+    func: Before3
+  do:
+    - inject_hooks:
+        before: Before3
+        path: go.opentelemetry.io/otelc/test/bench/hookcontext/hooks
+
+hook_after3:
+  target: main
+  where:
+    func: After3
+  do:
+    - inject_hooks:
+        after: After3
+        path: go.opentelemetry.io/otelc/test/bench/hookcontext/hooks
+
+hook_both3:
+  target: main
+  where:
+    func: Both3
+  do:
+    - inject_hooks:
+        before: Before3
+        after: After3
+        path: go.opentelemetry.io/otelc/test/bench/hookcontext/hooks
+
+hook_before6:
+  target: main
+  where:
+    func: Before6
+  do:
+    - inject_hooks:
+        before: Before6
+        path: go.opentelemetry.io/otelc/test/bench/hookcontext/hooks
+
+hook_after6:
+  target: main
+  where:
+    func: After6
+  do:
+    - inject_hooks:
+        after: After6
+        path: go.opentelemetry.io/otelc/test/bench/hookcontext/hooks
+
+hook_both6:
+  target: main
+  where:
+    func: Both6
+  do:
+    - inject_hooks:
+        before: Before6
+        after: After6
+        path: go.opentelemetry.io/otelc/test/bench/hookcontext/hooks
