@@ -104,6 +104,7 @@ func (MyStruct) Unnamed(int, float32) {}
 func recordNestedCall(value string) string { return "[" + value + "]" }
 
 func main() {
+	fmt.Printf("UnusedContext result: %d\n", UnusedContext(41))
 	ctx := &traceContext{
 		traceID: "123",
 		spanID:  "456",
@@ -149,3 +150,6 @@ func main() {
 	// Both calls must be wrapped, including the call inside the argument.
 	fmt.Println("Nested call wrappers:", strings.TrimSpace(strings.TrimSpace(" x ")))
 }
+
+//go:noinline
+func UnusedContext(n int) int { return n + 1 }
