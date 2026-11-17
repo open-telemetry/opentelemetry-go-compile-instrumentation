@@ -904,7 +904,12 @@ func toolexecBuildArgs(args []string, execPath string, vendored bool, goFlags ..
 		// add otelc.runtime.go manually to command line for file targets
 		dir := filepath.Dir(fileTargets[0])
 		otelcRuntimePath := filepath.Join(dir, otelcRuntimeFile)
-		if util.PathExists(otelcRuntimePath) {
+		// File targets are relative to the -C directory when there is one.
+		onDisk := otelcRuntimePath
+		if base := buildDir(subcommand, restArgs); base != "" && !filepath.IsAbs(onDisk) {
+			onDisk = filepath.Join(base, onDisk)
+		}
+		if util.PathExists(onDisk) {
 			// Keep the runtime file next to the file targets. In go test,
 			// a file path after a flag is passed to the test binary instead.
 			insertAt := lastFileTargetIndex(subcommand, restArgs) + 1
