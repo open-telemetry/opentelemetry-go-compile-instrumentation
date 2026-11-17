@@ -9,8 +9,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -719,6 +721,53 @@ func TestLoadRulesFromToolFiles(t *testing.T) {
 		_, _, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
 		require.ErrorIs(t, err, errNotInstrumentation)
 	})
+}
+
+// TestLoadRulesFromToolFiles_OtelInitCompanionRules verifies #1712 at the
+// rule-loading level. The init module links pkg/runtime, which links the
+// trace API and the SDK trace package, so a tool file that imports only the
+// init module must also load the rules of the otel/trace and otel/sdk/trace
+// instrumentation modules. The init module declares those modules in its own
+// nested tool file, and the walk recurses into it.
+func TestLoadRulesFromToolFiles_OtelInitCompanionRules(t *testing.T) {
+	tmp := t.TempDir()
+
+	// The module under test stands in for an application pinned by otelc:
+	// its tool file imports only the init instrumentation module.
+	const initInstModule = "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/init"
+	initDir, err := filepath.Abs(filepath.Join(
+		"..", "..", "..", "instrumentation",
+		"go.opentelemetry.io", "otel", "init",
+	))
+	require.NoError(t, err)
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmp, "go.mod"),
+		fmt.Appendf(nil, `module example.com/app
+
+go 1.26.0
+
+require %s v0.0.0-00010101000000-000000000000
+
+replace %s => %s
+`, initInstModule, initInstModule, initDir),
+		0o644,
+	))
+
+	rootTool := filepath.Join(tmp, toolFileCanonical)
+	writeToolFile(t, rootTool, initInstModule)
+
+	rules, moduleRoots, err := loadRulesFromToolFiles(t.Context(), []string{rootTool}, util.Version)
+	require.NoError(t, err)
+	require.Contains(t, ruleNames(rules), "init_sdk")
+
+	// The companion modules must contribute rules through the init module's
+	// nested tool file.
+	roots := slices.Collect(maps.Values(moduleRoots))
+	require.Contains(t, roots, filepath.Join(initDir, "..", "trace"),
+		"the otel/trace rules must load through the init module")
+	require.Contains(t, roots, filepath.Join(initDir, "..", "sdk", "trace"),
+		"the otel/sdk/trace rules must load through the init module")
 }
 
 // writeOverlapSubPackage writes a sub-package with one rule file (rule name
