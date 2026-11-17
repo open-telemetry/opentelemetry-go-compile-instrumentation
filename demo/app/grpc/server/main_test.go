@@ -4,7 +4,6 @@
 package main
 
 import (
-	"context"
 	"log/slog"
 	"os"
 	"testing"
@@ -23,7 +22,7 @@ func init() {
 
 func TestSayHello(t *testing.T) {
 	s := &server{}
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name     string
@@ -63,7 +62,7 @@ func TestSayHello(t *testing.T) {
 
 func TestShutdown(t *testing.T) {
 	s := &server{}
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Note: We can't test the os.Exit() behavior in a unit test,
 	// but we can test that the RPC returns the correct response

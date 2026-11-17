@@ -139,6 +139,34 @@ func FuzzParseDSN(f *testing.F) {
 	})
 }
 
+// FuzzParseMySQLDSNPassword asserts that a password containing any DSN
+// delimiter ('@', '/', '(', '?') never leaks into Host, Port, or DBName.
+func FuzzParseMySQLDSNPassword(f *testing.F) {
+	for _, password := range []string{
+		"", "password", "pa(ss", "s3cr/et?x", "p@secret/hidden?tail",
+	} {
+		f.Add(password)
+	}
+
+	templates := []struct {
+		address string
+		want    DSNInfo
+	}{
+		{"tcp(db.example.com:3306)", DSNInfo{Host: "db.example.com", Port: "3306", DBName: "app"}},
+		{"unix(/tmp/mysql.sock)", DSNInfo{Host: "/tmp/mysql.sock", DBName: "app"}},
+		{"db.example.com:3306", DSNInfo{Host: "db.example.com", Port: "3306", DBName: "app"}},
+	}
+
+	f.Fuzz(func(t *testing.T, password string) {
+		for _, tmpl := range templates {
+			dsn := "user:" + password + "@" + tmpl.address + "/app"
+			if got := ParseDSN("mysql", dsn); got != tmpl.want {
+				t.Fatalf("dsn=%q: ParseDSN() = %#v, want %#v", dsn, got, tmpl.want)
+			}
+		}
+	})
+}
+
 // FuzzParseDbName asserts the backward-compatible database-name extractor
 // never panics and never returns a value containing its own delimiters, which
 // would mean a query string leaked into db.namespace.

@@ -292,3 +292,24 @@ func TestDiscoverWorkDir(t *testing.T) {
 		}
 	})
 }
+
+func TestSessionDirHelpers(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(EnvOtelcWorkDir, workDir)
+
+	t.Setenv(EnvOtelcSessionDir, "")
+	assert.Equal(t, filepath.Join(workDir, BuildTempDir, SessionTempDir), GetSessionDir(),
+		"without an inherited session the build owns one in its build temp dir")
+	assert.False(t, InheritedSession())
+
+	t.Setenv(EnvOtelcSessionDir, SessionOff)
+	assert.Equal(t, SessionOff, GetSessionDir())
+	assert.False(t, InheritedSession(), "a disabled session is not inherited")
+
+	inherited := t.TempDir()
+	t.Setenv(EnvOtelcSessionDir, inherited)
+	assert.Equal(t, inherited, GetSessionDir())
+	assert.True(t, InheritedSession())
+
+	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "resolution_scope"), GetResolutionScopeFile())
+}

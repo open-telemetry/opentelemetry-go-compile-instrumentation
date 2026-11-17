@@ -13,6 +13,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.opentelemetry.io/collector/pdata/ptrace"
 
 	"go.opentelemetry.io/otelc/test/testutil"
 )
@@ -41,19 +42,11 @@ func TestMongoClient(t *testing.T) {
 				spans := testutil.AllSpans(f.Traces())
 				require.GreaterOrEqual(t, len(spans), 1, "expected at least 1 span (insert)")
 
-				// Verify insert span matching the actual attributes from otelmongo
-				insertSpan := testutil.RequireSpan(t, f.Traces(),
-					testutil.IsClient,
-					testutil.HasAttribute("db.operation.name", "insert"),
-				)
+				insertSpan := requireSingleInsertSpan(t, f)
 
 				// Assert MongoDB specific semantic conventions attributes
-				testutil.RequireAttribute(t, insertSpan, "db.system.name", "mongodb")
-				testutil.RequireAttribute(t, insertSpan, "db.operation.name", "insert")
-				testutil.RequireAttribute(t, insertSpan, "db.namespace", "testdb")
-				testutil.RequireAttribute(t, insertSpan, "db.collection.name", "users")
+				testutil.RequireMongoClientSemconv(t, insertSpan, "insert", "testdb", "users")
 				testutil.RequireAttributeContains(t, insertSpan, "network.peer.address", "127.0.0.1")
-				testutil.RequireAttribute(t, insertSpan, "network.transport", "tcp")
 			})
 		}
 	})
@@ -78,22 +71,28 @@ func TestMongoClient(t *testing.T) {
 				spans := testutil.AllSpans(f.Traces())
 				require.GreaterOrEqual(t, len(spans), 1, "expected at least 1 span (insert)")
 
-				// Verify insert span matching the actual attributes from otelmongo
-				insertSpan := testutil.RequireSpan(t, f.Traces(),
-					testutil.IsClient,
-					testutil.HasAttribute("db.operation.name", "insert"),
-				)
+				insertSpan := requireSingleInsertSpan(t, f)
 
 				// Assert MongoDB specific semantic conventions attributes
-				testutil.RequireAttribute(t, insertSpan, "db.system.name", "mongodb")
-				testutil.RequireAttribute(t, insertSpan, "db.operation.name", "insert")
-				testutil.RequireAttribute(t, insertSpan, "db.namespace", "testdb")
-				testutil.RequireAttribute(t, insertSpan, "db.collection.name", "users")
+				testutil.RequireMongoClientSemconv(t, insertSpan, "insert", "testdb", "users")
 				testutil.RequireAttributeContains(t, insertSpan, "network.peer.address", "127.0.0.1")
-				testutil.RequireAttribute(t, insertSpan, "network.transport", "tcp")
 			})
 		}
 	})
+}
+
+// requireSingleInsertSpan returns the only client insert span. More than one
+// means the command monitor was injected more than once.
+func requireSingleInsertSpan(t *testing.T, f *testutil.TestFixture) ptrace.Span {
+	t.Helper()
+	var insertSpans []ptrace.Span
+	for _, s := range testutil.AllSpans(f.Traces()) {
+		if testutil.IsClient(s) && testutil.HasAttribute("db.operation.name", "insert")(s) {
+			insertSpans = append(insertSpans, s)
+		}
+	}
+	require.Len(t, insertSpans, 1, "expected exactly one insert span")
+	return insertSpans[0]
 }
 
 // StartMockMongoServer starts a minimal mock MongoDB wire protocol server.
