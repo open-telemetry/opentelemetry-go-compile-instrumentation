@@ -592,6 +592,64 @@ func TestApplyFileRule_SiblingDirectoryPrefixRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "is outside rule package directory")
 }
 
+func TestApplyFileRule_InvalidSourceRejected(t *testing.T) {
+	srcDir := t.TempDir()
+	workDir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(srcDir, "subdir"), 0o755))
+
+	ip := &instrumentPhase{
+		logger:  slog.New(slog.DiscardHandler),
+		workDir: workDir,
+	}
+
+	tests := []struct {
+		name         string
+		file         string
+		resolvedPath string
+		wantErr      string
+	}{
+		{
+			name:         "empty resolved path",
+			file:         "helper.go",
+			resolvedPath: " ",
+			wantErr:      "resolved path for rule",
+		},
+		{
+			name:         "empty file",
+			file:         " ",
+			resolvedPath: srcDir,
+			wantErr:      "file for rule",
+		},
+		{
+			name:         "missing rule package directory",
+			file:         "helper.go",
+			resolvedPath: filepath.Join(srcDir, "missing"),
+			wantErr:      "opening rule package directory",
+		},
+		{
+			name:         "file is a directory",
+			file:         "subdir",
+			resolvedPath: srcDir,
+			wantErr:      "reading rule source file",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fileRule := &rule.InstFileRule{
+				File:         tt.file,
+				Path:         "example.com/mypkg",
+				ResolvedPath: tt.resolvedPath,
+			}
+			fileRule.Name = "test_invalid_source_rule"
+
+			err := ip.applyFileRule(t.Context(), fileRule, "targetpkg")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
 func TestApplyFileRule_SymlinkedBaseDirectory_Success(t *testing.T) {
 	realSrcDir := t.TempDir()
 	tempParent := t.TempDir()
