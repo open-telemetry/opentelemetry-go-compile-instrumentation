@@ -1,4 +1,4 @@
-version: "v1.0.0"
+version: "v1.2.0"
 
 # The otel SDK floor tracks the version the injected instrumentation modules
 # require (instrumentation/**); raise it together with those modules.

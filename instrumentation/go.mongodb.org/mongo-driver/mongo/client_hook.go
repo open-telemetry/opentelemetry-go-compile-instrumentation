@@ -91,17 +91,8 @@ func injectMonitor(opts []*options.ClientOptions) []*options.ClientOptions {
 	return append(opts[:len(opts):len(opts)], injected)
 }
 
-// BeforeConnect intercepts mongo.Connect and injects the OTel command monitor
-func BeforeConnect(ictx hook.HookContext, ctx context.Context, opts ...*options.ClientOptions) {
-	if !enabler.Enable() {
-		return
-	}
-
-	// Explicitly set parameter to ensure otelc compiles and applies it
-	ictx.SetParam(1, injectMonitor(opts))
-}
-
-// BeforeNewClient intercepts mongo.NewClient and injects the OTel command monitor
+// BeforeNewClient intercepts mongo.NewClient and injects the OTel command monitor.
+// It also covers mongo.Connect, which delegates to NewClient.
 func BeforeNewClient(ictx hook.HookContext, opts ...*options.ClientOptions) {
 	if !enabler.Enable() {
 		return

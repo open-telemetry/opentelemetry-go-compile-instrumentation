@@ -92,6 +92,55 @@ OTELC_DEBUG=1 otelc go build .
 Debug output goes to `.otelc-build/debug.log`. The file is opened in append mode, so
 entries accumulate across runs. Delete it between runs if you want a clean log.
 
+### Rule matching decisions
+
+With `--debug` (or `OTELC_DEBUG=1`), the real matcher also writes experimental
+JSON Lines diagnostics under `.otelc-build/debug/<escaped-package>/`:
+
+- `setup.matches.jsonl`: target/version and per-source AST decisions during setup.
+- `<source-base>.matches.jsonl`: decisions when toolexec applies rules to that source.
+
+For example, a function exists but its argument types differ from the rule:
+
+```json
+{"package":"example.com/foo","rule":"client_hook","phase":"setup","source":"/src/foo.go","matched":false,"reason":"signature_mismatch"}
+```
+
+Records describe individual decisions, not a package-wide verdict. A rule can fail
+in one file and match another. An omitted `source` means a package-level decision.
+`matched: true` omits `reason`; in setup it means eligibility, not an applied change.
+Call and literal rules are eligible in every file passing `where`; their join points
+are resolved during instrumentation. Use the `.diff` reports to inspect changes.
+
+The initial closed set of rejection codes is:
+
+| Code | Decision |
+| --- | --- |
+| `version_mismatch` | The resolved version failed the rule's range (including unresolved versions). |
+| `no_source_files` | There were no files for precise matching. |
+| `where_mismatch` | The real `where` predicate tree returned false for this file. |
+| `function_not_found` | No declaration had the requested function name. |
+| `receiver_mismatch` | The name existed, but no receiver matched. |
+| `signature_mismatch` | A signature, parameter, or result filter failed, including the `*_implements` filters. |
+| `struct_not_found` | The requested struct was absent. |
+| `directive_not_found` | The requested directive was absent. |
+| `declaration_not_found` | No named declaration of the requested kind existed. |
+| `ignored` | An `otelc:ignore` directive suppressed instrumentation, of the file, the function, or every matching call site. |
+| `no_joinpoint` | A call, literal, or directive rule found nothing to instrument in this file. |
+
+A rule whose target (exact, glob, list, or `$root`) does not select a package is
+never a candidate for it and produces no record, so the stream lists only rules
+that could have applied. Duplicate glob candidates are also omitted. Parse, predicate
+construction, and transformation errors remain build errors. Predicate failures
+report the whole `where` clause, including its combinators, rather than inventing
+a single failing leaf. A file rule whose added file is excluded by its build
+constraints produces no record: that is decided when the file is added, not by
+the matcher. These diagnostics do not alter `matched.json` or build IDs.
+Debug setup clears old artifacts; direct toolexec runs append. Record order across
+setup workers is unspecified. Go may reuse cached packages without running toolexec;
+use `go build -a` when you need fresh instrumentation decisions. The format is
+experimental and may change.
+
 ### Instrumentation Diffs
 
 When running with `--debug` (or `OTELC_DEBUG=1`), `otelc` writes unified `.diff` reports
@@ -143,6 +192,36 @@ showing all source modifications and source additions introduced into the Go com
 ```bash
 otelc --stats go build .
 ```
+
+With `--stats`, each link logs a `rule-added import resolution` line with
+`resolve_phase=link`. Each compile that a rule adds imports to logs the same
+line with `resolve_phase=compile`. The line shows how many imports that rules
+add the step had to find (`candidates`), how many it read from the session memo
+(`memo_hits`), and how many `go list -export` runs it needed (`go_list_calls`).
+
+### Sessions: `OTELC_SESSION_DIR` and `OTELC_MAX_PARALLEL_LOADS`
+
+An `otelc go build`, `go install`, or `go test` owns a session directory,
+`.otelc-build/session`. Every otelc process under that build uses it, including
+`otelc go build` commands that a test binary runs. The session keeps the export
+files that links found for imports that rules add, so other builds in the same
+session do not run `go list -export` again. A new outer build removes the old
+session.
+
+When you run `otelc setup` and then `go build -toolexec otelc` yourself, no
+otelc build owns the session. It stays in `.otelc-build/session` between your
+`go build` runs, until the next `otelc setup` or `otelc go ...` command removes
+it. Set `OTELC_SESSION_DIR=off` if you change library sources between those
+runs.
+
+- `OTELC_SESSION_DIR=<dir>` makes builds use `<dir>` as their session. otelc
+  sets it for the processes it starts, so you rarely need to set it.
+- `OTELC_SESSION_DIR=off` turns the session off. Use it if a test changes
+  library sources between nested otelc builds that run under one outer build.
+- `OTELC_MAX_PARALLEL_LOADS=<n>` limits how many large package loads the otelc
+  processes of one session run at the same time. The default is the number of
+  CPUs. `0` removes the limit. There is no time limit: a load waits until a
+  slot is free.
 
 ### `otelc version --verbose`
 

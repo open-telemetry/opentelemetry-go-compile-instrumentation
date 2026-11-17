@@ -79,8 +79,6 @@ func (c *HookContextImpl3330034316) GetReturnVal(idx int) interface{} {
 	switch idx {
 	case 0:
 		panic("GetReturnVal is unsupported for generic return value at index 0")
-	case 1:
-		return *(c.returnVals[1].(*error))
 	}
 	return nil
 }
@@ -89,16 +87,10 @@ func (c *HookContextImpl3330034316) SetReturnVal(idx int, val interface{}) {
 	switch idx {
 	case 0:
 		panic("SetReturnVal is unsupported for generic return value at index 0")
-	case 1:
-		if val == nil {
-			*(c.returnVals[1].(*error)) = *new(error)
-		} else {
-			*(c.returnVals[1].(*error)) = val.(error)
-		}
 	}
 }
 func (c *HookContextImpl3330034316) GetParamCount() int     { return len(c.params) }
-func (c *HookContextImpl3330034316) GetReturnValCount() int { return len(c.returnVals) }
+func (c *HookContextImpl3330034316) GetReturnValCount() int { return 0 }
 func (c *HookContextImpl3330034316) GetFuncName() string    { return c.funcName }
 func (c *HookContextImpl3330034316) GetPackageName() string { return c.packageName }
 

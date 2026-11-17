@@ -309,8 +309,9 @@ func parseMessagesResponse(body []byte, span trace.Span) {
 		semconv.GenAIUsageTotalTokens(totalInput+resp.Usage.OutputTokens),
 	)
 
-	// Prompt-cache usage is Anthropic-specific; only record it when the
-	// request actually used the cache.
+	// Prompt-cache usage: cache reads are shared with the openai-go
+	// instrumentation, cache creation is Anthropic-specific. Only record them
+	// when the request actually used the cache.
 	if resp.Usage.CacheReadInputTokens > 0 {
 		span.SetAttributes(semconv.GenAIUsageCacheReadInputTokens(resp.Usage.CacheReadInputTokens))
 	}

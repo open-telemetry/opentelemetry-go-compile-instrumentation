@@ -8,6 +8,7 @@ require (
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/metric v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
+	go.yaml.in/yaml/v3 v3.0.5
 	google.golang.org/grpc v1.85.0-dev.0.20260825072537-93e31b48545e
 )
 
@@ -19,7 +20,6 @@ require (
 	github.com/pierrec/lz4/v4 v4.1.21 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel/log v1.47.0 // indirect
-	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260817212433-ac3dfec99bb1 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect

@@ -116,6 +116,7 @@ func collectArguments(funcDecl *dst.FuncDecl, hash string) []string {
 	args := make([]string, 0)
 	next := syntheticNamer(funcDecl, hash)
 	if ast.HasReceiver(funcDecl) {
+		nameBlankReceiverTypeParams(funcDecl.Recv.List[0].Type, next)
 		if recv := funcDecl.Recv.List[0]; recv.Names != nil {
 			// Named receiver, e.g. func (r R) F() {} or func (_ R) F() {}
 			receiver := recv.Names[0].Name
@@ -154,6 +155,28 @@ func collectArguments(funcDecl *dst.FuncDecl, hash string) []string {
 		}
 	}
 	return args
+}
+
+// nameBlankReceiverTypeParams gives each blank type parameter of a generic
+// receiver, such as the _ in func (s *Set[_]) Len() int, a generated name.
+// The trampolines declare the receiver's type parameters again and the jump
+// passes them as type arguments, but _ cannot be used as a type.
+func nameBlankReceiverTypeParams(recvType dst.Expr, next func(prefix string) string) {
+	if star, ok := recvType.(*dst.StarExpr); ok {
+		recvType = star.X
+	}
+	var indices []dst.Expr
+	switch t := recvType.(type) {
+	case *dst.IndexExpr:
+		indices = []dst.Expr{t.Index}
+	case *dst.IndexListExpr:
+		indices = t.Indices
+	}
+	for _, index := range indices {
+		if ident, ok := index.(*dst.Ident); ok && ident.Name == ast.IdentIgnore {
+			ident.Name = next(ignoredTypeParam)
+		}
+	}
 }
 
 func createTrampArgs(names []string) []dst.Expr {
@@ -382,6 +405,9 @@ func (ip *instrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFun
 	// matches it. The func rule then contributes no instrumented function, so it
 	// must not force a globals file to be written for the package.
 	if ast.FuncLeadHasDirective(funcDecl, util.DirectiveIgnore) {
+		if DiffDebugEnabled() {
+			ip.reportDecision(rule, "ignored")
+		}
 		ip.Debug("Skip func rule due to //otelc:ignore", "func", rule.Func, "rule", rule.Name)
 		return false, nil
 	}

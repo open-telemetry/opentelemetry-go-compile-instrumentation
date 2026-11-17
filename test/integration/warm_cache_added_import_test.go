@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -333,15 +334,18 @@ package main
 import (
 	"os"
 	"runtime/pprof"
+	"time"
 
 	"example.com/warmcache/extra"
 )
 
 // main records a CPU profile in which extra.Note is the dominant cost. The
-// loop does no allocation and no timing calls, so the samples land on Note
-// instead of on the runtime. The count is the smallest that keeps Note
-// dominant: profiling samples at 100 Hz, and at 3e7 iterations and below
-// the samples thin out until the top node flips between Note and the loop.
+// inner loop does no allocation and no timing calls, so the samples land on
+// Note instead of on the runtime. Profiling samples at 100 Hz, so the run
+// is bounded by time, not by an iteration count: a fixed count finishes in
+// about 200ms on a fast runner, and the handful of samples it leaves can
+// miss Note entirely. The clock is read once per batch of 1e7 calls, so it
+// costs a negligible share of the samples.
 func main() {
 	f, err := os.Create(os.Args[1])
 	if err != nil {
@@ -350,8 +354,10 @@ func main() {
 	if err := pprof.StartCPUProfile(f); err != nil {
 		panic(err)
 	}
-	for i := 0; i < 100000000; i++ {
-		_ = extra.Note()
+	for start := time.Now(); time.Since(start) < time.Second; {
+		for range 10_000_000 {
+			_ = extra.Note()
+		}
 	}
 	pprof.StopCPUProfile()
 	if err := f.Close(); err != nil {
@@ -361,15 +367,31 @@ func main() {
 `)
 
 	// Record a real CPU profile with a plain go run; the compiler rejects
-	// profiles it cannot parse.
+	// profiles it cannot parse. Sampling is statistical: on some CI runners
+	// a recording can still leave Note below the PGO hotness threshold, so
+	// the recording is retried a bounded number of times until a profiled
+	// compile of extra inlines Note.
 	profile := filepath.Join(appDir, "cpu.pgo")
-	gen := exec.CommandContext(t.Context(), "go", "run", "./profilegen", profile)
-	gen.Dir = appDir
-	gen.Env = append(preparedBuildBaseEnvironment(), "GOWORK=off")
-	out, err := gen.CombinedOutput()
-	require.NoError(t, err, "recording the CPU profile failed:\n%s", out)
-
-	assertNoteInliningPremise(t, filepath.Join(appDir, "extra"), profile)
+	extraDir := filepath.Join(appDir, "extra")
+	assertNoteNotInlinedUnprofiled(t, extraDir)
+	record := func() {
+		gen := exec.CommandContext(t.Context(), "go", "run", "./profilegen", profile)
+		gen.Dir = appDir
+		gen.Env = append(preparedBuildBaseEnvironment(), "GOWORK=off")
+		out, recErr := gen.CombinedOutput()
+		require.NoError(t, recErr, "recording the CPU profile failed:\n%s", out)
+	}
+	profiledCompile := func() string {
+		return compileExtraDiagnostics(t, extraDir, "-pgo="+profile)
+	}
+	attempts, profiledOut := recordUntilNoteHot(t.Logf, record, profiledCompile)
+	require.Contains(
+		t,
+		profiledOut,
+		noteInline,
+		"after %d recordings a profiled compile still does not inline Note, so profiled and unprofiled extra no longer differ and the warm subtest proves nothing",
+		attempts,
+	)
 
 	// The profile path must be absolute: the nested builds toolexec runs
 	// for the link resolution work from other directories.
@@ -416,37 +438,70 @@ func main() {
 	})
 }
 
-// assertNoteInliningPremise fails the test when the premise the warm subtest
-// is built on breaks. extra.Note is tuned to sit past the compiler's inlining
-// budget, so only the recorded profile, which marks it hot, can lift it over.
-// A compiler that inlines Note unprofiled too, or one the profile no longer
-// reaches, makes the profiled and the unprofiled compile of extra produce the
-// same export data: the fingerprint mismatch this test relies on disappears,
-// and the warm subtest would keep passing while proving nothing. The
-// compiler's -m diagnostics are an escape hatch, not a stable API; the
-// wording was verified against the toolchains this repository builds with
-// (go 1.26 and 1.27), and a future wording change fails here loudly instead
-// of silently voiding the test.
-func assertNoteInliningPremise(t *testing.T, extraDir, profile string) {
+// noteInline is the -m=2 diagnostic the compiler prints when it inlines
+// extra.Note.
+//
+// The premise the warm subtest is built on: extra.Note is tuned to sit past
+// the compiler's inlining budget, so only the recorded profile, which marks it
+// hot, can lift it over. A compiler that inlines Note unprofiled too, or one
+// the profile no longer reaches, makes the profiled and the unprofiled compile
+// of extra produce the same export data: the fingerprint mismatch this test
+// relies on disappears, and the warm subtest would keep passing while proving
+// nothing. The compiler's -m diagnostics are an escape hatch, not a stable
+// API; the wording was verified against the toolchains this repository builds
+// with (go 1.26 and 1.27), and a future wording change fails loudly instead of
+// silently voiding the test.
+const noteInline = "can inline Note"
+
+// compileExtraDiagnostics compiles extra with -gcflags=-m=2 plus args and
+// returns the compiler output.
+func compileExtraDiagnostics(t *testing.T, extraDir string, args ...string) string {
 	t.Helper()
+	args = append(args, "-gcflags=-m=2", ".")
+	cmd := exec.CommandContext(t.Context(), "go", append([]string{"build"}, args...)...)
+	cmd.Dir = extraDir
+	// A fresh cache forces the compile of extra, so the diagnostics always
+	// print; extra imports nothing, so this compiles one tiny package.
+	cmd.Env = append(preparedBuildBaseEnvironment(),
+		"GOWORK=off", "GOCACHE="+t.TempDir())
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "go build %v failed:\n%s", args, out)
+	return string(out)
+}
 
-	build := func(args ...string) string {
-		t.Helper()
-		cmd := exec.CommandContext(t.Context(), "go", append([]string{"build"}, args...)...)
-		cmd.Dir = extraDir
-		// A fresh cache forces the compile of extra, so the diagnostics
-		// always print; extra imports nothing, so this compiles one tiny
-		// package.
-		cmd.Env = append(preparedBuildBaseEnvironment(),
-			"GOWORK=off", "GOCACHE="+t.TempDir())
-		out, err := cmd.CombinedOutput()
-		require.NoError(t, err, "go build %v failed:\n%s", args, out)
-		return string(out)
+// maxNoteRecordings bounds how many times recordUntilNoteHot records the
+// CPU profile.
+const maxNoteRecordings = 3
+
+// recordUntilNoteHot records the profile and runs the profiled compile until
+// the compile output shows Note inlined, at most maxNoteRecordings times. It
+// returns the number of recordings made and the last compile output; the
+// caller asserts on that output, so a run that never makes Note hot fails.
+func recordUntilNoteHot(
+	logf func(format string, args ...any),
+	record func(),
+	profiledCompile func() string,
+) (int, string) {
+	var out string
+	for attempt := 1; attempt <= maxNoteRecordings; attempt++ {
+		record()
+		out = profiledCompile()
+		if strings.Contains(out, noteInline) {
+			return attempt, out
+		}
+		logf("recording %d/%d did not make Note hot:\n%s", attempt, maxNoteRecordings, out)
 	}
+	return maxNoteRecordings, out
+}
 
-	const noteInline = "can inline Note"
-	assert.NotContains(t, build("-gcflags=-m=2", "."), noteInline,
-		"an unprofiled compile inlines Note, so profiled and unprofiled extra no longer differ and the warm subtest proves nothing")
-	assert.Contains(t, build("-pgo="+profile, "-gcflags=-m=2", "."), noteInline,
-		"a profiled compile no longer inlines Note, so profiled and unprofiled extra no longer differ and the warm subtest proves nothing")
+// assertNoteNotInlinedUnprofiled fails the test when an unprofiled compile
+// inlines Note, which voids the premise described at noteInline.
+func assertNoteNotInlinedUnprofiled(t *testing.T, extraDir string) {
+	t.Helper()
+	require.NotContains(
+		t,
+		compileExtraDiagnostics(t, extraDir),
+		noteInline,
+		"an unprofiled compile inlines Note, so profiled and unprofiled extra no longer differ and the warm subtest proves nothing",
+	)
 }
