@@ -885,6 +885,26 @@ func TestMatchesCallRule_UnqualifiedCallDoesNotMatch(t *testing.T) {
 	assert.False(t, matches)
 }
 
+func TestMatchesCallRule_ShadowedPackageDoesNotMatch(t *testing.T) {
+	r := &rule.InstCallRule{
+		ImportPath: "net/http",
+		FuncName:   "Get",
+	}
+	aliases := map[string]string{"http": "net/http"}
+
+	call := &dst.CallExpr{
+		Fun: &dst.SelectorExpr{
+			X:   &dst.Ident{Name: "http"},
+			Sel: &dst.Ident{Name: "Get"},
+		},
+	}
+	assert.True(t, matchesCallRule(call, r, aliases))
+
+	// A local declaration of the same name is in scope, so http is not the package.
+	call.Fun.(*dst.SelectorExpr).X.(*dst.Ident).Obj = &dst.Object{Kind: dst.Var, Name: "http"}
+	assert.False(t, matchesCallRule(call, r, aliases))
+}
+
 func TestMatchesCallRule_WrongPackage(t *testing.T) {
 	r := &rule.InstCallRule{
 		ImportPath: "net/http",
@@ -1312,6 +1332,51 @@ func Run() {
 			"\truntime.UnsuppressHooks()",
 	)
 	assert.NotContains(t, src, "runtime.SuppressHooks()\n\thttp.Get(\"kept\")")
+}
+
+func TestApplyIgnoredCallSites_RuntimeNameTakenUsesReservedAlias(t *testing.T) {
+	// k8s.io/apimachinery/pkg/runtime and github.com/go-openapi/runtime are
+	// both named runtime; importing the Go runtime as "runtime" next to them
+	// would not compile.
+	root := parseFile(t, `package main
+
+import runtime "example.com/app/runtime"
+
+func Run() {
+	//otelc:ignore
+	runtime.Start()
+}
+`)
+
+	_, err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+	require.NoError(t, err)
+
+	src := renderFile(t, root)
+	assert.Contains(t, src, `otelcRuntime "runtime"`)
+	assert.Contains(t, src, "otelcRuntime.SuppressHooks()\n")
+	assert.Contains(t, src, "otelcRuntime.UnsuppressHooks()")
+	assert.Contains(t, src, "\truntime.Start()\n", "the file's own runtime package stays as written")
+	assert.NotContains(t, src, "runtime.SuppressHooks()\n\totelcIgnoreDone0")
+}
+
+func TestApplyIgnoredCallSites_ReusesFileAliasForRuntime(t *testing.T) {
+	root := parseFile(t, `package main
+
+import rt "runtime"
+
+func Run() {
+	//otelc:ignore
+	rt.GC()
+}
+`)
+
+	_, err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+	require.NoError(t, err)
+
+	src := renderFile(t, root)
+	assert.Contains(t, src, "rt.SuppressHooks()\n")
+	assert.Contains(t, src, "rt.UnsuppressHooks()")
+	assert.Equal(t, 1, strings.Count(src, `"runtime"`), "runtime must not be imported a second time")
 }
 
 func TestApplyIgnoredCallSites_NoDirectiveNoChange(t *testing.T) {
