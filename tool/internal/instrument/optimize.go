@@ -494,6 +494,19 @@ func (ip *instrumentPhase) omitUnusedContext(tjump *tJump) error {
 	return nil
 }
 
+// removeAfterTrampoline removes the After trampoline of a rule that has no
+// After hook: its deferred call, its declaration, and the HookContext methods
+// that only it would have used.
+func (ip *instrumentPhase) removeAfterTrampoline(tjump *tJump) error {
+	if err := removeAfterTrampolineCall(tjump); err != nil {
+		return err
+	}
+	if err := removeAfterTrampolineDecl(ip.target, tjump); err != nil {
+		return err
+	}
+	return emptyUnusedHookContextMethods(ip.target, tjump)
+}
+
 func (ip *instrumentPhase) optimizeTJumps() error {
 	for _, tjump := range ip.tjumps {
 		mustTJump(tjump.ifStmt)
@@ -512,16 +525,7 @@ func (ip *instrumentPhase) optimizeTJumps() error {
 		removedOnExit := false
 		rule := tjump.rule
 		if rule.After == "" {
-			err := removeAfterTrampolineCall(tjump)
-			if err != nil {
-				return err
-			}
-			err = removeAfterTrampolineDecl(ip.target, tjump)
-			if err != nil {
-				return err
-			}
-			err = emptyUnusedHookContextMethods(ip.target, tjump)
-			if err != nil {
+			if err := ip.removeAfterTrampoline(tjump); err != nil {
 				return err
 			}
 			removedOnExit = true
