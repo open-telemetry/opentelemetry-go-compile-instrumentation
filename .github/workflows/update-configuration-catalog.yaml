@@ -38,9 +38,11 @@ jobs:
           schema_url="https://raw.githubusercontent.com/${UPSTREAM_REPOSITORY}/${commit}/schema/instrumentation.yaml"
           curl --fail --silent --show-error --location --max-time 30 "${schema_url}" --output "${RUNNER_TEMP}/instrumentation.yaml"
           checksum=$(sha256sum "${RUNNER_TEMP}/instrumentation.yaml" | cut -d ' ' -f 1)
-          echo "release=${release}" >> "${GITHUB_OUTPUT}"
-          echo "commit=${commit}" >> "${GITHUB_OUTPUT}"
-          echo "checksum=${checksum}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "release=${release}"
+            echo "commit=${commit}"
+            echo "checksum=${checksum}"
+          } >> "${GITHUB_OUTPUT}"
 
   propose-update:
     name: Generate and propose catalog update
