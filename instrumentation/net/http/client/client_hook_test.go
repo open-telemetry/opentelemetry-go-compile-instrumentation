@@ -93,9 +93,10 @@ func TestBeforeRoundTrip(t *testing.T) {
 				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
 			setupRequest: func() *http.Request {
-				ctx, _ := otel.Tracer(otelhttpScope).Start(context.Background(), "GET",
+				ctx, span := otel.Tracer(otelhttpScope).Start(context.Background(), "GET",
 					trace.WithSpanKind(trace.SpanKindClient))
-				req, _ := http.NewRequestWithContext(ctx, "GET", "http://example.com/path", nil)
+				t.Cleanup(func() { span.End() })
+				req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://example.com/path", nil)
 				return req
 			},
 			expectSpan: false,
@@ -106,9 +107,10 @@ func TestBeforeRoundTrip(t *testing.T) {
 				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
 			setupRequest: func() *http.Request {
-				ctx, _ := otel.Tracer(otelhttpScope).Start(context.Background(), "GET /",
+				ctx, span := otel.Tracer(otelhttpScope).Start(context.Background(), "GET /",
 					trace.WithSpanKind(trace.SpanKindServer))
-				req, _ := http.NewRequestWithContext(ctx, "GET", "http://example.com/path", nil)
+				t.Cleanup(func() { span.End() })
+				req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://example.com/path", nil)
 				return req
 			},
 			expectSpan: true,
@@ -119,9 +121,10 @@ func TestBeforeRoundTrip(t *testing.T) {
 				t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 			},
 			setupRequest: func() *http.Request {
-				ctx, _ := otel.Tracer("linodego").Start(context.Background(), "linodego.GetInstance",
+				ctx, span := otel.Tracer("linodego").Start(context.Background(), "linodego.GetInstance",
 					trace.WithSpanKind(trace.SpanKindClient))
-				req, _ := http.NewRequestWithContext(ctx, "GET", "http://example.com/path", nil)
+				t.Cleanup(func() { span.End() })
+				req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://example.com/path", nil)
 				return req
 			},
 			expectSpan: true,
@@ -654,7 +657,7 @@ func TestBeforeRoundTrip_SharedHeaderMapIsNotWritten(t *testing.T) {
 // the context. A later call must get an otelc span. IsRecording is false for
 // the ended span, so the hook does not treat it as an in-flight otelhttp call.
 func TestBeforeRoundTrip_EndedOtelhttpClientSpanStillTraces(t *testing.T) {
-	initOnce = *new(sync.Once)
+	initOnce = sync.Once{}
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "nethttp")
 	sr, _ := setupTestTracer(t)
 

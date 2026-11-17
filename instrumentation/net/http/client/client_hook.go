@@ -108,9 +108,6 @@ func BeforeRoundTrip(ictx hook.HookContext, transport *http.Transport, req *http
 	// injected its trace headers. A second CLIENT span would record the same
 	// call twice.
 	if hasOtelhttpClientSpan(req.Context()) {
-		if debugEnabled() {
-			logger.Debug("Skipping request that otelhttp.Transport already traces")
-		}
 		return
 	}
 
