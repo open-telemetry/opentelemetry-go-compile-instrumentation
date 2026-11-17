@@ -5,8 +5,10 @@ groups:
   # Source of truth for this file:
   #   instrumentation/github.com/openai/openai-go/v3/middleware.go  (span + attrs)
   #   instrumentation/github.com/openai/openai-go/internal/streaming/streaming.go (streaming attrs)
-  #   instrumentation/github.com/openai/openai-go/internal/streaming/attrs.go     (streaming attribute keys)
-  #   instrumentation/github.com/openai/openai-go/v3/semconv/genai.go (attribute keys)
+  #   instrumentation/github.com/openai/openai-go/v3/semconv/genai.go (gen_ai.system only)
+  #
+  # The other attribute keys come from upstream semconv v1.37.0 and from
+  # pkg/otelcconv, which is generated from the `id:` attributes below.
   #
   # (v1, v2, and v3 middleware are identical apart from the import path. Since
   # #990 the streaming reader is a single shared module under internal/streaming
