@@ -130,14 +130,10 @@ func OtelBeforeTrampoline_Func13592294264(param0 *string, param1 *int) (hookCont
 			}
 		}
 	}()
-	hookContext = &HookContextImpl3592294264{}
-	hookContext.params = []interface{}{param0, param1}
-	hookContext.funcName = "Func1"
-	hookContext.packageName = "main"
 	if otelc_hook_2956707965_H1Before != nil {
-		otelc_hook_2956707965_H1Before(hookContext, *param0, *param1)
+		otelc_hook_2956707965_H1Before(nil, *param0, *param1)
 	}
-	return hookContext, hookContext.skipCall
+	return nil, false
 }
 
 func OtelAfterTrampoline_Func13592294264(hookContext HookContext, arg0 *float32, arg1 *error) {
@@ -153,9 +149,8 @@ func OtelAfterTrampoline_Func13592294264(hookContext HookContext, arg0 *float32,
 			}
 		}
 	}()
-	hookContext.(*HookContextImpl3592294264).returnVals = []interface{}{arg0, arg1}
 	if otelc_hook_2956707965_H1After != nil {
-		otelc_hook_2956707965_H1After(hookContext, *arg0, *arg1)
+		otelc_hook_2956707965_H1After(nil, *arg0, *arg1)
 	}
 }
 
@@ -274,14 +269,10 @@ func OtelBeforeTrampoline_Func11830170046(param0 *string, param1 *int) (hookCont
 			}
 		}
 	}()
-	hookContext = &HookContextImpl1830170046{}
-	hookContext.params = []interface{}{param0, param1}
-	hookContext.funcName = "Func1"
-	hookContext.packageName = "main"
 	if otelc_hook_2956707965_H2Before != nil {
-		otelc_hook_2956707965_H2Before(hookContext, *param0, *param1)
+		otelc_hook_2956707965_H2Before(nil, *param0, *param1)
 	}
-	return hookContext, hookContext.skipCall
+	return nil, false
 }
 
 func OtelAfterTrampoline_Func11830170046(hookContext HookContext, arg0 *float32, arg1 *error) {
@@ -297,9 +288,8 @@ func OtelAfterTrampoline_Func11830170046(hookContext HookContext, arg0 *float32,
 			}
 		}
 	}()
-	hookContext.(*HookContextImpl1830170046).returnVals = []interface{}{arg0, arg1}
 	if otelc_hook_2956707965_H2After != nil {
-		otelc_hook_2956707965_H2After(hookContext, *arg0, *arg1)
+		otelc_hook_2956707965_H2After(nil, *arg0, *arg1)
 	}
 }
 

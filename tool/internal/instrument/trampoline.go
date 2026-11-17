@@ -220,17 +220,12 @@ func (ip *instrumentPhase) parseHookFileCached(file string) (*dst.File, error) {
 	return root, nil
 }
 
-// findHookFile locates the file in rule.ResolvedPath that declares the hook
-// function hookName and returns it with the declaration. The hooks are linked
-// by the import path of rule.Path, so only the files the go command compiles
-// into that package are searched: a subdirectory is another package, testdata
-// is no package at all, and test files and files starting with "." or "_" are
-// never built into it. Any of those files can declare the hook, so the before
-// and after hooks of one rule may live in different files.
-func (ip *instrumentPhase) findHookFile(rule *rule.InstFuncRule, hookName string) (string, *dst.FuncDecl, error) {
-	entries, err0 := os.ReadDir(rule.ResolvedPath)
-	if err0 != nil {
-		return "", nil, ex.Wrapf(err0, "reading hook directory %s", rule.ResolvedPath)
+// hookPackageFiles returns the files in rule.ResolvedPath that the go command
+// can compile into the hook package. It does not apply build constraints.
+func hookPackageFiles(rule *rule.InstFuncRule) ([]string, error) {
+	entries, err := os.ReadDir(rule.ResolvedPath)
+	if err != nil {
+		return nil, ex.Wrapf(err, "reading hook directory %s", rule.ResolvedPath)
 	}
 	files := make([]string, 0, len(entries))
 	for _, entry := range entries {
@@ -240,6 +235,21 @@ func (ip *instrumentPhase) findHookFile(rule *rule.InstFuncRule, hookName string
 			continue
 		}
 		files = append(files, filepath.Join(rule.ResolvedPath, name))
+	}
+	return files, nil
+}
+
+// findHookFile locates the file in rule.ResolvedPath that declares the hook
+// function hookName and returns it with the declaration. The hooks are linked
+// by the import path of rule.Path, so only the files the go command compiles
+// into that package are searched: a subdirectory is another package, testdata
+// is no package at all, and test files and files starting with "." or "_" are
+// never built into it. Any of those files can declare the hook, so the before
+// and after hooks of one rule may live in different files.
+func (ip *instrumentPhase) findHookFile(rule *rule.InstFuncRule, hookName string) (string, *dst.FuncDecl, error) {
+	files, err0 := hookPackageFiles(rule)
+	if err0 != nil {
+		return "", nil, err0
 	}
 	for _, file := range files {
 		root, err := ip.parseHookFileCached(file)
