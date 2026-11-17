@@ -367,7 +367,7 @@ func TestAppSurfacesDeadlineCause(t *testing.T) {
 	// the build's own generic error, so the user sees why, not
 	// "signal: killed".
 	finalErr := reportedErr(err, deadlineCause)
-	if finalErr != deadlineCause {
+	if !errors.Is(finalErr, deadlineCause) {
 		t.Errorf("reportedErr() = %v, want the deadline cause", finalErr)
 	}
 }
@@ -460,13 +460,13 @@ func TestReportedErr(t *testing.T) {
 	cause := errors.New("the --timeout build timeout (1ms) elapsed")
 
 	t.Run("deadline cause wins when both are set", func(t *testing.T) {
-		if got := reportedErr(runErr, cause); got != cause {
+		if got := reportedErr(runErr, cause); !errors.Is(got, cause) {
 			t.Errorf("reportedErr() = %v, want the deadline cause", got)
 		}
 	})
 
 	t.Run("the run error passes through when there is no deadline cause", func(t *testing.T) {
-		if got := reportedErr(runErr, nil); got != runErr {
+		if got := reportedErr(runErr, nil); !errors.Is(got, runErr) {
 			t.Errorf("reportedErr() = %v, want the run error", got)
 		}
 	})
