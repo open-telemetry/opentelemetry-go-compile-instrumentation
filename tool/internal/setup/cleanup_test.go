@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -440,4 +441,48 @@ func TestRunGoBuildRestoresInterruptedBuild(t *testing.T) {
 	content, readErr := os.ReadFile(goMod)
 	require.NoError(t, readErr)
 	assert.Equal(t, "module example.com/app\n\ngo 1.25.0\n", string(content))
+}
+
+func TestRestoreInterruptedBuildWhenStateCannotBeDiscarded(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory permissions do not prevent removal on Windows")
+	}
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+	goMod := leaveInterruptedBuild(t, tmp)
+	// The files are restored, but the manifest cannot be removed from a
+	// read-only build directory. That is only worth a warning.
+	buildDir := filepath.Dir(util.GetBuildTemp(stateFileName))
+	require.NoError(t, os.Chmod(buildDir, 0o555))
+	t.Cleanup(func() { _ = os.Chmod(buildDir, 0o755) })
+
+	require.NoError(t, restoreInterruptedBuild(t.Context()))
+
+	content, err := os.ReadFile(goMod)
+	require.NoError(t, err)
+	assert.Equal(t, "module example.com/app\n\ngo 1.25.0\n", string(content))
+}
+
+func TestRunGoBuildStopsWhenInterruptedBuildCannotBeRestored(t *testing.T) {
+	setupTestModule(t, nil)
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	goMod := filepath.Join(cwd, "go.mod")
+	before, err := os.ReadFile(goMod)
+	require.NoError(t, err)
+	// The manifest names go.mod, but its snapshot is gone.
+	mustWriteFile(t, util.GetBuildTemp(stateFileName), `["`+filepath.ToSlash(goMod)+`"]`)
+
+	cmd := &cli.Command{
+		Name:            "go",
+		SkipFlagParsing: true,
+		Action:          GoBuild,
+	}
+	err = cmd.Run(t.Context(), []string{"go", "build", "./..."})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "restoring the files of an interrupted build")
+	after, readErr := os.ReadFile(goMod)
+	require.NoError(t, readErr)
+	assert.Equal(t, string(before), string(after))
 }
