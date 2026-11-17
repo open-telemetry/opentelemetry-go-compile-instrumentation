@@ -2530,6 +2530,41 @@ func TestLinkResolutionReturnsContextErrorForLoneCandidate(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 }
 
+// TestLinkResolutionFailsOnNonLoadErrorFromEachCandidate covers a batch that
+// fails as a whole, followed by a lone load that fails for a reason other than
+// a candidate load failure. That error must fail the link.
+func TestLinkResolutionFailsOnNonLoadErrorFromEachCandidate(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra", "example.invalid/bad")
+	boom := errors.New("go list: unexpected failure")
+	resolver := func(_ context.Context, roots []string, _ ...string) (map[string]map[string]string, map[string]error, error) {
+		if len(roots) > 1 {
+			return nil, nil, errors.New("no packages found for " + strings.Join(roots, ", "))
+		}
+		return nil, nil, boom
+	}
+
+	_, err := resolveRuleAddedImportsWith(t.Context(), nil, freshLinkConfig(), resolver)
+	require.ErrorIs(t, err, boom)
+}
+
+// TestLinkResolutionReturnsContextErrorDuringEachCandidateLoad covers the
+// context ending while a lone candidate is loaded after a failed batch.
+func TestLinkResolutionReturnsContextErrorDuringEachCandidateLoad(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra", "example.invalid/bad")
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	resolver := func(_ context.Context, roots []string, _ ...string) (map[string]map[string]string, map[string]error, error) {
+		if len(roots) > 1 {
+			return nil, nil, errors.New("no packages found for " + strings.Join(roots, ", "))
+		}
+		cancel()
+		return nil, nil, errors.New("no packages found for " + roots[0])
+	}
+
+	_, err := resolveRuleAddedImportsWith(ctx, nil, freshLinkConfig(), resolver)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
 // TestLinkResolutionSkipsLoneFailureAfterMemoizedSuccess covers a later link
 // whose only miss is a candidate that fails as a whole. The earlier link's
 // successes come from the memo, so the lone failing root is loaded alone and

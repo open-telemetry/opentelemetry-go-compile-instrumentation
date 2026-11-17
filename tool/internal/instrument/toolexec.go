@@ -1029,7 +1029,8 @@ func (lr *linkResolution) resolveBatch(
 			return nil, nil, ctx.Err()
 		}
 		if rootErr != nil {
-			if errors.Is(rootErr, context.Canceled) || errors.Is(rootErr, context.DeadlineExceeded) || !candidateLoadFailure(rootErr) {
+			if errors.Is(rootErr, context.Canceled) || errors.Is(rootErr, context.DeadlineExceeded) ||
+				!candidateLoadFailure(rootErr) {
 				return nil, nil, rootErr
 			}
 			resolveFailed[root] = rootErr
