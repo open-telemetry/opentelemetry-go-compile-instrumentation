@@ -31,24 +31,24 @@ const (
 // Schema is the structured-list object-schema subset supported by otelc.
 type Schema struct {
 	// Type is the schema root type; the supported value is object.
-	Type string `yaml:"type"`
+	Type string `json:"type" yaml:"type"`
 	// Required lists property keys that must be supplied.
-	Required []string `yaml:"required,omitempty"`
+	Required []string `json:"required,omitempty" yaml:"required,omitempty"`
 	// Properties defines the allowed fields and their types.
-	Properties map[string]Property `yaml:"properties"`
+	Properties map[string]Property `json:"properties" yaml:"properties"`
 }
 
 // Property describes a property in a structured-list schema. Default and
 // Example retain the native YAML value type.
 type Property struct {
 	// Type is the property's declarative value type.
-	Type string `yaml:"type"`
+	Type string `json:"type" yaml:"type"`
 	// Description explains the property.
-	Description string `yaml:"description,omitempty"`
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 	// Default is an optional native-YAML default value.
-	Default any `yaml:"default,omitempty"`
+	Default any `json:"default,omitempty" yaml:"default,omitempty"`
 	// Example is an optional native-YAML example value.
-	Example    any `yaml:"example,omitempty"`
+	Example    any `json:"example,omitempty" yaml:"example,omitempty"`
 	hasDefault bool
 	hasExample bool
 }
@@ -57,29 +57,29 @@ type Property struct {
 // metadata it has either a Name (an inline declarative path) or a Ref.
 type Entry struct {
 	// Name is the OpenTelemetry configuration path relative to instrumentation/development.
-	Name string `yaml:"name,omitempty"`
+	Name string `json:"name,omitempty" yaml:"name,omitempty"`
 	// Ref identifies a catalog definition; resolved entries retain its provenance.
-	Ref string `yaml:"ref,omitempty"`
+	Ref string `json:"ref,omitempty" yaml:"ref,omitempty"`
 	// Description explains the option's behavior.
-	Description string `yaml:"description,omitempty"`
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 	// Type is boolean, string, int, map, list, or structured_list.
-	Type string `yaml:"type,omitempty"`
+	Type string `json:"type,omitempty" yaml:"type,omitempty"`
 	// Default is the top-level string default; nil means absent, not empty.
-	Default *string `yaml:"default,omitempty"`
+	Default *string `json:"default,omitempty" yaml:"default,omitempty"`
 	// Examples contains optional string representations of example values.
-	Examples []string `yaml:"examples,omitempty"`
+	Examples []string `json:"examples,omitempty" yaml:"examples,omitempty"`
 	// Schema describes the item object shape for a structured_list.
-	Schema *Schema `yaml:"schema,omitempty"`
+	Schema *Schema `json:"schema,omitempty" yaml:"schema,omitempty"`
 	// DefaultBehavior is the prose default behavior from the declarative schema.
-	DefaultBehavior string `yaml:"default_behavior,omitempty"`
+	DefaultBehavior string `json:"default_behavior,omitempty" yaml:"default_behavior,omitempty"`
 	// Indicates whether this configuration option is deprecated.
-	Deprecated bool `yaml:"deprecated,omitempty"`
+	Deprecated bool `json:"deprecated,omitempty" yaml:"deprecated,omitempty"`
 	// ReplacedBy identifies the canonical configuration path that supersedes this option.
-	ReplacedBy *string `yaml:"replaced_by,omitempty"`
+	ReplacedBy *string `json:"replaced_by,omitempty" yaml:"replaced_by,omitempty"`
 	// Source identifies the metadata.yaml entry that produced this definition.
-	Source string `yaml:"-"`
+	Source string `json:"-" yaml:"-"`
 	// DefinitionSource identifies the pinned shared definition used by a ref.
-	DefinitionSource string `yaml:"-"`
+	DefinitionSource string `json:"-" yaml:"-"`
 }
 
 // Metadata is the declarative configuration portion of one module's

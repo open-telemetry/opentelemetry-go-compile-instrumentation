@@ -94,6 +94,11 @@ options is warned about and ignored. If a configured option cannot be
 validated while a selected module lacks metadata, setup reports the missing
 module roots. Configuration never changes instrumentation selection.
 
+When validation succeeds, selected values and metadata defaults are normalized
+into a deterministic snapshot. Setup embeds that snapshot in generated runtime
+code and includes the selected metadata plus resolved values in the build-cache
+identity. The application does not need the source YAML file at runtime.
+
 ## Metadata discovery during setup
 
 Setup only considers metadata belonging to instrumentation modules whose rules

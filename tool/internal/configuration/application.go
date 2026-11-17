@@ -59,9 +59,12 @@ type ApplicationConfigurationWarning struct {
 // ValidatedApplicationConfiguration contains values validated for selected
 // instrumentation. It is the setup-to-embedding handoff for #1491.
 type ValidatedApplicationConfiguration struct {
-	Parsed   *otelconfx.OpenTelemetryConfiguration
-	Values   map[string]any
-	Warnings []ApplicationConfigurationWarning
+	Parsed         *otelconfx.OpenTelemetryConfiguration
+	Values         map[string]any
+	ResolvedValues map[string]any
+	Snapshot       []byte
+	Identity       []byte
+	Warnings       []ApplicationConfigurationWarning
 }
 
 func loadInstrumentationSchema() (*jsonschema.Schema, error) {
@@ -308,11 +311,68 @@ func ValidateApplicationOptions(
 	if err != nil {
 		return ValidatedApplicationConfiguration{}, err
 	}
+	resolvedValues, err := resolveApplicationDefaults(selected, values)
+	if err != nil {
+		return ValidatedApplicationConfiguration{}, err
+	}
+	snapshot, err := json.Marshal(resolvedValues)
+	if err != nil {
+		return ValidatedApplicationConfiguration{}, ex.Wrapf(err, "encode resolved application configuration")
+	}
+	identity, err := json.Marshal(struct {
+		Definitions map[string]Entry `json:"definitions"`
+		Values      map[string]any   `json:"values"`
+	}{
+		Definitions: configurationDefinitionIdentity(selected),
+		Values:      resolvedValues,
+	})
+	if err != nil {
+		return ValidatedApplicationConfiguration{}, ex.Wrapf(err, "encode application configuration identity")
+	}
 	return ValidatedApplicationConfiguration{
-		Parsed:   parsed,
-		Values:   values,
-		Warnings: append(warnings, deprecatedWarnings...),
+		Parsed:         parsed,
+		Values:         values,
+		ResolvedValues: resolvedValues,
+		Snapshot:       snapshot,
+		Identity:       identity,
+		Warnings:       append(warnings, deprecatedWarnings...),
 	}, nil
+}
+
+func resolveApplicationDefaults(selected map[string]Entry, values map[string]any) (map[string]any, error) {
+	resolved := maps.Clone(values)
+	for path, entry := range selected {
+		if _, exists := resolved[path]; exists || entry.Default == nil {
+			continue
+		}
+		value, err := applicationDefaultValue(*entry.Default, entry.Type)
+		if err != nil {
+			return nil, ex.Wrapf(err, "decode default for %s", path)
+		}
+		resolved[path] = value
+	}
+	return resolved, nil
+}
+
+func applicationDefaultValue(defaultValue, typeName string) (any, error) {
+	if typeName == stringType {
+		return defaultValue, nil
+	}
+	var value any
+	if err := yaml.Unmarshal([]byte(defaultValue), &value); err != nil {
+		return nil, err
+	}
+	return value, nil
+}
+
+func configurationDefinitionIdentity(selected map[string]Entry) map[string]Entry {
+	identity := make(map[string]Entry, len(selected))
+	for path, entry := range selected {
+		entry.Source = ""
+		entry.DefinitionSource = ""
+		identity[path] = entry
+	}
+	return identity
 }
 
 func filterSelectedApplicationOptions(
