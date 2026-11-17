@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -89,6 +90,11 @@ func rootFlags() []cli.Flag {
 }
 
 func main() {
+	// cli/v3's Before/After run on the ctx that step derived, not on the ctx
+	// app.Run was called with, so this is the only way to get a value one of
+	// them computed back out to this function: captured by the After
+	// closure below, read after app.Run returns.
+	var deadlineCause error
 	app := cli.Command{
 		Name:        "otelc",
 		Usage:       "OpenTelemetry Go Compile-Time Instrumentation Tool",
@@ -104,6 +110,7 @@ func main() {
 		},
 		Before: initRoot,
 		After: func(ctx context.Context, cmd *cli.Command) error {
+			deadlineCause = deadlineCauseIfExceeded(ctx)
 			cancelDeadline(ctx)
 			return ex.Join(stopProfiling(ctx, cmd), closeLogger(ctx))
 		},
@@ -113,9 +120,20 @@ func main() {
 	defer stop()
 
 	err := app.Run(ctx, os.Args)
-	if err != nil {
+	if err = reportedErr(err, deadlineCause); err != nil {
 		ex.Fatal(err)
 	}
+}
+
+// reportedErr returns deadlineCause in place of runErr when one was
+// recorded: runErr is just the generic fallout of the context getting
+// canceled (e.g. "signal: killed" from the build command), not informative
+// about why, while deadlineCause names the setting to raise.
+func reportedErr(runErr, deadlineCause error) error {
+	if deadlineCause != nil {
+		return deadlineCause
+	}
+	return runErr
 }
 
 // initRoot prepares the process before any subcommand runs.
@@ -175,6 +193,20 @@ func cancelDeadline(ctx context.Context) {
 	if cancel, ok := ctx.Value(deadlineCancelKey{}).(context.CancelFunc); ok {
 		cancel()
 	}
+}
+
+// deadlineCauseIfExceeded returns the cause withDeadline attached to ctx,
+// naming the setting to raise, when ctx's own deadline is what ended the
+// command: ctx.Err() alone only ever reports the generic
+// context.DeadlineExceeded, not which configured limit triggered it.
+// Otherwise (no deadline, or the command failed for an unrelated reason
+// before any deadline passed) it returns nil, so the caller keeps the
+// command's own error.
+func deadlineCauseIfExceeded(ctx context.Context) error {
+	if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return nil
+	}
+	return context.Cause(ctx)
 }
 
 // initGoflags removes the GOFLAGS entries that the go commands otelc spawns

@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -325,6 +326,52 @@ func TestInitRoot(t *testing.T) {
 	})
 }
 
+// TestAppSurfacesDeadlineCause wires initDeadline/deadlineCauseIfExceeded/
+// cancelDeadline together the same way main's app does (Before derives the
+// context, Action can run past it, After reports the cause), the one path
+// deadlineCauseIfExceeded exists for: a build that otelc itself stopped on
+// --timeout must report why, not just the generic error its canceled
+// context left the build command with.
+func TestAppSurfacesDeadlineCause(t *testing.T) {
+	t.Setenv(util.EnvOtelcBuildDeadline, "")
+
+	var deadlineCause error
+	app := &cli.Command{
+		Name:   "otelc",
+		Flags:  rootFlags(),
+		Before: initDeadline,
+		Action: func(ctx context.Context, _ *cli.Command) error {
+			<-ctx.Done()
+			return errors.New("signal: killed")
+		},
+		After: func(ctx context.Context, _ *cli.Command) error {
+			deadlineCause = deadlineCauseIfExceeded(ctx)
+			cancelDeadline(ctx)
+			return nil
+		},
+	}
+
+	err := app.Run(t.Context(), []string{"otelc", "--timeout", "1ms", "go"})
+
+	if err == nil {
+		t.Fatal("app.Run() = nil error, want the build's own error")
+	}
+	if deadlineCause == nil {
+		t.Fatal("deadlineCause = nil, want the --timeout cause")
+	}
+	if !strings.Contains(deadlineCause.Error(), "--timeout") {
+		t.Errorf("deadlineCause = %q, want it to name --timeout", deadlineCause.Error())
+	}
+
+	// This is the exact call main() makes: a non-nil deadlineCause replaces
+	// the build's own generic error, so the user sees why, not
+	// "signal: killed".
+	finalErr := reportedErr(err, deadlineCause)
+	if finalErr != deadlineCause {
+		t.Errorf("reportedErr() = %v, want the deadline cause", finalErr)
+	}
+}
+
 func TestInitDeadline(t *testing.T) {
 	run := func(t *testing.T, args ...string) context.Context {
 		t.Helper()
@@ -404,6 +451,76 @@ func TestInitDeadline(t *testing.T) {
 		}
 		if !deadline.Equal(inherited) {
 			t.Errorf("deadline = %s, want the inherited %s", deadline, inherited)
+		}
+	})
+}
+
+func TestReportedErr(t *testing.T) {
+	runErr := errors.New("signal: killed")
+	cause := errors.New("the --timeout build timeout (1ms) elapsed")
+
+	t.Run("deadline cause wins when both are set", func(t *testing.T) {
+		if got := reportedErr(runErr, cause); got != cause {
+			t.Errorf("reportedErr() = %v, want the deadline cause", got)
+		}
+	})
+
+	t.Run("the run error passes through when there is no deadline cause", func(t *testing.T) {
+		if got := reportedErr(runErr, nil); got != runErr {
+			t.Errorf("reportedErr() = %v, want the run error", got)
+		}
+	})
+
+	t.Run("nil stays nil when the run succeeded and had no deadline", func(t *testing.T) {
+		if got := reportedErr(nil, nil); got != nil {
+			t.Errorf("reportedErr() = %v, want nil", got)
+		}
+	})
+}
+
+func TestDeadlineCauseIfExceeded(t *testing.T) {
+	t.Run("nil for a context with no deadline at all", func(t *testing.T) {
+		if got := deadlineCauseIfExceeded(context.Background()); got != nil {
+			t.Errorf("deadlineCauseIfExceeded() = %v, want nil", got)
+		}
+	})
+
+	t.Run("nil for a context canceled for an unrelated reason", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		if got := deadlineCauseIfExceeded(ctx); got != nil {
+			t.Errorf("deadlineCauseIfExceeded() = %v, want nil for a plain cancel", got)
+		}
+	})
+
+	t.Run("nil while the deadline has not actually passed yet", func(t *testing.T) {
+		ctx, err := withDeadline(context.Background(), time.Now().Add(time.Hour), "should not surface")
+		if err != nil {
+			t.Fatalf("withDeadline() error = %v", err)
+		}
+		defer cancelDeadline(ctx)
+
+		if got := deadlineCauseIfExceeded(ctx); got != nil {
+			t.Errorf("deadlineCauseIfExceeded() = %v, want nil before the deadline passes", got)
+		}
+	})
+
+	t.Run("surfaces the custom cause once the deadline passes", func(t *testing.T) {
+		const message = "the --timeout build timeout (1ms) elapsed"
+		ctx, err := withDeadline(context.Background(), time.Now().Add(time.Millisecond), message)
+		if err != nil {
+			t.Fatalf("withDeadline() error = %v", err)
+		}
+		defer cancelDeadline(ctx)
+		<-ctx.Done()
+
+		cause := deadlineCauseIfExceeded(ctx)
+		if cause == nil {
+			t.Fatal("deadlineCauseIfExceeded() = nil, want the cause withDeadline attached")
+		}
+		if cause.Error() != message {
+			t.Errorf("cause = %q, want %q", cause.Error(), message)
 		}
 	})
 }
