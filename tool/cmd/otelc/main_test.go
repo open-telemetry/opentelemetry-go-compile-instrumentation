@@ -372,6 +372,42 @@ func TestAppSurfacesDeadlineCause(t *testing.T) {
 	}
 }
 
+// TestAppKeepsContextLiveForTeardown mirrors main()'s exact After ordering:
+// capture deadlineCause, defer cancelDeadline, then run teardown (in main,
+// stopProfiling and closeLogger). A build that finishes well within its
+// --timeout must not have its context already canceled by the time
+// teardown runs, since stopProfiling's --profile-summary merge step starts
+// a real subprocess with that same ctx.
+func TestAppKeepsContextLiveForTeardown(t *testing.T) {
+	t.Setenv(util.EnvOtelcBuildDeadline, "")
+
+	var sawCanceledDuringTeardown bool
+	app := &cli.Command{
+		Name:   "otelc",
+		Flags:  rootFlags(),
+		Before: initDeadline,
+		Action: func(_ context.Context, _ *cli.Command) error {
+			return nil // the build finishes immediately, well inside --timeout
+		},
+		After: func(ctx context.Context, _ *cli.Command) error {
+			_ = deadlineCauseIfExceeded(ctx)
+			defer cancelDeadline(ctx)
+			// Stand-in for stopProfiling: any teardown step that still
+			// needs a live ctx (e.g. to start a subprocess) must run here,
+			// before the deferred cancelDeadline fires.
+			sawCanceledDuringTeardown = ctx.Err() != nil
+			return nil
+		},
+	}
+
+	if err := app.Run(t.Context(), []string{"otelc", "--timeout", "1h", "go"}); err != nil {
+		t.Fatalf("app.Run() error = %v", err)
+	}
+	if sawCanceledDuringTeardown {
+		t.Error("ctx was already canceled during teardown; cancelDeadline must run after, not before, it")
+	}
+}
+
 func TestInitDeadline(t *testing.T) {
 	run := func(t *testing.T, args ...string) context.Context {
 		t.Helper()

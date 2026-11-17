@@ -111,7 +111,11 @@ func main() {
 		Before: initRoot,
 		After: func(ctx context.Context, cmd *cli.Command) error {
 			deadlineCause = deadlineCauseIfExceeded(ctx)
-			cancelDeadline(ctx)
+			// Deferred: stopProfiling's --profile-summary merge step runs
+			// "go tool pprof" with this same ctx, which must still be live
+			// for that to start even when the build itself already
+			// finished within its deadline.
+			defer cancelDeadline(ctx)
 			return ex.Join(stopProfiling(ctx, cmd), closeLogger(ctx))
 		},
 	}
