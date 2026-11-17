@@ -995,7 +995,8 @@ func (lr *linkResolution) resolveMisses(
 // them, it resolves each root on its own. A root whose load fails alone lands
 // in the failed map, so one unresolvable candidate does not fail the whole
 // link, including when it is the only root left after the others are memoized.
-// An error is returned only when the context is done.
+// An error is returned when the context is done, and when a load fails with
+// an error that is not a candidate load failure, which aborts the link.
 func (lr *linkResolution) resolveBatch(
 	ctx context.Context,
 	roots []string,
