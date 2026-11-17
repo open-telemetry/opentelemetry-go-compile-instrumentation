@@ -89,6 +89,13 @@ func Logger() *slog.Logger {
 	return logger
 }
 
+// LogDebug logs msg at debug level with the package logger. Injected files
+// reach it by linkname when importing log/slog would add an import their
+// target package does not have.
+func LogDebug(msg string, args ...any) {
+	Logger().Debug(msg, args...)
+}
+
 // levelNone is above every slog level, so a handler set to it logs nothing.
 const levelNone = slog.Level(math.MaxInt)
 

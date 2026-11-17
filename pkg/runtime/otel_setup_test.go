@@ -4,6 +4,8 @@
 package runtime
 
 import (
+	"bytes"
+	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -17,6 +19,18 @@ func TestGetLogger(t *testing.T) {
 	// Should return the same instance (singleton)
 	logger2 := Logger()
 	assert.Equal(t, logger1, logger2)
+}
+
+func TestLogDebugUsesCurrentLogger(t *testing.T) {
+	var buf bytes.Buffer
+	origLogger := logger
+	t.Cleanup(func() { logger = origLogger })
+	logger = slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	LogDebug("span stack at capacity", "limit", 2)
+
+	assert.Contains(t, buf.String(), `"msg":"span stack at capacity"`)
+	assert.Contains(t, buf.String(), `"limit":2`)
 }
 
 func TestInstrumented(t *testing.T) {
