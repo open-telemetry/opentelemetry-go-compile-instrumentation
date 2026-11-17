@@ -885,6 +885,26 @@ func TestMatchesCallRule_UnqualifiedCallDoesNotMatch(t *testing.T) {
 	assert.False(t, matches)
 }
 
+func TestMatchesCallRule_ShadowedPackageDoesNotMatch(t *testing.T) {
+	r := &rule.InstCallRule{
+		ImportPath: "net/http",
+		FuncName:   "Get",
+	}
+	aliases := map[string]string{"http": "net/http"}
+
+	call := &dst.CallExpr{
+		Fun: &dst.SelectorExpr{
+			X:   &dst.Ident{Name: "http"},
+			Sel: &dst.Ident{Name: "Get"},
+		},
+	}
+	assert.True(t, matchesCallRule(call, r, aliases))
+
+	// A local declaration of the same name is in scope, so http is not the package.
+	call.Fun.(*dst.SelectorExpr).X.(*dst.Ident).Obj = &dst.Object{Kind: dst.Var, Name: "http"}
+	assert.False(t, matchesCallRule(call, r, aliases))
+}
+
 func TestMatchesCallRule_WrongPackage(t *testing.T) {
 	r := &rule.InstCallRule{
 		ImportPath: "net/http",

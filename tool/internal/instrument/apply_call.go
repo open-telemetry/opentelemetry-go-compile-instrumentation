@@ -367,6 +367,14 @@ func matchesCallRule(call *dst.CallExpr, r *rule.InstCallRule, importAliases map
 		return false
 	}
 
+	// A local variable, parameter or receiver that has the name of an imported
+	// package shadows the import: its methods are not the package's functions.
+	// The parser resolves such a name to the declaration in scope, and leaves
+	// the name of a package unresolved.
+	if ident.Obj != nil {
+		return false
+	}
+
 	// Check that the package's import path matches the rule's import path.
 	pkgPath := ident.Path
 	if pkgPath != "" {
