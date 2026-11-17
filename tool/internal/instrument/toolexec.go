@@ -992,9 +992,11 @@ func (lr *linkResolution) resolveMisses(
 // resolveBatch runs one nested go list for the roots. When that load fails as
 // a whole, as it does when go list cannot resolve one root's module (for
 // example "updates to go.mod needed") and so returns no packages for any of
-// them, it resolves each root on its own. A root whose load fails alone lands
-// in the failed map, so one unresolvable candidate does not fail the whole
-// link, including when it is the only root left after the others are memoized.
+// them, it splits the roots in two halves and resolves each half the same
+// way. A root whose load fails alone lands in the failed map, so one
+// unresolvable candidate does not fail the whole link, including when it is
+// the only root left after the others are memoized. Splitting costs about two
+// loads per halving for each failing root, instead of one load per root.
 // An error is returned when the context is done, and when a load fails with
 // an error that is not a candidate load failure, which aborts the link.
 func (lr *linkResolution) resolveBatch(
@@ -1009,38 +1011,28 @@ func (lr *linkResolution) resolveBatch(
 		return loadErr
 	})
 	lr.goListCalls++
-	if err == nil || ctx.Err() != nil || errors.Is(err, context.Canceled) ||
-		errors.Is(err, context.DeadlineExceeded) {
-		return resolved, resolveFailed, err
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, nil, ctxErr
+	}
+	if err == nil {
+		return resolved, resolveFailed, nil
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+		!candidateLoadFailure(err) {
+		return nil, nil, err
 	}
 	if len(roots) == 1 {
-		if !candidateLoadFailure(err) {
-			return nil, nil, err
-		}
 		return nil, map[string]error{roots[0]: err}, nil
 	}
 
 	resolved = make(map[string]map[string]string, len(roots))
 	resolveFailed = make(map[string]error)
-	for _, root := range roots {
-		var one map[string]map[string]string
-		var oneFailed map[string]error
-		rootErr := session.WithLoadSlot(ctx, func(ctx context.Context) error {
-			var loadErr error
-			one, oneFailed, loadErr = lr.resolve(ctx, []string{root}, lr.buildFlags...)
-			return loadErr
-		})
-		lr.goListCalls++
-		if ctx.Err() != nil {
-			return nil, nil, ctx.Err()
-		}
-		if rootErr != nil {
-			if errors.Is(rootErr, context.Canceled) || errors.Is(rootErr, context.DeadlineExceeded) ||
-				!candidateLoadFailure(rootErr) {
-				return nil, nil, rootErr
-			}
-			resolveFailed[root] = rootErr
-			continue
+	const halves = 2
+	mid := len(roots) / halves
+	for _, half := range [][]string{roots[:mid], roots[mid:]} {
+		one, oneFailed, halfErr := lr.resolveBatch(ctx, half)
+		if halfErr != nil {
+			return nil, nil, halfErr
 		}
 		maps.Copy(resolved, one)
 		maps.Copy(resolveFailed, oneFailed)

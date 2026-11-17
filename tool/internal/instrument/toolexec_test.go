@@ -2603,6 +2603,88 @@ func TestLinkResolutionSkipsGoModUpdateFailure(t *testing.T) {
 	}
 }
 
+// TestLinkResolutionSplitsFailedBatch covers a batch of many roots that fails
+// as a whole because of one root. The roots are split in halves until the
+// failing root is alone, so the link lists far fewer batches than one per
+// root, and every other root still resolves.
+func TestLinkResolutionSplitsFailedBatch(t *testing.T) {
+	adds := make([]string, 0, 16)
+	for i := range 15 {
+		adds = append(adds, "example.com/extra"+strconv.Itoa(i))
+	}
+	adds = append(adds, "example.invalid/tidy")
+	setupLinkMemo(t, adds...)
+	resolver := &goModTidyResolver{
+		inner: &countingResolver{dir: t.TempDir()},
+		tidy:  map[string]bool{"example.invalid/tidy": true},
+	}
+
+	cfg := freshLinkConfig()
+	updated, err := resolveRuleAddedImportsWith(t.Context(), nil, cfg, resolver.resolve)
+	require.NoError(t, err)
+	assert.True(t, updated)
+	for _, path := range adds[:15] {
+		assert.Contains(t, cfg.PackageFile, path)
+	}
+	assert.NotContains(t, cfg.PackageFile, "example.invalid/tidy")
+	// One batch, then two halves at each of the four levels down to the
+	// failing root: 1 + 2*4, against 1 + 16 when each root loads alone.
+	assert.Equal(t, 9, resolver.calls)
+}
+
+// TestLinkResolutionReturnsContextErrorAfterLastSplitLoad covers the context
+// ending during the last load of a split batch while that load succeeds. The
+// link must fail with the context error instead of storing the results.
+func TestLinkResolutionReturnsContextErrorAfterLastSplitLoad(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra", "example.com/other")
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	inner := &countingResolver{dir: t.TempDir()}
+	calls := 0
+	resolver := func(
+		ctx context.Context, roots []string, flags ...string,
+	) (map[string]map[string]string, map[string]error, error) {
+		calls++
+		if len(roots) > 1 {
+			return nil, nil, errors.New("no packages found for " + strings.Join(roots, ", "))
+		}
+		if calls == 3 {
+			cancel()
+		}
+		return inner.resolve(ctx, roots, flags...)
+	}
+
+	_, err := resolveRuleAddedImportsWith(ctx, nil, freshLinkConfig(), resolver)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, 3, calls)
+}
+
+// TestLinkResolutionFailsOnNonLoadErrorFromSplitBatch covers a split batch
+// whose half fails for a reason other than a candidate load failure. That
+// error must fail the link at once, without splitting the half further.
+func TestLinkResolutionFailsOnNonLoadErrorFromSplitBatch(t *testing.T) {
+	setupLinkMemo(t, "example.com/a", "example.com/b", "example.com/c", "example.com/d")
+	boom := errors.New("go list: unexpected failure")
+	inner := &countingResolver{dir: t.TempDir()}
+	calls := 0
+	resolver := func(
+		ctx context.Context, roots []string, flags ...string,
+	) (map[string]map[string]string, map[string]error, error) {
+		calls++
+		switch calls {
+		case 1:
+			return nil, nil, errors.New("no packages found for " + strings.Join(roots, ", "))
+		case 2:
+			return nil, nil, boom
+		}
+		return inner.resolve(ctx, roots, flags...)
+	}
+
+	_, err := resolveRuleAddedImportsWith(t.Context(), nil, freshLinkConfig(), resolver)
+	require.ErrorIs(t, err, boom)
+	assert.Equal(t, 2, calls, "no load may follow the unexpected error")
+}
+
 func TestLinkResolutionReturnsContextErrorForLoneCandidate(t *testing.T) {
 	setupLinkMemo(t, "example.invalid/bad")
 	resolver := func(context.Context, []string, ...string) (map[string]map[string]string, map[string]error, error) {
