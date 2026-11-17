@@ -627,13 +627,17 @@ func TestNewResourceIncludesService(t *testing.T) {
 }
 
 func TestNewResourceServiceNameFromEnv(t *testing.T) {
+	resetResourceDetectors(t)
 	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "")
 	t.Setenv("OTEL_SERVICE_NAME", "checkout")
 
+	require.True(t, RegisterResourceDetector("service", staticDetector(
+		attribute.String("service.name", "from-detector"),
+	)))
+
 	res := newResource(context.Background())
-	name, ok := res.Set().Value(attribute.Key("service.name"))
-	require.True(t, ok)
-	assert.Equal(t, "checkout", name.AsString())
+	assert.Equal(t, "checkout", resourceValue(t, res, "service.name"),
+		"OTEL_SERVICE_NAME overrides the built-in and registered detectors")
 }
 
 func TestNewResourceKeepsDetectedAttributesOnError(t *testing.T) {
