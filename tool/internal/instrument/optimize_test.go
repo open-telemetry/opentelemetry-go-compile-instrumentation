@@ -406,13 +406,13 @@ func assertStringField(t *testing.T, expr dst.Expr, key, want string) {
 	lit, ok := unary.X.(*dst.CompositeLit)
 	require.True(t, ok)
 	for _, elt := range lit.Elts {
-		kv, ok := elt.(*dst.KeyValueExpr)
-		require.True(t, ok)
+		kv, isKeyValue := elt.(*dst.KeyValueExpr)
+		require.True(t, isKeyValue)
 		if kv.Key.(*dst.Ident).Name != key {
 			continue
 		}
-		basic, ok := kv.Value.(*dst.BasicLit)
-		require.True(t, ok)
+		basic, isBasicLit := kv.Value.(*dst.BasicLit)
+		require.True(t, isBasicLit)
 		assert.Equal(t, strconv.Quote(want), basic.Value)
 		return
 	}
