@@ -202,6 +202,11 @@ func (sp *setupPhase) storeInjectedHash(ctx context.Context, matched []*rule.Ins
 // source files of their add_file rules, and the dependencies of both.
 func (sp *setupPhase) injectedHash(ctx context.Context, matched []*rule.InstRuleSet) (string, error) {
 	h := sha256.New()
+	if identity := sp.validatedApplicationConfig.Identity; len(identity) > 0 {
+		_, _ = h.Write([]byte("application-configuration\n"))
+		_, _ = h.Write(identity)
+		_, _ = h.Write([]byte("\n"))
+	}
 	var paths []string
 	for _, set := range matched {
 		paths = appendRuleImports(paths, set.RawRules)

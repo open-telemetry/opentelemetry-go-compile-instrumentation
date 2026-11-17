@@ -37,6 +37,28 @@ instrumentation/development:
 	assert.Equal(t, "1.2", validated.Parsed.FileFormat)
 	assert.Equal(t, []any{"x-request-id"}, validated.Values["general.http.client.request_captured_headers"])
 	assert.Equal(t, true, validated.Values["go.my_instrumentation.enabled"])
+	assert.Equal(t, []any{"x-request-id"}, validated.ResolvedValues["general.http.client.request_captured_headers"])
+	assert.Equal(t, true, validated.ResolvedValues["go.my_instrumentation.enabled"])
+	assert.NotEmpty(t, validated.Snapshot)
+	assert.NotEmpty(t, validated.Identity)
+}
+
+func TestValidateApplicationOptionsAppliesMetadataDefaults(t *testing.T) {
+	app, err := ParseApplicationConfiguration([]byte(`file_format: "1.2"
+instrumentation/development:
+  go:
+    sample:
+      labels: []
+`), "app.yaml")
+	require.NoError(t, err)
+	validated, err := ValidateApplicationOptions(app, []Entry{
+		{Name: "go.sample.enabled", Type: booleanType, Default: new("true")},
+		{Name: "go.sample.labels", Type: listType},
+	}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, true, validated.ResolvedValues["go.sample.enabled"])
+	assert.Equal(t, []any{}, validated.ResolvedValues["go.sample.labels"])
+	assert.NotContains(t, validated.Values, "go.sample.enabled")
 }
 
 func TestParseApplicationConfigurationExpandsEnvironmentDuringSetup(t *testing.T) {

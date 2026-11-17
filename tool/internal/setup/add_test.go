@@ -597,6 +597,23 @@ func TestAddDepsRuntimeFileIsStable(t *testing.T) {
 	}
 }
 
+func TestAddDepsEmbedsApplicationConfiguration(t *testing.T) {
+	sp := newTestSetupPhase()
+	sp.validatedApplicationConfig.Snapshot = []byte(`{"go.sample.enabled":true}`)
+	outDir := t.TempDir()
+
+	require.NoError(t, sp.addDeps(t.Context(), nil, runtimePackage{
+		dir:  outDir,
+		name: "main",
+	}))
+
+	content, err := os.ReadFile(filepath.Join(outDir, otelcRuntimeFile))
+	require.NoError(t, err)
+	assert.Contains(t, string(content), `go.opentelemetry.io/otelc/pkg/runtime`)
+	assert.Contains(t, string(content), `RegisterConfiguration`)
+	assert.Contains(t, string(content), `go.sample.enabled`)
+}
+
 func TestAddDeps_FileRuleDoesNotBlankImportSourceImports(t *testing.T) {
 	fileRule := &rule.InstFileRule{
 		InstBaseRule: rule.InstBaseRule{

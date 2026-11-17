@@ -77,6 +77,21 @@ func genImportDecl(funcRules []*rule.InstFuncRule, fileRules []*rule.InstFileRul
 	return importDecls
 }
 
+func genConfigurationDecl(snapshot []byte) ([]dst.Decl, error) {
+	if len(snapshot) == 0 {
+		return nil, nil
+	}
+	parser := ast.NewAstParser()
+	file, err := parser.ParseSource(fmt.Sprintf(
+		"package generated\n\nfunc init() { _otel_runtime.RegisterConfiguration(%q) }\n",
+		string(snapshot),
+	))
+	if err != nil {
+		return nil, ex.Wrapf(err, "generate embedded application configuration")
+	}
+	return file.Decls, nil
+}
+
 // genVarDecl declares the stack helper variables for each hook package and an
 // init function that assigns them.
 //
@@ -439,17 +454,26 @@ func (sp *setupPhase) addDeps(
 		return err
 	}
 
-	if len(funcRules) == 0 && len(fileRules) == 0 {
+	if len(funcRules) == 0 && len(fileRules) == 0 && len(sp.validatedApplicationConfig.Snapshot) == 0 {
 		return sp.removeRuntimeFile(ctx, pkg.dir)
 	}
 
 	// Add required imports.
 	importDecls := genImportDecl(funcRules, fileRules)
+	var configurationDecls []dst.Decl
+	if len(sp.validatedApplicationConfig.Snapshot) > 0 {
+		importDecls = append(importDecls, ast.ImportDecl("_otel_runtime", "go.opentelemetry.io/otelc/pkg/runtime"))
+		var err error
+		configurationDecls, err = genConfigurationDecl(sp.validatedApplicationConfig.Snapshot)
+		if err != nil {
+			return err
+		}
+	}
 
 	// Generate the variable declarations used by the runtime.
 	varDecls := genVarDecl(funcRules)
 
-	root := buildOtelcRuntimeAst(append(importDecls, varDecls...), pkg.name)
+	root := buildOtelcRuntimeAst(append(append(importDecls, varDecls...), configurationDecls...), pkg.name)
 	otelcRuntimeFilePath := filepath.Join(pkg.dir, otelcRuntimeFile)
 
 	// Track the file in the state manager.
