@@ -167,32 +167,46 @@ func parseEntry(node *yaml.Node, source string) (Entry, error) {
 		return Entry{}, ex.Newf("%s: a ref entry must not include inline configuration fields", source)
 	}
 
-	entry := Entry{}
-	for _, field := range []struct {
-		name        string
-		destination *string
-	}{
-		{name: "name", destination: &entry.Name},
-		{name: "ref", destination: &entry.Ref},
-		{name: "description", destination: &entry.Description},
-		{name: "type", destination: &entry.Type},
-		{name: "default_behavior", destination: &entry.DefaultBehavior},
-	} {
-		value, present, fieldErr := stringField(fields, field.name, source)
-		if fieldErr != nil {
-			return Entry{}, fieldErr
-		}
-		if present {
-			*field.destination = value
+	var decoded struct {
+		Name            string `yaml:"name"`
+		Ref             string `yaml:"ref"`
+		Description     string `yaml:"description"`
+		Type            string `yaml:"type"`
+		DefaultBehavior string `yaml:"default_behavior"`
+	}
+	if decodeErr := node.Decode(&decoded); decodeErr != nil {
+		return Entry{}, ex.Wrapf(decodeErr, "%s: decode configuration entry", source)
+	}
+	entry := Entry{
+		Name:            decoded.Name,
+		Ref:             decoded.Ref,
+		Description:     decoded.Description,
+		Type:            decoded.Type,
+		DefaultBehavior: decoded.DefaultBehavior,
+	}
+	for _, name := range []string{"name", "ref", "description", "type", "default_behavior"} {
+		if field, present := fields[name]; present {
+			if _, fieldErr := scalarString(field, source+"."+name); fieldErr != nil {
+				return Entry{}, fieldErr
+			}
 		}
 	}
-
+	selector, value := "name", entry.Name
+	if hasRef {
+		selector, value = "ref", entry.Ref
+	}
+	if strings.TrimSpace(value) == "" {
+		return Entry{}, ex.Newf("%s: %s must not be empty", source, selector)
+	}
+	if strings.TrimSpace(value) != value {
+		return Entry{}, ex.Newf("%s: %s must not have leading or trailing whitespace", source, selector)
+	}
 	if defaultNode, ok := fields["default"]; ok {
-		value, defaultErr := defaultString(defaultNode, source+".default")
+		defaultValue, defaultErr := defaultString(defaultNode, source+".default")
 		if defaultErr != nil {
 			return Entry{}, defaultErr
 		}
-		entry.Default = &value
+		entry.Default = &defaultValue
 	}
 
 	if examplesNode, ok := fields["examples"]; ok {
@@ -215,21 +229,11 @@ func parseEntry(node *yaml.Node, source string) (Entry, error) {
 		}
 	}
 	if replacedByNode, ok := fields["replaced_by"]; ok {
-		value, stringErr := scalarString(replacedByNode, source+".replaced_by")
+		replacementValue, stringErr := scalarString(replacedByNode, source+".replaced_by")
 		if stringErr != nil {
 			return Entry{}, stringErr
 		}
-		entry.ReplacedBy = &value
-	}
-	selector, value := "name", entry.Name
-	if hasRef {
-		selector, value = "ref", entry.Ref
-	}
-	if strings.TrimSpace(value) == "" {
-		return Entry{}, ex.Newf("%s: %s must not be empty", source, selector)
-	}
-	if strings.TrimSpace(value) != value {
-		return Entry{}, ex.Newf("%s: %s must not have leading or trailing whitespace", source, selector)
+		entry.ReplacedBy = &replacementValue
 	}
 	return entry, nil
 }
@@ -450,15 +454,22 @@ func parseSchema(node *yaml.Node, source string) (*Schema, error) {
 	if err != nil {
 		return nil, err
 	}
-	typeValue, present, err := stringField(fields, "type", source)
+	var decoded struct {
+		Type string `yaml:"type"`
+	}
+	if err = node.Decode(&decoded); err != nil {
+		return nil, ex.Wrapf(err, "%s: decode schema", source)
+	}
+	typeNode, ok := fields["type"]
+	if !ok {
+		return nil, ex.Newf("%s: type is required", source)
+	}
+	typeValue, err := scalarString(typeNode, source+".type")
 	if err != nil {
 		return nil, err
 	}
-	if !present {
-		return nil, ex.Newf("%s: type is required", source)
-	}
-	propertiesNode, present := fields["properties"]
-	if !present {
+	propertiesNode, ok := fields["properties"]
+	if !ok {
 		return nil, ex.Newf("%s: properties is required", source)
 	}
 	propertiesFields, err := mappingFields(propertiesNode, source+".properties", nil)
@@ -466,7 +477,7 @@ func parseSchema(node *yaml.Node, source string) (*Schema, error) {
 		return nil, err
 	}
 	schema := &Schema{Type: typeValue, Properties: make(map[string]Property, len(propertiesFields))}
-	if requiredNode, ok := fields["required"]; ok {
+	if requiredNode, requiredPresent := fields["required"]; requiredPresent {
 		schema.Required, err = stringSequence(requiredNode, source+".required")
 		if err != nil {
 			return nil, err
@@ -503,28 +514,37 @@ func parseProperty(node *yaml.Node, source string) (Property, error) {
 	if err != nil {
 		return Property{}, err
 	}
-	typeValue, present, err := stringField(fields, "type", source)
+	var decoded struct {
+		Type        string `yaml:"type"`
+		Description string `yaml:"description"`
+	}
+	err = node.Decode(&decoded)
+	if err != nil {
+		return Property{}, ex.Wrapf(err, "%s: decode property", source)
+	}
+	typeNode, ok := fields["type"]
+	if !ok {
+		return Property{}, ex.Newf("%s: type is required", source)
+	}
+	typeValue, err := scalarString(typeNode, source+".type")
 	if err != nil {
 		return Property{}, err
 	}
-	if !present {
-		return Property{}, ex.Newf("%s: type is required", source)
-	}
-	property := Property{Type: typeValue}
-	if descriptionNode, ok := fields["description"]; ok {
+	property := Property{Type: typeValue, Description: decoded.Description}
+	if descriptionNode, descriptionPresent := fields["description"]; descriptionPresent {
 		property.Description, err = scalarString(descriptionNode, source+".description")
 		if err != nil {
 			return Property{}, err
 		}
 	}
-	if defaultNode, ok := fields["default"]; ok {
+	if defaultNode, defaultPresent := fields["default"]; defaultPresent {
 		property.Default, err = yamlNodeValue(defaultNode, source+".default")
 		if err != nil {
 			return Property{}, err
 		}
 		property.hasDefault = true
 	}
-	if exampleNode, ok := fields["example"]; ok {
+	if exampleNode, examplePresent := fields["example"]; examplePresent {
 		property.Example, err = yamlNodeValue(exampleNode, source+".example")
 		if err != nil {
 			return Property{}, err
@@ -535,6 +555,8 @@ func parseProperty(node *yaml.Node, source string) (Property, error) {
 }
 
 func mappingFields(node *yaml.Node, source string, allowed map[string]struct{}) (map[string]*yaml.Node, error) {
+	// yaml.Node is needed here to reject duplicate keys before decoding into Go
+	// maps and to report unknown fields at the precise metadata path.
 	if node.Kind != yaml.MappingNode {
 		return nil, ex.Newf("%s: expected a mapping", source)
 	}
@@ -556,15 +578,6 @@ func mappingFields(node *yaml.Node, source string, allowed map[string]struct{}) 
 		fields[key] = valueNode
 	}
 	return fields, nil
-}
-
-func stringField(fields map[string]*yaml.Node, name, source string) (string, bool, error) {
-	node, ok := fields[name]
-	if !ok {
-		return "", false, nil
-	}
-	value, err := scalarString(node, source+"."+name)
-	return value, true, err
 }
 
 func scalarString(node *yaml.Node, source string) (string, error) {

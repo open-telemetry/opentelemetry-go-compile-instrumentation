@@ -37,22 +37,26 @@ otelc revision it scans, resolves refs, and preserves the original `ref` alongsi
 the resolved fields in inventory. Source-entry exclusivity does not apply to
 those resolved records.
 
-`general.*` is generated offline from `upstream-instrumentation.yaml`, copied
-byte-for-byte from OpenTelemetry Configuration **v1.2.0**, commit
+`general.*` is generated from OpenTelemetry Configuration **v1.2.0**, commit
 `3b04ae78576ec407854d734eb4da4f78a67f902c`, `schema/instrumentation.yaml`.
-The source SHA-256 and the generated catalog contents are checked by tests.
+`gen-config-catalog` fetches that immutable URL and verifies its SHA-256 before
+generation. The upstream schema is not embedded in the runtime package. Tests
+exercise generation with small in-memory schema fixtures and do not use the
+network.
 Names preserve property paths: `instrumentation/development` is the enclosing
 root, so `/development` is not added to each general leaf. The snapshot also
 retains upstream constraints for subsequent application-configuration validation;
 this metadata catalog projects leaf names, types, descriptions, and default behavior.
 
-`general-compatibility.yaml` records deprecated `general.*` paths. For a path
+`general-compatibility.yaml` (owned by the generator under
+`tool/cmd/gen-config-catalog/`) records deprecated `general.*` paths. For a path
 still present upstream, the entry supplies its type and deprecation metadata;
 generation preserves the upstream description and default behavior. A retired
 path must include its complete definition. The generator compares the previous
 catalog with its output and fails if a prior path would disappear without a
 compatibility entry. Add otelc-owned `go.*` definitions, including any deprecated
-ones, to `go-configurations.yaml`; all three sources are combined by `go generate`.
+ones, to `tool/cmd/gen-config-catalog/go-configurations.yaml`; the generator
+combines both sources with the pinned upstream schema.
 
 After changing either source file, regenerate and test the catalog:
 
@@ -60,7 +64,12 @@ After changing either source file, regenerate and test the catalog:
 go generate ./tool/internal/configuration
 make format/yaml
 go test ./tool/internal/configuration
+go test ./tool/cmd/gen-config-catalog
 ```
+
+Catalog generation requires network access to fetch the pinned immutable upstream
+schema. Tests use fixture schemas and remain offline. The generated `catalog.yaml`
+is embedded by otelc; the source schemas and generator are not.
 
 Updating the upstream release requires updating the source snapshot, provenance
 constants, and checksum test together, reviewing changes to types and paths, and

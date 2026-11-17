@@ -19,9 +19,7 @@ import (
 const (
 	OpenTelemetryConfigurationRepository = "open-telemetry/opentelemetry-configuration"
 	// OpenTelemetryConfigurationRelease and OpenTelemetryConfigurationCommit pin
-	// the schema snapshot from which the catalog's general.* definitions were
-	// derived. Keep the catalog offline and reproducible; update these together
-	// only when intentionally refreshing the checked-in catalog.
+	// the schema source used to generate catalog.yaml.
 	OpenTelemetryConfigurationRelease = "v1.2.0"
 	OpenTelemetryConfigurationCommit  = "3b04ae78576ec407854d734eb4da4f78a67f902c"
 	OpenTelemetryConfigurationFile    = "schema/instrumentation.yaml"
@@ -113,6 +111,9 @@ func ParseCatalog(data []byte) (map[string]Entry, error) {
 }
 
 func catalogDefinitionNodes(document *yaml.Node) (map[string]*yaml.Node, error) {
+	// Keep the catalog envelope as YAML nodes until duplicate and unknown keys
+	// are rejected. Decoding definitions straight into a Go map would silently
+	// overwrite duplicate configuration paths.
 	if len(document.Content) != 1 {
 		return nil, ex.New("configuration catalog must be a mapping")
 	}

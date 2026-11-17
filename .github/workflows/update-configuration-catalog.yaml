@@ -1,0 +1,111 @@
+name: Update Configuration Catalog
+
+on:
+  schedule:
+    - cron: "0 8 1,15 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    name: Check upstream configuration release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      release: ${{ steps.source.outputs.release }}
+      commit: ${{ steps.source.outputs.commit }}
+      checksum: ${{ steps.source.outputs.checksum }}
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+        with:
+          persist-credentials: false
+      - name: Get latest stable release and schema checksum
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_REPOSITORY: open-telemetry/opentelemetry-configuration
+        run: |
+          set -euo pipefail
+          release=$(gh api "repos/${UPSTREAM_REPOSITORY}/releases/latest" --jq '.tag_name')
+          if [[ ! "${release}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Unexpected upstream release tag: ${release}"
+            exit 1
+          fi
+          commit=$(gh api "repos/${UPSTREAM_REPOSITORY}/commits/${release}" --jq '.sha')
+          schema_url="https://raw.githubusercontent.com/${UPSTREAM_REPOSITORY}/${commit}/schema/instrumentation.yaml"
+          curl --fail --silent --show-error --location --max-time 30 "${schema_url}" --output "${RUNNER_TEMP}/instrumentation.yaml"
+          checksum=$(sha256sum "${RUNNER_TEMP}/instrumentation.yaml" | cut -d ' ' -f 1)
+          echo "release=${release}" >> "${GITHUB_OUTPUT}"
+          echo "commit=${commit}" >> "${GITHUB_OUTPUT}"
+          echo "checksum=${checksum}" >> "${GITHUB_OUTPUT}"
+
+  propose-update:
+    name: Generate and propose catalog update
+    needs: [update]
+    runs-on: ubuntu-latest
+    if: needs.update.outputs.release != ''
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Update pinned upstream source
+        env:
+          RELEASE: ${{ needs.update.outputs.release }}
+          COMMIT: ${{ needs.update.outputs.commit }}
+          CHECKSUM: ${{ needs.update.outputs.checksum }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import re
+          import sys
+
+          replacements = [
+              (pathlib.Path("tool/internal/configuration/definitions.go"),
+               r'(OpenTelemetryConfigurationRelease\s*=\s*)"[^"]+"', os.environ["RELEASE"]),
+              (pathlib.Path("tool/internal/configuration/definitions.go"),
+               r'(OpenTelemetryConfigurationCommit\s*=\s*)"[^"]+"', os.environ["COMMIT"]),
+              (pathlib.Path("tool/cmd/gen-config-catalog/main.go"),
+               r'(upstreamSchemaSHA\s*=\s*)"[^"]+"', os.environ["CHECKSUM"]),
+          ]
+          for path, pattern, value in replacements:
+              text = path.read_text()
+              updated, count = re.subn(pattern, lambda match: match.group(1) + f'"{value}"', text, count=1)
+              if count != 1:
+                  print(f"expected one pinned value in {path}", file=sys.stderr)
+                  sys.exit(1)
+              path.write_text(updated)
+          PY
+      - name: Regenerate and validate catalog
+        run: |
+          go generate ./tool/internal/configuration
+          make format/yaml
+          go test ./tool/internal/configuration ./tool/cmd/gen-config-catalog
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510  # v3.3.0
+        id: app-token
+        with:
+          client-id: ${{ vars.OTELBOT_COMPILE_INSTRUMENTATION_CLIENT_ID }}
+          private-key: ${{ secrets.OTELBOT_COMPILE_INSTRUMENTATION_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676  # v7
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          branch: automation/configuration-catalog-${{ needs.update.outputs.release }}
+          delete-branch: true
+          commit-message: "chore(config): update catalog to ${{ needs.update.outputs.release }}"
+          title: "chore(config): update configuration catalog to ${{ needs.update.outputs.release }}"
+          body: |
+            Refresh the pinned OpenTelemetry Configuration schema and generated catalog to `${{ needs.update.outputs.release }}`.
+
+            The catalog generator fetched the immutable upstream commit `${{ needs.update.outputs.commit }}` and verified SHA-256 `${{ needs.update.outputs.checksum }}`. Review removed and changed definitions for compatibility before merging.
+          labels: scope:chore
