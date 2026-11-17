@@ -454,25 +454,48 @@ func TestMalformedTitlesAndMetadata(t *testing.T) {
 }
 
 func TestEmptyOrMissingWhatsChanged(t *testing.T) {
-	t.Run("missing section", func(t *testing.T) {
-		input := "Just some random release notes without any section heading."
-		_, err := curateReleaseNotes(context.Background(), input, nil)
+	t.Run("blank input", func(t *testing.T) {
+		_, err := curateReleaseNotes(context.Background(), "   \n\t ", nil)
 		if err == nil {
-			t.Fatal("expected error for missing section, got nil")
+			t.Fatal("expected error for blank input, got nil")
 		}
-		if !strings.Contains(err.Error(), `missing "## What's Changed" section`) {
+		if !strings.Contains(err.Error(), "release notes input is empty") {
 			t.Errorf("unexpected error message: %v", err)
 		}
 	})
 
-	t.Run("empty section", func(t *testing.T) {
-		input := "## What's Changed\n\n## New Contributors\n* @user contributed\n"
-		_, err := curateReleaseNotes(context.Background(), input, nil)
-		if err == nil {
-			t.Fatal("expected error for empty section, got nil")
+	t.Run("missing section", func(t *testing.T) {
+		input := "**Full Changelog**: https://github.com/org/repo/compare/v1.2.0...v1.2.1\n"
+		var logBuf bytes.Buffer
+		testLogger := log.New(&logBuf, "", 0)
+
+		curated, err := curateReleaseNotesWithLogger(context.Background(), input, nil, testLogger)
+		if err != nil {
+			t.Fatalf("unexpected error for missing section: %v", err)
 		}
-		if !strings.Contains(err.Error(), `empty`) || !strings.Contains(err.Error(), `no pull requests found`) {
-			t.Errorf("unexpected error message: %v", err)
+		if curated != input {
+			t.Errorf("expected input to be preserved.\nGot:\n%q\nExpected:\n%q", curated, input)
+		}
+		if !strings.Contains(logBuf.String(), `no "## What's Changed" section found`) {
+			t.Errorf("expected diagnostic log, got: %q", logBuf.String())
+		}
+	})
+
+	t.Run("empty section", func(t *testing.T) {
+		input := "Preamble\n\n## What's Changed\n\n## New Contributors\n* @user contributed\n"
+		expected := "## What's Changed\n\n## New Contributors\n* @user contributed\n"
+		var logBuf bytes.Buffer
+		testLogger := log.New(&logBuf, "", 0)
+
+		curated, err := curateReleaseNotesWithLogger(context.Background(), input, nil, testLogger)
+		if err != nil {
+			t.Fatalf("unexpected error for empty section: %v", err)
+		}
+		if curated != expected {
+			t.Errorf("expected verbatim tail to be preserved.\nGot:\n%q\nExpected:\n%q", curated, expected)
+		}
+		if !strings.Contains(logBuf.String(), `no pull requests found in "## What's Changed"`) {
+			t.Errorf("expected diagnostic log, got: %q", logBuf.String())
 		}
 	})
 }
