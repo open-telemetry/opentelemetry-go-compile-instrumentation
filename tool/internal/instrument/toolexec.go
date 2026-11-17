@@ -1004,7 +1004,8 @@ func (lr *linkResolution) resolveBatch(
 		return loadErr
 	})
 	lr.goListCalls++
-	if err == nil || ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if err == nil || ctx.Err() != nil || errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded) {
 		return resolved, resolveFailed, err
 	}
 	if len(roots) == 1 {
@@ -1164,7 +1165,12 @@ func (l *linkRuleImports) candidates(linkConfig *imports.ImportConfig) map[strin
 // collectRuleSetImports adds to paths every import a rule set can add to
 // its target package's compile: the imports each rule declares, plus the
 // imports of the source files the set's add_file rules insert.
-func collectRuleSetImports(ctx context.Context, bctx *build.Context, paths map[string]struct{}, set *rule.InstRuleSet) {
+func collectRuleSetImports(
+	ctx context.Context,
+	bctx *build.Context,
+	paths map[string]struct{},
+	set *rule.InstRuleSet,
+) {
 	addImportsOf(paths, set.RawRules)
 	addImportsOf(paths, set.FuncRules)
 	addImportsOf(paths, set.StructRules)
