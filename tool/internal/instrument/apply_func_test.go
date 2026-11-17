@@ -720,6 +720,30 @@ func HookedFunc(p1 string) {}
 		assert.Contains(t, src, `"runtime"`)
 		assert.Contains(t, src, "runtime.HooksSuppressed()")
 	})
+
+	t.Run("file already uses the name runtime for another package", func(t *testing.T) {
+		root := parseFile(t, `package main
+
+import runtime "example.com/app/runtime"
+
+var _ = runtime.Start
+
+func HookedFunc(p1 string) {}
+`)
+		ip := newTestPhase()
+		ip.target = root
+		ip.parser = ast.NewAstParser()
+		ip.buildUsesIgnoreDirective = true
+
+		funcDecl := findFuncDeclInFile(t, root, "HookedFunc")
+		_, err := ip.applyFuncRule(context.Background(), funcRule, root, funcDecl, true)
+		require.NoError(t, err)
+
+		src := renderFile(t, root)
+		assert.Contains(t, src, `otelcRuntime "runtime"`)
+		assert.Contains(t, src, "otelcRuntime.HooksSuppressed()")
+		assert.Contains(t, src, `runtime "example.com/app/runtime"`)
+	})
 }
 
 func TestInstrumentFile_FindFuncDeclErrorIsWrapped(t *testing.T) {

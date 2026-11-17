@@ -7,12 +7,16 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 func TestNormalizePath(t *testing.T) {
@@ -350,4 +354,103 @@ func TestExtractGZip_CloseError(t *testing.T) {
 	tmpDir := t.TempDir()
 	err = extractGZip(bytes.NewReader(truncated), tmpDir)
 	require.Error(t, err)
+}
+
+// bundleOf returns a gzip-compressed tar archive that holds the given files,
+// keyed by their path in the archive, after the directories that contain them.
+func bundleOf(t *testing.T, files map[string]string) *bytes.Buffer {
+	t.Helper()
+
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	dirs := make(map[string]bool)
+	for name := range files {
+		for dir := path.Dir(name); dir != "."; dir = path.Dir(dir) {
+			dirs[dir] = true
+		}
+	}
+	for _, dir := range slices.Sorted(maps.Keys(dirs)) {
+		require.NoError(t, tw.WriteHeader(&tar.Header{Name: dir + "/", Mode: 0o755, Typeflag: tar.TypeDir}))
+	}
+	for _, name := range slices.Sorted(maps.Keys(files)) {
+		content := files[name]
+		require.NoError(t, tw.WriteHeader(&tar.Header{
+			Name:     name,
+			Mode:     0o644,
+			Size:     int64(len(content)),
+			Typeflag: tar.TypeReg,
+		}))
+		_, err := tw.Write([]byte(content))
+		require.NoError(t, err)
+	}
+	require.NoError(t, tw.Close())
+	require.NoError(t, gz.Close())
+	return &buf
+}
+
+func TestRefreshExtractedBundle_RemovesFilesTheBundleNoLongerShips(t *testing.T) {
+	buildDir := t.TempDir()
+	stale := filepath.Join(buildDir, "instrumentation", "otel", "sdk", "trace", "hook.go")
+	stalePkg := filepath.Join(buildDir, "pkg", "old", "old.go")
+	cache := filepath.Join(buildDir, "gocache", "entry")
+	state := filepath.Join(buildDir, "state", "state.json")
+	for _, f := range []string{stale, stalePkg, cache, state} {
+		mustWriteFile(t, f, "old")
+	}
+
+	err := refreshExtractedBundle(bundleOf(t, map[string]string{
+		"instrumentation_temp/otel/sdk/trace/gls.go": "new",
+		"pkg_temp/runtime/runtime.go":                "new",
+	}), buildDir)
+	require.NoError(t, err)
+
+	require.NoFileExists(t, stale)
+	require.NoFileExists(t, stalePkg)
+	require.FileExists(t, filepath.Join(buildDir, "instrumentation", "otel", "sdk", "trace", "gls.go"))
+	require.FileExists(t, filepath.Join(buildDir, "pkg", "runtime", "runtime.go"))
+	require.FileExists(t, cache)
+	require.FileExists(t, state)
+}
+
+func TestRefreshExtractedBundle_FirstExtraction(t *testing.T) {
+	buildDir := filepath.Join(t.TempDir(), ".otelc-build")
+
+	err := refreshExtractedBundle(bundleOf(t, map[string]string{
+		"instrumentation_temp/a/a.go": "package a",
+	}), buildDir)
+	require.NoError(t, err)
+
+	require.FileExists(t, filepath.Join(buildDir, "instrumentation", "a", "a.go"))
+}
+
+func TestRefreshExtractedBundle_RemoveError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory permissions do not block removal on Windows")
+	}
+	buildDir := t.TempDir()
+	pkgDir := filepath.Join(buildDir, "pkg")
+	mustWriteFile(t, filepath.Join(pkgDir, "old.go"), "old")
+	// A directory without write permission cannot lose its entries.
+	require.NoError(t, os.Chmod(pkgDir, 0o555))
+	t.Cleanup(func() { _ = os.Chmod(pkgDir, 0o755) })
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+
+	err := refreshExtractedBundle(bundleOf(t, map[string]string{"pkg_temp/new.go": "new"}), buildDir)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "removing the previously extracted pkg directory")
+}
+
+func TestExtractOtelcBundle_DropsFilesOfAnEarlierBundle(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	stale := filepath.Join(util.GetBuildTempDir(), unzippedInstDir, "net", "http", "server", "stale.go")
+	mustWriteFile(t, stale, "package server\n")
+
+	require.NoError(t, extractOtelcBundle())
+
+	require.NoFileExists(t, stale)
+	require.FileExists(t, filepath.Join(util.GetBuildTempDir(), unzippedPkgDir, "runtime", "go.mod"))
 }

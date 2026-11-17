@@ -413,8 +413,13 @@ func ActiveBuildTags() []string {
 
 // UserBuildTags returns the build tags of the effective -tags flag. Flags from
 // buildFlags (the command line) override GOFLAGS, as they do in the go command.
+// A GOFLAGS token may be quoted as a whole, as in GOFLAGS="'-tags=a b'".
 func UserBuildTags(goflags, buildFlags []string) []string {
-	value, found := lastTagsValue(goflags)
+	unquoted := make([]string, len(goflags))
+	for i, token := range goflags {
+		unquoted[i] = UnquoteGoflagsToken(token)
+	}
+	value, found := lastTagsValue(unquoted)
 	if v, ok := lastTagsValue(buildFlags); ok {
 		value, found = v, true
 	}
