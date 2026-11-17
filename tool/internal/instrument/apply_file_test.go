@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	toolruntime "go.opentelemetry.io/otelc/tool/internal/runtime"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -413,6 +414,31 @@ func Helper() string {
 	assert.Contains(t, diffText, "+++ "+outPath)
 }
 
+func TestApplyFileRule_InternalFile(t *testing.T) {
+	workDir := t.TempDir()
+	ip := &instrumentPhase{
+		logger:  slog.New(slog.DiscardHandler),
+		workDir: workDir,
+	}
+
+	err := ip.applyFileRule(t.Context(), toolruntime.FileRule(), "runtime")
+	require.NoError(t, err)
+
+	outPath := filepath.Join(workDir, "otelc.runtime_gls.go")
+	require.FileExists(t, outPath)
+	assert.Contains(t, ip.compileArgs, outPath)
+
+	outData, err := os.ReadFile(outPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(outData), "package runtime")
+	assert.Contains(t, string(outData), "GetTraceContextFromGLS")
+
+	unknownRule := &rule.InstFileRule{File: "missing.go", Path: util.InternalPath}
+	err = ip.applyFileRule(t.Context(), unknownRule, "runtime")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown internal runtime file")
+}
+
 func skipIfSymlinkUnsupported(t *testing.T, err error) {
 	t.Helper()
 	if err == nil {
@@ -759,4 +785,63 @@ func Target() string {
 	require.NoError(t, err)
 	assert.Contains(t, string(outData), "package targetpkg")
 	assert.Contains(t, string(outData), "func Target()")
+}
+
+func TestApplyFileRule_SameBaseNameFromDifferentDirs(t *testing.T) {
+	workDir := t.TempDir()
+	ip := &instrumentPhase{
+		logger:  slog.New(slog.DiscardHandler),
+		workDir: workDir,
+	}
+
+	funcs := []string{"One", "Two", "Three"}
+	for _, fn := range funcs {
+		srcDir := t.TempDir()
+		content := "package sourcepkg\n\nfunc " + fn + "() {}\n"
+		require.NoError(t, os.WriteFile(filepath.Join(srcDir, "setup.go"), []byte(content), 0o644))
+		fileRule := &rule.InstFileRule{File: "setup.go", Path: "example.com/" + fn, ResolvedPath: srcDir}
+		fileRule.Name = "add_" + fn
+		require.NoError(t, ip.applyFileRule(t.Context(), fileRule, "targetpkg"))
+	}
+
+	want := []string{
+		filepath.Join(workDir, "otelc.setup.go"),
+		filepath.Join(workDir, "otelc.setup.1.go"),
+		filepath.Join(workDir, "otelc.setup.2.go"),
+	}
+	assert.Equal(t, want, ip.compileArgs)
+	for i, path := range want {
+		data, err := os.ReadFile(path)
+		require.NoError(t, err)
+		assert.Contains(t, string(data), "func "+funcs[i]+"()")
+	}
+}
+
+func TestApplyFileRule_DoesNotTakeGlobalsFileName(t *testing.T) {
+	srcDir := t.TempDir()
+	workDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(srcDir, "globals.go"),
+		[]byte("package sourcepkg\n\nfunc Greeting() string { return \"hi\" }\n"),
+		0o644,
+	))
+
+	ip := &instrumentPhase{
+		logger:  slog.New(slog.DiscardHandler),
+		workDir: workDir,
+	}
+	fileRule := &rule.InstFileRule{File: "globals.go", Path: "example.com/mypkg", ResolvedPath: srcDir}
+	fileRule.Name = "add_globals"
+	require.NoError(t, ip.applyFileRule(t.Context(), fileRule, "targetpkg"))
+
+	outPath := filepath.Join(workDir, "otelc.globals.1.go")
+	assert.Equal(t, []string{outPath}, ip.compileArgs)
+	assert.NoFileExists(t, filepath.Join(workDir, otelcGlobalsFile))
+
+	// The globals file written afterwards must not replace the added file.
+	require.NoError(t, ip.writeGlobals("targetpkg"))
+	data, err := os.ReadFile(outPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "func Greeting()")
+	assert.Equal(t, []string{outPath, filepath.Join(workDir, otelcGlobalsFile)}, ip.compileArgs)
 }

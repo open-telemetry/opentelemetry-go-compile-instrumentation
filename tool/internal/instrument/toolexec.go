@@ -32,6 +32,7 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/imports"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	toolruntime "go.opentelemetry.io/otelc/tool/internal/runtime"
 	"go.opentelemetry.io/otelc/tool/internal/session"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -104,6 +105,9 @@ type instrumentPhase struct {
 	// buildUsesIgnoreDirective is true when some package in this build has a
 	// //otelc:ignore comment above a call, found during setup.
 	buildUsesIgnoreDirective bool
+	// suppressHooksQualifier is the name the current file's trampolines use
+	// for the runtime package (see suppressHooksAlias).
+	suppressHooksQualifier string
 	// resolveExportFiles looks up go list -export files for type-checking;
 	// nil means pkgload.ResolveExportFilesBatch. Tests replace it.
 	resolveExportFiles func(
@@ -1185,17 +1189,16 @@ func addImportsOf[T interface{ Base() *rule.InstBaseRule }](
 // compile, so its imports are not candidates either. An "ignore" tag counts
 // as satisfied, because otelc compiles files ordinary builds ignore.
 func fileRuleImports(ctx context.Context, bctx *build.Context, fileRule *rule.InstFileRule) []string {
-	if fileRule.ResolvedPath == "" {
+	if fileRule.Path != util.InternalPath && fileRule.ResolvedPath == "" {
 		return nil
 	}
-	file := filepath.Join(fileRule.ResolvedPath, fileRule.File)
-	src, err := os.ReadFile(file)
+	file, data, err := readFileRuleSource(fileRule)
 	if err != nil {
 		util.LoggerFromContext(ctx).WarnContext(ctx,
-			"failed to read add_file rule source for link imports", "file", file, "error", err)
+			"failed to read add_file rule source for link imports", "file", fileRule.File, "error", err)
 		return nil
 	}
-	match, err := ast.MatchFileConstraints(bctx, fileRule.ResolvedPath, fileRule.File, src)
+	match, err := ast.MatchFileConstraints(bctx, fileRule.ResolvedPath, fileRule.File, data)
 	if err != nil {
 		util.LoggerFromContext(ctx).WarnContext(ctx,
 			"failed to match add_file rule constraints for link imports", "file", file, "error", err)
@@ -1204,7 +1207,7 @@ func fileRuleImports(ctx context.Context, bctx *build.Context, fileRule *rule.In
 	if !match {
 		return nil
 	}
-	parsed, err := parser.ParseFile(token.NewFileSet(), file, src, parser.ImportsOnly)
+	parsed, err := parser.ParseFile(token.NewFileSet(), file, data, parser.ImportsOnly)
 	if err != nil {
 		util.LoggerFromContext(ctx).WarnContext(ctx,
 			"failed to parse add_file rule source for link imports", "file", file, "error", err)
@@ -1321,6 +1324,30 @@ func toolVersionLine(line, rulesHash string) string {
 	return line + " " + marker
 }
 
+func rulesDigest(content []byte, tags []string, glsSource, injectedHash []byte) string {
+	content = WithoutWorkDirPaths(content)
+	// Build tags decide which add_file rule files apply, so a tagged build
+	// must not reuse artifacts compiled without those tags.
+	if len(tags) > 0 {
+		content = append(content, "\ntags="+strings.Join(tags, ",")...)
+	}
+	// Internal file rules (runtime_gls.go) leave ResolvedPath empty so
+	// matched.json stays work-dir independent; include the embedded GLS source
+	// hash so edits to it still invalidate the build cache.
+	glsSum := sha256.Sum256(glsSource)
+	content = append(content, "\ngls="+hex.EncodeToString(glsSum[:])...)
+	// go never sees the packages rules add, so their hash stands in. The
+	// tool ID is shared by every compile, so an edit to one injected
+	// package rebuilds the whole instrumented build, not only the
+	// packages that import it. Missing an edit would put stale code in
+	// the binary, so the coarser invalidation is the accepted cost.
+	if len(injectedHash) > 0 {
+		content = append(content, "\ninjected="+string(injectedHash)...)
+	}
+	sum := sha256.Sum256(content)
+	return hex.EncodeToString(sum[:8])
+}
+
 // markedToolVersion turns a tool's raw `-V=full` output into the line otelc
 // reports in its place: the version with an otelc marker, plus the current
 // matched-rules hash when one exists.
@@ -1337,22 +1364,11 @@ func RulesDigest() string {
 	if err != nil {
 		return ""
 	}
-	content = WithoutWorkDirPaths(content)
-	// Build tags decide which add_file rule files apply, so a tagged build
-	// must not reuse artifacts compiled without those tags.
-	if tags := util.ActiveBuildTags(); len(tags) > 0 {
-		content = append(content, "\ntags="+strings.Join(tags, ",")...)
+	var injected []byte
+	if inj, injErr := os.ReadFile(util.GetInjectedHashFile()); injErr == nil {
+		injected = inj
 	}
-	// go never sees the packages rules add, so their hash stands in. The
-	// tool ID is shared by every compile, so an edit to one injected
-	// package rebuilds the whole instrumented build, not only the
-	// packages that import it. Missing an edit would put stale code in
-	// the binary, so the coarser invalidation is the accepted cost.
-	if injected, injErr := os.ReadFile(util.GetInjectedHashFile()); injErr == nil && len(injected) > 0 {
-		content = append(content, "\ninjected="+string(injected)...)
-	}
-	sum := sha256.Sum256(content)
-	return hex.EncodeToString(sum[:8])
+	return rulesDigest(content, util.ActiveBuildTags(), toolruntime.RuntimeGLSSource, injected)
 }
 
 // runtimeDirPlaceholder replaces the work-dir location of the generated
