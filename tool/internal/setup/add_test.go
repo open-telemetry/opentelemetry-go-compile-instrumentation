@@ -254,6 +254,16 @@ func TestAddDeps(t *testing.T) {
 	}
 }
 
+func TestGenConfigurationDecl(t *testing.T) {
+	decls, err := genConfigurationDecl(nil)
+	require.NoError(t, err)
+	assert.Empty(t, decls)
+
+	decls, err = genConfigurationDecl([]byte(`{"go.sample.enabled":true}`))
+	require.NoError(t, err)
+	assert.Len(t, decls, 1)
+}
+
 func TestAddDeps_FileWriteError(t *testing.T) {
 	matched := []*rule.InstRuleSet{
 		newTestRuleSet(

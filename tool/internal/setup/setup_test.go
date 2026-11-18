@@ -42,6 +42,19 @@ func TestGoBuild_RejectsUnsupportedSubcommand(t *testing.T) {
 	}
 }
 
+func TestEnsureStateManager(t *testing.T) {
+	ctx := ensureStateManager(t.Context())
+	manager, found := stateManagerFromContext(ctx)
+	require.True(t, found)
+	require.NotNil(t, manager)
+
+	existing := newStateManager()
+	ctx = ensureStateManager(contextWithStateManager(t.Context(), existing))
+	got, found := stateManagerFromContext(ctx)
+	require.True(t, found)
+	assert.Same(t, existing, got)
+}
+
 func TestToolexecInsertArg(t *testing.T) {
 	t.Run("builds the -toolexec flag for a normal path", func(t *testing.T) {
 		insert, err := toolexecInsertArg("/usr/local/bin/otelc")
