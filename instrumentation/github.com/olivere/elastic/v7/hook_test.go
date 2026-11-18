@@ -6,6 +6,7 @@ package v7
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -152,7 +153,7 @@ func TestBeforeAfterPerformRequest_Success(t *testing.T) {
 	assert.Equal(t, "200", attrs["db.response.status_code"])
 }
 
-func TestBeforeAfterPerformRequest_Error(t *testing.T) {
+func TestBeforeAfterPerformRequest_GetDocNotFound(t *testing.T) {
 	sr := setupTestTracer(t)
 	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "elastic")
 
@@ -160,16 +161,192 @@ func TestBeforeAfterPerformRequest_Error(t *testing.T) {
 	ictx := hooktest.NewMockHookContext()
 
 	BeforePerformRequest(ictx, nil, context.Background(), opt)
+	// Elasticsearch answers {"found":false}, so olivere returns an Error
+	// with no details.
 	AfterPerformRequest(ictx, nil, &elastic.Error{Status: 404})
 
 	spans := sr.Ended()
 	require.Len(t, spans, 1)
 	got := spans[0]
-	assert.Equal(t, codes.Error, got.Status().Code)
+	assert.Equal(t, codes.Unset, got.Status().Code)
+	assert.Empty(t, got.Events(), "a missing document is not an exception")
 	attrs := attrMap(got.Attributes())
 	assert.Equal(t, "get", attrs["db.operation.name"])
 	assert.Equal(t, "404", attrs["db.response.status_code"])
+}
+
+func TestBeforeAfterPerformRequest_GetIndexNotFound(t *testing.T) {
+	sr := setupTestTracer(t)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "elastic")
+
+	opt := elastic.PerformRequestOptions{Method: "GET", Path: "/nope/_doc/1"}
+	ictx := hooktest.NewMockHookContext()
+
+	BeforePerformRequest(ictx, nil, context.Background(), opt)
+	AfterPerformRequest(ictx, nil, &elastic.Error{
+		Status:  404,
+		Details: &elastic.ErrorDetails{Type: "index_not_found_exception"},
+	})
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	got := spans[0]
+	assert.Equal(t, codes.Error, got.Status().Code)
+	assert.Equal(t, "404", attrMap(got.Attributes())["db.response.status_code"])
 	require.NotEmpty(t, got.Events(), "expected RecordError event")
+}
+
+func TestBeforeAfterPerformRequest_NotFoundOutsideGet(t *testing.T) {
+	sr := setupTestTracer(t)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "elastic")
+
+	opt := elastic.PerformRequestOptions{Method: "DELETE", Path: "/orders/_doc/missing"}
+	ictx := hooktest.NewMockHookContext()
+
+	BeforePerformRequest(ictx, nil, context.Background(), opt)
+	AfterPerformRequest(ictx, nil, &elastic.Error{Status: 404})
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	assert.Equal(t, codes.Error, spans[0].Status().Code)
+	require.NotEmpty(t, spans[0].Events(), "expected RecordError event")
+}
+
+func TestBeforeAfterPerformRequest_Bulk(t *testing.T) {
+	sr := setupTestTracer(t)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "elastic")
+
+	opt := elastic.PerformRequestOptions{
+		Method: "POST",
+		Path:   "/orders/_bulk",
+		Body: bulkBody(t,
+			elastic.NewBulkIndexRequest().Id("1").Doc(map[string]string{"name": "a"}),
+			elastic.NewBulkDeleteRequest().Id("2"),
+			elastic.NewBulkUpdateRequest().Id("3").Doc(map[string]string{"name": "c"}),
+		),
+	}
+	ictx := hooktest.NewMockHookContext()
+
+	BeforePerformRequest(ictx, nil, context.Background(), opt)
+	AfterPerformRequest(ictx, &elastic.Response{StatusCode: 200}, nil)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	got := spans[0]
+	assert.Equal(t, "bulk orders", got.Name())
+	attrs := attrMap(got.Attributes())
+	assert.Equal(t, "bulk", attrs["db.operation.name"])
+	assert.Equal(t, "orders", attrs["db.collection.name"])
+	assert.Equal(t, int64(3), attrs["db.operation.batch.size"])
+}
+
+func TestBeforeAfterPerformRequest_Mget(t *testing.T) {
+	sr := setupTestTracer(t)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "elastic")
+
+	body, err := elastic.NewMgetService(nil).Add(
+		elastic.NewMultiGetItem().Index("orders").Id("1"),
+		elastic.NewMultiGetItem().Index("orders").Id("2"),
+	).Source()
+	require.NoError(t, err)
+	opt := elastic.PerformRequestOptions{Method: "GET", Path: "/_mget", Body: body}
+	ictx := hooktest.NewMockHookContext()
+
+	BeforePerformRequest(ictx, nil, context.Background(), opt)
+	AfterPerformRequest(ictx, &elastic.Response{StatusCode: 200}, nil)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	attrs := attrMap(spans[0].Attributes())
+	assert.Equal(t, "mget", attrs["db.operation.name"])
+	assert.Equal(t, int64(2), attrs["db.operation.batch.size"])
+}
+
+func TestBatchSize(t *testing.T) {
+	mget, err := elastic.NewMgetService(nil).Add(
+		elastic.NewMultiGetItem().Index("orders").Id("1"),
+		elastic.NewMultiGetItem().Index("logs").Id("2"),
+		elastic.NewMultiGetItem().Index("logs").Id("3"),
+	).Source()
+	require.NoError(t, err)
+
+	tests := []struct {
+		name      string
+		operation string
+		body      any
+		want      int
+	}{
+		{
+			name:      "bulk index, create, update and delete",
+			operation: "bulk",
+			body: bulkBody(t,
+				elastic.NewBulkIndexRequest().Index("orders").Id("1").Doc(map[string]string{"a": "b"}),
+				elastic.NewBulkCreateRequest().Index("orders").Id("2").Doc(map[string]string{"a": "b"}),
+				elastic.NewBulkUpdateRequest().Index("orders").Id("3").Doc(map[string]string{"a": "b"}),
+				elastic.NewBulkDeleteRequest().Index("orders").Id("4"),
+				elastic.NewBulkDeleteRequest().Index("orders").Id("5"),
+				elastic.NewBulkIndexRequest().Index("logs").Doc(map[string]string{"a": "b"}),
+			),
+			want: 6,
+		},
+		{
+			name:      "bulk single action",
+			operation: "bulk",
+			body:      bulkBody(t, elastic.NewBulkDeleteRequest().Index("orders").Id("1")),
+			want:      1,
+		},
+		{
+			name:      "bulk source that starts like a delete",
+			operation: "bulk",
+			body:      "{\"index\":{}}\n{\"delete\":true}\n{\"delete\":{\"_id\":\"1\"}}\n",
+			want:      2,
+		},
+		{name: "bulk empty", operation: "bulk", body: "", want: 0},
+		{name: "bulk non-string body", operation: "bulk", body: []byte("{}"), want: 0},
+		{name: "mget docs", operation: "mget", body: mget, want: 3},
+		{name: "mget ids", operation: "mget", body: map[string]any{"ids": []string{"1", "2"}}, want: 0},
+		{name: "search body", operation: "search", body: mget, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, batchSize(tt.operation, tt.body))
+		})
+	}
+}
+
+func TestBeforeAfterPerformRequest_BulkSingleActionHasNoBatchSize(t *testing.T) {
+	sr := setupTestTracer(t)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "elastic")
+
+	opt := elastic.PerformRequestOptions{
+		Method: "POST",
+		Path:   "/_bulk",
+		Body:   bulkBody(t, elastic.NewBulkDeleteRequest().Index("orders").Id("1")),
+	}
+	ictx := hooktest.NewMockHookContext()
+
+	BeforePerformRequest(ictx, nil, context.Background(), opt)
+	AfterPerformRequest(ictx, &elastic.Response{StatusCode: 200}, nil)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	_, ok := attrMap(spans[0].Attributes())["db.operation.batch.size"]
+	assert.False(t, ok, "semconv: a batch has two or more operations")
+}
+
+// bulkBody builds the NDJSON body the way BulkService does.
+func bulkBody(t *testing.T, reqs ...elastic.BulkableRequest) string {
+	t.Helper()
+	var b strings.Builder
+	for _, r := range reqs {
+		lines, err := r.Source()
+		require.NoError(t, err)
+		for _, line := range lines {
+			b.WriteString(line)
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
 }
 
 func TestBeforeAfterPerformRequest_HTTPStatusError(t *testing.T) {
