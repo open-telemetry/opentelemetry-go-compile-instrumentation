@@ -469,11 +469,7 @@ func (sp *setupPhase) matchAllDeps(
 	// every set that shares a ModulePath a second time.
 	matched = append(matched, injected...)
 
-	runtimeSets, err := matchRuntimeGLS(deps)
-	if err != nil {
-		return nil, err
-	}
-	matched = append(matched, runtimeSets...)
+	matched = append(matched, matchRuntimeGLS(deps)...)
 	return matched, nil
 }
 
@@ -1041,6 +1037,9 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 }
 
 func runGoBuild(ctx context.Context, cmd *cli.Command) error {
+	if err := restoreInterruptedBuild(ctx); err != nil {
+		return err
+	}
 	ctx = contextWithStateManager(ctx, newStateManager())
 	logger := util.LoggerFromContext(ctx)
 

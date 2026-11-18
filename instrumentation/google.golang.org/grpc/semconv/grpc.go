@@ -22,6 +22,10 @@ const (
 	OTELExporterLogPath = "/opentelemetry.proto.collector.logs.v1.LogsService/Export"
 )
 
+// parseFullMethodAttrCap is the most attributes ParseFullMethod can return:
+// rpc.system, rpc.service and rpc.method.
+const parseFullMethodAttrCap = 3
+
 // ParseFullMethod returns a span name and attributes based on a gRPC's FullMethod.
 // Parsing is consistent with grpc-go implementation.
 // Format: /package.service/method
@@ -38,7 +42,8 @@ func ParseFullMethod(fullMethod string) (string, []attribute.KeyValue) {
 	}
 	service, method := name[:pos], name[pos+1:]
 
-	attrs := []attribute.KeyValue{semconv.RPCSystemGRPC}
+	attrs := make([]attribute.KeyValue, 0, parseFullMethodAttrCap)
+	attrs = append(attrs, semconv.RPCSystemGRPC)
 	if service != "" {
 		attrs = append(attrs, semconv.RPCService(service))
 	}

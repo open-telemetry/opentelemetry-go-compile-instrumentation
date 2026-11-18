@@ -16,6 +16,8 @@ import (
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	toolruntime "go.opentelemetry.io/otelc/tool/internal/runtime"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // applyFileRule introduces the new file to the target package at compile time.
@@ -78,6 +80,13 @@ func (ip *instrumentPhase) applyFileRule(ctx context.Context, fileRule *rule.Ins
 // that leave the rule package directory, both lexically and through symlinks.
 // It returns the path of the file and its contents.
 func readFileRuleSource(fileRule *rule.InstFileRule) (string, []byte, error) {
+	if fileRule.Path == util.InternalPath {
+		data, err := toolruntime.ReadInternalFile(fileRule.File)
+		if err != nil {
+			return "", nil, err
+		}
+		return fileRule.File, data, nil
+	}
 	if strings.TrimSpace(fileRule.ResolvedPath) == "" {
 		return "", nil, ex.Newf("resolved path for rule %q is empty", fileRule.Name)
 	}

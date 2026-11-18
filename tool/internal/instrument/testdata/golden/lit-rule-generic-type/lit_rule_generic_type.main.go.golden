@@ -1,0 +1,13 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+//line /golden/work/main.go:6
+import "go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/lit-rule-generic-type/helpers/generic"
+
+func main() {
+	_ = generic.Box[int]{Tag: "set", Value: 1}
+	/*line /golden/work/main.go:10*/ _ = &generic.Box[string]{Tag: "set", Value: "a"}
+	/*line /golden/work/main.go:11*/ _ = generic.Pair[string, int]{Tag: "set", Key: "k", Val: 2} /*line /golden/work/main.go:11*/
+}
