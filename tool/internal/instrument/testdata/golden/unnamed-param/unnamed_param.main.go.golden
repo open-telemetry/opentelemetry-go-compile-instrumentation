@@ -107,4 +107,4 @@ func OtelBeforeTrampoline_Unnamed604682800(param0 *int, param1 *float32) (hookCo
 }
 
 //go:linkname otelc_hook_2633298448_H13Before testdata/golden/unnamed-param.H13Before
-func otelc_hook_2633298448_H13Before(hookContext HookContext, param0 int, param1 float32)
+func otelc_hook_2633298448_H13Before(hookContext OtelHookContext, param0 int, param1 float32)

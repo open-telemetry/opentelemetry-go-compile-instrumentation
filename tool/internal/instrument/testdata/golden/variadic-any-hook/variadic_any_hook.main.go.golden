@@ -123,4 +123,4 @@ func OtelBeforeTrampoline_New1091505788(param0 *int, param1 *[]func(*options)) (
 }
 
 //go:linkname otelc_hook_4198193957_HAnyBefore testdata/golden/variadic-any-hook.HAnyBefore
-func otelc_hook_4198193957_HAnyBefore(hookContext HookContext, param0 int, param1 ...interface{})
+func otelc_hook_4198193957_HAnyBefore(hookContext OtelHookContext, param0 int, param1 ...interface{})

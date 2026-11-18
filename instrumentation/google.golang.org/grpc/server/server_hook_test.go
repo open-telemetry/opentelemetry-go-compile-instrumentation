@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/stats"
 	"google.golang.org/grpc/status"
 
@@ -334,6 +335,131 @@ func TestServerStatsHandler_HandleRPC_NilContextIsNoop(t *testing.T) {
 	})
 }
 
+// otherLayerStatsHandler mimics a stats.Handler from another tracing layer
+// (for example otelgrpc) that the application registers in addition to otelc.
+// grpc-go chains TagRPC in registration order, and otelc prepends its own
+// handler, so this handler runs after otelc's and its span is the innermost
+// span on the context that HandleRPC receives. Like otelgrpc, it ends its
+// span when HandleRPC receives stats.End.
+type otherLayerStatsHandler struct {
+	tracer trace.Tracer
+}
+
+func (h *otherLayerStatsHandler) TagRPC(ctx context.Context, info *stats.RPCTagInfo) context.Context {
+	//nolint:spancheck // the span outlives TagRPC and ends in HandleRPC
+	ctx, _ = h.tracer.Start(ctx, "other-layer/"+info.FullMethodName)
+	return ctx
+}
+
+func (h *otherLayerStatsHandler) HandleRPC(ctx context.Context, rs stats.RPCStats) {
+	if _, ok := rs.(*stats.End); ok {
+		trace.SpanFromContext(ctx).End()
+	}
+}
+
+func (h *otherLayerStatsHandler) TagConn(ctx context.Context, _ *stats.ConnTagInfo) context.Context {
+	return ctx
+}
+
+func (h *otherLayerStatsHandler) HandleConn(context.Context, stats.ConnStats) {}
+
+// TestServerStatsHandler_ChainedHandler_EndsOwnSpan is the regression test for the
+// span leak with chained stats handlers. HandleRPC receives the final chained
+// context, whose innermost span belongs to the handler that ran last in TagRPC.
+// It must annotate and end the span TagRPC started, not the innermost span.
+func TestServerStatsHandler_ChainedHandler_EndsOwnSpan(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "grpc")
+
+	initInstrumentation()
+
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSyncer(exporter),
+	)
+	oldTP := otel.GetTracerProvider()
+	otel.SetTracerProvider(tp)
+	t.Cleanup(func() {
+		_ = tp.Shutdown(context.Background())
+		otel.SetTracerProvider(oldTP)
+	})
+	tracer = tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(runtime.ModuleVersion()))
+
+	info := &stats.RPCTagInfo{
+		FullMethodName: "/grpc.testing.TestService/UnaryCall",
+	}
+
+	// Chain TagRPC in the order grpc-go uses: otelc first, the other layer second.
+	otelcHandler := newServerStatsHandler()
+	otherHandler := &otherLayerStatsHandler{tracer: tp.Tracer("other-layer")}
+	chainedCtx := otherHandler.TagRPC(otelcHandler.TagRPC(t.Context(), info), info)
+
+	// OutHeader must write the peer address to otelc's span, not to the
+	// innermost span. The peer context wraps the chained context, so it
+	// still carries the other layer's span.
+	peerCtx := peer.NewContext(chainedCtx, &peer.Peer{
+		Addr: &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 50051},
+	})
+	otelcHandler.HandleRPC(peerCtx, &stats.OutHeader{})
+	otherHandler.HandleRPC(peerCtx, &stats.OutHeader{})
+
+	end := &stats.End{
+		BeginTime: time.Now().Add(-50 * time.Millisecond),
+		EndTime:   time.Now(),
+		Error:     status.Error(codes.Internal, "boom"),
+	}
+
+	// grpc-go calls HandleRPC on every handler with the final chained context.
+	otelcHandler.HandleRPC(chainedCtx, end)
+
+	// otelc must not end or annotate the other layer's span. The other layer
+	// ends its own span after otelc, like the chained order does.
+	assert.True(t, trace.SpanFromContext(chainedCtx).IsRecording(),
+		"otelc must not end the other handler's span")
+
+	// otelc's own span must be ended and exported with the gRPC status.
+	spans := exporter.GetSpans()
+	require.Len(t, spans, 1, "expected exactly otelc's span to be exported")
+	otelcSpan := spans[0]
+	assert.Equal(t, "grpc.testing.TestService/UnaryCall", otelcSpan.Name)
+	assert.Equal(t, trace.SpanKindServer, otelcSpan.SpanKind)
+	assert.Equal(t, instrumentationName, otelcSpan.InstrumentationScope.Name)
+	assert.Equal(t, otelcodes.Error, otelcSpan.Status.Code, "errored RPC should set span status to Error")
+	require.Len(t, otelcSpan.Events, 1, "expected one exception event for the recorded error")
+	assert.Equal(t, "exception", otelcSpan.Events[0].Name)
+	var grpcStatusCode any
+	for _, attr := range otelcSpan.Attributes {
+		if string(attr.Key) == "rpc.grpc.status_code" {
+			grpcStatusCode = attr.Value.AsInt64()
+		}
+	}
+	assert.Equal(t, int64(codes.Internal), grpcStatusCode, "otelc's span must carry the gRPC status code")
+	var clientAddress any
+	for _, attr := range otelcSpan.Attributes {
+		if string(attr.Key) == "client.address" {
+			clientAddress = attr.Value.AsString()
+		}
+	}
+	assert.Equal(t, "127.0.0.1", clientAddress, "otelc's span must carry the peer address from OutHeader")
+
+	// The other layer ends its own span and it must stay clean of otelc data.
+	otherHandler.HandleRPC(chainedCtx, end)
+	spans = exporter.GetSpans()
+	require.Len(t, spans, 2, "expected both handlers' spans to be exported")
+	for _, s := range spans {
+		if s.Name != "other-layer//grpc.testing.TestService/UnaryCall" {
+			continue
+		}
+		assert.Equal(t, otelcodes.Unset, s.Status.Code, "otelc must not set the other span's status")
+		assert.Empty(t, s.Events, "otelc must not record events on the other span")
+		for _, attr := range s.Attributes {
+			assert.NotEqual(t, "rpc.grpc.status_code", string(attr.Key),
+				"otelc must not stamp rpc.grpc.status_code onto the other span")
+			assert.NotEqual(t, "client.address", string(attr.Key),
+				"otelc must not stamp the peer address onto the other span")
+		}
+	}
+}
+
 func TestServerStatsHandler_TagConn(t *testing.T) {
 	handler := newServerStatsHandler()
 
@@ -553,8 +679,7 @@ func TestServerStatsHandler_HandleRPC_NonRecordingSpan(t *testing.T) {
 	handler := newServerStatsHandler()
 
 	mockSpan := &nonRecordingSpan{Span: trace.SpanFromContext(t.Context())}
-	ctx := trace.ContextWithSpan(t.Context(), mockSpan)
-	ctx = context.WithValue(ctx, gRPCContextKey{}, &gRPCContext{})
+	ctx := context.WithValue(t.Context(), gRPCContextKey{}, &gRPCContext{span: mockSpan})
 
 	handler.HandleRPC(ctx, &stats.End{
 		BeginTime: time.Now().Add(-10 * time.Millisecond),

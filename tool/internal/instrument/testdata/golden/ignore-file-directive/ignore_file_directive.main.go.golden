@@ -125,7 +125,7 @@ func OtelBeforeTrampoline_ForcedFunc191951179(param0 *string) (hookContext *Hook
 	return nil, false
 }
 
-func OtelAfterTrampoline_ForcedFunc191951179(hookContext HookContext) {
+func OtelAfterTrampoline_ForcedFunc191951179(hookContext OtelHookContext) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "HAfter")
@@ -144,7 +144,7 @@ func OtelAfterTrampoline_ForcedFunc191951179(hookContext HookContext) {
 }
 
 //go:linkname otelc_hook_1508112018_HBefore testdata/golden/ignore-file-directive.HBefore
-func otelc_hook_1508112018_HBefore(hookContext HookContext, param0 string)
+func otelc_hook_1508112018_HBefore(hookContext OtelHookContext, param0 string)
 
 //go:linkname otelc_hook_1508112018_HAfter testdata/golden/ignore-file-directive.HAfter
-func otelc_hook_1508112018_HAfter(hookContext HookContext)
+func otelc_hook_1508112018_HAfter(hookContext OtelHookContext)

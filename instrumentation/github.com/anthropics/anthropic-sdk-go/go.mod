@@ -12,6 +12,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.47.0
 	go.opentelemetry.io/otelc/pkg v0.1.0
 	go.opentelemetry.io/otelc/pkg/netutil v0.0.0-00010101000000-000000000000
+	go.opentelemetry.io/otelc/pkg/otelcconv v0.0.0-00010101000000-000000000000
 	go.opentelemetry.io/otelc/pkg/runtime v0.0.0-00010101000000-000000000000
 )
 
@@ -69,5 +70,6 @@ require (
 
 replace (
 	go.opentelemetry.io/otelc/pkg/netutil => ../../../../pkg/netutil
+	go.opentelemetry.io/otelc/pkg/otelcconv => ../../../../pkg/otelcconv
 	go.opentelemetry.io/otelc/pkg/runtime => ../../../../pkg/runtime
 )

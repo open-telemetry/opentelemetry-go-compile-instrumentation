@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -32,6 +33,11 @@ var (
 	tracerProvider        *sdktrace.TracerProvider
 	loggerProvider        *sdklog.LoggerProvider
 	registerSignalHandler sync.Once
+
+	// ready is set at the end of init. Hooks can run before that: the
+	// trampolines call them through //go:linkname, which does not order this
+	// package or its imports before the instrumented package.
+	ready atomic.Bool
 )
 
 func init() {
@@ -41,6 +47,15 @@ func init() {
 	logger = slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
 		Level: logLevel(),
 	}))
+	ready.Store(true)
+}
+
+// Ready reports whether this package has initialized, and with it the
+// OpenTelemetry API packages it imports. A hook that runs earlier, during
+// another package's initialization, must not call into those packages:
+// otel.GetTracerProvider panics then.
+func Ready() bool {
+	return ready.Load()
 }
 
 // Config holds configuration for OpenTelemetry setup

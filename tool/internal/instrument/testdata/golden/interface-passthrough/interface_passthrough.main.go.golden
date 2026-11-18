@@ -111,7 +111,7 @@ func OtelBeforeTrampoline_InterfacePassthrough3881633898(param0 *interface{}) (h
 	return nil, false
 }
 
-func OtelAfterTrampoline_InterfacePassthrough3881633898(hookContext HookContext, arg0 *any) {
+func OtelAfterTrampoline_InterfacePassthrough3881633898(hookContext OtelHookContext, arg0 *any) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "H15InterfaceAfter")
@@ -130,7 +130,7 @@ func OtelAfterTrampoline_InterfacePassthrough3881633898(hookContext HookContext,
 }
 
 //go:linkname otelc_hook_2381018360_H15InterfaceBefore testdata/golden/interface-passthrough.H15InterfaceBefore
-func otelc_hook_2381018360_H15InterfaceBefore(hookContext HookContext, param0 interface{})
+func otelc_hook_2381018360_H15InterfaceBefore(hookContext OtelHookContext, param0 interface{})
 
 //go:linkname otelc_hook_2381018360_H15InterfaceAfter testdata/golden/interface-passthrough.H15InterfaceAfter
-func otelc_hook_2381018360_H15InterfaceAfter(hookContext HookContext, arg0 interface{})
+func otelc_hook_2381018360_H15InterfaceAfter(hookContext OtelHookContext, arg0 interface{})

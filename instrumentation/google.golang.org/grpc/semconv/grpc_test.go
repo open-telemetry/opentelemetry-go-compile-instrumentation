@@ -81,6 +81,14 @@ func TestParseFullMethod(t *testing.T) {
 	}
 }
 
+func TestParseFullMethod_DoesNotGrow(t *testing.T) {
+	_, attrs := ParseFullMethod("/grpc.testing.TestService/UnaryCall")
+
+	require.Len(t, attrs, 3)
+	assert.Equal(t, parseFullMethodAttrCap, cap(attrs),
+		"a 1-element literal that then appends rpc.service and rpc.method grows the slice twice")
+}
+
 func TestServerStatus(t *testing.T) {
 	tests := []struct {
 		name         string

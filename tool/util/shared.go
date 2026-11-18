@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"golang.org/x/mod/semver"
@@ -52,6 +53,14 @@ const (
 	// processes of one session run at once. A positive integer sets the
 	// bound, 0 removes it, and anything else falls back to runtime.NumCPU().
 	EnvOtelcMaxParallelLoads = "OTELC_MAX_PARALLEL_LOADS"
+	// EnvOtelcBuildDeadline carries the absolute deadline (RFC 3339, nanosecond
+	// precision) that --timeout/OTELC_BUILD_TIMEOUT computed for the whole
+	// build, set once by the outermost `otelc go` and inherited by every
+	// process under it: the go command it runs, the toolexec processes that
+	// spawns, and any nested otelc build. Carrying an absolute deadline
+	// rather than a duration means a nested build shares the outer build's
+	// remaining budget instead of restarting its own full timeout.
+	EnvOtelcBuildDeadline = "OTELC_BUILD_DEADLINE"
 	// SessionOff is the EnvOtelcSessionDir value that disables the session.
 	SessionOff = "off"
 	// SessionTempDir is the build temp entry an owning build uses as its
@@ -122,6 +131,25 @@ func GetInjectedHashFile() string {
 func GetAddedImportsFileForProcess() string {
 	pid := os.Getpid()
 	return GetBuildTemp(fmt.Sprintf("added_imports.%d.json", pid))
+}
+
+// FormatBuildDeadline encodes deadline for EnvOtelcBuildDeadline.
+func FormatBuildDeadline(deadline time.Time) string {
+	return deadline.Format(time.RFC3339Nano)
+}
+
+// BuildDeadlineFromEnv returns the deadline a parent otelc process set in
+// EnvOtelcBuildDeadline, and whether one was set and well formed.
+func BuildDeadlineFromEnv() (time.Time, bool) {
+	value := os.Getenv(EnvOtelcBuildDeadline)
+	if value == "" {
+		return time.Time{}, false
+	}
+	deadline, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return deadline, true
 }
 
 // GetOtelcWorkDir returns the otelc working directory. It first checks the

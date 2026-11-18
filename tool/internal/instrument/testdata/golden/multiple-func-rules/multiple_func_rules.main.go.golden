@@ -136,7 +136,7 @@ func OtelBeforeTrampoline_Func13592294264(param0 *string, param1 *int) (hookCont
 	return nil, false
 }
 
-func OtelAfterTrampoline_Func13592294264(hookContext HookContext, arg0 *float32, arg1 *error) {
+func OtelAfterTrampoline_Func13592294264(hookContext OtelHookContext, arg0 *float32, arg1 *error) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "H1After")
@@ -155,10 +155,10 @@ func OtelAfterTrampoline_Func13592294264(hookContext HookContext, arg0 *float32,
 }
 
 //go:linkname otelc_hook_2956707965_H1Before testdata/golden/multiple-func-rules.H1Before
-func otelc_hook_2956707965_H1Before(hookContext HookContext, param0 string, param1 int)
+func otelc_hook_2956707965_H1Before(hookContext OtelHookContext, param0 string, param1 int)
 
 //go:linkname otelc_hook_2956707965_H1After testdata/golden/multiple-func-rules.H1After
-func otelc_hook_2956707965_H1After(hookContext HookContext, arg0 float32, arg1 error)
+func otelc_hook_2956707965_H1After(hookContext OtelHookContext, arg0 float32, arg1 error)
 
 type HookContextImpl1830170046 struct {
 	params      []interface{}
@@ -275,7 +275,7 @@ func OtelBeforeTrampoline_Func11830170046(param0 *string, param1 *int) (hookCont
 	return nil, false
 }
 
-func OtelAfterTrampoline_Func11830170046(hookContext HookContext, arg0 *float32, arg1 *error) {
+func OtelAfterTrampoline_Func11830170046(hookContext OtelHookContext, arg0 *float32, arg1 *error) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "H2After")
@@ -294,7 +294,7 @@ func OtelAfterTrampoline_Func11830170046(hookContext HookContext, arg0 *float32,
 }
 
 //go:linkname otelc_hook_2956707965_H2Before testdata/golden/multiple-func-rules.H2Before
-func otelc_hook_2956707965_H2Before(hookContext HookContext, param0 string, param1 int)
+func otelc_hook_2956707965_H2Before(hookContext OtelHookContext, param0 string, param1 int)
 
 //go:linkname otelc_hook_2956707965_H2After testdata/golden/multiple-func-rules.H2After
-func otelc_hook_2956707965_H2After(hookContext HookContext, arg0 float32, arg1 error)
+func otelc_hook_2956707965_H2After(hookContext OtelHookContext, arg0 float32, arg1 error)

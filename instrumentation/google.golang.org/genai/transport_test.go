@@ -429,7 +429,7 @@ func TestRoundTrip_UninstrumentedPathsPassThrough(t *testing.T) {
 
 	for _, path := range []string{
 		"/v1beta/models/gemini-2.5-flash:countTokens",
-		"/v1beta/models/gemini-2.5-flash:streamGenerateContent",
+		"/v1beta/models/text-embedding-004:embedContent",
 		"/v1beta/models",
 	} {
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
