@@ -1096,6 +1096,7 @@ Examples:
 - `net/http.Get` matches `http.Get()` where `http` is imported from `"net/http"`
 - `github.com/redis/go-redis/v9.Get` matches `redis.Get()` from that package
 - `database/sql.Open` matches `sql.Open()` calls
+- `slices.Sort` matches both `slices.Sort(s)` and the instantiation `slices.Sort[[]int](s)`
 
 **What does NOT match:**
 
@@ -1786,7 +1787,7 @@ The rewritten package imports `gocqltrace`, so `gocqltrace`'s `init` runs before
 
 **Matching:**
 
-`struct_literal` uses the same qualified form as `function_call`. It matches both the `T{...}` and `&T{...}` spellings, which share one composite-literal node, and resolves the package qualifier through the file's imports, so an aliased import (`import nethttp "net/http"`) matches on the import path rather than the alias.
+`struct_literal` uses the same qualified form as `function_call`. It matches both the `T{...}` and `&T{...}` spellings, which share one composite-literal node, matches a generic type with explicit type arguments (`T[int]{...}`), and resolves the package qualifier through the file's imports, so an aliased import (`import nethttp "net/http"`) matches on the import path rather than the alias.
 
 **Notes:**
 

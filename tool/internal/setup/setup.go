@@ -1037,6 +1037,9 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 }
 
 func runGoBuild(ctx context.Context, cmd *cli.Command) error {
+	if err := restoreInterruptedBuild(ctx); err != nil {
+		return err
+	}
 	ctx = contextWithStateManager(ctx, newStateManager())
 	logger := util.LoggerFromContext(ctx)
 
