@@ -171,7 +171,8 @@ func (sp *setupPhase) storePGOProfile() error {
 // it. markedToolVersion folds this hash into the tool ID, so a change in one of
 // those packages still invalidates the cached compiles. Setup fails when the
 // hash cannot be computed: an incomplete hash would let a warm build reuse a
-// compile made against an older injected package.
+// compile made against an older injected package. A rule import that does not
+// load is not part of any compile, so it is left out (see injectedHash).
 //
 // The hash reads the files on disk, so it misses two inputs of the compile: a
 // file replaced through -overlay, where only the overlay's backing file
@@ -222,12 +223,21 @@ func (sp *setupPhase) injectedHash(ctx context.Context, matched []*rule.InstRule
 	slices.Sort(paths)
 	paths = slices.Compact(paths)
 	if len(paths) > 0 {
-		pkgs, err := pkgload.LoadPackages(ctx,
-			packages.NeedName|packages.NeedFiles|packages.NeedEmbedFiles|
-				packages.NeedImports|packages.NeedDeps|packages.NeedModule,
-			sp.buildFlags, false, paths...)
+		pkgs, unloadable, err := sp.loadInjectedPackages(ctx, paths)
 		if err != nil {
 			return "", err
+		}
+		// A rule import that does not load from the main module never reaches
+		// a cached compile: a compile that adds it resolves it with the same
+		// go list and fails, and the link skips it. Its path still goes into
+		// the hash, so the hash changes once it loads.
+		if len(unloadable) > 0 {
+			slices.Sort(unloadable)
+			sp.Info("Leaving rule imports that do not load out of the injected package hash",
+				"imports", unloadable)
+			for _, path := range unloadable {
+				_, _ = fmt.Fprintf(h, "%s unloadable\n", path)
+			}
 		}
 		goroot, err := pkgload.GOROOT(ctx, sp.buildFlags)
 		if err != nil {
@@ -238,6 +248,67 @@ func (sp *setupPhase) injectedHash(ctx context.Context, matched []*rule.InstRule
 		}
 	}
 	return hex.EncodeToString(h.Sum(nil)[:8]), nil
+}
+
+// loadInjectedPackages loads the rule imports in roots and returns the ones
+// that do not load, such as a package of a module that is in the module graph
+// but not in go.mod. go list then fails the whole load ("updates to go.mod
+// needed"), so a failed load is split in two halves until each such root is
+// found. Any other error is returned.
+func (sp *setupPhase) loadInjectedPackages(
+	ctx context.Context,
+	roots []string,
+) ([]*packages.Package, []string, error) {
+	pkgs, err := pkgload.LoadPackages(ctx,
+		packages.NeedName|packages.NeedFiles|packages.NeedEmbedFiles|
+			packages.NeedImports|packages.NeedDeps|packages.NeedModule,
+		sp.buildFlags, false, roots...)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, nil, ctxErr
+	}
+	if err != nil {
+		if !pkgload.IsLoadFailure(err) {
+			return nil, nil, err
+		}
+		if len(roots) == 1 {
+			return nil, roots, nil
+		}
+		const halves = 2
+		mid := len(roots) / halves
+		var loaded []*packages.Package
+		var unloadable []string
+		for _, half := range [][]string{roots[:mid], roots[mid:]} {
+			one, oneUnloadable, halfErr := sp.loadInjectedPackages(ctx, half)
+			if halfErr != nil {
+				return nil, nil, halfErr
+			}
+			loaded = append(loaded, one...)
+			unloadable = append(unloadable, oneUnloadable...)
+		}
+		return loaded, unloadable, nil
+	}
+
+	// A root that does not exist comes back with its errors instead of failing
+	// the load.
+	loaded := make([]*packages.Package, 0, len(pkgs))
+	var unloadable []string
+	for _, pkg := range pkgs {
+		if len(pkg.Errors) > 0 && allLoadFailures(pkg.Errors) {
+			unloadable = append(unloadable, pkg.PkgPath)
+			continue
+		}
+		loaded = append(loaded, pkg)
+	}
+	return loaded, unloadable, nil
+}
+
+func allLoadFailures(errs []packages.Error) bool {
+	for _, err := range errs {
+		if !pkgload.IsLoadFailure(err) {
+			return false
+		}
+	}
+	return true
 }
 
 func appendRuleImports[T interface{ Base() *rule.InstBaseRule }](

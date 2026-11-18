@@ -2972,7 +2972,7 @@ func TestDeterministicLoadFailure(t *testing.T) {
 		{"other error", errors.New("signal: killed"), false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, deterministicLoadFailure(tt.err))
+			assert.Equal(t, tt.want, pkgload.IsDeterministicLoadFailure(tt.err))
 		})
 	}
 }
@@ -2992,8 +2992,8 @@ func TestDeterministicLoadFailureOnRealGoList(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, failed, "example.com/p/broken")
 	require.Contains(t, failed, "example.com/p/missing")
-	assert.False(t, deterministicLoadFailure(failed["example.com/p/broken"]),
+	assert.False(t, pkgload.IsDeterministicLoadFailure(failed["example.com/p/broken"]),
 		"a compile failure must be retried: %v", failed["example.com/p/broken"])
-	assert.True(t, deterministicLoadFailure(failed["example.com/p/missing"]),
+	assert.True(t, pkgload.IsDeterministicLoadFailure(failed["example.com/p/missing"]),
 		"a missing package must be stored: %v", failed["example.com/p/missing"])
 }
