@@ -187,7 +187,7 @@ func writeGeminiStream(t *testing.T, w http.ResponseWriter, model string, usage 
 	events := []map[string]any{
 		{
 			"candidates": []map[string]any{
-				{"content": map[string]any{"role": "model", "parts": []map[string]any{{"text": "Hel"}}}},
+				{"content": map[string]any{"role": "model", "parts": []map[string]any{{"text": "Hi"}}}},
 			},
 			"modelVersion":  model + "-001",
 			"responseId":    "resp-test-123",
@@ -196,7 +196,7 @@ func writeGeminiStream(t *testing.T, w http.ResponseWriter, model string, usage 
 		{
 			"candidates": []map[string]any{
 				{
-					"content":      map[string]any{"role": "model", "parts": []map[string]any{{"text": "lo!"}}},
+					"content":      map[string]any{"role": "model", "parts": []map[string]any{{"text": " there!"}}},
 					"finishReason": "STOP",
 				},
 			},

@@ -24,10 +24,10 @@ import (
 // geminiStream is a streamGenerateContent response as the API sends it with
 // alt=sse: one GenerateContentResponse per event, CRLF line endings, usage as
 // running totals and the finish reason on the last event only.
-const geminiStream = "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hel\"}],\"role\":\"model\"}}]," +
+const geminiStream = "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hi\"}],\"role\":\"model\"}}]," +
 	"\"usageMetadata\":{\"promptTokenCount\":11,\"candidatesTokenCount\":2,\"totalTokenCount\":13}," +
 	"\"modelVersion\":\"gemini-2.5-flash-001\",\"responseId\":\"resp-stream-1\"}\r\n\r\n" +
-	"data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"lo\"}],\"role\":\"model\"}," +
+	"data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\" there\"}],\"role\":\"model\"}," +
 	"\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":11,\"candidatesTokenCount\":5," +
 	"\"thoughtsTokenCount\":3,\"totalTokenCount\":19},\"modelVersion\":\"gemini-2.5-flash-001\"," +
 	"\"responseId\":\"resp-stream-1\"}\r\n\r\n"
