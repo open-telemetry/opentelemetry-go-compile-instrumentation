@@ -77,6 +77,7 @@ func TestParseMetadataRejectsMalformedEntries(t *testing.T) {
 		{"whitespace name", `name: " go.x "`, "leading or trailing whitespace"},
 		{"empty ref", `ref: ""`, "ref must not be empty"},
 		{"null ref", "ref: null", "expected a string"},
+		{"non-scalar name", "name: [go.x]", "decode configuration entry"},
 		{"whitespace ref", `ref: " general.x "`, "ref must not have leading or trailing whitespace"},
 		{"ref override", "ref: general.x\ndescription: override", "must not include inline"},
 		{"empty ref override", "ref: general.x\ndescription: \"\"", "must not include inline"},
@@ -127,6 +128,7 @@ func TestParseMetadataRejectsMalformedEntries(t *testing.T) {
 		{"null default", "name: go.x\ntype: string\ndefault: null", "default must be"},
 		{"non-scalar default", "name: go.x\ntype: list\ndefault: []", "default must be"},
 		{"wrong list default", "name: go.x\ntype: list\ndefault: nope", "default must encode"},
+		{"invalid collection default", "name: go.x\ntype: list\ndefault: \"[\"", "parse collection default"},
 		{"wrong map default", "name: go.x\ntype: map\ndefault: \"[]\"", "default must encode"},
 		{
 			"missing required default property",
@@ -213,6 +215,28 @@ func TestConfigurationCatalogMatchesPinnedSource(t *testing.T) {
 	assert.Equal(t, "int", definitions["general.http.semconv.version"].Type)
 	assert.Equal(t, "boolean", definitions["general.http.semconv.experimental"].Type)
 	assert.NotContains(t, definitions, "general.http.client.request_captured_headers/development")
+}
+
+func TestGenerateCatalogPublicEntryPoint(t *testing.T) {
+	const upstream = `properties:
+  general:
+    properties:
+      http:
+        properties:
+          client:
+            properties:
+              request_captured_headers:
+                type: array
+                items: {type: string}
+`
+	generated, err := GenerateCatalog(
+		[]byte(upstream),
+		[]byte("configurations: []\n"),
+		[]byte("configurations: []\n"),
+		embeddedCatalog,
+	)
+	require.NoError(t, err)
+	assert.NotEmpty(t, generated)
 }
 
 func TestParseCatalogValidatesInlineDefinitions(t *testing.T) {

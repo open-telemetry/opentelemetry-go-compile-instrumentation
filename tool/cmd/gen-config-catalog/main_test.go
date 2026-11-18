@@ -97,6 +97,24 @@ func TestRunReportsPreviousCatalogErrors(t *testing.T) {
 	assert.Contains(t, stderr.String(), "read previous catalog")
 }
 
+func TestRunReportsGeneratorInputErrors(t *testing.T) {
+	for _, input := range []string{"go-configurations.yaml", "general-compatibility.yaml"} {
+		t.Run(input, func(t *testing.T) {
+			var stderr bytes.Buffer
+			code := runWithFetcherAndInput(nil, &stderr,
+				func(context.Context) ([]byte, error) { return testUpstreamSchema(), nil },
+				func(name string) ([]byte, error) {
+					if name == input {
+						return nil, errors.New("fixture unavailable")
+					}
+					return []byte("configurations: []\n"), nil
+				})
+			assert.Equal(t, 1, code)
+			assert.Contains(t, stderr.String(), "fixture unavailable")
+		})
+	}
+}
+
 func TestRunReportsCatalogGenerationErrors(t *testing.T) {
 	previous := filepath.Join(t.TempDir(), "invalid.yaml")
 	require.NoError(t, os.WriteFile(previous, []byte("not: a catalog"), 0o600))
@@ -190,6 +208,13 @@ func TestFetchSchemaRejectsInvalidURL(t *testing.T) {
 	require.ErrorContains(t, err, "create upstream schema request")
 }
 
+func TestFetchPinnedSchemaReportsCanceledRequest(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := fetchPinnedSchema(ctx)
+	require.ErrorContains(t, err, "fetch pinned upstream schema")
+}
+
 func TestFetchSchemaReportsTransportError(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return nil, errors.New("connection refused")
@@ -215,6 +240,14 @@ func TestFetchSchemaReportsReadError(t *testing.T) {
 func TestWriteGeneratedCatalogReportsRootErrors(t *testing.T) {
 	err := writeGeneratedCatalog(filepath.Join(t.TempDir(), "missing", "catalog.yaml"), []byte("catalog"))
 	require.ErrorContains(t, err, "open catalog output root")
+}
+
+func TestWriteGeneratedCatalogReportsWriteErrors(t *testing.T) {
+	if _, err := os.Stat("/dev/full"); err != nil {
+		t.Skip("/dev/full is unavailable")
+	}
+	err := writeGeneratedCatalog("/dev/full", []byte("catalog"))
+	require.ErrorContains(t, err, "write /dev/full")
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
