@@ -80,6 +80,27 @@ func TestAmqpClient(t *testing.T) {
 		testutil.RequireAttribute(t, receive, "messaging.operation.type", "receive")
 	})
 
+	t.Run("PublishAfterCanceledPublishWithContext", func(t *testing.T) {
+		f := testutil.NewTestFixture(t)
+		out := f.Run("amqpclient", "-amqp-url="+amqpURL, "-queue=canceledfirst", "-canceled-publish-first")
+		require.Contains(t, out, "published message")
+		require.Contains(t, out, "consumed message")
+
+		spans := testutil.AllSpans(f.Traces())
+		require.Len(t, spans, 2)
+
+		send := testutil.RequireSpan(t, f.Traces(),
+			func(s ptrace.Span) bool { return s.Kind() == ptrace.SpanKindProducer },
+		)
+		require.True(t, send.ParentSpanID().IsEmpty(), "send span must not use the canceled call's context as parent")
+		require.NotEqual(t, "0af7651916cd43dd8448eb211c80319c", send.TraceID().String())
+
+		process := testutil.RequireSpan(t, f.Traces(),
+			func(s ptrace.Span) bool { return s.Kind() == ptrace.SpanKindConsumer },
+		)
+		require.Equal(t, send.SpanID(), process.ParentSpanID())
+	})
+
 	t.Run("Disabled", func(t *testing.T) {
 		f := testutil.NewTestFixture(t)
 		f.SetEnv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "amqp")

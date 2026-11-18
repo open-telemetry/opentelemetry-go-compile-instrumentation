@@ -95,6 +95,9 @@ func BeforePerformRequest(
 	ctx context.Context,
 	opt elastic.PerformRequestOptions,
 ) {
+	if !runtime.Ready() {
+		return
+	}
 	if !enabler.Enable() {
 		logger.Debug("olivere/elastic instrumentation disabled")
 		return
@@ -134,6 +137,10 @@ func BeforePerformRequest(
 func AfterPerformRequest(ictx hook.HookContext, resp *elastic.Response, err error) {
 	data, ok := ictx.GetData().(*hookData)
 	if !ok || data == nil || data.span == nil {
+		// The logger is nil for a call skipped during package initialization.
+		if !runtime.Ready() {
+			return
+		}
 		logger.Debug("AfterPerformRequest: no span from before hook")
 		return
 	}

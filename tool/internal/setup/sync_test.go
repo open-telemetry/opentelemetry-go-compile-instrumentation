@@ -555,7 +555,13 @@ require (
 				},
 			}
 
+			readStdout := captureStdout(t)
+			readStderr := captureStderr(t)
 			require.NoError(t, warnVersion(ctx, gomodPath, before))
+
+			// Stdout belongs to the build, for example go test -json events.
+			assert.Empty(t, readStdout())
+			assert.Equal(t, "Bumped go version ("+test.goVersion+" -> 1.25.0)\n", readStderr())
 
 			logged := buf.String()
 			assert.Contains(t, logged, "bumped go version")
@@ -586,7 +592,12 @@ require (
 		},
 	}
 
+	readStdout := captureStdout(t)
+	readStderr := captureStderr(t)
 	require.NoError(t, warnVersion(ctx, gomodPath, before))
+
+	assert.Empty(t, readStdout())
+	assert.Equal(t, "Bumped dependency go.opentelemetry.io/otel (v1.38.0 -> v1.43.0)\n", readStderr())
 
 	logged := buf.String()
 	assert.Contains(t, logged, "bumped dependency")

@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -32,6 +33,11 @@ var (
 	tracerProvider        *sdktrace.TracerProvider
 	loggerProvider        *sdklog.LoggerProvider
 	registerSignalHandler sync.Once
+
+	// ready is set at the end of init. Hooks can run before that: the
+	// trampolines call them through //go:linkname, which does not order this
+	// package or its imports before the instrumented package.
+	ready atomic.Bool
 )
 
 func init() {
@@ -41,6 +47,15 @@ func init() {
 	logger = slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
 		Level: logLevel(),
 	}))
+	ready.Store(true)
+}
+
+// Ready reports whether this package has initialized, and with it the
+// OpenTelemetry API packages it imports. A hook that runs earlier, during
+// another package's initialization, must not call into those packages:
+// otel.GetTracerProvider panics then.
+func Ready() bool {
+	return ready.Load()
 }
 
 // Config holds configuration for OpenTelemetry setup
@@ -273,32 +288,56 @@ func setupLoggerProvider(ctx context.Context, res *resource.Resource) error {
 	return nil
 }
 
+type lifecycleProvider interface {
+	ForceFlush(context.Context) error
+	Shutdown(context.Context) error
+}
+
+type namedProvider struct {
+	name     string
+	provider lifecycleProvider
+}
+
+func configuredProviders() []namedProvider {
+	const signalCount = 3
+	providers := make([]namedProvider, 0, signalCount)
+	if tracerProvider != nil {
+		providers = append(providers, namedProvider{name: "tracer", provider: tracerProvider})
+	}
+	if meterProvider != nil {
+		providers = append(providers, namedProvider{name: "meter", provider: meterProvider})
+	}
+	if loggerProvider != nil {
+		providers = append(providers, namedProvider{name: "logger", provider: loggerProvider})
+	}
+	return providers
+}
+
+func runProviderOp(
+	ctx context.Context,
+	action string,
+	op func(lifecycleProvider, context.Context) error,
+) error {
+	var errs []error
+	for _, p := range configuredProviders() {
+		if err := op(p.provider, ctx); err != nil {
+			Logger().ErrorContext(ctx, "failed to "+action+" "+p.name+" provider", "error", err)
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// ForceFlush immediately flushes any buffered telemetry from the OpenTelemetry SDK providers.
+// It skips nil providers, logs individual failures through Logger(), joins any errors,
+// and leaves providers active so callers can keep recording and flushing telemetry.
+func ForceFlush(ctx context.Context) error {
+	return runProviderOp(ctx, "force flush", lifecycleProvider.ForceFlush)
+}
+
 // Shutdown gracefully shuts down the OpenTelemetry SDK
 func Shutdown(ctx context.Context) error {
-	var errs []error
-
-	if tracerProvider != nil {
-		if shutdownErr := tracerProvider.Shutdown(ctx); shutdownErr != nil {
-			Logger().Error("failed to shutdown tracer provider", "error", shutdownErr)
-			errs = append(errs, shutdownErr)
-		}
-	}
-
-	if meterProvider != nil {
-		if shutdownErr := meterProvider.Shutdown(ctx); shutdownErr != nil {
-			Logger().Error("failed to shutdown meter provider", "error", shutdownErr)
-			errs = append(errs, shutdownErr)
-		}
-	}
-
-	if loggerProvider != nil {
-		if shutdownErr := loggerProvider.Shutdown(ctx); shutdownErr != nil {
-			Logger().Error("failed to shutdown logger provider", "error", shutdownErr)
-			errs = append(errs, shutdownErr)
-		}
-	}
-
-	return errors.Join(errs...)
+	return runProviderOp(ctx, "shutdown", lifecycleProvider.Shutdown)
 }
 
 // StartRuntimeMetrics enables Go runtime metrics collection.

@@ -1,0 +1,44 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+//line /golden/work/main.go:6
+import "strings"
+
+type loud struct{}
+
+func (loud) ToUpper(s string) string { return s + "!" }
+
+func Wrapper(s string) string {
+	println("Wrapped!")
+	return s
+}
+
+func Package(s string) string {
+	return Wrapper(strings.ToUpper(s)) /*line /golden/work/main.go:18*/
+}
+
+func Param(strings loud) string {
+	return strings.ToUpper("param")
+}
+
+func Local() string {
+	strings := loud{}
+	return strings.ToUpper("local")
+}
+
+func Scoped() string {
+	{
+		strings := loud{}
+		_ = strings.ToUpper("inner")
+	}
+	return Wrapper(strings.ToUpper("outer")) /*line /golden/work/main.go:35*/
+}
+
+func main() {
+	_ = Package("a")
+	_ = Param(loud{})
+	_ = Local()
+	_ = Scoped()
+}

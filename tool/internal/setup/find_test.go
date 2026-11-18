@@ -402,6 +402,42 @@ cd %s
 	assert.Equal(t, "sample.cgo1.go", deps[0].CgoFiles[deps[0].Sources[0]])
 }
 
+// TestFindDepsResolvesSourcesAgainstCdDir covers go build -C: the build plan
+// prints sources relative to the -C directory, not to otelc's own.
+func TestFindDepsResolvesSourcesAgainstCdDir(t *testing.T) {
+	oldExec := execCommandContext
+	t.Cleanup(func() {
+		execCommandContext = oldExec
+	})
+
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	appDir := filepath.Join(workDir, "app")
+	sourceFile := filepath.Join(appDir, "cmd", "main.go")
+	require.NoError(t, os.MkdirAll(filepath.Dir(sourceFile), 0o755))
+	require.NoError(t, os.WriteFile(sourceFile, []byte("package main\n"), 0o644))
+
+	buildPlan := fmt.Sprintf(`
+cd %s
+.../compile -o /w/b001/_pkg_.a -p main -buildid x ./cmd/main.go
+`, filepath.ToSlash(appDir))
+
+	exe, err := os.Executable()
+	require.NoError(t, err)
+	execCommandContext = func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
+		cmd := exec.CommandContext(ctx, exe, "-test.run=^TestHelperProcess$")
+		cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1", "GO_HELPER_BUILD_PLAN="+buildPlan)
+		return cmd
+	}
+
+	deps, err := findDeps(t.Context(), subcmdBuild, []string{"-C", appDir, "./cmd"})
+	require.NoError(t, err)
+	require.Len(t, deps, 1)
+	assert.Equal(t, []string{sourceFile}, deps[0].Sources)
+}
+
 // TestFindDepsMergesIdenticalCompiles covers builds where only some main
 // packages have a default.pgo: every shared package is then compiled once
 // with and once without -pgoprofile, from the same sources.
@@ -997,7 +1033,7 @@ func TestFindGoSources_RecordsTestBuild(t *testing.T) {
 		// The test main is generated later, so the file is not there yet.
 		{[]string{"-p", "main", "$WORK/b001/_testmain.go"}, true},
 	} {
-		dep, err := findGoSources(t.Context(), tc.args, map[string]string{})
+		dep, err := findGoSources(t.Context(), tc.args, "", map[string]string{})
 		require.NoError(t, err)
 		assert.Equal(t, tc.isTest, dep.IsTest, "args %v", tc.args)
 	}
@@ -1011,7 +1047,7 @@ func TestFindGoSources(t *testing.T) {
 	require.NoError(t, os.WriteFile(srcB, []byte("package p\n"), 0o644))
 
 	args := []string{"-p", "example.com/p", srcA, srcB}
-	dep, err := findGoSources(context.Background(), args, map[string]string{})
+	dep, err := findGoSources(context.Background(), args, "", map[string]string{})
 	require.NoError(t, err)
 	require.NotNil(t, dep)
 
@@ -1064,12 +1100,23 @@ func TestListBuildPlan_KeepsTestOutputOffStdout(t *testing.T) {
 // a function that reads what was written to it.
 func captureStdout(t *testing.T) func() string {
 	t.Helper()
-	f, err := os.CreateTemp(t.TempDir(), "stdout")
+	return captureOutput(t, &os.Stdout)
+}
+
+// captureStderr is captureStdout for os.Stderr.
+func captureStderr(t *testing.T) func() string {
+	t.Helper()
+	return captureOutput(t, &os.Stderr)
+}
+
+func captureOutput(t *testing.T, out **os.File) func() string {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "output")
 	require.NoError(t, err)
-	oldStdout := os.Stdout
-	os.Stdout = f //nolint:reassign // listBuildPlan must not write to os.Stdout; capture it to check
+	old := *out
+	*out = f
 	t.Cleanup(func() {
-		os.Stdout = oldStdout //nolint:reassign // restore the original os.Stdout
+		*out = old
 		_ = f.Close()
 	})
 	return func() string {

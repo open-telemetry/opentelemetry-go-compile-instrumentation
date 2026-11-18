@@ -15,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"go.opentelemetry.io/otelc/pkg/hook"
+	"go.opentelemetry.io/otelc/pkg/runtime"
 )
 
 // depthLocalKey counts how deep we are inside (*App).next for one request.
@@ -64,7 +65,7 @@ func (h headerCarrier) Keys() []string {
 // (*Ctx).Next: a route with a single handler and no middleware never calls
 // c.Next(), so a hook on that method sees no traffic at all.
 func BeforeNext(ictx hook.HookContext, _ *fiber.App, c *fiber.Ctx) {
-	enabled := enabler.Enable()
+	enabled := runtime.Ready() && enabler.Enable()
 	ictx.SetKeyData(enabledDataKey, enabled)
 	ictx.SetKeyData(outermostDataKey, false)
 	if !enabled || c == nil {

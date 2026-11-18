@@ -26,6 +26,7 @@ import (
 	"go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go/internal/streaming"
 	"go.opentelemetry.io/otelc/instrumentation/github.com/openai/openai-go/semconv"
 	"go.opentelemetry.io/otelc/pkg/netutil"
+	"go.opentelemetry.io/otelc/pkg/otelcconv"
 	"go.opentelemetry.io/otelc/pkg/runtime"
 )
 
@@ -167,6 +168,10 @@ func otelMiddleware(
 	isContentCaptureEnabled func() bool,
 ) func(*http.Request, func(*http.Request) (*http.Response, error)) (*http.Response, error) {
 	return func(req *http.Request, next func(*http.Request) (*http.Response, error)) (*http.Response, error) {
+		if !runtime.Ready() {
+			return next(req)
+		}
+		initInstrumentation()
 		if req.Body == nil {
 			return next(req)
 		}
@@ -284,7 +289,7 @@ func otelMiddleware(
 		isStreaming = strings.EqualFold(contentType, "text/event-stream")
 
 		if isStreaming {
-			span.SetAttributes(semconv.GenAIRequestIsStream(true))
+			span.SetAttributes(otelcconv.GenAIRequestIsStream(true))
 			resp.Body = newStreamingReader(resp.Body, span, start, op, captureContent, func() {
 				if operationDuration != nil {
 					attrs := slices.Concat(baseAttrs, errorAttrs)
@@ -534,7 +539,7 @@ func parseChatResponse(body []byte, span trace.Span, captureContent bool) {
 		otelsemconv.GenAIResponseFinishReasonsKey.StringSlice(reasons),
 		otelsemconv.GenAIUsageInputTokensKey.Int64(resp.Usage.PromptTokens),
 		otelsemconv.GenAIUsageOutputTokensKey.Int64(resp.Usage.CompletionTokens),
-		semconv.GenAIUsageTotalTokens(resp.Usage.TotalTokens),
+		otelcconv.GenAIUsageTotalTokensKey.Int64(resp.Usage.TotalTokens),
 	)
 
 	// OpenAI serves part of the prompt from an automatic cache and reports the
@@ -545,7 +550,7 @@ func parseChatResponse(body []byte, span trace.Span, captureContent bool) {
 	// when the request actually hit the cache, matching the Anthropic
 	// instrumentation.
 	if cached := cachedPromptTokens(resp.Usage.PromptTokensDetails); cached > 0 {
-		span.SetAttributes(semconv.GenAIUsageCacheReadInputTokens(cached))
+		span.SetAttributes(otelcconv.GenAIUsageCacheReadInputTokensKey.Int64(cached))
 	}
 }
 
@@ -583,7 +588,7 @@ func parseCompletionResponse(body []byte, span trace.Span, captureContent bool) 
 		otelsemconv.GenAIResponseFinishReasonsKey.StringSlice(reasons),
 		otelsemconv.GenAIUsageInputTokensKey.Int64(resp.Usage.PromptTokens),
 		otelsemconv.GenAIUsageOutputTokensKey.Int64(resp.Usage.CompletionTokens),
-		semconv.GenAIUsageTotalTokens(resp.Usage.TotalTokens),
+		otelcconv.GenAIUsageTotalTokensKey.Int64(resp.Usage.TotalTokens),
 	)
 
 	// OpenAI serves part of the prompt from an automatic cache and reports the
@@ -594,7 +599,7 @@ func parseCompletionResponse(body []byte, span trace.Span, captureContent bool) 
 	// when the request actually hit the cache, matching the Anthropic
 	// instrumentation.
 	if cached := cachedPromptTokens(resp.Usage.PromptTokensDetails); cached > 0 {
-		span.SetAttributes(semconv.GenAIUsageCacheReadInputTokens(cached))
+		span.SetAttributes(otelcconv.GenAIUsageCacheReadInputTokensKey.Int64(cached))
 	}
 }
 
@@ -665,6 +670,6 @@ func parseEmbeddingResponse(body []byte, span trace.Span) {
 	span.SetAttributes(
 		otelsemconv.GenAIResponseModel(resp.Model),
 		otelsemconv.GenAIUsageInputTokensKey.Int64(resp.Usage.PromptTokens),
-		semconv.GenAIUsageTotalTokens(resp.Usage.TotalTokens),
+		otelcconv.GenAIUsageTotalTokensKey.Int64(resp.Usage.TotalTokens),
 	)
 }
