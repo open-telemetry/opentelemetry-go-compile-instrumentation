@@ -1,18 +1,14 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Package session holds the state otelc processes of one session share: a
-// memo of resolved export files, and the slots that bound how many heavy
-// package loads run at once. A session is owned by the outermost otelc build
-// and inherited by every otelc process under it (see util.EnvOtelcSessionDir).
-// It lasts one outer build, during which sources do not change, the same
-// assumption go itself makes for a build.
+// Package session holds the state otelc processes of one session share: the
+// slots that bound how many heavy package loads run at once. A session is
+// owned by the outermost otelc build and inherited by every otelc process
+// under it (see util.EnvOtelcSessionDir).
 package session
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -80,34 +76,4 @@ func releaseLock(lock *flock.Flock) func() {
 		_ = lock.Unlock()
 		_ = lock.Close()
 	}
-}
-
-// lockPath takes the lock file at path, waiting without a deadline until it
-// is free or ctx is done. onWait runs once, the first time the lock is busy.
-func lockPath(ctx context.Context, path string, onWait func()) (func(), error) {
-	return lockPathWith(ctx, path, onWait, newPollBackoff())
-}
-
-// lockPathWith is lockPath pacing its attempts with b.
-func lockPathWith(ctx context.Context, path string, onWait func(), b *pollBackoff) (func(), error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, ex.Wrapf(err, "creating lock directory for %s", path)
-	}
-	lock := flock.New(path)
-	ok, err := tryLock(lock)
-	if err == nil && !ok && onWait != nil {
-		onWait()
-	}
-	for err == nil && !ok {
-		if waitErr := b.wait(ctx); waitErr != nil {
-			_ = lock.Close()
-			return nil, ex.Wrapf(waitErr, "waiting for session lock %s", path)
-		}
-		ok, err = tryLock(lock)
-	}
-	if err != nil {
-		_ = lock.Close()
-		return nil, err
-	}
-	return releaseLock(lock), nil
 }

@@ -333,8 +333,6 @@ func TestSessionDirHelpers(t *testing.T) {
 	t.Setenv(EnvOtelcSessionDir, inherited)
 	assert.Equal(t, inherited, GetSessionDir())
 	assert.True(t, InheritedSession())
-
-	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "resolution_scope"), GetResolutionScopeFile())
 }
 
 func TestModFileChangedSinceSetupWithoutRecord(t *testing.T) {

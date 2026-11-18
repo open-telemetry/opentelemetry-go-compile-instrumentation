@@ -472,8 +472,7 @@ func markedToolVersion(rawOutput string) string {
 
 // RulesDigest returns a short hash of the matched rules setup stored plus the
 // active build tags and the hash of the packages rules inject, or "" when no
-// matched rules exist. It feeds the tool ID
-// otelc reports and the export memo's resolution scope.
+// matched rules exist. It feeds the tool ID otelc reports.
 func RulesDigest() string {
 	content, err := os.ReadFile(util.GetMatchedRuleFile())
 	if err != nil {

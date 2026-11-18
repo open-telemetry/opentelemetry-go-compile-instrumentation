@@ -42,8 +42,8 @@ const (
 	// EnvOtelcSessionDir names the session directory the outermost otelc
 	// build owns and every otelc process under it inherits: its toolexec
 	// processes, nested go commands, and nested otelc builds such as the
-	// ones a test binary runs. It holds the export memo and the load slots.
-	// SessionOff disables both.
+	// ones a test binary runs. It holds the load slots.
+	// SessionOff disables them.
 	EnvOtelcSessionDir = "OTELC_SESSION_DIR"
 	// EnvOtelcMaxParallelLoads bounds how many heavy package loads otelc
 	// processes of one session run at once. A positive integer sets the
@@ -200,21 +200,6 @@ func GetSessionDir() string {
 func InheritedSession() bool {
 	dir := os.Getenv(EnvOtelcSessionDir)
 	return dir != "" && dir != SessionOff
-}
-
-// GetResolutionScopeFile returns the path to the file in which setup records
-// the digest that scopes the export memo to this build's inputs.
-func GetResolutionScopeFile() string {
-	const resolutionScopeFile = "resolution_scope"
-	return GetBuildTemp(resolutionScopeFile)
-}
-
-// GetSetupGenerationFile returns the path to the file in which each setup
-// records a fresh token. The resolution scope carries the token of the setup
-// that wrote it, so a scope left by an earlier setup is recognized as stale.
-func GetSetupGenerationFile() string {
-	const setupGenerationFile = "setup_generation"
-	return GetBuildTemp(setupGenerationFile)
 }
 
 // GetBuildFlags returns the build flags from OTELC_BUILD_FLAGS environment variable.

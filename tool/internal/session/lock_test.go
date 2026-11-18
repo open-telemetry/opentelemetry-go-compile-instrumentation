@@ -20,18 +20,6 @@ import (
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
-func TestLockPathFailsOnPermanentError(t *testing.T) {
-	// A lock file that cannot be created in a read-only directory never
-	// becomes available, so the lock must fail instead of polling forever.
-	dir := readOnlyDir(t)
-
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-	_, err := lockPath(ctx, filepath.Join(dir, "busy.lock"), nil)
-	require.Error(t, err)
-	assert.NotErrorIs(t, err, context.DeadlineExceeded, "a permanent failure must not wait for the deadline")
-}
-
 func TestWithLoadSlotFailsOnPermanentError(t *testing.T) {
 	session := t.TempDir()
 	t.Setenv(util.EnvOtelcSessionDir, session)
@@ -120,53 +108,6 @@ func TestWithLoadSlotBoundsAcrossProcesses(t *testing.T) {
 	a, b := spans[0], spans[1]
 	assert.True(t, a.end <= b.start || b.end <= a.start,
 		"two processes held the only load slot at once: %v %v", a, b)
-}
-
-func TestLockPathReportsWaitOnce(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "busy.lock")
-	release, err := lockPath(t.Context(), path, nil)
-	require.NoError(t, err)
-
-	waits := 0
-	acquired := make(chan func())
-	go func() {
-		next, lockErr := lockPath(context.Background(), path, func() { waits++ })
-		assert.NoError(t, lockErr)
-		acquired <- next
-	}()
-	time.Sleep(3 * lockRetryInterval)
-	release()
-	next := <-acquired
-	next()
-	assert.Equal(t, 1, waits, "onWait must run exactly once while the lock is busy")
-}
-
-// TestLockWaitBacksOff pins the cost of a long wait: attempts that fail
-// reopen the lock file, so their rate must decay instead of staying at one
-// per lockRetryInterval.
-func TestLockWaitBacksOff(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "busy.lock")
-	release, err := lockPath(t.Context(), path, nil)
-	require.NoError(t, err)
-
-	const held = 2 * time.Second
-	b := newPollBackoff()
-	done := make(chan error)
-	go func() {
-		next, lockErr := lockPathWith(context.Background(), path, nil, b)
-		if lockErr == nil {
-			next()
-		}
-		done <- lockErr
-	}()
-	time.Sleep(held)
-	release()
-	require.NoError(t, <-done)
-
-	fixedRate := int(held / lockRetryInterval)
-	assert.LessOrEqual(t, b.polls, 6, "a %v wait made %d attempts; a fixed interval makes about %d",
-		held, b.polls, fixedRate)
-	assert.Positive(t, b.polls)
 }
 
 func TestSlotWaitBacksOff(t *testing.T) {

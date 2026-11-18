@@ -638,35 +638,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	if err = sp.storeInjectedHash(ctx, matched); err != nil {
 		return err
 	}
-	sp.recordResolutionScope(ctx, moduleDirs)
 	return nil
-}
-
-// recordResolutionScope writes the export memo's resolution scope. The memo
-// only saves work, so a scope that cannot be computed or written disables it
-// for this build instead of failing the build: no scope file means no memo.
-func (sp *setupPhase) recordResolutionScope(ctx context.Context, moduleDirs []string) {
-	buildDir, err := buildCommandDir(sp.buildFlags)
-	if err == nil {
-		err = writeResolutionScope(ctx, buildDir, moduleDirs)
-	}
-	if err == nil {
-		return
-	}
-	sp.Warn("cannot record the resolution scope; the export memo is off for this build", "error", err)
-	rmErr := os.Remove(util.GetResolutionScopeFile())
-	if rmErr == nil || os.IsNotExist(rmErr) {
-		return
-	}
-	// A scope from an earlier setup is still readable, but it carries that
-	// setup's generation token: session.Open rejects a scope whose token does
-	// not match the current setup_generation, so the stale scope is not
-	// trusted. The processes this build starts inherit a disabled session as
-	// well.
-	sp.Warn("cannot remove a stale resolution scope", "error", rmErr)
-	if setErr := os.Setenv(util.EnvOtelcSessionDir, util.SessionOff); setErr != nil {
-		sp.Warn("cannot turn the session off", "error", setErr)
-	}
 }
 
 // writeBuildOverlay writes the overlay that carries the imports the matched
