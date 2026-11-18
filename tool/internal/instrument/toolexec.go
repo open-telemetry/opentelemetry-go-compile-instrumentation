@@ -560,7 +560,7 @@ func trackAddedImports(packages map[string]string) error {
 // workspace whose path contains glob meta-characters (for example square
 // brackets) still resolves its files.
 func addedImportFiles() ([]string, error) {
-	dir := util.GetBuildTempDir()
+	dir := util.GetInvocationDir()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {

@@ -17,6 +17,12 @@ import (
 
 const (
 	EnvOtelcWorkDir    = "OTELC_WORK_DIR"
+	// EnvOtelcInvocationDir holds the files one build reads while it
+	// compiles: the matched rules, the import tracking files, the session.
+	// otelc sets it for the go command of a build that runs after it
+	// released the build lock, so the next build's setup cannot change them.
+	// When it is unset, these files are in the build temp directory.
+	EnvOtelcInvocationDir = "OTELC_INVOCATION_DIR"
 	EnvOtelcRules      = "OTELC_RULES"
 	EnvOtelcBuildFlags = "OTELC_BUILD_FLAGS"
 	// EnvOtelcStats enables per-toolexec timing stats when set to "1".
@@ -103,34 +109,34 @@ func IsRuleFile(name string) bool {
 
 func GetMatchedRuleFile() string {
 	const matchedRuleFile = "matched.json"
-	return GetBuildTemp(matchedRuleFile)
+	return GetInvocationTemp(matchedRuleFile)
 }
 
 // GetImportNamesFile returns the path to the import name table file.
 func GetImportNamesFile() string {
 	const importNamesFile = "import_names.json"
-	return GetBuildTemp(importNamesFile)
+	return GetInvocationTemp(importNamesFile)
 }
 
 // GetPGOProfileFile returns the path to the file that records the build's PGO
 // profile for the nested builds toolexec runs.
 func GetPGOProfileFile() string {
 	const pgoProfileFile = "pgo_profile"
-	return GetBuildTemp(pgoProfileFile)
+	return GetInvocationTemp(pgoProfileFile)
 }
 
 // GetInjectedHashFile returns the path to the file that records the content
 // hash of the packages rules add to the build.
 func GetInjectedHashFile() string {
 	const injectedHashFile = "injected_hash"
-	return GetBuildTemp(injectedHashFile)
+	return GetInvocationTemp(injectedHashFile)
 }
 
 // GetAddedImportsFileForProcess returns the per-process import tracking file.
 // Each compile process writes to its own file to avoid inter-process race conditions.
 func GetAddedImportsFileForProcess() string {
 	pid := os.Getpid()
-	return GetBuildTemp(fmt.Sprintf("added_imports.%d.json", pid))
+	return GetInvocationTemp(fmt.Sprintf("added_imports.%d.json", pid))
 }
 
 // FormatBuildDeadline encodes deadline for EnvOtelcBuildDeadline.
@@ -198,6 +204,20 @@ func GetBuildTempDir() string {
 	return filepath.Join(GetOtelcWorkDir(), BuildTempDir)
 }
 
+// GetInvocationDir returns the directory of the files that belong to one
+// build: $OTELC_INVOCATION_DIR, else the build temp directory.
+func GetInvocationDir() string {
+	if dir := os.Getenv(EnvOtelcInvocationDir); dir != "" {
+		return dir
+	}
+	return GetBuildTempDir()
+}
+
+// GetInvocationTemp returns the path of name in GetInvocationDir.
+func GetInvocationTemp(name string) string {
+	return filepath.Join(GetInvocationDir(), name)
+}
+
 // GetBuildTemp returns the path to the build temp directory $BUILD_TEMP/name
 func GetBuildTemp(name string) string {
 	return filepath.Join(GetOtelcWorkDir(), BuildTempDir, name)
@@ -210,7 +230,7 @@ func GetSessionDir() string {
 	if dir := os.Getenv(EnvOtelcSessionDir); dir != "" {
 		return dir
 	}
-	return GetBuildTemp(SessionTempDir)
+	return GetInvocationTemp(SessionTempDir)
 }
 
 // InheritedSession reports whether this process runs under a session an outer
@@ -224,7 +244,7 @@ func InheritedSession() bool {
 // the digest that scopes the export memo to this build's inputs.
 func GetResolutionScopeFile() string {
 	const resolutionScopeFile = "resolution_scope"
-	return GetBuildTemp(resolutionScopeFile)
+	return GetInvocationTemp(resolutionScopeFile)
 }
 
 // GetSetupGenerationFile returns the path to the file in which each setup
@@ -232,7 +252,7 @@ func GetResolutionScopeFile() string {
 // that wrote it, so a scope left by an earlier setup is recognized as stale.
 func GetSetupGenerationFile() string {
 	const setupGenerationFile = "setup_generation"
-	return GetBuildTemp(setupGenerationFile)
+	return GetInvocationTemp(setupGenerationFile)
 }
 
 // GetBuildFlags returns the build flags from OTELC_BUILD_FLAGS environment variable.

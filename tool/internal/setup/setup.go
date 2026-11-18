@@ -951,7 +951,7 @@ func JSONOutputFromContext(ctx context.Context) bool {
 // passed in by GoBuild: Setup already forced GOFLAGS=-mod=mod, but a CLI
 // -mod=vendor beats GOFLAGS, so it still has to be neutralized in the build
 // args and forwarded flags below.
-func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) error {
+func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool, extraFlags ...string) error {
 	args := cmd.Args().Slice()
 	logger := util.LoggerFromContext(ctx)
 
@@ -970,6 +970,7 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 		// does over GOFLAGS.
 		goFlags = append(goFlags, flagJSON)
 	}
+	goFlags = append(goFlags, extraFlags...)
 	newArgs, err := toolexecBuildArgs(args, execPath, vendored, goFlags...)
 	if err != nil {
 		return err
@@ -999,6 +1000,7 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 		buildFlags = rewriteModVendor(subcommand, buildFlags)
 	}
 	buildFlags = append(buildFlags, nestedCoverFlags(util.SplitGoflags(os.Getenv("GOFLAGS")), buildFlags)...)
+	buildFlags = append(buildFlags, extraFlags...)
 	if len(buildFlags) > 0 {
 		encoded := util.EncodeBuildFlags(buildFlags)
 		env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelcBuildFlags, encoded))
@@ -1031,14 +1033,23 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 
 	// Serialize with other otelc invocations in this module before touching
 	// any shared state (tracking files, go.mod, .otelc-build contents).
-	return withBuildLock(ctx, commandBuildDir(cmd), func(ctx context.Context) error {
-		return runGoBuild(ctx, cmd)
+	// A build that can compile from a snapshot of its setup returns the
+	// compile step, which runs after the lock is released.
+	var compile func(context.Context) error
+	err := withBuildLock(ctx, commandBuildDir(cmd), func(ctx context.Context) error {
+		var err error
+		compile, err = runGoBuild(ctx, cmd)
+		return err
 	})
+	if err != nil || compile == nil {
+		return err
+	}
+	return compile(ctx)
 }
 
-func runGoBuild(ctx context.Context, cmd *cli.Command) error {
+func runGoBuild(ctx context.Context, cmd *cli.Command) (func(context.Context) error, error) {
 	if err := restoreInterruptedBuild(ctx); err != nil {
-		return err
+		return nil, err
 	}
 	ctx = contextWithStateManager(ctx, newStateManager())
 	logger := util.LoggerFromContext(ctx)
@@ -1047,13 +1058,17 @@ func runGoBuild(ctx context.Context, cmd *cli.Command) error {
 	// to prevent stale data from affecting this build.
 	instrument.CleanupImportTrackingFiles()
 	if err := cleanupOwnedSession(); err != nil {
-		return ex.Wrapf(err, "cleaning the session directory")
+		return nil, ex.Wrapf(err, "cleaning the session directory")
 	}
 	if err := cleanupDebugArtifacts(); err != nil {
-		return ex.Wrapf(err, "cleaning debug artifacts")
+		return nil, ex.Wrapf(err, "cleaning debug artifacts")
 	}
 
+	reverted := false
 	defer func() {
+		if reverted {
+			return
+		}
 		// Restore backed-up go.mod/go.sum but keep .otelc-build/ for debugging.
 		// Users can run `otelc cleanup` to remove it explicitly. Deferred
 		// inside the locked body so the restore always runs under the lock.
@@ -1073,23 +1088,40 @@ func runGoBuild(ctx context.Context, cmd *cli.Command) error {
 	setupStart := time.Now()
 	err := Setup(ctx, cmd)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if statsEnabled {
 		logger.InfoContext(ctx, "setup stats", "duration", time.Since(setupStart))
 	}
 	logger.InfoContext(ctx, "Setup completed successfully")
 
-	buildStart := time.Now()
-	err = buildWithToolexec(ctx, cmd, vendored)
+	compile := func(ctx context.Context, extraFlags ...string) error {
+		buildStart := time.Now()
+		if err := buildWithToolexec(ctx, cmd, vendored, extraFlags...); err != nil {
+			return err
+		}
+		if statsEnabled {
+			logger.InfoContext(ctx, "build stats", "duration", time.Since(buildStart))
+		}
+		logger.InfoContext(ctx, "Instrumentation completed successfully")
+		return nil
+	}
+
+	if !canBuildUnlocked(ctx, cmd, vendored) {
+		return nil, compile(ctx)
+	}
+	snap, err := snapshotSetup(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if statsEnabled {
-		logger.InfoContext(ctx, "build stats", "duration", time.Since(buildStart))
+	// The snapshot holds every file setup changed, so the tree can be
+	// restored now, before the compile.
+	reverted = true
+	if err = Cleanup(ctx, false); err != nil {
+		_ = os.RemoveAll(snap.invocationDir)
+		return nil, err
 	}
-	logger.InfoContext(ctx, "Instrumentation completed successfully")
-	return nil
+	return snap.compileWith(compile), nil
 }
 
 // hookImports maps each hook package to every package it imports, directly or
