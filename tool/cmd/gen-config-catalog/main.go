@@ -42,6 +42,15 @@ func run(args []string, stderr io.Writer) int {
 }
 
 func runWithFetcher(args []string, stderr io.Writer, fetcher func(context.Context) ([]byte, error)) int {
+	return runWithFetcherAndInput(args, stderr, fetcher, generatorInputs.ReadFile)
+}
+
+func runWithFetcherAndInput(
+	args []string,
+	stderr io.Writer,
+	fetcher func(context.Context) ([]byte, error),
+	readInput func(string) ([]byte, error),
+) int {
 	flags := flag.NewFlagSet("gen-config-catalog", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	output := flags.String("output", "catalog.yaml", "destination catalog path")
@@ -60,12 +69,12 @@ func runWithFetcher(args []string, stderr io.Writer, fetcher func(context.Contex
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
-	goOptions, err := generatorInputs.ReadFile("go-configurations.yaml")
+	goOptions, err := readInput("go-configurations.yaml")
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
-	compatibility, err := generatorInputs.ReadFile("general-compatibility.yaml")
+	compatibility, err := readInput("general-compatibility.yaml")
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1

@@ -51,12 +51,12 @@ this metadata catalog projects leaf names, types, descriptions, and default beha
 `general-compatibility.yaml` (owned by the generator under
 `tool/cmd/gen-config-catalog/`) records deprecated `general.*` paths. For a path
 still present upstream, the entry supplies its type and deprecation metadata;
-generation preserves the upstream description and default behavior. A retired
-path must include its complete definition. The generator compares the previous
-catalog with its output and fails if a prior path would disappear without a
-compatibility entry. Add otelc-owned `go.*` definitions, including any deprecated
-ones, to `tool/cmd/gen-config-catalog/go-configurations.yaml`; the generator
-combines both sources with the pinned upstream schema.
+generation preserves the upstream description and default behavior. If an
+upstream `general.*` path is retired, the generator carries its previous
+definition forward as deprecated. Retired `go.*` paths must still be retained
+explicitly in `tool/cmd/gen-config-catalog/go-configurations.yaml`; generation
+fails if one would otherwise disappear. The generator combines both sources with
+the pinned upstream schema.
 
 After changing either source file, regenerate and test the catalog:
 
