@@ -13,9 +13,17 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 )
+
+// cancelGrace is how long a canceled command gets to exit after SIGINT
+// before cmd.Cancel's caller falls back to killing it. os/exec's default
+// Cancel (used when WaitDelay is set but Cancel is not overridden) is
+// cmd.Process.Kill, so this still ends in a hard kill if the process does
+// not exit in time.
+const cancelGrace = 10 * time.Second
 
 func runCmd(ctx context.Context, dir string, env []string, args ...string) error {
 	if len(args) == 0 {
@@ -33,6 +41,22 @@ func runCmd(ctx context.Context, dir string, env []string, args ...string) error
 	}
 	if env != nil {
 		cmd.Env = env
+	}
+
+	// A canceled context otherwise hard-kills only this direct child: Ctrl-C
+	// reaches the whole foreground process group, but exec.CommandContext's
+	// default Cancel sends SIGKILL to this process alone, so any toolexec or
+	// compile/link child it spawned can keep running after this process
+	// exits. Signaling it to interrupt first gives it a chance to shut down
+	// its own children the way it already does for Ctrl-C, with WaitDelay
+	// falling back to a hard kill if it ignores that. Interrupt is not
+	// implemented on Windows (os/exec.Signal would just return an error),
+	// so Windows keeps the default Kill-only behavior.
+	if !IsWindows() {
+		cmd.Cancel = func() error {
+			return cmd.Process.Signal(os.Interrupt)
+		}
+		cmd.WaitDelay = cancelGrace
 	}
 
 	err := cmd.Run()
