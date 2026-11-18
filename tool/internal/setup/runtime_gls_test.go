@@ -24,9 +24,7 @@ func TestMatchRuntimeGLS_NoRuntimeDep(t *testing.T) {
 		{ImportPath: "example.com/other"},
 	}
 
-	sets, err := matchRuntimeGLS(deps)
-	require.NoError(t, err)
-	assert.Nil(t, sets)
+	assert.Nil(t, matchRuntimeGLS(deps))
 }
 
 func TestMatchRuntimeGLS_WithRuntimeDep(t *testing.T) {
@@ -49,8 +47,7 @@ func TestMatchRuntimeGLS_WithRuntimeDep(t *testing.T) {
 		},
 	}
 
-	sets, err := matchRuntimeGLS(deps)
-	require.NoError(t, err)
+	sets := matchRuntimeGLS(deps)
 	require.Len(t, sets, 1)
 
 	rset := sets[0]
@@ -65,18 +62,41 @@ func TestMatchRuntimeGLS_WithRuntimeDep(t *testing.T) {
 
 	require.Len(t, rset.FileRules, 1)
 	assert.Equal(t, toolruntime.GLSFileName, rset.FileRules[0].File)
-	assert.Equal(t, util.GetBuildTemp("runtime"), rset.FileRules[0].ResolvedPath)
+	assert.Equal(t, util.InternalPath, rset.FileRules[0].Path)
+	assert.Empty(t, rset.FileRules[0].ResolvedPath)
+}
 
-	// Verify that runtime_gls.go was materialized to disk
-	materializedFile := filepath.Join(util.GetBuildTemp("runtime"), toolruntime.GLSFileName)
-	assert.True(t, util.PathExists(materializedFile))
+func TestMatchRuntimeGLS_StoreIsWorkDirIndependent(t *testing.T) {
+	mockRuntimeDir := t.TempDir()
+	runtime2File := filepath.Join(mockRuntimeDir, "runtime2.go")
+	procFile := filepath.Join(mockRuntimeDir, "proc.go")
+	deps := []*Dependency{{
+		ImportPath: toolruntime.TargetRuntime,
+		Sources:    []string{runtime2File, procFile},
+	}}
+
+	storeInWorkDir := func(wd string) []byte {
+		t.Helper()
+		t.Setenv(util.EnvOtelcWorkDir, wd)
+		require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+		sets := matchRuntimeGLS(deps)
+		require.NoError(t, resolveRulePaths(t.Context(), sets, nil))
+		require.NoError(t, newTestSetupPhase().store(sets))
+		data, err := os.ReadFile(util.GetMatchedRuleFile())
+		require.NoError(t, err)
+		return data
+	}
+
+	matchedA := storeInWorkDir(t.TempDir())
+	matchedB := storeInWorkDir(t.TempDir())
+	assert.Equal(t, matchedA, matchedB)
 }
 
 func TestWarnIfNoInstrumentationMatched_RuntimeOnly(t *testing.T) {
 	var logs bytes.Buffer
 	sp := &setupPhase{logger: slog.New(slog.NewTextHandler(&logs, nil))}
 
-	runtimeSet := toolruntime.BuildRuleSet("", "", t.TempDir())
+	runtimeSet := toolruntime.BuildRuleSet("", "")
 	sp.warnIfNoInstrumentationMatched([]*rule.InstRuleSet{runtimeSet})
 
 	assert.Contains(t, logs.String(), "no instrumentation rules matched any dependencies")
@@ -86,7 +106,7 @@ func TestWarnIfNoInstrumentationMatched_WithLibraryRules(t *testing.T) {
 	var logs bytes.Buffer
 	sp := &setupPhase{logger: slog.New(slog.NewTextHandler(&logs, nil))}
 
-	runtimeSet := toolruntime.BuildRuleSet("", "", t.TempDir())
+	runtimeSet := toolruntime.BuildRuleSet("", "")
 	libSet := rule.NewInstRuleSet("example.com/lib")
 	libSet.AddFileRule(&rule.InstFileRule{Path: "example.com/lib/hooks", File: "hook.go"})
 	sp.warnIfNoInstrumentationMatched([]*rule.InstRuleSet{runtimeSet, libSet})
@@ -96,9 +116,9 @@ func TestWarnIfNoInstrumentationMatched_WithLibraryRules(t *testing.T) {
 
 // TestRuntimeGLSDigestIsWorkDirIndependent covers builds that run the same
 // setup with different --work-dir values over one GOCACHE. The runtime GLS
-// source setup generates must be identical in each work dir, and the rules
-// digest that feeds otelc's tool ID must not depend on where it was written,
-// or no build could reuse another's cached compiles.
+// source is embedded in otelc and identical in each work dir, and the rules
+// digest that feeds otelc's tool ID must not depend on the work dir,
+// so builds in different work dirs can reuse each other's cached compiles.
 func TestRuntimeGLSDigestIsWorkDirIndependent(t *testing.T) {
 	runtimeSrc := t.TempDir()
 	deps := []*Dependency{{
@@ -117,18 +137,15 @@ func TestRuntimeGLSDigestIsWorkDirIndependent(t *testing.T) {
 	setupIn := func(workDir string) result {
 		t.Helper()
 		t.Setenv(util.EnvOtelcWorkDir, workDir)
-		sets, err := matchRuntimeGLS(deps)
-		require.NoError(t, err)
+		require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+		sets := matchRuntimeGLS(deps)
 		require.NotEmpty(t, sets)
 		matched, err := json.Marshal(sets)
 		require.NoError(t, err)
-		dir := util.GetBuildTemp("runtime")
-		require.Contains(t, string(matched), filepath.Base(filepath.Dir(dir)),
-			"the matched rules reference the generated runtime source")
+		require.NotContains(t, string(matched), workDir,
+			"matched rules must not contain the temporary work dir")
 		require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), matched, 0o644))
-		source, err := os.ReadFile(filepath.Join(dir, toolruntime.GLSFileName))
-		require.NoError(t, err)
-		return result{source: source, digest: instrument.RulesDigest(), dir: dir}
+		return result{source: toolruntime.RuntimeGLSSource, digest: instrument.RulesDigest(), dir: workDir}
 	}
 
 	first := setupIn(t.TempDir())
@@ -143,9 +160,9 @@ func TestRuntimeGLSDigestIsWorkDirIndependent(t *testing.T) {
 }
 
 // TestRuntimeGLSInjectedHashIsWorkDirIndependent covers the injected package
-// hash, the other input of otelc's tool ID: the runtime GLS source it hashes
-// lives under the work dir, so the hash must name it without the work dir.
-// TestRuntimeGLSDigestIsWorkDirIndependent checks that its content matches.
+// hash, the other input of otelc's tool ID: the internal runtime GLS source
+// does not depend on the work dir, so builds with different work dirs must
+// receive the identical injected hash.
 func TestRuntimeGLSInjectedHashIsWorkDirIndependent(t *testing.T) {
 	runtimeSrc := t.TempDir()
 	deps := []*Dependency{{
@@ -157,19 +174,16 @@ func TestRuntimeGLSInjectedHashIsWorkDirIndependent(t *testing.T) {
 	}}
 	sp := &setupPhase{logger: slog.New(slog.DiscardHandler)}
 
-	hashIn := func(workDir string) (string, string) {
+	hashIn := func(workDir string) string {
 		t.Helper()
 		t.Setenv(util.EnvOtelcWorkDir, workDir)
-		sets, err := matchRuntimeGLS(deps)
-		require.NoError(t, err)
+		sets := matchRuntimeGLS(deps)
 		hash, err := sp.injectedHash(t.Context(), sets)
 		require.NoError(t, err)
-		file := filepath.Join(util.GetBuildTemp("runtime"), toolruntime.GLSFileName)
-		return hash, string(instrument.WithoutWorkDirPaths([]byte(file)))
+		return hash
 	}
 
-	firstHash, firstName := hashIn(t.TempDir())
-	secondHash, secondName := hashIn(t.TempDir())
-	assert.Equal(t, firstName, secondName, "the hashed name must not depend on the work dir")
+	firstHash := hashIn(t.TempDir())
+	secondHash := hashIn(t.TempDir())
 	assert.Equal(t, firstHash, secondHash, "builds in different work dirs must get the same injected hash")
 }
