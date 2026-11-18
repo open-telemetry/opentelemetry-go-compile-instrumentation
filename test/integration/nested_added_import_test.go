@@ -167,7 +167,7 @@ func copyNestedImportsApp(t *testing.T, repoRoot string) string {
 	goMod := string(raw)
 	// Replace the longest relative path first: ../../.. is a prefix of the
 	// others, and the results would nest otherwise.
-	for _, rel := range []string{"../../../pkg/runtime", "../../../pkg", "../../.."} {
+	for _, rel := range []string{"../../../pkg", "../../.."} {
 		target := filepath.Join(repoRoot, strings.TrimPrefix(rel, "../../.."))
 		goMod = strings.ReplaceAll(goMod, rel, strconv.Quote(target))
 	}

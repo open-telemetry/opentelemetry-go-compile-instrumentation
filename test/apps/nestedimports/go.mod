@@ -2,10 +2,7 @@ module go.opentelemetry.io/otelc/test/apps/nestedimports
 
 go 1.26.0
 
-replace (
-	go.opentelemetry.io/otelc/pkg/runtime => ../../../pkg/runtime
-	go.opentelemetry.io/otelc/test/apps/nestedimports/instrumentation => ./instrumentation
-)
+replace go.opentelemetry.io/otelc/test/apps/nestedimports/instrumentation => ./instrumentation
 
 require go.opentelemetry.io/otelc/test/apps/nestedimports/instrumentation v0.0.0-00010101000000-000000000000
 
