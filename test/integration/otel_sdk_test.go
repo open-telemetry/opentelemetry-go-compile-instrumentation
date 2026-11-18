@@ -6,12 +6,57 @@
 package test
 
 import (
+	"fmt"
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"go.opentelemetry.io/otelc/test/testutil"
 )
+
+// TestOtelImplicitRulesWithoutOtelImports verifies #1712 for an application
+// that imports no OpenTelemetry package at all. The front handler calls a
+// second local handler with plain http.Get, which uses context.Background().
+// The client span must join the server span's trace, because otelc links the
+// OTel API, the trace API, and the SDK trace package through pkg/runtime.
+func TestOtelImplicitRulesWithoutOtelImports(t *testing.T) {
+	t.Parallel()
+	testutil.Build(t, "", "otelnoimport", "go", "build", "-a")
+
+	f := testutil.NewTestFixture(t)
+	port := testutil.FreePort(t)
+
+	f.Start("otelnoimport", fmt.Sprintf("-port=%d", port))
+	testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", port))
+
+	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/front", port))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// We expect exactly 1 trace with 3 spans:
+	// 1. HTTP server (front handler, trace root)
+	// 2. HTTP client (front handler to api handler, started from context.Background())
+	// 3. HTTP server (api handler)
+	f.WaitForSpans(3)
+	f.RequireTraceCount(1)
+	f.RequireSpansPerTrace(3)
+
+	server := testutil.RequireSpan(t, f.Traces(), testutil.IsServer, testutil.HasName("GET /front"))
+	client := testutil.RequireSpan(t, f.Traces(), testutil.IsClient)
+	apiServer := testutil.RequireSpan(t, f.Traces(), testutil.IsServer, testutil.HasName("GET /api"))
+
+	// The client span runs without the request context. It must still be a
+	// child of the front server span, in the same trace.
+	require.Equal(t, server.TraceID(), client.TraceID(),
+		"the client span must join the server span's trace")
+	require.Equal(t, server.SpanID(), client.ParentSpanID(),
+		"the front server span must be the parent of the client span")
+	require.Equal(t, client.SpanID(), apiServer.ParentSpanID(),
+		"the client span must be the parent of the api server span")
+	require.True(t, server.ParentSpanID().IsEmpty(), "the front server span must be the trace root")
+}
 
 // TestOtelSDKSpanFromContext verifies that trace.SpanFromContext returns
 // the active span from GLS when called with context.Background().
