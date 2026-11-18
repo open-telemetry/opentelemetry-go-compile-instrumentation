@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -446,6 +447,95 @@ func TestEntryOmitsEmptyVersionRange(t *testing.T) {
 	content, err := json.Marshal(Entry{ModulePath: "example.com/module", Target: "example.com/target"})
 	require.NoError(t, err)
 	assert.NotContains(t, string(content), "versionRange")
+}
+
+func TestParseTag(t *testing.T) {
+	tests := []struct {
+		tag     string
+		wantDir string
+		wantVer string
+		wantOk  bool
+	}{
+		{
+			tag:     "v0.1.0",
+			wantDir: ".",
+			wantVer: "v0.1.0",
+			wantOk:  true,
+		},
+		{
+			tag:     "instrumentation/net/http/otelchttp/client/v0.1.2",
+			wantDir: "instrumentation/net/http/otelchttp/client",
+			wantVer: "v0.1.2",
+			wantOk:  true,
+		},
+		{
+			tag:     "pkg/runtime/v1.0.0-rc1",
+			wantDir: "pkg/runtime",
+			wantVer: "v1.0.0-rc1",
+			wantOk:  true,
+		},
+		{
+			tag:    "not-semver",
+			wantOk: false,
+		},
+		{
+			tag:    "dir/not-semver",
+			wantOk: false,
+		},
+		{
+			tag:    "",
+			wantOk: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.tag, func(t *testing.T) {
+			dir, ver, ok := parseTag(tt.tag)
+			assert.Equal(t, tt.wantOk, ok)
+			if tt.wantOk {
+				assert.Equal(t, tt.wantDir, dir)
+				assert.Equal(t, tt.wantVer, ver)
+			}
+		})
+	}
+}
+
+func TestGenerate_SubmoduleTags(t *testing.T) {
+	root := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "git %v: %s", args, string(out))
+	}
+	run("init")
+	run("config", "user.name", "test")
+	run("config", "user.email", "test@example.com")
+
+	instDir := filepath.Join(root, "instrumentation")
+	writeModule(t, instDir, "mod_a", "example.com/mod_a")
+	writeRuleFile(t, instDir, "mod_a/otelc.yaml", `
+rule:
+  target: example.com/target_a
+`)
+
+	writeModule(t, instDir, "mod_b", "example.com/mod_b")
+	writeRuleFile(t, instDir, "mod_b/otelc.yaml", `
+rule:
+  target: example.com/target_b
+`)
+
+	run("add", ".")
+	run("-c", "commit.gpgsign=false", "commit", "-m", "initial")
+	run("-c", "tag.gpgsign=false", "tag", "instrumentation/mod_a/v0.1.0")
+	run("-c", "tag.gpgsign=false", "tag", "instrumentation/mod_b/v0.2.0")
+
+	got, err := Generate(instDir, "v0.0.0-fallback")
+	require.NoError(t, err)
+
+	require.Equal(t, Manifest{
+		{ModulePath: "example.com/mod_a", Target: "example.com/target_a", Version: "v0.1.0"},
+		{ModulePath: "example.com/mod_b", Target: "example.com/target_b", Version: "v0.2.0"},
+	}, got)
 }
 
 func compareEntries(a, b Entry) int {
