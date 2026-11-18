@@ -195,7 +195,7 @@ func parseSources(sources []string) (string, map[string]bool) {
 	imports := make(map[string]bool)
 	fset := token.NewFileSet()
 	for _, src := range sources {
-		if !strings.HasSuffix(src, ".go") {
+		if !strings.HasSuffix(src, goSuffix) {
 			continue
 		}
 		f, err := parser.ParseFile(fset, src, nil, parser.ImportsOnly)

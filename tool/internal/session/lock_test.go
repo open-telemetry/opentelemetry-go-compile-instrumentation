@@ -38,14 +38,6 @@ func TestWithLoadSlotFailsOnPermanentError(t *testing.T) {
 	assert.NotErrorIs(t, err, context.DeadlineExceeded)
 }
 
-// readOnlyDir returns an empty directory no lock file can be created in.
-func readOnlyDir(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	makeReadOnly(t, dir)
-	return dir
-}
-
 func makeReadOnly(t *testing.T, dir string) {
 	t.Helper()
 	if runtime.GOOS == "windows" || os.Geteuid() == 0 {

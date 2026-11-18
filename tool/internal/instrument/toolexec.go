@@ -106,9 +106,6 @@ type instrumentPhase struct {
 	resolveExportFiles func(
 		ctx context.Context, importPaths []string, buildFlags ...string,
 	) (map[string]string, map[string]error, error)
-	// resolveAddedImport resolves the export files of an import a rule added
-	// to the compile; nil means pkgload.ResolveExportFiles. Tests replace it.
-	resolveAddedImport func(ctx context.Context, importPath string, buildFlags ...string) (map[string]string, error)
 	// methodCallInfo is built lazily by ensureMethodCallInfo.
 	methodCallInfo       *methodCallPackageInfo
 	methodCallInfoLoaded bool
