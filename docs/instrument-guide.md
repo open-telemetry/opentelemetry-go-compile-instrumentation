@@ -163,6 +163,9 @@ Notes:
   whatever they gate together.
 - Cover the gate in unit tests with `t.Setenv`, asserting both that a disabled
   instrumentation emits nothing and that an explicitly enabled one still works.
+- A hook that starts telemetry also checks `runtime.Ready()`, and a hook that attaches
+  instrumentation checks it when the attached code runs. See Package Initialization Order
+  under [Limitations](#limitations).
 
 ### Limitations
 
@@ -237,6 +240,29 @@ When implementing hooks, we must adhere to certain limitations:
 
    The logrus instrumentation uses this pattern for the logger created by logrus's own
    package initialization.
+
+   The same applies to the OpenTelemetry API. Before its packages have initialized,
+   `otel.GetTracerProvider()` panics, and a panic inside `sync.Once` leaves the tracer nil
+   for the rest of the process. A hook or callback that starts telemetry must first check
+   `runtime.Ready()` from `go.opentelemetry.io/otelc/pkg/runtime`, which reports whether
+   that package, and with it the OpenTelemetry API it imports, has initialized:
+
+   ```go
+   func BeforeQuery(ictx hook.HookContext, query string) {
+       if !runtime.Ready() {
+           return
+       }
+       initInstrumentation()
+       // start the span
+   }
+   ```
+
+   `runtime.Ready()` does not mean the hook's own package has initialized, so the rule above
+   still applies to the hook package's variables. Calls skipped this way are not traced and
+   are not replayed. A hook that attaches
+   instrumentation to a client or server, such as a middleware or a stats handler, should
+   still attach it during initialization and check `runtime.Ready()` when the attached code
+   runs, so a client created in a package-level variable keeps its instrumentation.
 
 ### GLS Operation for OTel SDK Instrumentation
 
