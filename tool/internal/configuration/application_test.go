@@ -61,6 +61,23 @@ instrumentation/development:
 	assert.NotContains(t, validated.Values, "go.sample.enabled")
 }
 
+func TestValidateApplicationOptionsAppliesStringDefault(t *testing.T) {
+	app, err := ParseApplicationConfiguration([]byte(`file_format: "1.2"
+instrumentation/development:
+  go:
+    sample: {}
+`), "app.yaml")
+	require.NoError(t, err)
+
+	validated, err := ValidateApplicationOptions(app, []Entry{{
+		Name:    "go.sample.mode",
+		Type:    stringType,
+		Default: new("client"),
+	}}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "client", validated.ResolvedValues["go.sample.mode"])
+}
+
 func TestParseApplicationConfigurationExpandsEnvironmentDuringSetup(t *testing.T) {
 	t.Setenv("OTELC_TEST_FILE_FORMAT", "1.2")
 	t.Setenv("OTELC_TEST_ENABLED", "false")
@@ -423,6 +440,23 @@ func TestApplicationHelpers(t *testing.T) {
 	}
 }
 
+func TestApplicationOptionValuesHandlesNilAndUnknownNestedValues(t *testing.T) {
+	assert.Empty(t, (ApplicationConfiguration{}).ApplicationOptionValues(nil))
+
+	values := (ApplicationConfiguration{
+		Instrumentation: map[string]any{
+			"general": map[string]any{
+				"known":  true,
+				"nested": map[string]any{"value": "x"},
+			},
+		},
+	}).ApplicationOptionValues(map[string]Entry{
+		"general.known": {Name: "general.known", Type: booleanType},
+	})
+	assert.Equal(t, true, values["general.known"])
+	assert.Equal(t, "x", values["general.nested.value"])
+}
+
 func TestSetApplicationOptionErrors(t *testing.T) {
 	for _, test := range []struct {
 		name string
@@ -606,6 +640,9 @@ func TestValidateApplicationOptionsRejectsSelectedUnsupportedPath(t *testing.T) 
 func TestApplicationDefaultValueRejectsMalformedYAML(t *testing.T) {
 	_, err := applicationDefaultValue("[", listType)
 	require.Error(t, err)
+	value, err := applicationDefaultValue("client", stringType)
+	require.NoError(t, err)
+	assert.Equal(t, "client", value)
 }
 
 func TestValidateApplicationOptionsReportsMissingMetadataForGeneralOption(t *testing.T) {
@@ -684,6 +721,16 @@ func TestOverlayEnvironmentNodeIgnoresIncompatibleNodes(t *testing.T) {
 	parsed := &yaml.Node{Kind: yaml.ScalarNode, Value: "value"}
 	assert.NoError(t, overlayEnvironmentNode(source, parsed, "app.yaml", "root"))
 	assert.NoError(t, overlayEnvironmentNode(nil, parsed, "app.yaml", "root"))
+
+	scalar := &yaml.Node{Kind: yaml.ScalarNode, Value: "literal"}
+	assert.NoError(t, overlayEnvironmentNode(scalar, parsed, "app.yaml", "root"))
+
+	var sourceMapping, parsedMapping yaml.Node
+	require.NoError(t, yaml.Unmarshal([]byte("known: ${VALUE}\nmissing: literal\n"), &sourceMapping))
+	require.NoError(t, yaml.Unmarshal([]byte("known: value\n"), &parsedMapping))
+	assert.NoError(t, overlayEnvironmentNode(
+		sourceMapping.Content[0], parsedMapping.Content[0], "app.yaml", "root",
+	))
 }
 
 func TestParseSingleYAMLDocumentReportsTrailingErrors(t *testing.T) {
@@ -706,6 +753,10 @@ func TestParseAndValidateSelectedConfigurationRejectsMalformedDocuments(t *testi
 	application.Document = invalidFormat.Content[0]
 	_, _, err = parseAndValidateSelectedApplicationConfiguration(application, nil, nil)
 	require.ErrorContains(t, err, "newer than the supported")
+
+	application.Document = &yaml.Node{Kind: yaml.ScalarNode, Value: "invalid"}
+	_, _, err = parseAndValidateSelectedApplicationConfiguration(application, nil, nil)
+	require.ErrorContains(t, err, "decode application configuration")
 }
 
 func TestRejectDuplicateYAMLKeysHandlesAliasesAndNonStringKeys(t *testing.T) {
@@ -747,6 +798,9 @@ func TestValidateYAMLFieldsHandlesUnsupportedShapes(t *testing.T) {
 	}}
 	assert.NoError(t, validateYAMLFields(mapNode, reflect.TypeFor[map[string]string](), "app.yaml", ""))
 	assert.NoError(t, validateYAMLFields(mapNode, reflect.TypeFor[map[int]string](), "app.yaml", ""))
+	assert.NoError(t, validateYAMLFields(
+		&yaml.Node{Kind: yaml.SequenceNode}, reflect.TypeFor[int](), "app.yaml", "",
+	))
 
 	type Embedded struct {
 		Value string `yaml:"value"`
@@ -769,6 +823,39 @@ func TestValidateYAMLFieldsHandlesUnsupportedShapes(t *testing.T) {
 	}
 	require.ErrorContains(t, validateYAMLFields(
 		nestedMap.Content[0], reflect.TypeFor[mapConfig](), "app.yaml", ""), "unsupported field")
+}
+
+func TestApplicationValidationHelperBranches(t *testing.T) {
+	sequence := &yaml.Node{Kind: yaml.SequenceNode, Content: []*yaml.Node{
+		{Kind: yaml.ScalarNode, Value: "value"},
+	}}
+	assert.NoError(t, validateYAMLSequenceFields(sequence, reflect.TypeFor[int](), "app.yaml", "items"))
+
+	nonStringKey := &yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{
+		{Kind: yaml.SequenceNode}, {Kind: yaml.ScalarNode, Value: "value"},
+	}}
+	assert.NoError(t, validateYAMLStructFields(
+		nonStringKey, reflect.TypeFor[struct{}](), "app.yaml", "",
+	))
+
+	root := &yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{
+		{Kind: yaml.ScalarNode, Value: "instrumentation/development"},
+		{Kind: yaml.MappingNode},
+	}}
+	assert.NoError(t, validateApplicationRootFields(
+		root, reflect.TypeFor[struct{}](), "app.yaml",
+	))
+
+	application := ApplicationConfiguration{
+		Source:          "app.yaml",
+		SourceLocations: map[string]SourceLocation{"go.sample.option": {File: "app.yaml", Line: 2, Column: 3}},
+	}
+	err := explainDeprecatedApplicationField(&unsupportedApplicationFieldError{
+		Path: "instrumentation/development.go.sample.option",
+	}, application, map[string]Entry{
+		"go.sample.option": {Name: "go.sample.option", Deprecated: true},
+	})
+	require.ErrorContains(t, err, "deprecated configuration")
 }
 
 func TestYAMLStructFieldsSkipsUnexportedAndIgnoredFields(t *testing.T) {
