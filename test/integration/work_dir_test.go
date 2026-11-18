@@ -6,12 +6,12 @@
 package test
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -28,6 +28,10 @@ func TestBuildRemovesGoWorkDir(t *testing.T) {
 	otelcPath, err = filepath.Abs(otelcPath)
 	require.NoError(t, err)
 	t.Setenv("GOFLAGS", "")
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	require.NoError(t, err)
+	repoRootSlash := filepath.ToSlash(repoRoot)
+
 	t.Setenv(util.EnvOtelcDebug, "")
 
 	for _, tt := range []struct {
@@ -39,16 +43,69 @@ func TestBuildRemovesGoWorkDir(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			moduleDir := t.TempDir()
-			writeTestFile(t, moduleDir, "go.mod", "module example.com/otelc-work-dir\n\ngo 1.25.0\n")
+			writeTestFile(t, moduleDir, "go.mod", fmt.Sprintf(`module example.com/otelc-work-dir
+
+go 1.25.0
+
+require (
+	example.com/otelc-work-dir/hooks v0.0.0
+	go.opentelemetry.io/otelc/pkg v0.0.0
+)
+
+replace (
+	example.com/otelc-work-dir/hooks => ./hooks
+	go.opentelemetry.io/otelc => %s
+	go.opentelemetry.io/otelc/pkg => %s/pkg
+)
+`, repoRootSlash, repoRootSlash))
+			writeTestFile(t, moduleDir, "otel.instrumentation.go", `//go:build tools
+
+package tools
+
+import _ "example.com/otelc-work-dir/hooks"
+`)
+			writeTestFile(
+				t,
+				moduleDir,
+				filepath.Join("hooks", "go.mod"),
+				fmt.Sprintf(`module example.com/otelc-work-dir/hooks
+
+go 1.25.0
+
+require go.opentelemetry.io/otelc/pkg v0.0.0
+
+replace go.opentelemetry.io/otelc/pkg => %s/pkg
+`, repoRootSlash),
+			)
+			writeTestFile(t, moduleDir, filepath.Join("hooks", "hooks.go"), `// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package hooks
+
+import "go.opentelemetry.io/otelc/pkg/hook"
+
+func Before(ctx hook.HookContext) {
+	_ = ctx
+}
+`)
+			writeTestFile(t, moduleDir, filepath.Join("hooks", "otelc.yaml"), `hook_work:
+  target: main
+  where:
+    func: Greet
+  do:
+    - inject_hooks:
+        before: Before
+        path: example.com/otelc-work-dir/hooks
+`)
 			writeTestFile(t, moduleDir, "main.go", `// Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package main
 
-import "net/http"
+func Greet() string { return "hello" }
 
 func main() {
-	_, _ = http.Get("http://127.0.0.1:1/")
+	_ = Greet()
 }
 `)
 			tmpDir, err := filepath.EvalSymlinks(t.TempDir())
@@ -72,11 +129,7 @@ func main() {
 				require.Empty(t, workDirs, "default build left Go work directories behind")
 			}
 			symbols := goOutput(t, moduleDir, "tool", "nm", binary)
-			require.True(t,
-				strings.Contains(symbols, "otelc/instrumentation/net/http") ||
-					strings.Contains(symbols, "otelc-contrib/instrumentation/net/http"),
-				"net/http was not instrumented",
-			)
+			require.Contains(t, symbols, "example.com/otelc-work-dir/hooks.Before", "hooks were not instrumented")
 		})
 	}
 }
@@ -93,15 +146,22 @@ func TestBuildAcrossWorkDirsReusesCache(t *testing.T) {
 	otelcPath, err = filepath.Abs(otelcPath)
 	require.NoError(t, err)
 
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	require.NoError(t, err)
+	repoRootSlash := filepath.ToSlash(repoRoot)
+
 	moduleDir := t.TempDir()
-	writeTestFile(t, moduleDir, "go.mod", `module example.com/otelc-work-dir-local
+	writeTestFile(t, moduleDir, "go.mod", fmt.Sprintf(`module example.com/otelc-work-dir-local
 
 go 1.25.0
 
 require example.com/otelc-work-dir-local/hooks v0.0.0-00010101000000-000000000000
 
-replace example.com/otelc-work-dir-local/hooks => ./hooks
-`)
+replace (
+	example.com/otelc-work-dir-local/hooks => ./hooks
+	go.opentelemetry.io/otelc => %s
+)
+`, repoRootSlash))
 	writeTestFile(t, moduleDir, "otel.instrumentation.go", `//go:build tools
 
 package tools

@@ -51,6 +51,7 @@ func TestHook(t *testing.T) {
 // does not import normal.
 func writeTestOnlyModule(t *testing.T, repoRoot string) string {
 	t.Helper()
+	repoRootSlash := filepath.ToSlash(repoRoot)
 	pkgDir := filepath.ToSlash(filepath.Join(repoRoot, "pkg"))
 	moduleDir := t.TempDir()
 
@@ -60,10 +61,12 @@ go 1.25.0
 
 require example.com/otelc-testonly/instrumentation v0.0.0
 
-replace example.com/otelc-testonly/instrumentation => ./instrumentation
-
-replace go.opentelemetry.io/otelc/pkg => %s
-`, pkgDir))
+replace (
+	example.com/otelc-testonly/instrumentation => ./instrumentation
+	go.opentelemetry.io/otelc => %s
+	go.opentelemetry.io/otelc/pkg => %s
+)
+`, repoRootSlash, pkgDir))
 	writeTestFile(t, moduleDir, "otel.instrumentation.go", testOnlyLicenseHeader+`//go:build tools
 
 package tools

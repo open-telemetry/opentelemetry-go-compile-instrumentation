@@ -2,7 +2,10 @@ module go.opentelemetry.io/otelc/demo/app/basic
 
 go 1.26.0
 
-replace go.opentelemetry.io/otelc/demo/app/basic/instrumentation => ./instrumentation
+replace (
+	go.opentelemetry.io/otelc => ../../..
+	go.opentelemetry.io/otelc/demo/app/basic/instrumentation => ./instrumentation
+)
 
 require (
 	go.opentelemetry.io/otelc/demo/app/basic/instrumentation v0.0.0-00010101000000-000000000000

@@ -22,7 +22,12 @@ import (
 	"go.opentelemetry.io/otelc/test/testutil"
 )
 
-const concurrentBuildsGoMod = "module example.com/concurrentbuilds\n\ngo 1.25.0\n"
+func concurrentBuildsGoMod(repoRoot string) string {
+	return fmt.Sprintf(
+		"module example.com/concurrentbuilds\n\ngo 1.25.0\n\nreplace go.opentelemetry.io/otelc => %s\n",
+		repoRoot,
+	)
+}
 
 // envCrossModuleOtelc gives the tests of the cross-module test modules the
 // path of the otelc binary.
@@ -68,11 +73,24 @@ func TestNestedBuildsAcrossModules(t *testing.T) {
 	otelcPath, err = filepath.Abs(otelcPath)
 	require.NoError(t, err)
 
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	require.NoError(t, err)
+	repoRootSlash := filepath.ToSlash(repoRoot)
+
 	root := t.TempDir()
 	modules := []string{"a", "b"}
 	for i, name := range modules {
 		dir := filepath.Join(root, name)
-		writeTestFile(t, dir, "go.mod", fmt.Sprintf("module example.com/%s\n\ngo 1.25.0\n", name))
+		writeTestFile(
+			t,
+			dir,
+			"go.mod",
+			fmt.Sprintf(
+				"module example.com/%s\n\ngo 1.25.0\n\nreplace go.opentelemetry.io/otelc => %s\n",
+				name,
+				repoRootSlash,
+			),
+		)
 		writeTestFile(t, dir, filepath.Join("cmd", "app", "main.go"), `// Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
@@ -112,8 +130,17 @@ func main() { _, _ = http.Get("http://127.0.0.1:1/") }
 	for _, name := range modules {
 		goMod, readErr := os.ReadFile(filepath.Join(root, name, "go.mod"))
 		require.NoError(t, readErr)
-		assert.Equal(t, fmt.Sprintf("module example.com/%s\n\ngo 1.25.0\n", name), string(goMod),
-			"go.mod of module %s must be restored", name)
+		assert.Equal(
+			t,
+			fmt.Sprintf(
+				"module example.com/%s\n\ngo 1.25.0\n\nreplace go.opentelemetry.io/otelc => %s\n",
+				name,
+				repoRootSlash,
+			),
+			string(goMod),
+			"go.mod of module %s must be restored",
+			name,
+		)
 	}
 }
 
@@ -132,7 +159,7 @@ func TestConcurrentBuildsInOneModule(t *testing.T) {
 
 	t.Run("from different package dirs", func(t *testing.T) {
 		t.Parallel()
-		moduleDir := concurrentBuildsModule(t, apps)
+		moduleDir, expectedGoMod := concurrentBuildsModule(t, apps)
 		// The default work dir of each build is the directory it starts in.
 		cmds := make([]*exec.Cmd, 0, len(apps))
 		for _, app := range apps {
@@ -141,12 +168,12 @@ func TestConcurrentBuildsInOneModule(t *testing.T) {
 			cmd.Env = env
 			cmds = append(cmds, cmd)
 		}
-		assertBuildsTookTurns(t, moduleDir, runConcurrently(t, cmds))
+		assertBuildsTookTurns(t, moduleDir, expectedGoMod, runConcurrently(t, cmds))
 	})
 
 	t.Run("with -C and separate work dirs", func(t *testing.T) {
 		t.Parallel()
-		moduleDir := concurrentBuildsModule(t, apps)
+		moduleDir, expectedGoMod := concurrentBuildsModule(t, apps)
 		outside := t.TempDir()
 		cmds := make([]*exec.Cmd, 0, len(apps))
 		for _, app := range apps {
@@ -156,16 +183,21 @@ func TestConcurrentBuildsInOneModule(t *testing.T) {
 			cmd.Env = env
 			cmds = append(cmds, cmd)
 		}
-		assertBuildsTookTurns(t, moduleDir, runConcurrently(t, cmds))
+		assertBuildsTookTurns(t, moduleDir, expectedGoMod, runConcurrently(t, cmds))
 	})
 }
 
 // concurrentBuildsModule writes a module with one main package per app under
 // cmd/ and returns its root.
-func concurrentBuildsModule(t *testing.T, apps []string) string {
+func concurrentBuildsModule(t *testing.T, apps []string) (string, string) {
 	t.Helper()
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	require.NoError(t, err)
+	repoRootSlash := filepath.ToSlash(repoRoot)
+
 	moduleDir := t.TempDir()
-	writeTestFile(t, moduleDir, "go.mod", concurrentBuildsGoMod)
+	expectedGoMod := concurrentBuildsGoMod(repoRootSlash)
+	writeTestFile(t, moduleDir, "go.mod", expectedGoMod)
 	for _, app := range apps {
 		writeTestFile(t, moduleDir, filepath.Join("cmd", app, "main.go"), `// Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
@@ -177,7 +209,7 @@ import "net/http"
 func main() { _, _ = http.Get("http://127.0.0.1:1/") }
 `)
 	}
-	return moduleDir
+	return moduleDir, expectedGoMod
 }
 
 // startConcurrently runs cmds at the same time and returns their combined
@@ -214,11 +246,11 @@ func runConcurrently(t *testing.T, cmds []*exec.Cmd) []string {
 
 // assertBuildsTookTurns checks that the builds left the module as it was and
 // that at least one of them waited for the build lock of another.
-func assertBuildsTookTurns(t *testing.T, moduleDir string, outputs []string) {
+func assertBuildsTookTurns(t *testing.T, moduleDir, expectedGoMod string, outputs []string) {
 	t.Helper()
 	goMod, err := os.ReadFile(filepath.Join(moduleDir, "go.mod"))
 	require.NoError(t, err)
-	assert.Equal(t, concurrentBuildsGoMod, string(goMod), "go.mod must be restored")
+	assert.Equal(t, expectedGoMod, string(goMod), "go.mod must be restored")
 	assert.NoFileExists(t, filepath.Join(moduleDir, "go.sum"), "go.sum must be removed")
 
 	waited := 0

@@ -27,7 +27,7 @@ func TestUnlockedBuildsReuseCompilerCache(t *testing.T) {
 	require.NoError(t, err)
 	otelc, err = filepath.Abs(otelc)
 	require.NoError(t, err)
-	module := concurrentBuildsModule(t, []string{"a"})
+	module, expectedGoMod := concurrentBuildsModule(t, []string{"a"})
 	binary := filepath.Join(t.TempDir(), "app")
 	if runtime.GOOS == "windows" {
 		binary += ".exe"
@@ -61,7 +61,7 @@ func TestUnlockedBuildsReuseCompilerCache(t *testing.T) {
 	assert.Contains(t, string(out), "updated", "a warm build must still see source edits")
 	goMod, err := os.ReadFile(filepath.Join(module, "go.mod"))
 	require.NoError(t, err)
-	assert.Equal(t, concurrentBuildsGoMod, string(goMod))
+	assert.Equal(t, expectedGoMod, string(goMod))
 	assert.NoFileExists(t, filepath.Join(module, "go.sum"))
 }
 
@@ -78,7 +78,7 @@ func TestUnlockedBuildsSurviveCleanup(t *testing.T) {
 	goPath, err := exec.LookPath("go")
 	require.NoError(t, err)
 	root := t.TempDir()
-	module := concurrentBuildsModule(t, []string{"a", "b"})
+	module, expectedGoMod := concurrentBuildsModule(t, []string{"a", "b"})
 	writeTestFile(t, module, "root.go", "package concurrentbuilds\nimport _ \"net/http\"\n")
 	wrapperDir := filepath.Join(root, "bin")
 	writeTestFile(t, wrapperDir, "go", fmt.Sprintf(`#!/bin/sh
@@ -144,7 +144,7 @@ exec %q "$@"
 	}
 	goMod, err := os.ReadFile(filepath.Join(module, "go.mod"))
 	require.NoError(t, err)
-	assert.Equal(t, concurrentBuildsGoMod, string(goMod))
+	assert.Equal(t, expectedGoMod, string(goMod))
 	assert.NoFileExists(t, filepath.Join(module, "go.sum"))
 	for _, app := range []string{"a", "b"} {
 		binary := filepath.Join(root, app)
