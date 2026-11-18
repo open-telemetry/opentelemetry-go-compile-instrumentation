@@ -596,13 +596,13 @@ func (sp *setupPhase) loadRules(ctx context.Context, moduleDirs []string) ([]rul
 	// highest priority.
 	rulePath := os.Getenv(util.EnvOtelcRules)
 	if rulePath != "" {
-		sp.Debug("rules source: environment variable %s (%s)", util.EnvOtelcRules, rulePath)
+		sp.Debug("rules source: environment variable", "name", util.EnvOtelcRules, "path", rulePath)
 		return loadCustomRules(ctx, rulePath, util.Version)
 	}
 
 	// Load custom rule(s) from config file if specified
 	if sp.ruleConfig != "" {
-		sp.Debug("rules source: ruleConfig (%s)", sp.ruleConfig)
+		sp.Debug("rules source: ruleConfig", "path", sp.ruleConfig)
 		return loadCustomRules(ctx, sp.ruleConfig, util.Version)
 	}
 
