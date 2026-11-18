@@ -114,7 +114,7 @@ func OtelBeforeTrampoline_ExternalHelper2215449730() (hookContext *HookContextIm
 	return nil, false
 }
 
-func OtelAfterTrampoline_ExternalHelper2215449730(hookContext HookContext, arg0 *error) {
+func OtelAfterTrampoline_ExternalHelper2215449730(hookContext OtelHookContext, arg0 *error) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "AfterExternalHelper")
@@ -133,7 +133,7 @@ func OtelAfterTrampoline_ExternalHelper2215449730(hookContext HookContext, arg0 
 }
 
 //go:linkname otelc_hook_3504338147_BeforeExternalHelper testdata/golden/has-package-combo-match.BeforeExternalHelper
-func otelc_hook_3504338147_BeforeExternalHelper(hookContext HookContext)
+func otelc_hook_3504338147_BeforeExternalHelper(hookContext OtelHookContext)
 
 //go:linkname otelc_hook_3504338147_AfterExternalHelper testdata/golden/has-package-combo-match.AfterExternalHelper
-func otelc_hook_3504338147_AfterExternalHelper(hookContext HookContext, arg0 error)
+func otelc_hook_3504338147_AfterExternalHelper(hookContext OtelHookContext, arg0 error)

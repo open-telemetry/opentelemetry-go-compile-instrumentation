@@ -132,7 +132,7 @@ func OtelBeforeTrampoline_Func12313790154(param0 *string, param1 *int) (hookCont
 	return nil, false
 }
 
-func OtelAfterTrampoline_Func12313790154(hookContext HookContext, arg0 *float32, arg1 *error) {
+func OtelAfterTrampoline_Func12313790154(hookContext OtelHookContext, arg0 *float32, arg1 *error) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "H1After")
@@ -151,7 +151,7 @@ func OtelAfterTrampoline_Func12313790154(hookContext HookContext, arg0 *float32,
 }
 
 //go:linkname otelc_hook_2379989938_H1Before testdata/golden/func-rule-only.H1Before
-func otelc_hook_2379989938_H1Before(hookContext HookContext, param0 string, param1 int)
+func otelc_hook_2379989938_H1Before(hookContext OtelHookContext, param0 string, param1 int)
 
 //go:linkname otelc_hook_2379989938_H1After testdata/golden/func-rule-only.H1After
-func otelc_hook_2379989938_H1After(hookContext HookContext, arg0 float32, arg1 error)
+func otelc_hook_2379989938_H1After(hookContext OtelHookContext, arg0 float32, arg1 error)

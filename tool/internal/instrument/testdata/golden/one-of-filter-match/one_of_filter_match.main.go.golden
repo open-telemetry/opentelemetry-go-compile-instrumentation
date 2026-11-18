@@ -122,7 +122,7 @@ func OtelBeforeTrampoline_Open2733714658(param0 *string) (hookContext *HookConte
 	return nil, false
 }
 
-func OtelAfterTrampoline_Open2733714658(hookContext HookContext, arg0 *error) {
+func OtelAfterTrampoline_Open2733714658(hookContext OtelHookContext, arg0 *error) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "AfterOpen")
@@ -141,7 +141,7 @@ func OtelAfterTrampoline_Open2733714658(hookContext HookContext, arg0 *error) {
 }
 
 //go:linkname otelc_hook_3249185689_BeforeOpen testdata/golden/one-of-filter-match.BeforeOpen
-func otelc_hook_3249185689_BeforeOpen(hookContext HookContext, param0 string)
+func otelc_hook_3249185689_BeforeOpen(hookContext OtelHookContext, param0 string)
 
 //go:linkname otelc_hook_3249185689_AfterOpen testdata/golden/one-of-filter-match.AfterOpen
-func otelc_hook_3249185689_AfterOpen(hookContext HookContext, arg0 error)
+func otelc_hook_3249185689_AfterOpen(hookContext OtelHookContext, arg0 error)

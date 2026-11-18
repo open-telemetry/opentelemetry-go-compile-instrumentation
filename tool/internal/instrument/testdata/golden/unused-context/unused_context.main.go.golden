@@ -130,7 +130,7 @@ func (c *HookContextImpl4237239717) GetReturnValCount() int { return len(c.retur
 func (c *HookContextImpl4237239717) GetFuncName() string    { return c.funcName }
 func (c *HookContextImpl4237239717) GetPackageName() string { return c.packageName }
 
-func OtelAfterTrampoline_AfterOnly4237239717(hookContext HookContext, arg0 *int) {
+func OtelAfterTrampoline_AfterOnly4237239717(hookContext OtelHookContext, arg0 *int) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "UnusedAfter")
@@ -149,7 +149,7 @@ func OtelAfterTrampoline_AfterOnly4237239717(hookContext HookContext, arg0 *int)
 }
 
 //go:linkname otelc_hook_1344028440_UnusedAfter testdata/golden/unused-context.UnusedAfter
-func otelc_hook_1344028440_UnusedAfter(hookContext HookContext, arg0 int)
+func otelc_hook_1344028440_UnusedAfter(hookContext OtelHookContext, arg0 int)
 
 type HookContextImpl1226803491 struct {
 	params      []interface{}
@@ -254,7 +254,7 @@ func OtelBeforeTrampoline_AfterUses1226803491(param0 *int) (hookContext *HookCon
 	return hookContext, hookContext.skipCall
 }
 
-func OtelAfterTrampoline_AfterUses1226803491(hookContext HookContext, arg0 *int) {
+func OtelAfterTrampoline_AfterUses1226803491(hookContext OtelHookContext, arg0 *int) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "UsedAfter")
@@ -274,10 +274,10 @@ func OtelAfterTrampoline_AfterUses1226803491(hookContext HookContext, arg0 *int)
 }
 
 //go:linkname otelc_hook_1344028440_UnusedBefore testdata/golden/unused-context.UnusedBefore
-func otelc_hook_1344028440_UnusedBefore(hookContext HookContext, param0 int)
+func otelc_hook_1344028440_UnusedBefore(hookContext OtelHookContext, param0 int)
 
 //go:linkname otelc_hook_1344028440_UsedAfter testdata/golden/unused-context.UsedAfter
-func otelc_hook_1344028440_UsedAfter(hookContext HookContext, arg0 int)
+func otelc_hook_1344028440_UsedAfter(hookContext OtelHookContext, arg0 int)
 
 type HookContextImpl1412719616 struct {
 	params      []interface{}
@@ -466,7 +466,7 @@ func OtelBeforeTrampoline_BeforeUses956811467(param0 *int) (hookContext *HookCon
 	return hookContext, hookContext.skipCall
 }
 
-func OtelAfterTrampoline_BeforeUses956811467(hookContext HookContext, arg0 *int) {
+func OtelAfterTrampoline_BeforeUses956811467(hookContext OtelHookContext, arg0 *int) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "UnusedAfter")
@@ -486,7 +486,7 @@ func OtelAfterTrampoline_BeforeUses956811467(hookContext HookContext, arg0 *int)
 }
 
 //go:linkname otelc_hook_1344028440_UsedBefore testdata/golden/unused-context.UsedBefore
-func otelc_hook_1344028440_UsedBefore(hookContext HookContext, param0 int)
+func otelc_hook_1344028440_UsedBefore(hookContext OtelHookContext, param0 int)
 
 type HookContextImpl1986096774 struct {
 	params      []interface{}
@@ -587,7 +587,7 @@ func OtelBeforeTrampoline_BothUnused1986096774(param0 *int) (hookContext *HookCo
 	return nil, false
 }
 
-func OtelAfterTrampoline_BothUnused1986096774(hookContext HookContext, arg0 *int) {
+func OtelAfterTrampoline_BothUnused1986096774(hookContext OtelHookContext, arg0 *int) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "UnusedAfter")
