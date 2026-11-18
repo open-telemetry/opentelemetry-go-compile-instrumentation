@@ -119,9 +119,9 @@ func FindNew(ctx context.Context, root *dst.File, ruleImports map[string]string,
 	return result
 }
 
-// getExisting returns a map of alias -> path for all imports in the file.
+// Existing returns a map of alias -> path for all imports in the file.
 // For imports without explicit aliases, the package name is used as the key.
-func getExisting(ctx context.Context, root *dst.File, buildFlags ...string) map[string]string {
+func Existing(ctx context.Context, root *dst.File, buildFlags ...string) map[string]string {
 	return parseFile(ctx, root, buildFlags...).AliasToPath
 }
 
@@ -161,7 +161,7 @@ func AddToFile(ctx context.Context, root *dst.File, newImports map[string]string
 		return nil
 	}
 
-	existingImports := getExisting(ctx, root, buildFlags...)
+	existingImports := Existing(ctx, root, buildFlags...)
 
 	// Create reverse lookup: path -> alias
 	existingByPath := make(map[string]string)

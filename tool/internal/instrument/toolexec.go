@@ -32,6 +32,7 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/imports"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	toolruntime "go.opentelemetry.io/otelc/tool/internal/runtime"
 	"go.opentelemetry.io/otelc/tool/internal/session"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -104,6 +105,9 @@ type instrumentPhase struct {
 	// buildUsesIgnoreDirective is true when some package in this build has a
 	// //otelc:ignore comment above a call, found during setup.
 	buildUsesIgnoreDirective bool
+	// suppressHooksQualifier is the name the current file's trampolines use
+	// for the runtime package (see suppressHooksAlias).
+	suppressHooksQualifier string
 	// resolveExportFiles looks up go list -export files for type-checking;
 	// nil means pkgload.ResolveExportFilesBatch. Tests replace it.
 	resolveExportFiles func(
@@ -921,11 +925,19 @@ func deterministicLoadFailure(err error) bool {
 	return false
 }
 
+// candidateLoadFailure reports an error that means a root could not be loaded
+// as a package, rather than that the resolver itself could not run. These
+// errors can be skipped for this link; only deterministic ones are memoized.
+func candidateLoadFailure(err error) bool {
+	return deterministicLoadFailure(err) || strings.Contains(err.Error(), "no packages found")
+}
+
 // deterministicFailurePatterns are the messages of the failures
 // deterministicLoadFailure stores.
 func deterministicFailurePatterns() []string {
 	return []string{
 		"no required module provides package",
+		"updates to go.mod needed",
 		"cannot find module providing package",
 		"cannot find package",
 		"is not in std",
@@ -957,14 +969,7 @@ func (lr *linkResolution) resolveMisses(
 	if len(misses) == 0 {
 		return nil
 	}
-	var resolved map[string]map[string]string
-	var resolveFailed map[string]error
-	err = session.WithLoadSlot(ctx, func(ctx context.Context) error {
-		var loadErr error
-		resolved, resolveFailed, loadErr = lr.resolve(ctx, misses, lr.buildFlags...)
-		return loadErr
-	})
-	lr.goListCalls++
+	resolved, resolveFailed, err := lr.resolveBatch(ctx, misses)
 	if err != nil {
 		return err
 	}
@@ -982,6 +987,64 @@ func (lr *linkResolution) resolveMisses(
 		}
 	}
 	return nil
+}
+
+// resolveBatch runs one nested go list for the roots. When that load fails as
+// a whole, as it does when go list cannot resolve one root's module (for
+// example "updates to go.mod needed") and so returns no packages for any of
+// them, it resolves each root on its own. A root whose load fails alone lands
+// in the failed map, so one unresolvable candidate does not fail the whole
+// link, including when it is the only root left after the others are memoized.
+// An error is returned only when the context is done.
+func (lr *linkResolution) resolveBatch(
+	ctx context.Context,
+	roots []string,
+) (map[string]map[string]string, map[string]error, error) {
+	var resolved map[string]map[string]string
+	var resolveFailed map[string]error
+	err := session.WithLoadSlot(ctx, func(ctx context.Context) error {
+		var loadErr error
+		resolved, resolveFailed, loadErr = lr.resolve(ctx, roots, lr.buildFlags...)
+		return loadErr
+	})
+	lr.goListCalls++
+	if err == nil || ctx.Err() != nil || errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded) {
+		return resolved, resolveFailed, err
+	}
+	if len(roots) == 1 {
+		if !candidateLoadFailure(err) {
+			return nil, nil, err
+		}
+		return nil, map[string]error{roots[0]: err}, nil
+	}
+
+	resolved = make(map[string]map[string]string, len(roots))
+	resolveFailed = make(map[string]error)
+	for _, root := range roots {
+		var one map[string]map[string]string
+		var oneFailed map[string]error
+		rootErr := session.WithLoadSlot(ctx, func(ctx context.Context) error {
+			var loadErr error
+			one, oneFailed, loadErr = lr.resolve(ctx, []string{root}, lr.buildFlags...)
+			return loadErr
+		})
+		lr.goListCalls++
+		if ctx.Err() != nil {
+			return nil, nil, ctx.Err()
+		}
+		if rootErr != nil {
+			if errors.Is(rootErr, context.Canceled) || errors.Is(rootErr, context.DeadlineExceeded) ||
+				!candidateLoadFailure(rootErr) {
+				return nil, nil, rootErr
+			}
+			resolveFailed[root] = rootErr
+			continue
+		}
+		maps.Copy(resolved, one)
+		maps.Copy(resolveFailed, oneFailed)
+	}
+	return resolved, resolveFailed, nil
 }
 
 // linkRuleImports holds the rule-added import candidates of one link,
@@ -1106,7 +1169,12 @@ func (l *linkRuleImports) candidates(linkConfig *imports.ImportConfig) map[strin
 // collectRuleSetImports adds to paths every import a rule set can add to
 // its target package's compile: the imports each rule declares, plus the
 // imports of the source files the set's add_file rules insert.
-func collectRuleSetImports(ctx context.Context, bctx *build.Context, paths map[string]struct{}, set *rule.InstRuleSet) {
+func collectRuleSetImports(
+	ctx context.Context,
+	bctx *build.Context,
+	paths map[string]struct{},
+	set *rule.InstRuleSet,
+) {
 	addImportsOf(paths, set.RawRules)
 	addImportsOf(paths, set.FuncRules)
 	addImportsOf(paths, set.StructRules)
@@ -1185,17 +1253,16 @@ func addImportsOf[T interface{ Base() *rule.InstBaseRule }](
 // compile, so its imports are not candidates either. An "ignore" tag counts
 // as satisfied, because otelc compiles files ordinary builds ignore.
 func fileRuleImports(ctx context.Context, bctx *build.Context, fileRule *rule.InstFileRule) []string {
-	if fileRule.ResolvedPath == "" {
+	if fileRule.Path != util.InternalPath && fileRule.ResolvedPath == "" {
 		return nil
 	}
-	file := filepath.Join(fileRule.ResolvedPath, fileRule.File)
-	src, err := os.ReadFile(file)
+	file, data, err := readFileRuleSource(fileRule)
 	if err != nil {
 		util.LoggerFromContext(ctx).WarnContext(ctx,
-			"failed to read add_file rule source for link imports", "file", file, "error", err)
+			"failed to read add_file rule source for link imports", "file", fileRule.File, "error", err)
 		return nil
 	}
-	match, err := ast.MatchFileConstraints(bctx, fileRule.ResolvedPath, fileRule.File, src)
+	match, err := ast.MatchFileConstraints(bctx, fileRule.ResolvedPath, fileRule.File, data)
 	if err != nil {
 		util.LoggerFromContext(ctx).WarnContext(ctx,
 			"failed to match add_file rule constraints for link imports", "file", file, "error", err)
@@ -1204,7 +1271,7 @@ func fileRuleImports(ctx context.Context, bctx *build.Context, fileRule *rule.In
 	if !match {
 		return nil
 	}
-	parsed, err := parser.ParseFile(token.NewFileSet(), file, src, parser.ImportsOnly)
+	parsed, err := parser.ParseFile(token.NewFileSet(), file, data, parser.ImportsOnly)
 	if err != nil {
 		util.LoggerFromContext(ctx).WarnContext(ctx,
 			"failed to parse add_file rule source for link imports", "file", file, "error", err)
@@ -1321,6 +1388,30 @@ func toolVersionLine(line, rulesHash string) string {
 	return line + " " + marker
 }
 
+func rulesDigest(content []byte, tags []string, glsSource, injectedHash []byte) string {
+	content = WithoutWorkDirPaths(content)
+	// Build tags decide which add_file rule files apply, so a tagged build
+	// must not reuse artifacts compiled without those tags.
+	if len(tags) > 0 {
+		content = append(content, "\ntags="+strings.Join(tags, ",")...)
+	}
+	// Internal file rules (runtime_gls.go) leave ResolvedPath empty so
+	// matched.json stays work-dir independent; include the embedded GLS source
+	// hash so edits to it still invalidate the build cache.
+	glsSum := sha256.Sum256(glsSource)
+	content = append(content, "\ngls="+hex.EncodeToString(glsSum[:])...)
+	// go never sees the packages rules add, so their hash stands in. The
+	// tool ID is shared by every compile, so an edit to one injected
+	// package rebuilds the whole instrumented build, not only the
+	// packages that import it. Missing an edit would put stale code in
+	// the binary, so the coarser invalidation is the accepted cost.
+	if len(injectedHash) > 0 {
+		content = append(content, "\ninjected="+string(injectedHash)...)
+	}
+	sum := sha256.Sum256(content)
+	return hex.EncodeToString(sum[:8])
+}
+
 // markedToolVersion turns a tool's raw `-V=full` output into the line otelc
 // reports in its place: the version with an otelc marker, plus the current
 // matched-rules hash when one exists.
@@ -1337,22 +1428,11 @@ func RulesDigest() string {
 	if err != nil {
 		return ""
 	}
-	content = WithoutWorkDirPaths(content)
-	// Build tags decide which add_file rule files apply, so a tagged build
-	// must not reuse artifacts compiled without those tags.
-	if tags := util.ActiveBuildTags(); len(tags) > 0 {
-		content = append(content, "\ntags="+strings.Join(tags, ",")...)
+	var injected []byte
+	if inj, injErr := os.ReadFile(util.GetInjectedHashFile()); injErr == nil {
+		injected = inj
 	}
-	// go never sees the packages rules add, so their hash stands in. The
-	// tool ID is shared by every compile, so an edit to one injected
-	// package rebuilds the whole instrumented build, not only the
-	// packages that import it. Missing an edit would put stale code in
-	// the binary, so the coarser invalidation is the accepted cost.
-	if injected, injErr := os.ReadFile(util.GetInjectedHashFile()); injErr == nil && len(injected) > 0 {
-		content = append(content, "\ninjected="+string(injected)...)
-	}
-	sum := sha256.Sum256(content)
-	return hex.EncodeToString(sum[:8])
+	return rulesDigest(content, util.ActiveBuildTags(), toolruntime.RuntimeGLSSource, injected)
 }
 
 // runtimeDirPlaceholder replaces the work-dir location of the generated

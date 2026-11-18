@@ -10,11 +10,14 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	toolruntime "go.opentelemetry.io/otelc/tool/internal/runtime"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // applyFileRule introduces the new file to the target package at compile time.
@@ -55,10 +58,7 @@ func (ip *instrumentPhase) applyFileRule(ctx context.Context, fileRule *rule.Ins
 	}
 
 	// Write back the modified AST to a new file in the working directory
-	base := filepath.Base(fileRule.File)
-	ext := filepath.Ext(base)
-	newName := strings.TrimSuffix(base, ext)
-	newFile := filepath.Join(ip.workDir, fmt.Sprintf("otelc.%s.go", newName))
+	newFile := ip.addedFilePath(fileRule.File)
 	err = ast.WriteFile(newFile, root)
 	if err != nil {
 		return ex.Wrapf(err, "writing instrumented file %s", newFile)
@@ -80,6 +80,13 @@ func (ip *instrumentPhase) applyFileRule(ctx context.Context, fileRule *rule.Ins
 // that leave the rule package directory, both lexically and through symlinks.
 // It returns the path of the file and its contents.
 func readFileRuleSource(fileRule *rule.InstFileRule) (string, []byte, error) {
+	if fileRule.Path == util.InternalPath {
+		data, err := toolruntime.ReadInternalFile(fileRule.File)
+		if err != nil {
+			return "", nil, err
+		}
+		return fileRule.File, data, nil
+	}
 	if strings.TrimSpace(fileRule.ResolvedPath) == "" {
 		return "", nil, ex.Newf("resolved path for rule %q is empty", fileRule.Name)
 	}
@@ -122,4 +129,19 @@ func readFileRuleSource(fileRule *rule.InstFileRule) (string, []byte, error) {
 		return "", nil, ex.Wrapf(err, "reading rule source file %s", file)
 	}
 	return file, data, nil
+}
+
+// addedFilePath returns where the file a rule adds from src is written in the
+// work dir. The name is otelc.<name>.go, numbered when that is already taken
+// by the globals file or by a file an earlier rule added to the package. Two
+// rules can add files with the same base name from different directories, and
+// writing both to one path would compile the last one twice and drop the other.
+func (ip *instrumentPhase) addedFilePath(src string) string {
+	base := filepath.Base(src)
+	name := "otelc." + strings.TrimSuffix(base, filepath.Ext(base))
+	path := filepath.Join(ip.workDir, name+".go")
+	for i := 1; filepath.Base(path) == otelcGlobalsFile || slices.Contains(ip.compileArgs, path); i++ {
+		path = filepath.Join(ip.workDir, fmt.Sprintf("%s.%d.go", name, i))
+	}
+	return path
 }
