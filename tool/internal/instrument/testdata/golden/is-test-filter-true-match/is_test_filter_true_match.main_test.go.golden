@@ -120,7 +120,7 @@ func OtelBeforeTrampoline_ProcessRequest2587785677(param0 *string) (hookContext 
 	return nil, false
 }
 
-func OtelAfterTrampoline_ProcessRequest2587785677(hookContext HookContext, arg0 *error) {
+func OtelAfterTrampoline_ProcessRequest2587785677(hookContext OtelHookContext, arg0 *error) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "AfterProcessRequest")
@@ -139,7 +139,7 @@ func OtelAfterTrampoline_ProcessRequest2587785677(hookContext HookContext, arg0 
 }
 
 //go:linkname otelc_hook_3591031566_BeforeProcessRequest testdata/golden/is-test-filter-true-match.BeforeProcessRequest
-func otelc_hook_3591031566_BeforeProcessRequest(hookContext HookContext, param0 string)
+func otelc_hook_3591031566_BeforeProcessRequest(hookContext OtelHookContext, param0 string)
 
 //go:linkname otelc_hook_3591031566_AfterProcessRequest testdata/golden/is-test-filter-true-match.AfterProcessRequest
-func otelc_hook_3591031566_AfterProcessRequest(hookContext HookContext, arg0 error)
+func otelc_hook_3591031566_AfterProcessRequest(hookContext OtelHookContext, arg0 error)

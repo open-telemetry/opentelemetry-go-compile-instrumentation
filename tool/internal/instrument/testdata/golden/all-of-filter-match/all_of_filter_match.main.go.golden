@@ -125,7 +125,7 @@ func OtelBeforeTrampoline_Connect671999535(param0 *string) (hookContext *HookCon
 	return nil, false
 }
 
-func OtelAfterTrampoline_Connect671999535(hookContext HookContext, arg0 *error) {
+func OtelAfterTrampoline_Connect671999535(hookContext OtelHookContext, arg0 *error) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "AfterConnect")
@@ -144,7 +144,7 @@ func OtelAfterTrampoline_Connect671999535(hookContext HookContext, arg0 *error) 
 }
 
 //go:linkname otelc_hook_833968721_BeforeConnect testdata/golden/all-of-filter-match.BeforeConnect
-func otelc_hook_833968721_BeforeConnect(hookContext HookContext, param0 string)
+func otelc_hook_833968721_BeforeConnect(hookContext OtelHookContext, param0 string)
 
 //go:linkname otelc_hook_833968721_AfterConnect testdata/golden/all-of-filter-match.AfterConnect
-func otelc_hook_833968721_AfterConnect(hookContext HookContext, arg0 error)
+func otelc_hook_833968721_AfterConnect(hookContext OtelHookContext, arg0 error)
