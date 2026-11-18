@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.opentelemetry.io/otelc/test/testutil"
+	"go.opentelemetry.io/otelc/tool/util"
 )
 
 const preparedGoMod = `module example.com/otelc-prepared
@@ -251,7 +252,14 @@ func (b *preparedBuildCase) directBuild(buildDir string, emptyWorkDirEnv bool, e
 	args = append(args, ".")
 	cmd := exec.CommandContext(b.t.Context(), "go", args...)
 	cmd.Dir = buildDir
-	cmd.Env = preparedDropInBuildEnvironment(b.baseEnv, b.goCache, b.goFlags)
+	goFlags := b.goFlags
+	// Setup prints this flag for drop-in builds when rules add imports.
+	if overlay := filepath.Join(b.moduleDir, ".otelc-build", "overlay.json"); util.PathExists(overlay) {
+		token, err := util.QuoteGoflagsToken("-overlay=" + overlay)
+		require.NoError(b.t, err)
+		goFlags += " " + token
+	}
+	cmd.Env = preparedDropInBuildEnvironment(b.baseEnv, b.goCache, goFlags)
 	if emptyWorkDirEnv {
 		cmd.Env = append(cmd.Env, "OTELC_WORK_DIR=")
 	}
