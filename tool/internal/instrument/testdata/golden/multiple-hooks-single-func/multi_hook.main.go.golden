@@ -113,7 +113,7 @@ func OtelBeforeTrampoline_Func1155800511(param0 *string, param1 *int) (hookConte
 }
 
 //go:linkname otelc_hook_2022634862_H1Before testdata/golden/multiple-hooks-single-func.H1Before
-func otelc_hook_2022634862_H1Before(hookContext HookContext, param0 string, param1 int)
+func otelc_hook_2022634862_H1Before(hookContext OtelHookContext, param0 string, param1 int)
 
 type HookContextImpl1412092233 struct {
 	params      []interface{}
@@ -210,7 +210,7 @@ func (c *HookContextImpl1412092233) GetReturnValCount() int { return len(c.retur
 func (c *HookContextImpl1412092233) GetFuncName() string    { return c.funcName }
 func (c *HookContextImpl1412092233) GetPackageName() string { return c.packageName }
 
-func OtelAfterTrampoline_Func11412092233(hookContext HookContext, arg0 *float32, arg1 *error) {
+func OtelAfterTrampoline_Func11412092233(hookContext OtelHookContext, arg0 *float32, arg1 *error) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "H2After")
@@ -229,4 +229,4 @@ func OtelAfterTrampoline_Func11412092233(hookContext HookContext, arg0 *float32,
 }
 
 //go:linkname otelc_hook_2022634862_H2After testdata/golden/multiple-hooks-single-func.H2After
-func otelc_hook_2022634862_H2After(hookContext HookContext, arg0 float32, arg1 error)
+func otelc_hook_2022634862_H2After(hookContext OtelHookContext, arg0 float32, arg1 error)

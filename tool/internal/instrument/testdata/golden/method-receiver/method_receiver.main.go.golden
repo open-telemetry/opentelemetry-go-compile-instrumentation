@@ -148,7 +148,7 @@ func OtelBeforeTrampoline_Func13482884715(recv0 **T, param0 *string, param1 *int
 	return nil, false
 }
 
-func OtelAfterTrampoline_Func13482884715(hookContext HookContext, arg0 *float32, arg1 *error) {
+func OtelAfterTrampoline_Func13482884715(hookContext OtelHookContext, arg0 *float32, arg1 *error) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "H3After")
@@ -167,10 +167,10 @@ func OtelAfterTrampoline_Func13482884715(hookContext HookContext, arg0 *float32,
 }
 
 //go:linkname otelc_hook_532392343_H3Before testdata/golden/method-receiver.H3Before
-func otelc_hook_532392343_H3Before(hookContext HookContext, recv0 interface{}, param0 string, param1 int)
+func otelc_hook_532392343_H3Before(hookContext OtelHookContext, recv0 interface{}, param0 string, param1 int)
 
 //go:linkname otelc_hook_532392343_H3After testdata/golden/method-receiver.H3After
-func otelc_hook_532392343_H3After(hookContext HookContext, arg0 float32, arg1 error)
+func otelc_hook_532392343_H3After(hookContext OtelHookContext, arg0 float32, arg1 error)
 
 type HookContextImpl1380706877 struct {
 	params      []interface{}
@@ -257,4 +257,4 @@ func OtelBeforeTrampoline_Func31380706877(recv0 *T) (hookContext *HookContextImp
 }
 
 //go:linkname otelc_hook_532392343_H11Before testdata/golden/method-receiver.H11Before
-func otelc_hook_532392343_H11Before(hookContext HookContext, recv0 interface{})
+func otelc_hook_532392343_H11Before(hookContext OtelHookContext, recv0 interface{})

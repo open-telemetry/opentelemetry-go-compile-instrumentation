@@ -796,3 +796,63 @@ func TestWriteInstrumentedDebugCopiesSourceWithDiff(t *testing.T) {
 	assert.Contains(t, string(content), "-var X = 1")
 	assert.Contains(t, string(content), "+var X = 2")
 }
+
+// TestWriteGlobalsPrefixesHookContextToPreventUserPackageClash verifies that the
+// HookContext interface injected into package scope is renamed to OtelHookContext
+// so it does not collide with a user-defined HookContext type in the same package (issue #1820).
+func TestWriteGlobalsPrefixesHookContextToPreventUserPackageClash(t *testing.T) {
+	workDir := t.TempDir()
+	ip := newTestPhase()
+	ip.workDir = workDir
+
+	require.NoError(t, ip.writeGlobals("mypkg"))
+
+	globalsPath := filepath.Join(workDir, otelcGlobalsFile)
+	data, err := os.ReadFile(globalsPath)
+	require.NoError(t, err)
+
+	content := string(data)
+	assert.Contains(t, content, "type OtelHookContext interface")
+	assert.NotContains(t, content, "type HookContext interface")
+
+	// Parse both the generated globals and a user source file that defines a HookContext type.
+	fset := token.NewFileSet()
+	userSrc := "package mypkg\n\ntype HookContext struct { ID string }\n"
+	userFile, err := parser.ParseFile(fset, "user.go", userSrc, 0)
+	require.NoError(t, err)
+
+	globalsFile, err := parser.ParseFile(fset, "otelc.globals.go", content, 0)
+	require.NoError(t, err)
+
+	// Typecheck the package containing both files. Before the fix, this failed with:
+	// "HookContext redeclared in this block".
+	conf := types.Config{
+		Importer: importer.Default(),
+	}
+	info := &types.Info{}
+	pkg, err := conf.Check("mypkg", fset, []*goast.File{userFile, globalsFile}, info)
+	require.NoError(t, err, "user HookContext should not collide with injected OtelHookContext")
+	assert.NotNil(t, pkg)
+}
+
+func TestRenameHookContextDecl(t *testing.T) {
+	p := ast.NewAstParser()
+	f, err := p.ParseSource(`package test
+
+func F() {}
+
+var V int
+
+type Other struct{}
+
+type HookContext interface{}
+`)
+	require.NoError(t, err)
+	renameHookContextDecl(f.Decls)
+
+	typeOther := f.Decls[2].(*dst.GenDecl).Specs[0].(*dst.TypeSpec)
+	assert.Equal(t, "Other", typeOther.Name.Name)
+
+	typeHookContext := f.Decls[3].(*dst.GenDecl).Specs[0].(*dst.TypeSpec)
+	assert.Equal(t, "OtelHookContext", typeHookContext.Name.Name)
+}

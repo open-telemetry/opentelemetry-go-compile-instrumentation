@@ -107,4 +107,4 @@ func OtelBeforeTrampoline_UnderscoreFunc418572368(param0 *int, param1 *float32) 
 }
 
 //go:linkname otelc_hook_4254536111_H10Before testdata/golden/underscore-syntax.H10Before
-func otelc_hook_4254536111_H10Before(hookContext HookContext, param0 int, param1 float32)
+func otelc_hook_4254536111_H10Before(hookContext OtelHookContext, param0 int, param1 float32)

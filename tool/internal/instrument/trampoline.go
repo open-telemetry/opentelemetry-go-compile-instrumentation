@@ -37,10 +37,11 @@ import (
 // its name suggests, it jumps to the trampoline function from raw function.
 
 const (
+	hookContextPublicType           = "HookContext"
 	trampolineBeforeName            = "OtelBeforeTrampoline"
 	trampolineAfterName             = "OtelAfterTrampoline"
 	trampolineHookContextName       = "hookContext"
-	trampolineHookContextType       = "HookContext"
+	trampolineHookContextType       = "OtelHookContext"
 	trampolineAnyName               = "any"
 	trampolineInterfaceType         = "interface{}"
 	trampolineEmptyStructType       = "struct{}"
@@ -443,10 +444,17 @@ func sliceOrEllipsisElt(s string) (string, bool) {
 	return "", false
 }
 
+func isHookContextType(t string) bool {
+	return t == trampolineHookContextType || t == hookContextPublicType
+}
+
 // matchBaseType reports whether hookBase matches the expected trampBase type.
 func matchBaseType(trampBase, hookBase string) bool {
 	// The any-typed parameter can accept any trampoline parameter.
 	if isAnyOrInterface(hookBase) {
+		return true
+	}
+	if isHookContextType(trampBase) && isHookContextType(hookBase) {
 		return true
 	}
 	if trampBase != "" && trampBase == hookBase {
@@ -542,8 +550,12 @@ func (ip *instrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, targetParams *d
 		trampBase := trampParamTypeName(trampField.Type)
 		hookBase := baseTypeName(afterHookParams.List[i].Type)
 		if !matchBaseType(trampBase, hookBase) {
+			expected := trampBase
+			if expected == trampolineHookContextType {
+				expected = hookContextPublicType
+			}
 			return ex.Newf("hook func param %d type mismatch, expected %s, got %s",
-				i, trampBase, hookBase)
+				i, expected, hookBase)
 		}
 	}
 	return nil
@@ -559,9 +571,9 @@ func (ip *instrumentPhase) checkBeforeHookDecl(hookFunc *dst.FuncDecl, targetPar
 	}
 
 	// First param must be HookContext
-	if baseTypeName(beforeHookParams.List[0].Type) != trampolineHookContextType {
+	if baseTypeName(beforeHookParams.List[0].Type) != hookContextPublicType {
 		return ex.Newf("hook func first param must be %s, got %s",
-			trampolineHookContextType, baseTypeName(beforeHookParams.List[0].Type))
+			hookContextPublicType, baseTypeName(beforeHookParams.List[0].Type))
 	}
 
 	// Remaining params must match dereferenced trampoline params

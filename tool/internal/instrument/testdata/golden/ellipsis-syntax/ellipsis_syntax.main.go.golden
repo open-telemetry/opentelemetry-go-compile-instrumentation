@@ -99,4 +99,4 @@ func OtelBeforeTrampoline_EllipsisFunc1782564695(param0 *[]string) (hookContext 
 }
 
 //go:linkname otelc_hook_2007357514_H9Before testdata/golden/ellipsis-syntax.H9Before
-func otelc_hook_2007357514_H9Before(hookContext HookContext, param0 ...string)
+func otelc_hook_2007357514_H9Before(hookContext OtelHookContext, param0 ...string)
