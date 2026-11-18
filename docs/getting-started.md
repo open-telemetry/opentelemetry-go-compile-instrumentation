@@ -72,9 +72,9 @@ you don't want to change.
    GOFLAGS="${GOFLAGS} '-toolexec=otelc toolexec' -overlay=$PWD/.otelc-build/overlay.json" go build -o myapp .
    ```
 
-   Set it for build commands only: the overlay can hold a copy of `go.mod`,
-   so `go get` and `go mod tidy` refuse to run under it. The copy is taken by
-   `otelc setup`, so run setup again after changing dependencies. The overlay
+   Set it for build commands only: in a workspace the overlay can hold a copy
+   of `go.work`, so `go get` and `go mod tidy` refuse to run under it. Run
+   `otelc setup` again after changing dependencies. The overlay
    already includes the entries of any `-overlay` file you passed to `otelc setup`.
 
 Run `go build` from the module directory (or any subdirectory); `otelc`

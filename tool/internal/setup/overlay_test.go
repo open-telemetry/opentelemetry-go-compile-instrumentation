@@ -48,7 +48,7 @@ func TestBuildImportOverlayInPlace(t *testing.T) {
 	buildDir := t.TempDir()
 	pkgDir := t.TempDir()
 
-	o, err := buildImportOverlay([]*importTarget{
+	o, err := buildImportOverlay(t.Context(), []*importTarget{
 		{ImportPath: "example.com/a", Name: "a", Dir: pkgDir, Kind: kindInPlace, Imports: []string{"container/list"}},
 	}, filepath.Join(t.TempDir(), "go.mod"), buildDir)
 	require.NoError(t, err)
@@ -62,7 +62,7 @@ func TestBuildImportOverlayInPlace(t *testing.T) {
 func TestBuildImportOverlayXTestName(t *testing.T) {
 	pkgDir := t.TempDir()
 
-	o, err := buildImportOverlay([]*importTarget{
+	o, err := buildImportOverlay(t.Context(), []*importTarget{
 		{ImportPath: "example.com/a_test", Name: "a_test", Dir: pkgDir, Kind: kindInPlace, Imports: []string{"fmt"}},
 	}, filepath.Join(t.TempDir(), "go.mod"), t.TempDir())
 	require.NoError(t, err)
@@ -71,7 +71,7 @@ func TestBuildImportOverlayXTestName(t *testing.T) {
 }
 
 func TestBuildImportOverlaySkipsRuntimeFileTargets(t *testing.T) {
-	o, err := buildImportOverlay([]*importTarget{
+	o, err := buildImportOverlay(t.Context(), []*importTarget{
 		{
 			ImportPath: "command-line-arguments",
 			Name:       "main",
@@ -105,7 +105,7 @@ func TestBuildImportOverlayModCache(t *testing.T) {
 	goMod := filepath.Join(t.TempDir(), "go.mod")
 	mustWriteFile(t, goMod, "module example.com/app\n\ngo 1.25\n\nrequire example.com/dep v1.2.3\n")
 
-	o, err := buildImportOverlay([]*importTarget{{
+	o, err := buildImportOverlay(t.Context(), []*importTarget{{
 		ImportPath: "example.com/dep/sub", Name: "sub", Dir: filepath.Join(mod.Dir, "sub"),
 		Kind: kindModCache, Module: mod, Imports: []string{"container/list"},
 	}}, goMod, buildDir)
@@ -127,7 +127,7 @@ func TestBuildImportOverlayModCache(t *testing.T) {
 		assert.Equal(t, string(want), string(got), rel)
 	}
 
-	_, err = buildImportOverlay([]*importTarget{{
+	_, err = buildImportOverlay(t.Context(), []*importTarget{{
 		ImportPath: "example.com/dep/sub", Name: "sub", Dir: filepath.Join(mod.Dir, "sub"),
 		Kind: kindModCache, Module: mod, Imports: []string{"container/list"},
 	}}, goMod, buildDir)
@@ -136,7 +136,8 @@ func TestBuildImportOverlayModCache(t *testing.T) {
 	imports := o.Replace[filepath.Join(replaceDir, "sub", "otelc.imports.go")]
 	assert.Equal(t, string(importsFileSource("sub", []string{"container/list"})), readOverlayFile(t, imports))
 
-	assert.Contains(t, readOverlayFile(t, o.Replace[goMod]), "replace example.com/dep => "+replaceDir)
+	assert.NotContains(t, o.Replace, goMod, "go.mod is edited on disk so a -mod=mod build can update it")
+	assert.Contains(t, readOverlayFile(t, goMod), "replace example.com/dep => "+replaceDir)
 }
 
 func TestBuildImportOverlayModCacheNoGoMod(t *testing.T) {
@@ -145,7 +146,7 @@ func TestBuildImportOverlayModCacheNoGoMod(t *testing.T) {
 	goMod := filepath.Join(t.TempDir(), "go.mod")
 	mustWriteFile(t, goMod, "module example.com/app\n")
 
-	o, err := buildImportOverlay([]*importTarget{
+	o, err := buildImportOverlay(t.Context(), []*importTarget{
 		{
 			ImportPath: "example.com/dep",
 			Name:       "dep",
@@ -168,7 +169,7 @@ func TestBuildImportOverlayModCacheReplacedModule(t *testing.T) {
 	mustWriteFile(t, goMod, "module example.com/app\n\nrequire example.com/orig v1.0.0\n\n"+
 		"replace example.com/orig => example.com/dep v1.2.3\n")
 
-	o, err := buildImportOverlay([]*importTarget{
+	_, err := buildImportOverlay(t.Context(), []*importTarget{
 		{
 			ImportPath: "example.com/orig",
 			Name:       "dep",
@@ -181,7 +182,7 @@ func TestBuildImportOverlayModCacheReplacedModule(t *testing.T) {
 	require.NoError(t, err)
 
 	replaceDir := filepath.Join(buildDir, "modreplace", "example.com", "dep@v1.2.3")
-	assert.Contains(t, readOverlayFile(t, o.Replace[goMod]), "replace example.com/orig => "+replaceDir,
+	assert.Contains(t, readOverlayFile(t, goMod), "replace example.com/orig => "+replaceDir,
 		"the replace must apply to the module path the build list uses")
 }
 
@@ -202,9 +203,9 @@ func TestBuildImportOverlayDeterministic(t *testing.T) {
 		{ImportPath: "example.com/a", Name: "a", Dir: t.TempDir(), Kind: kindInPlace, Imports: []string{"fmt"}},
 	}
 
-	first, err := buildImportOverlay(targets, goMod, buildDir)
+	first, err := buildImportOverlay(t.Context(), targets, goMod, buildDir)
 	require.NoError(t, err)
-	second, err := buildImportOverlay(targets, goMod, buildDir)
+	second, err := buildImportOverlay(t.Context(), targets, goMod, buildDir)
 	require.NoError(t, err)
 
 	a, _ := json.Marshal(first)
@@ -288,7 +289,7 @@ func TestUserOverlayPath(t *testing.T) {
 
 func TestPrepareImportOverlay(t *testing.T) {
 	sp := &setupPhase{logger: slog.New(slog.DiscardHandler)}
-	buildDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
 	appDir := t.TempDir()
 	goMod := filepath.Join(appDir, "go.mod")
 	mustWriteFile(t, goMod, "module example.com/app\n")
@@ -300,8 +301,8 @@ func TestPrepareImportOverlay(t *testing.T) {
 	lib := rawSet("example.com/app/lib", []string{libSrc}, map[string]string{"list": "container/list"})
 	fileTarget := rawSet("command-line-arguments", []string{mainSrc}, map[string]string{"ring": "container/ring"})
 
-	o, runtimeImports, err := sp.prepareImportOverlay(
-		[]*rule.InstRuleSet{lib, fileTarget}, goMod, "/g", "/m", buildDir)
+	o, runtimeImports, err := sp.prepareImportOverlay(t.Context(),
+		[]*rule.InstRuleSet{lib, fileTarget}, goMod, "/g", "/m")
 	require.NoError(t, err)
 
 	assert.Equal(t, map[string][]string{filepath.Dir(mainSrc): {"container/ring"}}, runtimeImports)
@@ -340,17 +341,18 @@ func TestBuildImportOverlayGoModReplaceOrderIsStable(t *testing.T) {
 		})
 	}
 
-	first, err := buildImportOverlay(targets, goMod, buildDir)
+	first, err := buildImportOverlay(t.Context(), targets, goMod, buildDir)
 	require.NoError(t, err)
-	want := readOverlayFile(t, first.Replace[goMod])
+	require.NotContains(t, first.Replace, goMod)
+	want := readOverlayFile(t, goMod)
 	for range 20 {
-		o, buildErr := buildImportOverlay(targets, goMod, buildDir)
+		_, buildErr := buildImportOverlay(t.Context(), targets, goMod, buildDir)
 		require.NoError(t, buildErr)
 		require.Equal(
 			t,
 			want,
-			readOverlayFile(t, o.Replace[goMod]),
-			"the go.mod overlay must be identical on every build",
+			readOverlayFile(t, goMod),
+			"the go.mod must be identical on every build",
 		)
 	}
 }
@@ -361,7 +363,7 @@ func TestBuildImportOverlayModCacheWorkspace(t *testing.T) {
 	goWork := filepath.Join(t.TempDir(), "go.work")
 	mustWriteFile(t, goWork, "go 1.25.0\n\nuse ./app\n")
 
-	o, err := buildImportOverlay([]*importTarget{
+	o, err := buildImportOverlay(t.Context(), []*importTarget{
 		{
 			ImportPath: "example.com/dep",
 			Name:       "dep",
@@ -403,7 +405,7 @@ func TestBuildImportOverlayRecordsModFile(t *testing.T) {
 	mod := fakeModCacheModule(t, true)
 	goMod := filepath.Join(t.TempDir(), "go.mod")
 	mustWriteFile(t, goMod, "module example.com/app\n")
-	_, err = buildImportOverlay([]*importTarget{
+	_, err = buildImportOverlay(t.Context(), []*importTarget{
 		{
 			ImportPath: "example.com/dep",
 			Name:       "dep",

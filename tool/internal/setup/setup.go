@@ -635,10 +635,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	if err = sp.store(matched); err != nil {
 		return err
 	}
-	if err = sp.storeInjectedHash(ctx, matched); err != nil {
-		return err
-	}
-	return nil
+	return sp.storeInjectedHash(ctx, matched)
 }
 
 // writeBuildOverlay writes the overlay that carries the imports the matched
@@ -677,7 +674,7 @@ func (sp *setupPhase) writeBuildOverlay(
 	if modFile == "" {
 		modFile = filepath.Join(moduleDir, goModFileName)
 	}
-	o, runtimeImports, err := sp.prepareImportOverlay(matched, modFile, goroot, gomodcache, util.GetBuildTempDir())
+	o, runtimeImports, err := sp.prepareImportOverlay(ctx, matched, modFile, goroot, gomodcache)
 	if err != nil {
 		return ex.Wrapf(err, "preparing the overlay for rule-added imports")
 	}

@@ -183,8 +183,10 @@ func listRule(name, target, fn, value string) string {
 
 func TestOverlayImportIntoModCachePackage(t *testing.T) {
 	app := newOverlayApp(t, listRule("dep_list", overlayDepPath, "Hello", "dep-instrumented"))
+	goMod := readFile(t, filepath.Join(app.dir, "go.mod"))
 
 	app.build(t, ".")
+	assert.Equal(t, goMod, readFile(t, filepath.Join(app.dir, "go.mod")), "the build restores go.mod")
 	assert.Contains(t, app.run(t), "dep: dep-instrumented")
 	assertStatsCompiledPackage(t, statsLog(t, app.dir), overlayDepPath)
 

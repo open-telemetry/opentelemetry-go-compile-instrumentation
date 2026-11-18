@@ -295,13 +295,13 @@ func EscapePackagePath(s string) string {
 }
 
 // modFileRecord is the file under buildDir where setup records the go.mod (or
-// go.work) whose overlaid copy carries otelc's replace directives.
+// go.work) that carries otelc's replace directives.
 func modFileRecord(buildDir string) string {
 	return filepath.Join(buildDir, "overlay", "modfile")
 }
 
 // RecordModFile records, under buildDir, path and the hash of its content, so
-// a build can tell when the file changed after setup copied it into the overlay.
+// a build can tell when the file changed after setup wrote the replaces.
 func RecordModFile(buildDir, path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {

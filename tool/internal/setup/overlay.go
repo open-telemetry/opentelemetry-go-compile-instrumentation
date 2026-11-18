@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -58,7 +59,11 @@ func importsFileSource(name string, imports []string) []byte {
 // A package in place gets otelc.imports.go in its own directory. A module
 // cache module, which an overlay may not touch, is replaced in goModPath by
 // a directory under buildDir whose files all come from the overlay.
-func buildImportOverlay(targets []*importTarget, goModPath, buildDir string) (overlayFile, error) {
+func buildImportOverlay(
+	ctx context.Context,
+	targets []*importTarget,
+	goModPath, buildDir string,
+) (overlayFile, error) {
 	o := overlayFile{Replace: make(map[string]string)}
 	srcDir := filepath.Join(buildDir, overlaySourcesDir)
 	if err := os.MkdirAll(srcDir, 0o755); err != nil {
@@ -86,7 +91,7 @@ func buildImportOverlay(targets []*importTarget, goModPath, buildDir string) (ov
 			dir = filepath.Join(replaceDir, rel)
 		case kindInPlace:
 		}
-		name := importsFileName + ".go"
+		name := importsFileName + goSuffix
 		if strings.HasSuffix(t.Name, "_test") {
 			name = importsFileName + "_test.go"
 		}
@@ -98,12 +103,10 @@ func buildImportOverlay(targets []*importTarget, goModPath, buildDir string) (ov
 		o.Replace[target] = src
 	}
 	if len(replaced) > 0 {
-		src, err := replacedGoMod(goModPath, replaced, srcDir)
-		if err != nil {
+		if err := writeReplacedGoMod(ctx, o, goModPath, replaced, srcDir); err != nil {
 			return o, err
 		}
-		o.Replace[goModPath] = src
-		if err = util.RecordModFile(buildDir, goModPath); err != nil {
+		if err := util.RecordModFile(buildDir, goModPath); err != nil {
 			return o, err
 		}
 	}
@@ -133,7 +136,7 @@ func mapModule(o overlayFile, mod moduleRoot, buildDir string) (string, error) {
 		if d.IsDir() {
 			return os.MkdirAll(filepath.Join(replaceDir, rel), 0o755)
 		}
-		if filepath.Ext(rel) != ".go" && rel != "go.mod" {
+		if filepath.Ext(rel) != goSuffix && rel != goModFileName {
 			return linkFile(path, filepath.Join(replaceDir, rel))
 		}
 		hasGoMod = hasGoMod || rel == "go.mod"
@@ -161,24 +164,48 @@ func linkFile(src, dst string) error {
 	if os.Symlink(src, dst) == nil {
 		return nil
 	}
-	data, err := os.ReadFile(src)
+	return util.CopyFile(src, dst)
+}
+
+// writeReplacedGoMod makes modFilePath replace each module in replaced with
+// its replacement directory. A go.mod is edited on disk like setup's other
+// go.mod edits, so a -mod=mod build can still update it. A go.work, which
+// setup does not edit, gets an overlaid copy instead.
+func writeReplacedGoMod(
+	ctx context.Context,
+	o overlayFile,
+	modFilePath string,
+	replaced map[moduleRoot]string,
+	srcDir string,
+) error {
+	data, err := replacedGoMod(modFilePath, replaced)
 	if err != nil {
-		return ex.Wrapf(err, "reading %s", src)
+		return err
 	}
-	if err = os.WriteFile(dst, data, 0o644); err != nil {
-		return ex.Wrapf(err, "copying %s", src)
+	if filepath.Base(modFilePath) == "go.work" {
+		src, writeErr := writeOverlaySource(srcDir, modFilePath, data)
+		o.Replace[modFilePath] = src
+		return writeErr
+	}
+	if stateManager, found := stateManagerFromContext(ctx); found {
+		if err = stateManager.Track(modFilePath); err != nil {
+			return err
+		}
+	}
+	if err = util.WriteFileAtomic(modFilePath, data); err != nil {
+		return ex.Wrapf(err, "writing %s", modFilePath)
 	}
 	return nil
 }
 
-// replacedGoMod writes a copy of modFilePath, the main module's go.mod or the
-// active go.work, that replaces each module in replaced with its replacement
+// replacedGoMod returns modFilePath, the main module's go.mod or the active
+// go.work, with each module in replaced replaced by its replacement
 // directory. In a workspace the replace goes into go.work: its replaces win,
 // and a workspace root need not hold a go.mod.
-func replacedGoMod(modFilePath string, replaced map[moduleRoot]string, srcDir string) (string, error) {
+func replacedGoMod(modFilePath string, replaced map[moduleRoot]string) ([]byte, error) {
 	data, err := os.ReadFile(modFilePath)
 	if err != nil {
-		return "", ex.Wrapf(err, "reading %s", modFilePath)
+		return nil, ex.Wrapf(err, "reading %s", modFilePath)
 	}
 	var (
 		existing   []*modfile.Replace
@@ -188,7 +215,7 @@ func replacedGoMod(modFilePath string, replaced map[moduleRoot]string, srcDir st
 	if filepath.Base(modFilePath) == "go.work" {
 		f, parseErr := modfile.ParseWork(modFilePath, data, nil)
 		if parseErr != nil {
-			return "", ex.Wrapf(parseErr, "parsing %s", modFilePath)
+			return nil, ex.Wrapf(parseErr, "parsing %s", modFilePath)
 		}
 		existing = f.Replace
 		addReplace = func(oldPath, newPath string) error { return f.AddReplace(oldPath, "", newPath, "") }
@@ -196,7 +223,7 @@ func replacedGoMod(modFilePath string, replaced map[moduleRoot]string, srcDir st
 	} else {
 		f, parseErr := modfile.Parse(modFilePath, data, nil)
 		if parseErr != nil {
-			return "", ex.Wrapf(parseErr, "parsing %s", modFilePath)
+			return nil, ex.Wrapf(parseErr, "parsing %s", modFilePath)
 		}
 		existing = f.Replace
 		addReplace = func(oldPath, newPath string) error { return f.AddReplace(oldPath, "", newPath, "") }
@@ -213,14 +240,14 @@ func replacedGoMod(modFilePath string, replaced map[moduleRoot]string, srcDir st
 			}
 		}
 		if err = addReplace(oldPath, replaced[mod]); err != nil {
-			return "", ex.Wrapf(err, "replacing %s in %s", oldPath, modFilePath)
+			return nil, ex.Wrapf(err, "replacing %s in %s", oldPath, modFilePath)
 		}
 	}
 	out, err := format()
 	if err != nil {
-		return "", ex.Wrapf(err, "formatting %s", modFilePath)
+		return nil, ex.Wrapf(err, "formatting %s", modFilePath)
 	}
-	return writeOverlaySource(srcDir, modFilePath, out)
+	return out, nil
 }
 
 // writeOverlaySource writes content for the overlay entry target into srcDir,
@@ -352,8 +379,9 @@ func userFlagPath(args []string, dir, flag string) string {
 // imports the matched rules add. It also returns, keyed by directory, the
 // imports of file-target packages, which go into their otelc.runtime.go.
 func (sp *setupPhase) prepareImportOverlay(
+	ctx context.Context,
 	matched []*rule.InstRuleSet,
-	modFile, goroot, gomodcache, buildDir string,
+	modFile, goroot, gomodcache string,
 ) (overlayFile, map[string][]string, error) {
 	targets, err := sp.importTargets(matched, goroot, gomodcache)
 	if err != nil {
@@ -365,7 +393,7 @@ func (sp *setupPhase) prepareImportOverlay(
 			runtimeImports[t.Dir] = t.Imports
 		}
 	}
-	o, err := buildImportOverlay(targets, modFile, buildDir)
+	o, err := buildImportOverlay(ctx, targets, modFile, util.GetBuildTempDir())
 	return o, runtimeImports, err
 }
 
