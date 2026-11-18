@@ -51,3 +51,33 @@ func TestAfterLoadDefaultConfigDisabled(t *testing.T) {
 
 	assert.Empty(t, mockCtx.ReturnVals)
 }
+
+// appendMiddlewaresWhenReady is what a config loaded during package
+// initialization gets. Once pkg/runtime is ready, it must add the same
+// middlewares that AfterLoadDefaultConfig adds directly.
+func TestAppendMiddlewaresWhenReady(t *testing.T) {
+	mockCtx := hooktest.NewMockHookContext()
+	AfterLoadDefaultConfig(mockCtx, aws.Config{}, nil)
+	require.Len(t, mockCtx.ReturnVals, 1)
+	direct, ok := mockCtx.ReturnVals[0].(aws.Config)
+	require.True(t, ok, "return value 0 should be aws.Config")
+	want := middleware.NewStack("test", nil)
+	for _, opt := range direct.APIOptions {
+		require.NoError(t, opt(want))
+	}
+
+	got := middleware.NewStack("test", nil)
+	require.NoError(t, appendMiddlewaresWhenReady(got))
+
+	assert.NotEqual(t, middleware.NewStack("test", nil).List(), got.List())
+	assert.Equal(t, want.List(), got.List())
+}
+
+func TestAppendMiddlewaresWhenReadyDisabled(t *testing.T) {
+	t.Setenv("OTEL_GO_DISABLED_INSTRUMENTATIONS", "aws_sdk_v2")
+
+	stack := middleware.NewStack("test", nil)
+	require.NoError(t, appendMiddlewaresWhenReady(stack))
+
+	assert.Equal(t, middleware.NewStack("test", nil).List(), stack.List())
+}
