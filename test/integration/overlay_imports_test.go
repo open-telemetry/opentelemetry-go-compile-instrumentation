@@ -27,7 +27,7 @@ import (
 // otelcovdep does not import container/list; the rules below add that import.
 const (
 	overlayDepPath    = "example.com/otelcovdep"
-	overlayDepVersion = "v1.0.0"
+	overlayDepVersion = "v1.1.0"
 )
 
 // writeFileProxy serves overlayDep from a GOPROXY directory and returns its
@@ -36,6 +36,21 @@ func writeFileProxy(t *testing.T) string {
 	t.Helper()
 	src := t.TempDir()
 	writeTestFile(t, src, "go.mod", "module "+overlayDepPath+"\n\ngo 1.25.0\n")
+	// cdep reads a header from a sibling directory, which only the C compiler
+	// opens, not the go command.
+	writeTestFile(t, src, filepath.Join("include", "otelcov.h"),
+		"static const char *otelcov_name(void) { return \"cgo\"; }\n")
+	writeTestFile(t, src, filepath.Join("cdep", "cdep.go"), `package cdep
+
+// #cgo CFLAGS: -I${SRCDIR}/../include
+// #include "otelcov.h"
+import "C"
+
+// Name reports what the C side returns.
+func Name() string {
+	return C.GoString(C.otelcov_name())
+}
+`)
 	writeTestFile(t, src, "dep.go", `package otelcovdep
 
 // Hello reports what the dependency returns.
@@ -185,6 +200,25 @@ func TestOverlayImportIntoModCachePackage(t *testing.T) {
 		assert.Contains(t, app.run(t), "dep: dep-instrumented")
 		assertStatsCacheHitPackage(t, statsLog(t, app.dir), overlayDepPath)
 	})
+}
+
+func TestOverlayImportIntoModCacheCgoPackage(t *testing.T) {
+	app := newOverlayApp(t, listRule("cdep_list", overlayDepPath+"/cdep", "Name", "cdep-instrumented"))
+	writeTestFile(t, app.dir, "main.go", `package main
+
+import (
+	"fmt"
+
+	"example.com/otelcovdep/cdep"
+)
+
+func main() {
+	fmt.Println("cdep:", cdep.Name())
+}
+`)
+
+	app.build(t, ".")
+	assert.Contains(t, app.run(t), "cdep: cdep-instrumented")
 }
 
 func TestOverlayImportIntoStdPackage(t *testing.T) {

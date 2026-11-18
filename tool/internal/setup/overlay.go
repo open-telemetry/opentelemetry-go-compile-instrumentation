@@ -110,18 +110,20 @@ func buildImportOverlay(targets []*importTarget, goModPath, buildDir string) (ov
 	return o, nil
 }
 
-// mapModule maps every file of mod into a replacement directory under
-// buildDir and creates that directory's tree on disk: cgo and asm run inside
-// the package directory, so it has to exist.
-// shortcut: cgo flags or includes that reach files outside the package dir
-// (${SRCDIR}/../x.h) find nothing on disk; link or copy those files if a rule
-// ever adds imports to such a package.
+// mapModule makes a replacement directory under buildDir for mod. The go
+// command reads Go files and go.mod through the overlay, so those are only
+// mapped. Other files are linked into place: the C compiler and assembler
+// open them directly, including ones outside the package directory such as
+// ${SRCDIR}/../include/x.h.
 func mapModule(o overlayFile, mod moduleRoot, buildDir string) (string, error) {
 	escaped, err := module.EscapePath(mod.Path)
 	if err != nil {
 		return "", ex.Wrapf(err, "escaping module path %s", mod.Path)
 	}
 	replaceDir := filepath.Join(buildDir, modReplaceDir, filepath.FromSlash(escaped)+"@"+mod.Version)
+	if err = os.RemoveAll(replaceDir); err != nil {
+		return "", ex.Wrapf(err, "removing stale %s", replaceDir)
+	}
 	hasGoMod := false
 	err = filepath.WalkDir(mod.Dir, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -130,6 +132,9 @@ func mapModule(o overlayFile, mod moduleRoot, buildDir string) (string, error) {
 		rel, _ := filepath.Rel(mod.Dir, path)
 		if d.IsDir() {
 			return os.MkdirAll(filepath.Join(replaceDir, rel), 0o755)
+		}
+		if filepath.Ext(rel) != ".go" && rel != "go.mod" {
+			return linkFile(path, filepath.Join(replaceDir, rel))
 		}
 		hasGoMod = hasGoMod || rel == "go.mod"
 		o.Replace[filepath.Join(replaceDir, rel)] = path
@@ -148,6 +153,22 @@ func mapModule(o overlayFile, mod moduleRoot, buildDir string) (string, error) {
 		o.Replace[goMod] = src
 	}
 	return replaceDir, nil
+}
+
+// linkFile makes dst a symlink to src, or a copy where symlinks are not
+// allowed, as on Windows without developer mode.
+func linkFile(src, dst string) error {
+	if os.Symlink(src, dst) == nil {
+		return nil
+	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return ex.Wrapf(err, "reading %s", src)
+	}
+	if err = os.WriteFile(dst, data, 0o644); err != nil {
+		return ex.Wrapf(err, "copying %s", src)
+	}
+	return nil
 }
 
 // replacedGoMod writes a copy of modFilePath, the main module's go.mod or the

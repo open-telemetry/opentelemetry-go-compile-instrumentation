@@ -95,6 +95,7 @@ func fakeModCacheModule(t *testing.T, withGoMod bool) moduleRoot {
 	mustWriteFile(t, filepath.Join(dir, "x.go"), "package dep\n")
 	mustWriteFile(t, filepath.Join(dir, "sub", "y.go"), "package sub\n")
 	mustWriteFile(t, filepath.Join(dir, "testdata", "z.txt"), "z\n")
+	mustWriteFile(t, filepath.Join(dir, "include", "x.h"), "#define X 1\n")
 	return moduleRoot{Path: "example.com/dep", Version: "v1.2.3", Dir: dir}
 }
 
@@ -111,12 +112,26 @@ func TestBuildImportOverlayModCache(t *testing.T) {
 	require.NoError(t, err)
 
 	replaceDir := filepath.Join(buildDir, "modreplace", "example.com", "dep@v1.2.3")
-	for _, rel := range []string{"go.mod", "x.go", filepath.Join("sub", "y.go"), filepath.Join("testdata", "z.txt")} {
+	for _, rel := range []string{"go.mod", "x.go", filepath.Join("sub", "y.go")} {
 		assert.Equal(t, filepath.Join(mod.Dir, rel), o.Replace[filepath.Join(replaceDir, rel)], rel)
 	}
 	assert.DirExists(t, filepath.Join(replaceDir, "sub"))
-	assert.DirExists(t, filepath.Join(replaceDir, "testdata"))
-	assert.NoFileExists(t, filepath.Join(replaceDir, "x.go"), "module files must come from the overlay, not copies")
+	assert.NoFileExists(t, filepath.Join(replaceDir, "x.go"), "Go files must come from the overlay, not copies")
+	// Non-Go files are on disk: the C compiler reads ${SRCDIR}/../include/x.h directly.
+	for _, rel := range []string{filepath.Join("include", "x.h"), filepath.Join("testdata", "z.txt")} {
+		assert.NotContains(t, o.Replace, filepath.Join(replaceDir, rel), rel)
+		got, readErr := os.ReadFile(filepath.Join(replaceDir, rel))
+		require.NoError(t, readErr, rel)
+		want, readErr := os.ReadFile(filepath.Join(mod.Dir, rel))
+		require.NoError(t, readErr, rel)
+		assert.Equal(t, string(want), string(got), rel)
+	}
+
+	_, err = buildImportOverlay([]*importTarget{{
+		ImportPath: "example.com/dep/sub", Name: "sub", Dir: filepath.Join(mod.Dir, "sub"),
+		Kind: kindModCache, Module: mod, Imports: []string{"container/list"},
+	}}, goMod, buildDir)
+	require.NoError(t, err, "a second setup reuses the replacement directory")
 
 	imports := o.Replace[filepath.Join(replaceDir, "sub", "otelc.imports.go")]
 	assert.Equal(t, string(importsFileSource("sub", []string{"container/list"})), readOverlayFile(t, imports))
