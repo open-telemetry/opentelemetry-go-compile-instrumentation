@@ -120,6 +120,53 @@ func TestElasticClient(t *testing.T) {
 			"/orders/_doc/1",
 			200,
 		)
+
+		bulkBody := hitEndpoint(t, frontPort, "/bulk")
+		require.Contains(t, bulkBody, "items=3 errors=false")
+
+		f.WaitForSpans(8)
+		require.Len(t, testutil.AllSpans(f.Traces()), 8)
+		bulkClient := testutil.RequireSpan(
+			t,
+			f.Traces(),
+			testutil.IsClient,
+			testutil.HasAttribute("db.operation.name", "bulk"),
+		)
+		require.Equal(t, "bulk orders", bulkClient.Name())
+		testutil.RequireElasticsearchClientSemconv(
+			t,
+			bulkClient,
+			"bulk",
+			"orders",
+			"POST",
+			"/orders/_bulk",
+			200,
+		)
+		testutil.RequireAttribute(t, bulkClient, "db.operation.batch.size", int64(3))
+
+		missingBody := hitEndpoint(t, frontPort, "/get-missing")
+		require.Contains(t, missingBody, "found=false")
+
+		f.WaitForSpans(10)
+		require.Len(t, testutil.AllSpans(f.Traces()), 10)
+		getClient := testutil.RequireSpan(
+			t,
+			f.Traces(),
+			testutil.IsClient,
+			testutil.HasAttribute("db.operation.name", "get"),
+		)
+		testutil.RequireElasticsearchClientSemconv(
+			t,
+			getClient,
+			"get",
+			"orders",
+			"GET",
+			"/orders/_doc/missing",
+			404,
+		)
+		require.Equal(t, ptrace.StatusCodeUnset, getClient.Status().Code(),
+			"a missing document is not an error")
+		require.Zero(t, getClient.Events().Len(), "a missing document must not add an exception event")
 	})
 
 	t.Run("Disabled", func(t *testing.T) {
@@ -180,6 +227,19 @@ func startElasticsearchMock(t *testing.T) *httptest.Server {
 				"_shards":{"total":1,"successful":1,"skipped":0,"failed":0},
 				"hits":{"total":{"value":1,"relation":"eq"},"max_score":1.0,"hits":[]}
 			}`)
+		case strings.HasSuffix(r.URL.Path, "/_bulk"):
+			_, _ = io.WriteString(w, `{
+				"took":1,
+				"errors":false,
+				"items":[
+					{"index":{"_index":"orders","_id":"1","status":201}},
+					{"index":{"_index":"orders","_id":"2","status":201}},
+					{"delete":{"_index":"orders","_id":"3","status":200}}
+				]
+			}`)
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/_doc/missing"):
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = io.WriteString(w, `{"_index":"orders","_type":"_doc","_id":"missing","found":false}`)
 		case strings.Contains(r.URL.Path, "/_doc"):
 			_, _ = io.WriteString(w, `{
 				"_index":"orders",
