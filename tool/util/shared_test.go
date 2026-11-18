@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -240,6 +241,34 @@ func TestEncodeBuildFlagsRoundTrip(t *testing.T) {
 	// The encoding must be valid JSON that preserves spaces in tokens.
 	assert.True(t, strings.HasPrefix(encoded, "["))
 	assert.Contains(t, encoded, "foo bar")
+}
+
+func TestBuildDeadlineFromEnv(t *testing.T) {
+	t.Run("unset env means no deadline", func(t *testing.T) {
+		t.Setenv(EnvOtelcBuildDeadline, "")
+
+		_, ok := BuildDeadlineFromEnv()
+
+		assert.False(t, ok)
+	})
+
+	t.Run("malformed env means no deadline", func(t *testing.T) {
+		t.Setenv(EnvOtelcBuildDeadline, "not-a-time")
+
+		_, ok := BuildDeadlineFromEnv()
+
+		assert.False(t, ok)
+	})
+
+	t.Run("round trips through FormatBuildDeadline", func(t *testing.T) {
+		want := time.Now().Add(90 * time.Minute)
+		t.Setenv(EnvOtelcBuildDeadline, FormatBuildDeadline(want))
+
+		got, ok := BuildDeadlineFromEnv()
+
+		require.True(t, ok)
+		assert.True(t, want.Equal(got), "got %s, want %s", got, want)
+	})
 }
 
 func TestDiscoverWorkDir(t *testing.T) {
