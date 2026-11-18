@@ -5,9 +5,9 @@ package setup
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -19,37 +19,26 @@ import (
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
-// envUnlockedCompile enables compiling after the build lock is released.
 const envUnlockedCompile = "OTELC_UNLOCKED_COMPILE"
 
-const (
-	invocationsDir = "invocations"
-	overlayDir     = "overlay"
-)
+type goOverlay struct {
+	Replace map[string]string `json:"Replace"`
+}
 
-// setupSnapshot is what a build needs to compile after it released the build
-// lock: an -overlay with the files setup changed in the source tree, and a
-// directory with the files toolexec reads from .otelc-build.
+// setupSnapshot owns both the extracted bundle and all per-build metadata.
+// It lives outside .otelc-build so cleanup and another tool version cannot
+// remove inputs still in use by an unlocked compiler.
 type setupSnapshot struct {
 	invocationDir string
 	overlayFile   string
 }
 
-// canBuildUnlocked reports whether the compile of this build can run outside
-// the build lock. Builds that read setup's changes some other way than through
-// the go command keep the lock until they finish.
 func canBuildUnlocked(ctx context.Context, cmd *cli.Command, vendored bool) bool {
-	if os.Getenv(envUnlockedCompile) != "1" {
+	if os.Getenv(envUnlockedCompile) != "1" || vendored || cmd.Bool("debug") || util.InheritedSession() {
 		return false
 	}
 	args := cmd.Args().Slice()
-	subcommand := args[0]
-	if subcommand != subcmdBuild && subcommand != subcmdInstall {
-		// go test runs the test binaries, which can start nested builds that
-		// expect the files of their parent in the tree.
-		return false
-	}
-	if vendored || cmd.Bool("debug") {
+	if len(args) == 0 || (args[0] != subcmdBuild && args[0] != subcmdInstall) {
 		return false
 	}
 	flags := slices.Concat(args[1:], util.SplitGoflags(os.Getenv("GOFLAGS")))
@@ -59,14 +48,14 @@ func canBuildUnlocked(ctx context.Context, cmd *cli.Command, vendored bool) bool
 			return false
 		}
 	}
-	if _, fileTargets, err := splitBuildTargets(subcommand, args[1:]); err != nil || len(fileTargets) > 0 {
+	if _, fileTargets, err := splitBuildTargets(args[0], args[1:]); err != nil || len(fileTargets) > 0 {
 		return false
 	}
-	stateManager, found := stateManagerFromContext(ctx)
+	state, found := stateManagerFromContext(ctx)
 	if !found {
 		return false
 	}
-	for path := range stateManager.files {
+	for path := range state.files {
 		if filepath.Base(path) == "go.work.sum" {
 			return false
 		}
@@ -74,98 +63,58 @@ func canBuildUnlocked(ctx context.Context, cmd *cli.Command, vendored bool) bool
 	return true
 }
 
-// snapshotSetup copies the files setup wrote for this build out of the way
-// of the next setup. It must run under the build lock, before Cleanup.
-func snapshotSetup(ctx context.Context) (*setupSnapshot, error) {
-	stateManager, _ := stateManagerFromContext(ctx)
-
-	parent := util.GetBuildTemp(invocationsDir)
-	if err := os.MkdirAll(parent, 0o755); err != nil {
-		return nil, ex.Wrapf(err, "creating %s", parent)
-	}
-	dir, err := os.MkdirTemp(parent, "build-")
+func newSetupSnapshot() (*setupSnapshot, error) {
+	dir, err := os.MkdirTemp("", "otelc-invocation-")
 	if err != nil {
-		return nil, ex.Wrapf(err, "creating the invocation directory")
+		return nil, ex.Wrap(err)
 	}
-	snap := &setupSnapshot{invocationDir: dir, overlayFile: filepath.Join(dir, "overlay.json")}
-
-	if err = snap.copyBuildState(); err != nil {
-		_ = os.RemoveAll(dir)
-		return nil, err
-	}
-	if err = snap.writeOverlay(stateManager); err != nil {
-		_ = os.RemoveAll(dir)
-		return nil, err
-	}
-	return snap, nil
+	return &setupSnapshot{invocationDir: dir, overlayFile: filepath.Join(dir, "overlay.json")}, nil
 }
 
-// copyBuildState copies the files that toolexec reads through
-// util.GetInvocationTemp.
-func (s *setupSnapshot) copyBuildState() error {
-	for _, src := range []string{
-		util.GetMatchedRuleFile(),
-		util.GetImportNamesFile(),
-		util.GetPGOProfileFile(),
-		util.GetInjectedHashFile(),
-		util.GetResolutionScopeFile(),
-		util.GetSetupGenerationFile(),
-	} {
-		if !util.PathExists(src) {
-			continue
-		}
-		if err := util.CopyFile(src, filepath.Join(s.invocationDir, filepath.Base(src))); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// writeOverlay maps each file setup created or changed to a copy of its
-// content, and each file setup removed to nothing. The copies are named by
-// their content, so builds with the same setup output share them.
-func (s *setupSnapshot) writeOverlay(stateManager *stateManager) error {
-	replace := make(map[string]string, len(stateManager.files))
-	for path, existed := range stateManager.files {
-		if !util.PathExists(path) {
+// writeOverlay uses the same file-copy and snapshot naming helpers as Track.
+// Copies are invocation-owned, including changed files inside the bundle:
+// Revert may restore those files before the compiler starts reading them.
+func (s *setupSnapshot) writeOverlay(state *stateManager) error {
+	replace := make(map[string]string, len(state.files))
+	for path, existed := range state.files {
+		_, err := os.Stat(path)
+		if errors.Is(err, fs.ErrNotExist) {
 			if existed {
 				replace[path] = ""
 			}
 			continue
 		}
-		data, err := os.ReadFile(path)
 		if err != nil {
-			return ex.Wrapf(err, "reading %s", path)
+			return ex.Wrap(err)
 		}
-		sum := sha256.Sum256(data)
-		dst := filepath.Join(util.GetBuildTemp(overlayDir), hex.EncodeToString(sum[:]), filepath.Base(path))
-		if !util.PathExists(dst) {
-			if err = os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-				return ex.Wrapf(err, "creating %s", filepath.Dir(dst))
-			}
-			if err = util.WriteFileAtomic(dst, data); err != nil {
-				return err
-			}
+		dst := filepath.Join(s.invocationDir, "overlay", stateSnapshotPath(path), filepath.Base(path))
+		if err = util.CopyFile(path, dst); err != nil {
+			return err
 		}
 		replace[path] = dst
 	}
-	content, err := json.Marshal(map[string]map[string]string{"Replace": replace})
+	content, err := json.Marshal(goOverlay{Replace: replace})
 	if err != nil {
-		return ex.Wrapf(err, "encoding the overlay")
+		return ex.Wrap(err)
 	}
 	return util.WriteFileAtomic(s.overlayFile, content)
 }
 
-// compileWith returns the compile step that runs outside the build lock.
+// restoreBeforeCompile must succeed before the module lock is released.
+// Unlike Cleanup, it propagates errors and retains recovery state on failure.
+func restoreBeforeCompile(state *stateManager) error {
+	if err := state.Revert(); err != nil {
+		return err
+	}
+	return state.Discard()
+}
+
 func (s *setupSnapshot) compileWith(
 	compile func(ctx context.Context, extraFlags ...string) error,
 ) func(context.Context) error {
 	return func(ctx context.Context) error {
-		defer os.RemoveAll(s.invocationDir)
-		if err := os.Setenv(util.EnvOtelcInvocationDir, s.invocationDir); err != nil {
-			return ex.Wrapf(err, "setting %s", util.EnvOtelcInvocationDir)
-		}
-		defer os.Unsetenv(util.EnvOtelcInvocationDir)
-		return compile(ctx, "-overlay="+s.overlayFile)
+		// Setup already tidied the module. Do not allow the unlocked Go command
+		// to write module metadata if it discovers another dependency.
+		return compile(ctx, "-mod=readonly", "-overlay="+s.overlayFile)
 	}
 }

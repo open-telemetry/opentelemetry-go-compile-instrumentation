@@ -592,7 +592,7 @@ func generatePinnedProjects(ctx context.Context, moduleDirs []string, opts PinOp
 
 	ruleset, err := loadMinimalRules(
 		ctx,
-		filepath.Join(util.GetBuildTempDir(), unzippedInstDir),
+		filepath.Join(util.GetInvocationDir(), unzippedInstDir),
 		util.Version,
 	)
 	if err != nil {

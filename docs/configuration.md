@@ -4,6 +4,25 @@ This guide covers how to scope, filter, and tune `otelc` instrumentation for you
 assumes you have already completed the [Getting Started](getting-started.md) setup. For the full
 rule schema reference, see [Instrumentation Rules](rules.md).
 
+## Experimental concurrent compilation
+
+`OTELC_UNLOCKED_COMPILE=1` allows `otelc go build` and `otelc go install` of
+package targets to release the module lock after setup. Setup and restoration
+of `go.mod`, `go.sum`, and generated source files remain serialized. Compilation
+uses a Go overlay and an invocation-owned bundle and metadata directory outside
+`.otelc-build`, so another invocation's setup or cleanup cannot delete its inputs.
+The invocation directory is removed when the command finishes; abrupt termination
+may leave a temporary directory behind.
+
+This is opt-in. Tests, named-file builds, vendored projects, debug builds,
+inherited sessions, user-supplied `-overlay`/`-modfile` flags (including `GOFLAGS`),
+and builds tracking `go.work.sum` retain the lock throughout compilation.
+Restoration failure aborts the build before unlocking rather than compiling
+against an unrestored module. Concurrent compilation may not improve wall time
+on CPU-limited machines and uses additional temporary disk space. Set `GOCACHE`
+to a persistent directory outside `.otelc-build` to reuse compiler outputs between
+unlocked builds; otherwise their default caches are invocation-owned too.
+
 ## Selecting Instrumentations
 
 By default, `otelc` applies all instrumentation rules from its embedded bundle to every

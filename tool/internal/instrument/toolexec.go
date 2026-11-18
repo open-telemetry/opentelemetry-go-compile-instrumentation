@@ -1439,7 +1439,7 @@ const runtimeDirPlaceholder = "<otelc-build>/runtime"
 // the build cache. Both the raw and the JSON-escaped forms of the path are
 // replaced, since Windows paths are escaped in matched.json.
 func WithoutWorkDirPaths(content []byte) []byte {
-	dir := util.GetBuildTemp("runtime")
+	dir := util.GetInvocationTemp("runtime")
 	escaped, err := json.Marshal(dir)
 	if err == nil {
 		content = bytes.ReplaceAll(content, escaped[1:len(escaped)-1], []byte(runtimeDirPlaceholder))

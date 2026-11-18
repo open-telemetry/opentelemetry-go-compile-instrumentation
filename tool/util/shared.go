@@ -16,15 +16,15 @@ import (
 )
 
 const (
-	EnvOtelcWorkDir    = "OTELC_WORK_DIR"
-	// EnvOtelcInvocationDir holds the files one build reads while it
-	// compiles: the matched rules, the import tracking files, the session.
+	EnvOtelcWorkDir = "OTELC_WORK_DIR"
+	// EnvOtelcInvocationDir holds one build's extracted bundle, metadata,
+	// import tracking files, runtime packages, and session.
 	// otelc sets it for the go command of a build that runs after it
 	// released the build lock, so the next build's setup cannot change them.
 	// When it is unset, these files are in the build temp directory.
 	EnvOtelcInvocationDir = "OTELC_INVOCATION_DIR"
-	EnvOtelcRules      = "OTELC_RULES"
-	EnvOtelcBuildFlags = "OTELC_BUILD_FLAGS"
+	EnvOtelcRules         = "OTELC_RULES"
+	EnvOtelcBuildFlags    = "OTELC_BUILD_FLAGS"
 	// EnvOtelcStats enables per-toolexec timing stats when set to "1".
 	// Set automatically when --stats is used; propagated to child processes.
 	EnvOtelcStats = "OTELC_STATS"

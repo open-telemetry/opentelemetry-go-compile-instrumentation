@@ -358,7 +358,7 @@ func TestExtractGZip_CloseError(t *testing.T) {
 
 // bundleOf returns a gzip-compressed tar archive that holds the given files,
 // keyed by their path in the archive, after the directories that contain them.
-func bundleOf(t *testing.T, files map[string]string) *bytes.Reader {
+func bundleOf(t *testing.T, files map[string]string) *bytes.Buffer {
 	t.Helper()
 
 	var buf bytes.Buffer
@@ -386,7 +386,7 @@ func bundleOf(t *testing.T, files map[string]string) *bytes.Reader {
 	}
 	require.NoError(t, tw.Close())
 	require.NoError(t, gz.Close())
-	return bytes.NewReader(buf.Bytes())
+	return &buf
 }
 
 func TestRefreshExtractedBundle_RemovesFilesTheBundleNoLongerShips(t *testing.T) {

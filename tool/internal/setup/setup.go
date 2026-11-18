@@ -689,7 +689,7 @@ func setupGoCache(ctx context.Context, env []string) ([]string, error) {
 	}
 
 	logger := util.LoggerFromContext(ctx)
-	cacheDir := util.GetBuildTemp("gocache")
+	cacheDir := util.GetInvocationTemp("gocache")
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
 		return nil, ex.Wrapf(err, "failed to create persistent GOCACHE")
 	}
@@ -1039,7 +1039,7 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool, ext
 	return runBuildCmd(ctx, env, newArgs...)
 }
 
-func GoBuild(ctx context.Context, cmd *cli.Command) error {
+func GoBuild(ctx context.Context, cmd *cli.Command) (err error) {
 	// Validate the invocation before taking the build lock: a bad command
 	// line must fail immediately, not wait behind a running build.
 	if !cmd.Args().Present() {
@@ -1058,11 +1058,29 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 	// any shared state (tracking files, go.mod, .otelc-build contents).
 	// A build that can compile from a snapshot of its setup returns the
 	// compile step, which runs after the lock is released.
+	var snapshot *setupSnapshot
+	if os.Getenv(util.EnvOtelcInvocationDir) == "" &&
+		canBuildUnlocked(contextWithStateManager(ctx, newStateManager()), cmd, false) {
+		snapshot, err = newSetupSnapshot()
+		if err != nil {
+			return err
+		}
+		defer func() {
+			err = ex.Join(err, os.RemoveAll(snapshot.invocationDir))
+		}()
+		if err = os.Setenv(util.EnvOtelcInvocationDir, snapshot.invocationDir); err != nil {
+			return err
+		}
+		defer func() {
+			err = ex.Join(err, os.Unsetenv(util.EnvOtelcInvocationDir))
+		}()
+	}
+
 	var compile func(context.Context) error
-	err := withBuildLock(ctx, commandBuildDir(cmd), func(ctx context.Context) error {
-		var err error
-		compile, err = runGoBuild(ctx, cmd)
-		return err
+	err = withBuildLock(ctx, commandBuildDir(cmd), func(ctx context.Context) error {
+		var buildErr error
+		compile, buildErr = runGoBuild(ctx, cmd, snapshot)
+		return buildErr
 	})
 	if err != nil || compile == nil {
 		return err
@@ -1070,7 +1088,7 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 	return compile(ctx)
 }
 
-func runGoBuild(ctx context.Context, cmd *cli.Command) (func(context.Context) error, error) {
+func runGoBuild(ctx context.Context, cmd *cli.Command, snapshot *setupSnapshot) (func(context.Context) error, error) {
 	if err := restoreInterruptedBuild(ctx); err != nil {
 		return nil, err
 	}
@@ -1120,8 +1138,8 @@ func runGoBuild(ctx context.Context, cmd *cli.Command) (func(context.Context) er
 
 	compile := func(ctx context.Context, extraFlags ...string) error {
 		buildStart := time.Now()
-		if err := buildWithToolexec(ctx, cmd, vendored, extraFlags...); err != nil {
-			return err
+		if buildErr := buildWithToolexec(ctx, cmd, vendored, extraFlags...); buildErr != nil {
+			return buildErr
 		}
 		if statsEnabled {
 			logger.InfoContext(ctx, "build stats", "duration", time.Since(buildStart))
@@ -1130,21 +1148,18 @@ func runGoBuild(ctx context.Context, cmd *cli.Command) (func(context.Context) er
 		return nil
 	}
 
-	if !canBuildUnlocked(ctx, cmd, vendored) {
+	if snapshot == nil || !canBuildUnlocked(ctx, cmd, vendored) {
 		return nil, compile(ctx)
 	}
-	snap, err := snapshotSetup(ctx)
-	if err != nil {
+	state, _ := stateManagerFromContext(ctx)
+	if err = snapshot.writeOverlay(state); err != nil {
 		return nil, err
 	}
-	// The snapshot holds every file setup changed, so the tree can be
-	// restored now, before the compile.
+	if err = restoreBeforeCompile(state); err != nil {
+		return nil, err
+	}
 	reverted = true
-	if err = Cleanup(ctx, false); err != nil {
-		_ = os.RemoveAll(snap.invocationDir)
-		return nil, err
-	}
-	return snap.compileWith(compile), nil
+	return snapshot.compileWith(compile), nil
 }
 
 // hookImports maps each hook package to every package it imports, directly or

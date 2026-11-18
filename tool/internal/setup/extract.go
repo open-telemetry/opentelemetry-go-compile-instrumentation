@@ -6,11 +6,8 @@ package setup
 import (
 	"archive/tar"
 	"compress/gzip"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -136,46 +133,17 @@ func extractGZip(bundleReader io.Reader, targetDir string) (retErr error) {
 // a file that an older otelc extracted and the bundle no longer ships would
 // stay and be compiled together with the files that replaced it. Other
 // entries of targetDir, such as the Go build cache, are left alone.
-// bundleStampFile records the hash of the bundle extracted in the build temp
-// directory.
-const bundleStampFile = "bundle.sha256"
-
-func refreshExtractedBundle(bundleReader io.ReadSeeker, targetDir string) error {
-	hash := sha256.New()
-	if _, err := io.Copy(hash, bundleReader); err != nil {
-		return ex.Wrapf(err, "hashing the bundle")
-	}
-	if _, err := bundleReader.Seek(0, io.SeekStart); err != nil {
-		return ex.Wrapf(err, "rewinding the bundle")
-	}
-	sum := hex.EncodeToString(hash.Sum(nil))
-
-	// The go.mod of a build that already released the build lock points at
-	// these directories while it compiles. Extract again only if the bundle
-	// changed, so that a later setup does not remove them under it.
-	stamp := filepath.Join(targetDir, bundleStampFile)
-	if old, err := os.ReadFile(stamp); err == nil && string(old) == sum &&
-		util.PathExists(filepath.Join(targetDir, unzippedPkgDir)) &&
-		util.PathExists(filepath.Join(targetDir, unzippedInstDir)) {
-		return nil
-	}
-
-	if err := os.Remove(stamp); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return ex.Wrapf(err, "removing the bundle stamp")
-	}
+func refreshExtractedBundle(bundleReader io.Reader, targetDir string) error {
 	for _, dir := range []string{unzippedPkgDir, unzippedInstDir} {
 		if err := os.RemoveAll(filepath.Join(targetDir, dir)); err != nil {
 			return ex.Wrapf(err, "removing the previously extracted %s directory", dir)
 		}
 	}
-	if err := extractGZip(bundleReader, targetDir); err != nil {
-		return err
-	}
-	return util.WriteFileAtomic(stamp, []byte(sum))
+	return extractGZip(bundleReader, targetDir)
 }
 
 func extractOtelcBundle() error {
 	// Extract the instrumentation code to the build temp directory
 	// for future instrumentation phase
-	return refreshExtractedBundle(data.GetBundleReader(), util.GetBuildTempDir())
+	return refreshExtractedBundle(data.GetBundleReader(), util.GetInvocationDir())
 }

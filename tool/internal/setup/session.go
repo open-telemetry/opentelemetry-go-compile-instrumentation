@@ -24,7 +24,7 @@ func cleanupOwnedSession() error {
 	if os.Getenv(util.EnvOtelcSessionDir) != "" {
 		return nil
 	}
-	return os.RemoveAll(util.GetBuildTemp(util.SessionTempDir))
+	return os.RemoveAll(util.GetInvocationTemp(util.SessionTempDir))
 }
 
 // sessionEnv adds the session directory to the env of the go command an
