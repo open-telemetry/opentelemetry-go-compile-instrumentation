@@ -111,6 +111,24 @@ func TestToolexecBuildArgs(t *testing.T) {
 		assert.Contains(t, got, otelcRuntimeFile)
 	})
 
+	t.Run("adds the generated runtime file for file targets under -C", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Chdir(dir)
+		appDir := filepath.Join(dir, "app")
+		require.NoError(t, os.MkdirAll(appDir, 0o755))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(appDir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(appDir, otelcRuntimeFile), []byte("package main\n"), 0o644))
+
+		for _, cdir := range [][]string{{"-C", "app"}, {"-C=app"}, {"-C", appDir}} {
+			args := append(append([]string{"build"}, cdir...), "main.go")
+			got, err := toolexecBuildArgs(args, "/usr/bin/otelc", false)
+			require.NoError(t, err)
+			assert.Equal(t, slices.Index(got, "main.go")+1, slices.Index(got, otelcRuntimeFile), "args %v", args)
+		}
+	})
+
 	t.Run("go test inserts runtime file before -- delimiter", func(t *testing.T) {
 		dir := t.TempDir()
 		t.Chdir(dir)
