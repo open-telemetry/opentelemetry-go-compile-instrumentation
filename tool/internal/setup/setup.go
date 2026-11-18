@@ -138,10 +138,27 @@ const (
 	flagCoverpkg = "-coverpkg"
 )
 
+// isGoFileTarget reports whether a build target names a Go source file. The go
+// command takes an argument ending in .go for a file only when a file of that
+// name exists, and otherwise for a package path such as github.com/nats-io/nats.go
+// (golang.org/issue/34653). dir is the -C directory, see buildDir, which a
+// relative target is resolved against.
+func isGoFileTarget(dir, target string) bool {
+	if filepath.Ext(target) != ".go" {
+		return false
+	}
+	if dir != "" && !filepath.IsAbs(target) {
+		target = filepath.Join(dir, target)
+	}
+	info, err := os.Stat(target)
+	return err == nil && !info.IsDir()
+}
+
 func lastFileTargetIndex(subcommand string, args []string) int {
 	last := -1
+	dir := buildDir(subcommand, args)
 	for _, arg := range classifyArgs(subcommand, args) {
-		if arg.Kind == ArgTarget && filepath.Ext(arg.Raw) == ".go" {
+		if arg.Kind == ArgTarget && isGoFileTarget(dir, arg.Raw) {
 			last = arg.Index
 		}
 	}
@@ -265,6 +282,7 @@ func loadBuildPackages(
 func splitBuildTargets(subcommand string, args []string) ([]string, []string, error) {
 	classified := classifyArgs(subcommand, args)
 	var pkgs, files []string
+	changeDir := buildDir(subcommand, args)
 
 	for i, a := range classified {
 		if (a.Kind == ArgBuildFlag || a.Kind == ArgTestFlag) && !a.HasValue && takesValue(a.FlagName) {
@@ -275,7 +293,7 @@ func splitBuildTargets(subcommand string, args []string) ([]string, []string, er
 		}
 
 		if a.Kind == ArgTarget {
-			if filepath.Ext(a.Raw) == ".go" {
+			if isGoFileTarget(changeDir, a.Raw) {
 				files = append(files, a.Raw)
 			} else {
 				pkgs = append(pkgs, a.Raw)

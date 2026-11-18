@@ -267,7 +267,21 @@ func TestToolexecBuildArgs(t *testing.T) {
 	})
 }
 
+// chdirWithGoFiles changes into a new temporary directory holding an empty
+// file for each of the given slash separated names. The go command only takes
+// an argument ending in .go for a file when the file exists.
+func chdirWithGoFiles(t *testing.T, names ...string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, name := range names {
+		mustWriteFile(t, filepath.Join(dir, filepath.FromSlash(name)), "package p\n")
+	}
+	t.Chdir(dir)
+	return dir
+}
+
 func TestLastFileTargetIndex(t *testing.T) {
+	chdirWithGoFiles(t, "main.go", "main_test.go", "other.go", "custom.go", "pattern.go")
 	assert.Equal(t, 1, lastFileTargetIndex(subcmdBuild, []string{"--", "main.go"}))
 	assert.Equal(
 		t,
@@ -701,6 +715,8 @@ func TestGetBuildPackages_TestOnlyPackage(t *testing.T) {
 }
 
 func TestSplitBuildTargets(t *testing.T) {
+	chdirWithGoFiles(t, "main.go", "other.go", "foo.go", "extra.go", "custom.go",
+		"cmd/main.go", "cmd/util.go", "util/util.go")
 	tests := []struct {
 		name        string
 		subcommand  string
@@ -2430,4 +2446,66 @@ func TestNestedCoverFlags(t *testing.T) {
 			assert.Equal(t, tt.expected, nestedCoverFlags(tt.goflags, tt.forwarded))
 		})
 	}
+}
+
+// TestSplitBuildTargets_DotGoPackagePath guards the rule of the go command
+// that an argument ending in .go is a source file only when such a file
+// exists. Otherwise it is a package path, like the module path of
+// github.com/nats-io/nats.go (golang.org/issue/34653).
+func TestSplitBuildTargets_DotGoPackagePath(t *testing.T) {
+	const natsPath = "github.com/nats-io/nats.go"
+
+	t.Run("a package path ending in .go is a package", func(t *testing.T) {
+		chdirWithGoFiles(t, "cmd/main.go")
+
+		pkgs, files, err := splitBuildTargets(subcmdBuild, []string{natsPath, "./cmd"})
+		require.NoError(t, err)
+		assert.Equal(t, []string{natsPath, "./cmd"}, pkgs)
+		assert.Empty(t, files)
+		assert.Equal(t, -1, lastFileTargetIndex(subcmdBuild, []string{natsPath, "./cmd"}))
+	})
+
+	t.Run("a directory named like a file is a package", func(t *testing.T) {
+		dir := chdirWithGoFiles(t)
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "x.go"), 0o755))
+
+		pkgs, files, err := splitBuildTargets(subcmdBuild, []string{"./x.go"})
+		require.NoError(t, err)
+		assert.Equal(t, []string{"./x.go"}, pkgs)
+		assert.Empty(t, files)
+	})
+
+	t.Run("an existing file is still a file", func(t *testing.T) {
+		chdirWithGoFiles(t, "main.go")
+
+		pkgs, files, err := splitBuildTargets(subcmdBuild, []string{"main.go"})
+		require.NoError(t, err)
+		assert.Empty(t, pkgs)
+		assert.Equal(t, []string{"main.go"}, files)
+	})
+
+	t.Run("a file target is looked up in the -C directory", func(t *testing.T) {
+		dir := chdirWithGoFiles(t, "app/main.go")
+		abs := filepath.Join(dir, "app")
+
+		for _, cdir := range [][]string{{"-C", "app"}, {"-C=app"}, {"-C", abs}} {
+			args := append(slices.Clone(cdir), "main.go")
+			pkgs, files, err := splitBuildTargets(subcmdBuild, args)
+			require.NoError(t, err, "args %v", args)
+			assert.Empty(t, pkgs, "args %v", args)
+			assert.Equal(t, []string{"main.go"}, files, "args %v", args)
+			assert.Equal(t, len(cdir), lastFileTargetIndex(subcmdBuild, args), "args %v", args)
+		}
+
+		// A name with no file next to it is a package path, so mixing it with
+		// a file is the error the go command reports.
+		_, _, err := splitBuildTargets(subcmdBuild, []string{"-C", "app", "main.go", "other.go"})
+		require.ErrorContains(t, err, "cannot mix .go files and packages")
+
+		// Without -C the file is looked up in the current directory only.
+		pkgs, files, err := splitBuildTargets(subcmdBuild, []string{"main.go"})
+		require.NoError(t, err)
+		assert.Equal(t, []string{"main.go"}, pkgs)
+		assert.Empty(t, files)
+	})
 }
