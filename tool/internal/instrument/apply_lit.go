@@ -238,10 +238,12 @@ func wrapLiterals(
 // matchesLitRule reports whether a composite literal builds the rule's type.
 //
 // Only qualified literals are matched: pkg.Type{...}, including the &pkg.Type{...}
-// form, whose composite literal node is the same. A literal with an elided type
-// (an element of a slice or map literal) has no type to match and is skipped.
+// form, whose composite literal node is the same. A generic type matches with
+// its type arguments written out: pkg.Type[int]{...}. A literal with an elided
+// type (an element of a slice or map literal) has no type to match and is
+// skipped.
 func matchesLitRule(lit *dst.CompositeLit, r *rule.InstLitRule, importAliases map[string]string) bool {
-	sel, ok := lit.Type.(*dst.SelectorExpr)
+	sel, ok := withoutTypeArguments(lit.Type).(*dst.SelectorExpr)
 	if !ok {
 		return false
 	}

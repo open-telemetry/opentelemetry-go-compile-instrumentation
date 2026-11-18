@@ -22,6 +22,7 @@ import (
 
 	"go.opentelemetry.io/otelc/instrumentation/github.com/anthropics/anthropic-sdk-go/semconv"
 	"go.opentelemetry.io/otelc/pkg/netutil"
+	"go.opentelemetry.io/otelc/pkg/otelcconv"
 	"go.opentelemetry.io/otelc/pkg/runtime"
 )
 
@@ -191,7 +192,7 @@ func OtelMiddleware() func(*http.Request, func(*http.Request) (*http.Response, e
 		// rather than hold it open on a body we do not accumulate yet.
 		contentType := strings.TrimSpace(strings.SplitN(resp.Header.Get("Content-Type"), ";", 2)[0])
 		if strings.EqualFold(contentType, "text/event-stream") {
-			span.SetAttributes(semconv.GenAIRequestIsStream(true))
+			span.SetAttributes(otelcconv.GenAIRequestIsStream(true))
 			span.End()
 			return resp, nil
 		}
@@ -306,16 +307,16 @@ func parseMessagesResponse(body []byte, span trace.Span) {
 		otelsemconv.GenAIUsageOutputTokensKey.Int64(resp.Usage.OutputTokens),
 		// The Messages API reports no total_tokens field; derive it so the
 		// span shape matches the other GenAI instrumentations.
-		semconv.GenAIUsageTotalTokens(totalInput+resp.Usage.OutputTokens),
+		otelcconv.GenAIUsageTotalTokensKey.Int64(totalInput+resp.Usage.OutputTokens),
 	)
 
 	// Prompt-cache usage: cache reads are shared with the openai-go
 	// instrumentation, cache creation is Anthropic-specific. Only record them
 	// when the request actually used the cache.
 	if resp.Usage.CacheReadInputTokens > 0 {
-		span.SetAttributes(semconv.GenAIUsageCacheReadInputTokens(resp.Usage.CacheReadInputTokens))
+		span.SetAttributes(otelcconv.GenAIUsageCacheReadInputTokensKey.Int64(resp.Usage.CacheReadInputTokens))
 	}
 	if resp.Usage.CacheCreationInputTokens > 0 {
-		span.SetAttributes(semconv.GenAIUsageCacheCreationInputTokens(resp.Usage.CacheCreationInputTokens))
+		span.SetAttributes(otelcconv.GenAIUsageCacheCreationInputTokensKey.Int64(resp.Usage.CacheCreationInputTokens))
 	}
 }

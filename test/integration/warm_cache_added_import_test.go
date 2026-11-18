@@ -222,46 +222,55 @@ go 1.25.0
 
 package extra
 
+// seed is a variable, not a constant; see Note.
+var seed = 1
+
 // Note reports that the rule-injected code ran. Its body is tuned so the
 // compiler cannot inline it on an ordinary build (cost past the inlining
 // budget) but can inline it once the recorded profile marks it hot: the
 // profiled and unprofiled compiles of this package then produce different
 // export data, which is the fingerprint mismatch this test relies on.
+//
+// The body reads seed so the compiler cannot fold it into a constant. Folded,
+// Note compiles to two instructions, and whether a CPU profiling signal ever
+// lands inside them depends on the CPU: on some arm64 runners no recording
+// gave Note enough samples to mark it hot. Unfolded, Note does real work on
+// every call and holds most of the samples on any CPU.
 func Note() int {
 	x := 0
-	x += 1 * 1
-	x += 2 * 2
-	x += 3 * 3
-	x += 4 * 4
-	x += 5 * 5
-	x += 6 * 6
-	x += 7 * 7
-	x += 8 * 8
-	x += 9 * 9
-	x += 10 * 10
-	x += 11 * 11
-	x += 12 * 12
-	x += 13 * 13
-	x += 14 * 14
-	x += 15 * 15
-	x += 16 * 16
-	x += 17 * 17
-	x += 18 * 18
-	x += 19 * 19
-	x += 20 * 20
-	x += 21 * 21
-	x += 22 * 22
-	x += 23 * 23
-	x += 24 * 24
-	x += 25 * 25
-	x += 26 * 26
-	x += 27 * 27
-	x += 28 * 28
-	x += 29 * 29
-	x += 30 * 30
-	x += 31 * 31
-	x += 32 * 32
-	x += 33 * 33
+	x += seed * 1
+	x += seed * 2
+	x += seed * 3
+	x += seed * 4
+	x += seed * 5
+	x += seed * 6
+	x += seed * 7
+	x += seed * 8
+	x += seed * 9
+	x += seed * 10
+	x += seed * 11
+	x += seed * 12
+	x += seed * 13
+	x += seed * 14
+	x += seed * 15
+	x += seed * 16
+	x += seed * 17
+	x += seed * 18
+	x += seed * 19
+	x += seed * 20
+	x += seed * 21
+	x += seed * 22
+	x += seed * 23
+	x += seed * 24
+	x += seed * 25
+	x += seed * 26
+	x += seed * 27
+	x += seed * 28
+	x += seed * 29
+	x += seed * 30
+	x += seed * 31
+	x += seed * 32
+	x += seed * 33
 	return x
 }
 `)
@@ -382,7 +391,16 @@ func main() {
 		require.NoError(t, recErr, "recording the CPU profile failed:\n%s", out)
 	}
 	profiledCompile := func() string {
-		return compileExtraDiagnostics(t, extraDir, "-pgo="+profile)
+		out := compileExtraDiagnostics(t, extraDir, "-pgo="+profile)
+		if strings.Contains(out, noteInline) {
+			return out
+		}
+		// On a miss, show where the samples went, so a failure tells a
+		// profile that missed Note apart from a compiler that changed.
+		top := exec.CommandContext(t.Context(), "go", "tool", "pprof", "-top", "-nodecount=10", profile)
+		top.Env = append(preparedBuildBaseEnvironment(), "GOWORK=off")
+		topOut, _ := top.CombinedOutput()
+		return out + "profile:\n" + string(topOut)
 	}
 	attempts, profiledOut := recordUntilNoteHot(t.Logf, record, profiledCompile)
 	require.Contains(
