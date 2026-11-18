@@ -66,6 +66,48 @@ add_new_field_conn:
           - name: DSN
             type: string
 
+add_rows_state:
+  target: database/sql
+  where:
+    struct: Rows
+  do:
+    - add_struct_fields:
+        new_field:
+          - name: otelRowsNext
+            type: func()
+          - name: otelRowsClose
+            type: func(error)
+
+rows_lifecycle:
+  target: database/sql
+  do:
+    - add_file:
+        file: rows_lifecycle.go
+        path: "go.opentelemetry.io/otelc/instrumentation/database/sql"
+
+count_rows:
+  target: database/sql
+  where:
+    func: nextLocked
+    recv: "*Rows"
+    pattern: "^return false, true$"
+  do:
+    - inject_code:
+        raw: |-
+          if {{.Receiver}}.otelRowsNext != nil {
+            {{.Receiver}}.otelRowsNext()
+          }
+
+end_rows:
+  target: database/sql
+  where:
+    func: close
+    recv: "*Rows"
+  do:
+    - inject_code:
+        raw: |-
+          defer {{.Receiver}}.otelEndRows()
+
 hook_open:
   target: database/sql
   where:

@@ -25,3 +25,21 @@ groups:
       - ref: network.transport
       - ref: server.address
       - ref: server.port
+
+  - id: span.otelc.db.sql.rows
+    type: span
+    span_kind: internal
+    stability: development
+    brief: Opt-in result consumption lifetime, from query return to rows closure.
+    note: >-
+      The child outlives its query span and includes caller processing between reads. Returned rows counts successful Next
+      calls across result sets, including when the caller closes early. An unclosed result does not emit a rows span.
+    attributes:
+      - ref: db.system.name
+      - ref: db.operation.name
+      - ref: db.namespace
+      - ref: db.query.text
+      - ref: network.transport
+      - ref: server.address
+      - ref: server.port
+      - ref: db.response.returned_rows
