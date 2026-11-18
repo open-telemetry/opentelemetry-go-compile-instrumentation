@@ -11,7 +11,17 @@ They do not go through `PerformRequest`. `NewSimpleClient` skips those loops.
 
 | Target | Span name | Attributes |
 | --- | --- | --- |
-| `(*Client).PerformRequest` | `{operation} {index}` | `db.system.name=elasticsearch`, `db.operation.name`, `db.collection.name` (index), HTTP method/path, `db.response.status_code` |
+| `(*Client).PerformRequest` | `{operation} {index}` | `db.system.name=elasticsearch`, `db.operation.name`, `db.collection.name` (index), `db.operation.batch.size` (bulk, mget), HTTP method/path, `db.response.status_code` |
+
+`db.collection.name` comes from the request path, so `/orders/_bulk` gets
+`orders`. A bare `/_bulk` or `/_mget` names the index per item and gets no
+collection. `db.operation.batch.size` is the number of bulk actions or mget
+docs, and is set only for two or more.
+
+A `Get` of a missing document returns 404 with `"found":false`. The span
+keeps `db.response.status_code=404` but is not marked as an error, the
+same way `Exists` ignores 404. A 404 such as `index_not_found_exception`
+is still an error.
 
 Inner `net/http` client spans are suppressed so the datastore hop is not
 duplicated as a generic GET/POST. The host is chosen inside `PerformRequest`

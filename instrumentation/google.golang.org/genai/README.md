@@ -26,7 +26,7 @@ required.
 | Operation | Endpoint | Status |
 | ----------- | ---------- | -------- |
 | Generate content (non-streaming) | `POST .../<model>:generateContent` | Supported |
-| Generate content (streaming) | `POST .../<model>:streamGenerateContent` | Pass-through (see [Limitations](#limitations)) |
+| Generate content (streaming) | `POST .../<model>:streamGenerateContent` | Supported |
 | Count tokens | `POST .../<model>:countTokens` | Not instrumented |
 | Embed content | `POST .../<model>:embedContent` | Not instrumented |
 
@@ -117,7 +117,7 @@ This instrumentation emits spans following the
 | `gen_ai.request.temperature` | `generationConfig.temperature` | `0.7` |
 | `gen_ai.request.top_p` | `generationConfig.topP` | `0.9` |
 | `gen_ai.request.top_k` | `generationConfig.topK` | `40` |
-| `gen_ai.request.is_stream` | Set only on the defensive path where a `generateContent` response arrives as SSE | `true` |
+| `gen_ai.request.is_stream` | Set on `streamGenerateContent` calls | `true` |
 | `gen_ai.response.id` | `responseId` | `"resp-abc123"` |
 | `gen_ai.response.model` | `modelVersion` | `"gemini-2.5-flash-001"` |
 | `gen_ai.response.finish_reasons` | Per-candidate `finishReason` | `["STOP"]` |
@@ -168,12 +168,25 @@ the SDK always sees the full payload. A response larger than the cap keeps its
 span, but the attributes parsed from the response body are omitted and a warning
 is logged once per process.
 
+### Streaming
+
+A `streamGenerateContent` call gets the same span as a non-streaming one, plus
+`gen_ai.request.is_stream`. The span stays open until the stream finishes, so
+its duration covers the whole response. The events are parsed as the SDK reads
+them and passed through unchanged:
+
+- Usage comes from the latest event. Gemini reports running totals, so the
+  last event carries the full counts.
+- Each candidate's finish reason is taken from the event that ends it.
+- A stream that is closed before any finish reason arrives (for example, when
+  the caller breaks out of the iterator early) ends the span with an error
+  status. A read error is recorded on the span with `error.type`.
+- A single event larger than 4 MB is skipped for attribute parsing, and a
+  warning is logged once per process.
+
 ## Limitations
 
-- **Streaming is not yet instrumented.** `streamGenerateContent` requests pass
-  through without a span, because usage totals only arrive in the final
-  server-sent event and this instrumentation does not accumulate SSE yet.
-- Only `generateContent` is instrumented; `countTokens`, `embedContent`,
+- Only `generateContent` and `streamGenerateContent` are instrumented; `countTokens`, `embedContent`,
   image/video generation and the remaining model RPCs pass through.
 - Spans only, no metrics are recorded.
 

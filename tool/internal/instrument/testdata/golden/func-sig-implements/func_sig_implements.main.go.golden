@@ -134,7 +134,7 @@ func OtelBeforeTrampoline_HandleCustom1210741185(param0 **ReqCtx) (hookContext *
 	return nil, false
 }
 
-func OtelAfterTrampoline_HandleCustom1210741185(hookContext HookContext, arg0 **MyErr) {
+func OtelAfterTrampoline_HandleCustom1210741185(hookContext OtelHookContext, arg0 **MyErr) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "H1After")
@@ -153,7 +153,7 @@ func OtelAfterTrampoline_HandleCustom1210741185(hookContext HookContext, arg0 **
 }
 
 //go:linkname otelc_hook_1615451027_H1Before testdata/golden/func-sig-implements.H1Before
-func otelc_hook_1615451027_H1Before(hookContext HookContext, param0 interface{})
+func otelc_hook_1615451027_H1Before(hookContext OtelHookContext, param0 interface{})
 
 //go:linkname otelc_hook_1615451027_H1After testdata/golden/func-sig-implements.H1After
-func otelc_hook_1615451027_H1After(hookContext HookContext, arg0 interface{})
+func otelc_hook_1615451027_H1After(hookContext OtelHookContext, arg0 interface{})

@@ -109,4 +109,4 @@ func OtelBeforeTrampoline_Func14242419412(param0 *string, param1 *int) (hookCont
 }
 
 //go:linkname otelc_hook_3815785623_H1Before testdata/golden/before-only.H1Before
-func otelc_hook_3815785623_H1Before(hookContext HookContext, param0 string, param1 int)
+func otelc_hook_3815785623_H1Before(hookContext OtelHookContext, param0 string, param1 int)

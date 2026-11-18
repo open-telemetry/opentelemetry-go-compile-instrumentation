@@ -190,8 +190,10 @@ func findModVersion(path string) string {
 }
 
 // findGoSources extracts Go source files from compile command arguments,
-// resolving CGO files using the provided objDir->sourceDir mapping.
-func findGoSources(ctx context.Context, args []string, cgoObjDirs map[string]string) (*Dependency, error) {
+// resolving CGO files using the provided objDir->sourceDir mapping. The build
+// plan prints source paths relative to the directory of the last cd line, dir,
+// which is not ours when the build runs with -C.
+func findGoSources(ctx context.Context, args []string, dir string, cgoObjDirs map[string]string) (*Dependency, error) {
 	logger := util.LoggerFromContext(ctx)
 
 	dep := &Dependency{
@@ -207,7 +209,11 @@ func findGoSources(ctx context.Context, args []string, cgoObjDirs map[string]str
 		if !util.IsGoFile(arg) {
 			continue
 		}
-		if !util.PathExists(arg) {
+		path := arg
+		if dir != "" && !filepath.IsAbs(path) {
+			path = filepath.Join(dir, path)
+		}
+		if !util.PathExists(path) {
 			// Try to resolve as CGO generated file
 			objDir := util.NormalizePath(filepath.Dir(arg))
 			sourceDir, ok := cgoObjDirs[objDir]
@@ -227,7 +233,7 @@ func findGoSources(ctx context.Context, args []string, cgoObjDirs map[string]str
 		}
 
 		// This is a Go source file, add it to the dependency sources
-		abs, err := filepath.Abs(arg)
+		abs, err := filepath.Abs(path)
 		if err != nil {
 			return nil, ex.Wrapf(err, "failed to get absolute path of source file %s", arg)
 		}
@@ -272,7 +278,7 @@ func findDeps(ctx context.Context, subcommand string, cmdArgs []string) ([]*Depe
 
 		args := util.SplitCompileCmds(cmd)
 		if util.IsCompileCommandWithArgs(args) {
-			dep, err1 := findGoSources(ctx, args, cgoObjDirs)
+			dep, err1 := findGoSources(ctx, args, currentDir, cgoObjDirs)
 			if err1 != nil {
 				return nil, err1
 			}

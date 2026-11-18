@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"log"
 	"log/slog"
@@ -14,12 +15,19 @@ import (
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"go.opentelemetry.io/otel/trace"
 )
+
+// staleTraceID is the trace of the canceled publish that -canceled-publish-first
+// makes. No span of the published message may belong to it.
+const staleTraceID = "0af7651916cd43dd8448eb211c80319c"
 
 func main() {
 	queue := flag.String("queue", "orders", "queue name")
 	url := flag.String("amqp-url", envOr("AMQP_URL", "amqp://guest:guest@localhost:5672/"), "AMQP URL")
 	autoAck := flag.Bool("auto-ack", false, "consume with auto-ack")
+	canceledFirst := flag.Bool("canceled-publish-first", false,
+		"call PublishWithContext with a canceled context first, then publish with Publish")
 	flag.Parse()
 
 	conn, err := amqp.Dial(*url)
@@ -46,10 +54,16 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	err = ch.PublishWithContext(ctx, "", q.Name, false, false, amqp.Publishing{
+	msg := amqp.Publishing{
 		ContentType: "text/plain",
 		Body:        []byte("hello amqp"),
-	})
+	}
+	if *canceledFirst {
+		publishCanceled(ch, q.Name)
+		err = ch.Publish("", q.Name, false, false, msg)
+	} else {
+		err = ch.PublishWithContext(ctx, "", q.Name, false, false, msg)
+	}
 	if err != nil {
 		log.Fatalf("publish: %v", err)
 	}
@@ -65,6 +79,32 @@ func main() {
 		slog.Info("consumed message", "queue", q.Name)
 	case <-ctx.Done():
 		log.Fatalf("consume: %v", ctx.Err())
+	}
+}
+
+// publishCanceled calls PublishWithContext with a context that carries a span
+// of staleTraceID and is already canceled, so the library returns without
+// publishing.
+func publishCanceled(ch *amqp.Channel, queue string) {
+	traceID, err := trace.TraceIDFromHex(staleTraceID)
+	if err != nil {
+		log.Fatalf("trace id: %v", err)
+	}
+	spanID, err := trace.SpanIDFromHex("b7ad6b7169203331")
+	if err != nil {
+		log.Fatalf("span id: %v", err)
+	}
+	sc := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    traceID,
+		SpanID:     spanID,
+		TraceFlags: trace.FlagsSampled,
+		Remote:     true,
+	})
+	ctx, cancel := context.WithCancel(trace.ContextWithRemoteSpanContext(context.Background(), sc))
+	cancel()
+	err = ch.PublishWithContext(ctx, "", queue, false, false, amqp.Publishing{Body: []byte("never sent")})
+	if !errors.Is(err, context.Canceled) {
+		log.Fatalf("canceled publish: got %v, want %v", err, context.Canceled)
 	}
 }
 

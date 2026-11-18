@@ -35,7 +35,7 @@ const (
 var responseTruncatedWarnOnce sync.Once //nolint:gochecknoglobals // process-wide by design
 
 // otelTransport wraps the round tripper the GenAI SDK issues requests through
-// and emits one client span per non-streaming generateContent call.
+// and emits one client span per generateContent or streamGenerateContent call.
 //
 // Message content (prompts and completions) is never read onto the span. The
 // GenAI semantic conventions gate content capture behind
@@ -95,14 +95,6 @@ func (t *otelTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return t.roundTripper().RoundTrip(req)
 	}
 
-	// Streaming responses only report usage in their final server-sent event,
-	// so a span for them needs SSE accumulation. Until that lands, pass
-	// streaming calls through uninstrumented rather than emit a span that is
-	// missing every response attribute.
-	if op == opStreamChat {
-		return t.roundTripper().RoundTrip(req)
-	}
-
 	attrs := []attribute.KeyValue{
 		semconv.GenAISystem(t.system),
 		otelsemconv.GenAIProviderNameKey.String(t.provider),
@@ -113,12 +105,22 @@ func (t *otelTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		attrs = append(attrs, otelsemconv.ServerAddress(address), otelsemconv.ServerPort(port))
 	}
 	attrs = append(attrs, requestConfigAttrs(req)...)
+	if op == opStreamChat {
+		attrs = append(attrs, semconv.GenAIRequestIsStream(true))
+	}
 
 	ctx, span := tracer.Start(req.Context(), operationChat+" "+model,
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(attrs...),
 	)
-	defer span.End()
+	// A streaming span outlives RoundTrip: once the body is handed to
+	// streamReader, that reader ends the span when the stream finishes.
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			span.End()
+		}
+	}()
 
 	// otelc also instruments net/http's own RoundTrip, one layer below this
 	// one. Suppress it so a single GenAI call produces a single span.
@@ -141,12 +143,20 @@ func (t *otelTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return resp, nil
 	}
 
+	if op == opStreamChat {
+		if resp.Body != nil && resp.Body != http.NoBody {
+			resp.Body = newStreamReader(resp.Body, span)
+			handedOff = true
+		}
+		return resp, nil
+	}
+
 	// Defensive only: the SDK sends generateContent without alt=sse and asks
-	// for SSE solely on streamGenerateContent, which returned above, so a
+	// for SSE solely on streamGenerateContent, which is handled above, so a
 	// conforming server never takes this branch. A proxy or test double that
 	// answers with SSE anyway gets a span without response attributes rather
-	// than a blocked read on a body this instrumentation does not accumulate.
-	// The Anthropic instrumentation keeps the same guard.
+	// than a blocked read on a body this path does not accumulate. The
+	// Anthropic instrumentation keeps the same guard.
 	if strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
 		span.SetAttributes(semconv.GenAIRequestIsStream(true))
 		return resp, nil
@@ -254,43 +264,86 @@ func recordResponse(resp *http.Response, span trace.Span) {
 	span.SetAttributes(responseAttrs(raw)...)
 }
 
-func responseAttrs(body []byte) []attribute.KeyValue {
-	var parsed struct {
-		ResponseID   string `json:"responseId"`
-		ModelVersion string `json:"modelVersion"`
-		Candidates   []struct {
-			FinishReason string `json:"finishReason"`
-		} `json:"candidates"`
-		UsageMetadata *struct {
-			PromptTokenCount     int64 `json:"promptTokenCount"`
-			CandidatesTokenCount int64 `json:"candidatesTokenCount"`
-			ThoughtsTokenCount   int64 `json:"thoughtsTokenCount"`
-			TotalTokenCount      int64 `json:"totalTokenCount"`
-		} `json:"usageMetadata"`
-	}
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		return nil
-	}
+// generateContentResponse is the part of a GenerateContentResponse the span
+// reads. A streamGenerateContent event carries the same shape, one chunk of
+// the response per event.
+type generateContentResponse struct {
+	ResponseID   string `json:"responseId"`
+	ModelVersion string `json:"modelVersion"`
+	Candidates   []struct {
+		// Index is omitted from the JSON when it is 0, so a nil Index falls
+		// back to the candidate's position in the list.
+		Index        *int   `json:"index"`
+		FinishReason string `json:"finishReason"`
+	} `json:"candidates"`
+	UsageMetadata *usageMetadata `json:"usageMetadata"`
+}
 
-	var attrs []attribute.KeyValue
-	if parsed.ResponseID != "" {
-		attrs = append(attrs, otelsemconv.GenAIResponseID(parsed.ResponseID))
-	}
-	if parsed.ModelVersion != "" {
-		attrs = append(attrs, otelsemconv.GenAIResponseModel(parsed.ModelVersion))
-	}
+type usageMetadata struct {
+	PromptTokenCount     int64 `json:"promptTokenCount"`
+	CandidatesTokenCount int64 `json:"candidatesTokenCount"`
+	ThoughtsTokenCount   int64 `json:"thoughtsTokenCount"`
+	TotalTokenCount      int64 `json:"totalTokenCount"`
+}
 
-	reasons := make([]string, 0, len(parsed.Candidates))
-	for _, candidate := range parsed.Candidates {
-		if candidate.FinishReason != "" {
-			reasons = append(reasons, candidate.FinishReason)
+// responseSummary collects the response attributes across one
+// generateContent response or the sequence of streamGenerateContent events
+// that make up a streamed one.
+type responseSummary struct {
+	responseID   string
+	modelVersion string
+	reasons      []string
+	// reasonPos maps a candidate index to its slot in reasons, so a candidate
+	// reports one finish reason however many events mention it.
+	reasonPos map[int]int
+	usage     *usageMetadata
+}
+
+func (s *responseSummary) add(resp *generateContentResponse) {
+	if resp.ResponseID != "" {
+		s.responseID = resp.ResponseID
+	}
+	if resp.ModelVersion != "" {
+		s.modelVersion = resp.ModelVersion
+	}
+	for position, candidate := range resp.Candidates {
+		if candidate.FinishReason == "" {
+			continue
 		}
+		index := position
+		if candidate.Index != nil {
+			index = *candidate.Index
+		}
+		if slot, seen := s.reasonPos[index]; seen {
+			s.reasons[slot] = candidate.FinishReason
+			continue
+		}
+		if s.reasonPos == nil {
+			s.reasonPos = make(map[int]int)
+		}
+		s.reasonPos[index] = len(s.reasons)
+		s.reasons = append(s.reasons, candidate.FinishReason)
 	}
-	if len(reasons) > 0 {
-		attrs = append(attrs, otelsemconv.GenAIResponseFinishReasons(reasons...))
+	// Usage counts are running totals, so the latest report supersedes the
+	// earlier ones; in a stream the final event carries the full counts.
+	if resp.UsageMetadata != nil {
+		s.usage = resp.UsageMetadata
+	}
+}
+
+func (s *responseSummary) attrs() []attribute.KeyValue {
+	var attrs []attribute.KeyValue
+	if s.responseID != "" {
+		attrs = append(attrs, otelsemconv.GenAIResponseID(s.responseID))
+	}
+	if s.modelVersion != "" {
+		attrs = append(attrs, otelsemconv.GenAIResponseModel(s.modelVersion))
+	}
+	if len(s.reasons) > 0 {
+		attrs = append(attrs, otelsemconv.GenAIResponseFinishReasons(s.reasons...))
 	}
 
-	usage := parsed.UsageMetadata
+	usage := s.usage
 	if usage == nil {
 		return attrs
 	}
@@ -314,4 +367,15 @@ func responseAttrs(body []byte) []attribute.KeyValue {
 		otelsemconv.GenAIUsageOutputTokensKey.Int64(outputTokens),
 		semconv.GenAIUsageTotalTokens(totalTokens),
 	)
+}
+
+func responseAttrs(body []byte) []attribute.KeyValue {
+	var parsed generateContentResponse
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil
+	}
+
+	var summary responseSummary
+	summary.add(&parsed)
+	return summary.attrs()
 }

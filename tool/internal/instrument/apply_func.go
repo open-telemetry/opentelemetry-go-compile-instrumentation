@@ -8,6 +8,7 @@ import (
 	_ "embed"
 	"fmt"
 	"go/parser"
+	"go/token"
 	"path/filepath"
 	"strings"
 
@@ -322,6 +323,7 @@ func (ip *instrumentPhase) writeGlobals(pkgName string) error {
 	if err != nil {
 		return ex.Wrapf(err, "parsing api template")
 	}
+	renameHookContextDecl(api.Decls)
 	trampoline.Decls = append(trampoline.Decls, api.Decls...)
 
 	// Write trampoline code to file
@@ -334,6 +336,23 @@ func (ip *instrumentPhase) writeGlobals(pkgName string) error {
 	ip.keepForDebug(path)
 	ip.writeGlobalsDiffForDebug(path, ip.globalsContributors)
 	return nil
+}
+
+// renameHookContextDecl renames the HookContext interface declaration to
+// trampolineHookContextType so the symbol injected into the target package does
+// not clash with a user-defined HookContext in the same package scope (#1820).
+func renameHookContextDecl(decls []dst.Decl) {
+	for _, decl := range decls {
+		genDecl, ok := decl.(*dst.GenDecl)
+		if !ok || genDecl.Tok != token.TYPE {
+			continue
+		}
+		for _, spec := range genDecl.Specs {
+			if typeSpec, isType := spec.(*dst.TypeSpec); isType && typeSpec.Name.Name == hookContextPublicType {
+				typeSpec.Name.Name = trampolineHookContextType
+			}
+		}
+	}
 }
 
 func (ip *instrumentPhase) writeInstrumented(root *dst.File, oldFile string, changes []ruleChange) error {
