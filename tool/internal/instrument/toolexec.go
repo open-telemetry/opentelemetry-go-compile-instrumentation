@@ -105,6 +105,9 @@ type instrumentPhase struct {
 	// buildUsesIgnoreDirective is true when some package in this build has a
 	// //otelc:ignore comment above a call, found during setup.
 	buildUsesIgnoreDirective bool
+	// suppressHooksQualifier is the name the current file's trampolines use
+	// for the runtime package (see suppressHooksAlias).
+	suppressHooksQualifier string
 	// resolveExportFiles looks up go list -export files for type-checking;
 	// nil means pkgload.ResolveExportFilesBatch. Tests replace it.
 	resolveExportFiles func(
@@ -922,11 +925,19 @@ func deterministicLoadFailure(err error) bool {
 	return false
 }
 
+// candidateLoadFailure reports an error that means a root could not be loaded
+// as a package, rather than that the resolver itself could not run. These
+// errors can be skipped for this link; only deterministic ones are memoized.
+func candidateLoadFailure(err error) bool {
+	return deterministicLoadFailure(err) || strings.Contains(err.Error(), "no packages found")
+}
+
 // deterministicFailurePatterns are the messages of the failures
 // deterministicLoadFailure stores.
 func deterministicFailurePatterns() []string {
 	return []string{
 		"no required module provides package",
+		"updates to go.mod needed",
 		"cannot find module providing package",
 		"cannot find package",
 		"is not in std",
@@ -958,14 +969,7 @@ func (lr *linkResolution) resolveMisses(
 	if len(misses) == 0 {
 		return nil
 	}
-	var resolved map[string]map[string]string
-	var resolveFailed map[string]error
-	err = session.WithLoadSlot(ctx, func(ctx context.Context) error {
-		var loadErr error
-		resolved, resolveFailed, loadErr = lr.resolve(ctx, misses, lr.buildFlags...)
-		return loadErr
-	})
-	lr.goListCalls++
+	resolved, resolveFailed, err := lr.resolveBatch(ctx, misses)
 	if err != nil {
 		return err
 	}
@@ -983,6 +987,64 @@ func (lr *linkResolution) resolveMisses(
 		}
 	}
 	return nil
+}
+
+// resolveBatch runs one nested go list for the roots. When that load fails as
+// a whole, as it does when go list cannot resolve one root's module (for
+// example "updates to go.mod needed") and so returns no packages for any of
+// them, it resolves each root on its own. A root whose load fails alone lands
+// in the failed map, so one unresolvable candidate does not fail the whole
+// link, including when it is the only root left after the others are memoized.
+// An error is returned only when the context is done.
+func (lr *linkResolution) resolveBatch(
+	ctx context.Context,
+	roots []string,
+) (map[string]map[string]string, map[string]error, error) {
+	var resolved map[string]map[string]string
+	var resolveFailed map[string]error
+	err := session.WithLoadSlot(ctx, func(ctx context.Context) error {
+		var loadErr error
+		resolved, resolveFailed, loadErr = lr.resolve(ctx, roots, lr.buildFlags...)
+		return loadErr
+	})
+	lr.goListCalls++
+	if err == nil || ctx.Err() != nil || errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded) {
+		return resolved, resolveFailed, err
+	}
+	if len(roots) == 1 {
+		if !candidateLoadFailure(err) {
+			return nil, nil, err
+		}
+		return nil, map[string]error{roots[0]: err}, nil
+	}
+
+	resolved = make(map[string]map[string]string, len(roots))
+	resolveFailed = make(map[string]error)
+	for _, root := range roots {
+		var one map[string]map[string]string
+		var oneFailed map[string]error
+		rootErr := session.WithLoadSlot(ctx, func(ctx context.Context) error {
+			var loadErr error
+			one, oneFailed, loadErr = lr.resolve(ctx, []string{root}, lr.buildFlags...)
+			return loadErr
+		})
+		lr.goListCalls++
+		if ctx.Err() != nil {
+			return nil, nil, ctx.Err()
+		}
+		if rootErr != nil {
+			if errors.Is(rootErr, context.Canceled) || errors.Is(rootErr, context.DeadlineExceeded) ||
+				!candidateLoadFailure(rootErr) {
+				return nil, nil, rootErr
+			}
+			resolveFailed[root] = rootErr
+			continue
+		}
+		maps.Copy(resolved, one)
+		maps.Copy(resolveFailed, oneFailed)
+	}
+	return resolved, resolveFailed, nil
 }
 
 // linkRuleImports holds the rule-added import candidates of one link,
@@ -1107,7 +1169,12 @@ func (l *linkRuleImports) candidates(linkConfig *imports.ImportConfig) map[strin
 // collectRuleSetImports adds to paths every import a rule set can add to
 // its target package's compile: the imports each rule declares, plus the
 // imports of the source files the set's add_file rules insert.
-func collectRuleSetImports(ctx context.Context, bctx *build.Context, paths map[string]struct{}, set *rule.InstRuleSet) {
+func collectRuleSetImports(
+	ctx context.Context,
+	bctx *build.Context,
+	paths map[string]struct{},
+	set *rule.InstRuleSet,
+) {
 	addImportsOf(paths, set.RawRules)
 	addImportsOf(paths, set.FuncRules)
 	addImportsOf(paths, set.StructRules)
