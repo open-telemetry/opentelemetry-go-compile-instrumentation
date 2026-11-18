@@ -32,8 +32,8 @@ func TestOtelImplicitRulesWithoutOtelImports(t *testing.T) {
 
 	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/front", port))
 	require.NoError(t, err)
+	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	resp.Body.Close()
 
 	// We expect exactly 1 trace with 3 spans:
 	// 1. HTTP server (front handler, trace root)
