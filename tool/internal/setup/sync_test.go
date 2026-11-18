@@ -116,6 +116,30 @@ func TestParseGoMod_MissingFile(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to read go.mod file")
 }
 
+// TestWriteGoMod_SymlinkedGoMod checks that a go.mod that is a symbolic link
+// stays one. The link is how some repositories share one go.mod between
+// directories.
+func TestWriteGoMod_SymlinkedGoMod(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "shared.mod")
+	require.NoError(t, os.WriteFile(target, []byte("module example.com/old\n"), 0o644))
+	link := filepath.Join(dir, "go.mod")
+	if err := os.Symlink("shared.mod", link); err != nil {
+		t.Skipf("symlinks are not available: %v", err)
+	}
+
+	mf := &modfile.File{}
+	require.NoError(t, mf.AddModuleStmt("example.com/new"))
+	require.NoError(t, writeGoMod(link, mf))
+
+	info, err := os.Lstat(link)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink, "go.mod must stay a symbolic link")
+	content, err := os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "module example.com/new")
+}
+
 func TestWriteGoMod(t *testing.T) {
 	tempDir := t.TempDir()
 	gomodPath := filepath.Join(tempDir, "go.mod")
