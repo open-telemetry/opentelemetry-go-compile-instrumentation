@@ -69,8 +69,9 @@ The instrumentation follows a consistent pattern across all implementations:
 ```go
 // Before hook: Start span, inject context
 func BeforeRoundTrip(ictx hook.HookContext, transport *http.Transport, req *http.Request) {
-    // 1. Check if instrumentation is enabled
-    if !clientEnabler.Enable() {
+    // 1. Check if instrumentation is enabled. runtime.Ready() is false during
+    //    package initialization, before the OpenTelemetry API is usable.
+    if !runtime.Ready() || !clientEnabler.Enable() {
         return
     }
 
