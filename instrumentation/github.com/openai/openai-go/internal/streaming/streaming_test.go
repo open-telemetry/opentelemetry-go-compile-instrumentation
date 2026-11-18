@@ -862,7 +862,7 @@ func recordStream(t *testing.T, data string, op OperationType) []attribute.KeyVa
 	t.Helper()
 	sr := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
-	_, span := tp.Tracer("test").Start(t.Context(), "test-stream")
+	_, span := tp.Tracer("test").Start(t.Context(), "test-stream") //nolint:spancheck // ended by StreamingReader
 
 	reader := NewStreamingReader(io.NopCloser(strings.NewReader(data)), span, time.Now(), op, false, 0)
 	_, err := io.ReadAll(reader)
@@ -871,7 +871,7 @@ func recordStream(t *testing.T, data string, op OperationType) []attribute.KeyVa
 
 	spans := sr.Ended()
 	require.Len(t, spans, 1)
-	return spans[0].Attributes()
+	return spans[0].Attributes() //nolint:spancheck // ended by StreamingReader
 }
 
 // TestStreamingReader_CacheReadTokens verifies that cached prompt tokens in the
