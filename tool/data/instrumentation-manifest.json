@@ -125,6 +125,10 @@
     "target": "main"
   },
   {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/init",
+    "target": "os/signal"
+  },
+  {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/sdk/trace",
     "target": "go.opentelemetry.io/otel/sdk/trace",
     "versionRange": "v1.44.0"
@@ -137,6 +141,11 @@
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/go.uber.org/zap",
     "target": "go.uber.org/zap/zapcore",
     "versionRange": "v1.21.0"
+  },
+  {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/google.golang.org/genai",
+    "target": "google.golang.org/genai",
+    "versionRange": "v1.0.0"
   },
   {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/google.golang.org/grpc/client",
@@ -171,9 +180,5 @@
   {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/net/http/server",
     "target": "net/http"
-  },
-  {
-    "modulePath": "go.opentelemetry.io/otelc/instrumentation/runtime",
-    "target": "runtime"
   }
 ]

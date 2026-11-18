@@ -170,10 +170,18 @@ func curateReleaseNotes(ctx context.Context, input string, fetcher metadataFetch
 }
 
 func curateReleaseNotesWithLogger(ctx context.Context, input string, fetcher metadataFetcher, logger *log.Logger) (string, error) {
-	// Locte the "## What's Changed" heading
+	if strings.TrimSpace(input) == "" {
+		return "", errors.New("release notes input is empty")
+	}
+
+	// Locate the "## What's Changed" heading. Hotfix or cherry-pick branches
+	// with no merged PRs omit this section in GitHub's generated notes.
 	loc := reWhatsChanged.FindStringIndex(input)
 	if loc == nil {
-		return "", errors.New(`missing "## What's Changed" section in release notes`)
+		if logger != nil {
+			logger.Println(`[releasesummary] no "## What's Changed" section found; keeping release notes unchanged`)
+		}
+		return input, nil
 	}
 
 	verbatimTail := input[loc[0]:]
@@ -257,7 +265,10 @@ func curateReleaseNotesWithLogger(ctx context.Context, input string, fetcher met
 	}
 
 	if totalPRsFound == 0 {
-		return "", errors.New(`"## What's Changed" section is empty: no pull requests found`)
+		if logger != nil {
+			logger.Println(`[releasesummary] no pull requests found in "## What's Changed"; keeping verbatim release notes`)
+		}
+		return verbatimTail, nil
 	}
 
 	var summaryBuilder strings.Builder

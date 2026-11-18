@@ -57,13 +57,17 @@ func genImportDecl(funcRules []*rule.InstFuncRule, fileRules []*rule.InstFileRul
 	if len(funcRules) > 0 {
 		imports = maps.Clone(requiredImports) // clone required imports to avoid mutating the global map
 		for _, m := range funcRules {
-			imports[m.Path] = ast.IdentIgnore
+			if m.Path != util.InternalPath {
+				imports[m.Path] = ast.IdentIgnore
+			}
 		}
 	} else {
 		imports = make(map[string]string)
 	}
 	for _, m := range fileRules {
-		imports[m.Path] = ast.IdentIgnore
+		if m.Path != util.InternalPath {
+			imports[m.Path] = ast.IdentIgnore
+		}
 	}
 	importDecls := make([]dst.Decl, 0, len(imports))
 	// Sort the keys to ensure deterministic order
@@ -359,6 +363,9 @@ func collectFileRules(
 
 	for _, m := range matched {
 		for _, fileRule := range m.FileRules {
+			if fileRule.Path == util.InternalPath {
+				continue
+			}
 			if skipHook(fileRule.Path, pkg) {
 				recordSkippedHook(skippedHooks, fileRule.Path, pkg)
 				continue
@@ -383,13 +390,17 @@ func addTestOnlyHooks(
 	}
 	imported := make(map[string]bool, len(funcRules)+len(fileRules))
 	for _, r := range funcRules {
-		imported[r.Path] = true
+		if r.Path != util.InternalPath {
+			imported[r.Path] = true
+		}
 	}
 	for _, r := range fileRules {
-		imported[r.Path] = true
+		if r.Path != util.InternalPath {
+			imported[r.Path] = true
+		}
 	}
 	add := func(hookPath string) {
-		if hookPath != "" && hookPath != pkg.importPath && !imported[hookPath] {
+		if hookPath != util.InternalPath && hookPath != pkg.importPath && !imported[hookPath] {
 			testHooks[hookPath] = true
 		}
 	}

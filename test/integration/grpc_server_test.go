@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	semconv "go.opentelemetry.io/otel/semconv/v1.20.0"
@@ -66,13 +68,18 @@ func TestGRPCServer(t *testing.T) {
 	}
 
 	// These tests verify that telemetry is properly flushed when the server
-	// receives SIGINT or SIGTERM, using the batch span processor.
+	// receives SIGINT or SIGTERM, using the batch span processor, and that the
+	// process then ends the way it would without instrumentation.
 	for _, tc := range []struct {
 		name string
 		sig  os.Signal
+		// drain makes the app handle the signal with signal.NotifyContext,
+		// call stop() at once, and keep running for this long.
+		drain time.Duration
 	}{
 		{name: "SIGINT", sig: os.Interrupt},
 		{name: "SIGTERM", sig: syscall.SIGTERM},
+		{name: "SIGTERM with app handler", sig: syscall.SIGTERM, drain: 3 * time.Second},
 	} {
 		t.Run("telemetry flush on "+tc.name, func(t *testing.T) {
 			if util.IsWindows() {
@@ -84,7 +91,7 @@ func TestGRPCServer(t *testing.T) {
 
 			port := testutil.FreePort(t)
 			addr := fmt.Sprintf("localhost:%d", port)
-			srv := f.Start("grpcserver", fmt.Sprintf("-port=%d", port))
+			srv := f.Start("grpcserver", fmt.Sprintf("-port=%d", port), fmt.Sprintf("-drain=%s", tc.drain))
 			testutil.WaitForTCP(t, addr)
 
 			client := NewGRPCClient(t, addr)
@@ -101,13 +108,33 @@ func TestGRPCServer(t *testing.T) {
 			// cannot satisfy it before SayHello reaches stats.End.
 			srv.WaitForLog(grpcpb.RPCCompletedLog(pb.Greeter_SayHello_FullMethodName))
 
-			// Instrumentation flushes buffered telemetry on the signal but must not
-			// terminate the process — the app owns its exit. Wait for the flushed
-			// span, then confirm the process is still alive (fixture kills it later).
 			require.NoError(t, srv.Cmd.Process.Signal(tc.sig))
 			f.WaitForSpans(1)
-			require.NoError(t, srv.Cmd.Process.Signal(syscall.Signal(0)),
-				"instrumentation must not terminate the process on %s", tc.name)
+
+			var err error
+			exited := make(chan error, 1)
+			go func() { exited <- srv.Cmd.Wait() }()
+			select {
+			case err = <-exited:
+			case <-time.After(tc.drain + 10*time.Second):
+				t.Fatalf("process did not exit after %s", tc.name)
+			}
+
+			if tc.drain > 0 {
+				// The app handles the signal itself, so instrumentation must not
+				// re-raise it: that would kill the app during its drain.
+				require.NoError(t, err, "the app should exit normally after its drain")
+				srv.WaitForLog("drained")
+			} else {
+				// The app has no handler of its own, so instrumentation re-raises
+				// the signal after the flush and the process ends by that signal.
+				var exitErr *exec.ExitError
+				require.ErrorAs(t, err, &exitErr)
+				status, ok := exitErr.Sys().(syscall.WaitStatus)
+				require.True(t, ok)
+				require.True(t, status.Signaled(), "process should end by %s", tc.name)
+				require.Equal(t, tc.sig, status.Signal())
+			}
 
 			serverSpan := testutil.RequireSpan(t, f.Traces(),
 				testutil.IsServer,

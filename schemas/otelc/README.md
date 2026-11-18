@@ -19,6 +19,7 @@ schemas/otelc/
 │   ├── k8s.yaml             # k8s.io/client-go informer spans
 │   ├── openai.yaml          # openai/openai-go GenAI client spans
 │   ├── anthropic.yaml       # anthropics/anthropic-sdk-go GenAI client spans
+│   ├── gemini.yaml          # google.golang.org/genai GenAI client spans
 │   ├── mongo.yaml           # go.mongodb.org/mongo-driver client spans
 │   ├── elasticsearch.yaml   # olivere/elastic (v7) client spans
 │   ├── clickhouse.yaml      # ClickHouse/clickhouse-go (v2) native API client spans
@@ -28,8 +29,7 @@ schemas/otelc/
 │   ├── linodego.yaml        # linode/linodego (v2) client spans + operation-duration metric
 │   ├── stripe.yaml          # stripe/stripe-go (v81/v82) client spans + request metric
 │   ├── otel-sdk.yaml        # go.opentelemetry.io/otel* — Go runtime metrics
-│   ├── logs.yaml            # log, log/slog, logrus, zap — no telemetry (correlation only)
-│   └── runtime.yaml         # runtime — no telemetry (GLS context propagation)
+│   └── logs.yaml            # log, log/slog, logrus, zap — no telemetry (correlation only)
 └── .deps/                   # pre-fetched upstream semconv (git-ignored, generated)
 ```
 
@@ -58,6 +58,7 @@ signals an undeclared instrumentation.
 | `k8s.io/client-go`                                  | `k8s.yaml`          | Informer spans                                                         |
 | `github.com/openai/openai-go` (v1/v2/v3)            | `openai.yaml`       | GenAI client spans                                                     |
 | `github.com/anthropics/anthropic-sdk-go`            | `anthropic.yaml`    | GenAI client spans                                                     |
+| `google.golang.org/genai`                           | `gemini.yaml`       | GenAI client spans                                                     |
 | `go.mongodb.org/mongo-driver/mongo`                 | `mongo.yaml`        | DB client spans                                                        |
 | `go.mongodb.org/mongo-driver/v2/mongo`              | `mongo.yaml`        | DB client spans                                                        |
 | `github.com/olivere/elastic/v7`                     | `elasticsearch.yaml` | DB client spans                                                        |
@@ -72,7 +73,6 @@ signals an undeclared instrumentation.
 | `go.opentelemetry.io/otel/sdk/trace`                | `otel-sdk.yaml`     | nothing — maintains the GLS span chain                                 |
 | `go.opentelemetry.io/otel/trace`                    | `otel-sdk.yaml`     | nothing — GLS fallback for `SpanFromContext`                           |
 | `log`, `log/slog`, `github.com/sirupsen/logrus`, `go.uber.org/zap` | `logs.yaml`         | nothing — injects `trace_id`/`span_id` into the application's own logs |
-| `runtime`                                           | `runtime.yaml`      | nothing — goroutine-local context propagation                          |
 
 ## Validate locally
 

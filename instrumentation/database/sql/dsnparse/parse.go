@@ -68,9 +68,10 @@ type DSNParserFunc func(dsn string) DSNInfo
 // Parse calls f(dsn).
 func (f DSNParserFunc) Parse(dsn string) DSNInfo { return f(dsn) }
 
-// registry holds DSNParser implementations indexed by driver name. It is safe
-// for concurrent use, so parsers may be registered from init() functions while
-// ParseDSN runs inside instrumentation hooks.
+// registry holds the DSNParser implementations registered with
+// RegisterDSNParser, indexed by driver name. Its zero value is ready to use. It
+// is safe for concurrent use, so parsers may be registered from init() functions
+// while ParseDSN runs inside instrumentation hooks.
 type registry struct {
 	mu      sync.RWMutex
 	parsers map[string]DSNParser
@@ -79,50 +80,65 @@ type registry struct {
 func (r *registry) register(driverName string, parser DSNParser) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.parsers == nil {
+		r.parsers = make(map[string]DSNParser)
+	}
 	r.parsers[driverName] = parser
 }
 
 func (r *registry) registerAll(parsers map[string]DSNParser) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.parsers == nil {
+		r.parsers = make(map[string]DSNParser, len(parsers))
+	}
 	for name, p := range parsers {
 		r.parsers[name] = p
 	}
 }
 
+// lookup returns the parser registered for driverName, or else the built-in one.
 func (r *registry) lookup(driverName string) (DSNParser, bool) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 	p, ok := r.parsers[driverName]
-	return p, ok
+	r.mu.RUnlock()
+	if ok {
+		return p, true
+	}
+	return builtinParser(driverName)
 }
 
-// defaultRegistry maps the built-in driver names to their parsers. Aliases that
-// share a wire format (e.g. pgx and lib/pq both speak the PostgreSQL DSN
-// format) point at the same parser.
-var defaultRegistry = &registry{
-	parsers: map[string]DSNParser{
-		"postgres":   DSNParserFunc(parsePostgresDSN),
-		"postgresql": DSNParserFunc(parsePostgresDSN),
-		"pgx":        DSNParserFunc(parsePostgresDSN),
-		"lib/pq":     DSNParserFunc(parsePostgresDSN),
-		"mysql":      DSNParserFunc(parseMySQLDSN),
-		"mariadb":    DSNParserFunc(parseMySQLDSN),
-		"sqlite3":    DSNParserFunc(parseSQLiteDSN),
-		"sqlite":     DSNParserFunc(parseSQLiteDSN),
-		"sqlserver":  DSNParserFunc(parseSQLServerDSN),
-		"mssql":      DSNParserFunc(parseSQLServerDSN),
-		"clickhouse": DSNParserFunc(parseClickHouseDSN),
-		"godror":     DSNParserFunc(parseOracleDSN),
-		"oracle":     DSNParserFunc(parseOracleDSN),
-		"oci8":       DSNParserFunc(parseOracleDSN),
-		"go-oci8":    DSNParserFunc(parseOracleDSN),
-	},
+// defaultRegistry holds the parsers registered with RegisterDSNParser. It has no
+// initializer, and the built-in parsers are a switch rather than a map, because
+// sql.Open can run during another package's initialization, before this
+// package's variables are set.
+var defaultRegistry registry
+
+// builtinParser returns the built-in parser for driverName. Aliases that share a
+// wire format (e.g. pgx and lib/pq both speak the PostgreSQL DSN format) map to
+// the same parser.
+func builtinParser(driverName string) (DSNParser, bool) {
+	switch driverName {
+	case "postgres", "postgresql", "pgx", "lib/pq":
+		return DSNParserFunc(parsePostgresDSN), true
+	case "mysql", "mariadb":
+		return DSNParserFunc(parseMySQLDSN), true
+	case "sqlite3", "sqlite":
+		return DSNParserFunc(parseSQLiteDSN), true
+	case "sqlserver", "mssql":
+		return DSNParserFunc(parseSQLServerDSN), true
+	case "clickhouse":
+		return DSNParserFunc(parseClickHouseDSN), true
+	case "godror", "oracle", "oci8", "go-oci8":
+		return DSNParserFunc(parseOracleDSN), true
+	}
+	return nil, false
 }
 
-// RegisterDSNParser registers a custom DSN parser for driverName. Built-in
-// parsers are registered automatically; registering an already-known name
-// overwrites the previous parser. It is safe to call from init().
+// RegisterDSNParser registers a custom DSN parser for driverName. A parser
+// registered for a built-in driver name takes precedence over the built-in
+// one, and registering a name again overwrites the previous parser. It is
+// safe to call from init().
 func RegisterDSNParser(driverName string, parser DSNParser) {
 	defaultRegistry.register(driverName, parser)
 }
@@ -131,6 +147,12 @@ func RegisterDSNParser(driverName string, parser DSNParser) {
 // it over repeated RegisterDSNParser calls when registering several at once.
 func RegisterDSNParsers(parsers map[string]DSNParser) {
 	defaultRegistry.registerAll(parsers)
+}
+
+// HasParser reports whether a DSN parser is registered for driverName.
+func HasParser(driverName string) bool {
+	_, ok := defaultRegistry.lookup(driverName)
+	return ok
 }
 
 // ParseDSN parses a driver-specific data source name and returns structured
@@ -284,20 +306,26 @@ func parseLibpqKV(dsn string) DSNInfo {
 // It also handles the non-standard form where the address is not wrapped in
 // parentheses (e.g. user:pass@tcp:3306/dbname or user:pass@host:3306/dbname).
 func parseMySQLDSN(dsn string) DSNInfo {
-	// Find the last @ that precedes the first '(' so we skip '@' inside passwords.
-	atIdx := -1
-	for i := 0; i < len(dsn); i++ {
-		if dsn[i] == '@' {
-			atIdx = i
-		}
-		if dsn[i] == '(' {
-			break
-		}
+	// Match go-sql-driver/mysql's credential boundary: passwords may contain
+	// any DSN delimiter, so credentials end at the last '@' before the last '/'.
+	// The driver rejects a non-empty DSN without '/'; such DSNs return DSNInfo{}.
+	//
+	// dbSep only bounds the credentials search and the no-'/' gate. It can
+	// fall inside a query string and is never the database split.
+	dbSep := strings.LastIndexByte(dsn, '/')
+	if dbSep < 0 {
+		return DSNInfo{}
 	}
-	rest := dsn
-	if atIdx >= 0 {
-		rest = dsn[atIdx+1:]
+	// The last '/' fell inside the credentials: an '@' follows the separator
+	// but none precedes it, so the driver rejects the DSN as malformed.
+	if strings.IndexByte(dsn[:dbSep], '@') < 0 && strings.IndexByte(dsn[dbSep:], '@') >= 0 {
+		return DSNInfo{}
 	}
+	addressStart := 0
+	if credentialsEnd := strings.LastIndexByte(dsn[:dbSep], '@'); credentialsEnd >= 0 {
+		addressStart = credentialsEnd + 1
+	}
+	rest := dsn[addressStart:]
 
 	var addrStr, dbPart string
 
@@ -345,9 +373,15 @@ func isMySQLUnixAddr(addr string) bool {
 	return colon >= 0 && addr[:colon] == "unix"
 }
 
-// mysqlKnownProtocols lists the transport keywords used by go-sql-driver/mysql.
-var mysqlKnownProtocols = map[string]bool{
-	"tcp": true, "unix": true, "udp": true, "pipe": true,
+// isMySQLProtocol reports whether proto is a transport keyword used by
+// go-sql-driver/mysql. It is a switch rather than a map for the same reason as
+// defaultRegistry.
+func isMySQLProtocol(proto string) bool {
+	switch proto {
+	case "tcp", "unix", "udp", "pipe":
+		return true
+	}
+	return false
 }
 
 // mysqlStripProtocol removes a leading "proto:" prefix when proto is a known
@@ -358,7 +392,7 @@ func mysqlStripProtocol(addr string) string {
 		return addr
 	}
 	proto := addr[:colon]
-	if !mysqlKnownProtocols[proto] {
+	if !isMySQLProtocol(proto) {
 		return addr
 	}
 	rest := addr[colon+1:]

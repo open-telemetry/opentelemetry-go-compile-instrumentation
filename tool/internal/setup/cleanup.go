@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 
+	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -22,7 +23,7 @@ import (
 // Cleanup runs under the build lock; GoBuild's deferred call reuses the
 // surrounding lock via the context marker instead of re-acquiring it.
 func Cleanup(ctx context.Context, cleanAll bool) error {
-	return withBuildLock(ctx, func(ctx context.Context) error {
+	return withBuildLock(ctx, "", func(ctx context.Context) error {
 		return cleanupLocked(ctx, cleanAll)
 	})
 }
@@ -75,5 +76,38 @@ func cleanupLocked(ctx context.Context, cleanAll bool) error {
 			"cleanup", "otelc cleanup")
 	}
 
+	return nil
+}
+
+// restoreInterruptedBuild restores the files that an earlier build changed
+// and did not restore, because it was killed or its restore failed. Such a
+// build leaves its manifest behind. A new build snapshots go.mod as it finds
+// it, so without this step the replace directives of the earlier build would
+// become the original go.mod of this one, and every later restore would put
+// them back.
+//
+// It runs under the build lock, before the build tracks any file. Nothing is
+// done when no manifest exists.
+func restoreInterruptedBuild(ctx context.Context) error {
+	stateManager, err := loadStateManager()
+	if err != nil {
+		return err
+	}
+	if stateManager == nil {
+		return nil
+	}
+
+	logger := util.LoggerFromContext(ctx)
+	logger.WarnContext(ctx, "restoring the files of an interrupted build")
+	_, _ = fmt.Fprintf(os.Stderr, "Warning: a previous otelc build did not finish; restoring its go.mod and "+
+		"related files before building\n")
+
+	if err = stateManager.Revert(); err != nil {
+		return ex.Wrapf(err, "restoring the files of an interrupted build; "+
+			"the snapshots are kept in %s", util.GetBuildTemp(stateDir))
+	}
+	if err = stateManager.Discard(); err != nil {
+		logger.WarnContext(ctx, "failed to discard consumed state", "error", err)
+	}
 	return nil
 }

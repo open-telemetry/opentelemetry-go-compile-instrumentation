@@ -1,0 +1,75 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: otel-demo
+spec:
+  selector:
+    app: otel-collector
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http
+    - name: metrics
+      port: 8888
+      targetPort: metrics
+    - name: prometheus
+      port: 8889
+      targetPort: prometheus
+    - name: health
+      port: 13133
+      targetPort: health
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jaeger
+  namespace: otel-demo
+spec:
+  selector:
+    app: jaeger
+  ports:
+    - name: ui
+      port: 16686
+      targetPort: ui
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http
+    - name: metrics
+      port: 8888
+      targetPort: metrics
+    - name: health
+      port: 13133
+      targetPort: health
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: otel-demo
+spec:
+  selector:
+    app: prometheus
+  ports:
+    - name: web
+      port: 9090
+      targetPort: web
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: otel-demo
+spec:
+  selector:
+    app: grafana
+  ports:
+    - name: web
+      port: 3000
+      targetPort: web

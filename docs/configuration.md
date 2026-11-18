@@ -101,6 +101,29 @@ OTELC_RULES=ci-rules/ otelc go build .
 > configuration. For stable, versioned instrumentation, use the `otel.instrumentation.go`
 > mechanism described in [External Configuration Sources](external-configuration.md).
 
+## Limiting the Whole Build's Duration
+
+`--timeout` (or `OTELC_BUILD_TIMEOUT`) bounds the whole `otelc go` invocation: setup, the `go`
+command it runs, and every `toolexec` process that command spawns. It is off by default; Ctrl-C
+and a CI job's own time limit already stop a hung build without it. Set it when you specifically
+want `otelc` itself to give up and exit non-zero after a fixed duration, for example to fail fast
+in a script rather than rely on an outer timeout that would also kill unrelated work:
+
+```bash
+otelc --timeout 10m go build .
+```
+
+A nested `otelc` build (one a test binary runs, or one otelc starts itself to resolve a
+rule-added import) shares the outer build's deadline instead of getting its own fresh timeout,
+the same way `--rules`/`OTELC_RULES` are inherited.
+
+> [!NOTE]
+> For `otelc go test`, this also bounds running the tests themselves, which overlaps with Go's
+> own `-timeout` flag to `go test`. The two serve different purposes: `go test -timeout` catches
+> a single hung test, while `--timeout` here is a backstop on the entire `otelc` invocation
+> (setup included). Prefer `go test -timeout` for the former; use `--timeout` only when you need
+> the latter.
+
 ## Narrowing What Gets Instrumented
 
 Rules target packages and locations within them using three fields — the full schema is in
@@ -184,23 +207,6 @@ Keep in mind:
   whole statement, so a statement with more than one call, such as `combine(a(), b())`, would
   suppress hooks for every call in it. Give each other call its own statement first, then use
   its result in the annotated statement.
-- Using `//otelc:ignore` on a call site anywhere in the build requires
-  `instrumentation/runtime` to be loaded, since that is where the suppression functions the
-  directive relies on at runtime live:
-
-  ```go
-  //go:build tools
-
-  package tools
-
-  import (
-      _ "your/rule/package"
-      _ "go.opentelemetry.io/otelc/instrumentation/runtime"
-  )
-  ```
-
-  Without it, `otelc setup` fails with a clear error naming the missing import, rather than
-  letting the build fail later on an unrelated-looking compiler error.
 
 ## Runtime Tuning
 

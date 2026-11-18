@@ -4,12 +4,14 @@
 package instrument
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	goast "go/ast"
 	"go/parser"
 	"go/token"
 	"go/types"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,14 +33,14 @@ import (
 func (ip *instrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRule, root *dst.File) (bool, error) {
 	importAliases, aliasOverrides := ip.resolveImportOverrides(root, r.Imports)
 
-	appendModified, err := ip.applyCallAppendArgs(r, root, importAliases, aliasOverrides)
+	appendModified, err := ip.applyCallAppendArgs(ctx, r, root, importAliases, aliasOverrides)
 	if err != nil {
 		return false, err
 	}
 
 	replaceModified := false
 	if r.Replace != "" {
-		replaceModified, err = ip.applyCallReplace(r, root, importAliases, aliasOverrides)
+		replaceModified, err = ip.applyCallReplace(ctx, r, root, importAliases, aliasOverrides)
 		if err != nil {
 			return false, err
 		}
@@ -88,6 +90,7 @@ func walkCallsWithEnclosingFunc(root *dst.File, fn func(call *dst.CallExpr, encl
 // A //otelc:ignore comment above a matching call's enclosing statement opts
 // that one call site out and leaves every other matching call site wrapped.
 func (ip *instrumentPhase) applyCallReplace(
+	ctx context.Context,
 	r *rule.InstCallRule,
 	root *dst.File,
 	importAliases map[string]string,
@@ -101,15 +104,20 @@ func (ip *instrumentPhase) applyCallReplace(
 
 	stmts := ast.CallEnclosingStmts(root)
 
-	// Pass 1: collect matching calls and pre-compute replacements to avoid
-	// re-matching the original call pointer inside its own wrapper.
-	replacements := make(map[*dst.CallExpr]dst.Expr)
+	// Match only original calls. Template-generated calls must not be matched
+	// again, even when a wrapper calls the same function as the target.
+	type candidate struct {
+		enclosing *dst.FuncDecl
+		site      callSite
+	}
+	candidates := make(map[*dst.CallExpr]candidate)
 	var wrapError error
 	walkCallsWithEnclosingFunc(root, func(call *dst.CallExpr, enclosing *dst.FuncDecl) bool {
-		if !ip.matchesRule(call, r, importAliases) {
+		if !ip.matchesRule(ctx, call, r, importAliases) {
 			return true
 		}
 		if ast.HasLeadingDirective(stmts[call], util.DirectiveIgnore) {
+			ip.ignoredCallSites++
 			ip.Debug("Skip call site due to //otelc:ignore", "rule", r.Name)
 			return true
 		}
@@ -117,13 +125,35 @@ func (ip *instrumentPhase) applyCallReplace(
 			wrapError = shadowErr
 			return false
 		}
-		site := callSite{
+		candidates[call] = candidate{enclosing: enclosing, site: callSite{
 			methodCall: r.MethodCall != "",
 			deferred:   isGoOrDeferCall(stmts[call], call),
 			clone:      ip.cloneWithPositions,
+		}}
+		return true
+	})
+	if wrapError != nil {
+		return false, wrapError
+	}
+	if len(candidates) == 0 {
+		return false, nil
+	}
+
+	// Wrap children before their parents. Compiling a template clones the
+	// original call (or its arguments/receiver), so precomputing an outer
+	// replacement would retain stale, uninstrumented copies of nested calls.
+	// A post-order walk also leaves generated replacements unvisited.
+	dstutil.Apply(root, nil, func(cursor *dstutil.Cursor) bool {
+		call, ok := cursor.Node().(*dst.CallExpr)
+		if !ok {
+			return true
 		}
-		wrapped, wrapErr := tmpl.compileExpression(call, site, enclosing, importAliases, aliasOverrides)
-		if wrapErr == nil && site.deferred {
+		match, found := candidates[call]
+		if !found {
+			return true
+		}
+		wrapped, wrapErr := tmpl.compileExpression(call, match.site, match.enclosing, importAliases, aliasOverrides)
+		if wrapErr == nil && match.site.deferred {
 			if _, isCall := wrapped.(*dst.CallExpr); !isCall {
 				wrapErr = ex.Newf("the template output is a %T, but the matched call is the call of a defer "+
 					"or go statement, which must be replaced with a call expression", wrapped)
@@ -133,31 +163,13 @@ func (ip *instrumentPhase) applyCallReplace(
 			wrapError = ip.withCallPosition(wrapErr, r, call)
 			return false
 		}
-		replacements[call] = ip.cloneWithPositions(wrapped)
+		cursor.Replace(ip.cloneWithPositions(wrapped))
 		return true
 	})
 
 	if wrapError != nil {
 		return false, wrapError
 	}
-
-	if len(replacements) == 0 {
-		return false, nil
-	}
-
-	// Pass 2: replace each matched call with its pre-computed expression.
-	dstutil.Apply(root, func(cursor *dstutil.Cursor) bool {
-		call, ok := cursor.Node().(*dst.CallExpr)
-		if !ok {
-			return true
-		}
-		replacement, found := replacements[call]
-		if !found {
-			return true
-		}
-		cursor.Replace(replacement)
-		return true
-	}, nil)
 
 	return true, nil
 }
@@ -205,6 +217,7 @@ func isGoOrDeferCall(stmt dst.Stmt, call *dst.CallExpr) bool {
 // statement opts that one call site out and leaves every other matching call
 // site appended.
 func (ip *instrumentPhase) applyCallAppendArgs(
+	ctx context.Context,
 	r *rule.InstCallRule,
 	root *dst.File,
 	importAliases map[string]string,
@@ -223,10 +236,11 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 	var matchingCalls []*dst.CallExpr
 	var shadowErr error
 	walkCallsWithEnclosingFunc(root, func(call *dst.CallExpr, enclosing *dst.FuncDecl) bool {
-		if !ip.matchesRule(call, r, importAliases) {
+		if !ip.matchesRule(ctx, call, r, importAliases) {
 			return true
 		}
 		if ast.HasLeadingDirective(stmts[call], util.DirectiveIgnore) {
+			ip.ignoredCallSites++
 			ip.Debug("Skip call site due to //otelc:ignore", "rule", r.Name)
 			return true
 		}
@@ -328,6 +342,8 @@ func appendParsedCallArgs(
 //   - redis.Get() after "import redis 'github.com/redis/go-redis/v9'" matches "github.com/redis/go-redis/v9.Get"
 //   - sql.Open() after "import 'database/sql'" matches "database/sql.Open"
 //
+// An explicit instantiation such as pkg.Function[int]() matches like pkg.Function().
+//
 // What does NOT match:
 //   - Get() without package qualifier (unqualified calls not supported)
 //   - other.Get() where other is from a different package
@@ -336,8 +352,9 @@ func matchesCallRule(call *dst.CallExpr, r *rule.InstCallRule, importAliases map
 	importPath := r.ImportPath
 	funcName := r.FuncName
 
-	// Only match qualified calls: pkg.Function()
-	sel, ok := call.Fun.(*dst.SelectorExpr)
+	// Only match qualified calls: pkg.Function(), or pkg.Function[T]() when the
+	// type arguments are written out.
+	sel, ok := withoutTypeArguments(call.Fun).(*dst.SelectorExpr)
 	if !ok {
 		return false
 	}
@@ -353,6 +370,14 @@ func matchesCallRule(call *dst.CallExpr, r *rule.InstCallRule, importAliases map
 		return false
 	}
 
+	// A local variable, parameter or receiver that has the name of an imported
+	// package shadows the import: its methods are not the package's functions.
+	// The parser resolves such a name to the declaration in scope, and leaves
+	// the name of a package unresolved.
+	if ident.Obj != nil {
+		return false
+	}
+
 	// Check that the package's import path matches the rule's import path.
 	pkgPath := ident.Path
 	if pkgPath != "" {
@@ -363,23 +388,42 @@ func matchesCallRule(call *dst.CallExpr, r *rule.InstCallRule, importAliases map
 	return ok && resolvedPath == importPath
 }
 
+// withoutTypeArguments returns the generic function or type that expr
+// instantiates, so pkg.Name[int] gives pkg.Name. Any other expression is
+// returned unchanged.
+func withoutTypeArguments(expr dst.Expr) dst.Expr {
+	switch e := expr.(type) {
+	case *dst.IndexExpr:
+		return e.X
+	case *dst.IndexListExpr:
+		return e.X
+	default:
+		return expr
+	}
+}
+
 // matchesRule dispatches by selector: function_call or method_call.
-func (ip *instrumentPhase) matchesRule(call *dst.CallExpr, r *rule.InstCallRule, importAliases map[string]string) bool {
+func (ip *instrumentPhase) matchesRule(
+	ctx context.Context,
+	call *dst.CallExpr,
+	r *rule.InstCallRule,
+	importAliases map[string]string,
+) bool {
 	if r.MethodCall != "" {
-		return ip.matchesMethodCallRule(call, r)
+		return ip.matchesMethodCallRule(ctx, call, r)
 	}
 	return matchesCallRule(call, r, importAliases)
 }
 
 // matchesMethodCallRule ensures that files that never mention the method
 // name skip type-checking entirely.
-func (ip *instrumentPhase) matchesMethodCallRule(call *dst.CallExpr, r *rule.InstCallRule) bool {
+func (ip *instrumentPhase) matchesMethodCallRule(ctx context.Context, call *dst.CallExpr, r *rule.InstCallRule) bool {
 	sel, ok := call.Fun.(*dst.SelectorExpr)
 	if !ok || sel.Sel.Name != r.FuncName {
 		return false
 	}
 
-	info := ip.ensureMethodCallInfo()
+	info := ip.ensureMethodCallInfo(ctx)
 	if info == nil {
 		return false
 	}
@@ -418,7 +462,7 @@ func (ip *instrumentPhase) logUnresolvedMethodCall(
 
 // ensureMethodCallInfo type-checks the package at most once. It must run
 // before any file of the package is rewritten.
-func (ip *instrumentPhase) ensureMethodCallInfo() *methodCallPackageInfo {
+func (ip *instrumentPhase) ensureMethodCallInfo(ctx context.Context) *methodCallPackageInfo {
 	if ip.methodCallInfoLoaded {
 		return ip.methodCallInfo
 	}
@@ -426,7 +470,14 @@ func (ip *instrumentPhase) ensureMethodCallInfo() *methodCallPackageInfo {
 
 	pkgPath := util.FindFlagValue(ip.compileArgs, "-p")
 	files := packageSourceFiles(ip.compileArgs)
-	info, err := checkPackageForMethodCalls(pkgPath, files, ip.importConfig)
+	exportFiles, err := ip.exportDataFiles(ctx)
+	var info *methodCallPackageInfo
+	if err == nil {
+		info, err = checkPackageForMethodCalls(pkgPath, files, imports.ImportConfig{
+			PackageFile: exportFiles,
+			ImportMap:   ip.importConfig.ImportMap,
+		})
+	}
 	if err != nil {
 		ip.Warn("type-checking failed; method_call rules will not match in this package, "+
 			"and *_implements selectors and ThatImplements helpers will match the type name only",
@@ -629,18 +680,22 @@ func (pi *methodCallPackageInfo) methodReceiver(file string, line, col int) (str
 	return named.Obj().Pkg().Path(), recvType, true
 }
 
-// exportImporter reads a dependency's own compiled .a file.
+// archiveMagic starts every compiler archive (.a) file.
+const archiveMagic = "!<arch>\n"
+
+// exportImporter reads a dependency's export data: the compiled .a file from
+// -importcfg, or the file go list -export names.
 type exportImporter struct {
 	fset      *token.FileSet
-	archives  map[string]string // import path -> .a file, from -importcfg
+	files     map[string]string // import path -> export data file
 	importMap map[string]string // source import path -> its resolved/vendored path, from -importcfg
 	packages  map[string]*types.Package
 }
 
-func newExportImporter(fset *token.FileSet, archives, importMap map[string]string) *exportImporter {
+func newExportImporter(fset *token.FileSet, files, importMap map[string]string) *exportImporter {
 	return &exportImporter{
 		fset:      fset,
-		archives:  archives,
+		files:     files,
 		importMap: importMap,
 		packages:  make(map[string]*types.Package),
 	}
@@ -653,7 +708,7 @@ func (imp *exportImporter) Import(path string) (*types.Package, error) {
 
 // ImportFrom implements types.ImporterFrom.
 func (imp *exportImporter) ImportFrom(path, _ string, _ types.ImportMode) (*types.Package, error) {
-	if path == "unsafe" {
+	if path == unsafePackageName {
 		return types.Unsafe, nil
 	}
 	if pkg, ok := imp.packages[path]; ok && pkg.Complete() {
@@ -661,31 +716,38 @@ func (imp *exportImporter) ImportFrom(path, _ string, _ types.ImportMode) (*type
 	}
 
 	resolvedPath := path
-	archive, ok := imp.archives[path]
+	file, ok := imp.files[path]
 	if !ok {
 		if mapped, mappedOk := imp.importMap[path]; mappedOk {
-			archive, ok = imp.archives[mapped]
+			file, ok = imp.files[mapped]
 			resolvedPath = mapped
 		}
 	}
 	if !ok {
-		return nil, ex.Newf("no archive for import path %q in -importcfg", path)
+		return nil, ex.Newf("no export data for import path %q", path)
 	}
 
-	f, err := os.Open(archive)
+	f, err := os.Open(file)
 	if err != nil {
-		return nil, ex.Wrapf(err, "opening archive for %q", path)
+		return nil, ex.Wrapf(err, "opening export data for %q", path)
 	}
 	defer f.Close()
 
-	r, err := gcexportdata.NewReader(f) //nolint:staticcheck // no replacement exists yet ahead of Go 1.29
-	if err != nil {
-		return nil, ex.Wrapf(err, "reading export data section for %q from %s", path, archive)
+	// go list -export files (cmd/export, Go 1.28+) are export data as is.
+	// Only compiler archives need the export data section located first.
+	br := bufio.NewReader(f)
+	var r io.Reader = br
+	if head, _ := br.Peek(len(archiveMagic)); string(head) == archiveMagic {
+		//nolint:staticcheck // -importcfg compiler archives before Go 1.28; delete when min Go >= 1.28
+		r, err = gcexportdata.NewReader(r)
+		if err != nil {
+			return nil, ex.Wrapf(err, "reading export data section for %q from %s", path, file)
+		}
 	}
 
 	pkg, err := gcexportdata.Read(r, imp.fset, imp.packages, resolvedPath)
 	if err != nil {
-		return nil, ex.Wrapf(err, "decoding export data for %q from %s", path, archive)
+		return nil, ex.Wrapf(err, "decoding export data for %q from %s", path, file)
 	}
 	imp.packages[path] = pkg
 	return pkg, nil
@@ -738,12 +800,16 @@ func (ip *instrumentPhase) applyIgnoredCallSites(ctx context.Context, root *dst.
 
 	stmtLists := findStmtLists(root)
 
-	selfPackage := ip.isSuppressHooksPackage()
+	// Calls in package runtime itself stay unqualified.
+	qualifier := ""
+	if !ip.isSuppressHooksPackage() {
+		qualifier = suppressHooksAlias(ctx, root)
+	}
 
 	bracketed := 0
 	nextFlag := 0
 	for _, list := range stmtLists {
-		n, err := bracketMarkedStmts(list, marked, selfPackage, &nextFlag)
+		n, err := bracketMarkedStmts(list, marked, qualifier, &nextFlag)
 		if err != nil {
 			return false, err
 		}
@@ -753,10 +819,10 @@ func (ip *instrumentPhase) applyIgnoredCallSites(ctx context.Context, root *dst.
 		return false, nil
 	}
 
-	if selfPackage {
+	if qualifier == "" {
 		return true, nil
 	}
-	suppressImport := map[string]string{suppressHooksPackage: suppressHooksPackage}
+	suppressImport := map[string]string{qualifier: suppressHooksPackage}
 	if err := ip.addRuleImports(ctx, root, suppressImport, "otelc:ignore"); err != nil {
 		return false, err
 	}
@@ -798,14 +864,14 @@ func findStmtLists(root *dst.File) []*[]dst.Stmt {
 }
 
 // bracketMarkedStmts brackets every statement in *list that appears in
-// marked and reports how many it bracketed. selfPackage decides whether the
-// inserted calls need a "runtime" qualifier. nextFlag numbers each inserted
+// marked and reports how many it bracketed. qualifier is the name the inserted
+// calls use for the runtime package, empty for no qualifier. nextFlag numbers each inserted
 // guard variable so that two bracketed statements in the same function never
 // collide; callers share one counter across every list in the file.
 func bracketMarkedStmts(
 	list *[]dst.Stmt,
 	marked map[dst.Stmt]bool,
-	selfPackage bool,
+	qualifier string,
 	nextFlag *int,
 ) (int, error) {
 	stmts := *list
@@ -831,7 +897,7 @@ func bracketMarkedStmts(
 					"for the other calls. Give each other call its own statement, then use " +
 					"its result here")
 		}
-		before, after := suppressHooksStmts(selfPackage, *nextFlag)
+		before, after := suppressHooksStmts(qualifier, *nextFlag)
 		*nextFlag++
 		stmts = append(stmts[:i], append(before, stmts[i:]...)...)
 		i += len(before)
@@ -849,12 +915,12 @@ func bracketMarkedStmts(
 // A deferred statement also turns suppression off if the call panics.
 
 //nolint:revive // nonamedreturns conflicts with confusing-results
-func suppressHooksStmts(selfPackage bool, id int) ([]dst.Stmt, []dst.Stmt) {
+func suppressHooksStmts(qualifier string, id int) ([]dst.Stmt, []dst.Stmt) {
 	flag := fmt.Sprintf("otelcIgnoreDone%d", id)
 
 	fallback := &dst.IfStmt{
 		Cond: &dst.UnaryExpr{Op: token.NOT, X: ast.Ident(flag)},
-		Body: ast.Block(ast.ExprStmt(suppressHooksCall(unsuppressHooksFuncName, selfPackage))),
+		Body: ast.Block(ast.ExprStmt(suppressHooksCall(unsuppressHooksFuncName, qualifier))),
 	}
 	deferFallback := ast.DeferStmt(&dst.CallExpr{
 		Fun: &dst.FuncLit{
@@ -864,13 +930,13 @@ func suppressHooksStmts(selfPackage bool, id int) ([]dst.Stmt, []dst.Stmt) {
 	})
 
 	before := []dst.Stmt{
-		ast.ExprStmt(suppressHooksCall(suppressHooksFuncName, selfPackage)),
+		ast.ExprStmt(suppressHooksCall(suppressHooksFuncName, qualifier)),
 		ast.DefineStmts([]dst.Expr{ast.Ident(flag)}, []dst.Expr{ast.BoolFalse()}),
 		deferFallback,
 	}
 	after := []dst.Stmt{
 		ast.AssignStmt(ast.Ident(flag), ast.BoolTrue()),
-		ast.ExprStmt(suppressHooksCall(unsuppressHooksFuncName, selfPackage)),
+		ast.ExprStmt(suppressHooksCall(unsuppressHooksFuncName, qualifier)),
 	}
 	return before, after
 }

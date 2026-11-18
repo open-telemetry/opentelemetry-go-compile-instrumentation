@@ -65,9 +65,9 @@ func initInstrumentation() {
 func parentContext(ch *amqp.Channel) context.Context {
 	if ch != nil {
 		if v, ok := publishParents.LoadAndDelete(ch); ok {
-			if ctx, ok := v.(context.Context); ok && ctx != nil {
-				if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {
-					return ctx
+			if p, isParent := v.(*publishParent); isParent && p != nil && p.ctx != nil {
+				if span := trace.SpanFromContext(p.ctx); span.SpanContext().IsValid() {
+					return p.ctx
 				}
 			}
 		}
@@ -97,11 +97,27 @@ func cloneTable(t amqp.Table) amqp.Table {
 	return out
 }
 
-func stashPublishParent(ch *amqp.Channel, ctx context.Context) {
+// publishParent is the context one WithContext call stashed for its channel.
+// publishParents maps each *amqp.Channel to one.
+// The pointer identifies the call, so its after hook removes only its own
+// entry and not one stashed by a later publish on the same channel.
+type publishParent struct {
+	ctx context.Context
+}
+
+// stashedParent is what a WithContext before hook passes to its after hook.
+type stashedParent struct {
+	ch     *amqp.Channel
+	parent *publishParent
+}
+
+func stashPublishParent(ctx context.Context, ch *amqp.Channel) *publishParent {
 	if !enabler.Enable() || ch == nil || ctx == nil {
-		return
+		return nil
 	}
-	publishParents.Store(ch, ctx)
+	p := &publishParent{ctx: ctx}
+	publishParents.Store(ch, p)
+	return p
 }
 
 func acksFor(ch *amqp.Channel) *pendingAcks {
@@ -127,27 +143,53 @@ func acksLookup(ch *amqp.Channel) *pendingAcks {
 // BeforePublishWithContext stashes the API context. The library drops it
 // before PublishWithDeferredConfirm.
 func BeforePublishWithContext(
-	_ hook.HookContext,
+	ictx hook.HookContext,
 	ch *amqp.Channel,
 	ctx context.Context,
 	_ /*exchange*/, _ /*key*/ string,
 	_ /*mandatory*/, _ /*immediate*/ bool,
 	_ amqp.Publishing,
 ) {
-	stashPublishParent(ch, ctx)
+	if p := stashPublishParent(ctx, ch); p != nil {
+		ictx.SetData(stashedParent{ch: ch, parent: p})
+	}
+}
+
+// AfterPublishWithContext drops the stashed context if the inner
+// PublishWithDeferredConfirm hook did not take it. The library returns
+// ctx.Err() without publishing when ctx is already done, and the next Publish
+// on the channel would otherwise use that context as its parent.
+func AfterPublishWithContext(ictx hook.HookContext, _ error) {
+	dropPublishParent(ictx)
 }
 
 // BeforePublishWithDeferredConfirmWithContext stashes the API context for
 // the inner PublishWithDeferredConfirm hook.
 func BeforePublishWithDeferredConfirmWithContext(
-	_ hook.HookContext,
+	ictx hook.HookContext,
 	ch *amqp.Channel,
 	ctx context.Context,
 	_ /*exchange*/, _ /*key*/ string,
 	_ /*mandatory*/, _ /*immediate*/ bool,
 	_ amqp.Publishing,
 ) {
-	stashPublishParent(ch, ctx)
+	if p := stashPublishParent(ctx, ch); p != nil {
+		ictx.SetData(stashedParent{ch: ch, parent: p})
+	}
+}
+
+// AfterPublishWithDeferredConfirmWithContext drops the stashed context if the
+// inner hook did not take it. See AfterPublishWithContext.
+func AfterPublishWithDeferredConfirmWithContext(ictx hook.HookContext, _ *amqp.DeferredConfirmation, _ error) {
+	dropPublishParent(ictx)
+}
+
+// dropPublishParent removes the context stashed by the matching before hook,
+// unless another publish on the channel has replaced it since.
+func dropPublishParent(ictx hook.HookContext) {
+	if s, ok := ictx.GetData().(stashedParent); ok {
+		publishParents.CompareAndDelete(s.ch, s.parent)
+	}
 }
 
 // -----------------------------------------------------------------------------
@@ -163,6 +205,9 @@ func BeforePublishWithDeferredConfirm(
 	_ /*mandatory*/, _ /*immediate*/ bool,
 	msg amqp.Publishing,
 ) {
+	if !runtime.Ready() {
+		return
+	}
 	if !enabler.Enable() {
 		logger.Debug("amqp091 instrumentation disabled")
 		return
@@ -208,10 +253,14 @@ type consumeData struct {
 
 func storeConsume(ictx hook.HookContext, ch *amqp.Channel, queue string, autoAck bool) {
 	if !enabler.Enable() {
+		if !runtime.Ready() {
+			return
+		}
 		logger.Debug("amqp091 instrumentation disabled")
 		return
 	}
-	initInstrumentation()
+	// startDeliverySpan initializes the instrumentation, so a Consume during
+	// package initialization still wraps its deliveries.
 	ictx.SetData(&consumeData{ch: ch, queue: queue, autoAck: autoAck})
 }
 
@@ -282,7 +331,17 @@ func wrapDeliveries(ch *amqp.Channel, queue string, autoAck bool, in <-chan amqp
 	return out
 }
 
-func startDeliverySpan(ch *amqp.Channel, queue string, autoAck bool, d amqp.Delivery, local *pendingAcks) amqp.Delivery {
+func startDeliverySpan(
+	ch *amqp.Channel,
+	queue string,
+	autoAck bool,
+	d amqp.Delivery,
+	local *pendingAcks,
+) amqp.Delivery {
+	if !runtime.Ready() {
+		return d
+	}
+	initInstrumentation()
 	op := semconv.OperationProcess
 	if autoAck {
 		op = semconv.OperationReceive

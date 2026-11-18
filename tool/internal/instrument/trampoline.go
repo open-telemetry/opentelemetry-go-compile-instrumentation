@@ -4,11 +4,13 @@
 package instrument
 
 import (
+	"context"
 	_ "embed"
 	"fmt"
 	"go/token"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,6 +19,7 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/imports"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -46,6 +49,7 @@ const (
 	trampolineGetParamName          = "GetParam"
 	trampolineSetReturnValName      = "SetReturnVal"
 	trampolineGetReturnValName      = "GetReturnVal"
+	trampolineGetReturnValCountName = "GetReturnValCount"
 	trampolineSetSkipCallName       = "SetSkipCall"
 	trampolineAnyItemsIdentifier    = "_otel_anyItems"
 	trampolineAnyIndexIdentifier    = "_otel_anyIndex"
@@ -62,9 +66,12 @@ const (
 	trampolineAfter                 = false
 	unsafePackageName               = "unsafe"
 	suppressHooksPackage            = "runtime"
-	suppressHooksFuncName           = "SuppressHooks"
-	unsuppressHooksFuncName         = "UnsuppressHooks"
-	hooksSuppressedFuncName         = "HooksSuppressed"
+	// suppressHooksReservedAlias names the runtime import in a file that
+	// already uses "runtime" for a different package.
+	suppressHooksReservedAlias = "otelcRuntime"
+	suppressHooksFuncName      = "SuppressHooks"
+	unsuppressHooksFuncName    = "UnsuppressHooks"
+	hooksSuppressedFuncName    = "HooksSuppressed"
 )
 
 // @@ Modification on this trampoline template should be cautious, as it imposes
@@ -194,22 +201,6 @@ func hookLinkName(path, fnName string) string {
 	return "otelc_hook_" + util.CRC32(path) + "_" + fnName
 }
 
-func isHookDefined(root *dst.File, rule *rule.InstFuncRule) bool {
-	if rule.Before != "" {
-		decl := ast.FindFuncDeclWithoutRecv(root, rule.Before)
-		if decl == nil {
-			return false
-		}
-	}
-	if rule.After != "" {
-		decl := ast.FindFuncDeclWithoutRecv(root, rule.After)
-		if decl == nil {
-			return false
-		}
-	}
-	return true
-}
-
 // parseHookFileCached parses file once per process and reuses the result
 // across every hook lookup that touches it, whether for the same func rule
 // looked up twice (createTrampoline and optimizeTJumps) or a different rule
@@ -229,16 +220,12 @@ func (ip *instrumentPhase) parseHookFileCached(file string) (*dst.File, error) {
 	return root, nil
 }
 
-// findHookFile locates the file in rule.ResolvedPath defining rule's hooks
-// and returns it already parsed, since the caller needs both. The hooks are
-// linked by the import path of rule.Path, so only the files the go command
-// compiles into that package are searched: a subdirectory is another package,
-// testdata is no package at all, and test files and files starting with "." or
-// "_" are never built into it.
-func (ip *instrumentPhase) findHookFile(rule *rule.InstFuncRule) (string, *dst.File, error) {
-	entries, err0 := os.ReadDir(rule.ResolvedPath)
-	if err0 != nil {
-		return "", nil, ex.Wrapf(err0, "reading hook directory %s", rule.ResolvedPath)
+// hookPackageFiles returns the files in rule.ResolvedPath that the go command
+// can compile into the hook package. It does not apply build constraints.
+func hookPackageFiles(rule *rule.InstFuncRule) ([]string, error) {
+	entries, err := os.ReadDir(rule.ResolvedPath)
+	if err != nil {
+		return nil, ex.Wrapf(err, "reading hook directory %s", rule.ResolvedPath)
 	}
 	files := make([]string, 0, len(entries))
 	for _, entry := range entries {
@@ -249,31 +236,37 @@ func (ip *instrumentPhase) findHookFile(rule *rule.InstFuncRule) (string, *dst.F
 		}
 		files = append(files, filepath.Join(rule.ResolvedPath, name))
 	}
+	return files, nil
+}
+
+// findHookFile locates the file in rule.ResolvedPath that declares the hook
+// function hookName and returns it with the declaration. The hooks are linked
+// by the import path of rule.Path, so only the files the go command compiles
+// into that package are searched: a subdirectory is another package, testdata
+// is no package at all, and test files and files starting with "." or "_" are
+// never built into it. Any of those files can declare the hook, so the before
+// and after hooks of one rule may live in different files.
+func (ip *instrumentPhase) findHookFile(rule *rule.InstFuncRule, hookName string) (string, *dst.FuncDecl, error) {
+	files, err0 := hookPackageFiles(rule)
+	if err0 != nil {
+		return "", nil, err0
+	}
 	for _, file := range files {
 		root, err := ip.parseHookFileCached(file)
 		if err != nil {
 			return "", nil, err
 		}
-		if isHookDefined(root, rule) {
-			return file, root, nil
+		if decl := ast.FindFuncDeclWithoutRecv(root, hookName); decl != nil {
+			return file, decl, nil
 		}
 	}
-	return "", nil, ex.Newf("no hook {%s,%s} found for %s from %v",
-		rule.Before, rule.After, rule.Func, files)
+	return "", nil, ex.Newf("no hook %s found for %s from %v", hookName, rule.Func, files)
 }
 
 // getHookFunc resolves the Before/After hook function declaration for t.
 func (ip *instrumentPhase) getHookFunc(t *rule.InstFuncRule, before bool) (*dst.FuncDecl, error) {
-	file, root, err := ip.findHookFile(t)
-	if err != nil {
-		return nil, err
-	}
-	target := ast.FindFuncDeclWithoutRecv(root, getHookFuncName(t, before))
-	if target == nil {
-		return nil, ex.Newf("hook %s or %s not found from %s",
-			t.Before, t.After, file)
-	}
-	return target, nil
+	_, hookFunc, err := ip.findHookFile(t, getHookFuncName(t, before))
+	return hookFunc, err
 }
 
 func arrayTypeName(t *dst.ArrayType) string {
@@ -374,9 +367,11 @@ func interfaceTypeName(t *dst.InterfaceType) string {
 }
 
 // baseTypeName normalizes a type expression for signature matching by stripping
-// package qualifiers and the outermost pointer while preserving composite type
-// constructors, so trampoline and hook parameter types can be compared directly.
-// Examples: *pkg.Type → Type, []int → []int, ...string → ...string
+// package qualifiers while preserving pointers and composite type constructors,
+// so hook parameter types can be compared with the target's. Pointers are kept
+// because the hook is linked to a declaration typed after the target (see
+// addHookDecl): a hook that drops or adds a pointer would be handed a value of
+// the wrong layout. Examples: *pkg.Type is *Type, []*int is []*int.
 func baseTypeName(expr dst.Expr) string {
 	switch t := expr.(type) {
 	case *dst.Ident:
@@ -385,7 +380,7 @@ func baseTypeName(expr dst.Expr) string {
 		}
 		return t.Name
 	case *dst.StarExpr:
-		return baseTypeName(t.X)
+		return "*" + baseTypeName(t.X)
 	case *dst.SelectorExpr:
 		return t.Sel.Name
 	case *dst.ArrayType:
@@ -409,6 +404,17 @@ func baseTypeName(expr dst.Expr) string {
 	default:
 		return ""
 	}
+}
+
+// trampParamTypeName normalizes the type of a trampoline parameter for
+// comparison with a hook parameter. The trampoline takes each target parameter
+// by pointer (see buildTrampSignature), so that one pointer is not part of the
+// type the hook receives.
+func trampParamTypeName(expr dst.Expr) string {
+	if star, ok := expr.(*dst.StarExpr); ok {
+		return baseTypeName(star.X)
+	}
+	return baseTypeName(expr)
 }
 
 // indexListType builds a normalized name for a generic type instantiation
@@ -533,7 +539,7 @@ func (ip *instrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, targetParams *d
 	// All params must match (first is HookContext, rest are dereferenced)
 	// (interface{} or any in hook accepts any type, used for generics)
 	for i, trampField := range afterTrampParams.List {
-		trampBase := baseTypeName(trampField.Type)
+		trampBase := trampParamTypeName(trampField.Type)
 		hookBase := baseTypeName(afterHookParams.List[i].Type)
 		if !matchBaseType(trampBase, hookBase) {
 			return ex.Newf("hook func param %d type mismatch, expected %s, got %s",
@@ -579,7 +585,7 @@ func (ip *instrumentPhase) checkBeforeHookDecl(hookFunc *dst.FuncDecl, targetPar
 				return err
 			}
 		}
-		trampBase := baseTypeName(trampField.Type)
+		trampBase := trampParamTypeName(trampField.Type)
 		hookBase := baseTypeName(hookType)
 		if !matchBaseType(trampBase, hookBase) {
 			return ex.Newf("hook func param %d type mismatch, expected %s, got %s",
@@ -701,9 +707,16 @@ func (ip *instrumentPhase) hookGuardCond(fnName string) dst.Expr {
 	if !ip.buildUsesIgnoreDirective {
 		return notNil
 	}
+	qualifier := ip.suppressHooksQualifier
+	if qualifier == "" {
+		qualifier = suppressHooksPackage
+	}
+	if ip.isSuppressHooksPackage() {
+		qualifier = ""
+	}
 	notSuppressed := &dst.UnaryExpr{
 		Op: token.NOT,
-		X:  suppressHooksCall(hooksSuppressedFuncName, ip.isSuppressHooksPackage()),
+		X:  suppressHooksCall(hooksSuppressedFuncName, qualifier),
 	}
 	return &dst.BinaryExpr{X: notNil, Op: token.LAND, Y: notSuppressed}
 }
@@ -714,13 +727,37 @@ func (ip *instrumentPhase) isSuppressHooksPackage() bool {
 	return util.FindFlagValue(ip.compileArgs, "-p") == suppressHooksPackage
 }
 
-// suppressHooksCall builds a call to funcName in the runtime package,
-// unqualified when selfPackage is true.
-func suppressHooksCall(funcName string, selfPackage bool) *dst.CallExpr {
-	if selfPackage {
+// suppressHooksCall builds a call to funcName in the runtime package through
+// qualifier, or an unqualified call when qualifier is empty (the package being
+// compiled is runtime itself).
+func suppressHooksCall(funcName, qualifier string) *dst.CallExpr {
+	if qualifier == "" {
 		return ast.CallTo(funcName, nil, nil)
 	}
-	return &dst.CallExpr{Fun: ast.SelectorExpr(ast.Ident(suppressHooksPackage), funcName)}
+	return &dst.CallExpr{Fun: ast.SelectorExpr(ast.Ident(qualifier), funcName)}
+}
+
+// suppressHooksAlias returns the name the code generated in root uses for the
+// runtime package. A file can already use that name: it may import runtime
+// under its own alias, which is reused, or import a different package whose
+// name is runtime (k8s.io/apimachinery/pkg/runtime, for example), in which
+// case runtime is imported under a reserved alias instead.
+func suppressHooksAlias(ctx context.Context, root *dst.File) string {
+	existing := imports.Existing(ctx, root)
+	var own []string
+	for alias, path := range existing {
+		if path == suppressHooksPackage && alias != "_" && alias != "." {
+			own = append(own, alias)
+		}
+	}
+	if len(own) > 0 {
+		slices.Sort(own)
+		return own[0]
+	}
+	if _, taken := existing[suppressHooksPackage]; taken {
+		return suppressHooksReservedAlias
+	}
+	return suppressHooksPackage
 }
 
 func (ip *instrumentPhase) addHookDecl(t *rule.InstFuncRule, paramTypes *dst.FieldList, before bool) error {

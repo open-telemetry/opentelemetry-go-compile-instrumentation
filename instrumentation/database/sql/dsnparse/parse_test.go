@@ -212,6 +212,41 @@ func TestParseDSN_MySQL(t *testing.T) {
 			wantDB:   "mydb",
 		},
 		{
+			name:     "password with opening parenthesis",
+			dsn:      "user:pa(ss@tcp(db.example.com:3306)/app",
+			wantHost: "db.example.com",
+			wantPort: "3306",
+			wantDB:   "app",
+		},
+		{
+			name:     "password with multiple delimiters",
+			dsn:      "user:p@secret/hidden?tail@tcp(db.example.com:3306)/app",
+			wantHost: "db.example.com",
+			wantPort: "3306",
+			wantDB:   "app",
+		},
+		{
+			name:     "missing database separator is not parsed",
+			dsn:      "user:pa(ss@tcp(db.example.com:3306)",
+			wantHost: "",
+			wantPort: "",
+			wantDB:   "",
+		},
+		{
+			name:     "password with slash and no database separator",
+			dsn:      "user:pa/ss@host:3306",
+			wantHost: "",
+			wantPort: "",
+			wantDB:   "",
+		},
+		{
+			name:     "query param with at sign",
+			dsn:      "user:pass@tcp(host:3306)/db?x=a@b/c",
+			wantHost: "b",
+			wantPort: "3306",
+			wantDB:   "c",
+		},
+		{
 			name:     "unix socket",
 			dsn:      "user:pass@unix(/tmp/mysql.sock)/mydb",
 			wantHost: "/tmp/mysql.sock",
@@ -533,6 +568,33 @@ func TestRegisterDSNParsers(t *testing.T) {
 	})
 	assert.Equal(t, "h1:11", ParseDSN("batchdriver1", "x").Addr())
 	assert.Equal(t, "h2:22", ParseDSN("batchdriver2", "x").Addr())
+}
+
+func TestRegistry_ZeroValue(t *testing.T) {
+	// sql.Open can run during another package's initialization, before this
+	// package's variables are set, so an unset registry must still resolve the
+	// built-in parsers and accept registrations.
+	var r registry
+	p, ok := r.lookup("mysql")
+	assert.True(t, ok)
+	assert.Equal(t, "127.0.0.1:3306", p.Parse("user:pass@tcp(127.0.0.1:3306)/db").Addr())
+	_, ok = r.lookup("unknown-driver")
+	assert.False(t, ok)
+
+	r.register("mysql", DSNParserFunc(func(string) DSNInfo { return DSNInfo{Host: "custom", Port: "1"} }))
+	p, ok = r.lookup("mysql")
+	assert.True(t, ok)
+	assert.Equal(t, "custom:1", p.Parse("anything").Addr())
+}
+
+func TestHasParser(t *testing.T) {
+	for _, driver := range []string{"mysql", "postgres", "godror", "sqlserver"} {
+		assert.True(t, HasParser(driver), "driver=%s", driver)
+	}
+	assert.False(t, HasParser("hasparser-unregistered"))
+
+	RegisterDSNParser("hasparser-custom", DSNParserFunc(func(string) DSNInfo { return DSNInfo{} }))
+	assert.True(t, HasParser("hasparser-custom"))
 }
 
 func TestParseDSN_PostgresAliases(t *testing.T) {

@@ -299,7 +299,9 @@ func TestParseChatRequest_ContentCapture(t *testing.T) {
 }
 
 func TestParseChatRequest_MultimodalContentCapture(t *testing.T) {
-	body := []byte(`{"model":"gpt-4-vision-preview","messages":[{"role":"user","content":[{"type":"text","text":"describe this"},{"type":"image_url","image_url":{"url":"https://example.com/image.png"}}]}]}`)
+	body := []byte(
+		`{"model":"gpt-4-vision-preview","messages":[{"role":"user","content":[{"type":"text","text":"describe this"},{"type":"image_url","image_url":{"url":"https://example.com/image.png"}}]}]}`,
+	)
 	model, _, prompts := parseChatRequest(body, true)
 
 	assert.Equal(t, "gpt-4-vision-preview", model)
@@ -321,7 +323,11 @@ func TestParseChatRequest_MaxCompletionTokens(t *testing.T) {
 		body    string
 		wantMax int64
 	}{
-		{"max_completion_tokens preferred over max_tokens", `{"model":"gpt-4.1","max_tokens":100,"max_completion_tokens":200}`, 200},
+		{
+			"max_completion_tokens preferred over max_tokens",
+			`{"model":"gpt-4.1","max_tokens":100,"max_completion_tokens":200}`,
+			200,
+		},
 		{"max_completion_tokens only", `{"model":"gpt-4.1","max_completion_tokens":200}`, 200},
 		{"max_tokens fallback", `{"model":"gpt-4","max_tokens":100}`, 100},
 	}
@@ -355,7 +361,11 @@ func TestParseCompletionRequest_ContentCapture(t *testing.T) {
 		expected []string
 	}{
 		{"string", []byte(`{"model":"gpt-3.5-turbo-instruct","prompt":"hello"}`), []string{"hello"}},
-		{"array", []byte(`{"model":"gpt-3.5-turbo-instruct","prompt":["first","second"]}`), []string{"first", "second"}},
+		{
+			"array",
+			[]byte(`{"model":"gpt-3.5-turbo-instruct","prompt":["first","second"]}`),
+			[]string{"first", "second"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -498,7 +508,11 @@ func TestParseCompletionResponse_ContentCapture(t *testing.T) {
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
 	_, span := tp.Tracer("test").Start(t.Context(), "completion-content")
 
-	parseCompletionResponse([]byte(`{"choices":[{"text":"first","finish_reason":"stop"},{"text":"second","finish_reason":"stop"}]}`), span, true)
+	parseCompletionResponse(
+		[]byte(`{"choices":[{"text":"first","finish_reason":"stop"},{"text":"second","finish_reason":"stop"}]}`),
+		span,
+		true,
+	)
 	span.End()
 
 	spans := sr.Ended()
@@ -565,7 +579,12 @@ func TestOtelMiddleware_ContentCapture_Enabled(t *testing.T) {
 	sr := setupTestTracer(t)
 
 	reqBody := `{"model":"gpt-4","messages":[{"role":"user","content":"hello"}]}`
-	req, err := http.NewRequestWithContext(context.Background(), "POST", "https://api.openai.com/v1/chat/completions", bytes.NewBufferString(reqBody))
+	req, err := http.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		"https://api.openai.com/v1/chat/completions",
+		bytes.NewBufferString(reqBody),
+	)
 	require.NoError(t, err)
 
 	resp := &http.Response{
@@ -589,7 +608,12 @@ func TestOtelMiddleware_ContentCapture_Enabled(t *testing.T) {
 }
 
 func TestOtelMiddleware_ErrorResponse(t *testing.T) {
-	req, err := http.NewRequestWithContext(context.Background(), "POST", "https://api.openai.com/v1/chat/completions", bytes.NewBufferString(`{}`))
+	req, err := http.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		"https://api.openai.com/v1/chat/completions",
+		bytes.NewBufferString(`{}`),
+	)
 	require.NoError(t, err)
 
 	resp := &http.Response{
@@ -733,5 +757,106 @@ func TestReadBoundedBoundary(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, full, string(got), "the caller must always receive the full body")
 		})
+	}
+}
+
+const cacheReadTokensKey = "gen_ai.usage.cache_read.input_tokens"
+
+type cacheEndpoint struct {
+	name, url, respID string
+}
+
+// cacheEndpoints covers both response parsers: chat/completions goes through
+// parseChatResponse and the legacy completions endpoint through
+// parseCompletionResponse, which has its own copy of the cache handling.
+func cacheEndpoints() []cacheEndpoint {
+	return []cacheEndpoint{
+		{"chat", "http://api.openai.com/v1/chat/completions", "chatcmpl-1"},
+		{"completion", "http://api.openai.com/v1/completions", "cmpl-1"},
+	}
+}
+
+// spanAttrsForUsage runs one non-streaming call to url through the middleware
+// with the given usage JSON and returns the recorded span attributes.
+func spanAttrsForUsage(t *testing.T, url, respID, usage string) []attribute.KeyValue {
+	t.Helper()
+	sr := setupTestTracer(t)
+
+	req, _ := http.NewRequest(
+		http.MethodPost,
+		url,
+		io.NopCloser(bytes.NewReader([]byte(`{"model":"gpt-4o-mini"}`))),
+	)
+	respBody := `{"id":"` + respID + `","model":"gpt-4o-mini","choices":[{"finish_reason":"stop"}],"usage":` + usage + `}`
+	next := func(_ *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(respBody))),
+		}, nil
+	}
+
+	_, err := OtelMiddleware()(req, next)
+	require.NoError(t, err)
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	return spans[0].Attributes()
+}
+
+// TestRecordsCacheReadTokens verifies the cached prompt tokens OpenAI reports
+// under usage.prompt_tokens_details are recorded, and - the important part -
+// that they are not added to gen_ai.usage.input_tokens. OpenAI already counts
+// cached tokens inside prompt_tokens, so folding them in the way the Anthropic
+// instrumentation does would double-count the cached portion.
+func TestRecordsCacheReadTokens(t *testing.T) {
+	for _, ep := range cacheEndpoints() {
+		t.Run(ep.name, func(t *testing.T) {
+			attrs := spanAttrsForUsage(t, ep.url, ep.respID,
+				`{"prompt_tokens":2048,"completion_tokens":64,"total_tokens":2112,`+
+					`"prompt_tokens_details":{"cached_tokens":1024}}`)
+
+			assertInt64Attribute(t, attrs, cacheReadTokensKey, 1024)
+			assertInt64Attribute(t, attrs, "gen_ai.usage.input_tokens", 2048)
+			assertInt64Attribute(t, attrs, "gen_ai.usage.total_tokens", 2112)
+		})
+	}
+}
+
+// TestOmitsCacheReadTokens verifies the attribute is absent rather than
+// recorded as zero when the request did not hit the cache, matching the
+// anthropic-sdk-go instrumentation, and that a malformed details object does
+// not drop the other usage attributes.
+func TestOmitsCacheReadTokens(t *testing.T) {
+	tests := []struct {
+		name  string
+		usage string
+	}{
+		{
+			name:  "details absent entirely",
+			usage: `{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30}`,
+		},
+		{
+			name: "details present but no cache hit",
+			usage: `{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30,` +
+				`"prompt_tokens_details":{"cached_tokens":0}}`,
+		},
+		{
+			name: "details malformed",
+			usage: `{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30,` +
+				`"prompt_tokens_details":{"cached_tokens":"many"}}`,
+		},
+	}
+
+	for _, ep := range cacheEndpoints() {
+		for _, tt := range tests {
+			t.Run(ep.name+"/"+tt.name, func(t *testing.T) {
+				attrs := spanAttrsForUsage(t, ep.url, ep.respID, tt.usage)
+
+				assertNoAttribute(t, attrs, cacheReadTokensKey)
+				assertInt64Attribute(t, attrs, "gen_ai.usage.input_tokens", 10)
+				assertInt64Attribute(t, attrs, "gen_ai.usage.total_tokens", 30)
+			})
+		}
 	}
 }
