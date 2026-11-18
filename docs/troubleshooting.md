@@ -326,6 +326,12 @@ that uses state set up at initialization time panics, and the trampoline prints
 still pass. Hooks must create such state on first use. See
 [Adding a New Instrumentation Hook](instrument-guide.md#limitations).
 
+Operations that run during package initialization, before `pkg/runtime` has initialized,
+are skipped by the instrumentation and emit no telemetry. This covers, for example, a
+database query or an HTTP request made from an `init()` function or a package-level
+variable initializer. Clients and servers created at that time are still instrumented, so
+the calls they make after initialization are traced.
+
 **Goroutine-local storage scope.** Some instrumentation uses goroutine-local storage (GLS)
 to propagate trace context across boundaries that do not pass `context.Context`. GLS state
 is scoped to the goroutine that wrote it: spans started in a goroutine spawned from the
