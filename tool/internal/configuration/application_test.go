@@ -576,6 +576,38 @@ func TestValidateApplicationOptionsRejectsUnsupportedSectionPath(t *testing.T) {
 	require.ErrorContains(t, err, "unsupported instrumentation configuration path")
 }
 
+func TestValidateApplicationOptionsRejectsSelectedInvalidValue(t *testing.T) {
+	application, err := ParseApplicationConfiguration([]byte(`file_format: "1.2"
+instrumentation/development:
+  go:
+    selected:
+      enabled: not-a-boolean
+`), "app.yaml")
+	require.NoError(t, err)
+
+	_, err = ValidateApplicationOptions(application, []Entry{{
+		Name: "go.selected.enabled",
+		Type: booleanType,
+	}}, nil)
+	require.ErrorContains(t, err, "go.selected.enabled")
+}
+
+func TestValidateApplicationOptionsRejectsSelectedUnsupportedPath(t *testing.T) {
+	application := ApplicationConfiguration{
+		Source:          "app.yaml",
+		Instrumentation: map[string]any{"go": true},
+		SourceLocations: map[string]SourceLocation{"go": {File: "app.yaml", Line: 2, Column: 3}},
+	}
+
+	_, err := ValidateApplicationOptions(application, []Entry{{Name: "go", Type: booleanType}}, nil)
+	require.ErrorContains(t, err, "unsupported instrumentation configuration path")
+}
+
+func TestApplicationDefaultValueRejectsMalformedYAML(t *testing.T) {
+	_, err := applicationDefaultValue("[", listType)
+	require.Error(t, err)
+}
+
 func TestValidateApplicationOptionsReportsMissingMetadataForGeneralOption(t *testing.T) {
 	app, err := ParseApplicationConfiguration([]byte(`file_format: "1.2"
 instrumentation/development:

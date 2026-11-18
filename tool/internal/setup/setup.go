@@ -583,47 +583,16 @@ func (sp *setupPhase) buildDeps(
 }
 
 func setupLocked(ctx context.Context, cmd *cli.Command) error {
-	// Since Setup can be invoked in different contexts (i.e, via `otelc setup` or as part of `otelc go build`),
-	// we need to handle the arguments accordingly. If the command is `go build` or `go install`, we should trim the first argument
-	args := cmd.Args().Slice()
-	subcommand := subcmdBuild
-	if cmd.Name == "go" {
-		subcommand, args = goSubcommand(cmd.Args().Slice())
-	} else if cleanErr := cleanupOwnedSession(); cleanErr != nil {
-		return ex.Wrapf(cleanErr, "cleaning the session directory")
-	} else if err := cleanupDebugArtifacts(); err != nil {
-		// Clean up debug artifacts from previous runs for standalone `otelc setup`,
-		// as it prepares the environment for a subsequent toolexec build.
-		// For `otelc go ...`, runGoBuild already performed this cleanup at its
-		// lifecycle boundary before invoking Setup.
-		return ex.Wrapf(err, "cleaning debug artifacts")
+	subcommand, args, err := setupCommandArgs(cmd)
+	if err != nil {
+		return err
 	}
 
 	logger := util.LoggerFromContext(ctx)
 
-	// Vendored projects fail the vendor consistency check: setup edits go.mod
-	// for the injected hook modules but not vendor/modules.txt. Force module
-	// mode so both build phases resolve dependency sources from the module cache
-	// (matching versions and paths) instead of vendor/, leaving the user's
-	// vendor directory untouched. This must run before isSetup() and
-	// getBuildPackages() below so a cached-setup `otelc go build` still sets
-	// GOFLAGS for the later buildWithToolexec, and before the findDeps dry run
-	// further down. Computed here rather than threaded in because Setup is also
-	// a standalone command action (otelc setup).
-	if vendoringActive(ctx, buildDir(subcommand, args)) {
-		logger.InfoContext(ctx, "vendored project detected; building with -mod=mod")
-		// Mutates GOFLAGS process-wide with no restore. Fine for the one-shot
-		// CLI; a second in-process GoBuild would inherit this -mod=mod.
-		if err := os.Setenv("GOFLAGS", forceModMod(os.Getenv("GOFLAGS"))); err != nil {
-			return ex.Wrapf(err, "forcing module mode for vendored build")
-		}
-
-		// A CLI -mod=vendor beats the GOFLAGS=-mod=mod forced above, so the Phase-1
-		// build-plan dry run (both the auto-pin and the direct findDeps fallback
-		// below call it) would still resolve vendor/ paths without an @version;
-		// rewrite it to module mode when vendoring is active so both build phases
-		// agree on where the dependency source lives.
-		args = rewriteModVendor(subcommand, args)
+	args, err = prepareVendoredBuild(ctx, logger, subcommand, args)
+	if err != nil {
+		return err
 	}
 
 	if isSetup() {
@@ -638,7 +607,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		pgo:        pgoValue(subcommand, args),
 		testMode:   subcommand == subcmdTest,
 	}
-	if err := sp.loadConfiguredApplication(cmd.String(FlagInstrumentationConfig)); err != nil {
+	if err = sp.loadConfiguredApplication(cmd.String(FlagInstrumentationConfig)); err != nil {
 		return err
 	}
 
@@ -702,6 +671,23 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	}
 	sp.recordResolutionScope(ctx, moduleDirs)
 	return nil
+}
+
+func setupCommandArgs(cmd *cli.Command) (string, []string, error) {
+	args := cmd.Args().Slice()
+	if cmd.Name == "go" {
+		subcommand, args := goSubcommand(args)
+		return subcommand, args, nil
+	}
+	if err := cleanupOwnedSession(); err != nil {
+		return "", nil, ex.Wrapf(err, "cleaning the session directory")
+	}
+	if err := cleanupDebugArtifacts(); err != nil {
+		// Clean up debug artifacts from previous runs for standalone `otelc setup`,
+		// as it prepares the environment for a subsequent toolexec build.
+		return "", nil, ex.Wrapf(err, "cleaning debug artifacts")
+	}
+	return subcmdBuild, args, nil
 }
 
 // recordResolutionScope writes the export memo's resolution scope. The memo
