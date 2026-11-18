@@ -1,0 +1,19 @@
+tag_box:
+  target: main
+  where:
+    struct_literal: go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/lit-rule-generic-type/helpers/generic.Box
+  do:
+    - set_fields:
+        field:
+          - name: Tag
+            value: '"set"'
+
+tag_pair:
+  target: main
+  where:
+    struct_literal: go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/lit-rule-generic-type/helpers/generic.Pair
+  do:
+    - set_fields:
+        field:
+          - name: Tag
+            value: '"set"'

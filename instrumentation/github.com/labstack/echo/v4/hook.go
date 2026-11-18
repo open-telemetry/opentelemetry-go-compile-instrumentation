@@ -13,6 +13,7 @@ import (
 
 	httpsemconv "go.opentelemetry.io/otelc/instrumentation/net/http/semconv"
 	"go.opentelemetry.io/otelc/pkg/hook"
+	"go.opentelemetry.io/otelc/pkg/runtime"
 )
 
 // Keys stored on echo.Context. Reserved by this package.
@@ -25,7 +26,9 @@ const (
 // AfterFind runs after (*Router).Find. The router has set Context.Path()
 // to the matched template, or left it empty when nothing matched.
 func AfterFind(ictx hook.HookContext) {
-	if !enabler.Enable() {
+	// A request served during package initialization is skipped. See
+	// runtime.Ready.
+	if !runtime.Ready() || !enabler.Enable() {
 		return
 	}
 
@@ -61,7 +64,7 @@ func AfterFind(ictx hook.HookContext) {
 // BeforeError runs before (*context).Error. The receiver is unexported, so
 // the hook takes any and asserts to echo.Context.
 func BeforeError(_ hook.HookContext, recv any, err error) {
-	if !enabler.Enable() {
+	if !runtime.Ready() || !enabler.Enable() {
 		return
 	}
 	c, _ := recv.(echo.Context)
@@ -72,7 +75,7 @@ func BeforeError(_ hook.HookContext, recv any, err error) {
 // It covers errors returned by global middleware, which run outside the
 // handler that wrapHandler wraps.
 func BeforeDefaultHTTPErrorHandler(_ hook.HookContext, _ *echo.Echo, err error, c echo.Context) {
-	if !enabler.Enable() {
+	if !runtime.Ready() || !enabler.Enable() {
 		return
 	}
 	recordRequestError(c, err)

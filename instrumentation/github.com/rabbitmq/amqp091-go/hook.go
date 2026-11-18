@@ -205,6 +205,9 @@ func BeforePublishWithDeferredConfirm(
 	_ /*mandatory*/, _ /*immediate*/ bool,
 	msg amqp.Publishing,
 ) {
+	if !runtime.Ready() {
+		return
+	}
 	if !enabler.Enable() {
 		logger.Debug("amqp091 instrumentation disabled")
 		return
@@ -250,10 +253,14 @@ type consumeData struct {
 
 func storeConsume(ictx hook.HookContext, ch *amqp.Channel, queue string, autoAck bool) {
 	if !enabler.Enable() {
+		if !runtime.Ready() {
+			return
+		}
 		logger.Debug("amqp091 instrumentation disabled")
 		return
 	}
-	initInstrumentation()
+	// startDeliverySpan initializes the instrumentation, so a Consume during
+	// package initialization still wraps its deliveries.
 	ictx.SetData(&consumeData{ch: ch, queue: queue, autoAck: autoAck})
 }
 
@@ -331,6 +338,10 @@ func startDeliverySpan(
 	d amqp.Delivery,
 	local *pendingAcks,
 ) amqp.Delivery {
+	if !runtime.Ready() {
+		return d
+	}
+	initInstrumentation()
 	op := semconv.OperationProcess
 	if autoAck {
 		op = semconv.OperationReceive
