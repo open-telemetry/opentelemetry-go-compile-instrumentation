@@ -2474,6 +2474,133 @@ func TestLinkResolutionListsFailedCandidateOnce(t *testing.T) {
 	assert.Equal(t, 1, resolver.calls)
 }
 
+// batchFailingResolver fails any load of several roots as a whole, as go list
+// does when one root's module is missing from go.mod, and otherwise delegates.
+// A root in whole also fails as a whole when it is loaded alone, with a
+// top-level error rather than a per-root failure.
+type batchFailingResolver struct {
+	inner *countingResolver
+	whole map[string]bool
+}
+
+func (b *batchFailingResolver) resolve(
+	ctx context.Context, roots []string, flags ...string,
+) (map[string]map[string]string, map[string]error, error) {
+	if len(roots) > 1 {
+		return nil, nil, errors.New("no packages found for " + strings.Join(roots, ", "))
+	}
+	if b.whole[roots[0]] {
+		return nil, nil, errors.New("no packages found for " + roots[0])
+	}
+	return b.inner.resolve(ctx, roots, flags...)
+}
+
+// TestLinkResolutionResolvesEachCandidateWhenBatchFails covers a link whose
+// batch go list fails as a whole: the resolvable candidate must still be added
+// and the unresolvable one skipped, instead of failing the link.
+func TestLinkResolutionResolvesEachCandidateWhenBatchFails(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra", "example.invalid/bad")
+	resolver := &batchFailingResolver{inner: &countingResolver{
+		dir: t.TempDir(),
+		bad: map[string]bool{"example.invalid/bad": true},
+	}}
+
+	cfg := freshLinkConfig()
+	updated, err := resolveRuleAddedImportsWith(t.Context(), nil, cfg, resolver.resolve)
+	require.NoError(t, err)
+	assert.True(t, updated)
+	assert.Contains(t, cfg.PackageFile, "example.com/extra")
+	assert.NotContains(t, cfg.PackageFile, "example.invalid/bad")
+}
+
+// TestLinkResolutionSkipsLoneFailingCandidate covers a single rule-added import
+// whose load fails as a whole, as in #1788: the link must skip it, not fail.
+func TestLinkResolutionSkipsLoneFailingCandidate(t *testing.T) {
+	setupLinkMemo(t, "example.invalid/bad")
+	resolver := &batchFailingResolver{
+		inner: &countingResolver{dir: t.TempDir()},
+		whole: map[string]bool{"example.invalid/bad": true},
+	}
+
+	cfg := freshLinkConfig()
+	updated, err := resolveRuleAddedImportsWith(t.Context(), nil, cfg, resolver.resolve)
+	require.NoError(t, err)
+	assert.False(t, updated)
+	assert.NotContains(t, cfg.PackageFile, "example.invalid/bad")
+}
+
+func TestLinkResolutionReturnsContextErrorForLoneCandidate(t *testing.T) {
+	setupLinkMemo(t, "example.invalid/bad")
+	resolver := func(context.Context, []string, ...string) (map[string]map[string]string, map[string]error, error) {
+		return nil, nil, context.Canceled
+	}
+
+	_, err := resolveRuleAddedImportsWith(t.Context(), nil, freshLinkConfig(), resolver)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+// TestLinkResolutionFailsOnNonLoadErrorFromEachCandidate covers a batch that
+// fails as a whole, followed by a lone load that fails for a reason other than
+// a candidate load failure. That error must fail the link.
+func TestLinkResolutionFailsOnNonLoadErrorFromEachCandidate(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra", "example.invalid/bad")
+	boom := errors.New("go list: unexpected failure")
+	resolver := func(_ context.Context, roots []string, _ ...string) (map[string]map[string]string, map[string]error, error) {
+		if len(roots) > 1 {
+			return nil, nil, errors.New("no packages found for " + strings.Join(roots, ", "))
+		}
+		return nil, nil, boom
+	}
+
+	_, err := resolveRuleAddedImportsWith(t.Context(), nil, freshLinkConfig(), resolver)
+	require.ErrorIs(t, err, boom)
+}
+
+// TestLinkResolutionReturnsContextErrorDuringEachCandidateLoad covers the
+// context ending while a lone candidate is loaded after a failed batch.
+func TestLinkResolutionReturnsContextErrorDuringEachCandidateLoad(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra", "example.invalid/bad")
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	resolver := func(_ context.Context, roots []string, _ ...string) (map[string]map[string]string, map[string]error, error) {
+		if len(roots) > 1 {
+			return nil, nil, errors.New("no packages found for " + strings.Join(roots, ", "))
+		}
+		cancel()
+		return nil, nil, errors.New("no packages found for " + roots[0])
+	}
+
+	_, err := resolveRuleAddedImportsWith(ctx, nil, freshLinkConfig(), resolver)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+// TestLinkResolutionSkipsLoneFailureAfterMemoizedSuccess covers a later link
+// whose only miss is a candidate that fails as a whole. The earlier link's
+// successes come from the memo, so the lone failing root is loaded alone and
+// must be skipped rather than fail the link. Its failure is not memoized, so
+// the later link loads it again.
+func TestLinkResolutionSkipsLoneFailureAfterMemoizedSuccess(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra", "example.invalid/bad")
+	resolver := &batchFailingResolver{
+		inner: &countingResolver{dir: t.TempDir()},
+		whole: map[string]bool{"example.invalid/bad": true},
+	}
+
+	first := freshLinkConfig()
+	updated, err := resolveRuleAddedImportsWith(t.Context(), nil, first, resolver.resolve)
+	require.NoError(t, err)
+	require.True(t, updated)
+	require.Contains(t, first.PackageFile, "example.com/extra")
+
+	second := freshLinkConfig()
+	updated, err = resolveRuleAddedImportsWith(t.Context(), nil, second, resolver.resolve)
+	require.NoError(t, err)
+	assert.True(t, updated)
+	assert.Equal(t, first.PackageFile["example.com/extra"], second.PackageFile["example.com/extra"],
+		"the second link must take the memoized closure")
+	assert.NotContains(t, second.PackageFile, "example.invalid/bad")
+}
+
 func TestLinkResolutionSkipsGoListWhenNothingIsMissing(t *testing.T) {
 	setupLinkMemo(t, "example.com/extra")
 	resolver := &countingResolver{dir: t.TempDir()}
@@ -2680,6 +2807,7 @@ func TestDeterministicLoadFailure(t *testing.T) {
 		want bool
 	}{
 		{"missing module package", listErr("no required module provides package example.invalid/zzz; to add it:\n\tgo get example.invalid/zzz"), true},
+		{"go mod updates needed", listErr("updates to go.mod needed; to update it:\n\tgo mod tidy"), true},
 		{"not in std", listErr("package fmtx is not in std (/usr/local/go/src/fmtx)"), true},
 		{"build constraints", listErr("package example.com/p/ex: build constraints exclude all Go files in /tmp/p/ex"), true},
 		{"no export file", errors.New(`package "unsafe" has no export file`), true},
