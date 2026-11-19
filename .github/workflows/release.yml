@@ -41,6 +41,8 @@ jobs:
 
       - name: Generate GitHub App token
         id: app-token
+        # The client-id var gates App mode. When it is unset, the step is
+        # skipped by design and the workflow falls back to github.token.
         if: vars.OTELBOT_GO_COMPILE_INSTRUMENTATION_CLIENT_ID != ''
         continue-on-error: true
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510  # v3.3.0
@@ -48,6 +50,10 @@ jobs:
           client-id: ${{ vars.OTELBOT_GO_COMPILE_INSTRUMENTATION_CLIENT_ID }}
           private-key: ${{ secrets.OTELBOT_GO_COMPILE_INSTRUMENTATION_PRIVATE_KEY }}
           permission-contents: write
+
+      - name: Warn on App token failure
+        if: steps.app-token.outcome == 'failure'
+        run: echo "::warning::GitHub App token generation failed, falling back to github.token. Check the OTELBOT secrets."
 
       - name: Checkout merge commit
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
