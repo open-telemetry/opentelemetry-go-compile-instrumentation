@@ -22,6 +22,59 @@ against an unrestored module. Concurrent compilation may not improve wall time
 on CPU-limited machines and uses additional temporary disk space. Set `GOCACHE`
 to a persistent directory outside `.otelc-build` to reuse compiler outputs between
 unlocked builds; otherwise their default caches are invocation-owned too.
+Invocation-specific bundle and overlay paths can reduce warm-cache reuse even
+with a persistent `GOCACHE`. Compare both full rebuilds and incremental builds
+before enabling this in CI; releasing the lock does not guarantee a speedup.
+
+### Enable concurrent builds
+
+Use a binary built from this PR (or a release containing it). From your own
+module, enable the optimization for one package build:
+
+```bash
+OTELC_UNLOCKED_COMPILE=1 otelc go build -o ./app ./cmd/app
+```
+
+The setting permits compilation to overlap; it does not launch multiple builds
+for you. For two commands in the same module, run them concurrently with distinct
+output paths. Replace `./cmd/a` and `./cmd/b` with your package targets:
+
+```bash
+export OTELC_UNLOCKED_COMPILE=1
+export GOCACHE="${XDG_CACHE_HOME:-$HOME/.cache}/otelc/go-build"
+mkdir -p "$GOCACHE" bin
+
+otelc go build -o bin/a ./cmd/a &
+first=$!
+otelc go build -o bin/b ./cmd/b &
+second=$!
+
+# Wait for both commands and report failure if either build fails.
+status=0
+wait "$first" || status=1
+wait "$second" || status=1
+test "$status" -eq 0
+```
+
+Keep the cache outside `.otelc-build`: shared cleanup may remove that directory.
+There is no separate setup command to run first; each invocation performs its own
+serialized setup and restores the module before releasing the lock. Unsupported
+builds automatically keep the lock even when the variable is enabled.
+
+To return to fully locked builds, unset the variable or explicitly set it to `0`:
+
+```bash
+unset OTELC_UNLOCKED_COMPILE
+# Or override it for one command:
+OTELC_UNLOCKED_COMPILE=0 otelc go build -o ./app ./cmd/app
+```
+
+To compare modes, time the same commands with `OTELC_UNLOCKED_COMPILE=0` and `1`,
+keeping package targets, cache configuration, and Go flags identical. Measure the
+wall time until **both** background commands finish, not just the time to launch
+them. Warm each mode separately, alternate run order, and report full rebuilds
+(`-a`) separately from normal cached builds. Do not compare a cold cache in one
+mode with a warm cache in the other.
 
 ## Selecting Instrumentations
 
