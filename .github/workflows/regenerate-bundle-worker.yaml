@@ -159,6 +159,11 @@ jobs:
         run: |
           "${RUNNER_TEMP}/bundlerepair" credentials
 
+      # This copy differs on purpose from the release.yml and
+      # release-prepare.yml copies of the same pinned action. It is gated by
+      # the credentials step instead of a var check, and it needs
+      # workflows: write to push workflow files. Update all three copies
+      # together on a SHA bump.
       - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510  # v3.3.0
         id: app-token
         if: steps.credentials.outputs.use_app == 'true'
