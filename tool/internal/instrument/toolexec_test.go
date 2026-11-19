@@ -1209,7 +1209,7 @@ func TestInterceptToolVersionWriteError(t *testing.T) {
 }
 
 func TestToolVersionLine(t *testing.T) {
-	marker := "otelc@" + util.Version
+	marker := "otelc@" + otelcIdentity()
 
 	t.Run("release toolchain without rules hash", func(t *testing.T) {
 		got := toolVersionLine("compile version go1.26.5", "")
@@ -1230,6 +1230,27 @@ func TestToolVersionLine(t *testing.T) {
 	})
 }
 
+func TestOtelcIdentity(t *testing.T) {
+	version, commit := util.Version, util.CommitHash
+	t.Cleanup(func() { util.Version, util.CommitHash = version, commit })
+	util.Version = "v1.2.1"
+
+	t.Run("adds the commit hash so builds of one version stay apart", func(t *testing.T) {
+		util.CommitHash = "a91e08d"
+		assert.Equal(t, "v1.2.1-a91e08d", otelcIdentity())
+		util.CommitHash = "0123abc"
+		assert.Equal(t, "v1.2.1-0123abc", otelcIdentity())
+		assert.Regexp(t, versionMarkerPattern, toolVersionLine("compile version go1.26.5", "0123456789abcdef"))
+	})
+
+	t.Run("falls back to the version when the commit is unknown", func(t *testing.T) {
+		for _, commit := range []string{"", "unknown"} {
+			util.CommitHash = commit
+			assert.Equal(t, "v1.2.1", otelcIdentity())
+		}
+	})
+}
+
 func TestMarkedToolVersion(t *testing.T) {
 	const raw = "compile version go1.26.5\n"
 
@@ -1237,7 +1258,7 @@ func TestMarkedToolVersion(t *testing.T) {
 		t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
 
 		got := markedToolVersion(raw)
-		assert.Equal(t, "compile version go1.26.5 otelc@"+util.Version, got)
+		assert.Equal(t, "compile version go1.26.5 otelc@"+otelcIdentity(), got)
 	})
 
 	t.Run("appends a 16-hex-digit rules hash when matched.json is present", func(t *testing.T) {

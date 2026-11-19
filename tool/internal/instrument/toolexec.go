@@ -1367,7 +1367,7 @@ func cgoVetSourcePath(path string) string {
 // trailing `buildID=...` field, so append the marker to that field's value.
 func toolVersionLine(line, rulesHash string) string {
 	hasBuildID := strings.Contains(line, " buildID=")
-	marker := "otelc@" + util.Version
+	marker := "otelc@" + otelcIdentity()
 	if rulesHash != "" {
 		if hasBuildID {
 			marker += "+" + rulesHash
@@ -1379,6 +1379,17 @@ func toolVersionLine(line, rulesHash string) string {
 		return line + "+" + marker
 	}
 	return line + " " + marker
+}
+
+// otelcIdentity names the otelc build in the tool ID marker. The version alone
+// does not tell builds apart: `make build` stamps every local build with the
+// latest tag, so otelc binaries built from different commits would share cache
+// entries in the user's GOCACHE. The commit hash, when known, separates them.
+func otelcIdentity() string {
+	if util.CommitHash == "" || util.CommitHash == "unknown" {
+		return util.Version
+	}
+	return util.Version + "-" + util.CommitHash
 }
 
 func rulesDigest(content []byte, tags []string, glsSource, injectedHash []byte) string {
