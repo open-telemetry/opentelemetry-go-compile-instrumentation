@@ -240,8 +240,9 @@ func parsePostgresDSN(dsn string) DSNInfo {
 }
 
 // parseLibpqKV parses the PostgreSQL libpq keyword=value connection string.
-// Values may be unquoted (terminated by whitespace) or single-quoted (with
-// backslash escape support inside quotes).
+// Values may be unquoted (terminated by whitespace) or single-quoted. A
+// backslash escapes the next character in both forms, and whitespace around the
+// equals sign is allowed, as in libpq.
 func parseLibpqKV(dsn string) DSNInfo {
 	info := DSNInfo{Host: "localhost", Port: "5432"}
 	rest := strings.TrimSpace(dsn)
@@ -255,7 +256,7 @@ func parseLibpqKV(dsn string) DSNInfo {
 			break
 		}
 		key := strings.TrimSpace(rest[:eqIdx])
-		rest = rest[eqIdx+1:]
+		rest = strings.TrimLeft(rest[eqIdx+1:], " \t\n\r")
 
 		var val string
 		if strings.HasPrefix(rest, "'") {
@@ -277,12 +278,9 @@ func parseLibpqKV(dsn string) DSNInfo {
 			}
 			val = b.String()
 		} else {
-			end := strings.IndexAny(rest, " \t\n\r")
-			if end < 0 {
-				end = len(rest)
-			}
-			val = rest[:end]
-			rest = rest[end:]
+			var n int
+			val, n = libpqUnquotedValue(rest)
+			rest = rest[n:]
 		}
 	nextKV:
 		switch key {
@@ -295,6 +293,27 @@ func parseLibpqKV(dsn string) DSNInfo {
 		}
 	}
 	return info
+}
+
+// libpqUnquotedValue reads an unquoted libpq value, which ends at the first
+// whitespace character that is not escaped with a backslash. It returns the
+// value and the number of bytes of s that it used.
+func libpqUnquotedValue(s string) (string, int) {
+	b := make([]byte, 0, len(s))
+	i := 0
+	for i < len(s) {
+		c := s[i]
+		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+			break
+		}
+		if c == '\\' && i+1 < len(s) {
+			i++
+			c = s[i]
+		}
+		b = append(b, c)
+		i++
+	}
+	return string(b), i
 }
 
 // ---- MySQL -------------------------------------------------------------------

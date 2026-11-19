@@ -124,6 +124,27 @@ func TestParseDSN_Postgres(t *testing.T) {
 			wantPort: "5432",
 			wantDB:   "my db",
 		},
+		{
+			name:     "libpq spaces around the equals sign",
+			dsn:      "host = replica.internal port = 5433 dbname = analytics",
+			wantHost: "replica.internal",
+			wantPort: "5433",
+			wantDB:   "analytics",
+		},
+		{
+			name:     "libpq quoted value after spaces around the equals sign",
+			dsn:      "host = localhost dbname = 'my db'",
+			wantHost: "localhost",
+			wantPort: "5432",
+			wantDB:   "my db",
+		},
+		{
+			name:     "libpq escaped space in an unquoted value",
+			dsn:      "host=localhost dbname=my\\ db port=5433",
+			wantHost: "localhost",
+			wantPort: "5433",
+			wantDB:   "my db",
+		},
 		// pgx uses the same DSN format
 		{
 			name:     "pgx driver url format",
