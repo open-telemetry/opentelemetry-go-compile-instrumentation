@@ -77,7 +77,7 @@ func TestParseMetadataRejectsMalformedEntries(t *testing.T) {
 		{"whitespace name", `name: " go.x "`, "leading or trailing whitespace"},
 		{"empty ref", `ref: ""`, "ref must not be empty"},
 		{"null ref", "ref: null", "expected a string"},
-		{"non-scalar name", "name: [go.x]", "decode configuration entry"},
+		{"non-scalar name", "name: [go.x]", "name: expected a string"},
 		{"whitespace ref", `ref: " general.x "`, "ref must not have leading or trailing whitespace"},
 		{"ref override", "ref: general.x\ndescription: override", "must not include inline"},
 		{"empty ref override", "ref: general.x\ndescription: \"\"", "must not include inline"},
