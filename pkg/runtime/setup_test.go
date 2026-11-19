@@ -636,20 +636,23 @@ func TestNewResourceServiceNameFromEnv(t *testing.T) {
 	assert.Equal(t, "checkout", name.AsString())
 }
 
-func TestNewResourceFallsBackToDefaultOnError(t *testing.T) {
-	// A pair missing "=" makes resource.New fail with ErrPartialResource,
-	// so newResource must warn and return resource.Default().
-	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "key")
+func TestNewResourceKeepsDetectedAttributesOnError(t *testing.T) {
+	// A pair missing "=" makes resource.New fail with ErrPartialResource. The
+	// attributes the other detectors found, and the valid pairs, must survive.
+	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "key,team=payments")
+	t.Setenv("OTEL_SERVICE_NAME", "")
 
 	var buf bytes.Buffer
 	origLogger := logger
 	t.Cleanup(func() { logger = origLogger })
 	logger = slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
-	res := newResource(context.Background())
-	_, ok := res.Set().Value(attribute.Key("service.name"))
-	require.True(t, ok, "fallback resource should be resource.Default(), which sets service.name")
-	assert.Contains(t, buf.String(), "failed to create resource")
+	set := newResource(context.Background()).Set()
+	for _, key := range []string{"service.name", "service.instance.id", "process.pid", "team"} {
+		_, ok := set.Value(attribute.Key(key))
+		assert.True(t, ok, "resource must keep %s when one OTEL_RESOURCE_ATTRIBUTES entry is malformed", key)
+	}
+	assert.Contains(t, buf.String(), "failed to create complete resource")
 }
 
 func TestSetupOpenTelemetry(t *testing.T) {

@@ -126,8 +126,11 @@ func newResource(ctx context.Context) *resource.Resource {
 		resource.WithHost(),
 		resource.WithFromEnv())
 	if err != nil {
-		logger.Warn("failed to create resource", "error", err)
-		return resource.Default()
+		// resource.New returns what the detectors that did succeed found along
+		// with the error. One malformed OTEL_RESOURCE_ATTRIBUTES entry or one
+		// failing detector must not drop the process, host and
+		// service.instance.id attributes with it.
+		logger.Warn("failed to create complete resource, using the part that was detected", "error", err)
 	}
 	return res
 }

@@ -560,6 +560,50 @@ func TestWriteFileAtomic(t *testing.T) {
 	}
 }
 
+func TestWriteFileAtomic_FollowsSymlink(t *testing.T) {
+	root := t.TempDir()
+	realDir := filepath.Join(root, "real")
+	linkDir := filepath.Join(root, "link")
+	require.NoError(t, os.MkdirAll(realDir, 0o755))
+	require.NoError(t, os.MkdirAll(linkDir, 0o755))
+	target := filepath.Join(realDir, "go.mod")
+	require.NoError(t, os.WriteFile(target, []byte("old"), 0o644))
+
+	link := filepath.Join(linkDir, "go.mod")
+	if err := os.Symlink(filepath.Join("..", "real", "go.mod"), link); err != nil {
+		t.Skipf("symlinks are not available: %v", err)
+	}
+
+	require.NoError(t, WriteFileAtomic(link, []byte("new content")))
+
+	info, err := os.Lstat(link)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink, "the link must stay a link")
+	got, err := os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Equal(t, "new content", string(got), "the file the link points to must be updated")
+
+	for _, dir := range []string{realDir, linkDir} {
+		matches, globErr := filepath.Glob(filepath.Join(dir, "*.tmp-*"))
+		require.NoError(t, globErr)
+		assert.Empty(t, matches)
+	}
+}
+
+func TestWriteFileAtomic_DanglingSymlink(t *testing.T) {
+	root := t.TempDir()
+	link := filepath.Join(root, "go.mod")
+	if err := os.Symlink(filepath.Join(root, "missing"), link); err != nil {
+		t.Skipf("symlinks are not available: %v", err)
+	}
+
+	require.NoError(t, WriteFileAtomic(link, []byte("new content")))
+
+	got, err := os.ReadFile(link)
+	require.NoError(t, err)
+	assert.Equal(t, "new content", string(got))
+}
+
 func TestCRC32(t *testing.T) {
 	// CRC32 is deterministic and returns a decimal string.
 	got := CRC32("hello")
