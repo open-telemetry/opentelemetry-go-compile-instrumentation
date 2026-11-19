@@ -112,12 +112,14 @@ jobs:
             PR_TITLE="release: ${VERSION}"
             PR_BODY="This is a release PR for **${VERSION}**. Review and edit the release notes in \`.github/release-notes.md\`."
           fi
+          # Write the body to a file instead of a GITHUB_OUTPUT heredoc, so
+          # input values can never truncate the output block.
+          BODY_FILE="${RUNNER_TEMP}/release-pr-body.md"
+          printf '%b\n' "${PR_BODY}" > "${BODY_FILE}"
           {
             echo "commit_msg=${COMMIT_MSG}"
             echo "pr_title=${PR_TITLE}"
-            echo "pr_body<<EOF"
-            echo -e "${PR_BODY}"
-            echo "EOF"
+            echo "body_file=${BODY_FILE}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Generate GitHub App token
@@ -138,7 +140,7 @@ jobs:
           branch: release/${{ inputs.version }}
           base: ${{ inputs.target_branch }}
           title: ${{ steps.metadata.outputs.pr_title }}
-          body: ${{ steps.metadata.outputs.pr_body }}
+          body-path: ${{ steps.metadata.outputs.body_file }}
           commit-message: ${{ steps.metadata.outputs.commit_msg }}
           add-paths: .github/release-notes.md
           labels: scope:chore
