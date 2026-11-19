@@ -409,8 +409,12 @@ benchmark/threshold: build ## Enforce absolute otelc overhead ceiling (fails if 
 
 ##@ Testing
 
-test: ## Run all tests (unit + integration)
-test: test-unit test-integration
+test: ## Run all tests (workflows + unit + integration)
+test: test-workflows test-unit test-integration
+
+.PHONY: test-workflows
+test-workflows: ## Test GitHub Actions workflow definitions
+	@GOWORK=off go -C .tools test -count=1 ./workflows
 
 test-unit: test-unit/tool test-unit/pkg test-unit/demo test-unit/helper ## Run all unit tests (tool + pkg + demo + test helpers)
 
