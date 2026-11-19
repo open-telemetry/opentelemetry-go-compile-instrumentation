@@ -90,9 +90,14 @@ Merging the approved release PR automatically triggers the
    [Cross-Compilation Targets](#cross-compilation-targets))
 3. Generates SHA256 checksums for all binaries
 4. Tags the merge commit with the version
-5. Publishes the GitHub release with binaries, checksums, and the curated
-   release notes. When `pkg/` is included, the release title combines both
-   versions separated by `/` (e.g. `v1.3.0/v0.1.0`).
+5. Creates the GitHub release as a **draft** with binaries, checksums, and the
+   curated release notes. When `pkg/` is included, the release title combines
+   both versions separated by `/` (e.g. `v1.3.0/v0.1.0`).
+
+The draft release stays invisible on the Releases page until a maintainer
+publishes it manually. The git tag is pushed immediately, so the tag exists
+before the public release does. Publishing the draft is the final gate before
+the release notes and assets become public. See [Post-Release](#post-release).
 
 ## Pre-Releases
 
@@ -187,6 +192,12 @@ All binaries and a `checksums.txt` file are uploaded to the GitHub release as
 downloadable assets.
 
 ## Post-Release
+
+After the Release workflow succeeds, publish the draft release before the
+checks below. Open the
+[Releases page](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/releases),
+open the draft release for the new version, review the notes and assets, and
+click **Publish release**. The git tag already exists at this point.
 
 After the release is published:
 
