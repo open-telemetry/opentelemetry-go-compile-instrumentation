@@ -145,5 +145,5 @@ func refreshExtractedBundle(bundleReader io.Reader, targetDir string) error {
 func extractOtelcBundle() error {
 	// Extract the instrumentation code to the build temp directory
 	// for future instrumentation phase
-	return refreshExtractedBundle(data.GetBundleReader(), util.GetBuildTempDir())
+	return refreshExtractedBundle(data.GetBundleReader(), util.GetInvocationDir())
 }
