@@ -173,8 +173,14 @@ func ListFiles(dir string) ([]string, error) {
 
 // WriteFileAtomic writes data to a file atomically by first writing to a temporary file and then renaming it.
 // Permission precedence: explicit perm argument > existing file's permissions > default 0644.
+// A symbolic link is followed, so the file it points to is replaced and the
+// link stays in place. Renaming over the link itself would turn it into a
+// regular file and leave its target as it was.
 func WriteFileAtomic(filePath string, data []byte, perm ...os.FileMode) error {
 	const defaultPerm = 0o644
+	if resolved, err := filepath.EvalSymlinks(filePath); err == nil {
+		filePath = resolved
+	}
 	mode := os.FileMode(defaultPerm)
 	if fi, statErr := os.Stat(filePath); statErr == nil {
 		mode = fi.Mode().Perm()
