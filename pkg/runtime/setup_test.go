@@ -179,6 +179,12 @@ func TestRecordSignalNotifyUnknownSignalType(t *testing.T) {
 	})
 }
 
+// Markers that runReraiseProbe prints for the "ignored" mode.
+const (
+	signalStillIgnored = "otelc-signal-still-ignored"
+	sdkShutDown        = "otelc-sdk-shut-down"
+)
+
 // TestHandleShutdownSignalReraise delivers a real SIGTERM to a child process
 // and checks how the child ends.
 func TestHandleShutdownSignalReraise(t *testing.T) {
@@ -226,8 +232,10 @@ func TestHandleShutdownSignalReraise(t *testing.T) {
 	})
 
 	t.Run("signal ignored before setup", func(t *testing.T) {
-		_, err := run(t, "ignored")
+		stdout, err := run(t, "ignored")
 		require.NoError(t, err, "otelc must not re-raise a signal the application ignores")
+		assert.Contains(t, stdout, signalStillIgnored, "otelc must leave an ignored signal ignored")
+		assert.NotContains(t, stdout, sdkShutDown, "an ignored signal must not shut the SDK down")
 	})
 }
 
@@ -236,6 +244,7 @@ func TestHandleShutdownSignalReraise(t *testing.T) {
 func runReraiseProbe(mode, appReceived string) {
 	if mode == "ignored" {
 		signal.Ignore(syscall.SIGTERM)
+		tracerProvider = sdktrace.NewTracerProvider()
 		setupSignalHandler()
 		// Unit tests are not instrumented, so mark the hook as applied by hand.
 		signalOwners.Lock()
@@ -244,6 +253,15 @@ func runReraiseProbe(mode, appReceived string) {
 		sendSIGTERM()
 		// Give the handler time to flush and to re-raise if it wrongly does.
 		time.Sleep(time.Second)
+		if signal.Ignored(syscall.SIGTERM) {
+			fmt.Println(signalStillIgnored)
+		}
+		// A provider that has been shut down hands out non-recording spans.
+		_, span := tracerProvider.Tracer("probe").Start(context.Background(), "probe")
+		if !span.IsRecording() {
+			fmt.Println(sdkShutDown)
+		}
+		span.End()
 		return
 	}
 

@@ -380,20 +380,27 @@ func shutdownSignals() []os.Signal {
 // process terminates the way it would without otelc. An application that
 // handles the signal owns its exit path and exit code: re-raising there would
 // race its own graceful shutdown and could truncate it.
+//
+// A signal that is ignored when the handler is set up, for example SIGINT in a
+// job started in the background by a non-interactive shell, is left alone.
+// signal.Notify would turn it back on, and the flush would then shut the SDK
+// down in a process that keeps running, so all later telemetry would be lost.
 func setupSignalHandler() {
 	registerSignalHandler.Do(func() {
+		var sigs []os.Signal
+		for _, s := range shutdownSignals() {
+			if !signal.Ignored(s) {
+				sigs = append(sigs, s)
+			}
+		}
+		if len(sigs) == 0 {
+			return
+		}
 		sigCh := make(chan os.Signal, 1)
 		signalOwners.Lock()
 		signalOwners.otelcCh = sigCh
-		// otelc's signal.Notify below turns an ignored signal back on. Treat
-		// the application as owning such a signal so otelc never re-raises it.
-		for _, s := range shutdownSignals() {
-			if signal.Ignored(s) {
-				signalOwners.recordLocked(s)
-			}
-		}
 		signalOwners.Unlock()
-		signal.Notify(sigCh, shutdownSignals()...)
+		signal.Notify(sigCh, sigs...)
 		go handleShutdownSignal(sigCh)
 	})
 }
