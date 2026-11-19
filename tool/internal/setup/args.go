@@ -52,6 +52,7 @@ func isBuildFlagWithValue(name string) bool {
 	switch name {
 	case "-C", "-o", "-p", "-covermode", "-coverpkg",
 		"-asmflags", "-buildmode", "-compiler",
+		"-debug-actiongraph", "-debug-runtime-trace", "-debug-trace",
 		"-gccgoflags", flagGcflags, "-installsuffix", "-ldflags",
 		"-mod", "-modfile", "-overlay", "-pgo", "-pkgdir",
 		"-tags", "-toolexec":
