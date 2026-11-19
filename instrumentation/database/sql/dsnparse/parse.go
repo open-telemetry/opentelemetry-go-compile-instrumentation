@@ -329,40 +329,57 @@ func parseMySQLDSN(dsn string) DSNInfo {
 
 	var addrStr, dbPart string
 
-	if lp := strings.IndexByte(rest, '('); lp >= 0 {
+	// The driver looks for the address parentheses only before dbSep, so a
+	// parenthesis in a query value, as in user@/db?time_zone=(UTC), is not one.
+	addrZone := rest[:dbSep-addressStart]
+	if lp := strings.IndexByte(addrZone, '('); lp >= 0 {
 		// Standard parenthesised address: proto(host:port)/dbname
 		if rp := strings.IndexByte(rest[lp:], ')'); rp >= 0 {
 			addrStr = rest[lp+1 : lp+rp]
 			dbPart = rest[lp+rp+1:]
 		}
 	} else {
-		// Non-standard: no parentheses around the address.
-		// Locate the '/' that separates the address from the database name.
-		// A unix-socket address is itself an absolute filesystem path and so
-		// contains '/' before the database name does, meaning the first '/'
-		// belongs to the address, not the separator. Every other form here
-		// (tcp, bare host, bare port) has no '/' in the address at all, so
-		// using the last '/' there gives the same split as the first.
-		sep := strings.IndexByte
-		searchIn := rest
-		if isMySQLUnixAddr(rest) {
-			sep = strings.LastIndexByte
-			if q := strings.IndexByte(rest, '?'); q >= 0 {
-				searchIn = rest[:q]
-			}
-		}
-		if sl := sep(searchIn, '/'); sl >= 0 {
-			addrStr = rest[:sl]
-			dbPart = rest[sl:]
-		} else {
-			addrStr = rest
-		}
-		addrStr = mysqlStripProtocol(addrStr)
+		split := mysqlSplitUnparenthesized(rest)
+		addrStr, dbPart = split.addr, split.db
 	}
 
 	host, port := mysqlSplitAddr(addrStr)
 	dbName := mysqlDBName(dbPart)
 	return DSNInfo{Host: host, Port: port, DBName: dbName}
+}
+
+// mysqlAddrSplit holds the address and the database part of a MySQL DSN.
+type mysqlAddrSplit struct {
+	addr, db string
+}
+
+// mysqlSplitUnparenthesized splits a MySQL address that has no parentheses
+// from the database part that follows it.
+func mysqlSplitUnparenthesized(rest string) mysqlAddrSplit {
+	var addrStr, dbPart string
+	// Non-standard: no parentheses around the address.
+	// Locate the '/' that separates the address from the database name.
+	// A unix-socket address is itself an absolute filesystem path and so
+	// contains '/' before the database name does, meaning the first '/'
+	// belongs to the address, not the separator. Every other form here
+	// (tcp, bare host, bare port) has no '/' in the address at all, so
+	// using the last '/' there gives the same split as the first.
+	sep := strings.IndexByte
+	searchIn := rest
+	if isMySQLUnixAddr(rest) {
+		sep = strings.LastIndexByte
+		if before, _, ok := strings.Cut(rest, "?"); ok {
+			searchIn = before
+		}
+	}
+	if sl := sep(searchIn, '/'); sl >= 0 {
+		addrStr = rest[:sl]
+		dbPart = rest[sl:]
+	} else {
+		addrStr = rest
+	}
+	addrStr = mysqlStripProtocol(addrStr)
+	return mysqlAddrSplit{addr: addrStr, db: dbPart}
 }
 
 // isMySQLUnixAddr reports whether a non-parenthesized MySQL address begins
