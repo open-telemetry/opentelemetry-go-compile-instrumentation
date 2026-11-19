@@ -49,6 +49,11 @@ jobs:
         with:
           client-id: ${{ vars.OTELBOT_GO_COMPILE_INSTRUMENTATION_CLIENT_ID }}
           private-key: ${{ secrets.OTELBOT_GO_COMPILE_INSTRUMENTATION_PRIVATE_KEY }}
+          # This workflow only pushes tags and creates releases, so it needs
+          # contents: write only. The release-prepare copy also requests
+          # pull-requests: write, and the regenerate-bundle-worker copy needs
+          # workflows: write. Keep the copies intentionally different and
+          # update all three together on a SHA bump.
           permission-contents: write
 
       - name: Warn on App token failure
