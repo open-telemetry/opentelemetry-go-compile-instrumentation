@@ -475,33 +475,47 @@ func loadCustomRuleFile(
 }
 
 func loadCustomRules(ctx context.Context, ruleConfig, otelcVersion string) ([]rule.InstRule, error) {
+	rules, _, err := loadCustomRulesWithModuleRoots(ctx, ruleConfig, otelcVersion)
+	return rules, err
+}
+
+func loadCustomRulesWithModuleRoots(
+	ctx context.Context,
+	ruleConfig, otelcVersion string,
+) ([]rule.InstRule, map[rule.InstRule]string, error) {
 	// Deduplicate by YAML-entry name. A single entry can expand into several
 	// rules (e.g. a do: sequence with multiple modifiers), all sharing that
 	// name, so each name maps to the full slice of rules it produced. When two
 	// files define the same name, the last file in the list wins, and its
 	// group replaces the earlier group as a unit.
 	ruleSet := make(map[string][]rule.InstRule)
+	ruleModuleRoots := make(map[rule.InstRule]string)
 	// A file can be in the list more than one time, directly or through a
 	// directory. Load each rule file only one time, and keep its rules. Each
 	// time the file is in the list again, apply its rules again, so that the
 	// result is the same as when the file is loaded again.
 	loadedFiles := make(map[string]map[string][]rule.InstRule)
+	fileModuleRoots := make(map[string]string)
 	for path := range strings.SplitSeq(ruleConfig, ",") {
 		files, err := customRuleFiles(strings.TrimSpace(path))
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for _, file := range files {
 			key := ruleFileKey(file)
+			if _, known := fileModuleRoots[key]; !known {
+				fileModuleRoots[key] = customRuleModuleRoot(file)
+			}
 			grouped, loaded := loadedFiles[key]
 			if !loaded {
 				grouped, err = loadCustomRuleFile(ctx, file, otelcVersion)
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 				loadedFiles[key] = grouped
 			}
 			maps.Copy(ruleSet, grouped)
+			recordCustomRuleModuleRoots(ruleModuleRoots, grouped, fileModuleRoots[key])
 		}
 	}
 
@@ -513,7 +527,34 @@ func loadCustomRules(ctx context.Context, ruleConfig, otelcVersion string) ([]ru
 	for _, name := range slices.Sorted(maps.Keys(ruleSet)) {
 		result = append(result, ruleSet[name]...)
 	}
-	return result, nil
+	return result, ruleModuleRoots, nil
+}
+
+func customRuleModuleRoot(file string) string {
+	moduleRoot, err := moduleRootForPackage(filepath.Dir(file))
+	if err != nil {
+		return ""
+	}
+	absolute, err := filepath.Abs(moduleRoot)
+	if err != nil {
+		return ""
+	}
+	return absolute
+}
+
+func recordCustomRuleModuleRoots(
+	ruleModuleRoots map[rule.InstRule]string,
+	grouped map[string][]rule.InstRule,
+	moduleRoot string,
+) {
+	if moduleRoot == "" {
+		return
+	}
+	for _, rules := range grouped {
+		for _, r := range rules {
+			ruleModuleRoots[r] = moduleRoot
+		}
+	}
 }
 
 func loadRulesFromToolFiles(
@@ -597,13 +638,13 @@ func (sp *setupPhase) loadRules(ctx context.Context, moduleDirs []string) ([]rul
 	rulePath := os.Getenv(util.EnvOtelcRules)
 	if rulePath != "" {
 		sp.Debug("rules source: environment variable %s (%s)", util.EnvOtelcRules, rulePath)
-		return loadCustomRules(ctx, rulePath, util.Version)
+		return sp.loadCustomRules(ctx, rulePath)
 	}
 
 	// Load custom rule(s) from config file if specified
 	if sp.ruleConfig != "" {
 		sp.Debug("rules source: ruleConfig (%s)", sp.ruleConfig)
-		return loadCustomRules(ctx, sp.ruleConfig, util.Version)
+		return sp.loadCustomRules(ctx, sp.ruleConfig)
 	}
 
 	// Load rules from tool files if available
@@ -626,6 +667,28 @@ func (sp *setupPhase) loadRules(ctx context.Context, moduleDirs []string) ([]rul
 	// No tool files generated? Currently this part is un-reachable because
 	// auto-pinning always generates tool files.
 	return nil, nil
+}
+
+func (sp *setupPhase) loadCustomRules(ctx context.Context, ruleConfig string) ([]rule.InstRule, error) {
+	rules, moduleRoots, err := loadCustomRulesWithModuleRoots(ctx, ruleConfig, util.Version)
+	if err != nil {
+		return nil, err
+	}
+	for instRule, moduleRoot := range moduleRoots {
+		sp.recordRuleModuleRoot(instRule, moduleRoot)
+	}
+	if sp.instrumentationConfigPath == "" {
+		return rules, nil
+	}
+	for _, instRule := range rules {
+		if _, ok := moduleRoots[instRule]; !ok {
+			return nil, ex.Newf(
+				"custom rule %q is not located inside a Go module; application configuration validation requires custom rule module ownership",
+				instRule.GetName(),
+			)
+		}
+	}
+	return rules, nil
 }
 
 type ruleIndex struct {

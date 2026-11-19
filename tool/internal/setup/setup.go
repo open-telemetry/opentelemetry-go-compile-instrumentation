@@ -44,13 +44,18 @@ type setupPhase struct {
 
 	// fileImportsCache caches discovered source imports for add_file rules during setup.
 	fileImportsCache map[string][]string
-	testMode         bool
 	// testPackages holds the test variants and test binaries of a go test
 	// build, which buildPackages leaves out.
 	testPackages []*packages.Package
+	// instrumentationConfigPath is the one explicit behavior-configuration
+	// source for this setup invocation; it is empty when the flag is omitted.
+	instrumentationConfigPath string
+	applicationConfiguration  configuration.ApplicationConfiguration
 	// configurationMetadata is the setup-time handoff to application config
 	// validation, including selected modules that have no metadata file.
-	configurationMetadata selectedConfigurationMetadata
+	configurationMetadata      selectedConfigurationMetadata
+	validatedApplicationConfig configuration.ValidatedApplicationConfiguration
+	testMode                   bool
 	// ruleModuleRoots keeps instrumentation rule ownership outside the rules
 	// themselves so setup can resolve module-local metadata for matched rules.
 	ruleModuleRoots map[rule.InstRule]string
@@ -119,6 +124,10 @@ const (
 	vendorDirName = "vendor"
 	flagMod       = "-mod"
 )
+
+// FlagInstrumentationConfig selects the application behavior configuration
+// file consumed during setup.
+const FlagInstrumentationConfig = "instrumentation-config"
 
 // Go command flags that the argument scanners treat specially.
 const (
@@ -498,6 +507,25 @@ func (sp *setupPhase) recordRuleModuleRoot(instRule rule.InstRule, moduleRoot st
 	sp.ruleModuleRoots[instRule] = moduleRoot
 }
 
+func (sp *setupPhase) setInstrumentationConfigPath(path string) error {
+	if path == "" {
+		return nil
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return ex.Wrapf(err, "resolve application configuration path %q", path)
+	}
+	sp.instrumentationConfigPath = absolute
+	return nil
+}
+
+func (sp *setupPhase) loadConfiguredApplication(path string) error {
+	if err := sp.setInstrumentationConfigPath(path); err != nil {
+		return err
+	}
+	return sp.loadApplicationConfiguration()
+}
+
 func (sp *setupPhase) validateAndStoreSelectedConfigurationMetadata(matched []*rule.InstRuleSet) error {
 	metadata, err := sp.validateSelectedConfigurationMetadata(matched, configuration.CatalogDefinitions)
 	if err != nil {
@@ -508,48 +536,16 @@ func (sp *setupPhase) validateAndStoreSelectedConfigurationMetadata(matched []*r
 }
 
 func setupLocked(ctx context.Context, cmd *cli.Command) error {
-	// Since Setup can be invoked in different contexts (i.e, via `otelc setup` or as part of `otelc go build`),
-	// we need to handle the arguments accordingly. If the command is `go build` or `go install`, we should trim the first argument
-	args := cmd.Args().Slice()
-	subcommand := subcmdBuild
-	if cmd.Name == "go" {
-		subcommand = cmd.Args().First() // build / install / test
-		args = cmd.Args().Tail()        // trim the subcommand
-	} else if cleanErr := cleanupOwnedSession(); cleanErr != nil {
-		return ex.Wrapf(cleanErr, "cleaning the session directory")
-	} else if err := cleanupDebugArtifacts(); err != nil {
-		// Clean up debug artifacts from previous runs for standalone `otelc setup`,
-		// as it prepares the environment for a subsequent toolexec build.
-		// For `otelc go ...`, runGoBuild already performed this cleanup at its
-		// lifecycle boundary before invoking Setup.
-		return ex.Wrapf(err, "cleaning debug artifacts")
+	subcommand, args, err := setupCommandArgs(cmd)
+	if err != nil {
+		return err
 	}
 
 	logger := util.LoggerFromContext(ctx)
 
-	// Vendored projects fail the vendor consistency check: setup edits go.mod
-	// for the injected hook modules but not vendor/modules.txt. Force module
-	// mode so both build phases resolve dependency sources from the module cache
-	// (matching versions and paths) instead of vendor/, leaving the user's
-	// vendor directory untouched. This must run before isSetup() and
-	// getBuildPackages() below so a cached-setup `otelc go build` still sets
-	// GOFLAGS for the later buildWithToolexec, and before the findDeps dry run
-	// further down. Computed here rather than threaded in because Setup is also
-	// a standalone command action (otelc setup).
-	if vendoringActive(ctx, buildDir(subcommand, args)) {
-		logger.InfoContext(ctx, "vendored project detected; building with -mod=mod")
-		// Mutates GOFLAGS process-wide with no restore. Fine for the one-shot
-		// CLI; a second in-process GoBuild would inherit this -mod=mod.
-		if err := os.Setenv("GOFLAGS", forceModMod(os.Getenv("GOFLAGS"))); err != nil {
-			return ex.Wrapf(err, "forcing module mode for vendored build")
-		}
-
-		// A CLI -mod=vendor beats the GOFLAGS=-mod=mod forced above, so the Phase-1
-		// build-plan dry run (both the auto-pin and the direct findDeps fallback
-		// below call it) would still resolve vendor/ paths without an @version;
-		// rewrite it to module mode when vendoring is active so both build phases
-		// agree on where the dependency source lives.
-		args = rewriteModVendor(subcommand, args)
+	args, err = prepareVendoredBuild(ctx, logger, subcommand, args)
+	if err != nil {
+		return err
 	}
 
 	if isSetup() {
@@ -563,6 +559,9 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		buildFlags: extractBuildFlags(subcommand, args),
 		pgo:        pgoValue(subcommand, args),
 		testMode:   subcommand == subcmdTest,
+	}
+	if err = sp.loadConfiguredApplication(cmd.String(FlagInstrumentationConfig)); err != nil {
+		return err
 	}
 
 	// Introduce additional hook code by generating otelc.runtime.go
@@ -584,10 +583,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Ensure a state manager is available in the context
-	if stateManager, found := stateManagerFromContext(ctx); !found {
-		// save this state manager in the context
-		ctx = contextWithStateManager(ctx, stateManager)
-	}
+	ctx = ensureStateManager(ctx)
 
 	// Auto-pin generates/updates otel.instrumentation.go file
 	var deps []*Dependency
@@ -617,6 +613,9 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	if err = sp.validateAndStoreSelectedConfigurationMetadata(matched); err != nil {
 		return err
 	}
+	if err = sp.validateAndStoreApplicationConfiguration(); err != nil {
+		return err
+	}
 
 	sp.warnIfNoInstrumentationMatched(matched)
 
@@ -634,6 +633,22 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	}
 	sp.recordResolutionScope(ctx, moduleDirs)
 	return nil
+}
+
+func setupCommandArgs(cmd *cli.Command) (string, []string, error) {
+	args := cmd.Args().Slice()
+	if cmd.Name == "go" {
+		return cmd.Args().First(), cmd.Args().Tail(), nil
+	}
+	if err := cleanupOwnedSession(); err != nil {
+		return "", nil, ex.Wrapf(err, "cleaning the session directory")
+	}
+	if err := cleanupDebugArtifacts(); err != nil {
+		// Clean up debug artifacts from previous runs for standalone `otelc setup`,
+		// as it prepares the environment for a subsequent toolexec build.
+		return "", nil, ex.Wrapf(err, "cleaning debug artifacts")
+	}
+	return subcmdBuild, args, nil
 }
 
 // recordResolutionScope writes the export memo's resolution scope. The memo
@@ -661,6 +676,13 @@ func (sp *setupPhase) recordResolutionScope(ctx context.Context, moduleDirs []st
 	if setErr := os.Setenv(util.EnvOtelcSessionDir, util.SessionOff); setErr != nil {
 		sp.Warn("cannot turn the session off", "error", setErr)
 	}
+}
+
+func ensureStateManager(ctx context.Context) context.Context {
+	if stateManager, found := stateManagerFromContext(ctx); !found {
+		return contextWithStateManager(ctx, stateManager)
+	}
+	return ctx
 }
 
 // warnIfNoInstrumentationMatched reports the combined result. An individual

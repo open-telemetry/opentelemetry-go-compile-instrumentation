@@ -346,6 +346,23 @@ func TestSetupPhaseInjectedHash(t *testing.T) {
 	require.ErrorContains(t, err, "added.go", "a missing add_file source must fail the hash")
 }
 
+func TestInjectedHashIncludesApplicationConfigurationIdentity(t *testing.T) {
+	sp := newTestSetupPhase()
+
+	first, err := sp.injectedHash(t.Context(), nil)
+	require.NoError(t, err)
+
+	sp.validatedApplicationConfig.Identity = []byte(`{"values":{"go.sample.enabled":true}}`)
+	second, err := sp.injectedHash(t.Context(), nil)
+	require.NoError(t, err)
+	assert.NotEqual(t, first, second)
+
+	sp.validatedApplicationConfig.Identity = []byte(`{"values":{"go.sample.enabled":false}}`)
+	third, err := sp.injectedHash(t.Context(), nil)
+	require.NoError(t, err)
+	assert.NotEqual(t, second, third)
+}
+
 func TestStoreInjectedHashFailsOnLoadError(t *testing.T) {
 	modDir := t.TempDir()
 	goMod := []byte("module example.com/m\n\ngo 1.25.0\n")
