@@ -6,7 +6,13 @@
 // instrumentation.
 package init
 
-// import the runtime package to ensure it stays in go.mod
+// Import these packages to keep them in go.mod. otel.instrumentation.go loads
+// the rules of the two instrumentation modules (#1712).
 import (
+	// Keeps the SDK trace instrumentation module in go.mod.
+	_ "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/sdk/trace"
+	// Keeps the trace API instrumentation module in go.mod.
+	_ "go.opentelemetry.io/otelc/instrumentation/go.opentelemetry.io/otel/trace"
+	// Keeps the runtime package in go.mod.
 	_ "go.opentelemetry.io/otelc/pkg/runtime"
 )

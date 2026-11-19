@@ -630,7 +630,20 @@ func H1After(ctx hook.HookContext, rows []Row) {}`,
 			errorMsg:    "type mismatch, expected []*Row, got []Row",
 		},
 		{
-			name: "invalid - after hook takes a pointer to HookContext",
+			name: "invalid - after hook takes a pointer to HookContext (OtelHookContext trampoline)",
+			trampSrc: `
+package main
+func OtelAfterTrampoline(hookContext OtelHookContext, arg0 *string) {}`,
+			hookSrc: `
+package testdata
+import "go.opentelemetry.io/otelc/pkg/hook"
+func H1After(ctx *hook.HookContext, s string) {}`,
+			before:      false,
+			expectError: true,
+			errorMsg:    "type mismatch, expected HookContext, got *HookContext",
+		},
+		{
+			name: "invalid - after hook takes a pointer to HookContext (HookContext trampoline)",
 			trampSrc: `
 package main
 func OtelAfterTrampoline(hookContext HookContext, arg0 *string) {}`,
@@ -1791,4 +1804,23 @@ func TestAddHookDecl_HookNameMatchingTargetFuncDoesNotCallTarget(t *testing.T) {
 	assert.Contains(t, src, "func B() int")
 	assert.Contains(t, src, "if "+stubs[0][0]+" != nil")
 	assert.NotContains(t, src, "if B != nil")
+}
+
+func TestIsHookContextType(t *testing.T) {
+	assert.True(t, isHookContextType("HookContext"))
+	assert.True(t, isHookContextType("OtelHookContext"))
+	assert.False(t, isHookContextType("*HookContext"))
+	assert.False(t, isHookContextType("string"))
+	assert.False(t, isHookContextType(""))
+}
+
+func TestMatchBaseType_HookContext(t *testing.T) {
+	assert.True(t, matchBaseType("OtelHookContext", "HookContext"))
+	assert.True(t, matchBaseType("HookContext", "OtelHookContext"))
+	assert.True(t, matchBaseType("OtelHookContext", "OtelHookContext"))
+	assert.True(t, matchBaseType("HookContext", "HookContext"))
+	assert.False(t, matchBaseType("OtelHookContext", "*HookContext"))
+	assert.False(t, matchBaseType("*HookContext", "HookContext"))
+	assert.False(t, matchBaseType("OtelHookContext", "string"))
+	assert.False(t, matchBaseType("string", "OtelHookContext"))
 }

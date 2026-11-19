@@ -4,11 +4,13 @@
 package instrument
 
 import (
+	"context"
 	_ "embed"
 	"fmt"
 	"go/token"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,6 +19,7 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/imports"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -34,10 +37,11 @@ import (
 // its name suggests, it jumps to the trampoline function from raw function.
 
 const (
+	hookContextPublicType           = "HookContext"
 	trampolineBeforeName            = "OtelBeforeTrampoline"
 	trampolineAfterName             = "OtelAfterTrampoline"
 	trampolineHookContextName       = "hookContext"
-	trampolineHookContextType       = "HookContext"
+	trampolineHookContextType       = "OtelHookContext"
 	trampolineAnyName               = "any"
 	trampolineInterfaceType         = "interface{}"
 	trampolineEmptyStructType       = "struct{}"
@@ -63,9 +67,12 @@ const (
 	trampolineAfter                 = false
 	unsafePackageName               = "unsafe"
 	suppressHooksPackage            = "runtime"
-	suppressHooksFuncName           = "SuppressHooks"
-	unsuppressHooksFuncName         = "UnsuppressHooks"
-	hooksSuppressedFuncName         = "HooksSuppressed"
+	// suppressHooksReservedAlias names the runtime import in a file that
+	// already uses "runtime" for a different package.
+	suppressHooksReservedAlias = "otelcRuntime"
+	suppressHooksFuncName      = "SuppressHooks"
+	unsuppressHooksFuncName    = "UnsuppressHooks"
+	hooksSuppressedFuncName    = "HooksSuppressed"
 )
 
 // @@ Modification on this trampoline template should be cautious, as it imposes
@@ -214,17 +221,12 @@ func (ip *instrumentPhase) parseHookFileCached(file string) (*dst.File, error) {
 	return root, nil
 }
 
-// findHookFile locates the file in rule.ResolvedPath that declares the hook
-// function hookName and returns it with the declaration. The hooks are linked
-// by the import path of rule.Path, so only the files the go command compiles
-// into that package are searched: a subdirectory is another package, testdata
-// is no package at all, and test files and files starting with "." or "_" are
-// never built into it. Any of those files can declare the hook, so the before
-// and after hooks of one rule may live in different files.
-func (ip *instrumentPhase) findHookFile(rule *rule.InstFuncRule, hookName string) (string, *dst.FuncDecl, error) {
-	entries, err0 := os.ReadDir(rule.ResolvedPath)
-	if err0 != nil {
-		return "", nil, ex.Wrapf(err0, "reading hook directory %s", rule.ResolvedPath)
+// hookPackageFiles returns the files in rule.ResolvedPath that the go command
+// can compile into the hook package. It does not apply build constraints.
+func hookPackageFiles(rule *rule.InstFuncRule) ([]string, error) {
+	entries, err := os.ReadDir(rule.ResolvedPath)
+	if err != nil {
+		return nil, ex.Wrapf(err, "reading hook directory %s", rule.ResolvedPath)
 	}
 	files := make([]string, 0, len(entries))
 	for _, entry := range entries {
@@ -234,6 +236,21 @@ func (ip *instrumentPhase) findHookFile(rule *rule.InstFuncRule, hookName string
 			continue
 		}
 		files = append(files, filepath.Join(rule.ResolvedPath, name))
+	}
+	return files, nil
+}
+
+// findHookFile locates the file in rule.ResolvedPath that declares the hook
+// function hookName and returns it with the declaration. The hooks are linked
+// by the import path of rule.Path, so only the files the go command compiles
+// into that package are searched: a subdirectory is another package, testdata
+// is no package at all, and test files and files starting with "." or "_" are
+// never built into it. Any of those files can declare the hook, so the before
+// and after hooks of one rule may live in different files.
+func (ip *instrumentPhase) findHookFile(rule *rule.InstFuncRule, hookName string) (string, *dst.FuncDecl, error) {
+	files, err0 := hookPackageFiles(rule)
+	if err0 != nil {
+		return "", nil, err0
 	}
 	for _, file := range files {
 		root, err := ip.parseHookFileCached(file)
@@ -427,10 +444,17 @@ func sliceOrEllipsisElt(s string) (string, bool) {
 	return "", false
 }
 
+func isHookContextType(t string) bool {
+	return t == trampolineHookContextType || t == hookContextPublicType
+}
+
 // matchBaseType reports whether hookBase matches the expected trampBase type.
 func matchBaseType(trampBase, hookBase string) bool {
 	// The any-typed parameter can accept any trampoline parameter.
 	if isAnyOrInterface(hookBase) {
+		return true
+	}
+	if isHookContextType(trampBase) && isHookContextType(hookBase) {
 		return true
 	}
 	if trampBase != "" && trampBase == hookBase {
@@ -526,8 +550,12 @@ func (ip *instrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, targetParams *d
 		trampBase := trampParamTypeName(trampField.Type)
 		hookBase := baseTypeName(afterHookParams.List[i].Type)
 		if !matchBaseType(trampBase, hookBase) {
+			expected := trampBase
+			if expected == trampolineHookContextType {
+				expected = hookContextPublicType
+			}
 			return ex.Newf("hook func param %d type mismatch, expected %s, got %s",
-				i, trampBase, hookBase)
+				i, expected, hookBase)
 		}
 	}
 	return nil
@@ -543,9 +571,9 @@ func (ip *instrumentPhase) checkBeforeHookDecl(hookFunc *dst.FuncDecl, targetPar
 	}
 
 	// First param must be HookContext
-	if baseTypeName(beforeHookParams.List[0].Type) != trampolineHookContextType {
+	if baseTypeName(beforeHookParams.List[0].Type) != hookContextPublicType {
 		return ex.Newf("hook func first param must be %s, got %s",
-			trampolineHookContextType, baseTypeName(beforeHookParams.List[0].Type))
+			hookContextPublicType, baseTypeName(beforeHookParams.List[0].Type))
 	}
 
 	// Remaining params must match dereferenced trampoline params
@@ -691,9 +719,16 @@ func (ip *instrumentPhase) hookGuardCond(fnName string) dst.Expr {
 	if !ip.buildUsesIgnoreDirective {
 		return notNil
 	}
+	qualifier := ip.suppressHooksQualifier
+	if qualifier == "" {
+		qualifier = suppressHooksPackage
+	}
+	if ip.isSuppressHooksPackage() {
+		qualifier = ""
+	}
 	notSuppressed := &dst.UnaryExpr{
 		Op: token.NOT,
-		X:  suppressHooksCall(hooksSuppressedFuncName, ip.isSuppressHooksPackage()),
+		X:  suppressHooksCall(hooksSuppressedFuncName, qualifier),
 	}
 	return &dst.BinaryExpr{X: notNil, Op: token.LAND, Y: notSuppressed}
 }
@@ -704,13 +739,37 @@ func (ip *instrumentPhase) isSuppressHooksPackage() bool {
 	return util.FindFlagValue(ip.compileArgs, "-p") == suppressHooksPackage
 }
 
-// suppressHooksCall builds a call to funcName in the runtime package,
-// unqualified when selfPackage is true.
-func suppressHooksCall(funcName string, selfPackage bool) *dst.CallExpr {
-	if selfPackage {
+// suppressHooksCall builds a call to funcName in the runtime package through
+// qualifier, or an unqualified call when qualifier is empty (the package being
+// compiled is runtime itself).
+func suppressHooksCall(funcName, qualifier string) *dst.CallExpr {
+	if qualifier == "" {
 		return ast.CallTo(funcName, nil, nil)
 	}
-	return &dst.CallExpr{Fun: ast.SelectorExpr(ast.Ident(suppressHooksPackage), funcName)}
+	return &dst.CallExpr{Fun: ast.SelectorExpr(ast.Ident(qualifier), funcName)}
+}
+
+// suppressHooksAlias returns the name the code generated in root uses for the
+// runtime package. A file can already use that name: it may import runtime
+// under its own alias, which is reused, or import a different package whose
+// name is runtime (k8s.io/apimachinery/pkg/runtime, for example), in which
+// case runtime is imported under a reserved alias instead.
+func suppressHooksAlias(ctx context.Context, root *dst.File) string {
+	existing := imports.Existing(ctx, root)
+	var own []string
+	for alias, path := range existing {
+		if path == suppressHooksPackage && alias != "_" && alias != "." {
+			own = append(own, alias)
+		}
+	}
+	if len(own) > 0 {
+		slices.Sort(own)
+		return own[0]
+	}
+	if _, taken := existing[suppressHooksPackage]; taken {
+		return suppressHooksReservedAlias
+	}
+	return suppressHooksPackage
 }
 
 func (ip *instrumentPhase) addHookDecl(t *rule.InstFuncRule, paramTypes *dst.FieldList, before bool) error {

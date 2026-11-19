@@ -110,12 +110,8 @@ func OtelBeforeTrampoline_New1091505788(param0 *int, param1 *[]func(*options)) (
 			}
 		}
 	}()
-	hookContext = &HookContextImpl1091505788{}
-	hookContext.params = []interface{}{param0, param1}
-	hookContext.funcName = "New"
-	hookContext.packageName = "main"
 	if otelc_hook_4198193957_HAnyBefore != nil {
-		otelc_hook_4198193957_HAnyBefore(hookContext, *param0, func() []interface{} {
+		otelc_hook_4198193957_HAnyBefore(nil, *param0, func() []interface{} {
 			_otel_anyItems := make([]interface{}, len(*param1))
 			for _otel_anyIndex := range *param1 {
 				_otel_anyItems[_otel_anyIndex] = (*param1)[_otel_anyIndex]
@@ -123,8 +119,8 @@ func OtelBeforeTrampoline_New1091505788(param0 *int, param1 *[]func(*options)) (
 			return _otel_anyItems
 		}()...)
 	}
-	return hookContext, hookContext.skipCall
+	return nil, false
 }
 
 //go:linkname otelc_hook_4198193957_HAnyBefore testdata/golden/variadic-any-hook.HAnyBefore
-func otelc_hook_4198193957_HAnyBefore(hookContext HookContext, param0 int, param1 ...interface{})
+func otelc_hook_4198193957_HAnyBefore(hookContext OtelHookContext, param0 int, param1 ...interface{})

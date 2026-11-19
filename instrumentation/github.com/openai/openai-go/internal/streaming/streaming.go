@@ -22,6 +22,8 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	otelsemconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 	"go.opentelemetry.io/otel/trace"
+
+	"go.opentelemetry.io/otelc/pkg/otelcconv"
 )
 
 const (
@@ -133,6 +135,9 @@ type StreamingReader struct {
 	completed       atomic.Bool
 	capturedStreams map[int]*contentAccumulator
 	onDone          func()
+	// sawUsage is true once some chunk has carried a usage object. Without it,
+	// a reported 0 and a missing usage object look identical.
+	sawUsage bool
 }
 
 // errStreamAborted is reported when a stream is torn down (e.g. client
@@ -233,26 +238,32 @@ func (r *StreamingReader) finalize(flush bool, err error) {
 			r.span.SetAttributes(otelsemconv.ErrorType(err))
 		}
 	}
-	r.span.SetAttributes(
-		genAIResponseFinishReasonsKey.StringSlice(r.reasons),
-		genAIUsageInputTokensKey.Int64(r.inputTokens),
-		genAIUsageOutputTokensKey.Int64(r.outputTokens),
-		genAIUsageTotalTokensKey.Int64(r.totalTokens),
-	)
+	r.span.SetAttributes(otelsemconv.GenAIResponseFinishReasonsKey.StringSlice(r.reasons))
+	// OpenAI only sends usage on a streaming response when the request set
+	// stream_options.include_usage. Without this check, every stream that
+	// didn't ask for it reports 0 tokens as if that had been measured. Usage
+	// that really does say 0 is still recorded.
+	if r.sawUsage {
+		r.span.SetAttributes(
+			otelsemconv.GenAIUsageInputTokensKey.Int64(r.inputTokens),
+			otelsemconv.GenAIUsageOutputTokensKey.Int64(r.outputTokens),
+			otelcconv.GenAIUsageTotalTokensKey.Int64(r.totalTokens),
+		)
+	}
 	if r.id != "" {
-		r.span.SetAttributes(genAIResponseIDKey.String(r.id))
+		r.span.SetAttributes(otelsemconv.GenAIResponseIDKey.String(r.id))
 	}
 	if r.responseModel != "" {
-		r.span.SetAttributes(genAIResponseModelKey.String(r.responseModel))
+		r.span.SetAttributes(otelsemconv.GenAIResponseModelKey.String(r.responseModel))
 	}
 	if !r.first.IsZero() {
 		firstTokenUs := r.first.Sub(r.start).Microseconds()
-		r.span.SetAttributes(genAIResponseTimeToFirstTokenKey.Int64(firstTokenUs))
+		r.span.SetAttributes(otelcconv.GenAIResponseTimeToFirstTokenKey.Int64(firstTokenUs))
 	}
 	// Recorded only when the request actually hit the cache, matching the
 	// non-streaming path and the anthropic-sdk-go instrumentation.
 	if r.cacheReadTokens > 0 {
-		r.span.SetAttributes(genAIUsageCacheReadInputTokensKey.Int64(r.cacheReadTokens))
+		r.span.SetAttributes(otelcconv.GenAIUsageCacheReadInputTokensKey.Int64(r.cacheReadTokens))
 	}
 
 	r.recordCapturedContent()
@@ -383,6 +394,22 @@ func (r *StreamingReader) processChunk(payload []byte) {
 	}
 }
 
+// recordUsage merges a chunk's usage object into the running counts. Keeping
+// the last non-zero value means a later chunk with a partial usage object
+// can't wipe out what an earlier one reported.
+func (r *StreamingReader) recordUsage(input, output, total int64) {
+	r.sawUsage = true
+	if input > 0 {
+		r.inputTokens = input
+	}
+	if output > 0 {
+		r.outputTokens = output
+	}
+	if total > 0 {
+		r.totalTokens = total
+	}
+}
+
 func (r *StreamingReader) processChatChunk(payload []byte) {
 	var chunk struct {
 		ID      string `json:"id"`
@@ -394,7 +421,8 @@ func (r *StreamingReader) processChatChunk(payload []byte) {
 				Content string `json:"content"`
 			} `json:"delta"`
 		} `json:"choices"`
-		Usage struct {
+		// Pointer so a missing usage object is distinguishable from 0 tokens.
+		Usage *struct {
 			PromptTokens        int64           `json:"prompt_tokens"`
 			CompletionTokens    int64           `json:"completion_tokens"`
 			TotalTokens         int64           `json:"total_tokens"`
@@ -411,17 +439,11 @@ func (r *StreamingReader) processChatChunk(payload []byte) {
 	if chunk.Model != "" {
 		r.responseModel = chunk.Model
 	}
-	if chunk.Usage.PromptTokens > 0 {
-		r.inputTokens = chunk.Usage.PromptTokens
-	}
-	if chunk.Usage.CompletionTokens > 0 {
-		r.outputTokens = chunk.Usage.CompletionTokens
-	}
-	if chunk.Usage.TotalTokens > 0 {
-		r.totalTokens = chunk.Usage.TotalTokens
-	}
-	if cached := cachedPromptTokens(chunk.Usage.PromptTokensDetails); cached > 0 {
-		r.cacheReadTokens = cached
+	if chunk.Usage != nil {
+		r.recordUsage(chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens, chunk.Usage.TotalTokens)
+		if cached := cachedPromptTokens(chunk.Usage.PromptTokensDetails); cached > 0 {
+			r.cacheReadTokens = cached
+		}
 	}
 	for choicePosition, c := range chunk.Choices {
 		if c.FinishReason != "" {
@@ -442,7 +464,8 @@ func (r *StreamingReader) processCompletionChunk(payload []byte) {
 			FinishReason string `json:"finish_reason"`
 			Text         string `json:"text"`
 		} `json:"choices"`
-		Usage struct {
+		// Pointer so a missing usage object is distinguishable from 0 tokens.
+		Usage *struct {
 			PromptTokens        int64           `json:"prompt_tokens"`
 			CompletionTokens    int64           `json:"completion_tokens"`
 			TotalTokens         int64           `json:"total_tokens"`
@@ -459,17 +482,11 @@ func (r *StreamingReader) processCompletionChunk(payload []byte) {
 	if chunk.Model != "" {
 		r.responseModel = chunk.Model
 	}
-	if chunk.Usage.PromptTokens > 0 {
-		r.inputTokens = chunk.Usage.PromptTokens
-	}
-	if chunk.Usage.CompletionTokens > 0 {
-		r.outputTokens = chunk.Usage.CompletionTokens
-	}
-	if chunk.Usage.TotalTokens > 0 {
-		r.totalTokens = chunk.Usage.TotalTokens
-	}
-	if cached := cachedPromptTokens(chunk.Usage.PromptTokensDetails); cached > 0 {
-		r.cacheReadTokens = cached
+	if chunk.Usage != nil {
+		r.recordUsage(chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens, chunk.Usage.TotalTokens)
+		if cached := cachedPromptTokens(chunk.Usage.PromptTokensDetails); cached > 0 {
+			r.cacheReadTokens = cached
+		}
 	}
 	for choicePosition, c := range chunk.Choices {
 		if c.FinishReason != "" {
