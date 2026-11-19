@@ -35,6 +35,13 @@ create a pull request proposing yourself for that release.
 
 ## Before You Release
 
+> [!NOTE]
+> About 20 workflow files list the maintenance-branch glob
+> `release/v*.*.x` under `on.push.branches` or `on.pull_request.branches`.
+> GitHub Actions has no shared source for branch filters. If a release-branch
+> naming pattern changes, update every occurrence, or CI silently stops
+> running on release branches for the workflows you miss.
+
 1. **Create a [Version Release](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/new?template=version_release.md) checklist issue**
    to track progress. Fill in the version number in the title.
 
