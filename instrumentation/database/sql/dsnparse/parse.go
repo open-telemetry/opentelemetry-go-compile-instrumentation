@@ -561,8 +561,21 @@ func parseClickHouseDSN(dsn string) DSNInfo {
 // ---- Oracle ------------------------------------------------------------------
 
 // parseOracleDSN handles Oracle DSNs in URL format or the traditional
-// user/pass@host:port/service notation.
+// user/pass@host:port/service notation, which may also carry an Easy Connect
+// Plus protocol prefix: user/pass@[protocol://]host:port/service. godror also
+// accepts a logfmt form (user=scott password=... connectString=host:port/svc),
+// which is what its ConnectionParams.StringWithPassword writes.
 func parseOracleDSN(dsn string) DSNInfo {
+	if oracleIsLogfmt(dsn) {
+		addr := oracleLogfmtValue(dsn, "connectString")
+		if addr == "" {
+			return DSNInfo{}
+		}
+		return oracleParseAddress(addr)
+	}
+	if len(dsn) >= len(oracleURLPrefix) && strings.EqualFold(dsn[:len(oracleURLPrefix)], oracleURLPrefix) {
+		return oracleParseURL(dsn[len(oracleURLPrefix):], dsn)
+	}
 	if strings.Contains(dsn, "://") {
 		if u, err := nurl.Parse(dsn); err == nil && u.Host != "" {
 			host := u.Hostname()
@@ -570,19 +583,31 @@ func parseOracleDSN(dsn string) DSNInfo {
 			if port == "" {
 				port = "1521"
 			}
-			dbName := strings.TrimPrefix(u.Path, "/")
+			dbName := oracleServiceName(strings.TrimPrefix(u.Path, "/"))
 			return DSNInfo{Host: host, Port: port, DBName: dbName}
 		}
 	}
-	atIdx := strings.IndexByte(dsn, '@')
+	atIdx := oracleCredentialsEnd(dsn)
 	if atIdx < 0 {
 		return DSNInfo{}
 	}
-	connStr := strings.TrimPrefix(dsn[atIdx+1:], "//")
+	return oracleParseAddress(dsn[atIdx+1:])
+}
+
+const oracleURLPrefix = "oracle://"
+
+// oracleParseAddress parses the address part of an Easy Connect string, that is
+// everything after the credentials: [protocol://]host[:port][/service][?params].
+func oracleParseAddress(addr string) DSNInfo {
+	connStr := oracleStripProtocol(addr)
+	// Easy Connect parameters start at '?' and are not part of the address.
+	if q := strings.IndexByte(connStr, '?'); q >= 0 {
+		connStr = connStr[:q]
+	}
 	var hostPort, dbName string
 	if sl := strings.IndexByte(connStr, '/'); sl >= 0 {
 		hostPort = connStr[:sl]
-		dbName = connStr[sl+1:]
+		dbName = oracleServiceName(connStr[sl+1:])
 	} else {
 		hostPort = connStr
 	}
@@ -590,6 +615,178 @@ func parseOracleDSN(dsn string) DSNInfo {
 	return DSNInfo{Host: host, Port: port, DBName: dbName}
 }
 
+// oracleParseURL handles oracle://user:password@host:port/service, where rest
+// is the DSN after the scheme. go-oci8 does not parse this with net/url: it
+// strips the scheme and splits on the last '@', so a password may hold a raw
+// '@', '/' or ':'. go-ora and godror use net/url and expect those characters
+// percent-encoded, which leaves a single '@', so splitting on the last '@'
+// gives the same result for them.
+//
+// When a query string is present, we only trust the split if the last '@'
+// before the query is also the last '@' in the string. If they differ, or if
+// the only '@' comes after the query, the DSN is ambiguous (the '?' could be
+// inside an unquoted password or the '@' could be inside a query parameter)
+// and we return a zero-value DSNInfo rather than risk leaking password fragments.
+func oracleParseURL(rest, dsn string) DSNInfo {
+	q := strings.IndexByte(rest, '?')
+	if lastAt := strings.LastIndexByte(rest, '@'); lastAt >= 0 {
+		if q >= 0 && strings.LastIndexByte(rest[:q], '@') != lastAt {
+			return DSNInfo{}
+		}
+		info := oracleParseAddress(rest[lastAt+1:])
+		if info.Port == "" {
+			info.Port = "1521"
+		}
+		return info
+	}
+	u, err := nurl.Parse(dsn)
+	if err != nil || u.Host == "" {
+		return DSNInfo{}
+	}
+	port := u.Port()
+	if port == "" {
+		port = "1521"
+	}
+	return DSNInfo{
+		Host:   u.Hostname(),
+		Port:   port,
+		DBName: oracleServiceName(strings.TrimPrefix(u.Path, "/")),
+	}
+}
+
+// oracleIsLogfmt reports whether godror would read dsn as logfmt rather than
+// as an Easy Connect string, which it does when the DSN has a newline or a
+// connectString key.
+func oracleIsLogfmt(dsn string) bool {
+	return strings.Contains(dsn, "\n") || strings.Contains(dsn, "connectString=")
+}
+
+// oracleLogfmtValue returns the value of the last key in a logfmt DSN, or ""
+// when the key is absent. Values are bare words ending at whitespace or
+// double-quoted strings in which a backslash escapes the next character. A
+// quoted value that is never closed is dropped, so nothing after its opening
+// quote, such as a password, is read as an address.
+func oracleLogfmtValue(dsn, key string) string {
+	var found string
+	i := 0
+	for i < len(dsn) {
+		for i < len(dsn) && oracleIsSpace(dsn[i]) {
+			i++
+		}
+		keyStart := i
+		for i < len(dsn) && dsn[i] != '=' && !oracleIsSpace(dsn[i]) {
+			i++
+		}
+		k := dsn[keyStart:i]
+		if i >= len(dsn) || dsn[i] != '=' {
+			continue
+		}
+		var val string
+		var ok bool
+		val, i, ok = oracleLogfmtRead(dsn, i+1)
+		if !ok {
+			return ""
+		}
+		if k == key {
+			found = val
+		}
+	}
+	return found
+}
+
+// oracleLogfmtRead reads one logfmt value starting at dsn[i] and returns it
+// with the index after it. The bool is false for a quoted value that is never
+// closed.
+func oracleLogfmtRead(dsn string, i int) (string, int, bool) {
+	if i >= len(dsn) || dsn[i] != '"' {
+		start := i
+		for i < len(dsn) && !oracleIsSpace(dsn[i]) {
+			i++
+		}
+		return dsn[start:i], i, true
+	}
+	var out []byte
+	for i++; i < len(dsn); i++ {
+		switch c := dsn[i]; c {
+		case '"':
+			return string(out), i + 1, true
+		case '\\':
+			if i+1 < len(dsn) {
+				i++
+				out = append(out, dsn[i])
+			}
+		default:
+			out = append(out, c)
+		}
+	}
+	return "", i, false
+}
+
+func oracleIsSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
+}
+
+// Easy Connect Plus transport keywords, which may precede the "//" separator.
+const (
+	tcpPrefix        = "tcp:"
+	oracleTCPSPrefix = "tcps:"
+)
+
+// oracleStripProtocol removes the leading "//" separator, and with it the Easy
+// Connect Plus transport keyword tcp or tcps when one precedes it, so the keyword
+// is not reported as the host. Any other prefix is left alone.
+func oracleStripProtocol(addr string) string {
+	prefix, rest, ok := strings.Cut(addr, "//")
+	if !ok {
+		return addr
+	}
+	if prefix == "" ||
+		strings.EqualFold(prefix, tcpPrefix) ||
+		strings.EqualFold(prefix, oracleTCPSPrefix) {
+		return rest
+	}
+	return addr
+}
+
+// oracleServiceName returns the service name from the part of an Easy Connect
+// string after the host, which may continue with ":server_type" and
+// "/instance_name".
+func oracleServiceName(s string) string {
+	if end := strings.IndexAny(s, ":/"); end >= 0 {
+		return s[:end]
+	}
+	return s
+}
+
+// oracleCredentialsEnd returns the index of the '@' that separates the
+// credentials from the address, or -1. An address does not normally contain
+// '@', so the separator is taken to be the last '@' outside double quotes: an
+// '@' inside a quoted password, or one written as \@ or left bare in an
+// unquoted password, stays on the credentials side. A quote that is never
+// closed returns -1, so no part of the password can be taken for the address.
+//
+// The trade-off is an '@' after the separator, such as an email address in the
+// ssl_server_cert_dn Easy Connect Plus parameter. Such a DSN is read with that
+// later '@' as the separator and reports the wrong host, but never a part of
+// the password.
+func oracleCredentialsEnd(dsn string) int {
+	inQuotes := false
+	last := -1
+	for i := range len(dsn) {
+		switch dsn[i] {
+		case '"':
+			inQuotes = !inQuotes
+		case '@':
+			if !inQuotes {
+				last = i
+			}
+		}
+	}
+	if inQuotes {
+		return -1
+	}
+	return last
+}
 func oracleSplitHostPort(hp string) (host, port string) {
 	// A bracketed IPv6 literal has colons inside the brackets, so the port
 	// separator is only the colon that follows the closing bracket.

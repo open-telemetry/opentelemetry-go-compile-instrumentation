@@ -109,7 +109,7 @@ checkmake: $(CHECKMAKE) ## Build checkmake from .tools
 
 # Dynamic variables
 GOOS ?= $(shell go env GOOS)
-VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+VERSION := $(shell git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo "v0.0.0")
 COMMIT_HASH := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME := $(shell date -u '+%Y-%m-%d')
 MODULE_PATH = go.opentelemetry.io/otelc
