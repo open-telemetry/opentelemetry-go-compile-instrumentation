@@ -27,13 +27,13 @@ func TestHTTPServerDBClient(t *testing.T) {
 	f.BuildAndRun("httpclient", "-addr", addr, "-name", "test")
 
 	// BuildAndRun returns once the client exits, but the server span ends after
-	// the response is written, so it may still be in flight. Wait for all three.
-	f.WaitForSpans(3)
+	// the response is written, so it may still be in flight. Wait for all four.
+	f.WaitForSpans(4)
 
-	// One distributed trace with three spans:
-	// HTTP client -> HTTP server -> SQL client
+	// One distributed trace with four spans:
+	// HTTP client -> HTTP server -> SQL client -> SQL rows
 	f.RequireTraceCount(1)
-	f.RequireSpansPerTrace(3)
+	f.RequireSpansPerTrace(4)
 
 	httpClientSpan := testutil.RequireSpan(t, f.Traces(),
 		testutil.IsClient,
@@ -56,6 +56,9 @@ func TestHTTPServerDBClient(t *testing.T) {
 		sqlClientSpan.TraceID(),
 		"HTTP server and SQL client must share a trace ID",
 	)
+	rowsSpan := testutil.RequireSpan(t, f.Traces(), testutil.HasName("sql.rows"))
+	require.Equal(t, sqlClientSpan.TraceID(), rowsSpan.TraceID())
+	require.Equal(t, sqlClientSpan.SpanID(), rowsSpan.ParentSpanID())
 	require.Equal(t, httpClientSpan.SpanID(), httpServerSpan.ParentSpanID(), "HTTP server parent must be HTTP client")
 	require.Equal(t, httpServerSpan.SpanID(), sqlClientSpan.ParentSpanID(), "SQL client parent must be HTTP server")
 	require.True(t, httpClientSpan.ParentSpanID().IsEmpty(), "HTTP client span must be the trace root")

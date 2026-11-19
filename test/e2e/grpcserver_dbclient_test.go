@@ -27,13 +27,13 @@ func TestGRPCServerDBClient(t *testing.T) {
 	f.BuildAndRun("grpcclient", "-addr", addr, "-name", "test")
 
 	// BuildAndRun returns once the client exits, but the server span ends after
-	// the response is written, so it may still be in flight. Wait for all three.
-	f.WaitForSpans(3)
+	// the response is written, so it may still be in flight. Wait for all four.
+	f.WaitForSpans(4)
 
-	// One distributed trace with three spans:
-	// gRPC client -> gRPC server -> SQL client
+	// One distributed trace with four spans:
+	// gRPC client -> gRPC server -> SQL client -> SQL rows
 	f.RequireTraceCount(1)
-	f.RequireSpansPerTrace(3)
+	f.RequireSpansPerTrace(4)
 
 	grpcClientSpan := testutil.RequireSpan(t, f.Traces(),
 		testutil.IsClient,
@@ -56,6 +56,9 @@ func TestGRPCServerDBClient(t *testing.T) {
 		sqlClientSpan.TraceID(),
 		"gRPC server and SQL client must share a trace ID",
 	)
+	rowsSpan := testutil.RequireSpan(t, f.Traces(), testutil.HasName("sql.rows"))
+	require.Equal(t, sqlClientSpan.TraceID(), rowsSpan.TraceID())
+	require.Equal(t, sqlClientSpan.SpanID(), rowsSpan.ParentSpanID())
 	require.Equal(t, grpcClientSpan.SpanID(), grpcServerSpan.ParentSpanID(), "gRPC server parent must be gRPC client")
 	require.Equal(t, grpcServerSpan.SpanID(), sqlClientSpan.ParentSpanID(), "SQL client parent must be gRPC server")
 	require.True(t, grpcClientSpan.ParentSpanID().IsEmpty(), "gRPC client span must be the trace root")
