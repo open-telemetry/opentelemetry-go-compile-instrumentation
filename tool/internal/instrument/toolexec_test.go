@@ -1296,6 +1296,39 @@ func TestMarkedToolVersion(t *testing.T) {
 	})
 }
 
+func TestWithoutWorkDirPaths(t *testing.T) {
+	invocation := t.TempDir()
+	t.Setenv(util.EnvOtelcInvocationDir, invocation)
+	for _, directory := range []string{"runtime", "pkg", "instrumentation"} {
+		path := filepath.Join(invocation, directory, "source.go")
+		want := "<otelc-build>/" + filepath.Join(directory, "source.go")
+		assert.Equal(t, want, string(WithoutWorkDirPaths([]byte(path))))
+		encoded, err := json.Marshal(path)
+		require.NoError(t, err)
+		var decoded string
+		require.NoError(t, json.Unmarshal(WithoutWorkDirPaths(encoded), &decoded))
+		assert.Equal(t, want, decoded, "JSON paths must remain valid on Windows")
+	}
+	outside := filepath.Join(invocation+"-other", "source.go")
+	assert.Equal(t, outside, string(WithoutWorkDirPaths([]byte(outside))))
+}
+
+func TestRulesDigestIgnoresInvocationPaths(t *testing.T) {
+	digestIn := func(directory, file string) string {
+		t.Helper()
+		t.Setenv(util.EnvOtelcInvocationDir, directory)
+		content, err := json.Marshal(map[string]string{
+			"resolved_path": filepath.Join(directory, "instrumentation", "net", "http"),
+			"file":          file,
+		})
+		require.NoError(t, err)
+		return rulesDigest(content, nil, []byte("gls"), []byte("injected"))
+	}
+	first := digestIn(t.TempDir(), "hook.go")
+	assert.Equal(t, first, digestIn(t.TempDir(), "hook.go"))
+	assert.NotEqual(t, first, digestIn(t.TempDir(), "other.go"), "rule changes must still invalidate the cache")
+}
+
 func TestEnableNestedToolexec(t *testing.T) {
 	exe, err := os.Executable()
 	require.NoError(t, err)
@@ -2952,31 +2985,6 @@ func TestCompileResolutionReResolvesStoredFailure(t *testing.T) {
 	assert.Equal(t, 1, calls, "a stored failure must be resolved again, not reused")
 }
 
-// TestDeterministicLoadFailure pins which failures the memo stores, using
-// the messages go list really reports. Compiler errors arrive as ListErrors
-// too, so the kind alone must not decide.
-func TestDeterministicLoadFailure(t *testing.T) {
-	listErr := func(msg string) error { return packages.Error{Msg: msg, Kind: packages.ListError} }
-	for _, tt := range []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{"missing module package", listErr("no required module provides package example.invalid/zzz; to add it:\n\tgo get example.invalid/zzz"), true},
-		{"go mod updates needed", listErr("updates to go.mod needed; to update it:\n\tgo mod tidy"), true},
-		{"not in std", listErr("package fmtx is not in std (/usr/local/go/src/fmtx)"), true},
-		{"build constraints", listErr("package example.com/p/ex: build constraints exclude all Go files in /tmp/p/ex"), true},
-		{"no export file", errors.New(`package "unsafe" has no export file`), true},
-		{"compiler error", listErr("# example.com/p/broken\nbroken/b.go:3:12: undefined: x"), false},
-		{"invalid compiler flag", listErr("# example.com/p\nflag provided but not defined: -otelc-review-invalid-flag"), false},
-		{"other error", errors.New("signal: killed"), false},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, deterministicLoadFailure(tt.err))
-		})
-	}
-}
-
 // TestDeterministicLoadFailureOnRealGoList runs the real go list behind the
 // link's resolution: a package that does not exist is stored, a package
 // whose compile fails is not.
@@ -2992,8 +3000,8 @@ func TestDeterministicLoadFailureOnRealGoList(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, failed, "example.com/p/broken")
 	require.Contains(t, failed, "example.com/p/missing")
-	assert.False(t, deterministicLoadFailure(failed["example.com/p/broken"]),
+	assert.False(t, pkgload.IsDeterministicLoadFailure(failed["example.com/p/broken"]),
 		"a compile failure must be retried: %v", failed["example.com/p/broken"])
-	assert.True(t, deterministicLoadFailure(failed["example.com/p/missing"]),
+	assert.True(t, pkgload.IsDeterministicLoadFailure(failed["example.com/p/missing"]),
 		"a missing package must be stored: %v", failed["example.com/p/missing"])
 }

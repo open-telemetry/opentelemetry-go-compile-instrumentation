@@ -84,6 +84,21 @@ func TestDBClient(t *testing.T) {
 		)
 	})
 
+	t.Run("QueryWithLeadingComment", func(t *testing.T) {
+		f := testutil.NewTestFixture(t)
+
+		f.Run("dbclient", "-op=commented-query")
+
+		span := f.RequireSingleSpan()
+		require.Equal(t, "SELECT", span.Name())
+		testutil.RequireDBClientSemconv(t, span,
+			"SELECT",
+			"-- name: GetUserByName :many\nSELECT id, name FROM users WHERE name = ?",
+			"unknown", 0,
+			"testdb",
+		)
+	})
+
 	t.Run("QueryWithBatchSpanProcessor", func(t *testing.T) {
 		// The default batch span processor still holds the span when main
 		// returns, so it must be flushed on the way out.

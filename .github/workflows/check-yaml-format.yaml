@@ -10,7 +10,9 @@ on:
       - ".tools/go.sum"
       - ".github/workflows/check-yaml-format.yaml"
   push:
-    branches: [main]
+    branches:
+      - main
+      - 'release/v*.*.x'
     paths:
       - "**/*.yml"
       - "**/*.yaml"

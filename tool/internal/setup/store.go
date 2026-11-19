@@ -171,7 +171,8 @@ func (sp *setupPhase) storePGOProfile() error {
 // it. markedToolVersion folds this hash into the tool ID, so a change in one of
 // those packages still invalidates the cached compiles. Setup fails when the
 // hash cannot be computed: an incomplete hash would let a warm build reuse a
-// compile made against an older injected package.
+// compile made against an older injected package. A rule import that does not
+// load is not part of any compile, so it is left out (see injectedHash).
 //
 // The hash reads the files on disk, so it misses two inputs of the compile: a
 // file replaced through -overlay, where only the overlay's backing file
@@ -222,12 +223,21 @@ func (sp *setupPhase) injectedHash(ctx context.Context, matched []*rule.InstRule
 	slices.Sort(paths)
 	paths = slices.Compact(paths)
 	if len(paths) > 0 {
-		pkgs, err := pkgload.LoadPackages(ctx,
-			packages.NeedName|packages.NeedFiles|packages.NeedEmbedFiles|
-				packages.NeedImports|packages.NeedDeps|packages.NeedModule,
-			sp.buildFlags, false, paths...)
+		pkgs, unloadable, err := sp.loadInjectedPackages(ctx, paths)
 		if err != nil {
 			return "", err
+		}
+		// A rule import that does not load from the main module never reaches
+		// a cached compile: a compile that adds it resolves it with the same
+		// go list and fails, and the link skips it. Its path still goes into
+		// the hash, so the hash changes once it loads.
+		if len(unloadable) > 0 {
+			slices.Sort(unloadable)
+			sp.Info("Leaving rule imports that do not load out of the injected package hash",
+				"imports", unloadable)
+			for _, path := range unloadable {
+				_, _ = fmt.Fprintf(h, "%s unloadable\n", path)
+			}
 		}
 		goroot, err := pkgload.GOROOT(ctx, sp.buildFlags)
 		if err != nil {
@@ -238,6 +248,83 @@ func (sp *setupPhase) injectedHash(ctx context.Context, matched []*rule.InstRule
 		}
 	}
 	return hex.EncodeToString(h.Sum(nil)[:8]), nil
+}
+
+// loadInjectedPackages loads the rule imports in roots and returns the ones
+// that do not load, such as a package of a module that is in the module graph
+// but not in go.mod. go list then fails the whole load ("updates to go.mod
+// needed"), so a failed load is split in two halves until each such root is
+// found. Any other error is returned.
+func (sp *setupPhase) loadInjectedPackages(
+	ctx context.Context,
+	roots []string,
+) ([]*packages.Package, []string, error) {
+	pkgs, err := pkgload.LoadPackages(ctx,
+		packages.NeedName|packages.NeedFiles|packages.NeedEmbedFiles|
+			packages.NeedImports|packages.NeedDeps|packages.NeedModule,
+		sp.buildFlags, false, roots...)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, nil, ctxErr
+	}
+	if err != nil {
+		if !pkgload.IsLoadFailure(err) {
+			return nil, nil, err
+		}
+		if len(roots) == 1 {
+			return nil, roots, nil
+		}
+		const halves = 2
+		mid := len(roots) / halves
+		var loaded []*packages.Package
+		var unloadable []string
+		for _, half := range [][]string{roots[:mid], roots[mid:]} {
+			one, oneUnloadable, halfErr := sp.loadInjectedPackages(ctx, half)
+			if halfErr != nil {
+				return nil, nil, halfErr
+			}
+			loaded = append(loaded, one...)
+			unloadable = append(unloadable, oneUnloadable...)
+		}
+		return loaded, unloadable, nil
+	}
+
+	// A root that does not exist, or that imports a package that does not,
+	// comes back with the errors on the missing package instead of failing the
+	// load.
+	loaded := make([]*packages.Package, 0, len(pkgs))
+	var unloadable []string
+	for _, pkg := range pkgs {
+		if onlyLoadFailures(pkg) {
+			unloadable = append(unloadable, pkg.PkgPath)
+			continue
+		}
+		loaded = append(loaded, pkg)
+	}
+	return loaded, unloadable, nil
+}
+
+// onlyLoadFailures reports whether pkg or a package it imports has errors, and
+// all of them are load failures. A root with any other error stays loaded, so
+// hashPackages fails on it.
+func onlyLoadFailures(pkg *packages.Package) bool {
+	var failed, other bool
+	packages.Visit([]*packages.Package{pkg}, nil, func(p *packages.Package) {
+		for _, err := range p.Errors {
+			if isLoadFailure(err) {
+				failed = true
+			} else {
+				other = true
+			}
+		}
+	})
+	return failed && !other
+}
+
+// isLoadFailure reports whether err says that go list could not load a
+// package. A parse or type error is never one, even when its message quotes a
+// load failure.
+func isLoadFailure(err packages.Error) bool {
+	return (err.Kind == packages.ListError || err.Kind == packages.UnknownError) && pkgload.IsLoadFailure(err)
 }
 
 func appendRuleImports[T interface{ Base() *rule.InstBaseRule }](
@@ -293,7 +380,7 @@ func hashPackages(w io.Writer, goroot string, pkgs []*packages.Package) error {
 		// change what the same files compile to (loop variable scope, for one).
 		_, _ = fmt.Fprintf(w, "%s go=%s\n", pkg.PkgPath, goVersion)
 		for _, file := range slices.Sorted(slices.Values(packageFiles(pkg))) {
-			if err := hashFile(w, file); err != nil {
+			if err := hashFileAs(w, file); err != nil {
 				return err
 			}
 		}
@@ -322,21 +409,10 @@ func isStdPackage(pkg *packages.Package, goroot string) bool {
 	return true
 }
 
-// hashFile writes the path and the content hash of a file to w.
-func hashFile(w io.Writer, path string) error {
-	return hashFileNamed(w, path, path)
-}
-
-// hashFileAs is hashFile for an add_file source: a source setup generates
-// under the work dir, such as the runtime GLS file, is written under a name
-// that does not depend on the work dir. Its content is embedded in otelc and
-// identical in every work dir, so builds with different --work-dir values
-// keep one injected hash, one tool ID, and one build cache.
+// hashFileAs writes a file's content hash and a name that is independent of
+// its invocation directory. User paths outside that directory stay intact.
 func hashFileAs(w io.Writer, path string) error {
-	return hashFileNamed(w, path, string(instrument.WithoutWorkDirPaths([]byte(path))))
-}
-
-func hashFileNamed(w io.Writer, path, name string) error {
+	name := string(instrument.WithoutWorkDirPaths([]byte(path)))
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return ex.Wrapf(err, "reading %s", path)

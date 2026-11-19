@@ -186,7 +186,7 @@ func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) e
 	replaces := make(map[string]string, len(modPaths))
 	for m := range modPaths {
 		if path, isEmbedded := strings.CutPrefix(m, util.OtelcInstRoot+"/"); isEmbedded {
-			replaces[m] = filepath.Join(util.GetBuildTempDir(), unzippedInstDir, path)
+			replaces[m] = filepath.Join(util.GetInvocationDir(), unzippedInstDir, path)
 		}
 	}
 
@@ -219,19 +219,19 @@ func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) e
 	// Add replace directive for special runtime module
 	// runtime module initializes the OpenTelemetry SDK. It is required by all
 	// hook code to be present.
-	replaces[util.OtelcPkgRoot+"/runtime"] = filepath.Join(util.GetBuildTempDir(), unzippedPkgDir, "runtime")
+	replaces[util.OtelcPkgRoot+"/runtime"] = filepath.Join(util.GetInvocationDir(), unzippedPkgDir, "runtime")
 
 	// Add replace directive for special netutil module
-	replaces[util.OtelcPkgRoot+"/netutil"] = filepath.Join(util.GetBuildTempDir(), unzippedPkgDir, "netutil")
+	replaces[util.OtelcPkgRoot+"/netutil"] = filepath.Join(util.GetInvocationDir(), unzippedPkgDir, "netutil")
 
 	// Add replace directive for the otelcconv module, which holds the semantic
 	// convention attributes generated from schemas/otelc/. It is a separate
 	// module so the pkg module itself keeps no dependencies.
-	replaces[util.OtelcPkgRoot+"/otelcconv"] = filepath.Join(util.GetBuildTempDir(), unzippedPkgDir, "otelcconv")
+	replaces[util.OtelcPkgRoot+"/otelcconv"] = filepath.Join(util.GetInvocationDir(), unzippedPkgDir, "otelcconv")
 
 	// Add replace directive for instrumentation module
 	// instrumentation module contains shared semconv packages.
-	replaces[util.OtelcInstRoot] = filepath.Join(util.GetBuildTempDir(), unzippedInstDir)
+	replaces[util.OtelcInstRoot] = filepath.Join(util.GetInvocationDir(), unzippedInstDir)
 
 	// Okay, now add all the replace directives to go.mod in deterministic sorted order
 	changed := false
