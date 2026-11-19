@@ -156,6 +156,21 @@ func TestGoBuildSnapshotLifecycle(t *testing.T) {
 	}
 }
 
+func TestGoBuildStopsWhenSessionCleanupFails(t *testing.T) {
+	clearNestedBuildEnv(t)
+	root := t.TempDir()
+	t.Chdir(root)
+	t.Setenv(util.EnvOtelcWorkDir, root)
+	t.Setenv(util.EnvOtelcSessionDir, "")
+	mustWriteFile(t, "go.mod", "module example.com/cleanupfailure\n\ngo 1.26.0\n")
+	file := filepath.Join(root, "not-a-directory")
+	mustWriteFile(t, file, "x")
+	t.Setenv(util.EnvOtelcInvocationDir, filepath.Join(file, "invocation"))
+	cmd := &cli.Command{Name: "go", SkipFlagParsing: true, Action: GoBuild}
+	err := cmd.Run(t.Context(), []string{"otelc", "build", "."})
+	require.ErrorContains(t, err, "cleaning the session directory")
+}
+
 func TestSnapshotFilesystemErrors(t *testing.T) {
 	t.Run("temporary directory", func(t *testing.T) {
 		file := filepath.Join(t.TempDir(), "not-a-directory")
