@@ -133,6 +133,9 @@ jobs:
           client-id: ${{ vars.OTELBOT_GO_COMPILE_INSTRUMENTATION_CLIENT_ID }}
           private-key: ${{ secrets.OTELBOT_GO_COMPILE_INSTRUMENTATION_PRIVATE_KEY }}
           permission-contents: write
+          # This workflow creates PRs, so it needs pull-requests: write. The
+          # release.yml copy only requests contents: write. Keep the copies
+          # intentionally different and update both together on a SHA bump.
           permission-pull-requests: write
 
       - name: Warn on App token failure
