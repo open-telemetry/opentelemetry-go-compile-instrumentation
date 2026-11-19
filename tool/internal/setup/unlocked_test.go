@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -157,6 +158,9 @@ func TestGoBuildSnapshotLifecycle(t *testing.T) {
 }
 
 func TestGoBuildStopsWhenSessionCleanupFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows RemoveAll treats a non-directory ancestor as an absent path")
+	}
 	clearNestedBuildEnv(t)
 	root := t.TempDir()
 	t.Chdir(root)
