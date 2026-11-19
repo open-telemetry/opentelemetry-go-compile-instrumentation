@@ -257,32 +257,6 @@ Run-time behavior can also be controlled using the two `otelc`-specific environm
 - `OTEL_GO_ENABLED_INSTRUMENTATIONS`: Use this to specify which instrumentations should be enabled at run-time itself.
 - `OTEL_GO_DISABLED_INSTRUMENTATIONS`: Use this to specify which instrumentations to disable at run-time.
 
-### SQL result consumption
-
-`database/sql` instrumentation emits an additional `sql.rows` span for each
-recorded query whose rows are closed. This requires no extra configuration:
-rows tracing follows the existing database instrumentation and sampling controls.
-Disabling `database` instrumentation also disables these spans.
-
-The existing client span still ends when `QueryContext` returns. The new span
-has kind `INTERNAL` and is its child, preserving query association even without
-an application parent span. It starts after the query span ends and measures
-result consumption until closure, **including application work and pauses between
-reads**, not just database execution or network fetching. No per-row spans or
-events are emitted.
-
-`db.response.returned_rows` counts successful `Rows.Next` calls across all result
-sets, not matching rows in the database. Early closure and `QueryRow` can therefore
-report fewer rows than the result contains. Iteration, result-set, cancellation,
-and close errors are recorded; scan/conversion errors are not database errors.
-
-EOF of the final result set, explicit `Close`, and cancellation all close rows.
-Repeated or concurrent closure emits only once. The span is created at closure
-with the observed start/end timestamps, so it is not an active implicit parent
-between reads. Rows abandoned without closure emit no rows span; instrumentation does
-not fix application resource leaks. A long-lived result is visible only after it
-closes, and its query parent may already have been exported.
-
 ## Verifying Your Configuration
 
 After a build, the file `.otelc-build/matched.json` lists every rule that matched a dependency

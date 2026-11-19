@@ -36,13 +36,8 @@ func TestHTTPServerDBClient(t *testing.T) {
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	// Wait for the spans to be flushed
 	f.WaitForSpans(3)
 
-	// We expect exactly 1 trace with 3 spans:
-	// 1. HTTP server (Frontend)
-	// 2. SQL client (Frontend -> Database)
-	// 3. SQL rows consumption (child of the query)
 	f.RequireTraceCount(1)
 	f.RequireSpansPerTrace(3)
 

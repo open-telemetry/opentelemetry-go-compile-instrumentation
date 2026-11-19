@@ -8,7 +8,6 @@ import (
 	"database/sql/driver"
 	"errors"
 	"io"
-	"sync"
 
 	"go.opentelemetry.io/otelc/test/shared/testdb"
 )
@@ -70,7 +69,6 @@ type fixtureRows struct {
 	ctx     context.Context
 	pos     int
 	set     int
-	closed  sync.Once
 }
 
 func (*fixtureRows) Columns() []string { return []string{"id"} }
@@ -92,7 +90,7 @@ func (rows *fixtureRows) Next(dest []driver.Value) error {
 		}
 	case "cancel":
 		if rows.pos == 1 {
-			rows.closed.Do(func() { close(rows.fixture.reading) })
+			close(rows.fixture.reading)
 			<-rows.ctx.Done()
 			return rows.ctx.Err()
 		}

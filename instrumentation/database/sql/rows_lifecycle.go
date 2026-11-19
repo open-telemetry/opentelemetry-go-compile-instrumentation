@@ -5,9 +5,8 @@
 
 package sql
 
-// OtelTrackRows installs callbacks under the same lock used by iteration and
-// closure. Cancellation can close Rows before QueryContext's after-hook runs;
-// in that case the callback is invoked immediately instead of being lost.
+// OtelTrackRows synchronizes callbacks with iteration and closure, including
+// cancellation that closes Rows before the query after-hook runs.
 func (rs *Rows) OtelTrackRows(onNext func(), onClose func(error)) {
 	rs.closemu.Lock()
 	if rs.closed {
@@ -21,9 +20,8 @@ func (rs *Rows) OtelTrackRows(onNext func(), onClose func(error)) {
 	rs.closemu.Unlock()
 }
 
-// otelEndRows runs after close has released closemu. Clear the callbacks while
-// holding the write lock, so repeated/concurrent closes emit once and no row
-// increment is still in flight. Exporters run only after the lock is released.
+// otelEndRows runs after close releases closemu. Detach callbacks under the write
+// lock for exactly-once emission; invoke exporters outside the lock.
 func (rs *Rows) otelEndRows() {
 	rs.closemu.Lock()
 	onClose := rs.otelRowsClose

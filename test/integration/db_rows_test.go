@@ -6,6 +6,7 @@
 package test
 
 import (
+	"strconv"
 	"testing"
 	"time"
 
@@ -67,7 +68,13 @@ func TestDBRows(t *testing.T) {
 	} {
 		t.Run(scenario.mode, func(t *testing.T) {
 			fixture := testutil.NewTestFixture(t)
-			fixture.Run("dbrows", "-mode="+scenario.mode)
+			if scenario.mode == "cancel" {
+				// Cancellation closes rows in the background; collect before process exit.
+				fixture.Start("dbrows", "-mode=cancel", "-wait")
+				fixture.WaitForSpans(4)
+			} else {
+				fixture.Run("dbrows", "-mode="+scenario.mode)
+			}
 			rows := testutil.RequireSpan(t, fixture.Traces(), testutil.HasName("sql.rows"))
 			testutil.RequireAttribute(t, rows, "db.response.returned_rows", scenario.count)
 			require.Equal(t, 1, countRowsSpans(fixture.Traces()), "must finish exactly once")
@@ -83,8 +90,15 @@ func TestDBRows(t *testing.T) {
 	for _, mode := range []string{"race", "cancel-before-return", "concurrent"} {
 		t.Run(mode, func(t *testing.T) {
 			fixture := testutil.NewTestFixture(t)
-			fixture.Run("dbrows", "-mode="+mode, "-repeat=64")
-			require.Equal(t, 64, countRowsSpans(fixture.Traces()))
+			const repeat = 64
+			args := []string{"-mode=" + mode, "-repeat=" + strconv.Itoa(repeat)}
+			if mode == "concurrent" {
+				fixture.Run("dbrows", args...)
+			} else {
+				fixture.Start("dbrows", append(args, "-wait")...)
+				fixture.WaitForSpans(2*repeat + 2)
+			}
+			require.Equal(t, repeat, countRowsSpans(fixture.Traces()))
 			querySpans := make(map[string]bool)
 			for _, span := range testutil.AllSpans(fixture.Traces()) {
 				if span.Name() == "SELECT" {

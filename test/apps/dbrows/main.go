@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"sync"
 	"time"
 
@@ -22,7 +23,7 @@ type queryRows func(context.Context) (*sql.Rows, error)
 
 func queryFor(ctx context.Context, database *sql.DB, endpoint string) (queryRows, func() error, error) {
 	switch endpoint {
-	case "db", "row":
+	case "db":
 		return func(ctx context.Context) (*sql.Rows, error) {
 			return database.QueryContext(ctx, selectRows)
 		}, func() error { return nil }, nil
@@ -202,9 +203,15 @@ func main() {
 	mode := flag.String("mode", "delayed", "rows lifecycle scenario")
 	endpoint := flag.String("endpoint", "db", "query entry point")
 	repeat := flag.Int("repeat", 1, "number of queries")
+	wait := flag.Bool("wait", false, "wait for interrupt after queries finish")
 	flag.Parse()
 	if err := run(*mode, *endpoint, *repeat); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+	if *wait {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer stop()
+		<-ctx.Done()
 	}
 }

@@ -26,12 +26,9 @@ func TestHTTPServerDBClient(t *testing.T) {
 
 	f.BuildAndRun("httpclient", "-addr", addr, "-name", "test")
 
-	// BuildAndRun returns once the client exits, but the server span ends after
-	// the response is written, so it may still be in flight. Wait for all four.
+	// The client can exit before the server span ends.
 	f.WaitForSpans(4)
 
-	// One distributed trace with four spans:
-	// HTTP client -> HTTP server -> SQL client -> SQL rows
 	f.RequireTraceCount(1)
 	f.RequireSpansPerTrace(4)
 

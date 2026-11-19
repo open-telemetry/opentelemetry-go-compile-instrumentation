@@ -42,13 +42,8 @@ func TestGRPCServerDBClient(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "frontend querying database", resp.GetMessage())
 
-	// Wait for the spans to be flushed
 	f.WaitForSpans(3)
 
-	// We expect exactly 1 trace with 3 spans:
-	// 1. gRPC server (Frontend)
-	// 2. SQL client (Frontend -> Database)
-	// 3. SQL rows consumption (child of the query)
 	f.RequireTraceCount(1)
 	f.RequireSpansPerTrace(3)
 

@@ -23,18 +23,14 @@ func instrumentQueryEnd(ictx hook.HookContext, rows *sql.Rows, err error) {
 		return
 	}
 
-	// Keep causality without retaining the caller's context or making Rows the
-	// implicit parent of unrelated work. The child intentionally outlives SELECT.
+	// Retain the query's span context, not the caller's context.
 	ctx := trace.ContextWithSpanContext(context.Background(), state.span.SpanContext())
 	start := time.Now()
 	attrs := semconv.DbClientRequestTraceAttrs(state.req)
-	// Next runs under closemu; closure waits for it and prevents further reads.
 	var count int64
 	rows.OtelTrackRows(func() { count++ }, func(closeErr error) {
 		end := time.Now()
-		// Delay span creation until closure, with the observed timestamps. This
-		// avoids an active GLS span between reads and no span leaks if Rows is
-		// abandoned. The original query span has already ended.
+		// Creating the span at closure avoids changing the implicit GLS parent between reads.
 		_, span := tracer.Start(ctx, "sql.rows",
 			trace.WithSpanKind(trace.SpanKindInternal),
 			trace.WithTimestamp(start),
