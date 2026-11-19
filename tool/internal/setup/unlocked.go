@@ -47,9 +47,9 @@ func canBuildUnlocked(ctx context.Context, cmd *cli.Command, vendored bool) bool
 	flags := slices.Concat(goflags, args[1:])
 	for _, arg := range classifyArgs(args[0], flags) {
 		switch arg.FlagName {
-		case "-overlay", "-modfile":
+		case flagOverlay, flagModfile:
 			return false
-		case "-mod":
+		case flagMod:
 			if (arg.HasValue || arg.Kind == ArgBuildFlagValue) && arg.Value != "readonly" {
 				return false
 			}

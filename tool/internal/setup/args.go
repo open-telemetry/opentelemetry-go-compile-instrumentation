@@ -53,7 +53,7 @@ func isBuildFlagWithValue(name string) bool {
 	case "-C", "-o", "-p", "-covermode", "-coverpkg",
 		"-asmflags", "-buildmode", "-compiler",
 		"-gccgoflags", flagGcflags, "-installsuffix", "-ldflags",
-		"-mod", "-modfile", "-overlay", "-pgo", "-pkgdir",
+		flagMod, flagModfile, flagOverlay, "-pgo", "-pkgdir",
 		"-tags", "-toolexec":
 		return true
 	default:
@@ -131,7 +131,7 @@ func isTestAliasBoolFlag(name string) bool {
 // isBuildContextFlagWithValue reports whether name affects the build context and takes a value.
 func isBuildContextFlagWithValue(name string) bool {
 	switch name {
-	case "-C", "-overlay", "-tags", "-mod", "-modfile", flagGcflags, "-covermode", flagCoverpkg:
+	case "-C", flagOverlay, "-tags", flagMod, flagModfile, flagGcflags, "-covermode", flagCoverpkg:
 		return true
 	default:
 		return false

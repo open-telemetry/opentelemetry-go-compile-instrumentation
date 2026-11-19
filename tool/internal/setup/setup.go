@@ -118,6 +118,8 @@ const (
 	goModFileName = "go.mod"
 	vendorDirName = "vendor"
 	flagMod       = "-mod"
+	flagModfile   = "-modfile"
+	flagOverlay   = "-overlay"
 )
 
 // Go command flags that the argument scanners treat specially.
