@@ -229,6 +229,33 @@ func TestGetBuildTempPaths(t *testing.T) {
 	assert.Equal(t, want, GetAddedImportsFileForProcess())
 }
 
+func TestInvocationPaths(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(EnvOtelcWorkDir, workDir)
+	t.Setenv(EnvOtelcSessionDir, "")
+	for _, invocation := range []string{"", t.TempDir()} {
+		t.Setenv(EnvOtelcInvocationDir, invocation)
+		base := invocation
+		if base == "" {
+			base = filepath.Join(workDir, BuildTempDir)
+		}
+		assert.Equal(t, base, GetInvocationDir())
+		assert.Equal(t, filepath.Join(base, "file.go"), GetInvocationTemp("file.go"))
+		for name, getter := range map[string]func() string{
+			"matched.json":      GetMatchedRuleFile,
+			"import_names.json": GetImportNamesFile,
+			"pgo_profile":       GetPGOProfileFile,
+			"injected_hash":     GetInjectedHashFile,
+			"resolution_scope":  GetResolutionScopeFile,
+			"setup_generation":  GetSetupGenerationFile,
+			SessionTempDir:      GetSessionDir,
+			fmt.Sprintf("added_imports.%d.json", os.Getpid()): GetAddedImportsFileForProcess,
+		} {
+			assert.Equal(t, filepath.Join(base, name), getter())
+		}
+	}
+}
+
 func TestEncodeBuildFlagsEmpty(t *testing.T) {
 	assert.Empty(t, EncodeBuildFlags(nil))
 	assert.Empty(t, EncodeBuildFlags([]string{}))

@@ -6,6 +6,8 @@ package setup
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -73,6 +75,120 @@ func TestCanBuildUnlocked(t *testing.T) {
 			require.NoError(t, cmd.Run(ctx, append([]string{"otelc"}, test.args...)))
 		})
 	}
+}
+
+func TestGoBuildSnapshotLifecycle(t *testing.T) {
+	for _, test := range []struct {
+		name                                string
+		unlocked, failCompile, failSnapshot bool
+	}{
+		{name: "unlocked", unlocked: true},
+		{name: "compile failure", unlocked: true, failCompile: true},
+		{name: "snapshot failure", unlocked: true, failSnapshot: true},
+		{name: "locked"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			clearNestedBuildEnv(t)
+			root := t.TempDir()
+			t.Chdir(root)
+			t.Setenv(util.EnvOtelcWorkDir, root)
+			t.Setenv(util.EnvOtelcInvocationDir, "")
+			t.Setenv(util.EnvOtelcSessionDir, "")
+			t.Setenv(util.EnvOtelcStats, "1")
+			t.Setenv(envUnlockedCompile, "")
+			if test.unlocked {
+				t.Setenv(envUnlockedCompile, "1")
+			}
+			const goMod = "module example.com/lifecycle\n\ngo 1.26.0\n"
+			mustWriteFile(t, "go.mod", goMod)
+			mustWriteFile(t, "main.go", "package main\nfunc main() {}\n")
+			if test.failSnapshot {
+				file := filepath.Join(root, "invalid-temp")
+				mustWriteFile(t, file, "x")
+				t.Setenv("TMPDIR", file)
+				t.Setenv("TMP", file)
+				t.Setenv("TEMP", file)
+			}
+			compileFailure := errors.New("compiler failed")
+			original := runBuildCmd
+			t.Cleanup(func() { runBuildCmd = original })
+			called := false
+			var invocation string
+			runBuildCmd = func(_ context.Context, env []string, args ...string) error {
+				called = true
+				invocation = os.Getenv(util.EnvOtelcInvocationDir)
+				if test.unlocked {
+					require.DirExists(t, invocation)
+					assert.Contains(t, args, "-mod=readonly")
+					assert.Contains(t, args, "-overlay="+filepath.Join(invocation, "overlay.json"))
+					assert.Contains(t, env, util.EnvOtelcInvocationDir+"="+invocation)
+					module, readErr := os.ReadFile("go.mod")
+					require.NoError(t, readErr)
+					assert.Equal(t, goMod, string(module), "module must be restored before compilation")
+				}
+				if test.failCompile {
+					return compileFailure
+				}
+				return nil
+			}
+			cmd := &cli.Command{Name: "go", SkipFlagParsing: true, Action: GoBuild}
+			ctx := util.ContextWithLogger(t.Context(), slog.New(slog.DiscardHandler))
+			err := cmd.Run(ctx, []string{"otelc", "build", "."})
+			if test.failSnapshot {
+				require.Error(t, err)
+				assert.False(t, called, "failed snapshot must not reach compilation")
+				return
+			}
+			if test.failCompile {
+				require.ErrorIs(t, err, compileFailure)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.True(t, called)
+			assert.Empty(t, os.Getenv(util.EnvOtelcInvocationDir))
+			if test.unlocked {
+				assert.NoDirExists(t, invocation)
+			}
+			module, readErr := os.ReadFile("go.mod")
+			require.NoError(t, readErr)
+			assert.Equal(t, goMod, string(module))
+		})
+	}
+}
+
+func TestSnapshotFilesystemErrors(t *testing.T) {
+	t.Run("temporary directory", func(t *testing.T) {
+		file := filepath.Join(t.TempDir(), "not-a-directory")
+		mustWriteFile(t, file, "x")
+		t.Setenv("TMPDIR", file)
+		t.Setenv("TMP", file)
+		t.Setenv("TEMP", file)
+		snapshot, err := newSetupSnapshot()
+		require.Error(t, err)
+		assert.Nil(t, snapshot)
+	})
+	t.Run("stat", func(t *testing.T) {
+		file := filepath.Join(t.TempDir(), "not-a-directory")
+		mustWriteFile(t, file, "x")
+		state := newStateManager()
+		state.files[filepath.Join(file, "source.go")] = true
+		snapshot := &setupSnapshot{invocationDir: t.TempDir()}
+		require.Error(t, snapshot.writeOverlay(state))
+	})
+	t.Run("copy", func(t *testing.T) {
+		root := t.TempDir()
+		source := filepath.Join(root, "source.go")
+		mustWriteFile(t, source, "package main")
+		mustWriteFile(t, filepath.Join(root, "overlay"), "not-a-directory")
+		state := newStateManager()
+		state.files[source] = true
+		snapshot := &setupSnapshot{invocationDir: root}
+		require.Error(t, snapshot.writeOverlay(state))
+	})
+	t.Run("write overlay", func(t *testing.T) {
+		snapshot := &setupSnapshot{overlayFile: t.TempDir()}
+		require.Error(t, snapshot.writeOverlay(newStateManager()))
+	})
 }
 
 func TestUnlockedGoCache(t *testing.T) {
