@@ -218,7 +218,7 @@ func TestGetBackupFiles(t *testing.T) {
 
 			moduleDir := tt.setup(t, tmp)
 
-			files, err := getBackupFiles(t.Context(), []string{
+			files, err := getBackupFiles(t.Context(), "", []string{
 				moduleDir,
 			})
 
@@ -226,6 +226,40 @@ func TestGetBackupFiles(t *testing.T) {
 			require.ElementsMatch(t, tt.wantFiles(tmp, moduleDir), files)
 		})
 	}
+}
+
+// TestGetBackupFilesUsesBuildDirWorkspace covers go build -C: the go.work.sum to
+// back up belongs to the workspace of the build directory, not of otelc's own.
+func TestGetBackupFilesUsesBuildDirWorkspace(t *testing.T) {
+	tmp := t.TempDir()
+	workspace := filepath.Join(tmp, "ws")
+	moduleDir := filepath.Join(workspace, "mod")
+	mustWriteFile(t, filepath.Join(moduleDir, "go.mod"), "module example.com")
+	mustWriteFile(t, filepath.Join(workspace, "go.work"), "go 1.24")
+	mustWriteFile(t, filepath.Join(workspace, "go.work.sum"), "worksum")
+
+	elsewhere := filepath.Join(tmp, "elsewhere")
+	require.NoError(t, os.MkdirAll(elsewhere, 0o755))
+	t.Chdir(elsewhere)
+
+	want, err := os.Stat(filepath.Join(workspace, "go.work.sum"))
+	require.NoError(t, err)
+	tracksWorkSum := func(files []string) bool {
+		for _, f := range files {
+			if got, statErr := os.Stat(f); statErr == nil && os.SameFile(want, got) {
+				return true
+			}
+		}
+		return false
+	}
+
+	files, err := getBackupFiles(t.Context(), moduleDir, []string{moduleDir})
+	require.NoError(t, err)
+	assert.True(t, tracksWorkSum(files), "go.work.sum of the -C workspace is not backed up: %v", files)
+
+	files, err = getBackupFiles(t.Context(), "", []string{moduleDir})
+	require.NoError(t, err)
+	assert.False(t, tracksWorkSum(files), "go.work.sum of an unrelated workspace is backed up: %v", files)
 }
 
 func TestStateSnapshotPath(t *testing.T) {
@@ -482,7 +516,7 @@ func TestGetBackupFiles_DeterministicOrder(t *testing.T) {
 
 	var firstResult []string
 	for range 20 {
-		files, err := getBackupFiles(t.Context(), moduleDirs)
+		files, err := getBackupFiles(t.Context(), "", moduleDirs)
 		require.NoError(t, err)
 
 		if firstResult == nil {

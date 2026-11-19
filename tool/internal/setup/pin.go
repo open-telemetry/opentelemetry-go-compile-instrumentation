@@ -686,7 +686,7 @@ func autoPin(ctx context.Context, moduleDirs []string, subcommand string, args [
 		return nil, ex.New("state manager not found in context")
 	}
 
-	backupFiles, getBackupErr := getBackupFiles(ctx, moduleDirs)
+	backupFiles, getBackupErr := getBackupFiles(ctx, buildDir(subcommand, args), moduleDirs)
 	if getBackupErr != nil {
 		return nil, getBackupErr
 	}

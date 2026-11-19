@@ -24,9 +24,10 @@ type DatabaseSqlRequest struct {
 }
 
 // OperationName returns the uppercased first token of a SQL statement for use
-// as db.operation.name. Empty or whitespace-only input returns "".
+// as db.operation.name. Leading comments are skipped. Empty, whitespace-only
+// or comment-only input returns "".
 func OperationName(query string) string {
-	trimmed := strings.TrimSpace(query)
+	trimmed := skipLeadingComments(query)
 	if trimmed == "" {
 		return ""
 	}
@@ -36,6 +37,33 @@ func OperationName(query string) string {
 		trimmed = trimmed[:i]
 	}
 	return strings.ToUpper(trimmed)
+}
+
+// skipLeadingComments trims leading whitespace and any "--" line comments and
+// "/* */" block comments before the first token, such as the "-- name: ..."
+// line that sqlc puts at the start of every generated query. An unterminated
+// comment leaves nothing. Block comments do not nest, and MySQL executable
+// comments ("/*! ... */") are skipped like any other block comment.
+func skipLeadingComments(query string) string {
+	s := strings.TrimSpace(query)
+	for {
+		switch {
+		case strings.HasPrefix(s, "--"):
+			end := strings.IndexAny(s, "\r\n")
+			if end < 0 {
+				return ""
+			}
+			s = strings.TrimSpace(s[end+1:])
+		case strings.HasPrefix(s, "/*"):
+			end := strings.Index(s[2:], "*/")
+			if end < 0 {
+				return ""
+			}
+			s = strings.TrimSpace(s[2+end+2:])
+		default:
+			return s
+		}
+	}
 }
 
 func DbClientRequestTraceAttrs(req DatabaseSqlRequest) []attribute.KeyValue {

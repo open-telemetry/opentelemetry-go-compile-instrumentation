@@ -26,6 +26,7 @@ func TestGeminiClient(t *testing.T) {
 	testCases := []struct {
 		name           string
 		model          string
+		stream         bool
 		thoughtsTokens int64
 		// wantOutputTokens is candidatesTokenCount plus any thinking tokens,
 		// which Gemini reports separately but bills and generates as output.
@@ -45,6 +46,16 @@ func TestGeminiClient(t *testing.T) {
 			wantOutputTokens: 27,
 			wantTotalTokens:  37,
 		},
+		{
+			// The span stays open for the whole stream and takes usage from
+			// the last event, where the running totals are complete.
+			name:             "stream_generate_content",
+			model:            "gemini-2.5-flash",
+			stream:           true,
+			thoughtsTokens:   7,
+			wantOutputTokens: 27,
+			wantTotalTokens:  37,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -56,6 +67,7 @@ func TestGeminiClient(t *testing.T) {
 				fmt.Sprintf("-addr=%s", server.URL),
 				"-api-key=test-key",
 				fmt.Sprintf("-model=%s", tc.model),
+				fmt.Sprintf("-stream=%t", tc.stream),
 			)
 
 			span := f.RequireSingleSpan()
@@ -84,19 +96,25 @@ func TestGeminiClient(t *testing.T) {
 			// Generation parameters come from the request body, which the
 			// instrumentation replays via Request.GetBody rather than consuming.
 			testutil.RequireAttribute(t, span, "gen_ai.request.max_tokens", int64(64))
+			if tc.stream {
+				testutil.RequireAttribute(t, span, "gen_ai.request.is_stream", true)
+			}
 		})
 	}
 }
 
-// startMockGeminiServer creates a mock Gemini generateContent endpoint. A
-// non-zero thoughtsTokens value exercises the thinking-token path, where the
-// model's reasoning tokens are reported apart from candidatesTokenCount.
+// startMockGeminiServer creates a mock Gemini generateContent and
+// streamGenerateContent endpoint. A non-zero thoughtsTokens value exercises the
+// thinking-token path, where the model's reasoning tokens are reported apart
+// from candidatesTokenCount.
 func startMockGeminiServer(t *testing.T, thoughtsTokens int64) *httptest.Server {
 	t.Helper()
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
-		// Both backends address the model as ".../<model>:generateContent".
-		if !strings.HasSuffix(r.URL.Path, ":generateContent") {
+		// Both backends address the model as ".../<model>:generateContent",
+		// or ".../<model>:streamGenerateContent" when streaming.
+		streaming := strings.HasSuffix(r.URL.Path, ":streamGenerateContent")
+		if !streaming && !strings.HasSuffix(r.URL.Path, ":generateContent") {
 			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
 			return
 		}
@@ -129,6 +147,11 @@ func startMockGeminiServer(t *testing.T, thoughtsTokens int64) *httptest.Server 
 			usage["totalTokenCount"] = 30 + thoughtsTokens
 		}
 
+		if streaming {
+			writeGeminiStream(t, w, model, usage)
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		resp := map[string]any{
 			"candidates": []map[string]any{
@@ -153,4 +176,49 @@ func startMockGeminiServer(t *testing.T, thoughtsTokens int64) *httptest.Server 
 	t.Cleanup(server.Close)
 
 	return server
+}
+
+// writeGeminiStream answers a streamGenerateContent call the way the API does
+// with alt=sse: one GenerateContentResponse per event, usage as running totals,
+// and the finish reason and final usage on the last event.
+func writeGeminiStream(t *testing.T, w http.ResponseWriter, model string, usage map[string]any) {
+	t.Helper()
+
+	events := []map[string]any{
+		{
+			"candidates": []map[string]any{
+				{"content": map[string]any{"role": "model", "parts": []map[string]any{{"text": "Hi"}}}},
+			},
+			"modelVersion":  model + "-001",
+			"responseId":    "resp-test-123",
+			"usageMetadata": map[string]any{"promptTokenCount": 10, "candidatesTokenCount": 1, "totalTokenCount": 11},
+		},
+		{
+			"candidates": []map[string]any{
+				{
+					"content":      map[string]any{"role": "model", "parts": []map[string]any{{"text": " there!"}}},
+					"finishReason": "STOP",
+				},
+			},
+			"modelVersion":  model + "-001",
+			"responseId":    "resp-test-123",
+			"usageMetadata": usage,
+		},
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	for _, event := range events {
+		data, err := json.Marshal(event)
+		if err != nil {
+			t.Errorf("failed to encode stream event: %v", err)
+			return
+		}
+		if _, err = fmt.Fprintf(w, "data: %s\r\n\r\n", data); err != nil {
+			t.Errorf("failed to write stream event: %v", err)
+			return
+		}
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+	}
 }

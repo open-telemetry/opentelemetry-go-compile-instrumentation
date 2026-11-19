@@ -24,7 +24,7 @@ func cleanupOwnedSession() error {
 	if os.Getenv(util.EnvOtelcSessionDir) != "" {
 		return nil
 	}
-	return os.RemoveAll(util.GetBuildTemp(util.SessionTempDir))
+	return os.RemoveAll(util.GetInvocationTemp(util.SessionTempDir))
 }
 
 // sessionEnv adds the session directory to the env of the go command an
@@ -34,7 +34,7 @@ func sessionEnv(env []string) []string {
 	if os.Getenv(util.EnvOtelcSessionDir) != "" {
 		return env
 	}
-	return append(env, util.EnvOtelcSessionDir+"="+util.GetBuildTemp(util.SessionTempDir))
+	return append(env, util.EnvOtelcSessionDir+"="+util.GetInvocationTemp(util.SessionTempDir))
 }
 
 // writeResolutionScope records the digest that scopes the export memo: the

@@ -95,7 +95,10 @@ func stateManagerFromContext(ctx context.Context) (*stateManager, bool) {
 	return s, true
 }
 
-func getBackupFiles(ctx context.Context, moduleDirs []string) ([]string, error) {
+// getBackupFiles lists the files setup may rewrite for the modules in moduleDirs
+// and for the go.work.sum of the workspace that dir belongs to. dir is the
+// directory the go command builds in (see buildDir), "" for the current one.
+func getBackupFiles(ctx context.Context, dir string, moduleDirs []string) ([]string, error) {
 	var files []string
 
 	dirs := normalizeModuleDirs(moduleDirs)
@@ -123,6 +126,7 @@ func getBackupFiles(ctx context.Context, moduleDirs []string) ([]string, error) 
 
 	// Find go.work.sum if go.work exists
 	goWorkCmd := exec.CommandContext(ctx, "go", "env", "GOWORK")
+	goWorkCmd.Dir = dir
 	goWorkOutput, err := goWorkCmd.Output()
 	if err != nil {
 		return nil, ex.Wrapf(err, "failed to get GOWORK environment variable")

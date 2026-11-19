@@ -287,6 +287,47 @@ func loadExportClosures(ctx context.Context, importPaths []string, buildFlags ..
 	return &exportClosures{closures: closures, partial: partial, failed: failed}, nil
 }
 
+// IsDeterministicLoadFailure reports whether err is a load failure that go
+// list reports the same way for the rest of the session: the package does not
+// exist, or no file of it builds for this target. Any other failure, compiler
+// errors included, may not repeat.
+//
+// The error kind cannot tell the two apart: go/packages reports a failed
+// nested compile as a ListError too, the same kind as a missing package. The
+// messages cmd/go and this package use for the deterministic cases can.
+func IsDeterministicLoadFailure(err error) bool {
+	msg := err.Error()
+	for _, pattern := range deterministicFailurePatterns() {
+		if strings.Contains(msg, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsLoadFailure reports whether err means a requested package could not be
+// loaded, rather than that the loader itself could not run.
+func IsLoadFailure(err error) bool {
+	return IsDeterministicLoadFailure(err) || strings.Contains(err.Error(), "no packages found")
+}
+
+// deterministicFailurePatterns are the messages of the failures
+// IsDeterministicLoadFailure reports.
+func deterministicFailurePatterns() []string {
+	return []string{
+		"no required module provides package",
+		"updates to go.mod needed",
+		"cannot find module providing package",
+		"cannot find package",
+		"is not in std",
+		"is not in GOROOT",
+		"malformed import path",
+		"build constraints exclude all Go files",
+		"no Go files in",
+		"has no export file",
+	}
+}
+
 // CollectPackageNames walks pkgs and their transitive imports, mapping
 // each import path to its declared package name. Load pkgs with
 // packages.NeedImports and packages.NeedDeps, or the walk finds no

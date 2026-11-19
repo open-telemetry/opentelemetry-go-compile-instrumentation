@@ -3001,3 +3001,46 @@ func BenchmarkSortMatchedRuleSets(b *testing.B) {
 		}
 	}
 }
+
+func TestLoadRules_LogsSource(t *testing.T) {
+	rules := writeCustomRules(t, "r.yaml", `h1:
+  target: main
+  func: Example
+  raw: "_ = 1"`)
+
+	tests := []struct {
+		name       string
+		env        string
+		ruleConfig string
+		want       []string
+	}{
+		{
+			name: "environment variable",
+			env:  rules,
+			want: []string{"rules source: environment variable", util.EnvOtelcRules, rules},
+		},
+		{
+			name:       "rule config",
+			ruleConfig: rules,
+			want:       []string{"rules source: ruleConfig", rules},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(util.EnvOtelcRules, tt.env)
+
+			var logs bytes.Buffer
+			sp := &setupPhase{
+				logger: slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
+			}
+			sp.ruleConfig = tt.ruleConfig
+
+			_, err := sp.loadRules(t.Context(), nil)
+			require.NoError(t, err)
+			for _, w := range tt.want {
+				assert.Contains(t, logs.String(), w)
+			}
+			assert.NotContains(t, logs.String(), "!BADKEY")
+		})
+	}
+}

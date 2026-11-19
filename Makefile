@@ -4,6 +4,8 @@
 # Use bash for all shell commands (required for pipefail and other bash features)
 SHELL := /bin/bash
 
+export GOEXPERIMENT ?= $(shell go env GOEXPERIMENT)
+
 # Many recipes use .ONESHELL, so that "set -euo pipefail" applies to all the
 # lines of the recipe. GNU Make 3.81 (the default on macOS) does not support
 # .ONESHELL: it runs each line in a different shell, and failures can be
@@ -120,7 +122,7 @@ checkmake: $(CHECKMAKE) ## Build checkmake from .tools
 
 # Dynamic variables
 GOOS ?= $(shell go env GOOS)
-VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+VERSION := $(shell git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo "v0.0.0")
 COMMIT_HASH := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME := $(shell date -u '+%Y-%m-%d')
 MODULE_PATH = go.opentelemetry.io/otelc

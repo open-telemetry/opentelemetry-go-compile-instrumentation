@@ -8,8 +8,9 @@ groups:
   #
   # The genai instrumentation is trace-only: it wraps the transport of the HTTP
   # client the SDK issues requests through and creates one client span per
-  # non-streaming generateContent call (`gen_ai.operation.name` = `chat`). It
-  # records no metrics. `countTokens`, `embedContent` and the remaining model
+  # generateContent or streamGenerateContent call (`gen_ai.operation.name` =
+  # `chat`). A streaming span stays open until the stream finishes. It records
+  # no metrics. `countTokens`, `embedContent` and the remaining model
   # RPCs are not instrumented.
   #
   # Every attribute below is a standard upstream OpenTelemetry GenAI attribute,
@@ -32,10 +33,14 @@ groups:
   #     present and is otherwise derived (input + output).
   #   - `gen_ai.request.*` attributes come from the request's `generationConfig`
   #     and are absent when the caller sets no generation config.
+  #   - `gen_ai.request.is_stream` is set on streamGenerateContent calls, and on
+  #     the defensive path where a generateContent response arrives as SSE.
+  #   - On a streaming call, usage comes from the latest event (Gemini reports
+  #     running totals) and each candidate's finish reason from the event that
+  #     ends it.
   #   - `gen_ai.response.*` attributes are absent on error responses, on
-  #     responses larger than the 4 MB parse cap, and on server-sent-event
-  #     responses, which are passed through without accumulation.
-  #     `gen_ai.request.is_stream` is set only on that defensive SSE path.
+  #     responses larger than the 4 MB parse cap, and on the defensive SSE
+  #     path, which is passed through without accumulation.
   #   - `server.address` and `server.port` come from the request URL.
   # ---------------------------------------------------------------------------
 
@@ -43,7 +48,7 @@ groups:
     type: span
     span_kind: client
     stability: development
-    brief: Gemini client span, one per generateContent call.
+    brief: Gemini client span, one per generateContent or streamGenerateContent call.
     attributes:
       - ref: gen_ai.system
       - ref: gen_ai.provider.name

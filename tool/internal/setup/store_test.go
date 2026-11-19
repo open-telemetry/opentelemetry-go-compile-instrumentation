@@ -346,23 +346,130 @@ func TestSetupPhaseInjectedHash(t *testing.T) {
 	require.ErrorContains(t, err, "added.go", "a missing add_file source must fail the hash")
 }
 
-func TestStoreInjectedHashFailsOnLoadError(t *testing.T) {
-	modDir := t.TempDir()
-	goMod := []byte("module example.com/m\n\ngo 1.25.0\n")
-	require.NoError(t, os.WriteFile(filepath.Join(modDir, "go.mod"), goMod, 0o644))
-	t.Chdir(modDir)
+// TestStoreInjectedHashSkipsUnloadableImports covers rule imports that do not
+// load from the main module: a package that does not exist, a package that
+// imports one that does not exist, and a package of a module that is in the
+// module graph but not in go.mod, which makes go list fail the whole load.
+// None can reach a compile, so the hash leaves them out instead of failing the
+// build.
+func TestStoreInjectedHashSkipsUnloadableImports(t *testing.T) {
+	root := t.TempDir()
+	writeFile := func(name, content string) {
+		t.Helper()
+		path := filepath.Join(root, name)
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+	}
+	// example.com/b is in the module graph through example.com/a only.
+	writeFile("b/go.mod", "module example.com/b\n\ngo 1.25.0\n")
+	writeFile("b/bp/bp.go", "package bp\n")
+	writeFile("a/go.mod", "module example.com/a\n\ngo 1.25.0\n\nrequire example.com/b v0.0.0\n")
+	writeFile("a/a.go", "package a\n")
+	writeFile("m/go.mod", "module example.com/m\n\ngo 1.25.0\n\nrequire example.com/a v0.0.0\n\n"+
+		"replace example.com/a => ../a\n\nreplace example.com/b => ../b\n")
+	writeFile("m/m.go", "package m\n\nimport _ \"example.com/a\"\n")
+	writeFile("m/extra/extra.go", "package extra\n\nconst Tag = \"v1\"\n")
+	writeFile("m/uses/uses.go", "package uses\n\nimport _ \"example.com/m/gone\"\n")
+	t.Chdir(filepath.Join(root, "m"))
 	workDir := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, workDir)
 	require.NoError(t, os.MkdirAll(filepath.Join(workDir, util.BuildTempDir), 0o755))
 
 	set := rule.NewInstRuleSet("example.com/m/dep")
 	set.AddCallRule(fakeSrcFile("dep.go"), &rule.InstCallRule{
-		InstBaseRule: rule.InstBaseRule{Imports: map[string]string{"missing": "example.com/m/missing"}},
+		InstBaseRule: rule.InstBaseRule{Imports: map[string]string{
+			"extra":   "example.com/m/extra",
+			"missing": "example.com/m/missing",
+			"uses":    "example.com/m/uses",
+			"bp":      "example.com/b/bp",
+		}},
+	})
+	matched := []*rule.InstRuleSet{set}
+
+	sp := newTestSetupPhase()
+	require.NoError(t, sp.storeInjectedHash(t.Context(), matched))
+	stored, err := os.ReadFile(util.GetInjectedHashFile())
+	require.NoError(t, err)
+	first := string(stored)
+
+	hash := func() string {
+		t.Helper()
+		h, hashErr := sp.injectedHash(t.Context(), matched)
+		require.NoError(t, hashErr)
+		return h
+	}
+	assert.Equal(t, first, hash(), "an unchanged build must keep its hash")
+
+	writeFile("m/extra/extra.go", "package extra\n\nconst Tag = \"v2\"\n")
+	second := hash()
+	assert.NotEqual(t, first, second, "the imports that load must still be hashed")
+
+	writeFile("m/missing/missing.go", "package missing\n")
+	third := hash()
+	assert.NotEqual(t, second, third, "an import that starts to load must change the hash")
+
+	writeFile("m/gone/gone.go", "package gone\n")
+	assert.NotEqual(t, third, hash(), "an import whose dependency starts to load must change the hash")
+}
+
+// TestLoadInjectedPackagesReturnsOtherErrors covers a load that fails for a
+// reason other than a package that does not load: the error is returned.
+func TestLoadInjectedPackagesReturnsOtherErrors(t *testing.T) {
+	sp := newTestSetupPhase()
+	sp.buildFlags = []string{"-C", filepath.Join(t.TempDir(), "missing")}
+
+	_, _, err := sp.loadInjectedPackages(t.Context(), []string{"example.com/a", "example.com/b"})
+	require.Error(t, err)
+}
+
+func TestIsLoadFailureChecksKind(t *testing.T) {
+	msg := "no Go files in /tmp/p"
+	assert.True(t, isLoadFailure(packages.Error{Msg: msg, Kind: packages.ListError}))
+	assert.True(t, isLoadFailure(packages.Error{Msg: msg, Kind: packages.UnknownError}))
+	assert.False(t, isLoadFailure(packages.Error{Msg: msg, Kind: packages.ParseError}))
+	assert.False(t, isLoadFailure(packages.Error{Msg: msg, Kind: packages.TypeError}))
+	assert.False(t, isLoadFailure(packages.Error{Msg: "expected 'IDENT', found 'EOF'", Kind: packages.ListError}))
+}
+
+func TestInjectedHashFailsOnBrokenImport(t *testing.T) {
+	modDir := t.TempDir()
+	goMod := []byte("module example.com/m\n\ngo 1.25.0\n")
+	require.NoError(t, os.WriteFile(filepath.Join(modDir, "go.mod"), goMod, 0o644))
+	brokenDir := filepath.Join(modDir, "broken")
+	require.NoError(t, os.MkdirAll(brokenDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(brokenDir, "broken.go"), []byte("package\n"), 0o644))
+	t.Chdir(modDir)
+
+	set := rule.NewInstRuleSet("example.com/m/dep")
+	set.AddCallRule(fakeSrcFile("dep.go"), &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Imports: map[string]string{"broken": "example.com/m/broken"}},
 	})
 
-	err := newTestSetupPhase().storeInjectedHash(t.Context(), []*rule.InstRuleSet{set})
-	require.ErrorContains(t, err, "example.com/m/missing")
-	assert.NoFileExists(t, util.GetInjectedHashFile(), "an incomplete hash must not be stored")
+	_, err := newTestSetupPhase().injectedHash(t.Context(), []*rule.InstRuleSet{set})
+	require.ErrorContains(t, err, "example.com/m/broken",
+		"an import that exists but does not parse must fail the hash")
+}
+
+func TestHashPackagesInvocationIndependent(t *testing.T) {
+	goroot := t.TempDir()
+	hashIn := func(directory, name, content string) string {
+		t.Helper()
+		t.Setenv(util.EnvOtelcInvocationDir, directory)
+		file := filepath.Join(directory, "pkg", "hooks", name)
+		mustWriteFile(t, file, content)
+		pkg := &packages.Package{
+			PkgPath: "example.com/hooks",
+			Module:  &packages.Module{Path: "example.com/hooks", GoVersion: "1.26"},
+			GoFiles: []string{file},
+		}
+		var result strings.Builder
+		require.NoError(t, hashPackages(&result, goroot, []*packages.Package{pkg}))
+		return result.String()
+	}
+	first := hashIn(t.TempDir(), "hook.go", "package hooks\n")
+	assert.Equal(t, first, hashIn(t.TempDir(), "hook.go", "package hooks\n"))
+	assert.NotEqual(t, first, hashIn(t.TempDir(), "hook.go", "package hooks\nconst Version = 2\n"))
+	assert.NotEqual(t, first, hashIn(t.TempDir(), "other.go", "package hooks\n"))
 }
 
 func TestHashPackages(t *testing.T) {

@@ -118,6 +118,8 @@ const (
 	goModFileName = "go.mod"
 	vendorDirName = "vendor"
 	flagMod       = "-mod"
+	flagModfile   = "-modfile"
+	flagOverlay   = "-overlay"
 )
 
 // Go command flags that the argument scanners treat specially.
@@ -138,10 +140,27 @@ const (
 	flagCoverpkg = "-coverpkg"
 )
 
+// isGoFileTarget reports whether a build target names a Go source file. The go
+// command takes an argument ending in .go for a file only when a file of that
+// name exists, and otherwise for a package path such as github.com/nats-io/nats.go
+// (golang.org/issue/34653). dir is the -C directory, see buildDir, which a
+// relative target is resolved against.
+func isGoFileTarget(dir, target string) bool {
+	if filepath.Ext(target) != ".go" {
+		return false
+	}
+	if dir != "" && !filepath.IsAbs(target) {
+		target = filepath.Join(dir, target)
+	}
+	info, err := os.Stat(target)
+	return err == nil && !info.IsDir()
+}
+
 func lastFileTargetIndex(subcommand string, args []string) int {
 	last := -1
+	dir := buildDir(subcommand, args)
 	for _, arg := range classifyArgs(subcommand, args) {
-		if arg.Kind == ArgTarget && filepath.Ext(arg.Raw) == ".go" {
+		if arg.Kind == ArgTarget && isGoFileTarget(dir, arg.Raw) {
 			last = arg.Index
 		}
 	}
@@ -265,6 +284,7 @@ func loadBuildPackages(
 func splitBuildTargets(subcommand string, args []string) ([]string, []string, error) {
 	classified := classifyArgs(subcommand, args)
 	var pkgs, files []string
+	changeDir := buildDir(subcommand, args)
 
 	for i, a := range classified {
 		if (a.Kind == ArgBuildFlag || a.Kind == ArgTestFlag) && !a.HasValue && takesValue(a.FlagName) {
@@ -275,7 +295,7 @@ func splitBuildTargets(subcommand string, args []string) ([]string, []string, er
 		}
 
 		if a.Kind == ArgTarget {
-			if filepath.Ext(a.Raw) == ".go" {
+			if isGoFileTarget(changeDir, a.Raw) {
 				files = append(files, a.Raw)
 			} else {
 				pkgs = append(pkgs, a.Raw)
@@ -671,7 +691,7 @@ func setupGoCache(ctx context.Context, env []string) ([]string, error) {
 	}
 
 	logger := util.LoggerFromContext(ctx)
-	cacheDir := util.GetBuildTemp("gocache")
+	cacheDir := util.GetInvocationTemp("gocache")
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
 		return nil, ex.Wrapf(err, "failed to create persistent GOCACHE")
 	}
@@ -904,7 +924,12 @@ func toolexecBuildArgs(args []string, execPath string, vendored bool, goFlags ..
 		// add otelc.runtime.go manually to command line for file targets
 		dir := filepath.Dir(fileTargets[0])
 		otelcRuntimePath := filepath.Join(dir, otelcRuntimeFile)
-		if util.PathExists(otelcRuntimePath) {
+		// File targets are relative to the -C directory when there is one.
+		onDisk := otelcRuntimePath
+		if base := buildDir(subcommand, restArgs); base != "" && !filepath.IsAbs(onDisk) {
+			onDisk = filepath.Join(base, onDisk)
+		}
+		if util.PathExists(onDisk) {
 			// Keep the runtime file next to the file targets. In go test,
 			// a file path after a flag is passed to the test binary instead.
 			insertAt := lastFileTargetIndex(subcommand, restArgs) + 1
@@ -951,7 +976,7 @@ func JSONOutputFromContext(ctx context.Context) bool {
 // passed in by GoBuild: Setup already forced GOFLAGS=-mod=mod, but a CLI
 // -mod=vendor beats GOFLAGS, so it still has to be neutralized in the build
 // args and forwarded flags below.
-func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) error {
+func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool, extraFlags ...string) error {
 	args := cmd.Args().Slice()
 	logger := util.LoggerFromContext(ctx)
 
@@ -970,6 +995,7 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 		// does over GOFLAGS.
 		goFlags = append(goFlags, flagJSON)
 	}
+	goFlags = append(goFlags, extraFlags...)
 	newArgs, err := toolexecBuildArgs(args, execPath, vendored, goFlags...)
 	if err != nil {
 		return err
@@ -999,6 +1025,7 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 		buildFlags = rewriteModVendor(subcommand, buildFlags)
 	}
 	buildFlags = append(buildFlags, nestedCoverFlags(util.SplitGoflags(os.Getenv("GOFLAGS")), buildFlags)...)
+	buildFlags = append(buildFlags, extraFlags...)
 	if len(buildFlags) > 0 {
 		encoded := util.EncodeBuildFlags(buildFlags)
 		env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelcBuildFlags, encoded))
@@ -1014,7 +1041,7 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool) err
 	return runBuildCmd(ctx, env, newArgs...)
 }
 
-func GoBuild(ctx context.Context, cmd *cli.Command) error {
+func GoBuild(ctx context.Context, cmd *cli.Command) (err error) {
 	// Validate the invocation before taking the build lock: a bad command
 	// line must fail immediately, not wait behind a running build.
 	if !cmd.Args().Present() {
@@ -1031,14 +1058,41 @@ func GoBuild(ctx context.Context, cmd *cli.Command) error {
 
 	// Serialize with other otelc invocations in this module before touching
 	// any shared state (tracking files, go.mod, .otelc-build contents).
-	return withBuildLock(ctx, commandBuildDir(cmd), func(ctx context.Context) error {
-		return runGoBuild(ctx, cmd)
+	// A build that can compile from a snapshot of its setup returns the
+	// compile step, which runs after the lock is released.
+	var snapshot *setupSnapshot
+	if os.Getenv(util.EnvOtelcInvocationDir) == "" &&
+		canBuildUnlocked(contextWithStateManager(ctx, newStateManager()), cmd, false) {
+		snapshot, err = newSetupSnapshot()
+		if err != nil {
+			return err
+		}
+		defer func() {
+			err = ex.Join(err, os.RemoveAll(snapshot.invocationDir))
+		}()
+		if err = os.Setenv(util.EnvOtelcInvocationDir, snapshot.invocationDir); err != nil {
+			return err
+		}
+		defer func() {
+			err = ex.Join(err, os.Unsetenv(util.EnvOtelcInvocationDir))
+		}()
+	}
+
+	var compile func(context.Context) error
+	err = withBuildLock(ctx, commandBuildDir(cmd), func(ctx context.Context) error {
+		var buildErr error
+		compile, buildErr = runGoBuild(ctx, cmd, snapshot)
+		return buildErr
 	})
+	if err != nil || compile == nil {
+		return err
+	}
+	return compile(ctx)
 }
 
-func runGoBuild(ctx context.Context, cmd *cli.Command) error {
+func runGoBuild(ctx context.Context, cmd *cli.Command, snapshot *setupSnapshot) (func(context.Context) error, error) {
 	if err := restoreInterruptedBuild(ctx); err != nil {
-		return err
+		return nil, err
 	}
 	ctx = contextWithStateManager(ctx, newStateManager())
 	logger := util.LoggerFromContext(ctx)
@@ -1047,13 +1101,17 @@ func runGoBuild(ctx context.Context, cmd *cli.Command) error {
 	// to prevent stale data from affecting this build.
 	instrument.CleanupImportTrackingFiles()
 	if err := cleanupOwnedSession(); err != nil {
-		return ex.Wrapf(err, "cleaning the session directory")
+		return nil, ex.Wrapf(err, "cleaning the session directory")
 	}
 	if err := cleanupDebugArtifacts(); err != nil {
-		return ex.Wrapf(err, "cleaning debug artifacts")
+		return nil, ex.Wrapf(err, "cleaning debug artifacts")
 	}
 
+	reverted := false
 	defer func() {
+		if reverted {
+			return
+		}
 		// Restore backed-up go.mod/go.sum but keep .otelc-build/ for debugging.
 		// Users can run `otelc cleanup` to remove it explicitly. Deferred
 		// inside the locked body so the restore always runs under the lock.
@@ -1073,23 +1131,37 @@ func runGoBuild(ctx context.Context, cmd *cli.Command) error {
 	setupStart := time.Now()
 	err := Setup(ctx, cmd)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if statsEnabled {
 		logger.InfoContext(ctx, "setup stats", "duration", time.Since(setupStart))
 	}
 	logger.InfoContext(ctx, "Setup completed successfully")
 
-	buildStart := time.Now()
-	err = buildWithToolexec(ctx, cmd, vendored)
-	if err != nil {
-		return err
+	compile := func(ctx context.Context, extraFlags ...string) error {
+		buildStart := time.Now()
+		if buildErr := buildWithToolexec(ctx, cmd, vendored, extraFlags...); buildErr != nil {
+			return buildErr
+		}
+		if statsEnabled {
+			logger.InfoContext(ctx, "build stats", "duration", time.Since(buildStart))
+		}
+		logger.InfoContext(ctx, "Instrumentation completed successfully")
+		return nil
 	}
-	if statsEnabled {
-		logger.InfoContext(ctx, "build stats", "duration", time.Since(buildStart))
+
+	if snapshot == nil || !canBuildUnlocked(ctx, cmd, vendored) {
+		return nil, compile(ctx)
 	}
-	logger.InfoContext(ctx, "Instrumentation completed successfully")
-	return nil
+	state, _ := stateManagerFromContext(ctx)
+	if err = snapshot.writeOverlay(state); err != nil {
+		return nil, err
+	}
+	if err = restoreBeforeCompile(state); err != nil {
+		return nil, err
+	}
+	reverted = true
+	return snapshot.compileWith(compile), nil
 }
 
 // hookImports maps each hook package to every package it imports, directly or

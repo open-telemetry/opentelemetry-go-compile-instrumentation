@@ -121,7 +121,7 @@ func OtelBeforeTrampoline_InstrumentedMethod3533141232(recv0 **T, param0 *string
 	return nil, false
 }
 
-func OtelAfterTrampoline_InstrumentedMethod3533141232(hookContext HookContext) {
+func OtelAfterTrampoline_InstrumentedMethod3533141232(hookContext OtelHookContext) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "HAfter")
@@ -140,7 +140,7 @@ func OtelAfterTrampoline_InstrumentedMethod3533141232(hookContext HookContext) {
 }
 
 //go:linkname otelc_hook_2848419980_HBefore testdata/golden/ignore-directive-method.HBefore
-func otelc_hook_2848419980_HBefore(hookContext HookContext, recv0 interface{}, param0 string)
+func otelc_hook_2848419980_HBefore(hookContext OtelHookContext, recv0 interface{}, param0 string)
 
 //go:linkname otelc_hook_2848419980_HAfter testdata/golden/ignore-directive-method.HAfter
-func otelc_hook_2848419980_HAfter(hookContext HookContext)
+func otelc_hook_2848419980_HAfter(hookContext OtelHookContext)

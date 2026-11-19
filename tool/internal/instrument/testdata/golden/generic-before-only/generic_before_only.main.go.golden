@@ -115,4 +115,4 @@ func OtelBeforeTrampoline_GenericFuncBeforeOnly3330034316[T any](param0 *T, para
 }
 
 //go:linkname otelc_hook_1579483356_GenericFuncBeforeOnlyBefore testdata/golden/generic-before-only.GenericFuncBeforeOnlyBefore
-func otelc_hook_1579483356_GenericFuncBeforeOnlyBefore(hookContext HookContext, param0 interface{}, param1 int)
+func otelc_hook_1579483356_GenericFuncBeforeOnlyBefore(hookContext OtelHookContext, param0 interface{}, param1 int)

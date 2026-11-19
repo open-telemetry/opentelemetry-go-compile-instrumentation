@@ -32,6 +32,10 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
+func TestReadyAfterInit(t *testing.T) {
+	require.True(t, Ready())
+}
+
 func TestShutdownSignals(t *testing.T) {
 	signals := shutdownSignals()
 	require.Len(t, signals, 2)
@@ -175,6 +179,12 @@ func TestRecordSignalNotifyUnknownSignalType(t *testing.T) {
 	})
 }
 
+// Markers that runReraiseProbe prints for the "ignored" mode.
+const (
+	signalStillIgnored = "otelc-signal-still-ignored"
+	sdkShutDown        = "otelc-sdk-shut-down"
+)
+
 // TestHandleShutdownSignalReraise delivers a real SIGTERM to a child process
 // and checks how the child ends.
 func TestHandleShutdownSignalReraise(t *testing.T) {
@@ -222,8 +232,10 @@ func TestHandleShutdownSignalReraise(t *testing.T) {
 	})
 
 	t.Run("signal ignored before setup", func(t *testing.T) {
-		_, err := run(t, "ignored")
+		stdout, err := run(t, "ignored")
 		require.NoError(t, err, "otelc must not re-raise a signal the application ignores")
+		assert.Contains(t, stdout, signalStillIgnored, "otelc must leave an ignored signal ignored")
+		assert.NotContains(t, stdout, sdkShutDown, "an ignored signal must not shut the SDK down")
 	})
 }
 
@@ -232,6 +244,7 @@ func TestHandleShutdownSignalReraise(t *testing.T) {
 func runReraiseProbe(mode, appReceived string) {
 	if mode == "ignored" {
 		signal.Ignore(syscall.SIGTERM)
+		tracerProvider = sdktrace.NewTracerProvider()
 		setupSignalHandler()
 		// Unit tests are not instrumented, so mark the hook as applied by hand.
 		signalOwners.Lock()
@@ -240,6 +253,15 @@ func runReraiseProbe(mode, appReceived string) {
 		sendSIGTERM()
 		// Give the handler time to flush and to re-raise if it wrongly does.
 		time.Sleep(time.Second)
+		if signal.Ignored(syscall.SIGTERM) {
+			fmt.Println(signalStillIgnored)
+		}
+		// A provider that has been shut down hands out non-recording spans.
+		_, span := tracerProvider.Tracer("probe").Start(context.Background(), "probe")
+		if !span.IsRecording() {
+			fmt.Println(sdkShutDown)
+		}
+		span.End()
 		return
 	}
 
@@ -614,20 +636,23 @@ func TestNewResourceServiceNameFromEnv(t *testing.T) {
 	assert.Equal(t, "checkout", name.AsString())
 }
 
-func TestNewResourceFallsBackToDefaultOnError(t *testing.T) {
-	// A pair missing "=" makes resource.New fail with ErrPartialResource,
-	// so newResource must warn and return resource.Default().
-	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "key")
+func TestNewResourceKeepsDetectedAttributesOnError(t *testing.T) {
+	// A pair missing "=" makes resource.New fail with ErrPartialResource. The
+	// attributes the other detectors found, and the valid pairs, must survive.
+	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "key,team=payments")
+	t.Setenv("OTEL_SERVICE_NAME", "")
 
 	var buf bytes.Buffer
 	origLogger := logger
 	t.Cleanup(func() { logger = origLogger })
 	logger = slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
-	res := newResource(context.Background())
-	_, ok := res.Set().Value(attribute.Key("service.name"))
-	require.True(t, ok, "fallback resource should be resource.Default(), which sets service.name")
-	assert.Contains(t, buf.String(), "failed to create resource")
+	set := newResource(context.Background()).Set()
+	for _, key := range []string{"service.name", "service.instance.id", "process.pid", "team"} {
+		_, ok := set.Value(attribute.Key(key))
+		assert.True(t, ok, "resource must keep %s when one OTEL_RESOURCE_ATTRIBUTES entry is malformed", key)
+	}
+	assert.Contains(t, buf.String(), "failed to create complete resource")
 }
 
 func TestSetupOpenTelemetry(t *testing.T) {
