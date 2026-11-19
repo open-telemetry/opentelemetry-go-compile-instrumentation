@@ -130,6 +130,10 @@ jobs:
                 exit 1
               fi
             else
+              # The bot identity must match the credential that pushes the
+              # tag. The numeric id is the App's bot user for the App named by
+              # OTELBOT_GO_COMPILE_INSTRUMENTATION_CLIENT_ID. Update it in the
+              # same commit if the App is ever recreated or renamed.
               if [ -n "${APP_TOKEN}" ]; then
                 git config user.name "otelbot-go-compile-instrumentation[bot]"
                 git config user.email "350478713+otelbot-go-compile-instrumentation[bot]@users.noreply.github.com"
