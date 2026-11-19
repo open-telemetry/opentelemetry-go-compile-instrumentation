@@ -74,7 +74,10 @@ func TestDBClient(t *testing.T) {
 
 		f.Run("dbclient", "-op=query")
 
-		span := f.RequireSingleSpan()
+		require.Len(t, testutil.AllSpans(f.Traces()), 2)
+		span := testutil.RequireSpan(t, f.Traces(), testutil.IsClient)
+		rows := testutil.RequireSpan(t, f.Traces(), testutil.HasName("sql.rows"))
+		require.Equal(t, span.SpanID(), rows.ParentSpanID())
 		require.Equal(t, "SELECT", span.Name())
 		testutil.RequireDBClientSemconv(t, span,
 			"SELECT",
@@ -91,7 +94,7 @@ func TestDBClient(t *testing.T) {
 
 		// PrepareContext doesn't create a span directly, but stmt.QueryContext does
 		spans := testutil.AllSpans(f.Traces())
-		require.GreaterOrEqual(t, len(spans), 1, "Expected at least 1 span from prepared statement query")
+		require.Len(t, spans, 2, "Expected query and rows spans from prepared statement query")
 
 		// Find the query span from stmt.QueryContext
 		stmtSpan := testutil.RequireSpan(t, f.Traces(), testutil.IsClient)
@@ -242,7 +245,7 @@ func TestDBClient(t *testing.T) {
 			"-op=all",
 		)
 
-		// "all" operation produces 7 spans:
+		// "all" operation produces 7 client spans and 2 rows spans:
 		//   PING (PingContext)
 		//   INSERT (ExecContext)
 		//   SELECT (QueryContext)
@@ -251,7 +254,7 @@ func TestDBClient(t *testing.T) {
 		//   INSERT (Tx.ExecContext)
 		//   COMMIT (Tx.Commit)
 		spans := testutil.AllSpans(f.Traces())
-		require.GreaterOrEqual(t, len(spans), 7, "Expected at least 7 spans")
+		require.Len(t, spans, 9, "Expected 7 client spans and 2 rows spans")
 
 		// For "testdb" driver, parseDSN returns an error (unknown driver),
 		// so beforeOpenInstrumentation falls back to "unknown" as the endpoint.

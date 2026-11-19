@@ -22,7 +22,6 @@ func TestDBRows(t *testing.T) {
 	for _, endpoint := range []string{"db", "conn", "tx", "stmt", "txstmt", "row"} {
 		t.Run(endpoint, func(t *testing.T) {
 			fixture := testutil.NewTestFixture(t)
-			fixture.SetEnv("OTEL_GO_SQL_ROWS_SPAN_ENABLED", "true")
 			fixture.Run("dbrows", "-endpoint="+endpoint)
 
 			query := testutil.RequireSpan(t, fixture.Traces(), testutil.HasName("SELECT"))
@@ -68,7 +67,6 @@ func TestDBRows(t *testing.T) {
 	} {
 		t.Run(scenario.mode, func(t *testing.T) {
 			fixture := testutil.NewTestFixture(t)
-			fixture.SetEnv("OTEL_GO_SQL_ROWS_SPAN_ENABLED", "true")
 			fixture.Run("dbrows", "-mode="+scenario.mode)
 			rows := testutil.RequireSpan(t, fixture.Traces(), testutil.HasName("sql.rows"))
 			testutil.RequireAttribute(t, rows, "db.response.returned_rows", scenario.count)
@@ -85,7 +83,6 @@ func TestDBRows(t *testing.T) {
 	for _, mode := range []string{"race", "cancel-before-return", "concurrent"} {
 		t.Run(mode, func(t *testing.T) {
 			fixture := testutil.NewTestFixture(t)
-			fixture.SetEnv("OTEL_GO_SQL_ROWS_SPAN_ENABLED", "true")
 			fixture.Run("dbrows", "-mode="+mode, "-repeat=64")
 			require.Equal(t, 64, countRowsSpans(fixture.Traces()))
 			querySpans := make(map[string]bool)
@@ -112,7 +109,6 @@ func TestDBRows(t *testing.T) {
 
 	t.Run("NoCallerSpan", func(t *testing.T) {
 		fixture := testutil.NewTestFixture(t)
-		fixture.SetEnv("OTEL_GO_SQL_ROWS_SPAN_ENABLED", "true")
 		fixture.Run("dbrows", "-mode=no-parent")
 		query := testutil.RequireSpan(t, fixture.Traces(), testutil.HasName("SELECT"))
 		rows := testutil.RequireSpan(t, fixture.Traces(), testutil.HasName("sql.rows"))
@@ -124,7 +120,6 @@ func TestDBRows(t *testing.T) {
 	for _, mode := range []string{"query-error", "unclosed"} {
 		t.Run(mode, func(t *testing.T) {
 			fixture := testutil.NewTestFixture(t)
-			fixture.SetEnv("OTEL_GO_SQL_ROWS_SPAN_ENABLED", "true")
 			fixture.Run("dbrows", "-mode="+mode)
 			require.Zero(t, countRowsSpans(fixture.Traces()))
 			query := testutil.RequireSpan(t, fixture.Traces(), testutil.HasName("SELECT"))
@@ -135,23 +130,21 @@ func TestDBRows(t *testing.T) {
 	}
 
 	for _, configuration := range []struct {
-		name, enabled, disabled, sampler string
+		name, disabled, sampler string
+		wantRows                int
 	}{
-		{name: "Default"},
-		{name: "False", enabled: "false"},
-		{name: "Invalid", enabled: "invalid"},
-		{name: "DatabaseDisabled", enabled: "true", disabled: "database"},
-		{name: "NotSampled", enabled: "true", sampler: "always_off"},
+		{name: "Default", wantRows: 1},
+		{name: "DatabaseDisabled", disabled: "database"},
+		{name: "NotSampled", sampler: "always_off"},
 	} {
 		t.Run(configuration.name, func(t *testing.T) {
 			fixture := testutil.NewTestFixture(t)
-			fixture.SetEnv("OTEL_GO_SQL_ROWS_SPAN_ENABLED", configuration.enabled)
 			fixture.SetEnv("OTEL_GO_DISABLED_INSTRUMENTATIONS", configuration.disabled)
 			if configuration.sampler != "" {
 				fixture.SetEnv("OTEL_TRACES_SAMPLER", configuration.sampler)
 			}
 			fixture.Run("dbrows", "-mode=early")
-			require.Zero(t, countRowsSpans(fixture.Traces()))
+			require.Equal(t, configuration.wantRows, countRowsSpans(fixture.Traces()))
 			if configuration.sampler != "" {
 				require.Empty(t, testutil.AllSpans(fixture.Traces()))
 			} else {

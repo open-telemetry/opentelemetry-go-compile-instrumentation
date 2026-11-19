@@ -6,9 +6,6 @@ package db
 import (
 	"context"
 	"database/sql"
-	"os"
-	"strings"
-	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel/codes"
@@ -18,13 +15,9 @@ import (
 	"go.opentelemetry.io/otelc/pkg/hook"
 )
 
-var rowsSpanEnabled = sync.OnceValue(func() bool {
-	return strings.EqualFold(os.Getenv("OTEL_GO_SQL_ROWS_SPAN_ENABLED"), "true")
-})
-
 func instrumentQueryEnd(ictx hook.HookContext, rows *sql.Rows, err error) {
 	state, ok := ictx.GetData().(*queryState)
-	trackRows := ok && rows != nil && err == nil && rowsSpanEnabled() && state.span.IsRecording()
+	trackRows := ok && rows != nil && err == nil && state.span.IsRecording()
 	instrumentEnd(ictx, err)
 	if !trackRows {
 		return

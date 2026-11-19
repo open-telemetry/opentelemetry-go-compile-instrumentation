@@ -43,13 +43,14 @@ func TestGRPCServerDBClient(t *testing.T) {
 	require.Equal(t, "frontend querying database", resp.GetMessage())
 
 	// Wait for the spans to be flushed
-	f.WaitForSpans(2)
+	f.WaitForSpans(3)
 
-	// We expect exactly 1 trace with 2 spans:
+	// We expect exactly 1 trace with 3 spans:
 	// 1. gRPC server (Frontend)
 	// 2. SQL client (Frontend -> Database)
+	// 3. SQL rows consumption (child of the query)
 	f.RequireTraceCount(1)
-	f.RequireSpansPerTrace(2)
+	f.RequireSpansPerTrace(3)
 
 	grpcServerSpan := testutil.RequireSpan(
 		t,
@@ -58,6 +59,9 @@ func TestGRPCServerDBClient(t *testing.T) {
 		func(s ptrace.Span) bool { return s.Name() == "greeter.Greeter/SayHello" },
 	)
 	sqlClientSpan := testutil.RequireSpan(t, f.Traces(), testutil.IsClient)
+	rowsSpan := testutil.RequireSpan(t, f.Traces(), testutil.HasName("sql.rows"))
+	require.Equal(t, sqlClientSpan.TraceID(), rowsSpan.TraceID())
+	require.Equal(t, sqlClientSpan.SpanID(), rowsSpan.ParentSpanID())
 
 	// Assert on propagation (parent-child relationships)
 	require.Equal(t, grpcServerSpan.TraceID(), sqlClientSpan.TraceID(), "trace ID mismatch")

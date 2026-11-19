@@ -259,9 +259,9 @@ Run-time behavior can also be controlled using the two `otelc`-specific environm
 
 ### SQL result consumption
 
-Set `OTEL_GO_SQL_ROWS_SPAN_ENABLED=true` to emit an additional `sql.rows` span
-for each recorded `database/sql` query whose rows are closed. This is off by
-default; `true` is case-insensitive and the setting is read once per process.
+`database/sql` instrumentation emits an additional `sql.rows` span for each
+recorded query whose rows are closed. This requires no extra configuration:
+rows tracing follows the existing database instrumentation and sampling controls.
 Disabling `database` instrumentation also disables these spans.
 
 The existing client span still ends when `QueryContext` returns. The new span
@@ -279,7 +279,7 @@ and close errors are recorded; scan/conversion errors are not database errors.
 EOF of the final result set, explicit `Close`, and cancellation all close rows.
 Repeated or concurrent closure emits only once. The span is created at closure
 with the observed start/end timestamps, so it is not an active implicit parent
-between reads. Rows abandoned without closure emit no rows span; this option does
+between reads. Rows abandoned without closure emit no rows span; instrumentation does
 not fix application resource leaks. A long-lived result is visible only after it
 closes, and its query parent may already have been exported.
 

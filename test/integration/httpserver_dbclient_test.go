@@ -37,13 +37,14 @@ func TestHTTPServerDBClient(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	// Wait for the spans to be flushed
-	f.WaitForSpans(2)
+	f.WaitForSpans(3)
 
-	// We expect exactly 1 trace with 2 spans:
+	// We expect exactly 1 trace with 3 spans:
 	// 1. HTTP server (Frontend)
 	// 2. SQL client (Frontend -> Database)
+	// 3. SQL rows consumption (child of the query)
 	f.RequireTraceCount(1)
-	f.RequireSpansPerTrace(2)
+	f.RequireSpansPerTrace(3)
 
 	httpServerSpan := testutil.RequireSpan(
 		t,
@@ -52,6 +53,9 @@ func TestHTTPServerDBClient(t *testing.T) {
 		func(s ptrace.Span) bool { return s.Name() == "GET /hello" },
 	)
 	sqlClientSpan := testutil.RequireSpan(t, f.Traces(), testutil.IsClient)
+	rowsSpan := testutil.RequireSpan(t, f.Traces(), testutil.HasName("sql.rows"))
+	require.Equal(t, sqlClientSpan.TraceID(), rowsSpan.TraceID())
+	require.Equal(t, sqlClientSpan.SpanID(), rowsSpan.ParentSpanID())
 
 	// Assert on propagation (parent-child relationships)
 	require.Equal(t, httpServerSpan.TraceID(), sqlClientSpan.TraceID(), "trace ID mismatch")
