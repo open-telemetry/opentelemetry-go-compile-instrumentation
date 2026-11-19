@@ -906,49 +906,6 @@ func (lr *linkResolution) lookup(
 	return misses
 }
 
-// deterministicLoadFailure reports whether a root's load failure is one go
-// list reports the same way for the rest of the session: the package does not
-// exist, or no file of it builds for this target. Only those are stored in the
-// memo. Any other failure, compiler errors included, may not repeat, so a later
-// link resolves the root again; the current link still skips it.
-//
-// The error kind cannot tell the two apart: go/packages reports a failed
-// nested compile as a ListError too, the same kind as a missing package. The
-// messages cmd/go and pkgload use for the deterministic cases can.
-func deterministicLoadFailure(err error) bool {
-	msg := err.Error()
-	for _, pattern := range deterministicFailurePatterns() {
-		if strings.Contains(msg, pattern) {
-			return true
-		}
-	}
-	return false
-}
-
-// candidateLoadFailure reports an error that means a root could not be loaded
-// as a package, rather than that the resolver itself could not run. These
-// errors can be skipped for this link; only deterministic ones are memoized.
-func candidateLoadFailure(err error) bool {
-	return deterministicLoadFailure(err) || strings.Contains(err.Error(), "no packages found")
-}
-
-// deterministicFailurePatterns are the messages of the failures
-// deterministicLoadFailure stores.
-func deterministicFailurePatterns() []string {
-	return []string{
-		"no required module provides package",
-		"updates to go.mod needed",
-		"cannot find module providing package",
-		"cannot find package",
-		"is not in std",
-		"is not in GOROOT",
-		"malformed import path",
-		"build constraints exclude all Go files",
-		"no Go files in",
-		"has no export file",
-	}
-}
-
 // resolveMisses resolves the roots the memo could not answer with one nested
 // go list, under the memo's single-flight lock so concurrent links of the
 // session resolve each root once, and stores the results.
@@ -976,7 +933,9 @@ func (lr *linkResolution) resolveMisses(
 	for _, root := range misses {
 		if loadErr, bad := resolveFailed[root]; bad {
 			failed[root] = loadErr
-			if deterministicLoadFailure(loadErr) {
+			// A failure that may not repeat is not stored, so a later link
+			// resolves the root again; this link still skips it.
+			if pkgload.IsDeterministicLoadFailure(loadErr) {
 				lr.memo.Store(root, nil, loadErr)
 			}
 			continue
@@ -1018,7 +977,7 @@ func (lr *linkResolution) resolveBatch(
 		return resolved, resolveFailed, nil
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
-		!candidateLoadFailure(err) {
+		!pkgload.IsLoadFailure(err) {
 		return nil, nil, err
 	}
 	if len(roots) == 1 {
