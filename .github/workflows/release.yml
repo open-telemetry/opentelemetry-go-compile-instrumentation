@@ -59,7 +59,9 @@ jobs:
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           token: ${{ steps.app-token.outputs.token || github.token }}
-          persist-credentials: true
+          # Do not persist the checkout credential in the runner git config.
+          # The tag push below authenticates with an explicit token instead.
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Set up Go
@@ -105,6 +107,7 @@ jobs:
       - name: Create and push tags
         env:
           APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
           RELEASE_PKG: ${{ steps.pkg_version.outputs.release_pkg }}
           PKG_VERSION: ${{ steps.pkg_version.outputs.pkg_version }}
@@ -135,7 +138,10 @@ jobs:
                 git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
               fi
               git tag -a "${tag}" -m "Release ${tag}"
-              git push origin "${tag}"
+              # Push with an explicit token instead of persisted checkout
+              # credentials, so no token lingers in .git/config.
+              local push_token="${APP_TOKEN:-${GITHUB_TOKEN}}"
+              git push "https://x-access-token:${push_token}@github.com/${GITHUB_REPOSITORY}.git" "${tag}"
             fi
           }
 
