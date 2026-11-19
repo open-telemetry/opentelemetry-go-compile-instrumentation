@@ -7,6 +7,7 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // DSN strings arrive from application configuration and can be arbitrary: the
@@ -163,6 +164,126 @@ func FuzzParseMySQLDSNPassword(f *testing.F) {
 			if got := ParseDSN("mysql", dsn); got != tmpl.want {
 				t.Fatalf("dsn=%q: ParseDSN() = %#v, want %#v", dsn, got, tmpl.want)
 			}
+		}
+	})
+}
+
+// FuzzParseOracleDSNPassword asserts that no part of a quoted Oracle password
+// reaches the parsed address, whatever characters the password contains.
+func FuzzParseOracleDSNPassword(f *testing.F) {
+	for _, password := range []string{
+		"", "password", "p@ss", "a@b@c", "s3cr/et?x", "p@secret//hidden:1521",
+	} {
+		f.Add(password)
+	}
+
+	f.Fuzz(func(t *testing.T, password string) {
+		if strings.Contains(password, `"`) {
+			t.Skip("a quoted Oracle password cannot contain a double quote")
+		}
+		if strings.Contains(password, "\n") || strings.Contains(password, "connectString=") {
+			t.Skip("godror reads such a DSN as logfmt")
+		}
+		dsn := `user/"` + password + `"@dbhost:1521/ORCL`
+		got := ParseDSN("godror", dsn)
+		want := DSNInfo{Host: "dbhost", Port: "1521", DBName: "ORCL"}
+		if got != want {
+			t.Fatalf("password=%q: ParseDSN() = %#v, want %#v", password, got, want)
+		}
+	})
+}
+
+// FuzzParseOracleDSNUnquotedPassword asserts the same for an unquoted
+// password, which can carry an '@' either escaped as \@ (godror) or as is
+// (go-oci8 splits on the last '@').
+func FuzzParseOracleDSNUnquotedPassword(f *testing.F) {
+	for _, password := range []string{
+		"password", `p\@ss`, `a\@b\@c`, "p@ss", "a@b@c", "s3cr/et?x", `p\@secret//hidden:1521`,
+	} {
+		f.Add(password)
+	}
+
+	f.Fuzz(func(t *testing.T, password string) {
+		if strings.Contains(password, `"`) {
+			t.Skip("a double quote would start a quoted password")
+		}
+		if strings.Contains(password, "\n") || strings.Contains(password, "connectString=") {
+			t.Skip("godror reads such a DSN as logfmt")
+		}
+		dsn := `user/` + password + `@dbhost:1521/ORCL`
+		got := ParseDSN("godror", dsn)
+		want := DSNInfo{Host: "dbhost", Port: "1521", DBName: "ORCL"}
+		if got != want {
+			t.Fatalf("password=%q: ParseDSN() = %#v, want %#v", password, got, want)
+		}
+	})
+}
+
+// FuzzParseOracleDSNLogfmtPassword asserts that no part of a password reaches
+// the address of a logfmt DSN written the way godror's StringWithPassword
+// writes it, with and without a new password, and with the connect string in
+// either position.
+func FuzzParseOracleDSNLogfmtPassword(f *testing.F) {
+	for _, password := range []string{
+		"", "password", "ti@ger", "a@b@c", `a"b@c"d`, `a\b@c`, "p@ss word", "x connectString=evil:1/e", "s3cr/et?x",
+	} {
+		f.Add(password)
+	}
+
+	f.Fuzz(func(t *testing.T, password string) {
+		if !utf8.ValidString(password) {
+			t.Skip("logfmt values are valid UTF-8")
+		}
+		for _, r := range password {
+			if r < ' ' {
+				t.Skip("control characters are escaped by the writer")
+			}
+		}
+		value := password
+		if strings.ContainsAny(value, " =\"\\") {
+			value = `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(value) + `"`
+		}
+		want := DSNInfo{Host: "dbhost", Port: "1521", DBName: "ORCL"}
+		for _, dsn := range []string{
+			"user=scott password=" + value + " connectString=dbhost:1521/ORCL",
+			"connectString=dbhost:1521/ORCL user=scott password=" + value,
+			"user=scott password=" + value + " connectString=dbhost:1521/ORCL connectionClass= newPassword=" + value,
+			"user=scott password=" + value + " newPassword=" + value + " connectString=dbhost:1521/ORCL connectionClass=",
+		} {
+			if got := ParseDSN("godror", dsn); got != want {
+				t.Fatalf("dsn=%q: ParseDSN() = %#v, want %#v", dsn, got, want)
+			}
+		}
+	})
+}
+
+// FuzzParseOracleURLPassword asserts that no part of a raw or percent-encoded
+// password reaches the address of an oracle:// DSN. go-oci8 splits on the last
+// '@' without decoding anything.
+func FuzzParseOracleURLPassword(f *testing.F) {
+	for _, password := range []string{
+		"password", "p@ss", "a@b@c", "2024/Spring", "p@ss/w", "p%40ss", "s3cr:et", "p?x", "p@secret//hidden:1521",
+	} {
+		f.Add(password)
+	}
+
+	f.Fuzz(func(t *testing.T, password string) {
+		if strings.Contains(password, "\n") || strings.Contains(password, "connectString=") {
+			t.Skip("godror reads such a DSN as logfmt")
+		}
+		if strings.Contains(password, "?") {
+			// A '?' in the password makes the credentials/query boundary ambiguous,
+			// so the parser safely yields no address rather than risk leaking password bytes.
+			if got := ParseDSN("oci8", "oracle://scott:"+password+"@dbhost:1521/ORCL"); got != (DSNInfo{}) {
+				t.Fatalf("password=%q: ParseDSN() = %#v, want zero value", password, got)
+			}
+			return
+		}
+		dsn := "oracle://scott:" + password + "@dbhost:1521/ORCL"
+		got := ParseDSN("oci8", dsn)
+		want := DSNInfo{Host: "dbhost", Port: "1521", DBName: "ORCL"}
+		if got != want {
+			t.Fatalf("password=%q: ParseDSN() = %#v, want %#v", password, got, want)
 		}
 	})
 }
