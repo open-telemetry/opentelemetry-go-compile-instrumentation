@@ -4,7 +4,9 @@ on:
     paths:
       - '**/*.md'
   push:
-    branches: [main]
+    branches:
+      - main
+      - 'release/v*.*.x'
     paths:
       - '**/*.md'
 
