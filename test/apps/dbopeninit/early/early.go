@@ -8,6 +8,7 @@ package early
 
 import (
 	"database/sql"
+	"os"
 
 	_ "go.opentelemetry.io/otelc/test/shared/testdb"
 )
@@ -19,6 +20,14 @@ var (
 	// MySQL uses the built-in MySQL DSN parser and its protocol table.
 	MySQL = mustOpen("mysql", "user:pass@tcp:3306/inventory")
 )
+
+// An os.Exit here runs before pkg/runtime initializes, so the os.Exit hook
+// reaches pkg/runtime while its variables are not set yet.
+func init() {
+	if os.Getenv("DBOPENINIT_EXIT_IN_INIT") != "" {
+		os.Exit(0)
+	}
+}
 
 func mustOpen(driverName, dsn string) *sql.DB {
 	db, err := sql.Open(driverName, dsn)

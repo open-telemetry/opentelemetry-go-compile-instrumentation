@@ -438,7 +438,14 @@ func handleShutdownSignal(sigCh chan os.Signal) {
 // flush to finish instead, so an application that handles SIGINT or SIGTERM
 // itself and exits right away does not cut the flush short. It is not meant to
 // be called by application code.
+//
+// os.Exit can run during the initialization of a package that is initialized
+// before this one, when this package's variables are not set yet and there is
+// no SDK to flush. ShutdownOnExit does nothing then.
 func ShutdownOnExit() {
+	if !Ready() {
+		return
+	}
 	shutdownOnce()
 }
 

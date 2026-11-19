@@ -115,6 +115,22 @@ func TestShutdownOnExitFlushesProviders(t *testing.T) {
 	assert.True(t, rp.shutdownCalled, "ShutdownOnExit should flush the tracer provider")
 }
 
+// TestShutdownOnExitBeforeInit covers os.Exit called from the init of a
+// package that is initialized before this one: finalShutdown is still nil
+// then, and ShutdownOnExit must return without touching it.
+func TestShutdownOnExitBeforeInit(t *testing.T) {
+	restoreProviders(t)
+	rp := &recordingProcessor{}
+	tracerProvider = sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rp))
+	meterProvider, loggerProvider = nil, nil
+	finalShutdown = nil
+	ready.Store(false)
+	t.Cleanup(func() { ready.Store(true) })
+
+	assert.NotPanics(t, ShutdownOnExit)
+	assert.False(t, rp.shutdownCalled, "ShutdownOnExit must not flush before init")
+}
+
 // blockingProcessor holds Shutdown until release is closed, standing in for a
 // slow export, and counts the calls.
 type blockingProcessor struct {

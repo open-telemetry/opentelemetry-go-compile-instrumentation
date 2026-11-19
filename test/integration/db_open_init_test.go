@@ -45,4 +45,15 @@ func TestDBOpenedDuringInit(t *testing.T) {
 	)
 	testutil.RequireDBClientSemconv(t, mysqlSpan, "PING", "ping", "localhost", 3306, "inventory")
 	testutil.RequireAttribute(t, mysqlSpan, "db.system.name", "mysql")
+
+	t.Run("OSExitBeforeRuntimeInit", func(t *testing.T) {
+		// The os.Exit hook runs before pkg/runtime initializes and must
+		// leave the exit to os.Exit.
+		exitFixture := testutil.NewTestFixture(t)
+		exitFixture.SetEnv("DBOPENINIT_EXIT_IN_INIT", "1")
+
+		exitOutput := exitFixture.Run("dbopeninit")
+
+		require.NotContains(t, exitOutput, "panic")
+	})
 }
