@@ -293,7 +293,7 @@ func hashPackages(w io.Writer, goroot string, pkgs []*packages.Package) error {
 		// change what the same files compile to (loop variable scope, for one).
 		_, _ = fmt.Fprintf(w, "%s go=%s\n", pkg.PkgPath, goVersion)
 		for _, file := range slices.Sorted(slices.Values(packageFiles(pkg))) {
-			if err := hashFile(w, file); err != nil {
+			if err := hashFileAs(w, file); err != nil {
 				return err
 			}
 		}
@@ -322,21 +322,10 @@ func isStdPackage(pkg *packages.Package, goroot string) bool {
 	return true
 }
 
-// hashFile writes the path and the content hash of a file to w.
-func hashFile(w io.Writer, path string) error {
-	return hashFileNamed(w, path, path)
-}
-
-// hashFileAs is hashFile for an add_file source: a source setup generates
-// under the work dir, such as the runtime GLS file, is written under a name
-// that does not depend on the work dir. Its content is embedded in otelc and
-// identical in every work dir, so builds with different --work-dir values
-// keep one injected hash, one tool ID, and one build cache.
+// hashFileAs writes a file's content hash and a name that is independent of
+// its invocation directory. User paths outside that directory stay intact.
 func hashFileAs(w io.Writer, path string) error {
-	return hashFileNamed(w, path, string(instrument.WithoutWorkDirPaths([]byte(path))))
-}
-
-func hashFileNamed(w io.Writer, path, name string) error {
+	name := string(instrument.WithoutWorkDirPaths([]byte(path)))
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return ex.Wrapf(err, "reading %s", path)

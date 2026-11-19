@@ -365,6 +365,28 @@ func TestStoreInjectedHashFailsOnLoadError(t *testing.T) {
 	assert.NoFileExists(t, util.GetInjectedHashFile(), "an incomplete hash must not be stored")
 }
 
+func TestHashPackagesInvocationIndependent(t *testing.T) {
+	goroot := t.TempDir()
+	hashIn := func(directory, name, content string) string {
+		t.Helper()
+		t.Setenv(util.EnvOtelcInvocationDir, directory)
+		file := filepath.Join(directory, "pkg", "hooks", name)
+		mustWriteFile(t, file, content)
+		pkg := &packages.Package{
+			PkgPath: "example.com/hooks",
+			Module:  &packages.Module{Path: "example.com/hooks", GoVersion: "1.26"},
+			GoFiles: []string{file},
+		}
+		var result strings.Builder
+		require.NoError(t, hashPackages(&result, goroot, []*packages.Package{pkg}))
+		return result.String()
+	}
+	first := hashIn(t.TempDir(), "hook.go", "package hooks\n")
+	assert.Equal(t, first, hashIn(t.TempDir(), "hook.go", "package hooks\n"))
+	assert.NotEqual(t, first, hashIn(t.TempDir(), "hook.go", "package hooks\nconst Version = 2\n"))
+	assert.NotEqual(t, first, hashIn(t.TempDir(), "other.go", "package hooks\n"))
+}
+
 func TestHashPackages(t *testing.T) {
 	goroot := t.TempDir()
 	hashOf := func(pkgs ...*packages.Package) string {

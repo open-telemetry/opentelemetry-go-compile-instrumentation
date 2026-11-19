@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,6 +21,49 @@ import (
 
 	"go.opentelemetry.io/otelc/test/testutil"
 )
+
+func TestUnlockedBuildsReuseCompilerCache(t *testing.T) {
+	otelc, err := testutil.OtelcPath()
+	require.NoError(t, err)
+	otelc, err = filepath.Abs(otelc)
+	require.NoError(t, err)
+	module := concurrentBuildsModule(t, []string{"a"})
+	binary := filepath.Join(t.TempDir(), "app")
+	if runtime.GOOS == "windows" {
+		binary += ".exe"
+	}
+	env := append(preparedBuildBaseEnvironment(), "GOWORK=off",
+		"GOCACHE="+t.TempDir(), "OTELC_UNLOCKED_COMPILE=1", "OTELC_STATS=1", "OTEL_SDK_DISABLED=true")
+	build := func() string {
+		t.Helper()
+		require.NoError(t, os.RemoveAll(filepath.Join(module, ".otelc-build")))
+		runOtelcCommand(t, module, env, otelc, "go", "build", "-o", binary, "./cmd/a")
+		return statsLog(t, module)
+	}
+	cold := build()
+	assertStatsCompiledPackage(t, cold, "runtime")
+	assertStatsCompiledPackage(t, cold, "net/http")
+	warm := build()
+	assertStatsCacheHitPackage(t, warm, "runtime")
+	assertStatsCacheHitPackage(t, warm, "net/http")
+	source := filepath.Join(module, "cmd", "a", "main.go")
+	content, err := os.ReadFile(source)
+	require.NoError(t, err)
+
+	writeTestFile(t, module, filepath.Join("cmd", "a", "main.go"),
+		strings.Replace(string(content), "func main() {", "func main() { println(\"updated\");", 1))
+
+	build()
+	cmd := exec.CommandContext(t.Context(), binary)
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "%s", out)
+	assert.Contains(t, string(out), "updated", "a warm build must still see source edits")
+	goMod, err := os.ReadFile(filepath.Join(module, "go.mod"))
+	require.NoError(t, err)
+	assert.Equal(t, concurrentBuildsGoMod, string(goMod))
+	assert.NoFileExists(t, filepath.Join(module, "go.sum"))
+}
 
 // The go wrapper pauses at compile, not setup. Both builds must reach the
 // barrier before release, proving the module lock does not cover compilation.

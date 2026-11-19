@@ -1428,23 +1428,18 @@ func RulesDigest() string {
 	return rulesDigest(content, util.ActiveBuildTags(), toolruntime.RuntimeGLSSource, injected)
 }
 
-// runtimeDirPlaceholder replaces the work-dir location of the generated
-// runtime sources in the rules digest.
-const runtimeDirPlaceholder = "<otelc-build>/runtime"
-
-// WithoutWorkDirPaths replaces, in content such as matched.json, the absolute path of
-// the directory setup writes the runtime GLS source to with a fixed
-// placeholder. That source is embedded in otelc and identical in every work
-// dir, so builds with different --work-dir values keep one tool ID and share
-// the build cache. Both the raw and the JSON-escaped forms of the path are
-// replaced, since Windows paths are escaped in matched.json.
+// WithoutWorkDirPaths gives invocation-owned files stable names in cache
+// identities. File contents are hashed separately; only their temporary root
+// is ignored. Include the separator so similarly named user paths stay intact.
+// Normalize JSON-escaped paths too, since Windows paths are escaped in rules.
 func WithoutWorkDirPaths(content []byte) []byte {
-	dir := util.GetInvocationTemp("runtime")
+	dir := util.GetInvocationDir() + string(filepath.Separator)
+	placeholder := []byte("<otelc-build>/")
 	escaped, err := json.Marshal(dir)
 	if err == nil {
-		content = bytes.ReplaceAll(content, escaped[1:len(escaped)-1], []byte(runtimeDirPlaceholder))
+		content = bytes.ReplaceAll(content, escaped[1:len(escaped)-1], placeholder)
 	}
-	return bytes.ReplaceAll(content, []byte(dir), []byte(runtimeDirPlaceholder))
+	return bytes.ReplaceAll(content, []byte(dir), placeholder)
 }
 
 // interceptToolVersion handles the `tool -V=full` probe go uses to compute

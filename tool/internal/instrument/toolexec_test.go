@@ -1296,6 +1296,39 @@ func TestMarkedToolVersion(t *testing.T) {
 	})
 }
 
+func TestWithoutWorkDirPaths(t *testing.T) {
+	invocation := t.TempDir()
+	t.Setenv(util.EnvOtelcInvocationDir, invocation)
+	for _, directory := range []string{"runtime", "pkg", "instrumentation"} {
+		path := filepath.Join(invocation, directory, "source.go")
+		want := "<otelc-build>/" + filepath.Join(directory, "source.go")
+		assert.Equal(t, want, string(WithoutWorkDirPaths([]byte(path))))
+		encoded, err := json.Marshal(path)
+		require.NoError(t, err)
+		var decoded string
+		require.NoError(t, json.Unmarshal(WithoutWorkDirPaths(encoded), &decoded))
+		assert.Equal(t, want, decoded, "JSON paths must remain valid on Windows")
+	}
+	outside := filepath.Join(invocation+"-other", "source.go")
+	assert.Equal(t, outside, string(WithoutWorkDirPaths([]byte(outside))))
+}
+
+func TestRulesDigestIgnoresInvocationPaths(t *testing.T) {
+	digestIn := func(directory, file string) string {
+		t.Helper()
+		t.Setenv(util.EnvOtelcInvocationDir, directory)
+		content, err := json.Marshal(map[string]string{
+			"resolved_path": filepath.Join(directory, "instrumentation", "net", "http"),
+			"file":          file,
+		})
+		require.NoError(t, err)
+		return rulesDigest(content, nil, []byte("gls"), []byte("injected"))
+	}
+	first := digestIn(t.TempDir(), "hook.go")
+	assert.Equal(t, first, digestIn(t.TempDir(), "hook.go"))
+	assert.NotEqual(t, first, digestIn(t.TempDir(), "other.go"), "rule changes must still invalidate the cache")
+}
+
 func TestEnableNestedToolexec(t *testing.T) {
 	exe, err := os.Executable()
 	require.NoError(t, err)
