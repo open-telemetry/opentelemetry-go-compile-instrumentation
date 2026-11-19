@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	"github.com/urfave/cli/v3"
 
@@ -41,11 +40,19 @@ func canBuildUnlocked(ctx context.Context, cmd *cli.Command, vendored bool) bool
 	if len(args) == 0 || (args[0] != subcmdBuild && args[0] != subcmdInstall) {
 		return false
 	}
-	flags := slices.Concat(args[1:], util.SplitGoflags(os.Getenv("GOFLAGS")))
-	for _, arg := range flags {
-		name, _, _ := strings.Cut(strings.TrimLeft(arg, "-"), "=")
-		if name == "overlay" || name == "modfile" {
+	goflags := util.SplitGoflags(os.Getenv("GOFLAGS"))
+	for index, token := range goflags {
+		goflags[index] = util.UnquoteGoflagsToken(token)
+	}
+	flags := slices.Concat(goflags, args[1:])
+	for _, arg := range classifyArgs(args[0], flags) {
+		switch arg.FlagName {
+		case "-overlay", "-modfile":
 			return false
+		case "-mod":
+			if (arg.HasValue || arg.Kind == ArgBuildFlagValue) && arg.Value != "readonly" {
+				return false
+			}
 		}
 	}
 	if _, fileTargets, err := splitBuildTargets(args[0], args[1:]); err != nil || len(fileTargets) > 0 {

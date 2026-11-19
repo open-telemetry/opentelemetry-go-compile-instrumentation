@@ -15,8 +15,9 @@ The invocation directory is removed when the command finishes; abrupt terminatio
 may leave a temporary directory behind.
 
 This is opt-in. Tests, named-file builds, vendored projects, debug builds,
-inherited sessions, user-supplied `-overlay`/`-modfile` flags (including `GOFLAGS`),
-and builds tracking `go.work.sum` retain the lock throughout compilation.
+inherited sessions, user-supplied `-overlay`/`-modfile` flags or non-`readonly`
+`-mod` flags (including quoted tokens in `GOFLAGS`), and builds tracking
+`go.work.sum` retain the lock throughout compilation.
 Restoration failure aborts the build before unlocking rather than compiling
 against an unrestored module. Concurrent compilation may not improve wall time
 on CPU-limited machines and uses additional temporary disk space. Set `GOCACHE`
