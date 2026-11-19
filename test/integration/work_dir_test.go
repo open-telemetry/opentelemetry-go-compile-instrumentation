@@ -89,50 +89,7 @@ func TestBuildAcrossWorkDirsReusesCache(t *testing.T) {
 	require.NoError(t, err)
 
 	moduleDir := t.TempDir()
-	writeTestFile(t, moduleDir, "go.mod", `module example.com/otelc-work-dir-local
-
-go 1.25.0
-
-require example.com/otelc-work-dir-local/hooks v0.0.0-00010101000000-000000000000
-
-replace example.com/otelc-work-dir-local/hooks => ./hooks
-`)
-	writeTestFile(t, moduleDir, "otel.instrumentation.go", `//go:build tools
-
-package tools
-
-import _ "example.com/otelc-work-dir-local/hooks"
-`)
-	writeTestFile(t, moduleDir, "main.go", `// Copyright The OpenTelemetry Authors
-// SPDX-License-Identifier: Apache-2.0
-
-package main
-
-import "fmt"
-
-func Greet() string { return "hello" }
-
-func main() {
-	fmt.Println(Greet())
-}
-`)
-	writeTestFile(
-		t,
-		moduleDir,
-		filepath.Join("hooks", "go.mod"),
-		"module example.com/otelc-work-dir-local/hooks\n\ngo 1.25.0\n",
-	)
-	writeTestFile(t, moduleDir, filepath.Join("hooks", "hooks.go"), "package hooks\n")
-	writeTestFile(t, moduleDir, filepath.Join("hooks", "otelc.yaml"), `version: "v1.0.0"
-
-hook_greet:
-  target: main
-  where:
-    func: Greet
-  do:
-    - inject_code:
-        raw: 'println("hooked")'
-`)
+	writeLocalHookModule(t, moduleDir)
 
 	goCache := t.TempDir()
 	wdA := t.TempDir()
@@ -184,4 +141,111 @@ hook_greet:
 	runOut, runErr := runCmd.CombinedOutput()
 	require.NoError(t, runErr, "running cached binary failed:\n%s", runOut)
 	assert.Contains(t, string(runOut), "hooked")
+}
+
+// writeLocalHookModule writes a module whose main.Greet is instrumented by a
+// rule from a local hook module, so a build needs no network access.
+func writeLocalHookModule(t *testing.T, moduleDir string) {
+	t.Helper()
+	writeTestFile(t, moduleDir, "go.mod", `module example.com/otelc-work-dir-local
+
+go 1.25.0
+
+require example.com/otelc-work-dir-local/hooks v0.0.0-00010101000000-000000000000
+
+replace example.com/otelc-work-dir-local/hooks => ./hooks
+`)
+	writeTestFile(t, moduleDir, "otel.instrumentation.go", `//go:build tools
+
+package tools
+
+import _ "example.com/otelc-work-dir-local/hooks"
+`)
+	writeTestFile(t, moduleDir, "main.go", `// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+import "fmt"
+
+func Greet() string { return "hello" }
+
+func main() {
+	fmt.Println(Greet())
+}
+`)
+	writeTestFile(
+		t,
+		moduleDir,
+		filepath.Join("hooks", "go.mod"),
+		"module example.com/otelc-work-dir-local/hooks\n\ngo 1.25.0\n",
+	)
+	writeTestFile(t, moduleDir, filepath.Join("hooks", "hooks.go"), "package hooks\n")
+	writeTestFile(t, moduleDir, filepath.Join("hooks", "otelc.yaml"), `version: "v1.0.0"
+
+hook_greet:
+  target: main
+  where:
+    func: Greet
+  do:
+    - inject_code:
+        raw: 'println("hooked")'
+`)
+}
+
+// TestFreshCheckoutReusesDefaultCache verifies that otelc go build uses the go
+// command's default GOCACHE when none is set, so a build after the work
+// directory is removed (a fresh checkout, git clean, otelc cleanup) reuses the
+// cached compile archives instead of recompiling every package.
+func TestFreshCheckoutReusesDefaultCache(t *testing.T) {
+	t.Parallel()
+
+	otelcPath, err := testutil.OtelcPath()
+	require.NoError(t, err)
+	otelcPath, err = filepath.Abs(otelcPath)
+	require.NoError(t, err)
+
+	moduleDir := t.TempDir()
+	writeLocalHookModule(t, moduleDir)
+
+	// Point the user cache directory, where the go command keeps its default
+	// GOCACHE, at a temporary directory on every platform, and keep the module
+	// cache where it is.
+	userCache := t.TempDir()
+	env := append(preparedBuildBaseEnvironment(),
+		"GOWORK=off",
+		"OTELC_STATS=1",
+		"XDG_CACHE_HOME="+userCache,
+		"HOME="+userCache,
+		"LocalAppData="+userCache,
+		"GOPATH="+goOutput(t, moduleDir, "env", "GOPATH"),
+		"GOMODCACHE="+goOutput(t, moduleDir, "env", "GOMODCACHE"),
+	)
+	ext := ""
+	if runtime.GOOS == "windows" {
+		ext = ".exe"
+	}
+	binary := filepath.Join(t.TempDir(), "app"+ext)
+	buildDir := filepath.Join(moduleDir, util.BuildTempDir)
+	build := func() string {
+		t.Helper()
+		runOtelcCommand(t, moduleDir, env, otelcPath, "go", "build", "-o", binary, ".")
+		log, readErr := os.ReadFile(filepath.Join(buildDir, "debug.log"))
+		require.NoError(t, readErr)
+		return string(log)
+	}
+
+	logA := build()
+	assert.Contains(t, logA, "package=runtime", "cold build should compile runtime")
+	assert.NoDirExists(t, filepath.Join(buildDir, "gocache"), "otelc must not keep a cache of its own")
+
+	require.NoError(t, os.RemoveAll(buildDir))
+	logB := build()
+	assert.NotContains(t, logB, "package=runtime", "build after a fresh checkout must reuse GOCACHE for runtime")
+	assert.NotContains(t, logB, "package=example.com/otelc-work-dir-local",
+		"build after a fresh checkout must reuse GOCACHE for main")
+
+	out, runErr := exec.CommandContext(t.Context(), binary).CombinedOutput()
+	require.NoError(t, runErr, "running cached binary failed:\n%s", out)
+	assert.Contains(t, string(out), "hooked")
 }

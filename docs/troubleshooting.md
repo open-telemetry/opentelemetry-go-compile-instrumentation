@@ -179,10 +179,9 @@ showing all source modifications and source additions introduced into the Go com
   packages that are actually recompiled. If Go serves a package entirely from cache,
   `otelc` does not re-instrument it during that run and no fresh `.diff` is generated.
   To force recompilation and regenerate diffs for all packages, pass `-a` (e.g.
-  `otelc --debug go build -a .` or `OTELC_DEBUG=1 go build -a .`) or run `otelc cleanup` to
-  remove `otelc`'s retained build directory and cache before rebuilding. (Note that `otelc`
-  maintains its own persistent cache at `.otelc-build/gocache`, so a standard `go clean -cache`
-  only affects your default external Go cache unless `GOCACHE=.otelc-build/gocache` is set.)
+  `otelc --debug go build -a .` or `OTELC_DEBUG=1 go build -a .`). `otelc` builds use the
+  same `GOCACHE` as `go build`; instrumented artifacts are stored under their own cache keys,
+  so `go clean -cache` removes them together with the plain ones.
 
 ### `--stats`
 
@@ -248,7 +247,6 @@ Run `otelc cleanup` to remove them.
 | `debug/<package>/otelc.runtime.go.diff` | Setup-generated runtime diff report for `<package>`. |
 | `debug/main/go.mod` | Copy of `go.mod` after `otelc` adds its `replace` directives. |
 | `debug/<package>/` | Instrumented source files as compiled, one directory per package; `/` and `.` in the import path become `_`. |
-| `gocache/` | Persistent Go build cache used across `otelc` builds. |
 | `added_imports.<pid>.json` | Per-process import tracking used during the link phase. |
 
 With `--debug`, `go build -work` is also passed, so Go's own temporary work directory is
