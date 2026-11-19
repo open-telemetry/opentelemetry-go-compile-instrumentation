@@ -33,12 +33,18 @@ var (
 	tracerProvider        *sdktrace.TracerProvider
 	loggerProvider        *sdklog.LoggerProvider
 	registerSignalHandler sync.Once
+	// finalShutdown runs the SDK shutdown once, from whichever of the signal
+	// handler and ShutdownOnExit gets there first. Tests replace it.
+	finalShutdown = new(sync.Once) //nolint:gochecknoglobals // shared by the signal handler and ShutdownOnExit
 
 	// ready is set at the end of init. Hooks can run before that: the
 	// trampolines call them through //go:linkname, which does not order this
 	// package or its imports before the instrumented package.
 	ready atomic.Bool
 )
+
+// shutdownTimeout bounds the final flush and shutdown of the SDK.
+const shutdownTimeout = 5 * time.Second
 
 func init() {
 	// Initialize logger early so hook packages can use it with the correct log level
@@ -419,16 +425,43 @@ func handleShutdownSignal(sigCh chan os.Signal) {
 
 	logger.Info("received signal, flushing telemetry", "signal", sig.String())
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := Shutdown(ctx); err != nil {
-		logger.Error("error flushing telemetry during shutdown", "error", err)
-	} else {
-		logger.Info("OpenTelemetry SDK shutdown completed successfully")
-	}
+	shutdownOnce()
 
 	reraiseIfUnhandled(sig)
+}
+
+// ShutdownOnExit flushes and shuts down the SDK before the process exits.
+// otelc defers it at the start of main.main and calls it at the start of
+// os.Exit, so telemetry that the batch span processor still holds is exported
+// when main returns or the program calls os.Exit, including through
+// log.Fatal. If the signal handler is already flushing, it waits for that
+// flush to finish instead, so an application that handles SIGINT or SIGTERM
+// itself and exits right away does not cut the flush short. It is not meant to
+// be called by application code.
+//
+// os.Exit can run during the initialization of a package that is initialized
+// before this one, when this package's variables are not set yet and there is
+// no SDK to flush. ShutdownOnExit does nothing then.
+func ShutdownOnExit() {
+	if !Ready() {
+		return
+	}
+	shutdownOnce()
+}
+
+// shutdownOnce shuts the SDK down at most once. A caller that arrives while
+// another one is shutting it down blocks until that finishes.
+func shutdownOnce() {
+	finalShutdown.Do(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+
+		if err := Shutdown(ctx); err != nil {
+			Logger().Error("error flushing telemetry during shutdown", "error", err)
+		} else {
+			Logger().Info("OpenTelemetry SDK shutdown completed successfully")
+		}
+	})
 }
 
 // signalOwners records which signals the application registered for with

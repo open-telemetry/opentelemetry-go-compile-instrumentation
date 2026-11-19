@@ -12,6 +12,7 @@ import (
 	"flag"
 	"log"
 	"log/slog"
+	"os"
 
 	"go.opentelemetry.io/otelc/test/shared/testdb"
 )
@@ -24,6 +25,7 @@ var (
 		"all",
 		"The operation to perform: ping, exec, query, commented-query, tx, tx-rollback, tx-fail, prepare, tx-stmt, conn, opendb, all",
 	)
+	exit = flag.Bool("exit", false, "End with os.Exit(0) instead of returning from main")
 )
 
 func main() {
@@ -89,6 +91,10 @@ func main() {
 	}
 
 	slog.Info("database operations completed successfully")
+	if *exit {
+		db.Close()
+		os.Exit(0)
+	}
 }
 
 func doPing(ctx context.Context, db *sql.DB) {
