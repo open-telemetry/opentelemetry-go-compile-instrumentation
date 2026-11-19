@@ -4,6 +4,7 @@
 package pkgload
 
 import (
+	"errors"
 	"maps"
 	"os"
 	"path/filepath"
@@ -883,4 +884,37 @@ func TestResolveExportFilesBatch_KeepsDependenciesOfFailedRoot(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, failedRoots, "example.com/batch/broken")
 	assert.Empty(t, closures)
+}
+
+// TestIsDeterministicLoadFailure pins which failures repeat for the rest of
+// the session, using the messages go list really reports. Compiler errors
+// arrive as ListErrors too, so the kind alone must not decide.
+func TestIsDeterministicLoadFailure(t *testing.T) {
+	listErr := func(msg string) error { return packages.Error{Msg: msg, Kind: packages.ListError} }
+	for _, tt := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"missing module package", listErr("no required module provides package example.invalid/zzz; to add it:\n\tgo get example.invalid/zzz"), true},
+		{"go mod updates needed", listErr("updates to go.mod needed; to update it:\n\tgo mod tidy"), true},
+		{"not in std", listErr("package fmtx is not in std (/usr/local/go/src/fmtx)"), true},
+		{"build constraints", listErr("package example.com/p/ex: build constraints exclude all Go files in /tmp/p/ex"), true},
+		{"no export file", errors.New(`package "unsafe" has no export file`), true},
+		{"compiler error", listErr("# example.com/p/broken\nbroken/b.go:3:12: undefined: x"), false},
+		{"invalid compiler flag", listErr("# example.com/p\nflag provided but not defined: -otelc-review-invalid-flag"), false},
+		{"other error", errors.New("signal: killed"), false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, IsDeterministicLoadFailure(tt.err))
+		})
+	}
+}
+
+func TestIsLoadFailure(t *testing.T) {
+	listErr := func(msg string) error { return packages.Error{Msg: msg, Kind: packages.ListError} }
+	assert.True(t, IsLoadFailure(listErr("updates to go.mod needed; to update it:\n\tgo mod tidy")))
+	assert.True(t, IsLoadFailure(errors.New("no packages found for [example.com/a]")))
+	assert.False(t, IsLoadFailure(listErr("# example.com/p/broken\nbroken/b.go:3:12: undefined: x")))
+	assert.False(t, IsLoadFailure(errors.New("signal: killed")))
 }

@@ -4,6 +4,78 @@ This guide covers how to scope, filter, and tune `otelc` instrumentation for you
 assumes you have already completed the [Getting Started](getting-started.md) setup. For the full
 rule schema reference, see [Instrumentation Rules](rules.md).
 
+## Experimental concurrent compilation
+
+`OTELC_UNLOCKED_COMPILE=1` allows `otelc go build` and `otelc go install` of
+package targets to release the module lock after setup. Setup and restoration
+of `go.mod`, `go.sum`, and generated source files remain serialized. Compilation
+uses a Go overlay and an invocation-owned bundle and metadata directory outside
+`.otelc-build`, so another invocation's setup or cleanup cannot delete its inputs.
+The invocation directory is removed when the command finishes; abrupt termination
+may leave a temporary directory behind.
+
+This is opt-in. Tests, named-file builds, vendored projects, debug builds,
+inherited sessions, user-supplied `-overlay`/`-modfile` flags or non-`readonly`
+`-mod` flags (including quoted tokens in `GOFLAGS`), and builds tracking
+`go.work.sum` retain the lock throughout compilation.
+Restoration failure aborts the build before unlocking rather than compiling
+against an unrestored module. Concurrent compilation may not improve wall time
+on CPU-limited machines and uses additional temporary disk space. Unlocked
+builds use the same `GOCACHE` as `go build`, so they reuse compiler outputs
+between builds. Invocation-specific bundle and overlay paths can reduce warm-cache reuse even
+with a persistent `GOCACHE`. Compare both full rebuilds and incremental builds
+before enabling this in CI; releasing the lock does not guarantee a speedup.
+
+### Enable concurrent builds
+
+Use a binary built from this PR (or a release containing it). From your own
+module, enable the optimization for one package build:
+
+```bash
+OTELC_UNLOCKED_COMPILE=1 otelc go build -o ./app ./cmd/app
+```
+
+The setting permits compilation to overlap; it does not launch multiple builds
+for you. For two commands in the same module, run them concurrently with distinct
+output paths. Replace `./cmd/a` and `./cmd/b` with your package targets:
+
+```bash
+export OTELC_UNLOCKED_COMPILE=1
+export GOCACHE="${XDG_CACHE_HOME:-$HOME/.cache}/otelc/go-build"
+mkdir -p "$GOCACHE" bin
+
+otelc go build -o bin/a ./cmd/a &
+first=$!
+otelc go build -o bin/b ./cmd/b &
+second=$!
+
+# Wait for both commands and report failure if either build fails.
+status=0
+wait "$first" || status=1
+wait "$second" || status=1
+test "$status" -eq 0
+```
+
+Keep the cache outside `.otelc-build`: shared cleanup may remove that directory.
+There is no separate setup command to run first; each invocation performs its own
+serialized setup and restores the module before releasing the lock. Unsupported
+builds automatically keep the lock even when the variable is enabled.
+
+To return to fully locked builds, unset the variable or explicitly set it to `0`:
+
+```bash
+unset OTELC_UNLOCKED_COMPILE
+# Or override it for one command:
+OTELC_UNLOCKED_COMPILE=0 otelc go build -o ./app ./cmd/app
+```
+
+To compare modes, time the same commands with `OTELC_UNLOCKED_COMPILE=0` and `1`,
+keeping package targets, cache configuration, and Go flags identical. Measure the
+wall time until **both** background commands finish, not just the time to launch
+them. Warm each mode separately, alternate run order, and report full rebuilds
+(`-a`) separately from normal cached builds. Do not compare a cold cache in one
+mode with a warm cache in the other.
+
 ## Selecting Instrumentations
 
 By default, `otelc` applies all instrumentation rules from its embedded bundle to every

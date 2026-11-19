@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - 'release/v*.*.x'
     paths:
       - '.github/tools/**'
       - '.github/workflows/check-github-tools.yaml'
