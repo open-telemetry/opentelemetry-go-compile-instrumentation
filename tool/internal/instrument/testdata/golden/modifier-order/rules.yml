@@ -1,0 +1,33 @@
+# Without order, both inject_code rules are applied before the
+# expand_directive rule, crashtracker before tracer, so the span code would
+# run first. With order, the rule with the highest order is applied last and
+# its code runs first: crashtracker, then tracer, then the span.
+crashtracker:
+  target: main
+  where:
+    func: main
+  do:
+    - inject_code:
+        order: 100
+        raw: println("crashtracker start")
+
+span_directive:
+  target: main
+  where:
+    directive: "otelc:span"
+  do:
+    - expand_directive:
+        template: |-
+          println("span start: {{.FuncName}}")
+          defer println("span end: {{.FuncName}}")
+
+tracer:
+  target: main
+  where:
+    func: main
+  do:
+    - inject_code:
+        order: 50
+        raw: |-
+          println("tracer start")
+          defer println("tracer stop")

@@ -28,6 +28,7 @@ type InstRule interface {
 	GetTarget() *Target  // The packages the rule applies to
 	GetVersion() string  // The version range of target module if available, e.g "v1.0.0,v2.0.0"
 	GetWhere() *WhereDef // Optional non-package selectors that remain after normalization
+	GetOrder() int       // The order in which the rule is applied to a file, lowest first
 }
 
 // FilterDef describes file predicates nested under where.file.
@@ -77,6 +78,11 @@ type InstBaseRule struct {
 	Version string            `json:"version,omitempty" yaml:"version,omitempty"`
 	Imports map[string]string `json:"imports,omitempty" yaml:"imports,omitempty"`
 	Where   *WhereDef         `json:"where,omitempty"   yaml:"where,omitempty"`
+	// Order is the order in which the rule is applied to a file. Rules with
+	// a lower order are applied first, and rules with the same order keep
+	// the order they are matched in. Only the inject_code and
+	// expand_directive modifiers accept it.
+	Order int `json:"order,omitempty" yaml:"order,omitempty"`
 }
 
 func (ibr *InstBaseRule) String() string      { return ibr.Name }
@@ -84,6 +90,7 @@ func (ibr *InstBaseRule) GetName() string     { return ibr.Name }
 func (ibr *InstBaseRule) GetTarget() *Target  { return &ibr.Target }
 func (ibr *InstBaseRule) GetVersion() string  { return ibr.Version }
 func (ibr *InstBaseRule) GetWhere() *WhereDef { return ibr.Where }
+func (ibr *InstBaseRule) GetOrder() int       { return ibr.Order }
 
 // Base returns the embedded base rule. Every rule kind promotes this method,
 // so code that holds any rule kind can reach the fields all kinds share, such
