@@ -288,12 +288,13 @@ func (sp *setupPhase) loadInjectedPackages(
 		return loaded, unloadable, nil
 	}
 
-	// A root that does not exist comes back with its errors instead of failing
-	// the load.
+	// A root that does not exist, or that imports a package that does not,
+	// comes back with the errors on the missing package instead of failing the
+	// load.
 	loaded := make([]*packages.Package, 0, len(pkgs))
 	var unloadable []string
 	for _, pkg := range pkgs {
-		if len(pkg.Errors) > 0 && allLoadFailures(pkg.Errors) {
+		if onlyLoadFailures(pkg) {
 			unloadable = append(unloadable, pkg.PkgPath)
 			continue
 		}
@@ -302,13 +303,28 @@ func (sp *setupPhase) loadInjectedPackages(
 	return loaded, unloadable, nil
 }
 
-func allLoadFailures(errs []packages.Error) bool {
-	for _, err := range errs {
-		if !pkgload.IsLoadFailure(err) {
-			return false
+// onlyLoadFailures reports whether pkg or a package it imports has errors, and
+// all of them are load failures. A root with any other error stays loaded, so
+// hashPackages fails on it.
+func onlyLoadFailures(pkg *packages.Package) bool {
+	var failed, other bool
+	packages.Visit([]*packages.Package{pkg}, nil, func(p *packages.Package) {
+		for _, err := range p.Errors {
+			if isLoadFailure(err) {
+				failed = true
+			} else {
+				other = true
+			}
 		}
-	}
-	return true
+	})
+	return failed && !other
+}
+
+// isLoadFailure reports whether err says that go list could not load a
+// package. A parse or type error is never one, even when its message quotes a
+// load failure.
+func isLoadFailure(err packages.Error) bool {
+	return (err.Kind == packages.ListError || err.Kind == packages.UnknownError) && pkgload.IsLoadFailure(err)
 }
 
 func appendRuleImports[T interface{ Base() *rule.InstBaseRule }](

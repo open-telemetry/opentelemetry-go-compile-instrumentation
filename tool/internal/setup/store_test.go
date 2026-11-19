@@ -347,10 +347,11 @@ func TestSetupPhaseInjectedHash(t *testing.T) {
 }
 
 // TestStoreInjectedHashSkipsUnloadableImports covers rule imports that do not
-// load from the main module: a package that does not exist, and a package of
-// a module that is in the module graph but not in go.mod, which makes go list
-// fail the whole load. Neither can reach a compile, so the hash leaves them
-// out instead of failing the build.
+// load from the main module: a package that does not exist, a package that
+// imports one that does not exist, and a package of a module that is in the
+// module graph but not in go.mod, which makes go list fail the whole load.
+// None can reach a compile, so the hash leaves them out instead of failing the
+// build.
 func TestStoreInjectedHashSkipsUnloadableImports(t *testing.T) {
 	root := t.TempDir()
 	writeFile := func(name, content string) {
@@ -368,6 +369,7 @@ func TestStoreInjectedHashSkipsUnloadableImports(t *testing.T) {
 		"replace example.com/a => ../a\n\nreplace example.com/b => ../b\n")
 	writeFile("m/m.go", "package m\n\nimport _ \"example.com/a\"\n")
 	writeFile("m/extra/extra.go", "package extra\n\nconst Tag = \"v1\"\n")
+	writeFile("m/uses/uses.go", "package uses\n\nimport _ \"example.com/m/gone\"\n")
 	t.Chdir(filepath.Join(root, "m"))
 	workDir := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, workDir)
@@ -378,6 +380,7 @@ func TestStoreInjectedHashSkipsUnloadableImports(t *testing.T) {
 		InstBaseRule: rule.InstBaseRule{Imports: map[string]string{
 			"extra":   "example.com/m/extra",
 			"missing": "example.com/m/missing",
+			"uses":    "example.com/m/uses",
 			"bp":      "example.com/b/bp",
 		}},
 	})
@@ -402,7 +405,30 @@ func TestStoreInjectedHashSkipsUnloadableImports(t *testing.T) {
 	assert.NotEqual(t, first, second, "the imports that load must still be hashed")
 
 	writeFile("m/missing/missing.go", "package missing\n")
-	assert.NotEqual(t, second, hash(), "an import that starts to load must change the hash")
+	third := hash()
+	assert.NotEqual(t, second, third, "an import that starts to load must change the hash")
+
+	writeFile("m/gone/gone.go", "package gone\n")
+	assert.NotEqual(t, third, hash(), "an import whose dependency starts to load must change the hash")
+}
+
+// TestLoadInjectedPackagesReturnsOtherErrors covers a load that fails for a
+// reason other than a package that does not load: the error is returned.
+func TestLoadInjectedPackagesReturnsOtherErrors(t *testing.T) {
+	sp := newTestSetupPhase()
+	sp.buildFlags = []string{"-C", filepath.Join(t.TempDir(), "missing")}
+
+	_, _, err := sp.loadInjectedPackages(t.Context(), []string{"example.com/a", "example.com/b"})
+	require.Error(t, err)
+}
+
+func TestIsLoadFailureChecksKind(t *testing.T) {
+	msg := "no Go files in /tmp/p"
+	assert.True(t, isLoadFailure(packages.Error{Msg: msg, Kind: packages.ListError}))
+	assert.True(t, isLoadFailure(packages.Error{Msg: msg, Kind: packages.UnknownError}))
+	assert.False(t, isLoadFailure(packages.Error{Msg: msg, Kind: packages.ParseError}))
+	assert.False(t, isLoadFailure(packages.Error{Msg: msg, Kind: packages.TypeError}))
+	assert.False(t, isLoadFailure(packages.Error{Msg: "expected 'IDENT', found 'EOF'", Kind: packages.ListError}))
 }
 
 func TestInjectedHashFailsOnBrokenImport(t *testing.T) {
