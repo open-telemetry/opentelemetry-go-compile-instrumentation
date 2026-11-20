@@ -2509,3 +2509,19 @@ func TestSplitBuildTargets_DotGoPackagePath(t *testing.T) {
 		assert.Empty(t, files)
 	})
 }
+
+func TestSplitBuildTargets_DebugFlagValue(t *testing.T) {
+	chdirWithGoFiles(t, "cmd/main.go", "trace.go")
+
+	for _, flag := range []string{"-debug-actiongraph", "-debug-runtime-trace", "-debug-trace"} {
+		t.Run(flag, func(t *testing.T) {
+			pkgs, files, err := splitBuildTargets(subcmdBuild, []string{flag, "trace.go", "./cmd"})
+			require.NoError(t, err)
+			assert.Equal(t, []string{"./cmd"}, pkgs)
+			assert.Empty(t, files)
+
+			_, _, err = splitBuildTargets(subcmdBuild, []string{flag})
+			require.ErrorContains(t, err, "requires a value")
+		})
+	}
+}

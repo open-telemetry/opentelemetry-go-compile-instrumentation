@@ -39,9 +39,20 @@ jobs:
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Generate GitHub App token
+        id: app-token
+        if: vars.OTELBOT_GO_COMPILE_INSTRUMENTATION_CLIENT_ID != ''
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510  # v3.3.0
+        with:
+          client-id: ${{ vars.OTELBOT_GO_COMPILE_INSTRUMENTATION_CLIENT_ID }}
+          private-key: ${{ secrets.OTELBOT_GO_COMPILE_INSTRUMENTATION_PRIVATE_KEY }}
+          permission-contents: write
+
       - name: Checkout merge commit
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
+          token: ${{ steps.app-token.outputs.token || github.token }}
           persist-credentials: true
           fetch-depth: 0
 
@@ -87,6 +98,7 @@ jobs:
 
       - name: Create and push tags
         env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
           VERSION: ${{ steps.version.outputs.version }}
           RELEASE_PKG: ${{ steps.pkg_version.outputs.release_pkg }}
           PKG_VERSION: ${{ steps.pkg_version.outputs.pkg_version }}
@@ -109,8 +121,13 @@ jobs:
                 exit 1
               fi
             else
-              git config user.name "github-actions[bot]"
-              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              if [ -n "${APP_TOKEN}" ]; then
+                git config user.name "otelbot-go-compile-instrumentation[bot]"
+                git config user.email "350478713+otelbot-go-compile-instrumentation[bot]@users.noreply.github.com"
+              else
+                git config user.name "github-actions[bot]"
+                git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              fi
               git tag -a "${tag}" -m "Release ${tag}"
               git push origin "${tag}"
             fi
@@ -123,7 +140,7 @@ jobs:
 
       - name: Create GitHub release
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
           VERSION: ${{ steps.version.outputs.version }}
           PKG_VERSION: ${{ steps.pkg_version.outputs.pkg_version }}
           IS_PRERELEASE: ${{ steps.prerelease.outputs.prerelease }}
@@ -137,6 +154,7 @@ jobs:
             RELEASE_TITLE="${VERSION}/${PKG_VERSION}"
           fi
           gh release create "${VERSION}" dist/otelc-* dist/checksums.txt \
+            --draft \
             --title "${RELEASE_TITLE}" \
             --notes-file .github/release-notes.md \
             "${RELEASE_FLAGS[@]}"

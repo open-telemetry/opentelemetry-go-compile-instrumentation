@@ -13,7 +13,9 @@ on:
       - ".tools/workflows/**"
       - "Makefile"
   push:
-    branches: [main]
+    branches:
+      - main
+      - 'release/v*.*.x'
     paths:
       - ".github/workflows/*.yml"
       - ".github/workflows/*.yaml"

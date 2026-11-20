@@ -69,6 +69,25 @@ func TestClassifyArgs_Build(t *testing.T) {
 		assert.Equal(t, expected, got)
 	})
 
+	t.Run("undocumented debug flags take a separated value", func(t *testing.T) {
+		args := []string{
+			"-debug-actiongraph", "ag.json", "-debug-runtime-trace", "rt.out",
+			"-debug-trace", "t.json", "./cmd",
+		}
+		got := classifyArgs(subcmdBuild, args)
+
+		expected := []ClassifiedArg{
+			{Index: 0, Raw: "-debug-actiongraph", Kind: ArgBuildFlag, FlagName: "-debug-actiongraph"},
+			{Index: 1, Raw: "ag.json", Kind: ArgBuildFlagValue, FlagName: "-debug-actiongraph", Value: "ag.json"},
+			{Index: 2, Raw: "-debug-runtime-trace", Kind: ArgBuildFlag, FlagName: "-debug-runtime-trace"},
+			{Index: 3, Raw: "rt.out", Kind: ArgBuildFlagValue, FlagName: "-debug-runtime-trace", Value: "rt.out"},
+			{Index: 4, Raw: "-debug-trace", Kind: ArgBuildFlag, FlagName: "-debug-trace"},
+			{Index: 5, Raw: "t.json", Kind: ArgBuildFlagValue, FlagName: "-debug-trace", Value: "t.json"},
+			{Index: 6, Raw: "./cmd", Kind: ArgTarget},
+		}
+		assert.Equal(t, expected, got)
+	})
+
 	t.Run("joined -buildvcs values", func(t *testing.T) {
 		args := []string{"-buildvcs=false", "./cmd", "-buildvcs=auto", "./other"}
 		got := classifyArgs(subcmdBuild, args)

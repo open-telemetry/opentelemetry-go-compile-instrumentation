@@ -274,6 +274,18 @@ func TestOperationName(t *testing.T) {
 		{name: "tab after first token", query: "SELECT\t* FROM users", want: "SELECT"},
 		{name: "repeated spaces after first token", query: "SELECT   * FROM users", want: "SELECT"},
 		{name: "trailing whitespace", query: "COMMIT  \n", want: "COMMIT"},
+		{name: "sqlc name comment", query: "-- name: GetAuthor :one\nSELECT id, name FROM authors WHERE id = $1", want: "SELECT"},
+		{name: "line comment with CRLF", query: "-- note\r\ninsert into t values (1)", want: "INSERT"},
+		{name: "several line comments", query: "\n\t-- one\n\t-- two\n\tCREATE INDEX i ON t(c)", want: "CREATE"},
+		{name: "block comment", query: "/* app=shop */ UPDATE users SET x=1", want: "UPDATE"},
+		{name: "multiline block comment", query: "/*\n * report\n */\nSELECT 1", want: "SELECT"},
+		{name: "block then line comment", query: "/* a */ -- b\nDELETE FROM t", want: "DELETE"},
+		{name: "comment after first token", query: "SELECT -- all\n* FROM users", want: "SELECT"},
+		{name: "line comment ended by CR", query: "-- note\rSELECT 1", want: "SELECT"},
+		{name: "slash star slash does not close the comment", query: "/*/ x */ SELECT 1", want: "SELECT"},
+		{name: "line comment only", query: "-- nothing to run", want: ""},
+		{name: "block comment only", query: "/* nothing to run */", want: ""},
+		{name: "unterminated block comment", query: "/* SELECT 1", want: ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

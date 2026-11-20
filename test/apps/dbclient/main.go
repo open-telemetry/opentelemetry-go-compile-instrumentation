@@ -22,7 +22,7 @@ var (
 	op         = flag.String(
 		"op",
 		"all",
-		"The operation to perform: ping, exec, query, tx, tx-rollback, tx-fail, prepare, tx-stmt, conn, opendb, all",
+		"The operation to perform: ping, exec, query, commented-query, tx, tx-rollback, tx-fail, prepare, tx-stmt, conn, opendb, all",
 	)
 )
 
@@ -56,6 +56,8 @@ func main() {
 		doExec(ctx, db)
 	case "query":
 		doQuery(ctx, db)
+	case "commented-query":
+		doCommentedQuery(ctx, db)
 	case "tx":
 		doTx(ctx, db)
 	case "tx-rollback":
@@ -120,6 +122,20 @@ func doQuery(ctx context.Context, db *sql.DB) {
 		slog.Info("query result", "id", id, "name", name)
 	}
 	slog.Info("query succeeded")
+}
+
+// commentedQuery starts with a comment line, the way sqlc writes every query it
+// generates.
+const commentedQuery = `-- name: GetUserByName :many
+SELECT id, name FROM users WHERE name = ?`
+
+func doCommentedQuery(ctx context.Context, db *sql.DB) {
+	rows, err := db.QueryContext(ctx, commentedQuery, "alice")
+	if err != nil {
+		log.Fatalf("failed to query: %v", err)
+	}
+	defer rows.Close()
+	slog.Info("commented query succeeded")
 }
 
 func doPrepare(ctx context.Context, db *sql.DB) {
