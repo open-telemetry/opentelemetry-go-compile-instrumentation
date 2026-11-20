@@ -264,14 +264,16 @@ func ensureInstrumentationRequires(
 		if !ok || v == "" {
 			continue
 		}
-		hasReq := false
+		needsAdd := true
 		for _, req := range f.Require {
 			if req.Mod.Path == m {
-				hasReq = true
+				if semver.Compare(req.Mod.Version, v) >= 0 {
+					needsAdd = false
+				}
 				break
 			}
 		}
-		if !hasReq {
+		if needsAdd {
 			if addErr := f.AddRequire(m, v); addErr != nil {
 				return ex.Wrap(addErr)
 			}

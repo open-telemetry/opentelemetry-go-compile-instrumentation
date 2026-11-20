@@ -11,10 +11,14 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
 
 	"go.opentelemetry.io/otelc/tool/ex"
@@ -42,6 +46,10 @@ func Generate(instrumentationRoot string, version ...string) (Manifest, error) {
 		ver = version[0]
 	}
 	repoRoot, tags := loadCommitTags(instrumentationRoot)
+	var ci *commitInfo
+	if repoRoot != "" {
+		ci, _ = loadCommitInfo(repoRoot)
+	}
 
 	manifest := make(Manifest, 0)
 	err := filepath.WalkDir(instrumentationRoot, func(entryPath string, d os.DirEntry, err error) error {
@@ -62,9 +70,7 @@ func Generate(instrumentationRoot string, version ...string) (Manifest, error) {
 		if repoRoot != "" {
 			if rel, relErr := filepath.Rel(repoRoot, modDir); relErr == nil {
 				cleanRel := path.Clean(filepath.ToSlash(rel))
-				if tagVer, ok := tags[cleanRel]; ok && tagVer != "" {
-					modVer = tagVer
-				}
+				modVer = resolveSubmoduleVersion(repoRoot, cleanRel, tags, ci, ver)
 			}
 		}
 
@@ -147,6 +153,99 @@ func loadCommitTags(dir string) (string, map[string]string) {
 		}
 	}
 	return repoRoot, tags
+}
+
+const (
+	minGitLogFields = 2
+	shortHashLen    = 12
+	describeMatches = 4
+)
+
+var describePattern = regexp.MustCompile(`^(.*?)-(\d+)-g([0-9a-f]+)$`)
+
+type commitInfo struct {
+	time time.Time
+	hash string
+}
+
+func loadCommitInfo(dir string) (*commitInfo, error) {
+	cmd := exec.CommandContext(context.Background(), "git", "-C", dir, "log", "-1", "--format=%ct %H", "HEAD")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	fields := strings.Fields(strings.TrimSpace(string(out)))
+	if len(fields) < minGitLogFields {
+		return nil, ex.New("unexpected git log output")
+	}
+	sec, err := strconv.ParseInt(fields[0], 10, 64)
+	if err != nil {
+		return nil, err
+	}
+	return &commitInfo{
+		time: time.Unix(sec, 0).UTC(),
+		hash: fields[1],
+	}, nil
+}
+
+func resolveSubmoduleVersion(
+	repoRoot, subDir string,
+	tags map[string]string,
+	ci *commitInfo,
+	fallbackVer string,
+) string {
+	if tagVer, ok := tags[subDir]; ok && tagVer != "" {
+		return tagVer
+	}
+	if ci != nil && repoRoot != "" {
+		return resolveSubmodulePseudoversion(repoRoot, subDir, ci)
+	}
+	return fallbackVer
+}
+
+func resolveSubmodulePseudoversion(repoRoot, subDir string, ci *commitInfo) string {
+	hash := ci.hash
+	if len(hash) > shortHashLen {
+		hash = hash[:shortHashLen]
+	}
+
+	pattern := subDir + "/v*"
+	cmd := exec.CommandContext(
+		context.Background(),
+		"git",
+		"-C",
+		repoRoot,
+		"describe",
+		"--tags",
+		"--match",
+		pattern,
+		"HEAD",
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return module.PseudoVersion("v0", "", ci.time, hash)
+	}
+
+	desc := strings.TrimSpace(string(out))
+	if desc == "" {
+		return module.PseudoVersion("v0", "", ci.time, hash)
+	}
+
+	baseTag := desc
+	isAhead := false
+	if m := describePattern.FindStringSubmatch(desc); len(m) == describeMatches {
+		baseTag = m[1]
+		isAhead = true
+	}
+	baseTag = strings.TrimPrefix(baseTag, subDir+"/")
+	if !semver.IsValid(baseTag) {
+		return module.PseudoVersion("v0", "", ci.time, hash)
+	}
+	if !isAhead {
+		return baseTag
+	}
+	major := semver.Major(baseTag)
+	return module.PseudoVersion(major, baseTag, ci.time, hash)
 }
 
 func loadModulePath(path string) (string, error) {

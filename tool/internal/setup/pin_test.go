@@ -491,6 +491,42 @@ require example.com/mod v0.2.0
 			},
 		},
 		{
+			name: "bumps older existing require",
+			initial: `module example.com/test
+
+go 1.25
+
+require example.com/mod v0.0.5
+`,
+			imports: map[string]bool{
+				"example.com/mod": true,
+			},
+			versions: map[string]string{
+				"example.com/mod": "v0.1.0",
+			},
+			wantReqs: map[string]string{
+				"example.com/mod": "v0.1.0",
+			},
+		},
+		{
+			name: "bumps older indirect require",
+			initial: `module example.com/test
+
+go 1.25
+
+require example.com/mod v0.0.5 // indirect
+`,
+			imports: map[string]bool{
+				"example.com/mod": true,
+			},
+			versions: map[string]string{
+				"example.com/mod": "v0.1.0",
+			},
+			wantReqs: map[string]string{
+				"example.com/mod": "v0.1.0",
+			},
+		},
+		{
 			name: "empty imports does nothing",
 			initial: `module example.com/test
 

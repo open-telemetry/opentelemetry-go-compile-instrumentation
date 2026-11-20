@@ -16,6 +16,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/mod/module"
 
 	"go.opentelemetry.io/otelc/tool/data"
 )
@@ -546,6 +547,53 @@ rule:
 	gotSymlink, err := Generate(symlinkInstDir, "v0.0.0-fallback")
 	require.NoError(t, err)
 	require.Equal(t, got, gotSymlink)
+}
+
+func TestGenerate_UntaggedSubmoduleAtCommit(t *testing.T) {
+	root, evalErr := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, evalErr)
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "git %v: %s", args, string(out))
+	}
+	run("init")
+	run("config", "user.name", "test")
+	run("config", "user.email", "test@example.com")
+
+	instDir := filepath.Join(root, "instrumentation")
+	writeModule(t, instDir, "mod_a", "example.com/mod_a")
+	writeRuleFile(t, instDir, "mod_a/otelc.yaml", `
+rule:
+  target: example.com/target_a
+`)
+
+	writeModule(t, instDir, "mod_b", "example.com/mod_b")
+	writeRuleFile(t, instDir, "mod_b/otelc.yaml", `
+rule:
+  target: example.com/target_b
+`)
+
+	run("add", ".")
+	run("-c", "commit.gpgsign=false", "commit", "-m", "initial")
+	// Root repository tag v0.1.0, and submodule tag for mod_a only
+	run("-c", "tag.gpgsign=false", "tag", "v0.1.0")
+	run("-c", "tag.gpgsign=false", "tag", "instrumentation/mod_a/v0.1.0")
+
+	// Call Generate with the root repository tag "v0.1.0"
+	got, err := Generate(instDir, "v0.1.0")
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+
+	// mod_a has a matching submodule tag so it receives v0.1.0
+	require.Equal(t, "example.com/mod_a", got[0].ModulePath)
+	require.Equal(t, "v0.1.0", got[0].Version)
+
+	// mod_b is untagged for v0.1.0, so it must not inherit the unresolvable root tag "v0.1.0".
+	// It must resolve to a valid pseudoversion at the commit.
+	require.Equal(t, "example.com/mod_b", got[1].ModulePath)
+	require.True(t, module.IsPseudoVersion(got[1].Version), "expected pseudoversion, got %s", got[1].Version)
 }
 
 func compareEntries(a, b Entry) int {
