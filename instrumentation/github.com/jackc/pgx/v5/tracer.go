@@ -23,6 +23,7 @@ import (
 const (
 	instrumentationName = "go.opentelemetry.io/otelc/instrumentation/github.com/jackc/pgx/v5"
 	instrumentationKey  = "PGX"
+	expectedConnAttrs   = 6
 )
 
 type tracer struct {
@@ -44,27 +45,21 @@ func operationName(query string) string {
 	if trimmed == "" {
 		return ""
 	}
-	if i := strings.IndexFunc(trimmed, unicode.IsSpace); i != -1 {
-		trimmed = trimmed[:i]
+	end := strings.IndexFunc(trimmed, func(r rune) bool {
+		return unicode.IsSpace(r) || r == ';' || r == '('
+	})
+	if end > 0 {
+		trimmed = trimmed[:end]
 	}
 	return strings.ToUpper(trimmed)
 }
 
-// connConfigFunc allows extracting connection configuration, mockable for unit testing.
-var connConfigFunc = func(conn *pgx.Conn) *pgx.ConnConfig {
-	if conn == nil {
-		return nil
-	}
-	return conn.Config()
-}
-
-func (t *tracer) connAttributes(conn *pgx.Conn) []attribute.KeyValue {
-	cfg := connConfigFunc(conn)
+func configAttributes(cfg *pgx.ConnConfig) []attribute.KeyValue {
 	if cfg == nil {
 		return []attribute.KeyValue{semconv.DBSystemNamePostgreSQL}
 	}
 
-	attrs := make([]attribute.KeyValue, 0, 6)
+	attrs := make([]attribute.KeyValue, 0, expectedConnAttrs)
 	attrs = append(attrs, semconv.DBSystemNamePostgreSQL)
 
 	if cfg.Database != "" {
@@ -88,24 +83,32 @@ func (t *tracer) connAttributes(conn *pgx.Conn) []attribute.KeyValue {
 	return attrs
 }
 
-func (t *tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
-	if !enabler.Enable() {
+func connAttributes(conn *pgx.Conn) []attribute.KeyValue {
+	if conn == nil {
+		return []attribute.KeyValue{semconv.DBSystemNamePostgreSQL}
+	}
+	return configAttributes(conn.Config())
+}
+
+func (t *tracer) TraceQueryStart(
+	ctx context.Context,
+	conn *pgx.Conn,
+	data pgx.TraceQueryStartData,
+) context.Context {
+	if !isEnabled() {
 		return ctx
 	}
 
-	initInstrumentation()
-
-	cfg := connConfigFunc(conn)
 	op := operationName(data.SQL)
 	spanName := op
 	if spanName == "" {
 		spanName = "DB Query"
 	}
-	if cfg != nil && cfg.Database != "" {
-		spanName = fmt.Sprintf("%s %s", spanName, cfg.Database)
+	if conn != nil && conn.Config() != nil && conn.Config().Database != "" {
+		spanName = fmt.Sprintf("%s %s", spanName, conn.Config().Database)
 	}
 
-	attrs := t.connAttributes(conn)
+	attrs := connAttributes(conn)
 	if data.SQL != "" {
 		attrs = append(attrs, semconv.DBQueryText(data.SQL))
 	}
@@ -113,6 +116,7 @@ func (t *tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 		attrs = append(attrs, semconv.DBOperationName(op))
 	}
 
+	//nolint:spancheck // span is ended in TraceQueryEnd
 	ctx, _ = t.tr.Start(
 		ctx,
 		spanName,
@@ -122,8 +126,12 @@ func (t *tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 	return ctx
 }
 
-func (t *tracer) TraceQueryEnd(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryEndData) {
-	if !enabler.Enable() {
+func (*tracer) TraceQueryEnd(
+	ctx context.Context,
+	_ *pgx.Conn,
+	data pgx.TraceQueryEndData,
+) {
+	if !isEnabled() {
 		return
 	}
 
@@ -140,22 +148,24 @@ func (t *tracer) TraceQueryEnd(ctx context.Context, conn *pgx.Conn, data pgx.Tra
 	span.End()
 }
 
-func (t *tracer) TraceBatchStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceBatchStartData) context.Context {
-	if !enabler.Enable() {
+func (t *tracer) TraceBatchStart(
+	ctx context.Context,
+	conn *pgx.Conn,
+	_ pgx.TraceBatchStartData,
+) context.Context {
+	if !isEnabled() {
 		return ctx
 	}
 
-	initInstrumentation()
-
-	cfg := connConfigFunc(conn)
 	spanName := "BATCH"
-	if cfg != nil && cfg.Database != "" {
-		spanName = fmt.Sprintf("BATCH %s", cfg.Database)
+	if conn != nil && conn.Config() != nil && conn.Config().Database != "" {
+		spanName = fmt.Sprintf("BATCH %s", conn.Config().Database)
 	}
 
-	attrs := t.connAttributes(conn)
+	attrs := connAttributes(conn)
 	attrs = append(attrs, semconv.DBOperationName("BATCH"))
 
+	//nolint:spancheck // span is ended in TraceBatchEnd
 	ctx, _ = t.tr.Start(
 		ctx,
 		spanName,
@@ -165,7 +175,11 @@ func (t *tracer) TraceBatchStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 	return ctx
 }
 
-func (t *tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.TraceBatchQueryData) {
+func (*tracer) TraceBatchQuery(
+	ctx context.Context,
+	_ *pgx.Conn,
+	data pgx.TraceBatchQueryData,
+) {
 	span := trace.SpanFromContext(ctx)
 	if !span.IsRecording() {
 		return
@@ -176,8 +190,12 @@ func (t *tracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.T
 	}
 }
 
-func (t *tracer) TraceBatchEnd(ctx context.Context, conn *pgx.Conn, data pgx.TraceBatchEndData) {
-	if !enabler.Enable() {
+func (*tracer) TraceBatchEnd(
+	ctx context.Context,
+	_ *pgx.Conn,
+	data pgx.TraceBatchEndData,
+) {
+	if !isEnabled() {
 		return
 	}
 
@@ -194,25 +212,27 @@ func (t *tracer) TraceBatchEnd(ctx context.Context, conn *pgx.Conn, data pgx.Tra
 	span.End()
 }
 
-func (t *tracer) TraceCopyFromStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceCopyFromStartData) context.Context {
-	if !enabler.Enable() {
+func (t *tracer) TraceCopyFromStart(
+	ctx context.Context,
+	conn *pgx.Conn,
+	data pgx.TraceCopyFromStartData,
+) context.Context {
+	if !isEnabled() {
 		return ctx
 	}
 
-	initInstrumentation()
-
-	cfg := connConfigFunc(conn)
 	spanName := "COPY"
-	if cfg != nil && cfg.Database != "" {
-		spanName = fmt.Sprintf("COPY %s", cfg.Database)
+	if conn != nil && conn.Config() != nil && conn.Config().Database != "" {
+		spanName = fmt.Sprintf("COPY %s", conn.Config().Database)
 	}
 
-	attrs := t.connAttributes(conn)
+	attrs := connAttributes(conn)
 	attrs = append(attrs, semconv.DBOperationName("COPY"))
 	if len(data.TableName) > 0 {
 		attrs = append(attrs, attribute.String("db.collection.name", data.TableName.Sanitize()))
 	}
 
+	//nolint:spancheck // span is ended in TraceCopyFromEnd
 	ctx, _ = t.tr.Start(
 		ctx,
 		spanName,
@@ -222,8 +242,12 @@ func (t *tracer) TraceCopyFromStart(ctx context.Context, conn *pgx.Conn, data pg
 	return ctx
 }
 
-func (t *tracer) TraceCopyFromEnd(ctx context.Context, conn *pgx.Conn, data pgx.TraceCopyFromEndData) {
-	if !enabler.Enable() {
+func (*tracer) TraceCopyFromEnd(
+	ctx context.Context,
+	_ *pgx.Conn,
+	data pgx.TraceCopyFromEndData,
+) {
+	if !isEnabled() {
 		return
 	}
 
@@ -240,20 +264,21 @@ func (t *tracer) TraceCopyFromEnd(ctx context.Context, conn *pgx.Conn, data pgx.
 	span.End()
 }
 
-func (t *tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx.TracePrepareStartData) context.Context {
-	if !enabler.Enable() {
+func (t *tracer) TracePrepareStart(
+	ctx context.Context,
+	conn *pgx.Conn,
+	data pgx.TracePrepareStartData,
+) context.Context {
+	if !isEnabled() {
 		return ctx
 	}
 
-	initInstrumentation()
-
-	cfg := connConfigFunc(conn)
 	spanName := "PREPARE"
-	if cfg != nil && cfg.Database != "" {
-		spanName = fmt.Sprintf("PREPARE %s", cfg.Database)
+	if conn != nil && conn.Config() != nil && conn.Config().Database != "" {
+		spanName = fmt.Sprintf("PREPARE %s", conn.Config().Database)
 	}
 
-	attrs := t.connAttributes(conn)
+	attrs := connAttributes(conn)
 	attrs = append(attrs, semconv.DBOperationName("PREPARE"))
 	if data.SQL != "" {
 		attrs = append(attrs, semconv.DBQueryText(data.SQL))
@@ -262,6 +287,7 @@ func (t *tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 		attrs = append(attrs, attribute.String("db.prepared_statement.name", data.Name))
 	}
 
+	//nolint:spancheck // span is ended in TracePrepareEnd
 	ctx, _ = t.tr.Start(
 		ctx,
 		spanName,
@@ -271,8 +297,12 @@ func (t *tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx
 	return ctx
 }
 
-func (t *tracer) TracePrepareEnd(ctx context.Context, conn *pgx.Conn, data pgx.TracePrepareEndData) {
-	if !enabler.Enable() {
+func (*tracer) TracePrepareEnd(
+	ctx context.Context,
+	_ *pgx.Conn,
+	data pgx.TracePrepareEndData,
+) {
+	if !isEnabled() {
 		return
 	}
 
@@ -289,55 +319,69 @@ func (t *tracer) TracePrepareEnd(ctx context.Context, conn *pgx.Conn, data pgx.T
 	span.End()
 }
 
-func (t *tracer) TraceConnectStart(ctx context.Context, data pgx.TraceConnectStartData) context.Context {
+func (*tracer) TraceConnectStart(ctx context.Context, _ pgx.TraceConnectStartData) context.Context {
 	return ctx
 }
 
-func (t *tracer) TraceConnectEnd(ctx context.Context, data pgx.TraceConnectEndData) {
+func (*tracer) TraceConnectEnd(_ context.Context, _ pgx.TraceConnectEndData) {
 }
 
 // chainedTracer chains multiple tracers so custom user tracers continue to fire.
 type chainedTracer struct {
-	tracers []any
+	tracers []pgx.QueryTracer
 }
 
-func chainTracer(existing any, otelTracer any) any {
+func chainTracer(existing, otelTracer pgx.QueryTracer) pgx.QueryTracer {
 	if existing == nil {
 		return otelTracer
 	}
 	if ct, ok := existing.(*chainedTracer); ok {
 		return &chainedTracer{tracers: append(ct.tracers, otelTracer)}
 	}
-	return &chainedTracer{tracers: []any{existing, otelTracer}}
+	return &chainedTracer{tracers: []pgx.QueryTracer{existing, otelTracer}}
 }
 
-func (c *chainedTracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+func (c *chainedTracer) TraceQueryStart(
+	ctx context.Context,
+	conn *pgx.Conn,
+	data pgx.TraceQueryStartData,
+) context.Context {
 	for _, tr := range c.tracers {
-		if qt, ok := tr.(pgx.QueryTracer); ok {
-			ctx = qt.TraceQueryStart(ctx, conn, data)
-		}
+		//nolint:fatcontext // nested context chaining across tracers is intentional
+		ctx = tr.TraceQueryStart(ctx, conn, data)
 	}
 	return ctx
 }
 
-func (c *chainedTracer) TraceQueryEnd(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryEndData) {
+func (c *chainedTracer) TraceQueryEnd(
+	ctx context.Context,
+	conn *pgx.Conn,
+	data pgx.TraceQueryEndData,
+) {
 	for _, tr := range c.tracers {
-		if qt, ok := tr.(pgx.QueryTracer); ok {
-			qt.TraceQueryEnd(ctx, conn, data)
-		}
+		tr.TraceQueryEnd(ctx, conn, data)
 	}
 }
 
-func (c *chainedTracer) TraceBatchStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceBatchStartData) context.Context {
+func (c *chainedTracer) TraceBatchStart(
+	ctx context.Context,
+	conn *pgx.Conn,
+	data pgx.TraceBatchStartData,
+) context.Context {
 	for _, tr := range c.tracers {
 		if bt, ok := tr.(pgx.BatchTracer); ok {
+			//nolint:fatcontext // nested context chaining across tracers is intentional
 			ctx = bt.TraceBatchStart(ctx, conn, data)
 		}
 	}
 	return ctx
 }
 
-func (c *chainedTracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, data pgx.TraceBatchQueryData) {
+func (c *chainedTracer) TraceBatchQuery(
+	ctx context.Context,
+	conn *pgx.Conn,
+	data pgx.TraceBatchQueryData,
+) {
 	for _, tr := range c.tracers {
 		if bt, ok := tr.(pgx.BatchTracer); ok {
 			bt.TraceBatchQuery(ctx, conn, data)
@@ -345,7 +389,11 @@ func (c *chainedTracer) TraceBatchQuery(ctx context.Context, conn *pgx.Conn, dat
 	}
 }
 
-func (c *chainedTracer) TraceBatchEnd(ctx context.Context, conn *pgx.Conn, data pgx.TraceBatchEndData) {
+func (c *chainedTracer) TraceBatchEnd(
+	ctx context.Context,
+	conn *pgx.Conn,
+	data pgx.TraceBatchEndData,
+) {
 	for _, tr := range c.tracers {
 		if bt, ok := tr.(pgx.BatchTracer); ok {
 			bt.TraceBatchEnd(ctx, conn, data)
@@ -353,16 +401,25 @@ func (c *chainedTracer) TraceBatchEnd(ctx context.Context, conn *pgx.Conn, data 
 	}
 }
 
-func (c *chainedTracer) TraceCopyFromStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceCopyFromStartData) context.Context {
+func (c *chainedTracer) TraceCopyFromStart(
+	ctx context.Context,
+	conn *pgx.Conn,
+	data pgx.TraceCopyFromStartData,
+) context.Context {
 	for _, tr := range c.tracers {
 		if ct, ok := tr.(pgx.CopyFromTracer); ok {
+			//nolint:fatcontext // nested context chaining across tracers is intentional
 			ctx = ct.TraceCopyFromStart(ctx, conn, data)
 		}
 	}
 	return ctx
 }
 
-func (c *chainedTracer) TraceCopyFromEnd(ctx context.Context, conn *pgx.Conn, data pgx.TraceCopyFromEndData) {
+func (c *chainedTracer) TraceCopyFromEnd(
+	ctx context.Context,
+	conn *pgx.Conn,
+	data pgx.TraceCopyFromEndData,
+) {
 	for _, tr := range c.tracers {
 		if ct, ok := tr.(pgx.CopyFromTracer); ok {
 			ct.TraceCopyFromEnd(ctx, conn, data)
@@ -370,16 +427,25 @@ func (c *chainedTracer) TraceCopyFromEnd(ctx context.Context, conn *pgx.Conn, da
 	}
 }
 
-func (c *chainedTracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx.TracePrepareStartData) context.Context {
+func (c *chainedTracer) TracePrepareStart(
+	ctx context.Context,
+	conn *pgx.Conn,
+	data pgx.TracePrepareStartData,
+) context.Context {
 	for _, tr := range c.tracers {
 		if pt, ok := tr.(pgx.PrepareTracer); ok {
+			//nolint:fatcontext // nested context chaining across tracers is intentional
 			ctx = pt.TracePrepareStart(ctx, conn, data)
 		}
 	}
 	return ctx
 }
 
-func (c *chainedTracer) TracePrepareEnd(ctx context.Context, conn *pgx.Conn, data pgx.TracePrepareEndData) {
+func (c *chainedTracer) TracePrepareEnd(
+	ctx context.Context,
+	conn *pgx.Conn,
+	data pgx.TracePrepareEndData,
+) {
 	for _, tr := range c.tracers {
 		if pt, ok := tr.(pgx.PrepareTracer); ok {
 			pt.TracePrepareEnd(ctx, conn, data)
@@ -387,16 +453,23 @@ func (c *chainedTracer) TracePrepareEnd(ctx context.Context, conn *pgx.Conn, dat
 	}
 }
 
-func (c *chainedTracer) TraceConnectStart(ctx context.Context, data pgx.TraceConnectStartData) context.Context {
+func (c *chainedTracer) TraceConnectStart(
+	ctx context.Context,
+	data pgx.TraceConnectStartData,
+) context.Context {
 	for _, tr := range c.tracers {
 		if cnt, ok := tr.(pgx.ConnectTracer); ok {
+			//nolint:fatcontext // nested context chaining across tracers is intentional
 			ctx = cnt.TraceConnectStart(ctx, data)
 		}
 	}
 	return ctx
 }
 
-func (c *chainedTracer) TraceConnectEnd(ctx context.Context, data pgx.TraceConnectEndData) {
+func (c *chainedTracer) TraceConnectEnd(
+	ctx context.Context,
+	data pgx.TraceConnectEndData,
+) {
 	for _, tr := range c.tracers {
 		if cnt, ok := tr.(pgx.ConnectTracer); ok {
 			cnt.TraceConnectEnd(ctx, data)

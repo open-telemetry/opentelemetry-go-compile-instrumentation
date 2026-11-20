@@ -25,12 +25,20 @@ type mockCustomTracer struct {
 	queryEndCalled   bool
 }
 
-func (m *mockCustomTracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+func (m *mockCustomTracer) TraceQueryStart(
+	ctx context.Context,
+	_ *pgx.Conn,
+	_ pgx.TraceQueryStartData,
+) context.Context {
 	m.queryStartCalled = true
 	return ctx
 }
 
-func (m *mockCustomTracer) TraceQueryEnd(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryEndData) {
+func (m *mockCustomTracer) TraceQueryEnd(
+	_ context.Context,
+	_ *pgx.Conn,
+	_ pgx.TraceQueryEndData,
+) {
 	m.queryEndCalled = true
 }
 
@@ -46,16 +54,6 @@ func setupTestTracer(t *testing.T) (*tracetest.SpanRecorder, *tracer) {
 	tr := &tracer{
 		tr: tp.Tracer(instrumentationName),
 	}
-	otelTracer = tr
-
-	testCfg, _ := pgx.ParseConfig("postgres://testuser:testpass@localhost:5432/testdb")
-	origConfigFunc := connConfigFunc
-	connConfigFunc = func(conn *pgx.Conn) *pgx.ConnConfig {
-		return testCfg
-	}
-	t.Cleanup(func() {
-		connConfigFunc = origConfigFunc
-	})
 
 	return sr, tr
 }
@@ -80,12 +78,32 @@ func TestOperationName(t *testing.T) {
 	}
 }
 
+func TestConfigAttributes(t *testing.T) {
+	cfg, err := pgx.ParseConfig("postgres://myuser:mypass@example.com:5433/sampledb")
+	require.NoError(t, err)
+
+	attrs := configAttributes(cfg)
+	attrMap := make(map[string]any, len(attrs))
+	for _, a := range attrs {
+		attrMap[string(a.Key)] = a.Value.AsInterface()
+	}
+
+	assert.Equal(t, "postgresql", attrMap[string(semconv.DBSystemNameKey)])
+	assert.Equal(t, "sampledb", attrMap[string(semconv.DBNamespaceKey)])
+	assert.Equal(t, "myuser", attrMap["db.user"])
+	assert.Equal(t, "example.com", attrMap[string(semconv.ServerAddressKey)])
+	assert.Equal(t, int64(5433), attrMap[string(semconv.ServerPortKey)])
+}
+
 func TestTracer_TraceQuery(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "pgx")
 	sr, tr := setupTestTracer(t)
 
-	ctx := tr.TraceQueryStart(t.Context(), nil, pgx.TraceQueryStartData{
+	ctx := context.Background()
+	ctx = tr.TraceQueryStart(ctx, nil, pgx.TraceQueryStartData{
 		SQL: "SELECT * FROM users WHERE id = $1",
 	})
+
 	tr.TraceQueryEnd(ctx, nil, pgx.TraceQueryEndData{
 		Err: nil,
 	})
@@ -94,47 +112,31 @@ func TestTracer_TraceQuery(t *testing.T) {
 	require.Len(t, spans, 1)
 
 	span := spans[0]
-	assert.Equal(t, "SELECT testdb", span.Name())
+	assert.Equal(t, "SELECT", span.Name())
 	assert.Equal(t, codes.Unset, span.Status().Code)
 
-	attrs := span.Attributes()
-	var foundSQL, foundDB, foundHost, foundPort, foundSystem bool
-	for _, a := range attrs {
-		switch a.Key {
-		case semconv.DBQueryTextKey:
-			foundSQL = true
-			assert.Equal(t, "SELECT * FROM users WHERE id = $1", a.Value.AsString())
-		case semconv.DBNamespaceKey:
-			foundDB = true
-			assert.Equal(t, "testdb", a.Value.AsString())
-		case semconv.ServerAddressKey:
-			foundHost = true
-			assert.Equal(t, "localhost", a.Value.AsString())
-		case semconv.ServerPortKey:
-			foundPort = true
-			assert.Equal(t, int64(5432), a.Value.AsInt64())
-		case semconv.DBSystemNameKey:
-			foundSystem = true
-			assert.Equal(t, semconv.DBSystemNamePostgreSQL.Value.AsString(), a.Value.AsString())
-		}
+	attrMap := make(map[string]any)
+	for _, a := range span.Attributes() {
+		attrMap[string(a.Key)] = a.Value.AsInterface()
 	}
 
-	assert.True(t, foundSQL)
-	assert.True(t, foundDB)
-	assert.True(t, foundHost)
-	assert.True(t, foundPort)
-	assert.True(t, foundSystem)
+	assert.Equal(t, "postgresql", attrMap[string(semconv.DBSystemNameKey)])
+	assert.Equal(t, "SELECT", attrMap[string(semconv.DBOperationNameKey)])
+	assert.Equal(t, "SELECT * FROM users WHERE id = $1", attrMap[string(semconv.DBQueryTextKey)])
 }
 
 func TestTracer_TraceQuery_Error(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "pgx")
 	sr, tr := setupTestTracer(t)
 
-	queryErr := errors.New("connection reset by peer")
-	ctx := tr.TraceQueryStart(t.Context(), nil, pgx.TraceQueryStartData{
-		SQL: "INSERT INTO users (name) VALUES ($1)",
+	ctx := context.Background()
+	ctx = tr.TraceQueryStart(ctx, nil, pgx.TraceQueryStartData{
+		SQL: "INVALID SQL STATEMENT",
 	})
+
+	testErr := errors.New("syntax error")
 	tr.TraceQueryEnd(ctx, nil, pgx.TraceQueryEndData{
-		Err: queryErr,
+		Err: testErr,
 	})
 
 	spans := sr.Ended()
@@ -142,58 +144,67 @@ func TestTracer_TraceQuery_Error(t *testing.T) {
 
 	span := spans[0]
 	assert.Equal(t, codes.Error, span.Status().Code)
-	assert.Equal(t, "connection reset by peer", span.Status().Description)
-	require.NotEmpty(t, span.Events())
+	assert.Equal(t, "syntax error", span.Status().Description)
+	require.Len(t, span.Events(), 1)
 	assert.Equal(t, "exception", span.Events()[0].Name)
 }
 
 func TestTracer_TraceBatch(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "pgx")
 	sr, tr := setupTestTracer(t)
 
-	ctx := tr.TraceBatchStart(t.Context(), nil, pgx.TraceBatchStartData{})
-	tr.TraceBatchQuery(ctx, nil, pgx.TraceBatchQueryData{})
+	ctx := context.Background()
+	ctx = tr.TraceBatchStart(ctx, nil, pgx.TraceBatchStartData{})
+	tr.TraceBatchQuery(ctx, nil, pgx.TraceBatchQueryData{
+		SQL: "INSERT INTO tbl VALUES (1)",
+	})
 	tr.TraceBatchEnd(ctx, nil, pgx.TraceBatchEndData{})
 
 	spans := sr.Ended()
 	require.Len(t, spans, 1)
-	assert.Equal(t, "BATCH testdb", spans[0].Name())
+	assert.Equal(t, "BATCH", spans[0].Name())
 }
 
 func TestTracer_TraceCopyFrom(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "pgx")
 	sr, tr := setupTestTracer(t)
 
-	ctx := tr.TraceCopyFromStart(t.Context(), nil, pgx.TraceCopyFromStartData{
-		TableName: pgx.Identifier{"users"},
+	ctx := context.Background()
+	ctx = tr.TraceCopyFromStart(ctx, nil, pgx.TraceCopyFromStartData{
+		TableName: pgx.Identifier{"public", "users"},
 	})
 	tr.TraceCopyFromEnd(ctx, nil, pgx.TraceCopyFromEndData{})
 
 	spans := sr.Ended()
 	require.Len(t, spans, 1)
-	assert.Equal(t, "COPY testdb", spans[0].Name())
+	assert.Equal(t, "COPY", spans[0].Name())
 }
 
 func TestTracer_TracePrepare(t *testing.T) {
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "pgx")
 	sr, tr := setupTestTracer(t)
 
-	ctx := tr.TracePrepareStart(t.Context(), nil, pgx.TracePrepareStartData{
+	ctx := context.Background()
+	ctx = tr.TracePrepareStart(ctx, nil, pgx.TracePrepareStartData{
 		Name: "stmt1",
-		SQL:  "SELECT 1",
+		SQL:  "SELECT * FROM items WHERE id = $1",
 	})
 	tr.TracePrepareEnd(ctx, nil, pgx.TracePrepareEndData{})
 
 	spans := sr.Ended()
 	require.Len(t, spans, 1)
-	assert.Equal(t, "PREPARE testdb", spans[0].Name())
+	assert.Equal(t, "PREPARE", spans[0].Name())
 }
 
 func TestChainTracer(t *testing.T) {
-	_, tr := setupTestTracer(t)
 	custom := &mockCustomTracer{}
+	otelTr := newTracer()
 
-	chained := chainTracer(custom, tr).(pgx.QueryTracer)
+	chained := chainTracer(custom, otelTr)
 	require.NotNil(t, chained)
 
-	ctx := chained.TraceQueryStart(t.Context(), nil, pgx.TraceQueryStartData{SQL: "SELECT 1"})
+	ctx := context.Background()
+	ctx = chained.TraceQueryStart(ctx, nil, pgx.TraceQueryStartData{SQL: "SELECT 1"})
 	chained.TraceQueryEnd(ctx, nil, pgx.TraceQueryEndData{})
 
 	assert.True(t, custom.queryStartCalled)
@@ -201,39 +212,31 @@ func TestChainTracer(t *testing.T) {
 }
 
 func TestHooks_InjectTracer(t *testing.T) {
-	setupTestTracer(t)
+	t.Setenv("OTEL_GO_ENABLED_INSTRUMENTATIONS", "pgx")
 
 	t.Run("BeforeConnectConfig", func(t *testing.T) {
-		cfg, err := pgx.ParseConfig("postgres://localhost:5432/testdb")
-		require.NoError(t, err)
-
-		mockCtx := hooktest.NewMockHookContext(context.Background(), cfg)
-		BeforeConnectConfig(mockCtx)
-
+		cfg := &pgx.ConnConfig{}
+		hctx := hooktest.NewMockHookContext(context.Background(), cfg)
+		BeforeConnectConfig(hctx)
 		assert.NotNil(t, cfg.Tracer)
 	})
 
 	t.Run("AfterConnect", func(t *testing.T) {
-		mockCtx := hooktest.NewMockHookContext()
-		mockCtx.SetReturnVal(0, nil)
-		// Should safely no-op when conn is nil
-		AfterConnect(mockCtx)
+		hctx := hooktest.NewMockHookContext()
+		hctx.SetReturnVal(0, (*pgx.Conn)(nil))
+		AfterConnect(hctx)
 	})
 
 	t.Run("BeforeNewWithConfig", func(t *testing.T) {
-		poolCfg, err := pgxpool.ParseConfig("postgres://localhost:5432/testdb")
-		require.NoError(t, err)
-
-		mockCtx := hooktest.NewMockHookContext(context.Background(), poolCfg)
-		BeforeNewWithConfig(mockCtx)
-
-		assert.NotNil(t, poolCfg.ConnConfig.Tracer)
+		pcfg := &pgxpool.Config{ConnConfig: &pgx.ConnConfig{}}
+		hctx := hooktest.NewMockHookContext(context.Background(), pcfg)
+		BeforeNewWithConfig(hctx)
+		assert.NotNil(t, pcfg.ConnConfig.Tracer)
 	})
 
 	t.Run("AfterNewPool", func(t *testing.T) {
-		mockCtx := hooktest.NewMockHookContext()
-		mockCtx.SetReturnVal(0, nil)
-		// Should safely no-op when pool is nil
-		AfterNewPool(mockCtx)
+		hctx := hooktest.NewMockHookContext()
+		hctx.SetReturnVal(0, (*pgxpool.Pool)(nil))
+		AfterNewPool(hctx)
 	})
 }
