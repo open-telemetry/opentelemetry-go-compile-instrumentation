@@ -18,10 +18,12 @@ This project uses several tools for development. Most tools will be automaticall
 
 - [Go](https://golang.org/dl/) 1.26 or later
 - [Git](https://git-scm.com/)
-- [GNU Make](https://www.gnu.org/software/make/) 3.82 or later. macOS has GNU Make
-  3.81, which is too old: install a newer version with `brew install make`, then use
-  `gmake` (or add `$(brew --prefix make)/libexec/gnubin` to your `PATH` to use it as
-  `make`)
+- [GNU Make](https://www.gnu.org/software/make/) 3.82 or later.
+  - **macOS:** macOS ships with GNU Make 3.81, which is too old (lacks `.ONESHELL` support). Install a newer version with `brew install make`, then use `gmake` (or add `$(brew --prefix make)/libexec/gnubin` to your `PATH` to use it as `make`).
+  - **Windows:** The `Makefile` requires a Bash shell (`SHELL := /bin/bash`) and standard POSIX utilities (`find`, `sed`, `rm`).
+    - **Recommended:** Use [WSL2](https://learn.microsoft.com/windows/wsl/install) (Windows Subsystem for Linux) to run the full Make-based verification workflow (`make all`, `make build`, `make lint`, `make test`).
+    - **Alternative (Git Bash):** If running on native Windows without WSL, use **Git Bash** (or MSYS2) and ensure GNU Make 3.82+ is installed and present in your `PATH`. Native PowerShell and `cmd.exe` are not supported for `make` targets.
+    - Go tools and unit tests can also be run directly with the standard Go toolchain in any shell (e.g., `go test ./...` and `go build ./tool/cmd/otelc`).
 
 The tests of the bundle repair tool need only Git and Go.
 
