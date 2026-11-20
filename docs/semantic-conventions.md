@@ -52,14 +52,14 @@ schemas/otelc/
 │   ├── k8s.yaml             # k8s.io/client-go informer spans
 │   ├── openai.yaml          # openai/openai-go GenAI client spans
 │   ├── anthropic.yaml       # anthropics/anthropic-sdk-go GenAI client spans
+│   ├── gemini.yaml          # google.golang.org/genai GenAI client spans
 │   ├── mongo.yaml           # go.mongodb.org/mongo-driver client spans
 │   ├── elasticsearch.yaml   # olivere/elastic (v7) client spans
 │   ├── gin.yaml             # gin-gonic/gin server-span enrichment
 │   ├── fiber.yaml           # gofiber/fiber (v2) server spans
 │   ├── echo.yaml            # labstack/echo/v4 server-span enrichment
 │   ├── otel-sdk.yaml        # go.opentelemetry.io/otel* — Go runtime metrics
-│   ├── logs.yaml            # log, log/slog, logrus, zap — no telemetry (correlation only)
-│   └── runtime.yaml         # runtime — no telemetry (GLS context propagation)
+│   └── logs.yaml            # log, log/slog, logrus, zap — no telemetry (correlation only)
 └── .deps/                   # pre-fetched upstream semconv (git-ignored, generated)
 ```
 
@@ -139,6 +139,26 @@ This command:
 - **This check is blocking** — violations will fail CI
 
 **When to use**: Run this before committing changes to `schemas/otelc/**`, `instrumentation/**/semconv/`, or `.semconv-version`.
+
+### Generate Go Code for Local Attributes
+
+Attributes otelc declares itself with `id:` are generated into the
+`pkg/otelcconv` module (see [ADR-0006](adr/0006-semconv-telemetry-contract-organization.md)):
+
+```bash
+make generate
+```
+
+This command:
+
+- Runs `weaver registry generate` (from the `otel/weaver` OCI image) with the templates in `schemas/templates/registry/go/`, vendored from `go.opentelemetry.io/otel`
+- Selects only the locally declared attributes, using weaver's lineage output
+- Writes and `gofmt`s `pkg/otelcconv/attribute_group.go`
+
+CI regenerates the file and fails if it differs from the committed one, so run
+`make generate` and commit the result whenever you add or change an `id:`
+attribute. Attributes that upstream defines are imported from
+`go.opentelemetry.io/otel/semconv` and are never generated.
 
 ### Generate Registry Diff
 

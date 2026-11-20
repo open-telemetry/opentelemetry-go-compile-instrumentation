@@ -1,0 +1,21 @@
+blank_type_param_rule:
+  target: main
+  where:
+    func: Len
+    recv: "*Set"
+  do:
+    - inject_hooks:
+        before: LenBefore
+        after: LenAfter
+        path: testdata/golden/generic-blank-type-param
+
+blank_type_param_list_rule:
+  target: main
+  where:
+    func: Key
+    recv: Pair
+  do:
+    - inject_hooks:
+        before: KeyBefore
+        after: KeyAfter
+        path: testdata/golden/generic-blank-type-param

@@ -829,6 +829,167 @@ func TestFindFuncDeclRawRule(t *testing.T) {
 	assert.Equal(t, "TopLevel", fn.Name.Name)
 }
 
+// loadRawRuleFromYAML parses a structured inject_code rule the same way
+// setup does (ParseFile + Rules). Tests that go through this path catch
+// filters being hoisted by Normalize and then dropped by InstRawRule.
+func loadRawRuleFromYAML(t *testing.T, yaml string) *rule.InstRawRule {
+	t.Helper()
+	doc, err := rule.ParseFile([]byte(yaml))
+	require.NoError(t, err)
+	rules, err := doc.Rules()
+	require.NoError(t, err)
+	require.Len(t, rules, 1)
+	raw, ok := rules[0].(*rule.InstRawRule)
+	require.True(t, ok, "expected InstRawRule, got %T", rules[0])
+	return raw
+}
+
+func parseSource(t *testing.T, src string) *dst.File {
+	t.Helper()
+	file, err := NewAstParser().ParseSource(src)
+	require.NoError(t, err)
+	return file
+}
+
+// TestFindFuncDecl_InjectCodeHonorsSignatureFilters is the regression for
+// issue #1607: signature / signature_contains / param / result / last_result
+// on an inject_code rule must reject a same-named function whose types do
+// not match, the same way they do on inject_hooks.
+func TestFindFuncDecl_InjectCodeHonorsSignatureFilters(t *testing.T) {
+	const processString = `package main
+
+func Process(s string) {}
+`
+
+	const processCtx = `package main
+
+import "context"
+
+func Process(ctx context.Context) error { return nil }
+`
+
+	tests := []struct {
+		name   string
+		src    string
+		yaml   string
+		wantOK bool
+	}{
+		{
+			name: "signature args mismatch is not a match",
+			src:  processString,
+			yaml: `
+raw_with_signature:
+  target: main
+  where:
+    func: Process
+    signature:
+      args: [context.Context]
+  do:
+    - inject_code:
+        raw: 'println("injected")'
+`,
+			wantOK: false,
+		},
+		{
+			name: "signature_contains args mismatch is not a match",
+			src:  processString,
+			yaml: `
+raw_with_signature_contains:
+  target: main
+  where:
+    func: Process
+    signature_contains:
+      args: [context.Context]
+  do:
+    - inject_code:
+        raw: 'println("injected")'
+`,
+			wantOK: false,
+		},
+		{
+			name: "param mismatch is not a match",
+			src:  processString,
+			yaml: `
+raw_with_param:
+  target: main
+  where:
+    func: Process
+    param: context.Context
+  do:
+    - inject_code:
+        raw: 'println("injected")'
+`,
+			wantOK: false,
+		},
+		{
+			name: "result mismatch is not a match",
+			src:  processString,
+			yaml: `
+raw_with_result:
+  target: main
+  where:
+    func: Process
+    result: error
+  do:
+    - inject_code:
+        raw: 'println("injected")'
+`,
+			wantOK: false,
+		},
+		{
+			name: "last_result mismatch is not a match",
+			src:  processString,
+			yaml: `
+raw_with_last_result:
+  target: main
+  where:
+    func: Process
+    last_result: error
+  do:
+    - inject_code:
+        raw: 'println("injected")'
+`,
+			wantOK: false,
+		},
+		{
+			name: "matching signature still applies",
+			src:  processCtx,
+			yaml: `
+raw_with_matching_signature:
+  target: main
+  where:
+    func: Process
+    signature:
+      args: [context.Context]
+      returns: [error]
+    param: context.Context
+    result: error
+    last_result: error
+  do:
+    - inject_code:
+        raw: 'println("injected")'
+`,
+			wantOK: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := loadRawRuleFromYAML(t, tt.yaml)
+			file := parseSource(t, tt.src)
+			fn, ok, err := FindFuncDecl(file, raw, nil)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantOK, ok)
+			if tt.wantOK {
+				require.NotNil(t, fn)
+				assert.Equal(t, "Process", fn.Name.Name)
+			} else {
+				assert.Nil(t, fn)
+			}
+		})
+	}
+}
+
 func TestFindFuncDeclRawRuleMissing(t *testing.T) {
 	file := parseSharedFixture(t)
 
@@ -1117,6 +1278,62 @@ func (r pkg.T) Method() error { return nil }
 	// Both the function name and the receiver base name are the ones this
 	// declaration would match on if the shape were recognised, so returning nil
 	// can only come from the guard rather than from a name mismatch.
-	assert.Nil(t, findFuncDecl(file, "Method", "T"),
+	assert.Nil(t, findFuncDecl(file, "Method", "T", nil),
 		"an unrecognized receiver should be a no match, not a build abort")
+}
+
+func TestFindFuncDeclReportingReasons(t *testing.T) {
+	file, err := NewAstParser().ParseSource(`package p
+type T struct{}
+func F(x int) {}
+func (T) M() {}
+`)
+	require.NoError(t, err)
+	stringArgs := &rule.FuncSignature{Args: []string{"string"}}
+	tests := []struct {
+		name   string
+		find   func(reason *string) (*dst.FuncDecl, bool, error)
+		reason string
+	}{
+		{"func rule matches", func(reason *string) (*dst.FuncDecl, bool, error) {
+			return FindFuncDeclReporting(file, &rule.InstFuncRule{Func: "F"}, nil, reason)
+		}, ""},
+		{"func rule misses the name", func(reason *string) (*dst.FuncDecl, bool, error) {
+			return FindFuncDeclReporting(file, &rule.InstFuncRule{Func: "Missing"}, nil, reason)
+		}, "function_not_found"},
+		{"func rule wants a receiver", func(reason *string) (*dst.FuncDecl, bool, error) {
+			return FindFuncDeclReporting(file, &rule.InstFuncRule{Func: "F", Recv: "T"}, nil, reason)
+		}, "receiver_mismatch"},
+		{"func rule wants no receiver", func(reason *string) (*dst.FuncDecl, bool, error) {
+			return FindFuncDeclReporting(file, &rule.InstFuncRule{Func: "M"}, nil, reason)
+		}, "receiver_mismatch"},
+		{"func rule signature differs", func(reason *string) (*dst.FuncDecl, bool, error) {
+			return FindFuncDeclReporting(file, &rule.InstFuncRule{Func: "F", Signature: stringArgs}, nil, reason)
+		}, "signature_mismatch"},
+		{"raw rule misses the name", func(reason *string) (*dst.FuncDecl, bool, error) {
+			return FindFuncDeclReporting(file, &rule.InstRawRule{Func: "Missing"}, nil, reason)
+		}, "function_not_found"},
+		{"raw rule signature differs", func(reason *string) (*dst.FuncDecl, bool, error) {
+			return FindFuncDeclReporting(file, &rule.InstRawRule{Func: "F", Signature: stringArgs}, nil, reason)
+		}, "signature_mismatch"},
+		{"filter matches", func(reason *string) (*dst.FuncDecl, bool, error) {
+			return FindFuncDeclReporting(file, &rule.FilterDef{HasFunc: "M", HasRecv: "T"}, nil, reason)
+		}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// A stale value must be overwritten, including by a match.
+			reason := "stale"
+			decl, found, findErr := tt.find(&reason)
+			require.NoError(t, findErr)
+			assert.Equal(t, tt.reason, reason)
+			assert.Equal(t, tt.reason == "", found)
+			assert.Equal(t, tt.reason == "", decl != nil)
+			// Without a reason pointer the result is the same.
+			decl, found, findErr = tt.find(nil)
+			require.NoError(t, findErr)
+			assert.Equal(t, tt.reason == "", found)
+			assert.Equal(t, tt.reason == "", decl != nil)
+		})
+	}
 }

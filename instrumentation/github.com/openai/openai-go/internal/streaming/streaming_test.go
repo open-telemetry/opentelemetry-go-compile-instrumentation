@@ -115,6 +115,11 @@ func TestStreamingReader_EmptyStream(t *testing.T) {
 
 	spans := sr.Ended()
 	require.Len(t, spans, 1)
+	// No finish reason or [DONE] arrived, so this is an abort: finish_reasons
+	// is still set, to the synthetic "error" value (see TestStreamingReader_
+	// AbortOnCloseBeforeCompletion). Usage never arrived, so it stays absent.
+	assertSliceAttribute(t, spans[0].Attributes(), "gen_ai.response.finish_reasons", []string{"error"})
+	assertUsageAbsent(t, spans[0].Attributes())
 }
 
 func TestStreamingReader_CloseBeforeRead(t *testing.T) {
@@ -132,6 +137,8 @@ func TestStreamingReader_CloseBeforeRead(t *testing.T) {
 
 	spans := sr.Ended()
 	require.Len(t, spans, 1)
+	// Closed before reading, so no chunk was ever seen.
+	assertUsageAbsent(t, spans[0].Attributes())
 }
 
 func TestStreamingReader_MultipleCloseIdempotent(t *testing.T) {
@@ -511,6 +518,79 @@ func TestStreamingReader_TruncatedAfterFinishReasonIsError(t *testing.T) {
 	assertAttribute(t, s.Attributes(), "error.type", "*errors.errorString")
 }
 
+// TestStreamingReader_UsageOmittedWhenNotReported checks the default streaming
+// path, where no chunk carries usage and the span should end up with no usage
+// attributes at all.
+func TestStreamingReader_UsageOmittedWhenNotReported(t *testing.T) {
+	tests := []struct {
+		name string
+		op   OperationType
+		id   string
+		data string
+	}{
+		{
+			name: "chat chunks with no usage field",
+			op:   OpChat,
+			id:   "chatcmpl-nousage",
+			data: "data: {\"id\":\"chatcmpl-nousage\",\"model\":\"gpt-4o\"," +
+				"\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n",
+		},
+		{
+			name: "chat chunks with explicit null usage",
+			op:   OpChat,
+			id:   "chatcmpl-nullusage",
+			data: "data: {\"id\":\"chatcmpl-nullusage\",\"model\":\"gpt-4o\"," +
+				"\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}],\"usage\":null}\n\ndata: [DONE]\n\n",
+		},
+		{
+			name: "completion chunks with no usage field",
+			op:   OpCompletion,
+			id:   "cmpl-nousage",
+			data: "data: {\"id\":\"cmpl-nousage\",\"model\":\"gpt-3.5-turbo-instruct\"," +
+				"\"choices\":[{\"finish_reason\":\"length\"}]}\n\ndata: [DONE]\n\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			attrs := recordStream(t, tt.data, tt.op)
+			// The chunk parsed, so it's only usage that's missing.
+			assertAttribute(t, attrs, "gen_ai.response.id", tt.id)
+			assertUsageAbsent(t, attrs)
+		})
+	}
+}
+
+// TestStreamingReader_ZeroUsageIsRecorded checks the other direction: a usage
+// object that reports 0 is still a measurement, so it has to be kept.
+func TestStreamingReader_ZeroUsageIsRecorded(t *testing.T) {
+	data := "data: {\"id\":\"chatcmpl-zero\",\"model\":\"gpt-4o\"," +
+		"\"choices\":[{\"delta\":{},\"finish_reason\":\"content_filter\"}]," +
+		"\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":0,\"total_tokens\":9}}\n\n" +
+		"data: [DONE]\n\n"
+
+	attrs := recordStream(t, data, OpChat)
+	assertInt64Attribute(t, attrs, "gen_ai.usage.input_tokens", 9)
+	assertInt64Attribute(t, attrs, "gen_ai.usage.output_tokens", 0)
+	assertInt64Attribute(t, attrs, "gen_ai.usage.total_tokens", 9)
+}
+
+// TestStreamingReader_PartialUsageDoesNotEraseEarlierCounts covers a gateway
+// that reports usage once and then sends another chunk with an empty usage
+// object.
+func TestStreamingReader_PartialUsageDoesNotEraseEarlierCounts(t *testing.T) {
+	data := "data: {\"id\":\"chatcmpl-partial\",\"model\":\"gpt-4o\",\"choices\":[]," +
+		"\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3,\"total_tokens\":10}}\n\n" +
+		"data: {\"id\":\"chatcmpl-partial\",\"model\":\"gpt-4o\"," +
+		"\"choices\":[{\"finish_reason\":\"stop\"}],\"usage\":{}}\n\n" +
+		"data: [DONE]\n\n"
+
+	attrs := recordStream(t, data, OpChat)
+	assertInt64Attribute(t, attrs, "gen_ai.usage.input_tokens", 7)
+	assertInt64Attribute(t, attrs, "gen_ai.usage.output_tokens", 3)
+	assertInt64Attribute(t, attrs, "gen_ai.usage.total_tokens", 10)
+}
+
 // Helper functions for attribute assertions.
 
 func assertAttribute(t *testing.T, attrs []attribute.KeyValue, key, expected string) {
@@ -547,7 +627,6 @@ func assertSliceAttribute(t *testing.T, attrs []attribute.KeyValue, key string, 
 }
 
 func TestStreamingReader_ContentCapture(t *testing.T) {
-
 	sr := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
 	tr := tp.Tracer("test")
@@ -647,7 +726,14 @@ func TestStreamingReader_CompletionContentCapture(t *testing.T) {
 	streamData := "data: {\"choices\":[{\"index\":0,\"text\":\"hello \"}]}\n\n" +
 		"data: {\"choices\":[{\"index\":0,\"text\":\"world\",\"finish_reason\":\"stop\"}]}\n\n" +
 		"data: [DONE]\n\n"
-	reader := NewStreamingReader(io.NopCloser(strings.NewReader(streamData)), span, time.Now(), OpCompletion, true, ContentCaptureLimit)
+	reader := NewStreamingReader(
+		io.NopCloser(strings.NewReader(streamData)),
+		span,
+		time.Now(),
+		OpCompletion,
+		true,
+		ContentCaptureLimit,
+	)
 	_, err := io.ReadAll(reader)
 	require.NoError(t, err)
 	require.NoError(t, reader.Close())
@@ -664,7 +750,14 @@ func TestStreamingReader_SeparatesChoiceContent(t *testing.T) {
 	_, span := tp.Tracer("test").Start(t.Context(), "multiple-choices")
 
 	streamData := "data: {\"choices\":[{\"index\":1,\"delta\":{\"content\":\"beta\"}},{\"index\":0,\"delta\":{\"content\":\"alpha\"}}]}\n\ndata: [DONE]\n\n"
-	reader := NewStreamingReader(io.NopCloser(strings.NewReader(streamData)), span, time.Now(), OpChat, true, ContentCaptureLimit)
+	reader := NewStreamingReader(
+		io.NopCloser(strings.NewReader(streamData)),
+		span,
+		time.Now(),
+		OpChat,
+		true,
+		ContentCaptureLimit,
+	)
 	_, err := io.ReadAll(reader)
 	require.NoError(t, err)
 	require.NoError(t, reader.Close())
@@ -682,7 +775,14 @@ func TestStreamingReader_AbortedStreamRecordsError(t *testing.T) {
 	_, span := tp.Tracer("test").Start(t.Context(), "aborted-stream")
 
 	streamData := "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n"
-	reader := NewStreamingReader(io.NopCloser(strings.NewReader(streamData)), span, time.Now(), OpChat, false, ContentCaptureLimit)
+	reader := NewStreamingReader(
+		io.NopCloser(strings.NewReader(streamData)),
+		span,
+		time.Now(),
+		OpChat,
+		false,
+		ContentCaptureLimit,
+	)
 	_, err := io.ReadAll(reader)
 	require.NoError(t, err)
 	require.NoError(t, reader.Close())
@@ -699,7 +799,14 @@ func TestStreamingReader_AbortedStreamRecordsContent(t *testing.T) {
 	_, span := tp.Tracer("test").Start(t.Context(), "aborted-stream-content")
 
 	streamData := "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n"
-	reader := NewStreamingReader(io.NopCloser(strings.NewReader(streamData)), span, time.Now(), OpChat, true, ContentCaptureLimit)
+	reader := NewStreamingReader(
+		io.NopCloser(strings.NewReader(streamData)),
+		span,
+		time.Now(),
+		OpChat,
+		true,
+		ContentCaptureLimit,
+	)
 	_, err := io.ReadAll(reader)
 	require.NoError(t, err)
 	require.NoError(t, reader.Close())
@@ -716,4 +823,111 @@ func TestStreamingReader_AbortedStreamRecordsContent(t *testing.T) {
 		}
 	}
 	require.True(t, found, "expected the partial content event on an aborted stream")
+}
+
+func cacheTestOps() map[string]OperationType {
+	return map[string]OperationType{"chat": OpChat, "completion": OpCompletion}
+}
+
+// cacheStreamAttrs streams one content chunk followed by a separate terminal
+// usage chunk with an empty choices array, which is how OpenAI delivers usage
+// when stream_options.include_usage is set, and returns the span attributes.
+func cacheStreamAttrs(t *testing.T, op OperationType, usage string) []attribute.KeyValue {
+	t.Helper()
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	_, span := tp.Tracer("test").Start(t.Context(), "test-stream")
+
+	choice := `{"delta":{"content":"hi"},"finish_reason":"stop"}`
+	if op == OpCompletion {
+		choice = `{"text":"hi","finish_reason":"stop"}`
+	}
+	streamData := `data: {"id":"cache-1","model":"gpt-4o-mini","choices":[` + choice + "]}\n\n" +
+		`data: {"id":"cache-1","model":"gpt-4o-mini","choices":[],"usage":` + usage + "}\n\n" +
+		"data: [DONE]\n\n"
+
+	reader := NewStreamingReader(io.NopCloser(strings.NewReader(streamData)), span, time.Now(), op, false, 0)
+	_, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.NoError(t, reader.Close())
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	return spans[0].Attributes()
+}
+
+// recordStream runs data through a StreamingReader and returns the attributes
+// of the span it ended.
+func recordStream(t *testing.T, data string, op OperationType) []attribute.KeyValue {
+	t.Helper()
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	_, span := tp.Tracer("test").Start(t.Context(), "test-stream") //nolint:spancheck // ended by StreamingReader
+
+	reader := NewStreamingReader(io.NopCloser(strings.NewReader(data)), span, time.Now(), op, false, 0)
+	_, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.NoError(t, reader.Close())
+
+	spans := sr.Ended()
+	require.Len(t, spans, 1)
+	return spans[0].Attributes() //nolint:spancheck // ended by StreamingReader
+}
+
+// TestStreamingReader_CacheReadTokens verifies that cached prompt tokens in the
+// terminal usage chunk are recorded for both chunk parsers, and that they are
+// not added to gen_ai.usage.input_tokens: OpenAI already counts them inside
+// prompt_tokens.
+func TestStreamingReader_CacheReadTokens(t *testing.T) {
+	for name, op := range cacheTestOps() {
+		t.Run(name, func(t *testing.T) {
+			attrs := cacheStreamAttrs(t, op,
+				`{"prompt_tokens":2048,"completion_tokens":64,"total_tokens":2112,`+
+					`"prompt_tokens_details":{"cached_tokens":1024}}`)
+			assertInt64Attribute(t, attrs, "gen_ai.usage.cache_read.input_tokens", 1024)
+			assertInt64Attribute(t, attrs, "gen_ai.usage.input_tokens", 2048)
+			assertInt64Attribute(t, attrs, "gen_ai.usage.total_tokens", 2112)
+		})
+	}
+}
+
+// TestStreamingReader_OmitsCacheReadTokens verifies the attribute is absent,
+// not recorded as zero, when the stream reports no cache hit, and that a
+// malformed details object does not drop the other usage counts.
+func TestStreamingReader_OmitsCacheReadTokens(t *testing.T) {
+	const counts = `"prompt_tokens":10,"completion_tokens":5,"total_tokens":15`
+	tests := []struct{ name, usage string }{
+		{"details absent", `{` + counts + `}`},
+		{"cached zero", `{` + counts + `,"prompt_tokens_details":{"cached_tokens":0}}`},
+		{"details malformed", `{` + counts + `,"prompt_tokens_details":{"cached_tokens":"many"}}`},
+	}
+	for name, op := range cacheTestOps() {
+		for _, tt := range tests {
+			t.Run(name+"/"+tt.name, func(t *testing.T) {
+				attrs := cacheStreamAttrs(t, op, tt.usage)
+				for _, attr := range attrs {
+					assert.NotEqual(t, "gen_ai.usage.cache_read.input_tokens", string(attr.Key))
+				}
+				assertInt64Attribute(t, attrs, "gen_ai.usage.input_tokens", 10)
+				assertInt64Attribute(t, attrs, "gen_ai.usage.total_tokens", 15)
+			})
+		}
+	}
+}
+
+func assertAttributeAbsent(t *testing.T, attrs []attribute.KeyValue, key string) {
+	t.Helper()
+	for _, attr := range attrs {
+		if string(attr.Key) == key {
+			t.Errorf("attribute %q should be omitted, got %v", key, attr.Value.AsInterface())
+			return
+		}
+	}
+}
+
+func assertUsageAbsent(t *testing.T, attrs []attribute.KeyValue) {
+	t.Helper()
+	assertAttributeAbsent(t, attrs, "gen_ai.usage.input_tokens")
+	assertAttributeAbsent(t, attrs, "gen_ai.usage.output_tokens")
+	assertAttributeAbsent(t, attrs, "gen_ai.usage.total_tokens")
 }

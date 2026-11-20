@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otelc/instrumentation/database/sql/dsnparse"
 	"go.opentelemetry.io/otelc/instrumentation/database/sql/semconv"
 	"go.opentelemetry.io/otelc/pkg/hook"
 	"go.opentelemetry.io/otelc/pkg/runtime"
@@ -72,6 +73,9 @@ type queryState struct {
 	// parentCtx is the caller's context from before the span started. BeginTx
 	// keeps it on the Tx so commit and rollback spans are siblings of begin.
 	parentCtx context.Context
+	// hasParent records whether parentCtx had a valid span before the begin
+	// span started. It is set only for BeginTx.
+	hasParent bool
 	span      trace.Span
 	req       semconv.DatabaseSqlRequest
 }
@@ -82,14 +86,18 @@ func beforeOpenInstrumentation(ictx hook.HookContext, driverName, dataSourceName
 	if addr == "" {
 		// Surface the omission rather than silently emitting server.address:
 		// "unknown". The DSN is intentionally not logged as it may carry
-		// credentials.
-		if dataSourceName != "" {
+		// credentials. The logger is still nil when sql.Open runs during
+		// another package's initialization, before this package's variables
+		// are set.
+		if dataSourceName != "" && logger != nil {
 			logger.Warn("could not determine server.address from DSN", "driver", driverName)
 		}
 		addr = "unknown"
 	}
 	dbName := info.DBName
-	if dbName == "" && dataSourceName != "" {
+	// A registered parser already knows the DSN's credential boundaries; the
+	// generic fallback does not and would export password bytes.
+	if dbName == "" && dataSourceName != "" && !dsnparse.HasParser(driverName) {
 		dbName = ParseDbName(dataSourceName)
 	}
 	ictx.SetData(&connInfo{
@@ -177,13 +185,14 @@ func beforeOpenDBInstrumentation(ictx hook.HookContext, c driver.Connector) {
 	info := ParseDSN(driverName, dsn)
 	addr := info.Addr()
 	if addr == "" {
-		if dsn != "" {
+		// See beforeOpenInstrumentation.
+		if dsn != "" && logger != nil {
 			logger.Warn("could not determine server.address from DSN", "driver", driverName)
 		}
 		addr = "unknown"
 	}
 	dbName := info.DBName
-	if dbName == "" && dsn != "" {
+	if dbName == "" && dsn != "" && !dsnparse.HasParser(driverName) {
 		dbName = ParseDbName(dsn)
 	}
 
@@ -285,7 +294,7 @@ func beforeTxInstrumentation(ictx hook.HookContext, db *sql.DB, ctx context.Cont
 	if db == nil {
 		return
 	}
-	instrumentStart(ictx, ctx, "begin", "START TRANSACTION", db.Endpoint, db.DriverName, db.DSN, db.DbName)
+	instrumentBeginTx(ictx, ctx, "begin", db.Endpoint, db.DriverName, db.DSN, db.DbName)
 }
 
 func afterTxInstrumentation(ictx hook.HookContext, tx *sql.Tx, err error) {
@@ -314,12 +323,33 @@ func populateTxFromBeginHook(ictx hook.HookContext, tx *sql.Tx) {
 	tx.DriverName = st.req.DriverName
 	tx.DSN = st.req.Dsn
 	tx.DbName = st.req.DbName
-	if st.parentCtx != nil && trace.SpanContextFromContext(st.parentCtx).IsValid() {
+	if st.hasParent {
 		tx.OtelCtx = st.parentCtx
 	} else if st.ctx != nil {
 		// The caller had no span, so there is no parent to be a sibling of. Use
 		// the begin span's context to keep commit and rollback in the same trace.
 		tx.OtelCtx = st.ctx
+	}
+}
+
+// instrumentBeginTx starts the begin span for both BeginTx entry points. It
+// resolves the caller's parent first: once the begin span exists, a lookup on
+// a context without a span returns the begin span itself from goroutine-local
+// storage. A parent found only in goroutine-local storage is put in the
+// context so commit and rollback still find it after it leaves that storage.
+func instrumentBeginTx(
+	ictx hook.HookContext,
+	ctx context.Context,
+	spanName, endpoint, driverName, dsn, dbName string,
+) {
+	parent := trace.SpanFromContext(ctx)
+	hasParent := parent.SpanContext().IsValid()
+	if hasParent {
+		ctx = trace.ContextWithSpan(ctx, parent)
+	}
+	instrumentStart(ictx, ctx, spanName, "START TRANSACTION", endpoint, driverName, dsn, dbName)
+	if st, ok := ictx.GetData().(*queryState); ok {
+		st.hasParent = hasParent
 	}
 }
 
@@ -438,7 +468,7 @@ func beforeConnTxInstrumentation(ictx hook.HookContext, conn *sql.Conn, ctx cont
 	if conn == nil {
 		return
 	}
-	instrumentStart(ictx, ctx, "start", "START TRANSACTION", conn.Endpoint, conn.DriverName, conn.DSN, conn.DbName)
+	instrumentBeginTx(ictx, ctx, "start", conn.Endpoint, conn.DriverName, conn.DSN, conn.DbName)
 }
 
 func afterConnTxInstrumentation(ictx hook.HookContext, tx *sql.Tx, err error) {
@@ -630,6 +660,12 @@ func instrumentStart(
 	spanName, query, endpoint, driverName, dsn, dbName string,
 	args ...interface{},
 ) {
+	// A call during package initialization can come before the OpenTelemetry
+	// API is usable. Starting a span then would panic inside initOnce and leave
+	// tracer nil for the rest of the process.
+	if !runtime.Ready() {
+		return
+	}
 	if !clientEnabler.Enable() {
 		logger.Debug("Db client instrumentation disabled")
 		return
@@ -668,6 +704,10 @@ func instrumentEnd(ictx hook.HookContext, err error) {
 	}
 	st, ok := ictx.GetData().(*queryState)
 	if !ok || st.span == nil {
+		// The logger is nil for a call skipped during package initialization.
+		if !runtime.Ready() {
+			return
+		}
 		logger.Debug("instrumentEnd: no span from before hook")
 		return
 	}

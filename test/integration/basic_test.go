@@ -24,6 +24,10 @@ func TestBasic(t *testing.T) {
 	testutil.Build(t, appsDir, "basic", "go", "build", "-a")
 	output := testutil.Run(t, appsDir, "basic", nil)
 	expect := []string{
+		"UnusedContext before: 41",
+		"UnusedContext after: 42",
+		"UnusedContext result: 42",
+		"failed to exec Before hook",
 		"Every2",
 		"Every3",
 		"MyStruct.Example",
@@ -47,10 +51,12 @@ func TestBasic(t *testing.T) {
 		"returnValCount:0",
 		"isSkipCall:false",
 		"Ellipsis",
+		"retValCount:0 retVal0:<nil>",
 		"Hello from stdio",
 		"Underscore",
 		"AutoDetect: 00000000-0000-0000-0000-000000000000",
 		"UnnamedBefore 42 2.7",
+		"Nested call wrappers: [[x]]",
 	}
 	for _, e := range expect {
 		require.Contains(t, output, e)

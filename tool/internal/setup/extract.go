@@ -128,8 +128,22 @@ func extractGZip(bundleReader io.Reader, targetDir string) (retErr error) {
 	return nil
 }
 
+// refreshExtractedBundle replaces the pkg and instrumentation directories of
+// targetDir with the contents of the bundle. extractGZip only writes files, so
+// a file that an older otelc extracted and the bundle no longer ships would
+// stay and be compiled together with the files that replaced it. Other
+// entries of targetDir, such as the Go build cache, are left alone.
+func refreshExtractedBundle(bundleReader io.Reader, targetDir string) error {
+	for _, dir := range []string{unzippedPkgDir, unzippedInstDir} {
+		if err := os.RemoveAll(filepath.Join(targetDir, dir)); err != nil {
+			return ex.Wrapf(err, "removing the previously extracted %s directory", dir)
+		}
+	}
+	return extractGZip(bundleReader, targetDir)
+}
+
 func extractOtelcBundle() error {
 	// Extract the instrumentation code to the build temp directory
 	// for future instrumentation phase
-	return extractGZip(data.GetBundleReader(), util.GetBuildTempDir())
+	return refreshExtractedBundle(data.GetBundleReader(), util.GetInvocationDir())
 }

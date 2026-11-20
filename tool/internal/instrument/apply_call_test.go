@@ -13,6 +13,7 @@ import (
 	"go/types"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -525,7 +526,7 @@ func TestApplyCallReplace_DoesNotRewriteOriginalCallArguments(t *testing.T) {
 	importAliases := map[string]string{"http": "net/http"}
 	aliasOverrides := map[string]string{"traced": "f"}
 
-	modified, err := newTestPhase().applyCallReplace(r, root, importAliases, aliasOverrides)
+	modified, err := newTestPhase().applyCallReplace(t.Context(), r, root, importAliases, aliasOverrides)
 
 	require.NoError(t, err)
 	assert.True(t, modified)
@@ -882,6 +883,26 @@ func TestMatchesCallRule_UnqualifiedCallDoesNotMatch(t *testing.T) {
 	matches := matchesCallRule(call, r, nil)
 
 	assert.False(t, matches)
+}
+
+func TestMatchesCallRule_ShadowedPackageDoesNotMatch(t *testing.T) {
+	r := &rule.InstCallRule{
+		ImportPath: "net/http",
+		FuncName:   "Get",
+	}
+	aliases := map[string]string{"http": "net/http"}
+
+	call := &dst.CallExpr{
+		Fun: &dst.SelectorExpr{
+			X:   &dst.Ident{Name: "http"},
+			Sel: &dst.Ident{Name: "Get"},
+		},
+	}
+	assert.True(t, matchesCallRule(call, r, aliases))
+
+	// A local declaration of the same name is in scope, so http is not the package.
+	call.Fun.(*dst.SelectorExpr).X.(*dst.Ident).Obj = &dst.Object{Kind: dst.Var, Name: "http"}
+	assert.False(t, matchesCallRule(call, r, aliases))
 }
 
 func TestMatchesCallRule_WrongPackage(t *testing.T) {
@@ -1261,7 +1282,7 @@ func TestApplyCallAppendArgs_NoMatchReturnsFalse(t *testing.T) {
 
 	ip := newTestPhase()
 	importAliases := ast.ImportAliasMap(file, nil)
-	result, err := ip.applyCallAppendArgs(r, file, importAliases, nil)
+	result, err := ip.applyCallAppendArgs(t.Context(), r, file, importAliases, nil)
 
 	require.NoError(t, err)
 	assert.False(t, result, "applyCallAppendArgs must return false when no calls match")
@@ -1311,6 +1332,51 @@ func Run() {
 			"\truntime.UnsuppressHooks()",
 	)
 	assert.NotContains(t, src, "runtime.SuppressHooks()\n\thttp.Get(\"kept\")")
+}
+
+func TestApplyIgnoredCallSites_RuntimeNameTakenUsesReservedAlias(t *testing.T) {
+	// k8s.io/apimachinery/pkg/runtime and github.com/go-openapi/runtime are
+	// both named runtime; importing the Go runtime as "runtime" next to them
+	// would not compile.
+	root := parseFile(t, `package main
+
+import runtime "example.com/app/runtime"
+
+func Run() {
+	//otelc:ignore
+	runtime.Start()
+}
+`)
+
+	_, err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+	require.NoError(t, err)
+
+	src := renderFile(t, root)
+	assert.Contains(t, src, `otelcRuntime "runtime"`)
+	assert.Contains(t, src, "otelcRuntime.SuppressHooks()\n")
+	assert.Contains(t, src, "otelcRuntime.UnsuppressHooks()")
+	assert.Contains(t, src, "\truntime.Start()\n", "the file's own runtime package stays as written")
+	assert.NotContains(t, src, "runtime.SuppressHooks()\n\totelcIgnoreDone0")
+}
+
+func TestApplyIgnoredCallSites_ReusesFileAliasForRuntime(t *testing.T) {
+	root := parseFile(t, `package main
+
+import rt "runtime"
+
+func Run() {
+	//otelc:ignore
+	rt.GC()
+}
+`)
+
+	_, err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+	require.NoError(t, err)
+
+	src := renderFile(t, root)
+	assert.Contains(t, src, "rt.SuppressHooks()\n")
+	assert.Contains(t, src, "rt.UnsuppressHooks()")
+	assert.Equal(t, 1, strings.Count(src, `"runtime"`), "runtime must not be imported a second time")
 }
 
 func TestApplyIgnoredCallSites_NoDirectiveNoChange(t *testing.T) {
@@ -2263,7 +2329,7 @@ func TestMatchesMethodCallRule_TypeCheckFailureSkipsMatch(t *testing.T) {
 		},
 	}
 
-	assert.False(t, ip.matchesMethodCallRule(call, r))
+	assert.False(t, ip.matchesMethodCallRule(t.Context(), call, r))
 	assert.True(t, ip.methodCallInfoLoaded)
 	assert.Nil(t, ip.methodCallInfo)
 }
@@ -2284,7 +2350,7 @@ func (l Logger) Info(msg string) {}
 		},
 	}
 
-	assert.False(t, ip.matchesMethodCallRule(call, r))
+	assert.False(t, ip.matchesMethodCallRule(t.Context(), call, r))
 }
 
 func TestMatchesMethodCallRule_NoSourcePositionLogsMiss(t *testing.T) {
@@ -2305,7 +2371,7 @@ func (l Logger) Info(msg string) {}
 		},
 	}
 
-	assert.False(t, ip.matchesMethodCallRule(call, r))
+	assert.False(t, ip.matchesMethodCallRule(t.Context(), call, r))
 	assert.Contains(t, logs.String(), "no source position")
 }
 
@@ -2354,7 +2420,7 @@ func run() {
 	call := findCallByMethodName(root, "Write")
 	require.NotNil(t, call, "did not find Write call via dst")
 
-	assert.False(t, ip.matchesMethodCallRule(call, r),
+	assert.False(t, ip.matchesMethodCallRule(t.Context(), call, r),
 		"a call through an interface-typed receiver must not resolve, so it must not match")
 	assert.Contains(t, logs.String(), "could not be resolved to a receiver type")
 }
@@ -2382,7 +2448,7 @@ func run() {
 	call := findCallByMethodName(root, "Info")
 	require.NotNil(t, call, "did not find Info call via dst")
 
-	assert.False(t, ip.matchesMethodCallRule(call, r))
+	assert.False(t, ip.matchesMethodCallRule(t.Context(), call, r))
 	assert.Contains(t, logs.String(), "could not be resolved to a receiver type")
 	assert.Contains(t, logs.String(), "first_type_error")
 	assert.Contains(t, logs.String(), "undefined")
@@ -2534,7 +2600,7 @@ func TestExportImporter_ImportFrom_MissingArchive(t *testing.T) {
 	_, err := imp.ImportFrom("example.com/missing", "", 0)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no archive for import path")
+	assert.Contains(t, err.Error(), "no export data for import path")
 }
 
 func TestExportImporter_ImportFrom_OpenArchiveError(t *testing.T) {
@@ -2546,10 +2612,10 @@ func TestExportImporter_ImportFrom_OpenArchiveError(t *testing.T) {
 	_, err := imp.ImportFrom("example.com/gone", "", 0)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "opening archive")
+	assert.Contains(t, err.Error(), "opening export data")
 }
 
-func TestExportImporter_ImportFrom_NewReaderError(t *testing.T) {
+func TestExportImporter_ImportFrom_GarbageFile(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempGoFile(t, dir, "notanarchive.a", "not an archive at all")
 	imp := newExportImporter(token.NewFileSet(), map[string]string{"example.com/bad": path}, nil)
@@ -2557,7 +2623,7 @@ func TestExportImporter_ImportFrom_NewReaderError(t *testing.T) {
 	_, err := imp.ImportFrom("example.com/bad", "", 0)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "reading export data section")
+	assert.Contains(t, err.Error(), "decoding export data")
 }
 
 func TestExportImporter_ImportFrom_DecodeError(t *testing.T) {
@@ -3053,4 +3119,88 @@ func run(log *Logger) {
 
 		assert.Contains(t, renderFile(t, root), `log.Info("x")`)
 	})
+}
+
+func TestApplyCallRule_NestedCalls(t *testing.T) {
+	for _, tt := range []struct {
+		name, replacement, want string
+	}{
+		{"whole call", "traced({{ . }})", `traced(strings.TrimSpace(traced(strings.TrimSpace(" x "))))`},
+		{"call arguments", "traced({{ .CallArguments }})", `traced(traced(" x "))`},
+		{"matching wrapper", "strings.TrimSpace({{ . }})", `strings.TrimSpace(strings.TrimSpace(strings.TrimSpace(strings.TrimSpace(" x "))))`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := parseFile(t, `package main
+import "strings"
+var value = strings.TrimSpace(strings.TrimSpace(" x "))
+`)
+			r := &rule.InstCallRule{
+				InstBaseRule: rule.InstBaseRule{Name: "nested"},
+				FunctionCall: "strings.TrimSpace",
+				ImportPath:   "strings",
+				FuncName:     "TrimSpace",
+				Replace:      tt.replacement,
+			}
+			modified, err := newTestPhase().applyCallRule(t.Context(), r, root)
+			require.NoError(t, err)
+			require.True(t, modified)
+			assert.Contains(t, renderFile(t, root), tt.want)
+		})
+	}
+}
+
+func TestApplyCallRule_NestedMethodReceivers(t *testing.T) {
+	ip, root := setupMethodCallPhase(t, `package sample
+type Builder struct{}
+func (b Builder) Next() Builder { return b }
+func run() { var b Builder; _ = b.Next().Next().Next() }
+`)
+	r := methodCallRule("Builder", "Next", "traced({{ . }})")
+	modified, err := ip.applyCallRule(t.Context(), r, root)
+	require.NoError(t, err)
+	require.True(t, modified)
+	assert.Contains(t, renderFile(t, root), `traced(traced(traced(b.Next()).Next()).Next())`)
+	// Later rules must still resolve every original method through the clones.
+	r.Replace = "second({{ . }})"
+	_, err = ip.applyCallRule(t.Context(), r, root)
+	require.NoError(t, err)
+	assert.Contains(t, renderFile(t, root), `traced(second(traced(second(traced(second(b.Next())).Next())).Next()))`)
+}
+
+func TestApplyCallRule_NestedCallsRuntime(t *testing.T) {
+	root := parseFile(t, `package main
+import (
+	"fmt"
+	"strings"
+)
+var events []string
+func input() string { events = append(events, "input"); return " x " }
+func traced(s string) string { events = append(events, "trace"); return s }
+func run() {
+	defer strings.TrimSpace(strings.TrimSpace(input()))
+	events = append(events, "body")
+}
+func main() {
+	run()
+	fmt.Println(events)
+}
+`)
+	r := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "nested"},
+		FunctionCall: "strings.TrimSpace",
+		ImportPath:   "strings",
+		FuncName:     "TrimSpace",
+		Replace:      "strings.TrimSpace(traced({{ .CallArguments }}))",
+	}
+	modified, err := newTestPhase().applyCallRule(t.Context(), r, root)
+	require.NoError(t, err)
+	require.True(t, modified)
+	path := filepath.Join(t.TempDir(), "main.go")
+	require.NoError(t, os.WriteFile(path, []byte(renderFile(t, root)), 0o600))
+	cmd := exec.CommandContext(t.Context(), "go", "run", path)
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, "%s", output)
+	// Both original calls are instrumented once; the input is evaluated once.
+	// The arguments of a deferred call are evaluated before the body continues.
+	assert.Equal(t, "[input trace trace body]\n", strings.ReplaceAll(string(output), "\r\n", "\n"))
 }

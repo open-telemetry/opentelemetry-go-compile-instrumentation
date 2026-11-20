@@ -72,8 +72,8 @@ func TestAnthropicClient(t *testing.T) {
 				inputTokens+outputTokens, // totalTokens (computed)
 			)
 
-			// Anthropic-specific prompt-cache attributes appear only when the
-			// response reports cache activity.
+			// Prompt-cache attributes appear only when the response reports
+			// cache activity.
 			if tc.cacheRead > 0 {
 				testutil.RequireAttribute(t, span, "gen_ai.usage.cache_read.input_tokens", tc.cacheRead)
 			}

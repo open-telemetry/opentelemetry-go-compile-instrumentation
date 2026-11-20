@@ -28,7 +28,7 @@ instrumentation/google.golang.org/grpc/client/client.otelc.yaml
 Below is an example configuration for instrumenting a function `NewServer`:
 
 ```yaml
-version: "v1.0.0"
+version: "v1.2.0"
 
 inject_to_grpc_newserver:
   target: google.golang.org/grpc
@@ -51,6 +51,10 @@ inject_to_grpc_newserver:
   - `path`: import path where the hook functions are defined.
 
 > [!NOTE]
+> Rule files under `instrumentation/` must declare the top-level `version` key.
+> Use `v1.2.0`, the first `otelc` release that supports the key, unless the rules
+> need functionality from a later release. See [rules.md](rules.md#rule-shape).
+>
 > The 2-tier `where`/`do` schema and all other rule types are documented in [rules.md](rules.md). The schema invariants are recorded in [ADR-0003](adr/0003-structured-rule-schema.md).
 
 ## 2. Implement Hooks
@@ -159,6 +163,30 @@ Notes:
   whatever they gate together.
 - Cover the gate in unit tests with `t.Setenv`, asserting both that a disabled
   instrumentation emits nothing and that an explicitly enabled one still works.
+- A hook that starts telemetry also checks `runtime.Ready()`, and a hook that attaches
+  instrumentation checks it when the attached code runs. See Package Initialization Order
+  under [Limitations](#limitations).
+
+### Resource Detectors
+
+An instrumentation can add resource attributes by registering a
+[`resource.Detector`](https://pkg.go.dev/go.opentelemetry.io/otel/sdk/resource#Detector)
+from the `init` function of its hook package:
+
+```go
+func init() {
+	if !runtime.Instrumented(instrumentationKey) {
+		return
+	}
+	runtime.RegisterResourceDetector("aws_lambda", lambda.NewResourceDetector())
+}
+```
+
+The detected attributes are added to those of the built-in detectors. When both set the
+same attribute key, the registered detector wins, and `OTEL_RESOURCE_ATTRIBUTES` and
+`OTEL_SERVICE_NAME` win over both. Detection runs synchronously before the SDK starts, so
+a detector must not block. When it does not apply to the current environment, it returns
+an empty resource and a `nil` error.
 
 ### Limitations
 
@@ -193,6 +221,70 @@ When implementing hooks, we must adhere to certain limitations:
    Nothing catches this at build time: a hook that calls one of these four methods on a
    generic target compiles cleanly, and only panics once the instrumented function runs.
 
+3. **Package Initialization Order**: A hook can run before its own package is initialized.
+
+   The target package calls the hook through a `//go:linkname` declaration, which does not
+   create an import of the hook package. The only import of the hook package is in the
+   generated `otelc.runtime.go` file of package `main`, so Go only guarantees that the hook
+   package is initialized before `main`, not before the other packages `main` imports. When
+   the target function is called during package initialization, for example
+   `sql.Register` called from a database driver's `init()`, the hook runs before the
+   package-level variable initializers and `init()` functions of its own package.
+
+   The trampoline recovers the resulting panic and prints `failed to exec Before hook` or
+   `failed to exec After hook`, so the build and the tests still pass while the hook does
+   nothing for that call.
+
+   A hook must therefore not depend on state that is set up at initialization time. Leave
+   package-level variables at their zero value and create the state on first use:
+
+   ```go
+   // Not safe: seen is still nil when the hook runs during package initialization.
+   var seen = make(map[string]bool)
+
+   // Safe: the zero values of sync.Mutex and the map are ready before any
+   // initialization runs.
+   var (
+       mu   sync.Mutex
+       seen map[string]bool
+   )
+
+   func AfterRegister(ictx hook.HookContext) {
+       mu.Lock()
+       defer mu.Unlock()
+       if seen == nil {
+           seen = make(map[string]bool)
+       }
+       seen[ictx.GetParam(0).(string)] = true
+   }
+   ```
+
+   The logrus instrumentation uses this pattern for the logger created by logrus's own
+   package initialization.
+
+   The same applies to the OpenTelemetry API. Before its packages have initialized,
+   `otel.GetTracerProvider()` panics, and a panic inside `sync.Once` leaves the tracer nil
+   for the rest of the process. A hook or callback that starts telemetry must first check
+   `runtime.Ready()` from `go.opentelemetry.io/otelc/pkg/runtime`, which reports whether
+   that package, and with it the OpenTelemetry API it imports, has initialized:
+
+   ```go
+   func BeforeQuery(ictx hook.HookContext, query string) {
+       if !runtime.Ready() {
+           return
+       }
+       initInstrumentation()
+       // start the span
+   }
+   ```
+
+   `runtime.Ready()` does not mean the hook's own package has initialized, so the rule above
+   still applies to the hook package's variables. Calls skipped this way are not traced and
+   are not replayed. A hook that attaches
+   instrumentation to a client or server, such as a middleware or a stats handler, should
+   still attach it during initialization and check `runtime.Ready()` when the attached code
+   runs, so a client created in a package-level variable keeps its instrumentation.
+
 ### GLS Operation for OTel SDK Instrumentation
 
 This section explains how goroutine-local storage (GLS) is used by the OTel SDK instrumentation.
@@ -221,7 +313,7 @@ At runtime:
 
 ##### 1) Runtime GLS accessors
 
-`instrumentation/runtime/runtime_gls.go` provides low-level accessors:
+`tool/internal/runtime/runtime_gls.go` (embedded into `otelc`) provides low-level accessors:
 
 - `GetTraceContextFromGLS()`
 - `SetTraceContextToGLS(interface{})`

@@ -13,6 +13,10 @@ import (
 	"log"
 	"log/slog"
 	"net"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"go.opentelemetry.io/otelc/test/shared/grpcpb"
 	"go.opentelemetry.io/otelc/test/shared/grpcpb/pb"
@@ -20,7 +24,11 @@ import (
 	"google.golang.org/grpc/stats"
 )
 
-var port = flag.Int("port", 50051, "The server port")
+var (
+	port  = flag.Int("port", 50051, "The server port")
+	drain = flag.Duration("drain", 0, "If set, handle SIGINT and SIGTERM with signal.NotifyContext, "+
+		"stop listening for them as soon as one arrives, then keep running for this long before exiting")
+)
 
 type server struct {
 	pb.UnimplementedGreeterServer
@@ -94,7 +102,32 @@ func main() {
 	pb.RegisterGreeterServer(s, &server{})
 
 	slog.Info("server started", "address", lis.Addr())
+	if *drain > 0 {
+		// Register before serving, so the handler is in place by the time a
+		// test can complete an RPC and send the signal.
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		go serve(s, lis)
+		waitAndDrain(ctx, stop, *drain)
+		s.Stop()
+		return
+	}
+	serve(s, lis)
+}
+
+func serve(s *grpc.Server, lis net.Listener) {
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
 	}
+}
+
+// waitAndDrain follows a common graceful shutdown pattern: it calls stop() as
+// soon as the signal arrives, which restores the default signal disposition,
+// and then drains for d. A second shutdown signal sent during the drain would
+// kill the process.
+func waitAndDrain(ctx context.Context, stop context.CancelFunc, d time.Duration) {
+	<-ctx.Done()
+	stop()
+	slog.Info("draining")
+	time.Sleep(d)
+	slog.Info("drained")
 }

@@ -593,6 +593,45 @@ func (g *GenStruct[T]) Reset() error { return nil }
 	assert.Equal(t, "T", afterIndex.Index.(*dst.Ident).Name)
 }
 
+func TestCollectArgumentsNamesBlankReceiverTypeParams(t *testing.T) {
+	typeParam := func(idx int) string { return fmt.Sprintf("%s_%s_%d", ignoredTypeParam, testHash, idx) }
+	tests := []struct {
+		name     string
+		src      string
+		recvType string
+		args     []string
+	}{
+		{
+			name:     "pointer receiver with one blank type parameter",
+			src:      "package main\ntype S[T any] struct{}\nfunc (s *S[_]) F() {}",
+			recvType: "*S[" + typeParam(0) + "]",
+			args:     []string{"s"},
+		},
+		{
+			name:     "unnamed receiver with a blank type parameter",
+			src:      "package main\ntype S[T any] struct{}\nfunc (S[_]) F() {}",
+			recvType: "S[" + typeParam(0) + "]",
+			args:     []string{syntheticParam(1)},
+		},
+		{
+			name:     "named and blank type parameters",
+			src:      "package main\ntype M[K comparable, V any] struct{}\nfunc (m M[K, _]) F() {}",
+			recvType: "M[K, " + typeParam(0) + "]",
+			args:     []string{"m"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			funcDecl := parseFunc(t, tt.src)
+			args := collectArguments(funcDecl, testHash)
+			assert.Equal(t, tt.args, args)
+			recvType, err := ast.RenderExpr(funcDecl.Recv.List[0].Type)
+			require.NoError(t, err)
+			assert.Equal(t, tt.recvType, recvType)
+		})
+	}
+}
+
 func TestCreateTJumpIfMultipleGenericReceiverTypeArgs(t *testing.T) {
 	file, funcDecl := parseFileFunc(t, `package main
 type GenStruct[K comparable, V any] struct{}
@@ -681,6 +720,30 @@ func HookedFunc(p1 string) {}
 		assert.Contains(t, src, `"runtime"`)
 		assert.Contains(t, src, "runtime.HooksSuppressed()")
 	})
+
+	t.Run("file already uses the name runtime for another package", func(t *testing.T) {
+		root := parseFile(t, `package main
+
+import runtime "example.com/app/runtime"
+
+var _ = runtime.Start
+
+func HookedFunc(p1 string) {}
+`)
+		ip := newTestPhase()
+		ip.target = root
+		ip.parser = ast.NewAstParser()
+		ip.buildUsesIgnoreDirective = true
+
+		funcDecl := findFuncDeclInFile(t, root, "HookedFunc")
+		_, err := ip.applyFuncRule(context.Background(), funcRule, root, funcDecl, true)
+		require.NoError(t, err)
+
+		src := renderFile(t, root)
+		assert.Contains(t, src, `otelcRuntime "runtime"`)
+		assert.Contains(t, src, "otelcRuntime.HooksSuppressed()")
+		assert.Contains(t, src, `runtime "example.com/app/runtime"`)
+	})
 }
 
 func TestInstrumentFile_FindFuncDeclErrorIsWrapped(t *testing.T) {
@@ -732,4 +795,64 @@ func TestWriteInstrumentedDebugCopiesSourceWithDiff(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "-var X = 1")
 	assert.Contains(t, string(content), "+var X = 2")
+}
+
+// TestWriteGlobalsPrefixesHookContextToPreventUserPackageClash verifies that the
+// HookContext interface injected into package scope is renamed to OtelHookContext
+// so it does not collide with a user-defined HookContext type in the same package (issue #1820).
+func TestWriteGlobalsPrefixesHookContextToPreventUserPackageClash(t *testing.T) {
+	workDir := t.TempDir()
+	ip := newTestPhase()
+	ip.workDir = workDir
+
+	require.NoError(t, ip.writeGlobals("mypkg"))
+
+	globalsPath := filepath.Join(workDir, otelcGlobalsFile)
+	data, err := os.ReadFile(globalsPath)
+	require.NoError(t, err)
+
+	content := string(data)
+	assert.Contains(t, content, "type OtelHookContext interface")
+	assert.NotContains(t, content, "type HookContext interface")
+
+	// Parse both the generated globals and a user source file that defines a HookContext type.
+	fset := token.NewFileSet()
+	userSrc := "package mypkg\n\ntype HookContext struct { ID string }\n"
+	userFile, err := parser.ParseFile(fset, "user.go", userSrc, 0)
+	require.NoError(t, err)
+
+	globalsFile, err := parser.ParseFile(fset, "otelc.globals.go", content, 0)
+	require.NoError(t, err)
+
+	// Typecheck the package containing both files. Before the fix, this failed with:
+	// "HookContext redeclared in this block".
+	conf := types.Config{
+		Importer: importer.Default(),
+	}
+	info := &types.Info{}
+	pkg, err := conf.Check("mypkg", fset, []*goast.File{userFile, globalsFile}, info)
+	require.NoError(t, err, "user HookContext should not collide with injected OtelHookContext")
+	assert.NotNil(t, pkg)
+}
+
+func TestRenameHookContextDecl(t *testing.T) {
+	p := ast.NewAstParser()
+	f, err := p.ParseSource(`package test
+
+func F() {}
+
+var V int
+
+type Other struct{}
+
+type HookContext interface{}
+`)
+	require.NoError(t, err)
+	renameHookContextDecl(f.Decls)
+
+	typeOther := f.Decls[2].(*dst.GenDecl).Specs[0].(*dst.TypeSpec)
+	assert.Equal(t, "Other", typeOther.Name.Name)
+
+	typeHookContext := f.Decls[3].(*dst.GenDecl).Specs[0].(*dst.TypeSpec)
+	assert.Equal(t, "OtelHookContext", typeHookContext.Name.Name)
 }

@@ -127,6 +127,16 @@ func MyHookEllipsisBefore(ictx hook.HookContext, p1 ...string) {
 	println("Ellipsis")
 }
 
+// MyHookRetValsBefore is a before-only hook on a target with a return value.
+// Before this fix, an in-range GetReturnVal/SetReturnVal here indexed into
+// the HookContextImpl's nil returnVals slice (never populated, since no
+// After hook runs) and panicked with "index out of range" instead of
+// returning a sane value.
+func MyHookRetValsBefore(ictx hook.HookContext, p1 string, p2 int) {
+	fmt.Printf("retValCount:%d retVal0:%v\n", ictx.GetReturnValCount(), ictx.GetReturnVal(0))
+	ictx.SetReturnVal(0, nil)
+}
+
 // AutoDetectBefore is a hook that imports "github.com/google/uuid", which is
 // not imported by the demo/basic app. This verifies that auto-detection adds
 // the package to the build importcfg without requiring a manual imports: field.
@@ -156,4 +166,13 @@ func FunctionBBefore(ictx hook.HookContext, ctx context.Context) {
 
 func UnnamedBefore(ictx hook.HookContext, recv interface{}, arg1 int, arg2 float32) {
 	fmt.Printf("UnnamedBefore %v %v\n", arg1, arg2)
+}
+
+func UnusedContextBefore(_ hook.HookContext, n int) {
+	fmt.Printf("UnusedContext before: %d\n", n)
+	panic("unused context recovery")
+}
+
+func UnusedContextAfter(ctx hook.HookContext, n int) {
+	fmt.Printf("UnusedContext after: %d\n", n)
 }

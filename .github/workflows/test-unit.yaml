@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - main
+      - 'release/v*.*.x'
   pull_request:
 # Declare default permissions as read only.
 permissions:
@@ -134,6 +135,7 @@ jobs:
       - name: Build and test
         env:
           GOARCH: ${{ matrix.platform.arch }}
+          RACE: ${{ matrix.platform.os == 'ubuntu-latest' && matrix.platform.arch == 'amd64' && '1' || '0' }}
         run: make test-unit
 
   done:

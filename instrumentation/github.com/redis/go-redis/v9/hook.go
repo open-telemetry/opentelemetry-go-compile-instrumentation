@@ -73,6 +73,11 @@ func newOtelRedisHook(addr string) *otelRedisHook {
 
 func (o *otelRedisHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 	return func(ctx context.Context, cmd redis.Cmder) error {
+		// go-redis calls this outside any trampoline, so a panic here crashes
+		// a command run during package initialization. See runtime.Ready.
+		if !runtime.Ready() {
+			return next(ctx, cmd)
+		}
 		if !redisEnabler.Enable() {
 			logger.Debug("Redis Client instrumentation disabled")
 			return next(ctx, cmd)
@@ -106,6 +111,9 @@ func (o *otelRedisHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 
 func (o *otelRedisHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
 	return func(ctx context.Context, cmds []redis.Cmder) error {
+		if !runtime.Ready() {
+			return next(ctx, cmds)
+		}
 		if !redisEnabler.Enable() {
 			logger.Debug("Redis Client instrumentation disabled")
 			return next(ctx, cmds)

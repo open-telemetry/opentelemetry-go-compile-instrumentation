@@ -1419,6 +1419,7 @@ func TestPrepareVendoredBuild_NotVendored(t *testing.T) {
 		[]byte("module example.com/test\n\ngo 1.25\n"),
 		0o644,
 	))
+	t.Chdir(dir)
 	t.Setenv(util.EnvOtelcWorkDir, dir)
 	t.Setenv("GOFLAGS", "")
 
@@ -1447,6 +1448,7 @@ func TestPrepareVendoredBuild_Vendored(t *testing.T) {
 		[]byte(""),
 		0o644,
 	))
+	t.Chdir(dir)
 	t.Setenv(util.EnvOtelcWorkDir, dir)
 	t.Setenv("GOFLAGS", "")
 	// Force non-workspace mode; -mod=mod is forbidden in a workspace, so a
@@ -1769,6 +1771,7 @@ func TestPrepareVendoredBuild(t *testing.T) {
 	// With no vendored module active, prepareVendoredBuild returns the args
 	// unchanged and does not force module mode.
 	dir := newModuleDir(t)
+	t.Chdir(dir)
 	t.Setenv(util.EnvOtelcWorkDir, dir)
 
 	args := []string{"build", "./..."}
@@ -1937,8 +1940,16 @@ func TestGeneratePinnedProjects_ExtractBundleError(t *testing.T) {
 
 	buildTemp := util.GetBuildTempDir()
 	require.NoError(t, os.MkdirAll(buildTemp, 0o755))
+	// The previous extraction cannot be removed from a directory that has no
+	// write permission.
 	pkgPath := filepath.Join(buildTemp, unzippedPkgDir)
-	require.NoError(t, os.WriteFile(pkgPath, []byte("file"), 0o644))
+	require.NoError(t, os.MkdirAll(pkgPath, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(pkgPath, "old.go"), []byte("old"), 0o644))
+	require.NoError(t, os.Chmod(pkgPath, 0o555))
+	t.Cleanup(func() { _ = os.Chmod(pkgPath, 0o755) })
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("directory permissions do not block removal here")
+	}
 
 	_, err := generatePinnedProjects(t.Context(), []string{tempDir}, PinOptions{
 		Args: []string{"."},

@@ -5,23 +5,32 @@ package instrument
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"go/build"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/imports"
+	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	"go.opentelemetry.io/otelc/tool/internal/session"
 	"go.opentelemetry.io/otelc/tool/util"
+	"golang.org/x/tools/go/packages"
 )
 
 func TestPGOBuildFlags(t *testing.T) {
@@ -62,6 +71,53 @@ func TestPGOBuildFlags(t *testing.T) {
 			flags, err := ip.pgoBuildFlags()
 			if tt.readError && len(tt.compileArgs) > 0 {
 				require.ErrorContains(t, err, "failed to read PGO profile")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, flags)
+		})
+	}
+}
+
+// TestPGOBuildFlagsForLinkCommand covers the link-side decision. A link
+// command never carries -pgoprofile, because the profile shapes compile
+// actions only, so the decision must follow the profile setup recorded; the
+// compile-side table above cannot express that shape.
+func TestPGOBuildFlagsForLinkCommand(t *testing.T) {
+	const profile = "warm profile.pgo"
+	linkTool := linkToolPath()
+	args := []string{linkTool, "-o", "app.test", "-buildid=x", "-importcfg", "importcfg.link"}
+
+	tests := []struct {
+		name      string
+		profile   string
+		missing   bool
+		readError bool
+		want      []string
+		wantErr   string
+	}{
+		{
+			name: "recorded profile applies to the link", profile: profile,
+			want: []string{"-pgo=" + profile},
+		},
+		{name: "empty recorded profile"},
+		{name: "missing profile file", missing: true},
+		{name: "read error", readError: true, wantErr: "failed to read PGO profile"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+			require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+			if tt.readError {
+				require.NoError(t, os.Mkdir(util.GetPGOProfileFile(), 0o755))
+			} else if !tt.missing {
+				require.NoError(t, os.WriteFile(util.GetPGOProfileFile(), []byte(tt.profile), 0o644))
+			}
+
+			flags, err := pgoBuildFlagsFor(args)
+
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
 				return
 			}
 			require.NoError(t, err)
@@ -134,6 +190,85 @@ func TestStripCompleteFlag(t *testing.T) {
 			result := stripCompleteFlag(tt.args)
 			assert.Equal(t, tt.expected, result)
 			assert.Equal(t, origArgs, tt.args, "original slice should not be mutated")
+		})
+	}
+}
+
+func TestRaiseLangFlag(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		targetLang string
+		expected   []string
+	}{
+		{
+			name:       "empty target leaves args unchanged",
+			args:       []string{"compile", "-lang=go1.7", "file.go"},
+			targetLang: "",
+			expected:   []string{"compile", "-lang=go1.7", "file.go"},
+		},
+		{
+			name:       "empty args returns empty",
+			args:       []string{},
+			targetLang: "go1.18",
+			expected:   []string{},
+		},
+		{
+			name:       "raises separated -lang flag",
+			args:       []string{"compile", "-o", "out.a", "-lang", "go1.7", "file.go"},
+			targetLang: "go1.18",
+			expected:   []string{"compile", "-o", "out.a", "-lang", "go1.18", "file.go"},
+		},
+		{
+			name:       "raises equals -lang flag",
+			args:       []string{"compile", "-o", "out.a", "-lang=go1.7", "file.go"},
+			targetLang: "go1.18",
+			expected:   []string{"compile", "-o", "out.a", "-lang=go1.18", "file.go"},
+		},
+		{
+			name:       "does not lower higher existing -lang",
+			args:       []string{"compile", "-o", "out.a", "-lang=go1.22", "file.go"},
+			targetLang: "go1.18",
+			expected:   []string{"compile", "-o", "out.a", "-lang=go1.22", "file.go"},
+		},
+		{
+			name:       "raises equals -lang flag without go prefix",
+			args:       []string{"compile", "-o", "out.a", "-lang=1.7", "file.go"},
+			targetLang: "go1.18",
+			expected:   []string{"compile", "-o", "out.a", "-lang=go1.18", "file.go"},
+		},
+		{
+			name:       "raises separated -lang flag without go prefix",
+			args:       []string{"compile", "-o", "out.a", "-lang", "1.7", "file.go"},
+			targetLang: "go1.18",
+			expected:   []string{"compile", "-o", "out.a", "-lang", "go1.18", "file.go"},
+		},
+		{
+			name:       "does not lower higher existing -lang without go prefix",
+			args:       []string{"compile", "-o", "out.a", "-lang=1.22", "file.go"},
+			targetLang: "go1.18",
+			expected:   []string{"compile", "-o", "out.a", "-lang=1.22", "file.go"},
+		},
+		{
+			name:       "leaves equal existing -lang unchanged",
+			args:       []string{"compile", "-o", "out.a", "-lang", "go1.18", "file.go"},
+			targetLang: "go1.18",
+			expected:   []string{"compile", "-o", "out.a", "-lang", "go1.18", "file.go"},
+		},
+		{
+			name:       "inserts -lang when absent",
+			args:       []string{"compile", "-o", "out.a", "file.go"},
+			targetLang: "go1.18",
+			expected:   []string{"compile", "-lang", "go1.18", "-o", "out.a", "file.go"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			orig := slices.Clone(tt.args)
+			res := raiseLangFlag(tt.args, tt.targetLang)
+			assert.Equal(t, tt.expected, res)
+			assert.Equal(t, orig, tt.args, "original slice must not be mutated")
 		})
 	}
 }
@@ -804,10 +939,14 @@ func TestInterceptLinkLoadError(t *testing.T) {
 	workDir := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, workDir)
 	// A regular file where the build temp directory is expected makes
-	// loadAddedImports fail; the link command is then passed through unchanged.
+	// loadAddedImports fail. That failure is not fatal: the link still
+	// recovers rule-added imports from matched.json. With no matched rules
+	// and nothing to add, the link command is passed through unchanged.
 	require.NoError(t, os.WriteFile(util.GetBuildTempDir(), []byte("not a directory"), 0o644))
 
-	args := []string{"link", "-o", "exe", "-buildid", "id", "-importcfg", "importcfg.link"}
+	cfgPath := filepath.Join(workDir, "importcfg.link")
+	require.NoError(t, os.WriteFile(cfgPath, []byte("packagefile fmt=/unused/fmt.a\n"), 0o644))
+	args := []string{"link", "-o", "exe", "-buildid", "id", "-importcfg", cfgPath}
 	result, err := interceptLink(ctx, args)
 	require.NoError(t, err)
 	assert.Equal(t, args, result)
@@ -985,6 +1124,47 @@ func TestInterceptCompileFileRuleWithoutPackageName(t *testing.T) {
 	})
 }
 
+func TestInterceptCompile_RaisesLang(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	buildDir := t.TempDir()
+	sourcePath := filepath.Join(buildDir, "lib.go")
+	require.NoError(t, os.WriteFile(sourcePath, []byte("package oldlib\n\nfunc Run() {}\n"), 0o644))
+
+	set := rule.NewInstRuleSet("example.com/oldlib")
+	set.PackageName = "oldlib"
+	rawRule := &rule.InstRawRule{
+		Func: "Run",
+		Raw:  "var x any = 1\n_ = x",
+		Lang: "go1.18",
+	}
+	rawRule.Name = "inject_any"
+	set.AddRawRule(sourcePath, rawRule)
+
+	data, err := json.Marshal([]*rule.InstRuleSet{set})
+	require.NoError(t, err)
+	matched := util.GetMatchedRuleFile()
+	require.NoError(t, os.MkdirAll(filepath.Dir(matched), 0o755))
+	require.NoError(t, os.WriteFile(matched, data, 0o644))
+
+	ctx := util.ContextWithLogger(t.Context(), slog.New(slog.DiscardHandler))
+	args := []string{
+		"compile",
+		"-o", filepath.Join(buildDir, "_pkg_.a"),
+		"-p", "example.com/oldlib",
+		"-lang=go1.7",
+		"-complete",
+		sourcePath,
+	}
+
+	newArgs, err := interceptCompile(ctx, args)
+	require.NoError(t, err)
+
+	assert.Equal(t, "go1.18", util.FindFlagValue(newArgs, "-lang"))
+	assert.False(t, slices.Contains(newArgs, "-complete"))
+}
+
 func TestInterceptLinkWriteError(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod permissions are not enforced consistently on Windows")
@@ -1087,6 +1267,66 @@ func TestMarkedToolVersion(t *testing.T) {
 		assert.NotEqual(t, untagged, tagged)
 		assert.NotEqual(t, tagged, otherTag)
 	})
+
+	t.Run("embedded GLS change invalidates the rules hash", func(t *testing.T) {
+		content := []byte(`[{"module_path":"main"}]`)
+
+		base := rulesDigest(content, nil, []byte("gls-v1"), nil)
+		diffGLS := rulesDigest(content, nil, []byte("gls-v2"), nil)
+
+		assert.NotEqual(t, base, diffGLS)
+	})
+
+	t.Run("injected package hash changes the rules hash", func(t *testing.T) {
+		workDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, workDir)
+		require.NoError(t, os.MkdirAll(filepath.Join(workDir, util.BuildTempDir), 0o755))
+		require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), []byte(`[{"module_path":"main"}]`), 0o644))
+
+		without := markedToolVersion(raw)
+		require.NoError(t, os.WriteFile(util.GetInjectedHashFile(), []byte("0011223344556677"), 0o644))
+		first := markedToolVersion(raw)
+		require.NoError(t, os.WriteFile(util.GetInjectedHashFile(), []byte("8899aabbccddeeff"), 0o644))
+		second := markedToolVersion(raw)
+		require.NoError(t, os.WriteFile(util.GetInjectedHashFile(), nil, 0o644))
+
+		assert.NotEqual(t, without, first)
+		assert.NotEqual(t, first, second)
+		assert.Equal(t, without, markedToolVersion(raw), "an empty hash file must not change the rules hash")
+	})
+}
+
+func TestWithoutWorkDirPaths(t *testing.T) {
+	invocation := t.TempDir()
+	t.Setenv(util.EnvOtelcInvocationDir, invocation)
+	for _, directory := range []string{"runtime", "pkg", "instrumentation"} {
+		path := filepath.Join(invocation, directory, "source.go")
+		want := "<otelc-build>/" + filepath.Join(directory, "source.go")
+		assert.Equal(t, want, string(WithoutWorkDirPaths([]byte(path))))
+		encoded, err := json.Marshal(path)
+		require.NoError(t, err)
+		var decoded string
+		require.NoError(t, json.Unmarshal(WithoutWorkDirPaths(encoded), &decoded))
+		assert.Equal(t, want, decoded, "JSON paths must remain valid on Windows")
+	}
+	outside := filepath.Join(invocation+"-other", "source.go")
+	assert.Equal(t, outside, string(WithoutWorkDirPaths([]byte(outside))))
+}
+
+func TestRulesDigestIgnoresInvocationPaths(t *testing.T) {
+	digestIn := func(directory, file string) string {
+		t.Helper()
+		t.Setenv(util.EnvOtelcInvocationDir, directory)
+		content, err := json.Marshal(map[string]string{
+			"resolved_path": filepath.Join(directory, "instrumentation", "net", "http"),
+			"file":          file,
+		})
+		require.NoError(t, err)
+		return rulesDigest(content, nil, []byte("gls"), []byte("injected"))
+	}
+	first := digestIn(t.TempDir(), "hook.go")
+	assert.Equal(t, first, digestIn(t.TempDir(), "hook.go"))
+	assert.NotEqual(t, first, digestIn(t.TempDir(), "other.go"), "rule changes must still invalidate the cache")
 }
 
 func TestEnableNestedToolexec(t *testing.T) {
@@ -1359,4 +1599,1409 @@ func TestToolexecEmptyArgs(t *testing.T) {
 	err := Toolexec(t.Context(), []string{}, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no tool command specified")
+}
+
+// callRuleWithImports returns a call rule whose JSON unmarshals cleanly; the
+// selector must parse, so it names a real package function shape.
+func callRuleWithImports(imports map[string]string) *rule.InstCallRule {
+	return &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name: "call-rule", Imports: imports,
+		},
+		FunctionCall: "example.com/b.New",
+	}
+}
+
+// writeMatchedRules stores matched.json the way setup does, so the link phase
+// can read the rule-added imports back.
+func writeMatchedRules(t *testing.T, sets []*rule.InstRuleSet) {
+	t.Helper()
+	content, err := json.Marshal(sets)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), content, 0o600))
+}
+
+// linkArgs returns a minimal link command with importcfg at cfgPath.
+func linkArgs(cfgPath string) []string {
+	return []string{"link", "-o", "out.test", "-buildid=test", "-importcfg", cfgPath}
+}
+
+// TestInterceptLinkRecoversRuleAddedImport covers the warm-GOCACHE shape: no
+// compile ran, so no per-process tracking file exists, and the link must
+// still receive the import a rule adds, recovered from matched.json.
+func TestInterceptLinkRecoversRuleAddedImportFromMatchedRules(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	writeMatchedRules(t, []*rule.InstRuleSet{
+		{
+			PackageName: "dep",
+			ModulePath:  "example.com/app/dep",
+			FuncRules: map[string][]*rule.InstFuncRule{
+				"dep.go": {{
+					InstBaseRule: rule.InstBaseRule{
+						Name:    "rule",
+						Target:  rule.NewTarget("example.com/app/dep"),
+						Imports: map[string]string{"extra": "fmt"},
+					},
+				}},
+			},
+		},
+	})
+
+	cfgPath := filepath.Join(workDir, "importcfg.link")
+	// The link lists the rule set's target package, the shape a real link
+	// importcfg always has: the target's compile is part of the binary.
+	require.NoError(t, os.WriteFile(cfgPath,
+		[]byte("packagefile context=/unused/context.a\npackagefile example.com/app/dep=/unused/dep.a\n"), 0o644))
+
+	_, err := interceptLink(t.Context(), linkArgs(cfgPath))
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(cfgPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "packagefile fmt=")
+}
+
+// TestInterceptLinkSkipsImportsTheLinkAlreadyHas checks that a link importcfg
+// listing every rule-added import is left untouched, and that a build with no
+// matched rules changes nothing.
+func TestInterceptLinkLeavesCompleteImportcfgUnchanged(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	writeMatchedRules(t, []*rule.InstRuleSet{
+		{
+			PackageName: "dep",
+			ModulePath:  "example.com/app/dep",
+			FuncRules: map[string][]*rule.InstFuncRule{
+				"dep.go": {{
+					InstBaseRule: rule.InstBaseRule{
+						Name:    "rule",
+						Target:  rule.NewTarget("example.com/app/dep"),
+						Imports: map[string]string{"extra": "fmt"},
+					},
+				}},
+			},
+		},
+	})
+
+	cfgPath := filepath.Join(workDir, "importcfg.link")
+	original := "packagefile fmt=/unused/fmt.a\npackagefile context=/unused/context.a\npackagefile example.com/app/dep=/unused/dep.a\n"
+	require.NoError(t, os.WriteFile(cfgPath, []byte(original), 0o644))
+
+	_, err := interceptLink(t.Context(), linkArgs(cfgPath))
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(cfgPath)
+	require.NoError(t, err)
+	assert.Equal(t, original, string(content))
+
+	// Without matched.json there is nothing to recover either.
+	require.NoError(t, os.Remove(util.GetMatchedRuleFile()))
+	_, err = interceptLink(t.Context(), linkArgs(cfgPath))
+	require.NoError(t, err)
+	content, err = os.ReadFile(cfgPath)
+	require.NoError(t, err)
+	assert.Equal(t, original, string(content))
+}
+
+// TestRuleAddedImportsCollectsEveryRuleKind checks that the link-side
+// candidate set covers the imports of every rule kind and of add_file rule
+// sources, and skips the built-in pseudo-packages.
+func TestRuleAddedImportsCollectsEveryRuleKind(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	sourceDir := filepath.Join(workDir, "hooksrc")
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	sourceFile := filepath.Join(sourceDir, "added.go")
+	require.NoError(t, os.WriteFile(sourceFile, []byte(
+		"//go:build ignore\n\npackage hooks\n\nimport (\n\t\"fmt\"\n\t\"example.com/hooks\"\n)\n",
+	), 0o644))
+
+	writeMatchedRules(t, []*rule.InstRuleSet{
+		{
+			PackageName: "dep",
+			ModulePath:  "example.com/app/dep",
+			FuncRules: map[string][]*rule.InstFuncRule{
+				"dep.go": {{InstBaseRule: rule.InstBaseRule{
+					Name: "func-rule", Imports: map[string]string{"a": "example.com/a"},
+				}}},
+			},
+			CallRules: map[string][]*rule.InstCallRule{
+				"dep.go": {callRuleWithImports(map[string]string{"b": "example.com/b"})},
+			},
+			RawRules: map[string][]*rule.InstRawRule{
+				"dep.go": {{InstBaseRule: rule.InstBaseRule{
+					Name: "raw-rule", Imports: map[string]string{"c": "unsafe"},
+				}}},
+			},
+			FileRules: []*rule.InstFileRule{{
+				InstBaseRule: rule.InstBaseRule{Name: "file-rule"},
+				File:         "added.go",
+				Path:         "example.com/app/hooks",
+				ResolvedPath: sourceDir,
+			}},
+		},
+	})
+
+	paths := parseLinkRuleImports(t.Context(), nil).candidates(&imports.ImportConfig{
+		PackageFile: map[string]string{"example.com/app/dep": "/unused/dep.a"},
+	})
+	assert.Equal(t, map[string]struct{}{
+		"example.com/a":     {},
+		"example.com/b":     {},
+		"unsafe":            {},
+		"fmt":               {},
+		"example.com/hooks": {},
+	}, paths)
+}
+
+// TestResolveRuleAddedImportsSkipsUnresolvableImports checks that a candidate
+// the rules declare but that cannot load does not fail the link, while a
+// resolvable one still lands in the import config.
+func TestResolveRuleAddedImportsSkipsUnresolvableImports(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	linkConfig := imports.ImportConfig{
+		PackageFile: map[string]string{
+			"context":             "/unused/context.a",
+			"example.com/app/dep": "/unused/dep.a",
+		},
+	}
+	updated, err := resolveRuleAddedImports(t.Context(), nil, &linkConfig)
+	require.NoError(t, err)
+	assert.False(t, updated)
+
+	writeMatchedRules(t, []*rule.InstRuleSet{
+		{
+			PackageName: "dep",
+			ModulePath:  "example.com/app/dep",
+			FuncRules: map[string][]*rule.InstFuncRule{
+				"dep.go": {{InstBaseRule: rule.InstBaseRule{
+					Name: "rule",
+					Imports: map[string]string{
+						"std":          "fmt",
+						"unresolvable": "example.invalid/nonexistent/pkg",
+					},
+				}}},
+			},
+		},
+	})
+
+	updated, err = resolveRuleAddedImports(t.Context(), nil, &linkConfig)
+	require.NoError(t, err)
+	assert.True(t, updated)
+	assert.Contains(t, linkConfig.PackageFile, "fmt")
+	assert.NotContains(t, linkConfig.PackageFile, "example.invalid/nonexistent/pkg")
+}
+
+// TestResolveRuleAddedImportsRestrictedToLinkPackages checks that rule sets
+// whose target package is not part of the link contribute no candidates: a
+// multi-binary build must not resolve the imports of another binary's rules.
+func TestResolveRuleAddedImportsRestrictedToLinkPackages(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	writeMatchedRules(t, []*rule.InstRuleSet{
+		{
+			PackageName: "a",
+			ModulePath:  "example.com/app/a",
+			FuncRules: map[string][]*rule.InstFuncRule{
+				"a.go": {{InstBaseRule: rule.InstBaseRule{
+					Name: "rule-a", Imports: map[string]string{"fmt": "fmt"},
+				}}},
+			},
+		},
+		{
+			PackageName: "b",
+			ModulePath:  "example.com/app/b",
+			FuncRules: map[string][]*rule.InstFuncRule{
+				"b.go": {{InstBaseRule: rule.InstBaseRule{
+					Name: "rule-b", Imports: map[string]string{"strings": "strings"},
+				}}},
+			},
+		},
+	})
+
+	// The link lists target a but not target b, so only a's imports may be
+	// recovered. Both imports resolve, so only the filter can keep b's out.
+	linkConfig := imports.ImportConfig{
+		PackageFile: map[string]string{
+			"context":           "/unused/context.a",
+			"example.com/app/a": "/unused/a.a",
+		},
+	}
+	updated, err := resolveRuleAddedImports(t.Context(), nil, &linkConfig)
+	require.NoError(t, err)
+	assert.True(t, updated)
+	assert.Contains(t, linkConfig.PackageFile, "fmt")
+	assert.NotContains(t, linkConfig.PackageFile, "strings",
+		"the link does not list example.com/app/b, so its rule imports must not be resolved")
+}
+
+// TestResolveRuleAddedImportsSkipsConstraintExcludedAddFileSource checks that
+// an add_file source the active build constraints exclude contributes no
+// candidates. Its import resolves on this platform, so only the constraint
+// check can keep it out of the link.
+func TestResolveRuleAddedImportsSkipsConstraintExcludedAddFileSource(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	sourceDir := filepath.Join(workDir, "hooksrc")
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "excluded.go"),
+		[]byte("//go:build otelc_never_active\n\npackage hooks\n\nimport \"os\"\n"), 0o644))
+
+	writeMatchedRules(t, []*rule.InstRuleSet{
+		{
+			PackageName: "dep",
+			ModulePath:  "example.com/app/dep",
+			FileRules: []*rule.InstFileRule{{
+				InstBaseRule: rule.InstBaseRule{Name: "file-rule"},
+				File:         "excluded.go",
+				Path:         "example.com/app/hooks",
+				ResolvedPath: sourceDir,
+			}},
+		},
+	})
+
+	linkConfig := imports.ImportConfig{
+		PackageFile: map[string]string{
+			"context":             "/unused/context.a",
+			"example.com/app/dep": "/unused/dep.a",
+		},
+	}
+	updated, err := resolveRuleAddedImports(t.Context(), nil, &linkConfig)
+	require.NoError(t, err)
+	assert.False(t, updated)
+	assert.NotContains(t, linkConfig.PackageFile, "os",
+		"the build constraints exclude the add_file source, so its imports must not be resolved")
+}
+
+// TestRuleAddedImportsCollectsStructLitDirectiveDeclRules covers the rule
+// kinds the other candidate tests leave out: struct, literal, directive, and
+// declaration rules. Every kind embeds InstBaseRule, whose imports the
+// collector must read the same way it reads them for func, call, and raw
+// rules.
+func TestRuleAddedImportsCollectsStructLitDirectiveDeclRules(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	writeMatchedRules(t, []*rule.InstRuleSet{
+		{
+			PackageName: "dep",
+			ModulePath:  "example.com/app/dep",
+			StructRules: map[string][]*rule.InstStructRule{
+				"dep.go": {{
+					InstBaseRule: rule.InstBaseRule{
+						Name: "struct-rule", Imports: map[string]string{"s": "example.com/s"},
+					},
+					Struct:   "Transport",
+					NewField: []*rule.InstStructField{{Name: "F", Type: "int"}},
+				}},
+			},
+			LitRules: map[string][]*rule.InstLitRule{
+				"dep.go": {{
+					InstBaseRule: rule.InstBaseRule{
+						Name: "lit-rule", Imports: map[string]string{"l": "example.com/l"},
+					},
+					StructLiteral: "net/http.Transport",
+					Field:         []*rule.InstLitField{{Name: "F", Value: "true"}},
+				}},
+			},
+			DirectiveRules: map[string][]*rule.InstDirectiveRule{
+				"dep.go": {{
+					InstBaseRule: rule.InstBaseRule{
+						Name: "directive-rule", Imports: map[string]string{"d": "example.com/d"},
+					},
+					Directive: "//otelc:span",
+					Template:  "otel.Span()",
+				}},
+			},
+			DeclRules: map[string][]*rule.InstDeclRule{
+				"dep.go": {{
+					InstBaseRule: rule.InstBaseRule{
+						Name: "decl-rule", Imports: map[string]string{"decl": "example.com/decl"},
+					},
+					Kind:       "var",
+					Identifier: "DefaultTransport",
+					Replace:    "http.DefaultTransport",
+				}},
+			},
+		},
+	})
+
+	paths := parseLinkRuleImports(t.Context(), nil).candidates(&imports.ImportConfig{
+		PackageFile: map[string]string{"example.com/app/dep": "/unused/dep.a"},
+	})
+	assert.Equal(t, map[string]struct{}{
+		"example.com/s":    {},
+		"example.com/l":    {},
+		"example.com/d":    {},
+		"example.com/decl": {},
+	}, paths)
+}
+
+// TestResolveRuleAddedImportsSkipsBuiltinPseudoPackages checks that rules
+// declaring imports of unsafe or the cgo pseudo-package C contribute no
+// resolvable candidate: neither has an archive, and asking the nested build
+// for one would only log a warning.
+func TestResolveRuleAddedImportsSkipsBuiltinPseudoPackages(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	writeMatchedRules(t, []*rule.InstRuleSet{
+		{
+			PackageName: "dep",
+			ModulePath:  "example.com/app/dep",
+			FuncRules: map[string][]*rule.InstFuncRule{
+				"dep.go": {{InstBaseRule: rule.InstBaseRule{
+					Name: "rule",
+					Imports: map[string]string{
+						"fmt":    "fmt",
+						"unsafe": "unsafe",
+						"cgo":    "C",
+					},
+				}}},
+			},
+		},
+	})
+
+	linkConfig := imports.ImportConfig{
+		PackageFile: map[string]string{
+			"context":             "/unused/context.a",
+			"example.com/app/dep": "/unused/dep.a",
+		},
+	}
+	updated, err := resolveRuleAddedImports(t.Context(), nil, &linkConfig)
+	require.NoError(t, err)
+	assert.True(t, updated)
+	assert.Contains(t, linkConfig.PackageFile, "fmt")
+	assert.NotContains(t, linkConfig.PackageFile, "unsafe")
+	assert.NotContains(t, linkConfig.PackageFile, "C")
+}
+
+// TestRuleAddedImportsIgnoresMalformedMatchedRules checks that a matched.json
+// the link cannot parse yields no candidates instead of failing the link.
+func TestRuleAddedImportsIgnoresMalformedMatchedRules(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), []byte("{not json"), 0o600))
+
+	linkConfig := imports.ImportConfig{PackageFile: map[string]string{"example.com/app/dep": "/unused/dep.a"}}
+	assert.Empty(t, parseLinkRuleImports(t.Context(), nil).candidates(&linkConfig))
+}
+
+// TestFileRuleImportsSkipsUnusableSources checks every add_file source the
+// link cannot use: no resolved path, a missing file, a malformed build
+// constraint, and a file without a valid package clause.
+func TestFileRuleImportsSkipsUnusableSources(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "badconstraint.go"),
+		[]byte("//go:build (\n\npackage hooks\n\nimport \"os\"\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "notgo.go"),
+		[]byte("this is not Go\n"), 0o644))
+
+	bctx := build.Default
+	for _, tt := range []struct {
+		name string
+		rule *rule.InstFileRule
+	}{
+		{name: "no resolved path", rule: &rule.InstFileRule{File: "hooks.go"}},
+		{name: "missing file", rule: &rule.InstFileRule{File: "missing.go", ResolvedPath: dir}},
+		{name: "malformed build constraint", rule: &rule.InstFileRule{File: "badconstraint.go", ResolvedPath: dir}},
+		{name: "no package clause", rule: &rule.InstFileRule{File: "notgo.go", ResolvedPath: dir}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Empty(t, fileRuleImports(t.Context(), &bctx, tt.rule))
+		})
+	}
+}
+
+// TestResolveRuleAddedImportsKeepsListedDependencies checks that a resolved
+// transitive dependency the link already lists keeps its archive: only the
+// missing packages are added.
+func TestResolveRuleAddedImportsKeepsListedDependencies(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	writeMatchedRules(t, []*rule.InstRuleSet{{
+		PackageName: "dep",
+		ModulePath:  "example.com/app/dep",
+		FuncRules: map[string][]*rule.InstFuncRule{
+			"dep.go": {{InstBaseRule: rule.InstBaseRule{
+				Name:    "rule",
+				Target:  rule.NewTarget("example.com/app/dep"),
+				Imports: map[string]string{"std": "fmt"},
+			}}},
+		},
+	}})
+
+	linkConfig := imports.ImportConfig{PackageFile: map[string]string{
+		"example.com/app/dep": "/unused/dep.a",
+		"errors":              "/listed/errors.a",
+	}}
+	updated, err := resolveRuleAddedImports(t.Context(), nil, &linkConfig)
+	require.NoError(t, err)
+	assert.True(t, updated)
+	assert.Contains(t, linkConfig.PackageFile, "fmt")
+	assert.Equal(t, "/listed/errors.a", linkConfig.PackageFile["errors"],
+		"a dependency the link already lists must keep its archive")
+}
+
+// TestResolveRuleAddedImportsFollowsChainedRuleSets covers recovery when a
+// rule-added import is itself the target of a matched rule set: a rule adds
+// fmt to dep, and a matched rule on fmt adds encoding/xml. The link starts
+// without fmt, so the first pass cannot even see fmt's rule set; the pass
+// after fmt joins the importcfg must resolve encoding/xml. encoding/xml is
+// not a dependency of fmt, so only the chain, not a transitive resolution,
+// can add it.
+func TestResolveRuleAddedImportsFollowsChainedRuleSets(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	writeMatchedRules(t, []*rule.InstRuleSet{
+		{
+			PackageName: "dep",
+			ModulePath:  "example.com/app/dep",
+			FuncRules: map[string][]*rule.InstFuncRule{
+				"dep.go": {{InstBaseRule: rule.InstBaseRule{
+					Name:    "dep-rule",
+					Target:  rule.NewTarget("example.com/app/dep"),
+					Imports: map[string]string{"fmt": "fmt"},
+				}}},
+			},
+		},
+		{
+			PackageName: "fmt",
+			ModulePath:  "fmt",
+			FuncRules: map[string][]*rule.InstFuncRule{
+				"print.go": {{InstBaseRule: rule.InstBaseRule{
+					Name:    "fmt-rule",
+					Target:  rule.NewTarget("fmt"),
+					Imports: map[string]string{"xml": "encoding/xml"},
+				}}},
+			},
+		},
+	})
+
+	// The link lists only the rule target itself; every rule-added import is
+	// missing and only the recovery can supply it.
+	linkConfig := imports.ImportConfig{PackageFile: map[string]string{
+		"example.com/app/dep": "/unused/dep.a",
+	}}
+	updated, err := resolveRuleAddedImports(t.Context(), nil, &linkConfig)
+	require.NoError(t, err)
+	assert.True(t, updated)
+	assert.Contains(t, linkConfig.PackageFile, "fmt",
+		"the first pass must resolve the rule-added import itself")
+	assert.Contains(t, linkConfig.PackageFile, "encoding/xml",
+		"the pass after fmt joins the importcfg must resolve the rule set fmt carries")
+}
+
+// chainLinkPackages returns stdlib packages for the depth-bound test below,
+// ordered so that no one of them imports a later one, verified against go's
+// own dependency graph: resolving any one of them never drags a later chain
+// element into the importcfg, so each recovery pass adds exactly one hop.
+func chainLinkPackages() []string {
+	return []string{
+		"cmp", "container/list", "unicode", "image/color", "unicode/utf16",
+		"container/ring", "unicode/utf8", "math/bits", "image/color/palette",
+		"math", "slices", "errors", "path", "strconv", "sort", "container/heap",
+		"hash/maphash", "hash/adler32", "hash/crc32", "hash/crc64", "hash/fnv",
+		"encoding/ascii85", "strings", "encoding/base32", "encoding/base64",
+		"encoding/hex", "text/scanner", "net/url", "crypto/rc4", "crypto/md5",
+		"crypto/des", "crypto/aes", "crypto/sha512", "crypto/sha256",
+	}
+}
+
+// chainLinkSets returns the rule sets that chain the first hops packages
+// into a d-hop chain: the set of package i declares an import of package
+// i+1, so a recovery pass resolves package i+1 only after package i joined
+// the importcfg, one hop per pass.
+func chainLinkSets(hops int) []*rule.InstRuleSet {
+	packages := chainLinkPackages()
+	sets := make([]*rule.InstRuleSet, hops)
+	for i := range sets {
+		sets[i] = &rule.InstRuleSet{
+			PackageName: "dep" + strconv.Itoa(i),
+			ModulePath:  packages[i],
+			FuncRules: map[string][]*rule.InstFuncRule{
+				"dep.go": {{InstBaseRule: rule.InstBaseRule{
+					Name:   "chain-rule",
+					Target: rule.NewTarget(packages[i]),
+					Imports: map[string]string{
+						"next": packages[i+1],
+					},
+				}}},
+			},
+		}
+	}
+	return sets
+}
+
+// TestResolveRuleAddedImportsAcceptsChainsTheCompileAccepted proves the
+// pass bound of the link recovery matches the compile bound exactly. The
+// compile side accepts a chain of maxResolutionChain hops: enterNestedResolution
+// fails only on a chain that holds more entries than that. A chain of d hops
+// needs d recovery passes that each add one level, plus one final pass that
+// adds nothing, so the link must run one more pass than the compile bound to
+// accept every chain a compile accepted. One pass less, and a chain of
+// maxResolutionChain hops, which compiled cold, fails its warm recovery.
+func TestResolveRuleAddedImportsAcceptsChainsTheCompileAccepted(t *testing.T) {
+	t.Run("a chain of maxResolutionChain hops recovers", func(t *testing.T) {
+		workDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, workDir)
+		writeMatchedRules(t, chainLinkSets(maxResolutionChain))
+
+		// The link lists only the chain's root, the first package a rule of
+		// the build instrumented.
+		packages := chainLinkPackages()
+		linkConfig := &imports.ImportConfig{PackageFile: map[string]string{
+			packages[0]: "/unused/root.a",
+		}}
+		updated, err := resolveRuleAddedImports(t.Context(), nil, linkConfig)
+		require.NoError(t, err)
+		assert.True(t, updated)
+		assert.Contains(t, linkConfig.PackageFile, packages[maxResolutionChain],
+			"the last hop of a chain the compile accepted must resolve for the link")
+	})
+
+	t.Run("a chain one hop deeper exhausts the passes", func(t *testing.T) {
+		workDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, workDir)
+		writeMatchedRules(t, chainLinkSets(maxResolutionChain+1))
+
+		packages := chainLinkPackages()
+		linkConfig := &imports.ImportConfig{PackageFile: map[string]string{
+			packages[0]: "/unused/root.a",
+		}}
+		_, err := resolveRuleAddedImports(t.Context(), nil, linkConfig)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(),
+			"rules add imports nested deeper than "+strconv.Itoa(maxResolutionChain))
+	})
+}
+
+// TestLinkedBinaryName covers every name shape go gives a link's -o
+// output: the bare name go derives from the main package's import path,
+// the ".test" suffix of test binaries, the ".exe" suffix Windows adds, both
+// suffixes together, a custom -o name, and a command that names no output.
+func TestLinkedBinaryName(t *testing.T) {
+	tests := []struct {
+		name     string
+		linkArgs []string
+		want     string
+	}{
+		{
+			name:     "bare binary name",
+			linkArgs: []string{"link", "-o", "/build/out/app", "-importcfg", "cfg"},
+			want:     "app",
+		},
+		{
+			name:     "test binary suffix",
+			linkArgs: []string{"link", "-o", "/build/out/app.test", "-importcfg", "cfg"},
+			want:     "app",
+		},
+		{
+			name:     "windows exe suffix",
+			linkArgs: []string{"link", "-o", "/build/out/app.exe", "-importcfg", "cfg"},
+			want:     "app",
+		},
+		{
+			name:     "test binary on windows",
+			linkArgs: []string{"link", "-o", "/build/out/app.test.exe", "-importcfg", "cfg"},
+			want:     "app",
+		},
+		{
+			name:     "custom output name",
+			linkArgs: []string{"link", "-o", "/build/out/custom-name", "-importcfg", "cfg"},
+			want:     "custom-name",
+		},
+		{
+			name:     "no output flag",
+			linkArgs: []string{"link", "-importcfg", "cfg"},
+			want:     "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, linkedBinaryName(tt.linkArgs))
+		})
+	}
+}
+
+// TestResolveRuleAddedImportsKeepsLinkedBinarysMainSets covers a
+// multi-binary build: every main package compiles with -p main, so every
+// executable's rule set carries ModulePath "main" and no link importcfg can
+// name the package a set instrumented. The link -o output name can: go
+// names a binary after the last element of its main package's import path,
+// which is also the directory the set's matched rules name. A custom -o
+// name matches no set, so every main set stays and recovery never drops an
+// import the link needs.
+func TestResolveRuleAddedImportsKeepsLinkedBinarysMainSets(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+
+	mainSet := func(name, dir string, imports map[string]string) *rule.InstRuleSet {
+		set := rule.NewInstRuleSet("main")
+		set.SetPackageName("main")
+		set.AddFuncRule(filepath.Join(workDir, dir, "main.go"), &rule.InstFuncRule{
+			InstBaseRule: rule.InstBaseRule{
+				Name:    name,
+				Target:  rule.NewTarget("main"),
+				Imports: imports,
+			},
+			Func: "main",
+		})
+		return set
+	}
+	writeMatchedRules(t, []*rule.InstRuleSet{
+		mainSet("rule-a", "a", map[string]string{"fmt": "fmt"}),
+		mainSet("rule-b", "b", map[string]string{"strings": "strings"}),
+	})
+
+	// The link importcfg names no main package by path, the shape a warm
+	// multi-binary build gives every link.
+	newLinkConfig := func() *imports.ImportConfig {
+		return &imports.ImportConfig{PackageFile: map[string]string{
+			"runtime": "/unused/runtime.a",
+		}}
+	}
+	linkCmd := func(binary string) []string {
+		return []string{"link", "-o", filepath.Join(workDir, binary), "-buildid=test", "-importcfg", "unused"}
+	}
+
+	// fmt resolves no strings in its dependency closure, so only the kept
+	// main set can add strings.
+	t.Run("keeps only the linked binary's main set", func(t *testing.T) {
+		linkConfig := newLinkConfig()
+		updated, err := resolveRuleAddedImports(t.Context(), linkCmd("a"), linkConfig)
+		require.NoError(t, err)
+		assert.True(t, updated)
+		assert.Contains(t, linkConfig.PackageFile, "fmt")
+		assert.NotContains(t, linkConfig.PackageFile, "strings",
+			"the link builds the a binary, so the b binary's main rule set must not contribute")
+	})
+
+	t.Run("custom -o name keeps every main set", func(t *testing.T) {
+		linkConfig := newLinkConfig()
+		updated, err := resolveRuleAddedImports(t.Context(), linkCmd("custom-name"), linkConfig)
+		require.NoError(t, err)
+		assert.True(t, updated)
+		assert.Contains(t, linkConfig.PackageFile, "fmt")
+		assert.Contains(t, linkConfig.PackageFile, "strings",
+			"a custom -o name matches no main set, so no set may be dropped")
+	})
+}
+
+// TestInterceptLinkFailsWhenRecoveryFails checks that an error while
+// recovering rule-added imports stops the link: an unreadable recorded PGO
+// profile and a nested go list that cannot run both surface as errors.
+func TestInterceptLinkFailsWhenRecoveryFails(t *testing.T) {
+	sets := []*rule.InstRuleSet{{
+		PackageName: "dep",
+		ModulePath:  "example.com/app/dep",
+		FuncRules: map[string][]*rule.InstFuncRule{
+			"dep.go": {{InstBaseRule: rule.InstBaseRule{
+				Name:    "rule",
+				Target:  rule.NewTarget("example.com/app/dep"),
+				Imports: map[string]string{"std": "fmt"},
+			}}},
+		},
+	}}
+	writeLinkConfig := func(t *testing.T, workDir string) string {
+		t.Helper()
+		cfgPath := filepath.Join(workDir, "importcfg.link")
+		require.NoError(t, os.WriteFile(cfgPath, []byte("packagefile example.com/app/dep=/unused/dep.a\n"), 0o644))
+		return cfgPath
+	}
+
+	t.Run("unreadable recorded PGO profile", func(t *testing.T) {
+		workDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, workDir)
+		writeMatchedRules(t, sets)
+		// A directory where the profile record belongs makes the read fail.
+		require.NoError(t, os.MkdirAll(util.GetPGOProfileFile(), 0o755))
+
+		// pgoBuildFlagsFor reads the recorded profile only for a real link
+		// tool path, so this case uses one.
+		args := linkArgs(writeLinkConfig(t, workDir))
+		args[0] = linkToolPath()
+		_, err := interceptLink(t.Context(), args)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "PGO profile")
+	})
+
+	t.Run("nested go list cannot run", func(t *testing.T) {
+		workDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, workDir)
+		t.Setenv(util.EnvOtelcBuildFlags, `["-otelc-not-a-go-flag"]`)
+		writeMatchedRules(t, sets)
+
+		_, err := interceptLink(t.Context(), linkArgs(writeLinkConfig(t, workDir)))
+		require.Error(t, err)
+	})
+}
+
+// linkToolPath returns a path that util.IsLinkCommandWithArgs accepts as the
+// link tool.
+func linkToolPath() string {
+	name := "link"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	return filepath.Join(string(filepath.Separator)+"go", "pkg", "tool", name)
+}
+
+// countingResolver is a fake nested go list that resolves every root to a
+// closure of archive files it creates under dir (the root plus deps), except
+// the roots in bad, and counts the calls and the roots each call lists.
+type countingResolver struct {
+	dir string
+	bad map[string]bool
+	// transient roots fail the way a nested compile does: a ListError that
+	// go list may not repeat.
+	transient map[string]bool
+	deps      []string
+	calls     int
+	roots     [][]string
+}
+
+func (c *countingResolver) resolve(
+	_ context.Context, roots []string, _ ...string,
+) (map[string]map[string]string, map[string]error, error) {
+	c.calls++
+	c.roots = append(c.roots, roots)
+	closures := make(map[string]map[string]string)
+	failed := make(map[string]error)
+	for _, root := range roots {
+		if c.bad[root] {
+			failed[root] = packages.Error{
+				Msg:  "no required module provides package " + root + "; to add it:\n\tgo get " + root,
+				Kind: packages.ListError,
+			}
+			continue
+		}
+		if c.transient[root] {
+			// go/packages reports a failed nested compile as a ListError,
+			// the same kind as a missing package.
+			failed[root] = packages.Error{
+				Msg:  "# " + root + "\nflaky.go:3:12: undefined: x",
+				Kind: packages.ListError,
+			}
+			continue
+		}
+		archive := filepath.Join(c.dir, util.EscapePackagePath(root)+".a")
+		if err := os.WriteFile(archive, []byte(root), 0o644); err != nil {
+			return nil, nil, err
+		}
+		closures[root] = map[string]string{root: archive}
+		for _, dep := range c.deps {
+			closures[root][dep] = filepath.Join(c.dir, util.EscapePackagePath(dep)+".a")
+			if err := os.WriteFile(closures[root][dep], []byte(dep), 0o644); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+	return closures, failed, nil
+}
+
+// link runs one link's recovery with the counting resolver.
+func (c *countingResolver) link(t *testing.T, cfg *imports.ImportConfig) bool {
+	t.Helper()
+	updated, err := resolveRuleAddedImportsWith(t.Context(), nil, cfg, c.resolve)
+	require.NoError(t, err)
+	return updated
+}
+
+// setupLinkMemo prepares a work dir with a session, a resolution scope, and
+// matched rules that add imports of the given paths to example.com/app/dep.
+func setupLinkMemo(t *testing.T, adds ...string) {
+	t.Helper()
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	t.Setenv(util.EnvOtelcSessionDir, filepath.Join(t.TempDir(), "session"))
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	importsMap := make(map[string]string, len(adds))
+	for i, path := range adds {
+		importsMap["i"+string(rune('a'+i))] = path
+	}
+	writeMatchedRules(t, []*rule.InstRuleSet{{
+		PackageName: "dep",
+		ModulePath:  "example.com/app/dep",
+		FuncRules: map[string][]*rule.InstFuncRule{
+			"dep.go": {{InstBaseRule: rule.InstBaseRule{Name: "rule", Imports: importsMap}}},
+		},
+	}})
+	// Setup writes the scope after matched.json; an older scope is stale.
+	require.NoError(t, os.WriteFile(util.GetResolutionScopeFile(), []byte("scope"), 0o644))
+}
+
+func freshLinkConfig() *imports.ImportConfig {
+	return &imports.ImportConfig{PackageFile: map[string]string{"example.com/app/dep": "/unused/dep.a"}}
+}
+
+func TestLinkResolutionReusesMemoAcrossLinks(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra")
+	resolver := &countingResolver{dir: t.TempDir()}
+
+	first := freshLinkConfig()
+	updated := resolver.link(t, first)
+	assert.True(t, updated)
+	second := freshLinkConfig()
+	updated = resolver.link(t, second)
+	assert.True(t, updated)
+
+	assert.Equal(t, 1, resolver.calls, "the second link must read the memo instead of running go list")
+	assert.Equal(t, first.PackageFile, second.PackageFile)
+	assert.Contains(t, second.PackageFile, "example.com/extra")
+}
+
+func TestLinkResolutionReResolvesStaleMemoEntry(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra")
+	resolver := &countingResolver{dir: t.TempDir()}
+
+	cfg := freshLinkConfig()
+	resolver.link(t, cfg)
+	require.NoError(t, os.Remove(cfg.PackageFile["example.com/extra"]))
+
+	resolver.link(t, freshLinkConfig())
+	assert.Equal(t, 2, resolver.calls, "an entry whose archive is gone must be resolved again")
+}
+
+// TestLinkResolutionReResolvesIncompatibleArchive covers a memo entry
+// resolved against other deps: its closure maps a package the link already
+// lists to another archive, so the link must resolve it again rather than
+// mix the two builds.
+func TestLinkResolutionReResolvesIncompatibleArchive(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra")
+	resolver := &countingResolver{dir: t.TempDir(), deps: []string{"example.com/shared"}}
+
+	resolver.link(t, freshLinkConfig())
+	require.Equal(t, 1, resolver.calls)
+
+	// The link compiled example.com/shared itself, in its own $WORK.
+	cfg := freshLinkConfig()
+	own := filepath.Join(t.TempDir(), "b007", "_pkg_.a")
+	cfg.PackageFile["example.com/shared"] = own
+	resolver.link(t, cfg)
+	assert.Equal(t, 2, resolver.calls, "an entry built against another archive must be resolved again")
+	assert.Equal(t, own, cfg.PackageFile["example.com/shared"], "the link keeps its own archive")
+}
+
+func TestLinkResolutionListsFailedCandidateOnce(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra", "example.invalid/bad")
+	resolver := &countingResolver{dir: t.TempDir(), bad: map[string]bool{"example.invalid/bad": true}}
+
+	cfg := freshLinkConfig()
+	resolver.link(t, cfg)
+	require.Equal(t, 1, resolver.calls)
+	assert.NotContains(t, cfg.PackageFile, "example.invalid/bad")
+
+	// A later link reads the failure from the memo too.
+	resolver.link(t, freshLinkConfig())
+	assert.Equal(t, 1, resolver.calls)
+}
+
+// batchFailingResolver fails any load of several roots as a whole, as go list
+// does when one root's module is missing from go.mod, and otherwise delegates.
+// A root in whole also fails as a whole when it is loaded alone, with a
+// top-level error rather than a per-root failure.
+type batchFailingResolver struct {
+	inner *countingResolver
+	whole map[string]bool
+}
+
+func (b *batchFailingResolver) resolve(
+	ctx context.Context, roots []string, flags ...string,
+) (map[string]map[string]string, map[string]error, error) {
+	if len(roots) > 1 {
+		return nil, nil, errors.New("no packages found for " + strings.Join(roots, ", "))
+	}
+	if b.whole[roots[0]] {
+		return nil, nil, errors.New("no packages found for " + roots[0])
+	}
+	return b.inner.resolve(ctx, roots, flags...)
+}
+
+// TestLinkResolutionResolvesEachCandidateWhenBatchFails covers a link whose
+// batch go list fails as a whole: the resolvable candidate must still be added
+// and the unresolvable one skipped, instead of failing the link.
+func TestLinkResolutionResolvesEachCandidateWhenBatchFails(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra", "example.invalid/bad")
+	resolver := &batchFailingResolver{inner: &countingResolver{
+		dir: t.TempDir(),
+		bad: map[string]bool{"example.invalid/bad": true},
+	}}
+
+	cfg := freshLinkConfig()
+	updated, err := resolveRuleAddedImportsWith(t.Context(), nil, cfg, resolver.resolve)
+	require.NoError(t, err)
+	assert.True(t, updated)
+	assert.Contains(t, cfg.PackageFile, "example.com/extra")
+	assert.NotContains(t, cfg.PackageFile, "example.invalid/bad")
+}
+
+// TestLinkResolutionSkipsLoneFailingCandidate covers a single rule-added import
+// whose load fails as a whole, as in #1788: the link must skip it, not fail.
+func TestLinkResolutionSkipsLoneFailingCandidate(t *testing.T) {
+	setupLinkMemo(t, "example.invalid/bad")
+	resolver := &batchFailingResolver{
+		inner: &countingResolver{dir: t.TempDir()},
+		whole: map[string]bool{"example.invalid/bad": true},
+	}
+
+	cfg := freshLinkConfig()
+	updated, err := resolveRuleAddedImportsWith(t.Context(), nil, cfg, resolver.resolve)
+	require.NoError(t, err)
+	assert.False(t, updated)
+	assert.NotContains(t, cfg.PackageFile, "example.invalid/bad")
+}
+
+// goModTidyResolver fails any load that lists a root in tidy as a whole, with
+// the error pkgload.LoadPackages returns when go list reports that go.mod needs
+// updates. Other loads go to inner.
+type goModTidyResolver struct {
+	inner *countingResolver
+	tidy  map[string]bool
+	calls int
+}
+
+func (g *goModTidyResolver) resolve(
+	ctx context.Context, roots []string, flags ...string,
+) (map[string]map[string]string, map[string]error, error) {
+	g.calls++
+	for _, root := range roots {
+		if g.tidy[root] {
+			listErr := errors.New("go: updates to go.mod needed; to update it:\n\tgo mod tidy")
+			return nil, nil, ex.Wrapf(listErr, "loading packages %v", roots)
+		}
+	}
+	return g.inner.resolve(ctx, roots, flags...)
+}
+
+// TestLinkResolutionSkipsGoModUpdateFailure covers a load that fails as a
+// whole because go.mod needs updates for one root. The other roots must still
+// resolve, the failing root must be skipped without failing the link, and its
+// failure must be memoized as deterministic so a later link lists nothing.
+func TestLinkResolutionSkipsGoModUpdateFailure(t *testing.T) {
+	tests := []struct {
+		name     string
+		adds     []string
+		resolved []string
+		updated  bool
+	}{
+		{
+			name:     "with resolvable roots",
+			adds:     []string{"example.com/extra", "example.com/other", "example.invalid/tidy"},
+			resolved: []string{"example.com/extra", "example.com/other"},
+			updated:  true,
+		},
+		{
+			name: "lone root",
+			adds: []string{"example.invalid/tidy"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupLinkMemo(t, tt.adds...)
+			resolver := &goModTidyResolver{
+				inner: &countingResolver{dir: t.TempDir()},
+				tidy:  map[string]bool{"example.invalid/tidy": true},
+			}
+
+			cfg := freshLinkConfig()
+			updated, err := resolveRuleAddedImportsWith(t.Context(), nil, cfg, resolver.resolve)
+			require.NoError(t, err)
+			assert.Equal(t, tt.updated, updated)
+			for _, path := range tt.resolved {
+				assert.Contains(t, cfg.PackageFile, path)
+			}
+			assert.NotContains(t, cfg.PackageFile, "example.invalid/tidy")
+
+			calls := resolver.calls
+			second := freshLinkConfig()
+			updated, err = resolveRuleAddedImportsWith(t.Context(), nil, second, resolver.resolve)
+			require.NoError(t, err)
+			assert.Equal(t, tt.updated, updated)
+			assert.Equal(t, calls, resolver.calls,
+				"the go.mod failure must be memoized, so a later link runs no go list")
+			assert.NotContains(t, second.PackageFile, "example.invalid/tidy")
+		})
+	}
+}
+
+// TestLinkResolutionSplitsFailedBatch covers a batch of many roots that fails
+// as a whole because of one root. The roots are split in halves until the
+// failing root is alone, so the link lists far fewer batches than one per
+// root, and every other root still resolves.
+func TestLinkResolutionSplitsFailedBatch(t *testing.T) {
+	adds := make([]string, 0, 16)
+	for i := range 15 {
+		adds = append(adds, "example.com/extra"+strconv.Itoa(i))
+	}
+	adds = append(adds, "example.invalid/tidy")
+	setupLinkMemo(t, adds...)
+	resolver := &goModTidyResolver{
+		inner: &countingResolver{dir: t.TempDir()},
+		tidy:  map[string]bool{"example.invalid/tidy": true},
+	}
+
+	cfg := freshLinkConfig()
+	updated, err := resolveRuleAddedImportsWith(t.Context(), nil, cfg, resolver.resolve)
+	require.NoError(t, err)
+	assert.True(t, updated)
+	for _, path := range adds[:15] {
+		assert.Contains(t, cfg.PackageFile, path)
+	}
+	assert.NotContains(t, cfg.PackageFile, "example.invalid/tidy")
+	// One batch, then two halves at each of the four levels down to the
+	// failing root: 1 + 2*4, against 1 + 16 when each root loads alone.
+	assert.Equal(t, 9, resolver.calls)
+}
+
+// TestLinkResolutionReturnsContextErrorAfterLastSplitLoad covers the context
+// ending during the last load of a split batch while that load succeeds. The
+// link must fail with the context error instead of storing the results.
+func TestLinkResolutionReturnsContextErrorAfterLastSplitLoad(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra", "example.com/other")
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	inner := &countingResolver{dir: t.TempDir()}
+	calls := 0
+	resolver := func(
+		ctx context.Context, roots []string, flags ...string,
+	) (map[string]map[string]string, map[string]error, error) {
+		calls++
+		if len(roots) > 1 {
+			return nil, nil, errors.New("no packages found for " + strings.Join(roots, ", "))
+		}
+		if calls == 3 {
+			cancel()
+		}
+		return inner.resolve(ctx, roots, flags...)
+	}
+
+	_, err := resolveRuleAddedImportsWith(ctx, nil, freshLinkConfig(), resolver)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, 3, calls)
+}
+
+// TestLinkResolutionFailsOnNonLoadErrorFromSplitBatch covers a split batch
+// whose half fails for a reason other than a candidate load failure. That
+// error must fail the link at once, without splitting the half further.
+func TestLinkResolutionFailsOnNonLoadErrorFromSplitBatch(t *testing.T) {
+	setupLinkMemo(t, "example.com/a", "example.com/b", "example.com/c", "example.com/d")
+	boom := errors.New("go list: unexpected failure")
+	inner := &countingResolver{dir: t.TempDir()}
+	calls := 0
+	resolver := func(
+		ctx context.Context, roots []string, flags ...string,
+	) (map[string]map[string]string, map[string]error, error) {
+		calls++
+		switch calls {
+		case 1:
+			return nil, nil, errors.New("no packages found for " + strings.Join(roots, ", "))
+		case 2:
+			return nil, nil, boom
+		}
+		return inner.resolve(ctx, roots, flags...)
+	}
+
+	_, err := resolveRuleAddedImportsWith(t.Context(), nil, freshLinkConfig(), resolver)
+	require.ErrorIs(t, err, boom)
+	assert.Equal(t, 2, calls, "no load may follow the unexpected error")
+}
+
+func TestLinkResolutionReturnsContextErrorForLoneCandidate(t *testing.T) {
+	setupLinkMemo(t, "example.invalid/bad")
+	resolver := func(context.Context, []string, ...string) (map[string]map[string]string, map[string]error, error) {
+		return nil, nil, context.Canceled
+	}
+
+	_, err := resolveRuleAddedImportsWith(t.Context(), nil, freshLinkConfig(), resolver)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+// TestLinkResolutionFailsOnNonLoadErrorFromEachCandidate covers a batch that
+// fails as a whole, followed by a lone load that fails for a reason other than
+// a candidate load failure. That error must fail the link.
+func TestLinkResolutionFailsOnNonLoadErrorFromEachCandidate(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra", "example.invalid/bad")
+	boom := errors.New("go list: unexpected failure")
+	resolver := func(_ context.Context, roots []string, _ ...string) (map[string]map[string]string, map[string]error, error) {
+		if len(roots) > 1 {
+			return nil, nil, errors.New("no packages found for " + strings.Join(roots, ", "))
+		}
+		return nil, nil, boom
+	}
+
+	_, err := resolveRuleAddedImportsWith(t.Context(), nil, freshLinkConfig(), resolver)
+	require.ErrorIs(t, err, boom)
+}
+
+// TestLinkResolutionReturnsContextErrorDuringEachCandidateLoad covers the
+// context ending while a lone candidate is loaded after a failed batch.
+func TestLinkResolutionReturnsContextErrorDuringEachCandidateLoad(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra", "example.invalid/bad")
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	resolver := func(_ context.Context, roots []string, _ ...string) (map[string]map[string]string, map[string]error, error) {
+		if len(roots) > 1 {
+			return nil, nil, errors.New("no packages found for " + strings.Join(roots, ", "))
+		}
+		cancel()
+		return nil, nil, errors.New("no packages found for " + roots[0])
+	}
+
+	_, err := resolveRuleAddedImportsWith(ctx, nil, freshLinkConfig(), resolver)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+// TestLinkResolutionSkipsLoneFailureAfterMemoizedSuccess covers a later link
+// whose only miss is a candidate that fails as a whole. The earlier link's
+// successes come from the memo, so the lone failing root is loaded alone and
+// must be skipped rather than fail the link. Its failure is not memoized, so
+// the later link loads it again.
+func TestLinkResolutionSkipsLoneFailureAfterMemoizedSuccess(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra", "example.invalid/bad")
+	resolver := &batchFailingResolver{
+		inner: &countingResolver{dir: t.TempDir()},
+		whole: map[string]bool{"example.invalid/bad": true},
+	}
+
+	first := freshLinkConfig()
+	updated, err := resolveRuleAddedImportsWith(t.Context(), nil, first, resolver.resolve)
+	require.NoError(t, err)
+	require.True(t, updated)
+	require.Contains(t, first.PackageFile, "example.com/extra")
+
+	second := freshLinkConfig()
+	updated, err = resolveRuleAddedImportsWith(t.Context(), nil, second, resolver.resolve)
+	require.NoError(t, err)
+	assert.True(t, updated)
+	assert.Equal(t, first.PackageFile["example.com/extra"], second.PackageFile["example.com/extra"],
+		"the second link must take the memoized closure")
+	assert.NotContains(t, second.PackageFile, "example.invalid/bad")
+}
+
+func TestLinkResolutionSkipsGoListWhenNothingIsMissing(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra")
+	resolver := &countingResolver{dir: t.TempDir()}
+
+	cfg := freshLinkConfig()
+	cfg.PackageFile["example.com/extra"] = "/unused/extra.a"
+	updated := resolver.link(t, cfg)
+	assert.False(t, updated)
+	assert.Zero(t, resolver.calls)
+}
+
+func TestLinkResolutionWithoutSessionResolvesEveryLink(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra")
+	t.Setenv(util.EnvOtelcSessionDir, util.SessionOff)
+	resolver := &countingResolver{dir: t.TempDir()}
+
+	for range 2 {
+		resolver.link(t, freshLinkConfig())
+	}
+	assert.Equal(t, 2, resolver.calls)
+}
+
+func TestCompileResolutionReusesMemo(t *testing.T) {
+	setupLinkMemo(t)
+	archiveDir := t.TempDir()
+	calls := 0
+	resolve := func(_ context.Context, importPath string, _ ...string) (map[string]string, error) {
+		calls++
+		archive := filepath.Join(archiveDir, "extra.a")
+		if err := os.WriteFile(archive, []byte(importPath), 0o644); err != nil {
+			return nil, err
+		}
+		return map[string]string{importPath: archive}, nil
+	}
+
+	compile := func() string {
+		cfgPath := filepath.Join(t.TempDir(), "importcfg")
+		require.NoError(t, os.WriteFile(cfgPath, []byte("packagefile context=/unused/context.a\n"), 0o644))
+		ip := &instrumentPhase{
+			logger:             slog.Default(),
+			importConfigPath:   cfgPath,
+			importConfig:       imports.ImportConfig{PackageFile: map[string]string{"context": "/unused/context.a"}},
+			resolveAddedImport: resolve,
+		}
+		require.NoError(t, ip.updateImportConfig(t.Context(), map[string]string{"extra": "example.com/extra"}))
+		content, err := os.ReadFile(cfgPath)
+		require.NoError(t, err)
+		return string(content)
+	}
+
+	first := compile()
+	second := compile()
+	assert.Equal(t, 1, calls, "the second compile must read the memo instead of running go list")
+	assert.Equal(t, first, second)
+	assert.Contains(t, second, "packagefile example.com/extra=")
+}
+
+// TestLinkResolutionReadsResultOfLinkItWaitedFor covers the single-flight
+// lock: a link that misses while another holds the lock must read what that
+// holder stored instead of running go list itself.
+func TestLinkResolutionReadsResultOfLinkItWaitedFor(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra")
+	resolver := &countingResolver{dir: t.TempDir()}
+	memo := session.Open(nil)
+	require.NotNil(t, memo)
+
+	release, err := memo.Lock(t.Context())
+	require.NoError(t, err)
+	done := make(chan *imports.ImportConfig)
+	go func() {
+		cfg := freshLinkConfig()
+		_, linkErr := resolveRuleAddedImportsWith(context.Background(), nil, cfg, resolver.resolve)
+		assert.NoError(t, linkErr)
+		done <- cfg
+	}()
+	// The holder resolves the import and stores it before releasing.
+	time.Sleep(200 * time.Millisecond)
+	archive := filepath.Join(t.TempDir(), "extra.a")
+	require.NoError(t, os.WriteFile(archive, []byte("extra"), 0o644))
+	memo.Store("example.com/extra", map[string]string{"example.com/extra": archive}, nil)
+	release()
+
+	cfg := <-done
+	assert.Zero(t, resolver.calls, "the waiting link must reuse the holder's result")
+	assert.Equal(t, archive, cfg.PackageFile["example.com/extra"])
+}
+
+func TestLinkResolutionFailsWhenMemoLockFails(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra")
+	blocker := filepath.Join(t.TempDir(), "file")
+	require.NoError(t, os.WriteFile(blocker, nil, 0o644))
+	t.Setenv(util.EnvOtelcSessionDir, blocker)
+	resolver := &countingResolver{dir: t.TempDir()}
+
+	_, err := resolveRuleAddedImportsWith(t.Context(), nil, freshLinkConfig(), resolver.resolve)
+	require.Error(t, err)
+	assert.Zero(t, resolver.calls)
+}
+
+func TestRuleAddedResolutionLogsStats(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra")
+	t.Setenv(util.EnvOtelcStats, "1")
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	resolver := &countingResolver{dir: t.TempDir()}
+
+	_, err := resolveRuleAddedImportsWith(util.ContextWithLogger(t.Context(), logger), nil,
+		freshLinkConfig(), resolver.resolve)
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "resolve_phase=link candidates=1 memo_hits=0 go_list_calls=1 failed=0")
+
+	buf.Reset()
+	cfgPath := filepath.Join(t.TempDir(), "importcfg")
+	require.NoError(t, os.WriteFile(cfgPath, []byte("packagefile context=/unused/context.a\n"), 0o644))
+	ip := &instrumentPhase{
+		logger:           logger,
+		importConfigPath: cfgPath,
+		importConfig:     imports.ImportConfig{PackageFile: map[string]string{"context": "/unused/context.a"}},
+		resolveAddedImport: func(_ context.Context, importPath string, _ ...string) (map[string]string, error) {
+			return map[string]string{importPath: resolverArchive(t, resolver.dir, importPath)}, nil
+		},
+	}
+	// The link stored example.com/extra, so the compile reads it from the memo.
+	require.NoError(t, ip.updateImportConfig(t.Context(), map[string]string{"extra": "example.com/extra"}))
+	assert.Contains(t, buf.String(), "resolve_phase=compile candidates=1 memo_hits=1 go_list_calls=0")
+}
+
+func resolverArchive(t *testing.T, dir, importPath string) string {
+	t.Helper()
+	p := filepath.Join(dir, util.EscapePackagePath(importPath)+".a")
+	require.NoError(t, os.WriteFile(p, []byte(importPath), 0o644))
+	return p
+}
+
+// TestLinkResolutionRetriesTransientFailures pins the failure policy: only a
+// failure go list reports the same way for the whole session (a listing
+// error) is stored in the memo. Any other failure is skipped for the rest of
+// its own link but resolved again by the next one.
+func TestLinkResolutionRetriesTransientFailures(t *testing.T) {
+	setupLinkMemo(t, "example.com/extra", "example.com/flaky")
+	resolver := &countingResolver{dir: t.TempDir(), transient: map[string]bool{"example.com/flaky": true}}
+
+	cfg := freshLinkConfig()
+	resolver.link(t, cfg)
+	require.Equal(t, 1, resolver.calls)
+	assert.NotContains(t, cfg.PackageFile, "example.com/flaky")
+
+	resolver.transient = nil
+	cfg = freshLinkConfig()
+	resolver.link(t, cfg)
+	assert.Equal(t, 2, resolver.calls, "a transient failure must be resolved again")
+	assert.Equal(t, []string{"example.com/flaky"}, resolver.roots[1],
+		"only the root that failed transiently is listed again")
+	assert.Contains(t, cfg.PackageFile, "example.com/flaky")
+}
+
+// TestCompileResolutionReResolvesStoredFailure covers the claim that lets a
+// compile skip the import-cycle check on a memo hit: only a successful
+// resolution counts as a hit. A stored failure is not one, so the compile
+// resolves the import again, with the cycle check in place.
+func TestCompileResolutionReResolvesStoredFailure(t *testing.T) {
+	setupLinkMemo(t)
+	session.Open(nil).Store("example.com/extra", nil, errors.New("cannot find package"))
+	archiveDir := t.TempDir()
+	calls := 0
+	compile := func(t *testing.T) error {
+		t.Helper()
+		cfgPath := filepath.Join(t.TempDir(), "importcfg")
+		require.NoError(t, os.WriteFile(cfgPath, []byte("packagefile context=/unused/context.a\n"), 0o644))
+		ip := &instrumentPhase{
+			logger:           slog.Default(),
+			importConfigPath: cfgPath,
+			importConfig:     imports.ImportConfig{PackageFile: map[string]string{"context": "/unused/context.a"}},
+			compileArgs:      []string{"compile", "-p", "example.com/app/dep"},
+			resolveAddedImport: func(_ context.Context, importPath string, _ ...string) (map[string]string, error) {
+				calls++
+				return map[string]string{importPath: resolverArchive(t, archiveDir, importPath)}, nil
+			},
+		}
+		return ip.updateImportConfig(t.Context(), map[string]string{"extra": "example.com/extra"})
+	}
+
+	// A chain in which example.com/extra already waits makes the import a
+	// cycle: the stored failure must not let the compile skip that check.
+	t.Setenv(util.EnvOtelcNestedResolving, "example.com/extra>example.com/app/dep")
+	err := compile(t)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "import cycle")
+	assert.Zero(t, calls)
+
+	t.Setenv(util.EnvOtelcNestedResolving, "")
+	require.NoError(t, compile(t))
+	assert.Equal(t, 1, calls, "a stored failure must be resolved again, not reused")
+}
+
+// TestDeterministicLoadFailureOnRealGoList runs the real go list behind the
+// link's resolution: a package that does not exist is stored, a package
+// whose compile fails is not.
+func TestDeterministicLoadFailureOnRealGoList(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/p\n\ngo 1.25\n"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "broken"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "broken", "b.go"),
+		[]byte("package broken\n\nfunc f() { x }\n"), 0o644))
+
+	_, failed, err := pkgload.ResolveExportClosures(t.Context(),
+		[]string{"example.com/p/broken", "example.com/p/missing"}, "-C", dir)
+	require.NoError(t, err)
+	require.Contains(t, failed, "example.com/p/broken")
+	require.Contains(t, failed, "example.com/p/missing")
+	assert.False(t, pkgload.IsDeterministicLoadFailure(failed["example.com/p/broken"]),
+		"a compile failure must be retried: %v", failed["example.com/p/broken"])
+	assert.True(t, pkgload.IsDeterministicLoadFailure(failed["example.com/p/missing"]),
+		"a missing package must be stored: %v", failed["example.com/p/missing"])
 }

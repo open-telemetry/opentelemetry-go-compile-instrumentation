@@ -107,11 +107,21 @@ var serverEnabler = grpcServerEnabler{}
 // BeforeNewServer hooks before grpc.NewServer to inject stats handler
 func BeforeNewServer(ictx hook.HookContext, opts ...grpc.ServerOption) {
 	if !serverEnabler.Enable() {
+		if !runtime.Ready() {
+			return
+		}
 		logger.Debug("gRPC server instrumentation disabled")
 		return
 	}
 
-	initInstrumentation()
+	// The stats handler initializes the instrumentation in TagRPC, so a server
+	// created during package initialization keeps it. The logger is not set up
+	// that early, so that case returns before logging.
+	if !runtime.Ready() {
+		ictx.SetParam(optionsParamIndex,
+			append([]grpc.ServerOption{grpc.StatsHandler(newServerStatsHandler())}, opts...))
+		return
+	}
 
 	logger.Debug("BeforeNewServer called")
 
@@ -123,6 +133,9 @@ func BeforeNewServer(ictx hook.HookContext, opts ...grpc.ServerOption) {
 
 // AfterNewServer hooks after grpc.NewServer
 func AfterNewServer(ictx hook.HookContext, server *grpc.Server) {
+	if !runtime.Ready() {
+		return
+	}
 	if !serverEnabler.Enable() {
 		return
 	}
@@ -132,6 +145,12 @@ func AfterNewServer(ictx hook.HookContext, server *grpc.Server) {
 type gRPCContextKey struct{}
 
 type gRPCContext struct {
+	// span is the span TagRPC started. grpc-go chains TagRPC across all
+	// registered stats handlers and this handler runs first, so a later
+	// handler (for example otelgrpc) can put a different span on the context
+	// that HandleRPC receives. HandleRPC must end the span this handler owns,
+	// not the innermost one.
+	span          trace.Span
 	inMessages    int64
 	outMessages   int64
 	metricAttrs   []attribute.KeyValue
@@ -146,6 +165,11 @@ func newServerStatsHandler() stats.Handler {
 
 // TagRPC is called at the beginning of an RPC to create a context
 func (h *serverStatsHandler) TagRPC(ctx context.Context, info *stats.RPCTagInfo) context.Context {
+	if !runtime.Ready() {
+		return ctx
+	}
+	initInstrumentation()
+
 	// Skip instrumentation for OTLP exporter endpoints to prevent infinite recursion
 	if grpcsemconv.IsOTELExporterPath(info.FullMethodName) {
 		return ctx
@@ -167,6 +191,7 @@ func (h *serverStatsHandler) TagRPC(ctx context.Context, info *stats.RPCTagInfo)
 
 	// Store gRPC context for metrics
 	gctx := &gRPCContext{
+		span:          trace.SpanFromContext(ctx),
 		metricAttrs:   attrs,
 		metricAttrSet: attribute.NewSet(attrs...),
 	}
@@ -184,7 +209,8 @@ func (h *serverStatsHandler) HandleRPC(ctx context.Context, rs stats.RPCStats) {
 		return
 	}
 
-	span := trace.SpanFromContext(ctx)
+	// End the span TagRPC started, not the span of a chained handler.
+	span := gctx.span
 
 	switch rs := rs.(type) {
 	case *stats.Begin:

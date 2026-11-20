@@ -116,6 +116,30 @@ func TestParseGoMod_MissingFile(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to read go.mod file")
 }
 
+// TestWriteGoMod_SymlinkedGoMod checks that a go.mod that is a symbolic link
+// stays one. The link is how some repositories share one go.mod between
+// directories.
+func TestWriteGoMod_SymlinkedGoMod(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "shared.mod")
+	require.NoError(t, os.WriteFile(target, []byte("module example.com/old\n"), 0o644))
+	link := filepath.Join(dir, "go.mod")
+	if err := os.Symlink("shared.mod", link); err != nil {
+		t.Skipf("symlinks are not available: %v", err)
+	}
+
+	mf := &modfile.File{}
+	require.NoError(t, mf.AddModuleStmt("example.com/new"))
+	require.NoError(t, writeGoMod(link, mf))
+
+	info, err := os.Lstat(link)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink, "go.mod must stay a symbolic link")
+	content, err := os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "module example.com/new")
+}
+
 func TestWriteGoMod(t *testing.T) {
 	tempDir := t.TempDir()
 	gomodPath := filepath.Join(tempDir, "go.mod")
@@ -183,10 +207,12 @@ func setupSyncDepsTest(t *testing.T, goMod string, instPaths []string) (string, 
 	pkgDir := filepath.Join(buildTempDir, unzippedPkgDir)
 	pkgRuntimeDir := filepath.Join(pkgDir, "runtime")
 	pkgNetutilDir := filepath.Join(pkgDir, "netutil")
+	pkgOtelcconvDir := filepath.Join(pkgDir, "otelcconv")
 	instDir := filepath.Join(buildTempDir, unzippedInstDir)
 
 	require.NoError(t, os.MkdirAll(pkgRuntimeDir, 0o755))
 	require.NoError(t, os.MkdirAll(pkgNetutilDir, 0o755))
+	require.NoError(t, os.MkdirAll(pkgOtelcconvDir, 0o755))
 	require.NoError(t, os.MkdirAll(instDir, 0o755))
 
 	require.NoError(t, os.WriteFile(
@@ -202,6 +228,11 @@ func setupSyncDepsTest(t *testing.T, goMod string, instPaths []string) (string, 
 	require.NoError(t, os.WriteFile(
 		filepath.Join(pkgNetutilDir, "go.mod"),
 		[]byte("module "+util.OtelcPkgRoot+"/netutil\ngo 1.21\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(pkgOtelcconvDir, "go.mod"),
+		[]byte("module "+util.OtelcPkgRoot+"/otelcconv\ngo 1.21\n"),
 		0o644,
 	))
 
@@ -236,6 +267,8 @@ go 1.21
 		"replace "+util.OtelcPkgRoot+"/runtime => "+filepath.Join(buildTempDir, unzippedPkgDir, "runtime"))
 	assert.Contains(t, got,
 		"replace "+util.OtelcPkgRoot+"/netutil => "+filepath.Join(buildTempDir, unzippedPkgDir, "netutil"))
+	assert.Contains(t, got,
+		"replace "+util.OtelcPkgRoot+"/otelcconv => "+filepath.Join(buildTempDir, unzippedPkgDir, "otelcconv"))
 	assert.Contains(t, got,
 		"replace "+util.OtelcInstRoot+" => "+filepath.Join(buildTempDir, unzippedInstDir))
 	assert.Contains(
@@ -546,7 +579,13 @@ require (
 				},
 			}
 
+			readStdout := captureStdout(t)
+			readStderr := captureStderr(t)
 			require.NoError(t, warnVersion(ctx, gomodPath, before))
+
+			// Stdout belongs to the build, for example go test -json events.
+			assert.Empty(t, readStdout())
+			assert.Equal(t, "Bumped go version ("+test.goVersion+" -> 1.25.0)\n", readStderr())
 
 			logged := buf.String()
 			assert.Contains(t, logged, "bumped go version")
@@ -577,7 +616,12 @@ require (
 		},
 	}
 
+	readStdout := captureStdout(t)
+	readStderr := captureStderr(t)
 	require.NoError(t, warnVersion(ctx, gomodPath, before))
+
+	assert.Empty(t, readStdout())
+	assert.Equal(t, "Bumped dependency go.opentelemetry.io/otel (v1.38.0 -> v1.43.0)\n", readStderr())
 
 	logged := buf.String()
 	assert.Contains(t, logged, "bumped dependency")

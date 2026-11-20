@@ -1,4 +1,4 @@
-version: "v1.0.0"
+version: "v1.2.0"
 
 # Publish, PublishWithContext, and PublishWithDeferredConfirmWithContext all
 # call PublishWithDeferredConfirm. Hook that one path so a publish is one span.
@@ -61,6 +61,7 @@ amqp_hook_publish_with_context:
   do:
     - inject_hooks:
         before: BeforePublishWithContext
+        after: AfterPublishWithContext
         path: "go.opentelemetry.io/otelc/instrumentation/github.com/rabbitmq/amqp091-go"
 
 amqp_hook_publish_with_deferred_confirm_with_context:
@@ -72,6 +73,7 @@ amqp_hook_publish_with_deferred_confirm_with_context:
   do:
     - inject_hooks:
         before: BeforePublishWithDeferredConfirmWithContext
+        after: AfterPublishWithDeferredConfirmWithContext
         path: "go.opentelemetry.io/otelc/instrumentation/github.com/rabbitmq/amqp091-go"
 
 amqp_hook_ack:

@@ -93,10 +93,13 @@ func warnVersion(ctx context.Context, goModPath string, before versionSnapshot) 
 		return ex.Wrapf(err, "unable to check for version bumps after go mod tidy")
 	}
 
+	// The notices go to stderr, like the go command's own diagnostics. Stdout
+	// carries the output of the build, such as the JSON events of go test -json.
+	//
 	// Go directives use Go toolchain syntax ("1.21"), not module semver.
 	if after.Go != nil && before.goVersion != "" {
 		if goversion.Compare("go"+after.Go.Version, "go"+before.goVersion) > 0 {
-			_, _ = fmt.Fprintf(os.Stdout, "Bumped go version (%s -> %s)\n", before.goVersion, after.Go.Version)
+			_, _ = fmt.Fprintf(os.Stderr, "Bumped go version (%s -> %s)\n", before.goVersion, after.Go.Version)
 			logger.WarnContext(ctx, "bumped go version", "old", before.goVersion, "new", after.Go.Version)
 		}
 	}
@@ -104,7 +107,7 @@ func warnVersion(ctx context.Context, goModPath string, before versionSnapshot) 
 	for _, req := range after.Require {
 		if oldVer, tracked := before.deps[req.Mod.Path]; tracked {
 			if semver.Compare(req.Mod.Version, oldVer) > 0 {
-				_, _ = fmt.Fprintf(os.Stdout, "Bumped dependency %s (%s -> %s)\n",
+				_, _ = fmt.Fprintf(os.Stderr, "Bumped dependency %s (%s -> %s)\n",
 					req.Mod.Path, oldVer, req.Mod.Version)
 				logger.WarnContext(ctx, "bumped dependency",
 					"module", req.Mod.Path,
@@ -183,7 +186,7 @@ func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) e
 	replaces := make(map[string]string, len(modPaths))
 	for m := range modPaths {
 		if path, isEmbedded := strings.CutPrefix(m, util.OtelcInstRoot+"/"); isEmbedded {
-			replaces[m] = filepath.Join(util.GetBuildTempDir(), unzippedInstDir, path)
+			replaces[m] = filepath.Join(util.GetInvocationDir(), unzippedInstDir, path)
 		}
 	}
 
@@ -216,14 +219,19 @@ func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) e
 	// Add replace directive for special runtime module
 	// runtime module initializes the OpenTelemetry SDK. It is required by all
 	// hook code to be present.
-	replaces[util.OtelcPkgRoot+"/runtime"] = filepath.Join(util.GetBuildTempDir(), unzippedPkgDir, "runtime")
+	replaces[util.OtelcPkgRoot+"/runtime"] = filepath.Join(util.GetInvocationDir(), unzippedPkgDir, "runtime")
 
 	// Add replace directive for special netutil module
-	replaces[util.OtelcPkgRoot+"/netutil"] = filepath.Join(util.GetBuildTempDir(), unzippedPkgDir, "netutil")
+	replaces[util.OtelcPkgRoot+"/netutil"] = filepath.Join(util.GetInvocationDir(), unzippedPkgDir, "netutil")
+
+	// Add replace directive for the otelcconv module, which holds the semantic
+	// convention attributes generated from schemas/otelc/. It is a separate
+	// module so the pkg module itself keeps no dependencies.
+	replaces[util.OtelcPkgRoot+"/otelcconv"] = filepath.Join(util.GetInvocationDir(), unzippedPkgDir, "otelcconv")
 
 	// Add replace directive for instrumentation module
 	// instrumentation module contains shared semconv packages.
-	replaces[util.OtelcInstRoot] = filepath.Join(util.GetBuildTempDir(), unzippedInstDir)
+	replaces[util.OtelcInstRoot] = filepath.Join(util.GetInvocationDir(), unzippedInstDir)
 
 	// Okay, now add all the replace directives to go.mod in deterministic sorted order
 	changed := false

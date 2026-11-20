@@ -66,7 +66,7 @@ func (s *server) SayHello(ctx context.Context, in *pb.HelloRequest) (*pb.HelloRe
 		Value: []byte("test-message"),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to write to kafka: %v", err)
+		return nil, fmt.Errorf("failed to write to kafka: %w", err)
 	}
 
 	return &pb.HelloReply{Message: "frontend produced message to kafka"}, nil

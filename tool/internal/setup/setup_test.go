@@ -111,6 +111,24 @@ func TestToolexecBuildArgs(t *testing.T) {
 		assert.Contains(t, got, otelcRuntimeFile)
 	})
 
+	t.Run("adds the generated runtime file for file targets under -C", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Chdir(dir)
+		appDir := filepath.Join(dir, "app")
+		require.NoError(t, os.MkdirAll(appDir, 0o755))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(appDir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(appDir, otelcRuntimeFile), []byte("package main\n"), 0o644))
+
+		for _, cdir := range [][]string{{"-C", "app"}, {"-C=app"}, {"-C", appDir}} {
+			args := append(append([]string{"build"}, cdir...), "main.go")
+			got, err := toolexecBuildArgs(args, "/usr/bin/otelc", false)
+			require.NoError(t, err)
+			assert.Equal(t, slices.Index(got, "main.go")+1, slices.Index(got, otelcRuntimeFile), "args %v", args)
+		}
+	})
+
 	t.Run("go test inserts runtime file before -- delimiter", func(t *testing.T) {
 		dir := t.TempDir()
 		t.Chdir(dir)
@@ -249,7 +267,21 @@ func TestToolexecBuildArgs(t *testing.T) {
 	})
 }
 
+// chdirWithGoFiles changes into a new temporary directory holding an empty
+// file for each of the given slash separated names. The go command only takes
+// an argument ending in .go for a file when the file exists.
+func chdirWithGoFiles(t *testing.T, names ...string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, name := range names {
+		mustWriteFile(t, filepath.Join(dir, filepath.FromSlash(name)), "package p\n")
+	}
+	t.Chdir(dir)
+	return dir
+}
+
 func TestLastFileTargetIndex(t *testing.T) {
+	chdirWithGoFiles(t, "main.go", "main_test.go", "other.go", "custom.go", "pattern.go")
 	assert.Equal(t, 1, lastFileTargetIndex(subcmdBuild, []string{"--", "main.go"}))
 	assert.Equal(
 		t,
@@ -271,6 +303,11 @@ type toolexecInvocation struct {
 }
 
 func runBuildWithToolexec(t *testing.T, args []string, vendored bool) toolexecInvocation {
+	t.Helper()
+	return runBuildWithToolexecContext(t.Context(), t, args, vendored)
+}
+
+func runBuildWithToolexecContext(ctx context.Context, t *testing.T, args []string, vendored bool) toolexecInvocation {
 	t.Helper()
 
 	dir := t.TempDir()
@@ -298,7 +335,7 @@ func runBuildWithToolexec(t *testing.T, args []string, vendored bool) toolexecIn
 		Flags:    []cli.Flag{&cli.BoolFlag{Name: "debug"}},
 		Commands: []*cli.Command{goCmd},
 	}
-	require.NoError(t, cmd.Run(t.Context(), append([]string{"otelc"}, args...)))
+	require.NoError(t, cmd.Run(ctx, append([]string{"otelc"}, args...)))
 	return got
 }
 
@@ -314,10 +351,31 @@ func TestBuildWithToolexec(t *testing.T) {
 		assert.Contains(t, strings.Join(got.env, "\n"), util.EnvOtelcWorkDir+"=")
 	})
 
+	t.Run("tells nested otelc invocations which locks and work dir it holds", func(t *testing.T) {
+		clearNestedBuildEnv(t)
+		ctx := contextWithBuildLockHeld(t.Context(), []string{"held.lock"})
+		got := runBuildWithToolexecContext(ctx, t, []string{"go", "test", "."}, false)
+
+		assert.Contains(t, got.env, util.EnvOtelcHeldBuildLocks+`=["held.lock"]`)
+		assert.Contains(t, got.env,
+			util.EnvOtelcParentWorkDirs+"="+encodePathList([]string{canonicalDir(util.GetOtelcWorkDir())}))
+	})
+
 	t.Run("keeps the work directory when the root debug flag is set", func(t *testing.T) {
 		got := runBuildWithToolexec(t, []string{"--debug", "go", "build", "."}, false)
 
 		assert.Contains(t, got.argv, "-work")
+	})
+
+	t.Run("passes -json on the command line when GOFLAGS asked for it", func(t *testing.T) {
+		assert.NotContains(t, runBuildWithToolexec(t, []string{"go", "test", "./..."}, false).argv, "-json")
+
+		ctx := ContextWithJSONOutput(t.Context())
+		got := runBuildWithToolexecContext(ctx, t, []string{"go", "test", "-json=false", "./..."}, false)
+
+		// A -json=false of the user comes later and still wins.
+		require.Contains(t, got.argv, "-json")
+		assert.Less(t, slices.Index(got.argv, "-json"), slices.Index(got.argv, "-json=false"))
 	})
 
 	t.Run("forwards build flags and neutralizes vendor mode", func(t *testing.T) {
@@ -657,6 +715,8 @@ func TestGetBuildPackages_TestOnlyPackage(t *testing.T) {
 }
 
 func TestSplitBuildTargets(t *testing.T) {
+	chdirWithGoFiles(t, "main.go", "other.go", "foo.go", "extra.go", "custom.go",
+		"cmd/main.go", "cmd/util.go", "util/util.go")
 	tests := []struct {
 		name        string
 		subcommand  string
@@ -1456,6 +1516,32 @@ func TestAddBuildFlags(t *testing.T) {
 	}
 }
 
+func TestLeadingDirFlag(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		dir  string
+		n    int
+	}{
+		{name: "no args", args: nil},
+		{name: "without change directory", args: []string{"."}},
+		{name: "change directory after another flag", args: []string{"-v", "-C", "app", "."}},
+		{name: "separate change directory without a value", args: []string{"-C"}},
+		{name: "separate change directory", args: []string{"-C", "app", "."}, dir: "app", n: 2},
+		{name: "joined change directory", args: []string{"-C=app", "."}, dir: "app", n: 1},
+		{name: "separate double-dash change directory", args: []string{"--C", "app", "."}, dir: "app", n: 2},
+		{name: "joined double-dash change directory", args: []string{"--C=app", "."}, dir: "app", n: 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir, n := leadingDirFlag(tt.args)
+			assert.Equal(t, tt.dir, dir)
+			assert.Equal(t, tt.n, n)
+		})
+	}
+}
+
 func TestIsSetup(t *testing.T) {
 	// isSetup is currently a stub that always reports false.
 	assert.False(t, isSetup())
@@ -1795,7 +1881,7 @@ func TestSetup_FindDepsErrorWithRules(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestSetup_MatchDepsError(t *testing.T) {
+func TestSetup_RuleLoadError(t *testing.T) {
 	setupTestModule(t, []string{"cmd"})
 	t.Setenv(util.EnvOtelcRules, "/nonexistent/rules.yaml")
 	_ = os.RemoveAll(util.GetBuildTempDir())
@@ -1806,7 +1892,7 @@ func TestSetup_MatchDepsError(t *testing.T) {
 		Action: Setup,
 	}
 	err := cmd.Run(t.Context(), []string{"setup", "."})
-	require.Error(t, err)
+	require.ErrorContains(t, err, "loading hook rules")
 }
 
 func TestSetup_ResolveRulePathsError(t *testing.T) {
@@ -1951,6 +2037,95 @@ func TestGetBuildPackages_TestWithoutTargets(t *testing.T) {
 
 func TestExtractBuildFlags_DashPrefixedValue(t *testing.T) {
 	assert.Equal(t, []string{"-tags", "-race"}, extractBuildFlags(subcmdTest, []string{"-tags", "-race", "./pkg"}))
+}
+
+func TestAbsChangeDir(t *testing.T) {
+	t.Chdir(t.TempDir())
+	wd, wdErr := os.Getwd()
+	require.NoError(t, wdErr)
+	app := filepath.Join(wd, "app")
+	require.NoError(t, os.MkdirAll(app, 0o755))
+	tests := []struct {
+		name       string
+		subcommand string
+		args       []string
+		want       []string
+	}{
+		{
+			"separate value",
+			subcmdBuild,
+			[]string{"-C", "app", "-tags", "x", "."},
+			[]string{"-C", app, "-tags", "x", "."},
+		},
+		{"double dash", subcmdBuild, []string{"--C", "app", "."}, []string{"--C", app, "."}},
+		{"joined value", subcmdBuild, []string{"-C=app", "."}, []string{"-C=" + app, "."}},
+		{"joined double dash", subcmdBuild, []string{"--C=app", "."}, []string{"--C=" + app, "."}},
+		{"absolute kept", subcmdBuild, []string{"-C", app, "."}, []string{"-C", app, "."}},
+		{"go test", subcmdTest, []string{"-C", "app", "-run", "TestX", "."}, []string{"-C", app, "-run", "TestX", "."}},
+		{"tags value -C", subcmdBuild, []string{"-tags", "-C", "."}, []string{"-tags", "-C", "."}},
+		{"tags value -C=dir", subcmdBuild, []string{"-tags", "-C=other", "."}, []string{"-tags", "-C=other", "."}},
+		{"test flag value -C", subcmdTest, []string{"-run", "-C", "."}, []string{"-run", "-C", "."}},
+		{"missing value left to go", subcmdBuild, []string{"-C"}, []string{"-C"}},
+		{"no args", subcmdBuild, nil, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := absChangeDir(tt.subcommand, tt.args)
+			require.NoError(t, err)
+			requireArgsNameDir(t, app, tt.want, got)
+		})
+	}
+
+	t.Run("does not modify its input", func(t *testing.T) {
+		args := []string{"-C", "app", "."}
+		_, err := absChangeDir(subcmdBuild, args)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"-C", "app", "."}, args)
+	})
+
+	t.Run("forwarded flags load packages from another directory", func(t *testing.T) {
+		// The toolexec processes load packages with the forwarded flags, in
+		// a working directory other than the one go build -C ran in.
+		goMod := []byte("module example.com/app\n\ngo 1.26\n")
+		require.NoError(t, os.WriteFile(filepath.Join(app, "go.mod"), goMod, 0o644))
+		args, err := absChangeDir(subcmdBuild, []string{"-C", "app", "."})
+		require.NoError(t, err)
+		flags := extractBuildFlags(subcmdBuild, args)
+		t.Chdir(t.TempDir())
+		archives, err := pkgload.ResolveExportFiles(t.Context(), "sync/atomic", flags...)
+		require.NoError(t, err)
+		assert.Contains(t, archives, "sync/atomic")
+	})
+
+	t.Run("forwarded flags carry the absolute directory", func(t *testing.T) {
+		args, err := absChangeDir(subcmdBuild, []string{"-C", "app", "-tags", "x", "."})
+		require.NoError(t, err)
+		requireArgsNameDir(t, app, []string{"-C", app, "-tags", "x"}, extractBuildFlags(subcmdBuild, args))
+	})
+}
+
+// requireArgsNameDir checks got against want. An element of want that ends
+// with dir matches any absolute path to the same directory: on Windows,
+// os.Getwd and filepath.Abs can spell one directory differently, such as the
+// short name RUNNER~1 and the long name of a user's temp directory.
+func requireArgsNameDir(t *testing.T, dir string, want, got []string) {
+	t.Helper()
+	require.Len(t, got, len(want), "args: %v", got)
+	wantInfo, err := os.Stat(dir)
+	require.NoError(t, err)
+	for i, w := range want {
+		prefix, isDir := strings.CutSuffix(w, dir)
+		if !isDir {
+			require.Equal(t, w, got[i], "args: %v", got)
+			continue
+		}
+		gotDir, ok := strings.CutPrefix(got[i], prefix)
+		require.True(t, ok, "arg %q does not start with %q", got[i], prefix)
+		require.True(t, filepath.IsAbs(gotDir), "arg %q is not absolute", got[i])
+		gotInfo, statErr := os.Stat(gotDir)
+		require.NoError(t, statErr)
+		require.True(t, os.SameFile(wantInfo, gotInfo), "arg %q is not %q", got[i], dir)
+	}
 }
 
 func TestToolexecBuildArgs_RuntimeFileCompiled(t *testing.T) {
@@ -2120,10 +2295,10 @@ func TestMatchAllDeps_DeterministicOrder(t *testing.T) {
 	}
 }
 
-// TestMatchAllDeps_MatchDepsError covers the first error boundary of
-// matchAllDeps: a rule file that cannot be parsed must surface the matchDeps
+// TestMatchAllDeps_RuleLoadError covers the first error boundary of
+// matchAllDeps: a rule file that cannot be parsed must surface the rule loading
 // failure, not a silently empty result.
-func TestMatchAllDeps_MatchDepsError(t *testing.T) {
+func TestMatchAllDeps_RuleLoadError(t *testing.T) {
 	t.Setenv(util.EnvOtelcRules, "")
 
 	dir := t.TempDir()
@@ -2136,7 +2311,7 @@ func TestMatchAllDeps_MatchDepsError(t *testing.T) {
 	deps := []*Dependency{{ImportPath: "example.com/maddeps/aaa"}}
 	_, err := sp.matchAllDeps(t.Context(), deps, []string{dir}, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "matching dependencies to hook rules")
+	assert.Contains(t, err.Error(), "loading hook rules")
 }
 
 // TestMatchAllDeps_ResolveRulePathsError covers the second error boundary of
@@ -2269,6 +2444,84 @@ func TestNestedCoverFlags(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.expected, nestedCoverFlags(tt.goflags, tt.forwarded))
+		})
+	}
+}
+
+// TestSplitBuildTargets_DotGoPackagePath guards the rule of the go command
+// that an argument ending in .go is a source file only when such a file
+// exists. Otherwise it is a package path, like the module path of
+// github.com/nats-io/nats.go (golang.org/issue/34653).
+func TestSplitBuildTargets_DotGoPackagePath(t *testing.T) {
+	const natsPath = "github.com/nats-io/nats.go"
+
+	t.Run("a package path ending in .go is a package", func(t *testing.T) {
+		chdirWithGoFiles(t, "cmd/main.go")
+
+		pkgs, files, err := splitBuildTargets(subcmdBuild, []string{natsPath, "./cmd"})
+		require.NoError(t, err)
+		assert.Equal(t, []string{natsPath, "./cmd"}, pkgs)
+		assert.Empty(t, files)
+		assert.Equal(t, -1, lastFileTargetIndex(subcmdBuild, []string{natsPath, "./cmd"}))
+	})
+
+	t.Run("a directory named like a file is a package", func(t *testing.T) {
+		dir := chdirWithGoFiles(t)
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "x.go"), 0o755))
+
+		pkgs, files, err := splitBuildTargets(subcmdBuild, []string{"./x.go"})
+		require.NoError(t, err)
+		assert.Equal(t, []string{"./x.go"}, pkgs)
+		assert.Empty(t, files)
+	})
+
+	t.Run("an existing file is still a file", func(t *testing.T) {
+		chdirWithGoFiles(t, "main.go")
+
+		pkgs, files, err := splitBuildTargets(subcmdBuild, []string{"main.go"})
+		require.NoError(t, err)
+		assert.Empty(t, pkgs)
+		assert.Equal(t, []string{"main.go"}, files)
+	})
+
+	t.Run("a file target is looked up in the -C directory", func(t *testing.T) {
+		dir := chdirWithGoFiles(t, "app/main.go")
+		abs := filepath.Join(dir, "app")
+
+		for _, cdir := range [][]string{{"-C", "app"}, {"-C=app"}, {"-C", abs}} {
+			args := append(slices.Clone(cdir), "main.go")
+			pkgs, files, err := splitBuildTargets(subcmdBuild, args)
+			require.NoError(t, err, "args %v", args)
+			assert.Empty(t, pkgs, "args %v", args)
+			assert.Equal(t, []string{"main.go"}, files, "args %v", args)
+			assert.Equal(t, len(cdir), lastFileTargetIndex(subcmdBuild, args), "args %v", args)
+		}
+
+		// A name with no file next to it is a package path, so mixing it with
+		// a file is the error the go command reports.
+		_, _, err := splitBuildTargets(subcmdBuild, []string{"-C", "app", "main.go", "other.go"})
+		require.ErrorContains(t, err, "cannot mix .go files and packages")
+
+		// Without -C the file is looked up in the current directory only.
+		pkgs, files, err := splitBuildTargets(subcmdBuild, []string{"main.go"})
+		require.NoError(t, err)
+		assert.Equal(t, []string{"main.go"}, pkgs)
+		assert.Empty(t, files)
+	})
+}
+
+func TestSplitBuildTargets_DebugFlagValue(t *testing.T) {
+	chdirWithGoFiles(t, "cmd/main.go", "trace.go")
+
+	for _, flag := range []string{"-debug-actiongraph", "-debug-runtime-trace", "-debug-trace"} {
+		t.Run(flag, func(t *testing.T) {
+			pkgs, files, err := splitBuildTargets(subcmdBuild, []string{flag, "trace.go", "./cmd"})
+			require.NoError(t, err)
+			assert.Equal(t, []string{"./cmd"}, pkgs)
+			assert.Empty(t, files)
+
+			_, _, err = splitBuildTargets(subcmdBuild, []string{flag})
+			require.ErrorContains(t, err, "requires a value")
 		})
 	}
 }

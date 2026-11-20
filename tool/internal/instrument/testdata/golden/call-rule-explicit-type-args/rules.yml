@@ -1,0 +1,15 @@
+wrap_id:
+  target: main
+  where:
+    function_call: go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/call-rule-explicit-type-args/helpers/generic.Id
+  do:
+    - wrap_call:
+        replace: "trace({{ . }})"
+
+wrap_convert:
+  target: main
+  where:
+    function_call: go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/call-rule-explicit-type-args/helpers/generic.Convert
+  do:
+    - wrap_call:
+        replace: "trace({{ . }})"

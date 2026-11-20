@@ -84,7 +84,6 @@ func (a app) prepare(ctx context.Context, args []string) error {
 		{"head_ref", headRef},
 		{"head_repo_full", headRepo},
 		{"head_sha", headSHA},
-		{"is_cross_repository", strconv.FormatBool(headRepo != req.Repo)},
 	})
 }
 

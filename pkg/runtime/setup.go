@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -32,6 +33,11 @@ var (
 	tracerProvider        *sdktrace.TracerProvider
 	loggerProvider        *sdklog.LoggerProvider
 	registerSignalHandler sync.Once
+
+	// ready is set at the end of init. Hooks can run before that: the
+	// trampolines call them through //go:linkname, which does not order this
+	// package or its imports before the instrumented package.
+	ready atomic.Bool
 )
 
 func init() {
@@ -41,6 +47,15 @@ func init() {
 	logger = slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
 		Level: logLevel(),
 	}))
+	ready.Store(true)
+}
+
+// Ready reports whether this package has initialized, and with it the
+// OpenTelemetry API packages it imports. A hook that runs earlier, during
+// another package's initialization, must not call into those packages:
+// otel.GetTracerProvider panics then.
+func Ready() bool {
+	return ready.Load()
 }
 
 // Config holds configuration for OpenTelemetry setup
@@ -99,8 +114,9 @@ func logLevel() slog.Level {
 // WithTelemetrySDK stamps telemetry.sdk.name/language/version, which
 // resource.Default() includes but resource.New() does not unless asked.
 // WithService stamps service.name (unknown_service:<executable>) and
-// service.instance.id. WithFromEnv stays last so OTEL_SERVICE_NAME and
-// OTEL_RESOURCE_ATTRIBUTES still win.
+// service.instance.id. Registered detectors run after the built-in ones.
+// WithFromEnv stays last so OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES
+// still win.
 func newResource(ctx context.Context) *resource.Resource {
 	res, err := resource.New(ctx,
 		resource.WithTelemetrySDK(),
@@ -109,10 +125,14 @@ func newResource(ctx context.Context) *resource.Resource {
 		resource.WithOS(),
 		resource.WithContainer(),
 		resource.WithHost(),
+		resource.WithDetectors(resourceDetectors.seal()...),
 		resource.WithFromEnv())
 	if err != nil {
-		logger.Warn("failed to create resource", "error", err)
-		return resource.Default()
+		// resource.New returns what the detectors that did succeed found along
+		// with the error. One malformed OTEL_RESOURCE_ATTRIBUTES entry or one
+		// failing detector must not drop the process, host and
+		// service.instance.id attributes with it.
+		logger.Warn("failed to create complete resource, using the part that was detected", "error", err)
 	}
 	return res
 }
@@ -273,32 +293,56 @@ func setupLoggerProvider(ctx context.Context, res *resource.Resource) error {
 	return nil
 }
 
+type lifecycleProvider interface {
+	ForceFlush(context.Context) error
+	Shutdown(context.Context) error
+}
+
+type namedProvider struct {
+	name     string
+	provider lifecycleProvider
+}
+
+func configuredProviders() []namedProvider {
+	const signalCount = 3
+	providers := make([]namedProvider, 0, signalCount)
+	if tracerProvider != nil {
+		providers = append(providers, namedProvider{name: "tracer", provider: tracerProvider})
+	}
+	if meterProvider != nil {
+		providers = append(providers, namedProvider{name: "meter", provider: meterProvider})
+	}
+	if loggerProvider != nil {
+		providers = append(providers, namedProvider{name: "logger", provider: loggerProvider})
+	}
+	return providers
+}
+
+func runProviderOp(
+	ctx context.Context,
+	action string,
+	op func(lifecycleProvider, context.Context) error,
+) error {
+	var errs []error
+	for _, p := range configuredProviders() {
+		if err := op(p.provider, ctx); err != nil {
+			Logger().ErrorContext(ctx, "failed to "+action+" "+p.name+" provider", "error", err)
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// ForceFlush immediately flushes any buffered telemetry from the OpenTelemetry SDK providers.
+// It skips nil providers, logs individual failures through Logger(), joins any errors,
+// and leaves providers active so callers can keep recording and flushing telemetry.
+func ForceFlush(ctx context.Context) error {
+	return runProviderOp(ctx, "force flush", lifecycleProvider.ForceFlush)
+}
+
 // Shutdown gracefully shuts down the OpenTelemetry SDK
 func Shutdown(ctx context.Context) error {
-	var errs []error
-
-	if tracerProvider != nil {
-		if shutdownErr := tracerProvider.Shutdown(ctx); shutdownErr != nil {
-			Logger().Error("failed to shutdown tracer provider", "error", shutdownErr)
-			errs = append(errs, shutdownErr)
-		}
-	}
-
-	if meterProvider != nil {
-		if shutdownErr := meterProvider.Shutdown(ctx); shutdownErr != nil {
-			Logger().Error("failed to shutdown meter provider", "error", shutdownErr)
-			errs = append(errs, shutdownErr)
-		}
-	}
-
-	if loggerProvider != nil {
-		if shutdownErr := loggerProvider.Shutdown(ctx); shutdownErr != nil {
-			Logger().Error("failed to shutdown logger provider", "error", shutdownErr)
-			errs = append(errs, shutdownErr)
-		}
-	}
-
-	return errors.Join(errs...)
+	return runProviderOp(ctx, "shutdown", lifecycleProvider.Shutdown)
 }
 
 // StartRuntimeMetrics enables Go runtime metrics collection.
@@ -333,20 +377,40 @@ func shutdownSignals() []os.Signal {
 }
 
 // setupSignalHandler flushes the OTel SDK on SIGINT/SIGTERM so buffered telemetry
-// survives shutdown, then steps aside. It never exits or re-raises the signal:
-// the application owns its own exit path and exit code. Terminating here would
-// race an application running its own graceful shutdown and could truncate it.
+// survives shutdown. It never exits. It re-raises the signal only when the
+// application never registered a handler for it (see shouldReraise), so the
+// process terminates the way it would without otelc. An application that
+// handles the signal owns its exit path and exit code: re-raising there would
+// race its own graceful shutdown and could truncate it.
+//
+// A signal that is ignored when the handler is set up, for example SIGINT in a
+// job started in the background by a non-interactive shell, is left alone.
+// signal.Notify would turn it back on, and the flush would then shut the SDK
+// down in a process that keeps running, so all later telemetry would be lost.
 func setupSignalHandler() {
 	registerSignalHandler.Do(func() {
+		var sigs []os.Signal
+		for _, s := range shutdownSignals() {
+			if !signal.Ignored(s) {
+				sigs = append(sigs, s)
+			}
+		}
+		if len(sigs) == 0 {
+			return
+		}
 		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, shutdownSignals()...)
+		signalOwners.Lock()
+		signalOwners.otelcCh = sigCh
+		signalOwners.Unlock()
+		signal.Notify(sigCh, sigs...)
 		go handleShutdownSignal(sigCh)
 	})
 }
 
 // handleShutdownSignal waits for the first signal on sigCh and flushes the SDK.
-// It does not exit or re-raise the signal, leaving the process exit to the
-// application or the OS default disposition.
+// It then re-raises the signal if shouldReraise reports that nothing else
+// handles it. Otherwise it returns and leaves the process exit to the
+// application.
 func handleShutdownSignal(sigCh chan os.Signal) {
 	sig := <-sigCh
 
@@ -364,5 +428,102 @@ func handleShutdownSignal(sigCh chan os.Signal) {
 		logger.Error("error flushing telemetry during shutdown", "error", err)
 	} else {
 		logger.Info("OpenTelemetry SDK shutdown completed successfully")
+	}
+
+	reraiseIfUnhandled(sig)
+}
+
+// signalOwners records which signals the application registered for with
+// signal.Notify. The os/signal rules in instrumentation/go.opentelemetry.io/otel/init
+// report every signal.Notify call through RecordSignalNotify.
+var signalOwners signalRecord
+
+type signalRecord struct {
+	sync.Mutex
+	// otelcCh is the channel that setupSignalHandler registers.
+	otelcCh chan<- os.Signal
+	// hookInstalled is true once otelc's own signal.Notify call has gone
+	// through RecordSignalNotify, which proves the os/signal instrumentation
+	// is applied to this binary.
+	hookInstalled bool
+	// allSignals is true when the application called signal.Notify with no
+	// signal list, which registers for every signal.
+	allSignals bool
+	// signals holds the signals the application registered for.
+	signals map[os.Signal]bool
+}
+
+// recordLocked marks sig as handled by the application. The caller must hold r.
+func (r *signalRecord) recordLocked(sig os.Signal) {
+	if r.signals == nil {
+		r.signals = make(map[os.Signal]bool)
+	}
+	r.signals[sig] = true
+}
+
+// RecordSignalNotify is called at the start of every signal.Notify call by the
+// os/signal instrumentation, which reaches it through go:linkname. It is not
+// meant to be called by application code.
+//
+// The record is never cleared when the application calls signal.Stop:
+// signal.NotifyContext callers often call stop() as soon as the signal arrives
+// and then drain for a while, and a re-raise at that point would kill them.
+// So an application that registered for a signal at any point keeps today's
+// behavior for that signal: otelc flushes and does not re-raise.
+func RecordSignalNotify(c chan<- os.Signal, sig []os.Signal) {
+	signalOwners.Lock()
+	defer signalOwners.Unlock()
+
+	if c != nil && c == signalOwners.otelcCh {
+		signalOwners.hookInstalled = true
+		return
+	}
+	if len(sig) == 0 {
+		signalOwners.allSignals = true
+		return
+	}
+	for _, s := range sig {
+		// signal.Notify ignores signal types it does not know. Skip them
+		// too: an uncomparable os.Signal would panic as a map key.
+		if s, ok := s.(syscall.Signal); ok {
+			signalOwners.recordLocked(s)
+		}
+	}
+}
+
+// reraiseIfUnhandled re-raises sig if shouldReraise allows it. It holds
+// signalOwners across the check and the re-raise, so an application that calls
+// signal.Notify during the flush either is seen by the check or registers
+// after the signal is sent.
+func reraiseIfUnhandled(sig os.Signal) {
+	signalOwners.Lock()
+	defer signalOwners.Unlock()
+
+	if shouldReraise(sig) {
+		reraise(sig)
+	}
+}
+
+// shouldReraise reports whether sig must be re-raised after the flush. That is
+// the case only when the os/signal instrumentation is applied and the
+// application never registered for sig. Without the instrumentation otelc
+// cannot tell whether the application handles sig, so it does not re-raise.
+// The caller must hold signalOwners.
+func shouldReraise(sig os.Signal) bool {
+	return signalOwners.hookInstalled && !signalOwners.allSignals && !signalOwners.signals[sig]
+}
+
+// reraise sends sig to the current process. handleShutdownSignal has already
+// called signal.Stop, and nothing else registered for sig, so sig now gets the
+// disposition it would have without otelc: by default the process terminates
+// with the signal. It does nothing on Windows, which cannot send these signals
+// to a process.
+func reraise(sig os.Signal) {
+	p, err := os.FindProcess(os.Getpid())
+	if err == nil {
+		err = p.Signal(sig)
+	}
+	if err != nil {
+		logger.Debug("could not re-raise signal", "signal", sig.String(), "error", err)
 	}
 }

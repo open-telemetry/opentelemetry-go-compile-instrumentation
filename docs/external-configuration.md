@@ -125,7 +125,7 @@ Each rule file should declare its minimum required `otelc` version with the rese
 top-level `version` key:
 
 ```yaml
-version: "v1.0.0"
+version: "v1.2.0"
 
 my_rule:
   target: example.com/package
@@ -134,8 +134,13 @@ my_rule:
 
 The requirement is evaluated per file. If a package contains multiple rule files, the
 highest declared minimum is the package's effective requirement. This also keeps standalone
-files supplied through `--rules` self-contained. For compatibility, an unversioned file is
-currently treated as requiring `v1.0.0` and produces a warning.
+files supplied through `--rules` self-contained. An unversioned file is treated as
+requiring `v1.0.0` and produces a warning.
+
+> [!NOTE]
+> `otelc` v1.2.0 is the first release that supports the top-level `version` key, so
+> `v1.2.0` is the lowest meaningful value. Earlier releases parse every top-level key
+> as a rule and fail on a scalar `version` entry.
 
 ## Discovery and Resolution Protocol
 

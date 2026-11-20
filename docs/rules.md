@@ -46,7 +46,7 @@ Every rule file declares the minimum `otelc` version required to read it. The re
 top-level `version` key is followed by map entries whose keys are rule names:
 
 ```yaml
-version: "v1.0.0"
+version: "v1.2.0"
 
 rule_name:
   target: <package pattern or list>   # required
@@ -68,6 +68,16 @@ The file-level `version` is a released `otelc` semantic version. Each rule's nes
 rule applies. When a package contains multiple rule files, `otelc` enforces the highest
 minimum version declared by those files. Legacy files without a top-level `version` are
 treated as requiring `v1.0.0` and produce a warning.
+
+> [!NOTE]
+> `otelc` v1.2.0 is the first release that supports the top-level `version` key.
+> Earlier releases parse every top-level key as a rule and reject a scalar
+> `version` entry, so they cannot read a file that declares it; those releases
+> use the instrumentation rules bundled with them instead. Published
+> instrumentation rule files — including the rules bundled with `otelc` under
+> `instrumentation/` — declare `version: "v1.2.0"`. A rule file that relies on
+> functionality added in a later `otelc` release should declare that release as
+> its minimum version.
 
 ### Top-level fields
 
@@ -309,7 +319,10 @@ Rules:
 
 ### Special `target` values
 
-- `target: main` — matches the compile-time package named `main`.
+- `target: main` — matches the compile-time package named `main`. Under
+  `otelc go test`, the main package compiles under its import path instead, so
+  `target: main` does not reach it or its `_test.go` files. List `main` together
+  with `$root` (or the import path) to cover both builds and tests.
 - `target: test_main` — not currently supported; reserved for future work.
 - `target: $root` — matches the root module of the build and every package
   below it. If a build spans multiple modules, it matches the union of all
@@ -520,7 +533,7 @@ The tool automatically reads the hook source file and ensures all of its imports
 
 #### Signature Sub-Filters
 
-By default the rule matches any function with the given name (and optional receiver). Eight optional sub-filters, placed under `where` alongside `func`, can narrow the match further by inspecting the function's parameter and result types. All specified sub-filters must match (AND logic); omitting a sub-filter places no constraint on that aspect of the signature.
+By default the rule matches any function with the given name (and optional receiver). Eight optional sub-filters, placed under `where` alongside `func`, can narrow the match further by inspecting the function's parameter and result types. All specified sub-filters must match (AND logic); omitting a sub-filter places no constraint on that aspect of the signature. The same sub-filters apply to `inject_code` rules.
 
 | Field | Type | Semantics |
 | --- | --- | --- |
@@ -694,6 +707,7 @@ This rule injects a string of raw Go code at the beginning of a target function.
 
 - `func` (string, required): The name of the target function.
 - `recv` (string, optional): The receiver type for a method.
+- `signature`, `signature_contains`, `param`, `result`, `last_result` (optional): The same signature sub-filters as [Function Hook Rule](#signature-sub-filters). They narrow the match to functions whose parameter and result types satisfy the filter. A filter that does not match leaves the function uninstrumented.
 - `pattern` (string, optional): The position within the function where the raw code should be injected. By default, the code is injected at the start of the function body. If provided, the value must be a valid regular expression.
 
   The pattern is matched against the canonical gofmt representation for each statement in the function body (not always the exact original source formatting). The injected code is placed immediately before/after the first statement that matches the pattern.
@@ -705,6 +719,8 @@ This rule injects a string of raw Go code at the beginning of a target function.
 **Modifier (`do: - inject_code:`):**
 
 - `raw` (string, required): The raw Go code to be injected. The code will be inserted at the beginning of the target function. If the string contains `{{`, it is additionally rendered as a Go standard [text/template](https://pkg.go.dev/text/template) template using the shared function template variables below before being parsed; code with no `{{` is injected verbatim, unaffected by this rendering step.
+
+- `lang` (string, optional): The minimum Go language version required by the injected code (e.g. `go1.18` or `go1.21`). When set, `otelc` raises the `-lang` flag on the compile command when the target module declares an older Go version. This allows modern language features like `any` or generics to compile. Language versions higher than `lang` are never lowered.
 
 Top-level `imports` (map[string]string, optional): A map of imports to inject into the target file. Required when the injected code references packages not already imported by the target. Same format as [Top-level fields](#top-level-fields).
 
@@ -1080,6 +1096,7 @@ Examples:
 - `net/http.Get` matches `http.Get()` where `http` is imported from `"net/http"`
 - `github.com/redis/go-redis/v9.Get` matches `redis.Get()` from that package
 - `database/sql.Open` matches `sql.Open()` calls
+- `slices.Sort` matches both `slices.Sort(s)` and the instantiation `slices.Sort[[]int](s)`
 
 **What does NOT match:**
 
@@ -1770,7 +1787,7 @@ The rewritten package imports `gocqltrace`, so `gocqltrace`'s `init` runs before
 
 **Matching:**
 
-`struct_literal` uses the same qualified form as `function_call`. It matches both the `T{...}` and `&T{...}` spellings, which share one composite-literal node, and resolves the package qualifier through the file's imports, so an aliased import (`import nethttp "net/http"`) matches on the import path rather than the alias.
+`struct_literal` uses the same qualified form as `function_call`. It matches both the `T{...}` and `&T{...}` spellings, which share one composite-literal node, matches a generic type with explicit type arguments (`T[int]{...}`), and resolves the package qualifier through the file's imports, so an aliased import (`import nethttp "net/http"`) matches on the import path rather than the alias.
 
 **Notes:**
 

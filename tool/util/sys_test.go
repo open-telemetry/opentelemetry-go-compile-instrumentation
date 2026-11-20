@@ -4,11 +4,13 @@
 package util
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -170,6 +172,47 @@ func TestRunCmdErrorMessages(t *testing.T) {
 	})
 }
 
+func TestRunCmdCancelSendsInterruptBeforeKilling(t *testing.T) {
+	if IsWindows() {
+		t.Skip("os.Interrupt is not implemented on Windows; Cancel keeps the default Kill")
+	}
+
+	marker := filepath.Join(t.TempDir(), "trapped")
+	ctx, cancel := context.WithCancel(t.Context())
+	start := time.Now()
+	errCh := make(chan error, 1)
+	go func() {
+		// trap writes the marker only if the shell receives SIGINT, not
+		// SIGKILL: SIGKILL cannot be trapped or handled at all. A busy loop
+		// of short sleeps, rather than one long sleep, lets the shell notice
+		// the signal between iterations instead of blocking in a single
+		// wait() call until it completes.
+		errCh <- RunCmd(ctx, "sh", "-c",
+			"trap 'touch "+marker+"; exit 0' INT; while true; do sleep 0.05; done")
+	}()
+
+	// Give the shell a moment to install its trap before canceling.
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-errCh:
+		// A canceled context makes exec.Cmd.Run report ctx.Err() regardless
+		// of how the process exited, so the error itself is not meaningful
+		// here; what matters is that it returned promptly (not after
+		// cancelGrace's hard-kill fallback) and the trap actually ran.
+		if elapsed := time.Since(start); elapsed >= cancelGrace {
+			t.Errorf("RunCmd took %s to return, want well under the %s kill grace, "+
+				"suggesting SIGINT did not reach the process", elapsed, cancelGrace)
+		}
+	case <-time.After(cancelGrace + 5*time.Second):
+		t.Fatal("RunCmd did not return after the context was canceled")
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("marker file not written, want the process to have caught SIGINT: %v", err)
+	}
+}
+
 func TestBuildFlagsRoundTrip(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -274,7 +317,7 @@ func TestListFiles_HiddenFileDoesNotSkipSiblings(t *testing.T) {
 		case "visible2.txt":
 			foundVisible2 = true
 		case ".hidden":
-			t.Fatalf("hidden file should not be returned")
+			t.Fatal("hidden file should not be returned")
 		}
 	}
 
@@ -323,7 +366,7 @@ func TestListFiles_SkipsHiddenDirectories(t *testing.T) {
 	}
 
 	if !foundVisible {
-		t.Fatalf("expected visible file to be returned")
+		t.Fatal("expected visible file to be returned")
 	}
 }
 
@@ -515,6 +558,50 @@ func TestWriteFileAtomic(t *testing.T) {
 			require.Empty(t, matches)
 		})
 	}
+}
+
+func TestWriteFileAtomic_FollowsSymlink(t *testing.T) {
+	root := t.TempDir()
+	realDir := filepath.Join(root, "real")
+	linkDir := filepath.Join(root, "link")
+	require.NoError(t, os.MkdirAll(realDir, 0o755))
+	require.NoError(t, os.MkdirAll(linkDir, 0o755))
+	target := filepath.Join(realDir, "go.mod")
+	require.NoError(t, os.WriteFile(target, []byte("old"), 0o644))
+
+	link := filepath.Join(linkDir, "go.mod")
+	if err := os.Symlink(filepath.Join("..", "real", "go.mod"), link); err != nil {
+		t.Skipf("symlinks are not available: %v", err)
+	}
+
+	require.NoError(t, WriteFileAtomic(link, []byte("new content")))
+
+	info, err := os.Lstat(link)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink, "the link must stay a link")
+	got, err := os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Equal(t, "new content", string(got), "the file the link points to must be updated")
+
+	for _, dir := range []string{realDir, linkDir} {
+		matches, globErr := filepath.Glob(filepath.Join(dir, "*.tmp-*"))
+		require.NoError(t, globErr)
+		assert.Empty(t, matches)
+	}
+}
+
+func TestWriteFileAtomic_DanglingSymlink(t *testing.T) {
+	root := t.TempDir()
+	link := filepath.Join(root, "go.mod")
+	if err := os.Symlink(filepath.Join(root, "missing"), link); err != nil {
+		t.Skipf("symlinks are not available: %v", err)
+	}
+
+	require.NoError(t, WriteFileAtomic(link, []byte("new content")))
+
+	got, err := os.ReadFile(link)
+	require.NoError(t, err)
+	assert.Equal(t, "new content", string(got))
 }
 
 func TestCRC32(t *testing.T) {

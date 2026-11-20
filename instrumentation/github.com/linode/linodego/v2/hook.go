@@ -137,6 +137,9 @@ func BeforeDoRequest(
 	_ interface{}, // requestParams
 	_ interface{}, // paginationMutator
 ) {
+	if !runtime.Ready() {
+		return
+	}
 	if !enabler.Enable() {
 		logger.Debug("linodego instrumentation disabled")
 		return
@@ -169,6 +172,10 @@ func BeforeDoRequest(
 func AfterDoRequest(ictx hook.HookContext, err error) {
 	span, ok := ictx.GetKeyData(keySpan).(trace.Span)
 	if !ok || span == nil {
+		// The logger is nil for a call skipped during package initialization.
+		if !runtime.Ready() {
+			return
+		}
 		logger.Debug("AfterDoRequest: no span from before hook")
 		return
 	}

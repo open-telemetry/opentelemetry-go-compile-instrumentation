@@ -110,7 +110,7 @@ func TestGetExisting(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := getExisting(t.Context(), tt.root)
+			result := Existing(t.Context(), tt.root)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

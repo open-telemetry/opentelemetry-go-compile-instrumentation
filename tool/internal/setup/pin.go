@@ -592,7 +592,7 @@ func generatePinnedProjects(ctx context.Context, moduleDirs []string, opts PinOp
 
 	ruleset, err := loadMinimalRules(
 		ctx,
-		filepath.Join(util.GetBuildTempDir(), unzippedInstDir),
+		filepath.Join(util.GetInvocationDir(), unzippedInstDir),
 		util.Version,
 	)
 	if err != nil {
@@ -649,7 +649,7 @@ func prepareVendoredBuild(
 	subcommand string,
 	args []string,
 ) ([]string, error) {
-	if !vendoringActive(ctx, util.GetOtelcWorkDir()) {
+	if !vendoringActive(ctx, buildDir(subcommand, args)) {
 		return args, nil
 	}
 
@@ -692,7 +692,8 @@ type PinResult struct {
 // re-parsing compile commands again.
 func Pin(ctx context.Context, opts PinOptions) (*PinResult, error) {
 	var result *PinResult
-	err := withBuildLock(ctx, func(ctx context.Context) error {
+	dir, _ := leadingDirFlag(opts.Args)
+	err := withBuildLock(ctx, dir, func(ctx context.Context) error {
 		var pinErr error
 		result, pinErr = pinLocked(ctx, opts)
 		return pinErr
@@ -748,7 +749,7 @@ func autoPin(ctx context.Context, moduleDirs []string, subcommand string, args [
 		return nil, ex.New("state manager not found in context")
 	}
 
-	backupFiles, getBackupErr := getBackupFiles(ctx, moduleDirs)
+	backupFiles, getBackupErr := getBackupFiles(ctx, buildDir(subcommand, args), moduleDirs)
 	if getBackupErr != nil {
 		return nil, getBackupErr
 	}
