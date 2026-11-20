@@ -35,8 +35,8 @@ func compareEntries(a, b Entry) int {
 	if cmp := strings.Compare(a.Target, b.Target); cmp != 0 {
 		return cmp
 	}
-	if cmp := strings.Compare(a.Version, b.Version); cmp != 0 {
+	if cmp := strings.Compare(a.VersionRange, b.VersionRange); cmp != 0 {
 		return cmp
 	}
-	return strings.Compare(a.VersionRange, b.VersionRange)
+	return strings.Compare(a.Version, b.Version)
 }

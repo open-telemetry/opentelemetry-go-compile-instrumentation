@@ -4,8 +4,6 @@
 # Use bash for all shell commands (required for pipefail and other bash features)
 SHELL := /bin/bash
 
-export GOEXPERIMENT ?= $(shell go env GOEXPERIMENT)
-
 # Many recipes use .ONESHELL, so that "set -euo pipefail" applies to all the
 # lines of the recipe. GNU Make 3.81 (the default on macOS) does not support
 # .ONESHELL: it runs each line in a different shell, and failures can be

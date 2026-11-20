@@ -879,3 +879,79 @@ func TestWalkInstrumentationParseError(t *testing.T) {
 	)
 	require.Error(t, err)
 }
+
+func TestHasUnresolvedConfigs(t *testing.T) {
+	require.True(t, hasUnresolvedConfigs(nil, []string{"a"}))
+	require.True(t, hasUnresolvedConfigs(map[string]*instrumentationConfig{}, []string{"a"}))
+	require.True(t, hasUnresolvedConfigs(map[string]*instrumentationConfig{
+		"a": nil,
+	}, []string{"a"}))
+	require.True(t, hasUnresolvedConfigs(map[string]*instrumentationConfig{
+		"a": {Error: errors.New("err")},
+	}, []string{"a"}))
+	require.True(t, hasUnresolvedConfigs(map[string]*instrumentationConfig{
+		"a": {},
+	}, []string{"a", "b"}))
+	require.False(t, hasUnresolvedConfigs(map[string]*instrumentationConfig{
+		"a": {},
+		"b": {},
+	}, []string{"a", "b"}))
+}
+
+func TestMergeResolvedConfigs(t *testing.T) {
+	valid := &instrumentationConfig{ImportPath: "example.com/mod"}
+	errCfg := &instrumentationConfig{ImportPath: "example.com/mod", Error: errors.New("failed")}
+
+	// nil target returns fallback
+	merged := mergeResolvedConfigs(
+		nil,
+		map[string]*instrumentationConfig{"example.com/mod": valid},
+		[]string{"example.com/mod"},
+	)
+	require.Equal(t, valid, merged["example.com/mod"])
+
+	// target with error is replaced by valid fallback
+	target := map[string]*instrumentationConfig{"example.com/mod": errCfg}
+	fallback := map[string]*instrumentationConfig{"example.com/mod": valid}
+	merged = mergeResolvedConfigs(target, fallback, []string{"example.com/mod"})
+	require.Equal(t, valid, merged["example.com/mod"])
+
+	// target with valid config is not overwritten
+	customValid := &instrumentationConfig{ImportPath: "example.com/mod"}
+	target = map[string]*instrumentationConfig{"example.com/mod": customValid}
+	merged = mergeResolvedConfigs(target, fallback, []string{"example.com/mod"})
+	require.Equal(t, customValid, merged["example.com/mod"])
+
+	// fallback with error does not overwrite target error
+	fallbackErr := map[string]*instrumentationConfig{"example.com/mod": errCfg}
+	target = map[string]*instrumentationConfig{"example.com/mod": errCfg}
+	merged = mergeResolvedConfigs(target, fallbackErr, []string{"example.com/mod"})
+	require.Equal(t, errCfg, merged["example.com/mod"])
+}
+
+func TestResolveConfigsWithFallback(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Root module knows where both foo and bar live
+	rootDir := filepath.Join(tmp, "app")
+	writeInstrumentationModule(t, rootDir, "example.com/app", false, map[string]string{
+		"example.com/foo": filepath.Join(tmp, "foo"),
+		"example.com/bar": filepath.Join(tmp, "bar"),
+	})
+
+	// Foo module has no replace directive for bar
+	fooDir := filepath.Join(tmp, "foo")
+	writeInstrumentationModule(t, fooDir, "example.com/foo", true, nil)
+
+	// Bar module
+	barDir := filepath.Join(tmp, "bar")
+	writeInstrumentationModule(t, barDir, "example.com/bar", true, nil)
+
+	// Resolving bar from fooDir alone fails or cannot find bar
+	// But passing rootDir in rootDirs allows resolving bar via fallback
+	cfgs, err := resolveConfigsWithFallback(t.Context(), fooDir, []string{rootDir}, []string{"example.com/bar"})
+	require.NoError(t, err)
+	require.NotNil(t, cfgs["example.com/bar"])
+	require.NoError(t, cfgs["example.com/bar"].Error)
+	require.NotEmpty(t, cfgs["example.com/bar"].RuleFiles)
+}

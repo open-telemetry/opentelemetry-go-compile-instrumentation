@@ -90,3 +90,44 @@ http:
 	err := run()
 	require.ErrorContains(t, err, "write instrumentation manifest")
 }
+
+func TestRunCustomFlags(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+
+	writeModule(t, root, "instrumentation/example", "example.com/instrumentation/example")
+	writeRuleFile(t, root, "instrumentation/example/otelc.yaml", `
+http:
+  target: net/http
+`)
+	outDir := filepath.Join(root, "custom")
+	require.NoError(t, os.MkdirAll(outDir, 0o755))
+	outFile := filepath.Join(outDir, "custom-manifest.json")
+
+	var capturedVersion string
+	origFetch := fetchRepo
+	fetchRepo = func(version string) (string, string, func(), error) {
+		capturedVersion = version
+		return "v2.0.0", root, func() {}, nil
+	}
+	t.Cleanup(func() { fetchRepo = origFetch })
+
+	require.NoError(t, run("-version", "v2.0.0", "-output", outFile))
+	require.Equal(t, "v2.0.0", capturedVersion)
+
+	content, err := os.ReadFile(outFile)
+	require.NoError(t, err)
+
+	var got Manifest
+	require.NoError(t, json.Unmarshal(content, &got))
+	require.Equal(t, Manifest{{
+		ModulePath: "example.com/instrumentation/example",
+		Target:     "net/http",
+		Version:    "v2.0.0",
+	}}, got)
+}
+
+func TestRunInvalidFlag(t *testing.T) {
+	err := run("-nonexistent-flag")
+	require.Error(t, err)
+}

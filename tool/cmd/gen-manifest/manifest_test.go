@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -548,25 +549,16 @@ rule:
 }
 
 func compareEntries(a, b Entry) int {
-	if a.ModulePath < b.ModulePath {
-		return -1
+	if cmp := strings.Compare(a.ModulePath, b.ModulePath); cmp != 0 {
+		return cmp
 	}
-	if a.ModulePath > b.ModulePath {
-		return 1
+	if cmp := strings.Compare(a.Target, b.Target); cmp != 0 {
+		return cmp
 	}
-	if a.Target < b.Target {
-		return -1
+	if cmp := strings.Compare(a.VersionRange, b.VersionRange); cmp != 0 {
+		return cmp
 	}
-	if a.Target > b.Target {
-		return 1
-	}
-	if a.VersionRange < b.VersionRange {
-		return -1
-	}
-	if a.VersionRange > b.VersionRange {
-		return 1
-	}
-	return 0
+	return strings.Compare(a.Version, b.Version)
 }
 
 func writeModule(t *testing.T, root, relative, modulePath string) {
