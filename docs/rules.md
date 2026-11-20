@@ -10,6 +10,7 @@
   - [`where` semantics](#where-semantics)
   - [`where.file` semantics](#wherefile-semantics)
   - [`do` semantics](#do-semantics)
+    - [Application order](#application-order)
   - [Modifier names → rule types](#modifier-names--rule-types)
   - [Special `target` values](#special-target-values)
   - [Glob targets](#glob-targets)
@@ -298,8 +299,58 @@ Rules:
 
 - The sequence form is canonical and used in all in-repo examples.
 - Each list item is a single-key map whose key names the modifier.
-- Duplicate modifier kinds are allowed; declaration order is preserved.
+- Duplicate modifier kinds are allowed. Items of the same kind are applied in declaration order. See [Application order](#application-order) for what this means for the generated code.
 - `do` must not be missing or empty.
+
+#### Application order
+
+otelc applies the rules that match a file one at a time. `add_file` rules come first. By default, the other rules are applied by modifier kind, in this order: `inject_hooks`, `add_struct_fields`, `inject_code`, `wrap_call`, `set_fields` and `wrap_literal`, `expand_directive`, `assign_value`. Rules of the same kind keep an order that does not change between builds, but that depends on where the rules come from.
+
+`expand_directive`, and `inject_code` without `pattern`, put their code above the code that is already at the start of the function, so the code of the rule applied last runs first. This is also true for two items of one `do` sequence: the code of the second item runs first. `inject_code` with `pattern` puts its code next to the matched statement. With `placement: before`, the code of the rule applied first runs first. With `placement: after`, the code of the rule applied last runs first.
+
+To set the order of this code, use `order` (integer, optional, default `0`) on an `inject_code` or `expand_directive` modifier. Rules with a lower `order` are applied first, so at the start of a function the code of a rule with a higher `order` runs first. Rules with the same `order` keep the default order. `order` changes the order of rules of all kinds. For example, an `inject_code` with a negative `order` is applied before the `inject_hooks` rules, so its code runs after their `before` hooks. The other modifiers do not accept `order`, and `order` is not accepted at the top level of a rule.
+
+In this example, the tracer must start before the span of an annotated `main` starts, and stop after the span ends:
+
+```yaml
+start_tracer:
+  target: main
+  where:
+    func: main
+  do:
+    - inject_code:
+        order: 50
+        raw: |-
+          tracer.Start()
+          defer tracer.Stop()
+  imports:
+    tracer: example.com/tracer
+
+span_directive:
+  target: main
+  where:
+    directive: "otelc:span"
+  do:
+    - expand_directive:
+        template: |-
+          span := tracer.StartSpan("{{ .FuncName }}")
+          defer span.End()
+  imports:
+    tracer: example.com/tracer
+```
+
+Without `order`, `start_tracer` is applied first and the span code runs before `tracer.Start()`. With `order: 50`, the result is:
+
+```go
+//otelc:span
+func main() {
+    tracer.Start()
+    defer tracer.Stop()
+    span := tracer.StartSpan("main")
+    defer span.End()
+    // original body
+}
+```
 
 ### Modifier names → rule types
 

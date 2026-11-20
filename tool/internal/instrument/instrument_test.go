@@ -717,6 +717,36 @@ func TestGroupRules(t *testing.T) {
 			},
 			expectedFiles: []string{"aaa.go", "mmm.go", "zzz.go"},
 		},
+		{
+			name: "rules are sorted by order, then by kind and match order",
+			ruleSet: &rule.InstRuleSet{
+				FuncRules: map[string][]*rule.InstFuncRule{
+					"file1.go": {{InstBaseRule: rule.InstBaseRule{Name: "hook"}}},
+				},
+				RawRules: map[string][]*rule.InstRawRule{
+					"file1.go": {
+						{InstBaseRule: rule.InstBaseRule{Name: "raw_100", Order: 100}},
+						{InstBaseRule: rule.InstBaseRule{Name: "raw_0_first"}},
+						{InstBaseRule: rule.InstBaseRule{Name: "raw_minus_1", Order: -1}},
+						{InstBaseRule: rule.InstBaseRule{Name: "raw_50", Order: 50}},
+						{InstBaseRule: rule.InstBaseRule{Name: "raw_0_second"}},
+					},
+				},
+				DirectiveRules: map[string][]*rule.InstDirectiveRule{
+					"file1.go": {{InstBaseRule: rule.InstBaseRule{Name: "directive"}}},
+				},
+			},
+			expectedFiles: []string{"file1.go"},
+			validate: func(t *testing.T, grouped map[string][]rule.InstRule) {
+				names := make([]string, 0, len(grouped["file1.go"]))
+				for _, r := range grouped["file1.go"] {
+					names = append(names, r.GetName())
+				}
+				assert.Equal(t, []string{
+					"raw_minus_1", "hook", "raw_0_first", "raw_0_second", "directive", "raw_50", "raw_100",
+				}, names)
+			},
+		},
 	}
 
 	for _, tt := range tests {

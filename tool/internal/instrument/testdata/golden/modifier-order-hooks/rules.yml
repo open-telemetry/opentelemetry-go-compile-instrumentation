@@ -1,0 +1,29 @@
+# The inject_code rule with order -1 is applied before the hook, so its code
+# runs after the before hook. The inject_code rule with the default order is
+# applied after the hook, so its code runs first.
+hook_func:
+  target: main
+  where:
+    func: Func1
+  do:
+    - inject_hooks:
+        before: H1Before
+        after: H1After
+        path: testdata/golden/modifier-order-hooks
+
+add_raw_code:
+  target: main
+  where:
+    func: Func1
+  do:
+    - inject_code:
+        raw: "_ = 456"
+
+add_raw_code_after_hook:
+  target: main
+  where:
+    func: Func1
+  do:
+    - inject_code:
+        order: -1
+        raw: "_ = 789"

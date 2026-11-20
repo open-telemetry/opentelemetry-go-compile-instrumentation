@@ -286,6 +286,85 @@ func TestFileRules_InjectCodeKeepsSignatureFilters(t *testing.T) {
 	assert.Equal(t, "error", raw.LastResult)
 }
 
+func TestFileRules_Order(t *testing.T) {
+	tests := []struct {
+		name      string
+		content   string
+		wantOrder []int
+		wantErr   string
+	}{
+		{
+			name:      "inject_code",
+			content:   "rule:\n  target: main\n  where:\n    func: main\n  do:\n    - inject_code:\n        raw: _ = 0\n        order: 50\n",
+			wantOrder: []int{50},
+		},
+		{
+			name: "expand_directive",
+			content: "rule:\n  target: main\n  where:\n    directive: otelc:span\n" +
+				"  do:\n    - expand_directive:\n        template: _ = 0\n        order: -10\n",
+			wantOrder: []int{-10},
+		},
+		{
+			name:      "map form",
+			content:   "rule:\n  target: main\n  where:\n    func: main\n  do:\n    inject_code:\n      raw: _ = 0\n      order: 7\n",
+			wantOrder: []int{7},
+		},
+		{
+			name: "each do item keeps its own order",
+			content: "rule:\n  target: main\n  where:\n    func: main\n  do:\n" +
+				"    - inject_code:\n        raw: _ = 1\n        order: 2\n" +
+				"    - inject_code:\n        raw: _ = 2\n",
+			wantOrder: []int{2, 0},
+		},
+		{
+			name: "inject_hooks",
+			content: "rule:\n  target: main\n  where:\n    func: main\n" +
+				"  do:\n    - inject_hooks:\n        before: Before\n        path: example.com/hooks\n        order: 1\n",
+			wantErr: `do[0]: modifier "inject_hooks" does not accept order`,
+		},
+		{
+			name: "add_struct_fields",
+			content: "rule:\n  target: main\n  where:\n    struct: Server\n" +
+				"  do:\n    add_struct_fields:\n      new_field:\n        - name: X\n          type: int\n      order: 1\n",
+			wantErr: `modifier "add_struct_fields" does not accept order`,
+		},
+		{
+			name:    "top level",
+			content: "rule:\n  target: main\n  order: 1\n  where:\n    func: main\n  do:\n    - inject_code:\n        raw: _ = 0\n",
+			wantErr: "order must be set on a do modifier",
+		},
+		{
+			name:    "string",
+			content: "rule:\n  target: main\n  where:\n    func: main\n  do:\n    - inject_code:\n        raw: _ = 0\n        order: high\n",
+			wantErr: "order must be an integer, got high",
+		},
+		{
+			name:    "float",
+			content: "rule:\n  target: main\n  where:\n    func: main\n  do:\n    - inject_code:\n        raw: _ = 0\n        order: 1.5\n",
+			wantErr: "order must be an integer, got 1.5",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file, err := ParseFile([]byte(test.content))
+			require.NoError(t, err)
+
+			rules, err := file.Rules()
+			if test.wantErr != "" {
+				require.ErrorContains(t, err, test.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			got := make([]int, 0, len(rules))
+			for _, r := range rules {
+				got = append(got, r.GetOrder())
+			}
+			assert.Equal(t, test.wantOrder, got)
+		})
+	}
+}
+
 func TestFileRulesDecodeError(t *testing.T) {
 	var node yaml.Node
 	require.NoError(t, yaml.Unmarshal([]byte("- value"), &node))
