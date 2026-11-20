@@ -34,8 +34,11 @@ require example.com/otelc-cgo-vet/instrumentation v0.0.0
 
 replace example.com/otelc-cgo-vet/instrumentation => ./instrumentation
 
-replace go.opentelemetry.io/otelc/pkg => %s
-`, filepath.ToSlash(filepath.Join(repoRoot, "pkg"))))
+replace (
+	go.opentelemetry.io/otelc => %s
+	go.opentelemetry.io/otelc/pkg => %s
+)
+`, filepath.ToSlash(repoRoot), filepath.ToSlash(filepath.Join(repoRoot, "pkg"))))
 	writeTestFile(t, moduleDir, "otel.instrumentation.go", `// Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 

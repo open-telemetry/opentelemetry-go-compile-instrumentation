@@ -6,6 +6,7 @@
 package test
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,21 +31,78 @@ func TestGcflagsBuildLinks(t *testing.T) {
 	otelcPath, err = filepath.Abs(otelcPath)
 	require.NoError(t, err)
 
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	require.NoError(t, err)
+	repoRootSlash := filepath.ToSlash(repoRoot)
+
 	moduleDir := t.TempDir()
-	writeTestFile(t, moduleDir, "go.mod", "module example.com/otelc-gcflags\n\ngo 1.25.0\n")
+	writeTestFile(t, moduleDir, "go.mod", fmt.Sprintf(`module example.com/otelc-gcflags
+
+go 1.25.0
+
+require (
+	example.com/otelc-gcflags/hooks v0.0.0
+	go.opentelemetry.io/otelc/pkg v0.0.0
+)
+
+replace (
+	example.com/otelc-gcflags/hooks => ./hooks
+	go.opentelemetry.io/otelc => %s
+	go.opentelemetry.io/otelc/pkg => %s/pkg
+)
+`, repoRootSlash, repoRootSlash))
+	writeTestFile(t, moduleDir, "otel.instrumentation.go", `//go:build tools
+
+package tools
+
+import _ "example.com/otelc-gcflags/hooks"
+`)
+	writeTestFile(t, moduleDir, filepath.Join("hooks", "go.mod"), fmt.Sprintf(`module example.com/otelc-gcflags/hooks
+
+go 1.25.0
+
+require go.opentelemetry.io/otelc/pkg v0.0.0
+
+replace go.opentelemetry.io/otelc/pkg => %s/pkg
+`, repoRootSlash))
+	writeTestFile(t, moduleDir, filepath.Join("hooks", "hooks.go"), `// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package hooks
+
+import (
+	"fmt"
+
+	"go.opentelemetry.io/otelc/pkg/hook"
+)
+
+func Before(ctx hook.HookContext) {
+	_ = ctx
+	fmt.Println("hook called")
+}
+`)
+	writeTestFile(t, moduleDir, filepath.Join("hooks", "otelc.yaml"), `hook_target:
+  target: main
+  where:
+    func: Target
+  do:
+    - inject_hooks:
+        before: Before
+        path: example.com/otelc-gcflags/hooks
+`)
 	writeTestFile(t, moduleDir, "main.go", `// Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package main
 
-import (
-	"fmt"
-	"net/http"
-)
+import "fmt"
+
+func Target() {
+	fmt.Println("target called")
+}
 
 func main() {
-	_, err := http.Get("http://127.0.0.1:1/")
-	fmt.Println(err != nil)
+	Target()
 }
 `)
 
@@ -70,7 +128,7 @@ func main() {
 			runOtelcCommand(t, moduleDir, os.Environ(), otelcPath, append(args, ".")...)
 
 			symbols := goOutput(t, moduleDir, "tool", "nm", binary)
-			require.Contains(t, symbols, "otelc/instrumentation/net/http", "net/http was not instrumented")
+			require.Contains(t, symbols, "example.com/otelc-gcflags/hooks.Before", "hook was not linked")
 			buildInfo := goOutput(t, moduleDir, "version", "-m", binary)
 			require.Contains(t, buildInfo, tt.recorded, "the binary was not built with the requested flags")
 
@@ -78,7 +136,8 @@ func main() {
 			run.Dir = moduleDir
 			out, runErr := run.CombinedOutput()
 			require.NoError(t, runErr, string(out))
-			require.Contains(t, string(out), "true")
+			require.Contains(t, string(out), "hook called")
+			require.Contains(t, string(out), "target called")
 		})
 	}
 }

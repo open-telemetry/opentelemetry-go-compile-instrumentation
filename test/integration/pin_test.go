@@ -27,11 +27,17 @@ const toolFileCanonical = "otel.instrumentation.go"
 func writePinApp(t *testing.T) string {
 	t.Helper()
 
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	require.NoError(t, err)
+	repoRootSlash := filepath.ToSlash(repoRoot)
+
 	const pinApp = "pinapp"
-	const pinAppGoMod = `module pinapp
+	pinAppGoMod := fmt.Sprintf(`module pinapp
 
 go 1.25.0
-`
+
+replace go.opentelemetry.io/otelc => %s
+`, repoRootSlash)
 	const pinAppMain = `package main
 
 import "net/http"
@@ -97,6 +103,10 @@ func writeInstrumentationModule(
 ) string {
 	t.Helper()
 
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	require.NoError(t, err)
+	repoRootSlash := filepath.ToSlash(repoRoot)
+
 	require.NoError(t, os.MkdirAll(root, 0o755))
 
 	goMod := fmt.Appendf(nil, "module %s\n\ngo 1.25\n", module)
@@ -106,6 +116,7 @@ func writeInstrumentationModule(
 	for imp, replace := range imports {
 		goMod = fmt.Appendf(goMod, "\nreplace %s => %s\n", imp, replace)
 	}
+	goMod = fmt.Appendf(goMod, "\nreplace go.opentelemetry.io/otelc => %s\n", repoRootSlash)
 	require.NoError(t, os.WriteFile(
 		filepath.Join(root, "go.mod"),
 		goMod,
@@ -151,7 +162,7 @@ func TestPin_GeneratesNewToolFile(t *testing.T) {
 	require.Contains(
 		t,
 		string(content),
-		"_ "+strconv.Quote("go.opentelemetry.io/otelc/instrumentation/net/http/client"),
+		"_ "+strconv.Quote("go.opentelemetry.io/otelc-contrib/instrumentation/net/http/otelchttp/client"),
 	)
 
 	goMod, goModErr := os.ReadFile(filepath.Join(workDir, "go.mod"))
@@ -164,7 +175,7 @@ func TestPin_GeneratesNewToolFile(t *testing.T) {
 	require.Contains(t, string(goMod), "go.opentelemetry.io/otelc")
 
 	// Ensure the http integration is within the go.mod file, which ensures it is pinned as a dependency.
-	require.Contains(t, string(goMod), "go.opentelemetry.io/otelc/instrumentation/net/http/client")
+	require.Contains(t, string(goMod), "go.opentelemetry.io/otelc-contrib/instrumentation/net/http/otelchttp/client")
 }
 
 func TestPin_PrunesInvalidImports(t *testing.T) {

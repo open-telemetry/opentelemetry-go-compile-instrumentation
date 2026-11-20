@@ -6,6 +6,7 @@
 package test
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,11 +30,81 @@ func TestPGOBuildIsInstrumented(t *testing.T) {
 	otelcPath, err = filepath.Abs(otelcPath)
 	require.NoError(t, err)
 
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	require.NoError(t, err)
+	repoRootSlash := filepath.ToSlash(repoRoot)
+
 	// Resolve symlinks (e.g. /var -> /private/var on macOS) so the recorded
 	// -pgo path can be compared literally.
 	moduleDir, err := filepath.EvalSymlinks(t.TempDir())
 	require.NoError(t, err)
-	writeTestFile(t, moduleDir, "go.mod", "module example.com/otelc-pgo\n\ngo 1.25.0\n")
+	writeTestFile(t, moduleDir, "go.mod", fmt.Sprintf(`module example.com/otelc-pgo
+
+go 1.25.0
+
+require (
+	example.com/otelc-pgo/hooks v0.0.0
+	go.opentelemetry.io/otelc/pkg v0.0.0
+)
+
+replace (
+	example.com/otelc-pgo/hooks => ./hooks
+	go.opentelemetry.io/otelc => %s
+	go.opentelemetry.io/otelc/pkg => %s/pkg
+)
+`, repoRootSlash, repoRootSlash))
+	writeTestFile(t, moduleDir, "otel.instrumentation.go", `//go:build tools
+
+package tools
+
+import _ "example.com/otelc-pgo/hooks"
+`)
+	writeTestFile(t, moduleDir, filepath.Join("hooks", "go.mod"), fmt.Sprintf(`module example.com/otelc-pgo/hooks
+
+go 1.25.0
+
+require go.opentelemetry.io/otelc/pkg v0.0.0
+
+replace go.opentelemetry.io/otelc/pkg => %s/pkg
+`, repoRootSlash))
+	writeTestFile(t, moduleDir, filepath.Join("hooks", "hooks.go"), `// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package hooks
+
+import (
+	"fmt"
+
+	"go.opentelemetry.io/otelc/pkg/hook"
+)
+
+func Before(ctx hook.HookContext) {
+	_ = ctx
+	fmt.Println("hook executed")
+}
+`)
+	writeTestFile(t, moduleDir, filepath.Join("hooks", "otelc.yaml"), `hook_work:
+  target: example.com/otelc-pgo/lib
+  where:
+    func: Work
+  do:
+    - inject_hooks:
+        before: Before
+        path: example.com/otelc-pgo/hooks
+`)
+	writeTestFile(t, moduleDir, filepath.Join("lib", "lib.go"), `// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package lib
+
+func Work() int {
+	s := 0
+	for i := 0; i < 10000; i++ {
+		s += i
+	}
+	return s
+}
+`)
 	writeTestFile(t, moduleDir, "main.go", `// Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
@@ -41,39 +112,17 @@ package main
 
 import (
 	"fmt"
-	"io"
-	"net"
-	"net/http"
 	"os"
 	"runtime/pprof"
 	"time"
+
+	"example.com/otelc-pgo/lib"
 )
 
-func profileHTTP() {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		panic(err)
-	}
-	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, "profile response")
-	})}
-	defer server.Close()
-	go server.Serve(listener)
-	url := "http://" + listener.Addr().String()
-	deadline := time.Now().Add(10 * time.Second)
+func runWork() {
+	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) {
-		resp, err := http.Get(url)
-		if err != nil {
-			panic(err)
-		}
-		_, err = io.Copy(io.Discard, resp.Body)
-		closeErr := resp.Body.Close()
-		if err != nil {
-			panic(err)
-		}
-		if closeErr != nil {
-			panic(closeErr)
-		}
+		_ = lib.Work()
 	}
 }
 
@@ -86,13 +135,12 @@ func main() {
 		if err := pprof.StartCPUProfile(f); err != nil {
 			panic(err)
 		}
-		profileHTTP()
+		runWork()
 		pprof.StopCPUProfile()
 		_ = f.Close()
 		return
 	}
-	_, err := http.Get("http://127.0.0.1:1/")
-	fmt.Println(err != nil)
+	fmt.Println(lib.Work())
 }
 `)
 
@@ -108,11 +156,17 @@ func main() {
 	runOtelcCommand(t, moduleDir, os.Environ(), otelcPath, "go", "build", "-o", binary, ".")
 
 	symbols := goOutput(t, moduleDir, "tool", "nm", binary)
-	require.Contains(t, symbols, "otelc/instrumentation/net/http",
-		"net/http was not instrumented in a build with default.pgo")
+	require.Contains(t, symbols, "example.com/otelc-pgo/hooks.Before",
+		"hook was not instrumented in a build with default.pgo")
 
 	buildInfo := goOutput(t, moduleDir, "version", "-m", binary)
 	require.Contains(t, buildInfo, "-pgo="+profile, "the build no longer applies the PGO profile")
+
+	run := exec.CommandContext(t.Context(), binary)
+	run.Dir = moduleDir
+	runOut, runErr := run.CombinedOutput()
+	require.NoError(t, runErr, string(runOut))
+	require.Contains(t, string(runOut), "hook executed")
 }
 
 func goOutput(t *testing.T, dir string, args ...string) string {
