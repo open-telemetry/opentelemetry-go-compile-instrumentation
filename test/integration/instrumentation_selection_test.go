@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -32,20 +33,22 @@ func TestExplicitInstrumentationSelection(t *testing.T) {
 
 	matchedData, readErr := os.ReadFile(matched)
 	require.NoError(t, readErr)
-	require.Contains(
+	require.True(
 		t,
-		string(matchedData),
-		util.OtelcRoot+"/instrumentation/net/http/server",
+		strings.Contains(string(matchedData), util.OtelcRoot+"/instrumentation/net/http/server") ||
+			strings.Contains(string(matchedData), "go.opentelemetry.io/otelc-contrib/instrumentation/net/http/otelchttp/server"),
+		"net/http server instrumentation not found in matched.json",
 	)
 	require.Contains(
 		t,
 		string(matchedData),
 		util.OtelcRoot+"/test/apps/gincustom/instrumentation",
 	)
-	require.NotContains(
+	require.False(
 		t,
-		string(matchedData),
-		util.OtelcRoot+"/instrumentation/github.com/gin-gonic/gin",
+		strings.Contains(string(matchedData), util.OtelcRoot+"/instrumentation/github.com/gin-gonic/gin") ||
+			strings.Contains(string(matchedData), "go.opentelemetry.io/otelc-contrib/instrumentation/github.com/gin-gonic/gin"),
+		"built-in gin instrumentation must not be selected",
 	)
 
 	f := testutil.NewTestFixture(t)
