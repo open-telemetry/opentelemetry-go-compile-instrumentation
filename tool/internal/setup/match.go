@@ -171,27 +171,71 @@ func (sp *setupPhase) runMatch(
 		return set, nil
 	}
 
-	// filter rules by version
-	filteredRules := make([]rule.InstRule, 0, len(relevantRules))
-	for _, r := range relevantRules {
+	filteredRules := sp.filterVersionMatchedRules(dep, relevantRules)
+	if len(filteredRules) == 0 {
+		return set, nil
+	}
+
+	return sp.matchFilteredRules(ctx, dep, filteredRules, set)
+}
+
+func (sp *setupPhase) filterVersionMatchedRules(
+	dep *Dependency,
+	rules []rule.InstRule,
+) []rule.InstRule {
+	filtered := make([]rule.InstRule, 0, len(rules))
+	for _, r := range rules {
 		if !matchVersion(dep, r) {
 			sp.reportDecision("", r, "version_mismatch")
 			if unresolvedVersionSkip(dep.Version, r.GetVersion()) {
-				// Per-rule: setup drops individual rules, so each skip is actionable.
 				warnUnresolvedVersionSkip(sp.Warn, dep.ImportPath, r.GetVersion(),
 					"rule", r.GetName(),
 				)
 			}
 			continue
 		}
-		filteredRules = append(filteredRules, r)
+		filtered = append(filtered, r)
 	}
+	return filtered
+}
 
+func (sp *setupPhase) matchFilteredRules(
+	ctx context.Context,
+	dep *Dependency,
+	filteredRules []rule.InstRule,
+	set *rule.InstRuleSet,
+) (*rule.InstRuleSet, error) {
 	// Separate file rules from rules that need precise matching
 	preciseRules := make([]rule.InstRule, 0, len(filteredRules))
+	var trees []*dst.File
+	treesParsed := false
+	parseTrees := func() ([]*dst.File, error) {
+		if treesParsed {
+			return trees, nil
+		}
+		var err error
+		trees, err = parsePackageSources(ctx, dep)
+		if err != nil {
+			return nil, err
+		}
+		treesParsed = true
+		return trees, nil
+	}
 	for _, r := range filteredRules {
-		// If the rule is a file rule, it is always applicable
 		if fr, ok := r.(*rule.InstFileRule); ok {
+			if fr.GetWhere() == nil {
+				set.AddFileRule(fr)
+				sp.Info("Match file rule", "rule", fr, "dep", dep)
+				continue
+			}
+			applies, matchErr := fileRuleApplies(dep, fr, parseTrees)
+			if matchErr != nil {
+				return nil, matchErr
+			}
+			if !applies {
+				sp.Debug("Skip file rule, where clause did not match", "rule", fr, "dep", dep)
+				continue
+			}
 			set.AddFileRule(fr)
 			sp.reportDecision("", r, "")
 			sp.Info("Match file rule", "rule", fr, "dep", dep)
@@ -204,7 +248,7 @@ func (sp *setupPhase) runMatch(
 
 	if len(preciseRules) == 0 {
 		if !set.IsEmpty() && len(dep.Sources) > 0 {
-			name, err := ast.ParsePackageName(dep.Sources[0])
+			name, err := packageNameForSet(dep, trees, treesParsed)
 			if err != nil {
 				return nil, err
 			}
@@ -214,7 +258,62 @@ func (sp *setupPhase) runMatch(
 		return set, nil
 	}
 
-	return sp.preciseMatching(ctx, dep, preciseRules, set)
+	if !treesParsed {
+		if _, err := parseTrees(); err != nil {
+			return nil, err
+		}
+	}
+	return sp.preciseMatchingWithTrees(ctx, dep, preciseRules, set, trees)
+}
+
+// packageNameForSet returns the dependency's package-clause name. When a file
+// rule's where clause already parsed the package, it reads the clause from that
+// tree instead of reading the first source from disk again.
+func packageNameForSet(dep *Dependency, trees []*dst.File, treesParsed bool) (string, error) {
+	if treesParsed && len(trees) > 0 {
+		return trees[0].Name.Name, nil
+	}
+	return ast.ParsePackageName(dep.Sources[0])
+}
+
+func parsePackageSources(ctx context.Context, dep *Dependency) ([]*dst.File, error) {
+	trees := make([]*dst.File, 0, len(dep.Sources))
+	for _, source := range dep.Sources {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		tree, err := ast.ParseFileFast(source)
+		if err != nil {
+			return nil, err
+		}
+		trees = append(trees, tree)
+	}
+	return trees, nil
+}
+
+// fileRuleApplies reports whether a file rule's where clause holds for dep. The
+// rule adds one file to the whole package, so the clause is checked against the
+// package rather than each file on its own. parseTrees supplies the package AST
+// lazily: a pure is_test (or empty) where is decided without parsing it.
+func fileRuleApplies(dep *Dependency, fr *rule.InstFileRule, parseTrees func() ([]*dst.File, error)) (bool, error) {
+	where := fr.GetWhere()
+	if where == nil {
+		return true, nil
+	}
+	f, err := build(where)
+	if err != nil {
+		return false, ex.Wrapf(err, "build where filter for rule %q", fr.GetName())
+	}
+	if f == nil {
+		return true, nil
+	}
+	var trees []*dst.File
+	if needsPackage(f) {
+		if trees, err = parseTrees(); err != nil {
+			return false, err
+		}
+	}
+	return f.Match(&matchContext{IsTest: dep.IsTest || util.IsTestBuild(dep.Sources), Package: trees}), nil
 }
 
 // ruleFilter pairs a rule with its pre-compiled where filter (if any).
@@ -236,6 +335,20 @@ func (sp *setupPhase) preciseMatching(
 	dep *Dependency,
 	rules []rule.InstRule,
 	set *rule.InstRuleSet,
+) (*rule.InstRuleSet, error) {
+	trees, err := parsePackageSources(ctx, dep)
+	if err != nil {
+		return nil, err
+	}
+	return sp.preciseMatchingWithTrees(ctx, dep, rules, set, trees)
+}
+
+func (sp *setupPhase) preciseMatchingWithTrees(
+	ctx context.Context,
+	dep *Dependency,
+	rules []rule.InstRule,
+	set *rule.InstRuleSet,
+	trees []*dst.File,
 ) (*rule.InstRuleSet, error) {
 	if len(dep.Sources) == 0 {
 		for _, r := range rules {
@@ -263,11 +376,11 @@ func (sp *setupPhase) preciseMatching(
 
 	// IsTest is a property of the whole compile (every file in a test build
 	// shares it), so compute it once and reuse it across each file's context.
-	isTest := util.IsTestBuild(dep.Sources)
+	isTest := dep.IsTest || util.IsTestBuild(dep.Sources)
 
 	known := knownDirectiveNames(rules)
 
-	for _, source := range dep.Sources {
+	for i, source := range dep.Sources {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -278,10 +391,7 @@ func (sp *setupPhase) preciseMatching(
 		// (nil, non-nil error) on failure. A (nil, nil) return is not
 		// possible per the Go stdlib parser.ParseFile and dave/dst
 		// DecorateFile contracts that ParseFileFast composes.
-		tree, err := ast.ParseFileFast(source)
-		if err != nil {
-			return nil, err
-		}
+		tree := trees[i]
 		// All files in a Go package share the same declared package name, so
 		// this is idempotent across iterations; SetPackageName asserts non-empty.
 		set.SetPackageName(tree.Name.Name)
@@ -305,7 +415,7 @@ func (sp *setupPhase) preciseMatching(
 				sp.reportDecision(source, rf.rule, "where_mismatch")
 				continue
 			}
-			if err = sp.matchOneRule(tree, source, rf.rule, set, dep); err != nil {
+			if err := sp.matchOneRule(tree, source, rf.rule, set, dep); err != nil {
 				return nil, err
 			}
 		}
