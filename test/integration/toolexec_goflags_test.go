@@ -208,7 +208,12 @@ func (b *preparedBuildCase) setup(args ...string) {
 	matchedPath := filepath.Join(b.moduleDir, ".otelc-build", "matched.json")
 	matched, err := os.ReadFile(matchedPath)
 	require.NoError(b.t, err)
-	require.Contains(b.t, string(matched), "/instrumentation/net/http/client")
+	require.True(
+		b.t,
+		strings.Contains(string(matched), "/instrumentation/net/http/client") ||
+			strings.Contains(string(matched), "/instrumentation/net/http/otelchttp/client"),
+		"net/http client instrumentation not found in matched.json",
+	)
 }
 
 func (b *preparedBuildCase) cleanup() {

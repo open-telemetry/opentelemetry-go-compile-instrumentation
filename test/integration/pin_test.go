@@ -151,7 +151,7 @@ func TestPin_GeneratesNewToolFile(t *testing.T) {
 	require.Contains(
 		t,
 		string(content),
-		"_ "+strconv.Quote("go.opentelemetry.io/otelc/instrumentation/net/http/client"),
+		"_ "+strconv.Quote("go.opentelemetry.io/otelc-contrib/instrumentation/net/http/otelchttp/client"),
 	)
 
 	goMod, goModErr := os.ReadFile(filepath.Join(workDir, "go.mod"))
@@ -164,7 +164,7 @@ func TestPin_GeneratesNewToolFile(t *testing.T) {
 	require.Contains(t, string(goMod), "go.opentelemetry.io/otelc")
 
 	// Ensure the http integration is within the go.mod file, which ensures it is pinned as a dependency.
-	require.Contains(t, string(goMod), "go.opentelemetry.io/otelc/instrumentation/net/http/client")
+	require.Contains(t, string(goMod), "go.opentelemetry.io/otelc-contrib/instrumentation/net/http/otelchttp/client")
 }
 
 func TestPin_PrunesInvalidImports(t *testing.T) {
