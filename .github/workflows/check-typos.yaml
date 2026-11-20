@@ -3,7 +3,9 @@ name: Check Typos
 on:
   pull_request:
   push:
-    branches: [main]
+    branches:
+      - main
+      - 'release/v*.*.x'
 
 permissions:
   contents: read

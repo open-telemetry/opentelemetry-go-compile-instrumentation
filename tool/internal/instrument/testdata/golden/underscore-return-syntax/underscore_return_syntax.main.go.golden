@@ -97,7 +97,7 @@ func (c *HookContextImpl2035128499) GetReturnValCount() int { return len(c.retur
 func (c *HookContextImpl2035128499) GetFuncName() string    { return c.funcName }
 func (c *HookContextImpl2035128499) GetPackageName() string { return c.packageName }
 
-func OtelAfterTrampoline_UnderscoreReturnFunc2035128499(hookContext HookContext, arg0 *int, arg1 *error) {
+func OtelAfterTrampoline_UnderscoreReturnFunc2035128499(hookContext OtelHookContext, arg0 *int, arg1 *error) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "H12UnderscoreReturnAfter")
@@ -116,4 +116,4 @@ func OtelAfterTrampoline_UnderscoreReturnFunc2035128499(hookContext HookContext,
 }
 
 //go:linkname otelc_hook_3599636213_H12UnderscoreReturnAfter testdata/golden/underscore-return-syntax.H12UnderscoreReturnAfter
-func otelc_hook_3599636213_H12UnderscoreReturnAfter(hookContext HookContext, arg0 int, arg1 error)
+func otelc_hook_3599636213_H12UnderscoreReturnAfter(hookContext OtelHookContext, arg0 int, arg1 error)

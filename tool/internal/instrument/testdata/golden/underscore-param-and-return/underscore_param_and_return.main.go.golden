@@ -118,7 +118,7 @@ func OtelBeforeTrampoline_UnderscoreParamReturnFunc1353090234(param0 *int) (hook
 	return nil, false
 }
 
-func OtelAfterTrampoline_UnderscoreParamReturnFunc1353090234(hookContext HookContext, arg0 *error) {
+func OtelAfterTrampoline_UnderscoreParamReturnFunc1353090234(hookContext OtelHookContext, arg0 *error) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "H12UnderscoreParamReturnAfter")
@@ -137,7 +137,7 @@ func OtelAfterTrampoline_UnderscoreParamReturnFunc1353090234(hookContext HookCon
 }
 
 //go:linkname otelc_hook_758298485_H12UnderscoreParamReturnBefore testdata/golden/underscore-param-and-return.H12UnderscoreParamReturnBefore
-func otelc_hook_758298485_H12UnderscoreParamReturnBefore(hookContext HookContext, param0 int)
+func otelc_hook_758298485_H12UnderscoreParamReturnBefore(hookContext OtelHookContext, param0 int)
 
 //go:linkname otelc_hook_758298485_H12UnderscoreParamReturnAfter testdata/golden/underscore-param-and-return.H12UnderscoreParamReturnAfter
-func otelc_hook_758298485_H12UnderscoreParamReturnAfter(hookContext HookContext, arg0 error)
+func otelc_hook_758298485_H12UnderscoreParamReturnAfter(hookContext OtelHookContext, arg0 error)

@@ -123,7 +123,7 @@ func (c *HookContextImpl1681024588) GetReturnValCount() int { return len(c.retur
 func (c *HookContextImpl1681024588) GetFuncName() string    { return c.funcName }
 func (c *HookContextImpl1681024588) GetPackageName() string { return c.packageName }
 
-func OtelAfterTrampoline_Func11681024588(hookContext HookContext, arg0 *float32, arg1 *error) {
+func OtelAfterTrampoline_Func11681024588(hookContext OtelHookContext, arg0 *float32, arg1 *error) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "H1After")
@@ -142,7 +142,7 @@ func OtelAfterTrampoline_Func11681024588(hookContext HookContext, arg0 *float32,
 }
 
 //go:linkname otelc_hook_1405514857_H1After testdata/golden/after-only.H1After
-func otelc_hook_1405514857_H1After(hookContext HookContext, arg0 float32, arg1 error)
+func otelc_hook_1405514857_H1After(hookContext OtelHookContext, arg0 float32, arg1 error)
 
 type HookContextImpl3865747808 struct {
 	params      []interface{}
@@ -247,7 +247,7 @@ func (c *HookContextImpl3865747808) GetReturnValCount() int { return len(c.retur
 func (c *HookContextImpl3865747808) GetFuncName() string    { return c.funcName }
 func (c *HookContextImpl3865747808) GetPackageName() string { return c.packageName }
 
-func OtelAfterTrampoline_Func13865747808(hookContext HookContext, arg0 *float32, arg1 *error) {
+func OtelAfterTrampoline_Func13865747808(hookContext OtelHookContext, arg0 *float32, arg1 *error) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "H8After")
@@ -266,4 +266,4 @@ func OtelAfterTrampoline_Func13865747808(hookContext HookContext, arg0 *float32,
 }
 
 //go:linkname otelc_hook_1405514857_H8After testdata/golden/after-only.H8After
-func otelc_hook_1405514857_H8After(hookContext HookContext, arg0 float32, arg1 error)
+func otelc_hook_1405514857_H8After(hookContext OtelHookContext, arg0 float32, arg1 error)

@@ -62,3 +62,19 @@ func TestCommandToolexecNestedKeepsToolexec(t *testing.T) {
 	assert.Contains(t, tokens, "-mod=mod")
 	assert.Contains(t, tokens, wantToken)
 }
+
+// TestCommandSetupPassesBuildFlags: setup prepares the module for a later
+// build, so it takes the same go build flags and packages as otelc go, such
+// as -tags, and must not parse them as its own.
+func TestCommandSetupPassesBuildFlags(t *testing.T) {
+	var got []string
+	setupCmd := commandSetup
+	setupCmd.Before = nil
+	setupCmd.Action = func(_ context.Context, cmd *cli.Command) error {
+		got = cmd.Args().Slice()
+		return nil
+	}
+	app := &cli.Command{Name: "otelc", Commands: []*cli.Command{&setupCmd}}
+	require.NoError(t, app.Run(context.Background(), []string{"otelc", "setup", "-tags", "foo", "-trimpath", "./..."}))
+	assert.Equal(t, []string{"-tags", "foo", "-trimpath", "./..."}, got)
+}

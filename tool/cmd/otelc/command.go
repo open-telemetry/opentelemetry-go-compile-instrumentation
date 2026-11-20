@@ -77,10 +77,12 @@ var commandPin = cli.Command{
 
 //nolint:gochecknoglobals // Implementation of a CLI command
 var commandSetup = cli.Command{
-	Name:        "setup",
-	Description: "Set up the environment for instrumentation",
-	Before:      addLoggerPhaseAttribute,
-	Action:      setup.Setup,
+	Name:            "setup",
+	Description:     "Set up the environment for instrumentation",
+	ArgsUsage:       "[go build flags and packages]",
+	SkipFlagParsing: true,
+	Before:          addLoggerPhaseAttribute,
+	Action:          setup.Setup,
 }
 
 //nolint:gochecknoglobals // Implementation of a CLI command

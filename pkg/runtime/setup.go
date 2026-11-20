@@ -114,8 +114,9 @@ func logLevel() slog.Level {
 // WithTelemetrySDK stamps telemetry.sdk.name/language/version, which
 // resource.Default() includes but resource.New() does not unless asked.
 // WithService stamps service.name (unknown_service:<executable>) and
-// service.instance.id. WithFromEnv stays last so OTEL_SERVICE_NAME and
-// OTEL_RESOURCE_ATTRIBUTES still win.
+// service.instance.id. Registered detectors run after the built-in ones.
+// WithFromEnv stays last so OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES
+// still win.
 func newResource(ctx context.Context) *resource.Resource {
 	res, err := resource.New(ctx,
 		resource.WithTelemetrySDK(),
@@ -124,10 +125,14 @@ func newResource(ctx context.Context) *resource.Resource {
 		resource.WithOS(),
 		resource.WithContainer(),
 		resource.WithHost(),
+		resource.WithDetectors(resourceDetectors.seal()...),
 		resource.WithFromEnv())
 	if err != nil {
-		logger.Warn("failed to create resource", "error", err)
-		return resource.Default()
+		// resource.New returns what the detectors that did succeed found along
+		// with the error. One malformed OTEL_RESOURCE_ATTRIBUTES entry or one
+		// failing detector must not drop the process, host and
+		// service.instance.id attributes with it.
+		logger.Warn("failed to create complete resource, using the part that was detected", "error", err)
 	}
 	return res
 }
@@ -377,20 +382,27 @@ func shutdownSignals() []os.Signal {
 // process terminates the way it would without otelc. An application that
 // handles the signal owns its exit path and exit code: re-raising there would
 // race its own graceful shutdown and could truncate it.
+//
+// A signal that is ignored when the handler is set up, for example SIGINT in a
+// job started in the background by a non-interactive shell, is left alone.
+// signal.Notify would turn it back on, and the flush would then shut the SDK
+// down in a process that keeps running, so all later telemetry would be lost.
 func setupSignalHandler() {
 	registerSignalHandler.Do(func() {
+		var sigs []os.Signal
+		for _, s := range shutdownSignals() {
+			if !signal.Ignored(s) {
+				sigs = append(sigs, s)
+			}
+		}
+		if len(sigs) == 0 {
+			return
+		}
 		sigCh := make(chan os.Signal, 1)
 		signalOwners.Lock()
 		signalOwners.otelcCh = sigCh
-		// otelc's signal.Notify below turns an ignored signal back on. Treat
-		// the application as owning such a signal so otelc never re-raises it.
-		for _, s := range shutdownSignals() {
-			if signal.Ignored(s) {
-				signalOwners.recordLocked(s)
-			}
-		}
 		signalOwners.Unlock()
-		signal.Notify(sigCh, shutdownSignals()...)
+		signal.Notify(sigCh, sigs...)
 		go handleShutdownSignal(sigCh)
 	})
 }

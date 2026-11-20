@@ -167,6 +167,27 @@ Notes:
   instrumentation checks it when the attached code runs. See Package Initialization Order
   under [Limitations](#limitations).
 
+### Resource Detectors
+
+An instrumentation can add resource attributes by registering a
+[`resource.Detector`](https://pkg.go.dev/go.opentelemetry.io/otel/sdk/resource#Detector)
+from the `init` function of its hook package:
+
+```go
+func init() {
+	if !runtime.Instrumented(instrumentationKey) {
+		return
+	}
+	runtime.RegisterResourceDetector("aws_lambda", lambda.NewResourceDetector())
+}
+```
+
+The detected attributes are added to those of the built-in detectors. When both set the
+same attribute key, the registered detector wins, and `OTEL_RESOURCE_ATTRIBUTES` and
+`OTEL_SERVICE_NAME` win over both. Detection runs synchronously before the SDK starts, so
+a detector must not block. When it does not apply to the current environment, it returns
+an empty resource and a `nil` error.
+
 ### Limitations
 
 The constraints below apply to hook implementations. For runtime symptoms (spans not

@@ -125,7 +125,7 @@ func OtelBeforeTrampoline_Key2475612500[K comparable, _ignoredTypeParam_24756125
 	return nil, false
 }
 
-func OtelAfterTrampoline_Key2475612500[K comparable, _ignoredTypeParam_2475612500_0 any](hookContext HookContext, arg0 *K) {
+func OtelAfterTrampoline_Key2475612500[K comparable, _ignoredTypeParam_2475612500_0 any](hookContext OtelHookContext, arg0 *K) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "KeyAfter")
@@ -144,10 +144,10 @@ func OtelAfterTrampoline_Key2475612500[K comparable, _ignoredTypeParam_247561250
 }
 
 //go:linkname otelc_hook_809495487_KeyBefore testdata/golden/generic-blank-type-param.KeyBefore
-func otelc_hook_809495487_KeyBefore(hookContext HookContext, recv0 interface{})
+func otelc_hook_809495487_KeyBefore(hookContext OtelHookContext, recv0 interface{})
 
 //go:linkname otelc_hook_809495487_KeyAfter testdata/golden/generic-blank-type-param.KeyAfter
-func otelc_hook_809495487_KeyAfter(hookContext HookContext, arg0 interface{})
+func otelc_hook_809495487_KeyAfter(hookContext OtelHookContext, arg0 interface{})
 
 type HookContextImpl2080245203 struct {
 	params      []interface{}
@@ -244,7 +244,7 @@ func OtelBeforeTrampoline_Len2080245203[_ignoredTypeParam_2080245203_0 comparabl
 	return nil, false
 }
 
-func OtelAfterTrampoline_Len2080245203[_ignoredTypeParam_2080245203_0 comparable](hookContext HookContext, arg0 *int) {
+func OtelAfterTrampoline_Len2080245203[_ignoredTypeParam_2080245203_0 comparable](hookContext OtelHookContext, arg0 *int) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "LenAfter")
@@ -263,7 +263,7 @@ func OtelAfterTrampoline_Len2080245203[_ignoredTypeParam_2080245203_0 comparable
 }
 
 //go:linkname otelc_hook_809495487_LenBefore testdata/golden/generic-blank-type-param.LenBefore
-func otelc_hook_809495487_LenBefore(hookContext HookContext, recv0 interface{})
+func otelc_hook_809495487_LenBefore(hookContext OtelHookContext, recv0 interface{})
 
 //go:linkname otelc_hook_809495487_LenAfter testdata/golden/generic-blank-type-param.LenAfter
-func otelc_hook_809495487_LenAfter(hookContext HookContext, arg0 int)
+func otelc_hook_809495487_LenAfter(hookContext OtelHookContext, arg0 int)
