@@ -1423,6 +1423,7 @@ func TestPrepareVendoredBuild_NotVendored(t *testing.T) {
 		[]byte("module example.com/test\n\ngo 1.25\n"),
 		0o644,
 	))
+	t.Chdir(dir)
 	t.Setenv(util.EnvOtelcWorkDir, dir)
 	t.Setenv("GOFLAGS", "")
 
@@ -1451,6 +1452,7 @@ func TestPrepareVendoredBuild_Vendored(t *testing.T) {
 		[]byte(""),
 		0o644,
 	))
+	t.Chdir(dir)
 	t.Setenv(util.EnvOtelcWorkDir, dir)
 	t.Setenv("GOFLAGS", "")
 	// Force non-workspace mode; -mod=mod is forbidden in a workspace, so a
@@ -1782,6 +1784,7 @@ func TestPrepareVendoredBuild(t *testing.T) {
 	// With no vendored module active, prepareVendoredBuild returns the args
 	// unchanged and does not force module mode.
 	dir := newModuleDir(t)
+	t.Chdir(dir)
 	t.Setenv(util.EnvOtelcWorkDir, dir)
 
 	args := []string{"build", "./..."}

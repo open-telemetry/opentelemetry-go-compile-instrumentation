@@ -63,7 +63,7 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
         with:
           path: test/.otelc-gocache
-          key: ${{ runner.os }}-amd64-otelc-gocache-e2e-coverage-${{ hashFiles('go.mod', '**/go.mod', '**/go.sum', 'Makefile',
+          key: ${{ runner.os }}-amd64-otelc-gocache-coverage-${{ hashFiles('go.mod', '**/go.mod', '**/go.sum', 'Makefile',
             'tool/**', 'pkg/**', 'instrumentation/**', 'test/apps/**') }}
       - run: make test-e2e/coverage
         env:

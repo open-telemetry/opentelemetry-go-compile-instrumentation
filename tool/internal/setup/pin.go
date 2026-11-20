@@ -193,7 +193,7 @@ func loadModuleRules(
 			return nil
 		}
 
-		data, readErr := os.ReadFile(path) //nolint:gosec // walking embedded rules from extractOtelcBundle
+		data, readErr := os.ReadFile(path) //nolint:gosec // walking rules from the source checkout
 		if readErr != nil {
 			return ex.Wrapf(readErr, "reading rule file %s", path)
 		}
@@ -648,7 +648,7 @@ func prepareVendoredBuild(
 	subcommand string,
 	args []string,
 ) ([]string, error) {
-	if !vendoringActive(ctx, util.GetOtelcWorkDir()) {
+	if !vendoringActive(ctx, buildDir(subcommand, args)) {
 		return args, nil
 	}
 
@@ -748,7 +748,7 @@ func autoPin(ctx context.Context, moduleDirs []string, subcommand string, args [
 		return nil, ex.New("state manager not found in context")
 	}
 
-	backupFiles, getBackupErr := getBackupFiles(ctx, moduleDirs)
+	backupFiles, getBackupErr := getBackupFiles(ctx, buildDir(subcommand, args), moduleDirs)
 	if getBackupErr != nil {
 		return nil, getBackupErr
 	}
