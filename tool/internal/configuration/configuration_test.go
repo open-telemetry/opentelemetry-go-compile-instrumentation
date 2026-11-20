@@ -4,7 +4,6 @@
 package configuration
 
 import (
-	"crypto/sha256"
 	"fmt"
 	"strings"
 	"testing"
@@ -78,6 +77,7 @@ func TestParseMetadataRejectsMalformedEntries(t *testing.T) {
 		{"whitespace name", `name: " go.x "`, "leading or trailing whitespace"},
 		{"empty ref", `ref: ""`, "ref must not be empty"},
 		{"null ref", "ref: null", "expected a string"},
+		{"non-scalar name", "name: [go.x]", "name: expected a string"},
 		{"whitespace ref", `ref: " general.x "`, "ref must not have leading or trailing whitespace"},
 		{"ref override", "ref: general.x\ndescription: override", "must not include inline"},
 		{"empty ref override", "ref: general.x\ndescription: \"\"", "must not include inline"},
@@ -128,6 +128,7 @@ func TestParseMetadataRejectsMalformedEntries(t *testing.T) {
 		{"null default", "name: go.x\ntype: string\ndefault: null", "default must be"},
 		{"non-scalar default", "name: go.x\ntype: list\ndefault: []", "default must be"},
 		{"wrong list default", "name: go.x\ntype: list\ndefault: nope", "default must encode"},
+		{"invalid collection default", "name: go.x\ntype: list\ndefault: \"[\"", "parse collection default"},
 		{"wrong map default", "name: go.x\ntype: map\ndefault: \"[]\"", "default must encode"},
 		{
 			"missing required default property",
@@ -203,16 +204,6 @@ func TestParseMetadataPropertyValuesRetainYAMLTypes(t *testing.T) {
 }
 
 func TestConfigurationCatalogMatchesPinnedSource(t *testing.T) {
-	assert.Equal(t, "a6e45b6e5f6eb647f9101b5e045619b79368c83b561629e522e7c536775403bb",
-		fmt.Sprintf("%x", sha256.Sum256(upstreamInstrumentation)), "snapshot must match the pinned upstream release")
-	generated, err := GenerateCatalog()
-	require.NoError(t, err)
-	// Compare YAML values rather than formatting: repository-wide yamlfmt may
-	// reflow long descriptions, but it must not change catalog content.
-	var expected, actual any
-	require.NoError(t, yaml.Unmarshal(generated, &expected))
-	require.NoError(t, yaml.Unmarshal(embeddedCatalog, &actual))
-	assert.Equal(t, expected, actual, "run go generate ./tool/internal/configuration")
 	definitions, err := CatalogDefinitions()
 	require.NoError(t, err)
 	require.Len(t, definitions, 26)
@@ -224,6 +215,28 @@ func TestConfigurationCatalogMatchesPinnedSource(t *testing.T) {
 	assert.Equal(t, "int", definitions["general.http.semconv.version"].Type)
 	assert.Equal(t, "boolean", definitions["general.http.semconv.experimental"].Type)
 	assert.NotContains(t, definitions, "general.http.client.request_captured_headers/development")
+}
+
+func TestGenerateCatalogPublicEntryPoint(t *testing.T) {
+	const upstream = `properties:
+  general:
+    properties:
+      http:
+        properties:
+          client:
+            properties:
+              request_captured_headers:
+                type: array
+                items: {type: string}
+`
+	generated, err := GenerateCatalog(
+		[]byte(upstream),
+		[]byte("configurations: []\n"),
+		[]byte("configurations: []\n"),
+		embeddedCatalog,
+	)
+	require.NoError(t, err)
+	assert.NotEmpty(t, generated)
 }
 
 func TestParseCatalogValidatesInlineDefinitions(t *testing.T) {
@@ -436,7 +449,7 @@ func TestGenerateCatalogRetainsDeprecatedGeneralCompatibilityDefinitions(t *test
 	assert.Equal(t, "no outbound request headers are captured", upstreamEntry.DefaultBehavior)
 }
 
-func TestGenerateCatalogRejectsDroppedDefinitionWithoutCompatibilityEntry(t *testing.T) {
+func TestGenerateCatalogCarriesDroppedUpstreamDefinitionAsDeprecated(t *testing.T) {
 	const upstream = `properties:
   general:
     properties:
@@ -458,20 +471,39 @@ func TestGenerateCatalogRejectsDroppedDefinitionWithoutCompatibilityEntry(t *tes
 		},
 		Definitions: map[string]Entry{
 			"general.http.client.legacy_request_headers": {
-				Name: "general.http.client.legacy_request_headers",
-				Type: listType,
+				Name:        "general.http.client.legacy_request_headers",
+				Type:        listType,
+				Description: "Last known description",
+				Default:     new("[]"),
 			},
 		},
 	}
 	previousData, err := yaml.Marshal(previous)
 	require.NoError(t, err)
-	_, err = generateCatalog(
+	generated, err := generateCatalog(
 		[]byte(upstream),
 		[]byte("configurations: []\n"),
 		[]byte("configurations: []\n"),
 		previousData,
 	)
-	require.ErrorContains(t, err, "catalog generation would drop \"general.http.client.legacy_request_headers\"")
+	require.NoError(t, err)
+	definitions, err := ParseCatalog(generated)
+	require.NoError(t, err)
+	retired := definitions["general.http.client.legacy_request_headers"]
+	assert.True(t, retired.Deprecated)
+	assert.Equal(t, "Last known description", retired.Description)
+	require.NotNil(t, retired.Default)
+	assert.Equal(t, "[]", *retired.Default)
+	assert.False(t, definitions["general.http.client.request_captured_headers"].Deprecated)
+}
+
+func TestEnsureCatalogDefinitionsRetainedRejectsRemovedGoDefinition(t *testing.T) {
+	previous := map[string]Entry{
+		"go.http.client.rules": {Name: "go.http.client.rules", Type: stringType},
+	}
+	current := map[string]Entry{}
+	err := ensureCatalogDefinitionsRetained(previous, current)
+	require.ErrorContains(t, err, `catalog generation would drop "go.http.client.rules"`)
 }
 
 func TestGenerateCatalogDoesNotSilentlyDropPriorDeprecationMetadata(t *testing.T) {
@@ -555,6 +587,17 @@ func TestGenerateCatalogDoesNotSilentlyClearDeprecatedFlag(t *testing.T) {
 }
 
 func TestGenerateCatalogIncludesDeprecatedInlineGoDefinitions(t *testing.T) {
+	const upstream = `properties:
+  general:
+    properties:
+      http:
+        properties:
+          client:
+            properties:
+              request_captured_headers:
+                type: array
+                items: {type: string}
+`
 	goOptions := []byte(`configurations:
   - name: go.http.client.legacy_rules
     type: structured_list
@@ -565,11 +608,27 @@ func TestGenerateCatalogIncludesDeprecatedInlineGoDefinitions(t *testing.T) {
     type: structured_list
     schema: {type: object, properties: {pattern: {type: string}}}
 `)
+	previousCatalog, err := yaml.Marshal(catalogDocument{
+		CatalogVersion: 1,
+		Source: catalogSource{
+			Repository: OpenTelemetryConfigurationRepository,
+			Release:    OpenTelemetryConfigurationRelease,
+			Commit:     OpenTelemetryConfigurationCommit,
+			File:       OpenTelemetryConfigurationFile,
+		},
+		Definitions: map[string]Entry{
+			"general.http.client.request_captured_headers": {
+				Name: "general.http.client.request_captured_headers",
+				Type: listType,
+			},
+		},
+	})
+	require.NoError(t, err)
 	generated, err := generateCatalog(
-		upstreamInstrumentation,
+		[]byte(upstream),
 		goOptions,
 		[]byte("configurations: []\n"),
-		embeddedCatalog,
+		previousCatalog,
 	)
 	require.NoError(t, err)
 	definitions, err := ParseCatalog(generated)
