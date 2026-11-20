@@ -85,6 +85,7 @@ func TestDBClient(t *testing.T) {
 	})
 
 	t.Run("QueryWithLeadingComment", func(t *testing.T) {
+		t.Skip("requires opentelemetry-go-compile-contrib to incorporate upstream PR #1787")
 		f := testutil.NewTestFixture(t)
 
 		f.Run("dbclient", "-op=commented-query")

@@ -500,7 +500,8 @@ func TestParseTag(t *testing.T) {
 }
 
 func TestGenerate_SubmoduleTags(t *testing.T) {
-	root := t.TempDir()
+	root, evalErr := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, evalErr)
 	run := func(args ...string) {
 		t.Helper()
 		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
@@ -536,6 +537,14 @@ rule:
 		{ModulePath: "example.com/mod_a", Target: "example.com/target_a", Version: "v0.1.0"},
 		{ModulePath: "example.com/mod_b", Target: "example.com/target_b", Version: "v0.2.0"},
 	}, got)
+
+	// Also verify that passing a symlinked instrumentation root resolves cleanly.
+	symlinkRoot := filepath.Join(t.TempDir(), "symlink-root")
+	require.NoError(t, os.Symlink(root, symlinkRoot))
+	symlinkInstDir := filepath.Join(symlinkRoot, "instrumentation")
+	gotSymlink, err := Generate(symlinkInstDir, "v0.0.0-fallback")
+	require.NoError(t, err)
+	require.Equal(t, got, gotSymlink)
 }
 
 func compareEntries(a, b Entry) int {

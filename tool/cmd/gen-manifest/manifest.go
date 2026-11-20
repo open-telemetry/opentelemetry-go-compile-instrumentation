@@ -34,6 +34,9 @@ type yamlRule struct {
 }
 
 func Generate(instrumentationRoot string, version ...string) (Manifest, error) {
+	if resolved, evalErr := filepath.EvalSymlinks(instrumentationRoot); evalErr == nil {
+		instrumentationRoot = resolved
+	}
 	var ver string
 	if len(version) > 0 {
 		ver = version[0]
@@ -115,12 +118,18 @@ func parseTag(tag string) (string, string, bool) {
 
 func loadCommitTags(dir string) (string, map[string]string) {
 	tags := make(map[string]string)
+	if resolved, evalErr := filepath.EvalSymlinks(dir); evalErr == nil {
+		dir = resolved
+	}
 	cmd := exec.CommandContext(context.Background(), "git", "-C", dir, "rev-parse", "--show-toplevel")
 	out, err := cmd.Output()
 	if err != nil {
 		return "", tags
 	}
 	repoRoot := filepath.Clean(strings.TrimSpace(string(out)))
+	if resolved, evalErr := filepath.EvalSymlinks(repoRoot); evalErr == nil {
+		repoRoot = resolved
+	}
 
 	cmd = exec.CommandContext(context.Background(), "git", "-C", dir, "tag", "--points-at", "HEAD")
 	out, err = cmd.Output()
