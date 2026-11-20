@@ -1345,10 +1345,14 @@ func toolVersionLine(line, rulesHash string) string {
 // latest tag, so otelc binaries built from different commits would share cache
 // entries in the user's GOCACHE. The commit hash, when known, separates them.
 func otelcIdentity() string {
-	if util.CommitHash == "" || util.CommitHash == "unknown" {
-		return util.Version
+	return otelcIdentityFor(util.Version, util.CommitHash)
+}
+
+func otelcIdentityFor(version, commit string) string {
+	if commit == "" || commit == "unknown" {
+		return version
 	}
-	return util.Version + "-" + util.CommitHash
+	return version + "-" + commit
 }
 
 func rulesDigest(content []byte, tags []string, glsSource, injectedHash []byte) string {

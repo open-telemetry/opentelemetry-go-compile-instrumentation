@@ -1231,23 +1231,20 @@ func TestToolVersionLine(t *testing.T) {
 }
 
 func TestOtelcIdentity(t *testing.T) {
-	version, commit := util.Version, util.CommitHash
-	t.Cleanup(func() { util.Version, util.CommitHash = version, commit })
-	util.Version = "v1.2.1"
-
 	t.Run("adds the commit hash so builds of one version stay apart", func(t *testing.T) {
-		util.CommitHash = "a91e08d"
-		assert.Equal(t, "v1.2.1-a91e08d", otelcIdentity())
-		util.CommitHash = "0123abc"
-		assert.Equal(t, "v1.2.1-0123abc", otelcIdentity())
-		assert.Regexp(t, versionMarkerPattern, toolVersionLine("compile version go1.26.5", "0123456789abcdef"))
+		assert.Equal(t, "v1.2.1-a91e08d", otelcIdentityFor("v1.2.1", "a91e08d"))
+		assert.Equal(t, "v1.2.1-0123abc", otelcIdentityFor("v1.2.1", "0123abc"))
+		assert.Regexp(t, versionMarkerPattern, "otelc@"+otelcIdentityFor("v1.2.1", "0123abc")+"+0123456789abcdef")
 	})
 
 	t.Run("falls back to the version when the commit is unknown", func(t *testing.T) {
 		for _, commit := range []string{"", "unknown"} {
-			util.CommitHash = commit
-			assert.Equal(t, "v1.2.1", otelcIdentity())
+			assert.Equal(t, "v1.2.1", otelcIdentityFor("v1.2.1", commit))
 		}
+	})
+
+	t.Run("uses the version and commit otelc was built with", func(t *testing.T) {
+		assert.Equal(t, otelcIdentityFor(util.Version, util.CommitHash), otelcIdentity())
 	})
 }
 
