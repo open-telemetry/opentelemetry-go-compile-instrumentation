@@ -20,10 +20,9 @@ inherited sessions, user-supplied `-overlay`/`-modfile` flags or non-`readonly`
 `go.work.sum` retain the lock throughout compilation.
 Restoration failure aborts the build before unlocking rather than compiling
 against an unrestored module. Concurrent compilation may not improve wall time
-on CPU-limited machines and uses additional temporary disk space. Set `GOCACHE`
-to a persistent directory outside `.otelc-build` to reuse compiler outputs between
-unlocked builds; otherwise their default caches are invocation-owned too.
-Invocation-specific bundle and overlay paths can reduce warm-cache reuse even
+on CPU-limited machines and uses additional temporary disk space. Unlocked
+builds use the same `GOCACHE` as `go build`, so they reuse compiler outputs
+between builds. Invocation-specific bundle and overlay paths can reduce warm-cache reuse even
 with a persistent `GOCACHE`. Compare both full rebuilds and incremental builds
 before enabling this in CI; releasing the lock does not guarantee a speedup.
 

@@ -681,26 +681,6 @@ func (sp *setupPhase) warnIfNoInstrumentationMatched(matched []*rule.InstRuleSet
 	}
 }
 
-// setupGoCache creates a persistent GOCACHE in .otelc-build/gocache if one isn't already set.
-// This prevents cache pollution when modifying core packages via //go:linkname while
-// allowing incremental builds to work properly.
-func setupGoCache(ctx context.Context, env []string) ([]string, error) {
-	if os.Getenv("GOCACHE") != "" {
-		// User has explicitly set GOCACHE, respect it
-		return env, nil
-	}
-
-	logger := util.LoggerFromContext(ctx)
-	cacheDir := util.GetInvocationTemp("gocache")
-	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
-		return nil, ex.Wrapf(err, "failed to create persistent GOCACHE")
-	}
-
-	env = append(env, "GOCACHE="+cacheDir)
-	logger.DebugContext(ctx, "using GOCACHE", "path", cacheDir)
-	return env, nil
-}
-
 // extractBuildFlags extracts flags that affect the build context from the arguments.
 // These flags need to be forwarded to `go list` when resolving import archives.
 // Returns a slice of flag arguments preserving their original form.
@@ -1032,12 +1012,9 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool, ext
 		logger.DebugContext(ctx, "forwarding build flags", "flags", buildFlags)
 	}
 
-	// Use a fresh GOCACHE to prevent cache pollution when modifying core packages
-	env, err = setupGoCache(ctx, env)
-	if err != nil {
-		return ex.Wrapf(err, "configuring go cache")
-	}
-
+	// The build uses the go command's own GOCACHE. The otelc marker in every
+	// tool ID (see instrument.markedToolVersion) keeps instrumented artifacts
+	// apart from plain ones and from other otelc configurations in that cache.
 	return runBuildCmd(ctx, env, newArgs...)
 }
 

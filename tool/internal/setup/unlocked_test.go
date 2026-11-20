@@ -229,21 +229,6 @@ func TestSnapshotFilesystemErrors(t *testing.T) {
 	})
 }
 
-func TestUnlockedGoCache(t *testing.T) {
-	t.Setenv("GOCACHE", "")
-	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
-	snapshot, err := newSetupSnapshot()
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, os.RemoveAll(snapshot.invocationDir)) })
-	t.Setenv(util.EnvOtelcInvocationDir, snapshot.invocationDir)
-	env, err := setupGoCache(t.Context(), nil)
-	require.NoError(t, err)
-	cache := filepath.Join(snapshot.invocationDir, "gocache")
-	assert.Contains(t, env, "GOCACHE="+cache)
-	require.NoError(t, os.RemoveAll(util.GetBuildTempDir()))
-	assert.DirExists(t, cache)
-}
-
 func TestSetupSnapshotOverlay(t *testing.T) {
 	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
 	root := t.TempDir()
