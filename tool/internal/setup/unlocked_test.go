@@ -108,6 +108,9 @@ func TestGoBuildSnapshotLifecycle(t *testing.T) {
 		{name: "locked"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			_, sourceFile, _, ok := runtime.Caller(0)
+			require.True(t, ok)
+			t.Setenv("OTELC_SOURCE_ROOT", filepath.Clean(filepath.Join(filepath.Dir(sourceFile), "../../..")))
 			clearNestedBuildEnv(t)
 			root := t.TempDir()
 			t.Chdir(root)

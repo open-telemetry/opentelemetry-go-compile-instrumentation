@@ -24,8 +24,10 @@ import (
 
 const (
 	// Allowed names for the instrumentation config file.
-	toolFileCanonical = "otel.instrumentation.go"
-	toolFileAlias     = "otelc.tool.go"
+	toolFileCanonical            = "otel.instrumentation.go"
+	toolFileAlias                = "otelc.tool.go"
+	instrumentationYAMLCanonical = "otel.instrumentation.yml"
+	instrumentationYAMLAlias     = "otel.instrumentation.yaml"
 )
 
 type instrumentationConfig struct {
@@ -36,22 +38,17 @@ type instrumentationConfig struct {
 	Error      error
 }
 
-//nolint:forbidigo // sentinel error; must not carry mutable stack state
-var errNotInstrumentation = errors.New("not an instrumentation package")
+func findOneOf(moduleDir, canonicalName, aliasName, label string) (string, error) {
+	canonical := filepath.Join(moduleDir, canonicalName)
+	alias := filepath.Join(moduleDir, aliasName)
 
-func findToolFile(moduleDir string) (string, error) {
-	canonical := filepath.Join(moduleDir, toolFileCanonical)
-	alias := filepath.Join(moduleDir, toolFileAlias)
-
-	canonicalExists := util.PathExists(canonical)
-	aliasExists := util.PathExists(alias)
-
-	switch {
+	switch canonicalExists, aliasExists := util.PathExists(canonical), util.PathExists(alias); {
 	case canonicalExists && aliasExists:
 		return "", ex.Newf(
-			"both %q and %q exist; only one instrumentation config file is allowed",
-			toolFileCanonical,
-			toolFileAlias,
+			"both %q and %q exist; only one %s file is allowed",
+			canonicalName,
+			aliasName,
+			label,
 		)
 	case canonicalExists:
 		return canonical, nil
@@ -62,9 +59,25 @@ func findToolFile(moduleDir string) (string, error) {
 	}
 }
 
-func findToolFiles(moduleDirs []string) ([]string, error) {
+func findInstrumentationYAMLFile(moduleDir string) (string, error) {
+	return findOneOf(
+		moduleDir,
+		instrumentationYAMLCanonical,
+		instrumentationYAMLAlias,
+		"instrumentation YAML",
+	)
+}
+
+//nolint:forbidigo // sentinel error; must not carry mutable stack state
+var errNotInstrumentation = errors.New("not an instrumentation package")
+
+func findToolFile(moduleDir string) (string, error) {
+	return findOneOf(moduleDir, toolFileCanonical, toolFileAlias, "instrumentation config")
+}
+
+func findToolFiles(moduleDirs map[string]bool) ([]string, error) {
 	toolFiles := make([]string, 0, len(moduleDirs))
-	for _, dir := range moduleDirs {
+	for dir := range moduleDirs {
 		toolFile, err := findToolFile(dir)
 		if err != nil {
 			return nil, err
@@ -120,12 +133,12 @@ func resolveInstrumentationConfigs(
 
 		modDir := pkg.Module.Dir
 		cfgs[importPath].ModuleDir = modDir
-		// A tools-only instrumentation package (its only .go file carries
-		// //go:build tools) has no buildable Go files, so packages.Load reports
-		// "build constraints exclude all Go files" and PackageDir returns the
-		// directory from go list. If that is empty too, derive the dir from the
-		// module path + import-path suffix (correct even under replace
-		// directives). The walk only needs the directory, not a compilable package.
+		// Prefer the directory of a real Go file. A tools-only instrumentation
+		// package (its only .go file carries //go:build tools) has no buildable Go
+		// files, so packages.Load reports "build constraints exclude all Go files"
+		// and GoFiles is empty; fall back to deriving the dir from the module path +
+		// import-path suffix (correct even under replace directives). The walk only
+		// needs the directory, not a compilable package.
 		pkgDir := pkgload.PackageDir(pkg)
 		if pkgDir == "" {
 			pkgDir = filepath.Join(modDir, filepath.FromSlash(strings.TrimPrefix(importPath, pkg.Module.Path)))
@@ -225,58 +238,79 @@ func collectImports(toolFile string, f *dst.File, seenImports map[string]bool) (
 
 // walkInstrumentation walks the instrumentation tool files and calls the visitor function for each.
 func walkInstrumentation(ctx context.Context, toolFiles []string, visit instrumentationVisitor) error {
-	queue := append([]string(nil), toolFiles...)
-	seenImports := make(map[string]bool)
-	seenToolFiles := make(map[string]bool, len(toolFiles))
-	for _, toolFile := range toolFiles {
-		seenToolFiles[toolFile] = true
+	p := ast.NewAstParser()
+	seenRoots := make(map[string]bool, len(toolFiles))
+	for _, rootToolFile := range toolFiles {
+		if seenRoots[rootToolFile] {
+			continue
+		}
+		seenRoots[rootToolFile] = true
+
+		// Keep import and nested-tool-file de-duplication local to each root.
+		// Two YAML files may select the same instrumentation independently;
+		// each owning root must still receive its own invalid-import result so
+		// pruning one selection cannot leave the other stale.
+		if err := walkInstrumentationRoot(ctx, p, rootToolFile, visit); err != nil {
+			return err
+		}
 	}
 
-	p := ast.NewAstParser()
+	return nil
+}
+
+func walkInstrumentationRoot(
+	ctx context.Context,
+	p *ast.AstParser,
+	rootToolFile string,
+	visit instrumentationVisitor,
+) error {
+	queue := []string{rootToolFile}
+	seenImports := make(map[string]bool)
+	seenToolFiles := map[string]bool{rootToolFile: true}
 	for len(queue) > 0 {
 		toolFile := queue[0]
 		queue = queue[1:]
 
-		f, parseErr := p.Parse(toolFile, parser.ImportsOnly)
-		if parseErr != nil {
-			return parseErr
+		f, err := p.Parse(toolFile, parser.ImportsOnly)
+		if err != nil {
+			return err
 		}
-
-		importPaths, collectErr := collectImports(toolFile, f, seenImports)
-		if collectErr != nil {
-			return collectErr
+		importPaths, err := collectImports(toolFile, f, seenImports)
+		if err != nil {
+			return err
 		}
-
-		cfgs, resolveErr := resolveInstrumentationConfigs(ctx, filepath.Dir(toolFile), importPaths)
-		if resolveErr != nil {
-			return resolveErr
+		cfgs, err := resolveInstrumentationConfigs(ctx, filepath.Dir(toolFile), importPaths)
+		if err != nil {
+			return err
 		}
-
 		for _, importPath := range importPaths {
 			cfg := cfgs[importPath]
 			if cfg == nil {
 				continue
 			}
-
-			v := &instrumentationVisit{
-				Config:   cfg,
-				ToolFile: toolFile,
-			}
-			recurse, visitErr := visit(v)
+			nestedToolFile, visitErr := visitInstrumentationImport(visit, cfg, toolFile, seenToolFiles)
 			if visitErr != nil {
 				return visitErr
 			}
-
-			if recurse && cfg.ToolFile != "" {
-				// Two different import paths may share the same tool file, so we need to de-duplicate it.
-				if seenToolFiles[cfg.ToolFile] {
-					continue
-				}
-				seenToolFiles[cfg.ToolFile] = true
-				queue = append(queue, cfg.ToolFile)
+			if nestedToolFile != "" {
+				queue = append(queue, nestedToolFile)
 			}
 		}
 	}
-
 	return nil
+}
+
+func visitInstrumentationImport(
+	visit instrumentationVisitor,
+	cfg *instrumentationConfig,
+	toolFile string,
+	seenToolFiles map[string]bool,
+) (string, error) {
+	v := &instrumentationVisit{Config: cfg, ToolFile: toolFile}
+	recurse, err := visit(v)
+	if err != nil || !recurse || cfg.ToolFile == "" || seenToolFiles[cfg.ToolFile] {
+		return "", err
+	}
+	seenToolFiles[cfg.ToolFile] = true
+	return cfg.ToolFile, nil
 }

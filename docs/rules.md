@@ -72,10 +72,9 @@ treated as requiring `v1.0.0` and produce a warning.
 > [!NOTE]
 > `otelc` v1.2.0 is the first release that supports the top-level `version` key.
 > Earlier releases parse every top-level key as a rule and reject a scalar
-> `version` entry, so they cannot read a file that declares it; those releases
-> use the instrumentation rules bundled with them instead. Published
-> instrumentation rule files — including the rules bundled with `otelc` under
-> `instrumentation/` — declare `version: "v1.2.0"`. A rule file that relies on
+> `version` entry, so upgrade those binaries before using files that declare it.
+> Instrumentation rule files in the repository's `instrumentation/` tree declare
+> `version: "v1.2.0"`. A rule file that relies on
 > functionality added in a later `otelc` release should declare that release as
 > its minimum version.
 
@@ -462,19 +461,23 @@ When multiple rule sources are present, `otelc` resolves them using the followin
 
 1. `OTELC_RULES` environment variable
 2. `--rules` flag
-3. `otel.instrumentation.go` / `otelc.tool.go`
-4. Default embedded rules.
+3. Module-local `otel.instrumentation.go` / `otelc.tool.go`, or YAML selection when no
+   tool file exists in the same module
+4. Manifest-based defaults.
 
-Only the highest-precedence source that is present is used.
+`OTELC_RULES` and `--rules` are invocation-wide overrides. Without either override, the
+precedence is resolved independently for each module and selections from participating modules
+are combined for the build.
 
 For example:
 
 - If `OTELC_RULES` is set, all other rule sources are ignored.
-- If `--rules` is provided, discovery through tool files is skipped.
-- If an `otel.instrumentation.go` (or `otelc.tool.go`) file exists, embedded
-  rules are not used.
-- Default embedded rules are only used when no higher-precedence rule source is
-  available.
+- If `--rules` is provided, discovery through module-local tool files and YAML selections is skipped.
+- If an `otel.instrumentation.go` (or `otelc.tool.go`) file exists, inferred
+  manifest-based defaults are not used for that module.
+- Manifest-based defaults are inferred for modules without a higher-precedence
+  selection source. A module with an explicitly empty YAML selection does not
+  fall back to defaults.
 
 For task-oriented guidance on choosing between these sources and verifying your
 configuration, see [Configuration and Fine-Tuning](configuration.md). For the full

@@ -607,7 +607,11 @@ func (sp *setupPhase) loadRules(ctx context.Context, moduleDirs []string) ([]rul
 	}
 
 	// Load rules from tool files if available
-	toolFiles, err := findToolFiles(moduleDirs)
+	moduleDirSet := make(map[string]bool, len(moduleDirs))
+	for _, moduleDir := range moduleDirs {
+		moduleDirSet[moduleDir] = true
+	}
+	toolFiles, err := findToolFiles(moduleDirSet)
 	if err != nil {
 		return nil, err
 	}

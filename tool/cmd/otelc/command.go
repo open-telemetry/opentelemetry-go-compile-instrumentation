@@ -40,21 +40,21 @@ var commandGo = cli.Command{
 //nolint:gochecknoglobals // Implementation of a CLI command
 var commandPin = cli.Command{
 	Name:        "pin",
-	Description: "Generate or update otel.instrumentation.go to pin instrumentation packages for the current module.",
+	Description: "Pin instrumentation packages through otel.instrumentation.go or otel.instrumentation.yml for the current module.",
 	Flags: []cli.Flag{
 		&cli.BoolFlag{
 			Name:  "prune",
-			Usage: "Prune invalid imports within otel.instrumentation.go",
+			Usage: "Prune invalid instrumentation selections from the active Go or YAML configuration",
 			Value: true,
 		},
 		&cli.BoolFlag{
 			Name:  "validate",
-			Usage: "Validate that all imports in otel.instrumentation.go contain valid rules",
+			Usage: "Validate that selected instrumentation packages contain valid rules",
 			Value: false,
 		},
 		&cli.BoolFlag{
 			Name:  "generate",
-			Usage: "Manages //go:generate directive in otel.instrumentation.go",
+			Usage: "Manage the //go:generate directive in otel.instrumentation.go",
 		},
 	},
 	Before: addLoggerPhaseAttribute,

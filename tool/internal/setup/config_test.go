@@ -15,7 +15,6 @@ import (
 	"testing"
 
 	"github.com/dave/dst"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -89,44 +88,36 @@ func TestFindToolFile(t *testing.T) {
 	}
 }
 
-func TestFindToolFiles(t *testing.T) {
-	dirA := t.TempDir()
-	dirB := t.TempDir()
-	dirC := t.TempDir()
-
-	require.NoError(t, os.WriteFile(filepath.Join(dirA, toolFileCanonical), nil, 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(dirB, toolFileAlias), nil, 0o644))
-	// dirC has no tool file
-
-	expectedA := filepath.Join(dirA, toolFileCanonical)
-	expectedB := filepath.Join(dirB, toolFileAlias)
-	wantSorted := []string{expectedA, expectedB}
-	slices.Sort(wantSorted)
-
-	t.Run("empty moduleDirs returns empty slice", func(t *testing.T) {
-		got, err := findToolFiles([]string{})
-		require.NoError(t, err)
-		assert.Empty(t, got)
-	})
-
-	t.Run("collects and sorts tool files", func(t *testing.T) {
-		input := []string{dirC, dirB, dirA}
-		inputOrig := append([]string(nil), input...)
-
-		got, err := findToolFiles(input)
-		require.NoError(t, err)
-		assert.Equal(t, wantSorted, got)
-		assert.Equal(t, inputOrig, input, "input slice must not be mutated")
-	})
-
-	t.Run("propagates error on conflicting tool files", func(t *testing.T) {
-		errDir := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(errDir, toolFileCanonical), nil, 0o644))
-		require.NoError(t, os.WriteFile(filepath.Join(errDir, toolFileAlias), nil, 0o644))
-
-		_, err := findToolFiles([]string{dirA, errDir})
-		require.Error(t, err)
-	})
+func TestFindInstrumentationYAMLFile(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		files []string
+		want  string
+		err   bool
+	}{
+		{name: "none"},
+		{name: "canonical", files: []string{instrumentationYAMLCanonical}, want: instrumentationYAMLCanonical},
+		{name: "alias", files: []string{instrumentationYAMLAlias}, want: instrumentationYAMLAlias},
+		{name: "both", files: []string{instrumentationYAMLCanonical, instrumentationYAMLAlias}, err: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for _, name := range tt.files {
+				require.NoError(t, os.WriteFile(filepath.Join(dir, name), nil, 0o644))
+			}
+			got, err := findInstrumentationYAMLFile(dir)
+			if tt.err {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			if tt.want == "" {
+				require.Empty(t, got)
+			} else {
+				require.Equal(t, filepath.Join(dir, tt.want), got)
+			}
+		})
+	}
 }
 
 func TestResolveInstrumentationConfig(t *testing.T) {
@@ -857,7 +848,7 @@ func TestFindToolFilesBothExist(t *testing.T) {
 	err = os.WriteFile(filepath.Join(dir, toolFileAlias), []byte("package main"), 0o644)
 	require.NoError(t, err)
 
-	_, err = findToolFiles([]string{dir})
+	_, err = findToolFiles(map[string]bool{dir: true})
 	require.Error(t, err)
 	require.ErrorContains(t, err, "only one instrumentation config file")
 }

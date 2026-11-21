@@ -14,20 +14,15 @@ import (
 	"golang.org/x/mod/modfile"
 
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/manifest"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
-// Entry describes a distinct instrumentation module, target package, and
-// minimum version bound.
-type Entry struct {
-	ModulePath string `json:"modulePath"`
-	Target     string `json:"target"`
-	// VersionRange is a minimum version bound. Empty means all versions.
-	VersionRange string `json:"versionRange,omitempty"`
-}
-
-type Manifest []Entry
+type (
+	Entry    = manifest.Entry
+	Manifest = manifest.Manifest
+)
 
 type yamlRule struct {
 	Target       rule.Target `yaml:"target"`
