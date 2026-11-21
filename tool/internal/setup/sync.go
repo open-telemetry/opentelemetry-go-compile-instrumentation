@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
@@ -23,7 +24,25 @@ import (
 
 const (
 	envOtelcSourceRoot = "OTELC_SOURCE_ROOT"
+	goSumFileName      = "go.sum"
 )
+
+type pinSourceRootKey struct{}
+
+type pinSourceRootCache struct {
+	once sync.Once
+	root string
+	err  error
+}
+
+func pinSourceRoot(ctx context.Context) (string, error) {
+	cache, ok := ctx.Value(pinSourceRootKey{}).(*pinSourceRootCache)
+	if !ok {
+		return repositorySourceRoot()
+	}
+	cache.once.Do(func() { cache.root, cache.err = repositorySourceRoot() })
+	return cache.root, cache.err
+}
 
 func repositorySourceRoot() (string, error) {
 	root := os.Getenv(envOtelcSourceRoot)
@@ -91,7 +110,7 @@ func instrumentationModuleDir(instDir, modulePath string) (string, error) {
 }
 
 func parseGoMod(gomod string) (*modfile.File, error) {
-	data, err := os.ReadFile(gomod)
+	data, err := os.ReadFile(filepath.Clean(gomod))
 	if err != nil {
 		return nil, ex.Wrapf(err, "failed to read go.mod file")
 	}
@@ -154,10 +173,10 @@ func snapshotVersion(mf *modfile.File) versionSnapshot {
 	return snap
 }
 
-func warnVersion(ctx context.Context, goModPath string, before versionSnapshot) error {
+func warnVersion(ctx context.Context, moduleDir string, before versionSnapshot) error {
 	logger := util.LoggerFromContext(ctx)
 
-	after, err := parseGoMod(goModPath)
+	after, err := parseGoMod(filepath.Join(moduleDir, goModFileName))
 	if err != nil {
 		return ex.Wrapf(err, "unable to check for version bumps after go mod tidy")
 	}
@@ -258,7 +277,7 @@ func syncDeps(ctx context.Context, modPaths map[string]bool, moduleDir string) e
 	if len(modPaths) == 0 {
 		return nil
 	}
-	sourceRoot, err := repositorySourceRoot()
+	sourceRoot, err := pinSourceRoot(ctx)
 	if err != nil {
 		return err
 	}
@@ -366,7 +385,7 @@ func syncDepsFromSource(ctx context.Context, modPaths map[string]bool, moduleDir
 	}
 
 	// Compare after tidy because MVS may raise existing consumer versions.
-	if err = warnVersion(ctx, goModFile, before); err != nil {
+	if err = warnVersion(ctx, moduleDir, before); err != nil {
 		return err
 	}
 

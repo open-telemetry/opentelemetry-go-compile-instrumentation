@@ -36,6 +36,17 @@ func TestCommandVersion(t *testing.T) {
 	assert.Contains(t, out, "go1.")
 }
 
+func TestCommandPinHelpMentionsYAMLConfiguration(t *testing.T) {
+	assert.Contains(t, commandPin.Description, "otel.instrumentation.go")
+	assert.Contains(t, commandPin.Description, "otel.instrumentation.yml")
+	pruneFlag, ok := commandPin.Flags[0].(*cli.BoolFlag)
+	require.True(t, ok)
+	assert.Contains(t, pruneFlag.Usage, "YAML")
+	validateFlag, ok := commandPin.Flags[1].(*cli.BoolFlag)
+	require.True(t, ok)
+	assert.Contains(t, validateFlag.Usage, "rule")
+}
+
 // TestCommandToolexecNestedKeepsToolexec: a nested toolexec puts otelc back in
 // GOFLAGS, which startup stripped. A compile it instruments can resolve an
 // added import with a nested build of its own, and that build must run through

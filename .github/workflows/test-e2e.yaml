@@ -59,6 +59,8 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: "**/go.mod"
+      - name: Build demo Docker app stages
+        run: make build-demo-images
       - run: make test-e2e/coverage
       - uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac  # v5.5.5
         with:

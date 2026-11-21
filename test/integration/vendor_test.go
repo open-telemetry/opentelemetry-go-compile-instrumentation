@@ -103,6 +103,50 @@ func TestVendoredBuild(t *testing.T) {
 	require.Equal(t, before, after, "otelc must not modify the vendor directory")
 }
 
+func TestVendoredYAMLBuild(t *testing.T) {
+	otelcPath, err := testutil.OtelcPath()
+	require.NoError(t, err)
+	t.Setenv("OTELC_SOURCE_ROOT", filepath.Dir(otelcPath))
+	appsDir := t.TempDir()
+	app := filepath.Join(appsDir, vendoredApp)
+	require.NoError(t, os.MkdirAll(app, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(app, "go.mod"), []byte(vendoredAppGoMod), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(app, "main.go"), []byte(vendoredAppMain), 0o644))
+	goMod(t, app, "tidy")
+	goMod(t, app, "vendor")
+	yaml := []byte(
+		"# explicitly selected\ninstrumentations:\n  - go.opentelemetry.io/otelc/instrumentation/github.com/gin-gonic/gin\n",
+	)
+	require.NoError(t, os.WriteFile(filepath.Join(app, "otel.instrumentation.yml"), yaml, 0o644))
+	beforeMod, err := os.ReadFile(filepath.Join(app, "go.mod"))
+	require.NoError(t, err)
+	beforeSum, err := os.ReadFile(filepath.Join(app, "go.sum"))
+	require.NoError(t, err)
+	beforeVendor, err := os.ReadFile(filepath.Join(app, "vendor", "modules.txt"))
+	require.NoError(t, err)
+
+	testutil.Build(t, appsDir, vendoredApp, "go", "build")
+	matched, err := os.ReadFile(filepath.Join(app, ".otelc-build", "matched.json"))
+	require.NoError(t, err)
+	require.Contains(t, string(matched), "gin-gonic/gin")
+	generated, err := os.ReadFile(filepath.Join(app, ".otelc-build", "debug", "main", "otel.instrumentation.go"))
+	require.NoError(t, err)
+	require.Contains(t, string(generated), "instrumentation/github.com/gin-gonic/gin")
+	require.NoFileExists(t, filepath.Join(app, "otel.instrumentation.go"))
+	gotYAML, err := os.ReadFile(filepath.Join(app, "otel.instrumentation.yml"))
+	require.NoError(t, err)
+	require.Equal(t, yaml, gotYAML)
+	gotMod, err := os.ReadFile(filepath.Join(app, "go.mod"))
+	require.NoError(t, err)
+	require.Equal(t, beforeMod, gotMod)
+	gotSum, err := os.ReadFile(filepath.Join(app, "go.sum"))
+	require.NoError(t, err)
+	require.Equal(t, beforeSum, gotSum)
+	gotVendor, err := os.ReadFile(filepath.Join(app, "vendor", "modules.txt"))
+	require.NoError(t, err)
+	require.Equal(t, beforeVendor, gotVendor)
+}
+
 func goMod(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.CommandContext(t.Context(), "go", append([]string{"mod"}, args...)...)

@@ -323,6 +323,784 @@ func TestGenerateOtelInstrumentationGo(t *testing.T) {
 	}
 }
 
+func TestLoadOtelYAMLImports(t *testing.T) {
+	path := filepath.Join(t.TempDir(), instrumentationYAMLCanonical)
+	require.NoError(t, os.WriteFile(path, []byte(`instrumentations:
+  - example.com/foo
+  - example.com/bar
+  - example.com/foo
+`), 0o644))
+	imports, err := loadOtelYAMLImports(path)
+	require.NoError(t, err)
+	require.Equal(t, map[string]bool{"example.com/foo": true, "example.com/bar": true}, imports)
+
+	require.NoError(t, os.WriteFile(path, []byte("unknown: true\n"), 0o644))
+	_, err = loadOtelYAMLImports(path)
+	require.ErrorContains(t, err, "field unknown not found")
+
+	for _, contents := range []string{
+		"", "# empty\n", "{}\n", "instrumentations: null\n", "instrumentations: []\n",
+		"instrumentations: []\n---\n", "instrumentations: []\n---\n# trailing comment\n",
+	} {
+		require.NoError(t, os.WriteFile(path, []byte(contents), 0o644))
+		imports, err = loadOtelYAMLImports(path)
+		require.NoError(t, err)
+		require.Empty(t, imports)
+	}
+
+	for _, tt := range []struct {
+		name     string
+		contents string
+		want     string
+	}{
+		{name: "malformed", contents: "instrumentations: [", want: "parsing"},
+		{name: "multiple documents", contents: "instrumentations: []\n---\ninstrumentations: []\n", want: "multiple YAML documents"},
+		{name: "malformed second document", contents: "instrumentations: []\n---\n[", want: "parsing"},
+		{
+			name:     "populated document after empty document",
+			contents: "instrumentations: []\n---\n# empty\n---\ninstrumentations: [example.com/third]\n",
+			want:     "multiple YAML documents",
+		},
+		{name: "empty import", contents: "instrumentations:\n  - '  '\n", want: "must not contain empty import paths"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			require.NoError(t, os.WriteFile(path, []byte(tt.contents), 0o644))
+			_, loadErr := loadOtelYAMLImports(path)
+			require.ErrorContains(t, loadErr, tt.want)
+		})
+	}
+
+	_, err = loadOtelYAMLImports(filepath.Join(t.TempDir(), "missing.yml"))
+	require.ErrorContains(t, err, "reading")
+}
+
+func TestWriteOtelYAMLImports(t *testing.T) {
+	path := filepath.Join(t.TempDir(), instrumentationYAMLCanonical)
+	original := []byte(`# hand-maintained config
+instrumentations:
+  - 'example.com/z'
+  # retain this comment
+  - example.com/a # retain inline comment
+`)
+	require.NoError(t, os.WriteFile(path, original, 0o640))
+
+	// A no-op prune must preserve the file byte-for-byte.
+	require.NoError(t, writeOtelYAMLImports(path, map[string]bool{
+		"example.com/z": true,
+		"example.com/a": true,
+	}))
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, original, data)
+
+	// Real pruning retains the original order and comments associated with the
+	// surviving scalar while dropping only the invalid selection.
+	require.NoError(t, writeOtelYAMLImports(path, map[string]bool{"example.com/a": true}))
+	data, err = os.ReadFile(path)
+	require.NoError(t, err)
+	require.Contains(t, string(data), "# hand-maintained config")
+	require.Contains(t, string(data), "# retain this comment")
+	require.Contains(t, string(data), "# retain inline comment")
+	require.Contains(t, string(data), "example.com/a")
+	require.NotContains(t, string(data), "example.com/z")
+	if runtime.GOOS != "windows" {
+		info, statErr := os.Stat(path)
+		require.NoError(t, statErr)
+		require.Equal(t, os.FileMode(0o640), info.Mode().Perm())
+	}
+
+	err = writeOtelYAMLImports(filepath.Join(t.TempDir(), "missing", "config.yml"), nil)
+	require.ErrorContains(t, err, "reading")
+}
+
+func TestYAMLStateManager(t *testing.T) {
+	manager, err := yamlStateManager(t.Context(), false)
+	require.NoError(t, err)
+	require.NotNil(t, manager)
+
+	_, err = yamlStateManager(t.Context(), true)
+	require.ErrorContains(t, err, "state manager not found")
+
+	want := newStateManager()
+	manager, err = yamlStateManager(contextWithStateManager(t.Context(), want), true)
+	require.NoError(t, err)
+	require.Same(t, want, manager)
+}
+
+func TestLoadYAMLStatesError(t *testing.T) {
+	_, err := loadYAMLStates([]modulePinConfig{{yamlFile: filepath.Join(t.TempDir(), "missing.yml")}})
+	require.Error(t, err)
+}
+
+func TestTrackYAMLConfigFilesRevertsExistingAndGeneratedFiles(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+	t.Setenv("GOWORK", "off")
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	moduleDir := filepath.Join(tmp, "module")
+	require.NoError(t, os.MkdirAll(moduleDir, 0o755))
+	goMod := filepath.Join(moduleDir, goModFileName)
+	original := []byte("module example.com/test\n\ngo 1.25\n")
+	require.NoError(t, os.WriteFile(goMod, original, 0o644))
+
+	manager := newStateManager()
+	require.NoError(t, trackYAMLConfigFiles(
+		t.Context(), manager, []modulePinConfig{{moduleDir: moduleDir}}, PinOptions{},
+	))
+	for _, name := range []string{goModFileName, goSumFileName, toolFileCanonical, toolFileAlias} {
+		path, err := filepath.Abs(filepath.Join(moduleDir, name))
+		require.NoError(t, err)
+		require.Contains(t, manager.files, filepath.Clean(path))
+	}
+
+	require.NoError(t, os.WriteFile(goMod, []byte("changed"), 0o644))
+	generated := filepath.Join(moduleDir, toolFileCanonical)
+	require.NoError(t, os.WriteFile(generated, []byte("generated"), 0o644))
+	require.NoError(t, manager.Revert())
+
+	got, err := os.ReadFile(goMod)
+	require.NoError(t, err)
+	require.Equal(t, original, got)
+	require.NoFileExists(t, generated)
+}
+
+func TestTrackYAMLConfigFilesTracksWorkspaceSum(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, root)
+	t.Setenv("GOWORK", "")
+	moduleDir := filepath.Join(root, "module")
+	require.NoError(t, os.MkdirAll(moduleDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(moduleDir, goModFileName), []byte("module example.com/test\n\ngo 1.25\n"), 0o644,
+	))
+	workFile := filepath.Join(root, "go.work")
+	workSum := filepath.Join(root, "go.work.sum")
+	require.NoError(t, os.WriteFile(workFile, []byte("go 1.26.0\n\nuse ./module\n"), 0o644))
+	require.NoError(t, os.WriteFile(workSum, []byte("workspace sum\n"), 0o644))
+
+	manager := newStateManager()
+	require.NoError(t, trackYAMLConfigFiles(
+		t.Context(), manager, []modulePinConfig{{moduleDir: moduleDir}},
+		PinOptions{Args: []string{"-C", moduleDir}},
+	))
+	absWorkSum, err := filepath.Abs(workSum)
+	require.NoError(t, err)
+	require.Contains(t, manager.files, filepath.Clean(absWorkSum))
+}
+
+func TestProcessYAMLConfigsRequiresStateManagerForAutoPin(t *testing.T) {
+	path := filepath.Join(t.TempDir(), instrumentationYAMLCanonical)
+	require.NoError(t, os.WriteFile(path, []byte("instrumentations: []\n"), 0o644))
+	err := processYAMLConfigs(t.Context(), []modulePinConfig{{yamlFile: path}}, PinOptions{AutoPin: true})
+	require.ErrorContains(t, err, "state manager not found")
+}
+
+func TestProcessYAMLConfigsLoadError(t *testing.T) {
+	err := processYAMLConfigs(t.Context(), []modulePinConfig{{
+		yamlFile: filepath.Join(t.TempDir(), "missing.yml"),
+	}}, PinOptions{})
+	require.ErrorContains(t, err, "reading")
+}
+
+func TestFinalizeAutoPinYAMLTidyErrorRevertsToolFile(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	moduleDir := filepath.Join(tmp, "module")
+	require.NoError(t, os.MkdirAll(moduleDir, 0o755))
+	toolFile := filepath.Join(moduleDir, toolFileCanonical)
+	manager := newStateManager()
+	require.NoError(t, manager.Track(toolFile))
+
+	err := finalizeAutoPinYAML(t.Context(), []yamlPinState{{
+		config:   modulePinConfig{moduleDir: moduleDir},
+		imports:  map[string]bool{"example.com/instrumentation": true},
+		toolFile: toolFile,
+	}}, PinOptions{})
+	require.ErrorContains(t, err, "running go mod tidy")
+	require.NoError(t, manager.Revert())
+	require.NoFileExists(t, toolFile)
+}
+
+func TestFinalizeAutoPinYAMLWritesPrunedToolFile(t *testing.T) {
+	tmp := t.TempDir()
+	moduleDir := filepath.Join(tmp, "module")
+	require.NoError(t, os.MkdirAll(moduleDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(moduleDir, goModFileName), []byte("module example.com/test\n\ngo 1.25\n"), 0o644,
+	))
+	toolFile := filepath.Join(moduleDir, toolFileCanonical)
+
+	err := finalizeAutoPinYAML(t.Context(), []yamlPinState{{
+		config:   modulePinConfig{moduleDir: moduleDir},
+		imports:  map[string]bool{},
+		toolFile: toolFile,
+	}}, PinOptions{})
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(toolFile)
+	require.NoError(t, err)
+	require.Contains(t, string(data), "package tools")
+	require.NotContains(t, string(data), "import (")
+}
+
+func TestFinalizeStandaloneYAMLWriteError(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	manager := newStateManager()
+	generated := filepath.Join(tmp, toolFileCanonical)
+	require.NoError(t, manager.Track(generated))
+	require.NoError(t, os.WriteFile(generated, []byte("generated"), 0o644))
+
+	err := finalizeStandaloneYAML([]yamlPinState{{
+		config: modulePinConfig{yamlFile: filepath.Join(tmp, "missing.yml")},
+	}}, PinOptions{Prune: true}, manager)
+	require.ErrorContains(t, err, "reading")
+	require.NoFileExists(t, generated)
+}
+
+func TestMaterializeYAMLConfigsInvalidGoMod(t *testing.T) {
+	dir := t.TempDir()
+	yamlFile := filepath.Join(dir, instrumentationYAMLCanonical)
+	require.NoError(t, os.WriteFile(yamlFile, []byte("instrumentations: []\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, goModFileName), []byte("invalid"), 0o644))
+
+	_, err := materializeYAMLConfigs(t.Context(), []modulePinConfig{{moduleDir: dir, yamlFile: yamlFile}}, PinOptions{})
+	require.ErrorContains(t, err, "ensuring otelc require")
+}
+
+func TestProcessYAMLConfigsMaterializeErrorRevertsToolFile(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	yamlFile := filepath.Join(tmp, instrumentationYAMLCanonical)
+	require.NoError(t, os.WriteFile(yamlFile, []byte("instrumentations: []\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmp, goModFileName), []byte("invalid"), 0o644))
+
+	err := processYAMLConfigs(t.Context(), []modulePinConfig{{
+		moduleDir: tmp,
+		yamlFile:  yamlFile,
+	}}, PinOptions{})
+	require.ErrorContains(t, err, "ensuring otelc require")
+	require.NoFileExists(t, filepath.Join(tmp, toolFileCanonical))
+	require.NoFileExists(
+		t,
+		util.GetBuildTemp(stateFileName),
+		"a reverted standalone pin must discard its recovery manifest",
+	)
+	goMod, readErr := os.ReadFile(filepath.Join(tmp, goModFileName))
+	require.NoError(t, readErr)
+	require.Equal(t, "invalid", string(goMod))
+}
+
+func TestProcessConfiguredModulesError(t *testing.T) {
+	dir := t.TempDir()
+	toolFile := filepath.Join(dir, toolFileCanonical)
+	require.NoError(t, os.WriteFile(toolFile, []byte("not go"), 0o644))
+
+	err := processConfiguredModules(t.Context(), []modulePinConfig{{moduleDir: dir, toolFile: toolFile}}, PinOptions{})
+	require.Error(t, err)
+}
+
+func TestDiscoverPinConfigsKeepsUnconfiguredModules(t *testing.T) {
+	configured := t.TempDir()
+	unconfigured := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(configured, instrumentationYAMLCanonical),
+		[]byte("instrumentations: []\n"), 0o644,
+	))
+
+	configs, inferred, err := discoverPinConfigs([]string{configured, unconfigured})
+	require.NoError(t, err)
+	require.Equal(t, []modulePinConfig{{
+		moduleDir: configured,
+		yamlFile:  filepath.Join(configured, instrumentationYAMLCanonical),
+	}}, configs)
+	require.Equal(t, map[string]bool{unconfigured: true}, inferred)
+}
+
+func TestDiscoverPinConfigsToolFileTakesPrecedence(t *testing.T) {
+	dir := t.TempDir()
+	toolFile := filepath.Join(dir, toolFileCanonical)
+	require.NoError(t, os.WriteFile(toolFile, []byte("//go:build tools\n\npackage tools\n"), 0o644))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, instrumentationYAMLCanonical),
+		[]byte("instrumentations:\n  - example.com/ignored\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, instrumentationYAMLAlias),
+		[]byte("instrumentations:\n  - example.com/also-ignored\n"),
+		0o644,
+	))
+
+	configs, unconfigured, err := discoverPinConfigs([]string{dir})
+	require.NoError(t, err)
+	require.Empty(t, unconfigured)
+	require.Equal(t, []modulePinConfig{{moduleDir: dir, toolFile: toolFile}}, configs)
+}
+
+func TestDiscoverPinConfigsRejectsAmbiguousFiles(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		files []string
+		want  string
+	}{
+		{
+			name:  "tool files",
+			files: []string{toolFileCanonical, toolFileAlias},
+			want:  "only one instrumentation config file is allowed",
+		},
+		{
+			name:  "YAML files",
+			files: []string{instrumentationYAMLCanonical, instrumentationYAMLAlias},
+			want:  "only one instrumentation YAML file is allowed",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for _, name := range tt.files {
+				require.NoError(t, os.WriteFile(filepath.Join(dir, name), nil, 0o644))
+			}
+
+			configs, unconfigured, err := discoverPinConfigs([]string{dir})
+			require.ErrorContains(t, err, tt.want)
+			require.Nil(t, configs)
+			require.Nil(t, unconfigured)
+		})
+	}
+}
+
+func TestPinLockedYAMLOnlyPrunesAndRestoresModuleState(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	root := filepath.Join(tmp, "root")
+	invalid := filepath.Join(tmp, "invalid")
+	require.NoError(t, os.MkdirAll(root, 0o755))
+	require.NoError(t, os.MkdirAll(invalid, 0o755))
+	goMod := fmt.Sprintf(`module example.com/root
+
+go 1.25
+
+require example.com/invalid v0.0.0
+
+replace example.com/invalid => %s
+`, invalid)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte(goMod), 0o644))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(invalid, "go.mod"), []byte("module example.com/invalid\n\ngo 1.25\n"), 0o644,
+	))
+	require.NoError(t, os.WriteFile(filepath.Join(invalid, "invalid.go"), []byte("package invalid\n"), 0o644))
+	yamlFile := filepath.Join(root, instrumentationYAMLCanonical)
+	require.NoError(t, os.WriteFile(
+		yamlFile, []byte("instrumentations:\n  - example.com/invalid\n"), 0o644,
+	))
+
+	beforeMod, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	require.NoError(t, err)
+	_, err = pinLocked(t.Context(), PinOptions{Prune: true, ModuleDirs: []string{root}})
+	require.NoError(t, err)
+
+	afterMod, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	require.NoError(t, err)
+	require.Equal(t, beforeMod, afterMod)
+	require.NoFileExists(t, filepath.Join(root, toolFileCanonical))
+	imports, err := loadOtelYAMLImports(yamlFile)
+	require.NoError(t, err)
+	require.Empty(t, imports)
+}
+
+func TestPinLockedYAMLOnlyWithoutPruneRestoresModuleState(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	root := filepath.Join(tmp, "root")
+	invalid := filepath.Join(tmp, "invalid")
+	require.NoError(t, os.MkdirAll(root, 0o755))
+	require.NoError(t, os.MkdirAll(invalid, 0o755))
+	goMod := fmt.Sprintf(`module example.com/root
+
+go 1.25
+
+require example.com/invalid v0.0.0
+
+replace example.com/invalid => %s
+`, invalid)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte(goMod), 0o644))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(invalid, "go.mod"), []byte("module example.com/invalid\n\ngo 1.25\n"), 0o644,
+	))
+	require.NoError(t, os.WriteFile(filepath.Join(invalid, "invalid.go"), []byte("package invalid\n"), 0o644))
+	yamlFile := filepath.Join(root, instrumentationYAMLCanonical)
+	yamlData := []byte("# keep formatting\ninstrumentations:\n  - example.com/invalid\n")
+	require.NoError(t, os.WriteFile(yamlFile, yamlData, 0o644))
+
+	beforeMod, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	require.NoError(t, err)
+	_, err = pinLocked(t.Context(), PinOptions{ModuleDirs: []string{root}})
+	require.NoError(t, err)
+
+	afterMod, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	require.NoError(t, err)
+	require.Equal(t, beforeMod, afterMod)
+	require.NoFileExists(t, filepath.Join(root, toolFileCanonical))
+	afterYAML, err := os.ReadFile(yamlFile)
+	require.NoError(t, err)
+	require.True(t, bytes.Equal(yamlData, afterYAML))
+}
+
+func TestPinLockedYAMLValidationPrunesInvalidRule(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	root := filepath.Join(tmp, "root")
+	valid := filepath.Join(tmp, "valid")
+	invalid := filepath.Join(tmp, "invalid")
+	require.NoError(t, os.MkdirAll(root, 0o755))
+	writeInstrumentationModule(t, valid, "example.com/valid", true, nil)
+	writeInstrumentationModule(t, invalid, "example.com/invalid", false, nil)
+	require.NoError(t, os.WriteFile(
+		filepath.Join(invalid, "invalid.otelc.yml"), []byte("invalid: yaml: {"), 0o644,
+	))
+	goMod := fmt.Sprintf(`module example.com/root
+
+go 1.25
+
+require (
+	example.com/invalid v0.0.0
+	example.com/valid v0.0.0
+)
+
+replace example.com/invalid => %s
+replace example.com/valid => %s
+`, invalid, valid)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte(goMod), 0o644))
+	yamlFile := filepath.Join(root, instrumentationYAMLCanonical)
+	require.NoError(t, os.WriteFile(yamlFile, []byte(
+		"instrumentations:\n  - example.com/invalid\n  - example.com/valid\n",
+	), 0o644))
+
+	beforeMod, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	require.NoError(t, err)
+	_, err = pinLocked(t.Context(), PinOptions{
+		Prune: true, Validate: true, ModuleDirs: []string{root},
+	})
+	require.NoError(t, err)
+
+	afterMod, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	require.NoError(t, err)
+	require.Equal(t, beforeMod, afterMod)
+	require.NoFileExists(t, filepath.Join(root, toolFileCanonical))
+	imports, err := loadOtelYAMLImports(yamlFile)
+	require.NoError(t, err)
+	require.Equal(t, map[string]bool{"example.com/valid": true}, imports)
+}
+
+func TestPinLockedProcessesToolAndYAMLModules(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	toolRoot := filepath.Join(tmp, "tool-root")
+	toolInvalid := filepath.Join(tmp, "tool-invalid")
+	toolFile := writeInstrumentationModule(t, toolRoot, "example.com/tool-root", false, map[string]string{
+		"example.com/tool-invalid": toolInvalid,
+	})
+	writeInstrumentationModule(t, toolInvalid, "example.com/tool-invalid", false, nil)
+
+	yamlRoot := filepath.Join(tmp, "yaml-root")
+	yamlInvalid := filepath.Join(tmp, "yaml-invalid")
+	require.NoError(t, os.MkdirAll(yamlRoot, 0o755))
+	writeInstrumentationModule(t, yamlInvalid, "example.com/yaml-invalid", false, nil)
+	yamlGoMod := fmt.Sprintf(`module example.com/yaml-root
+
+go 1.25
+
+require example.com/yaml-invalid v0.0.0
+
+replace example.com/yaml-invalid => %s
+`, yamlInvalid)
+	require.NoError(t, os.WriteFile(filepath.Join(yamlRoot, "go.mod"), []byte(yamlGoMod), 0o644))
+	yamlFile := filepath.Join(yamlRoot, instrumentationYAMLCanonical)
+	require.NoError(t, os.WriteFile(
+		yamlFile, []byte("instrumentations:\n  - example.com/yaml-invalid\n"), 0o644,
+	))
+
+	_, err := pinLocked(t.Context(), PinOptions{Prune: true, ModuleDirs: []string{
+		toolRoot,
+		yamlRoot,
+	}})
+	require.NoError(t, err)
+
+	toolData, err := os.ReadFile(toolFile)
+	require.NoError(t, err)
+	require.NotContains(t, string(toolData), "example.com/tool-invalid")
+	yamlImports, err := loadOtelYAMLImports(yamlFile)
+	require.NoError(t, err)
+	require.Empty(t, yamlImports)
+	require.NoFileExists(t, filepath.Join(yamlRoot, toolFileCanonical))
+}
+
+func TestPinLockedPrunesDuplicateInvalidYAMLSelectionsPerModule(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+	t.Setenv("GOWORK", "off")
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	sourceRoot, err := repositorySourceRoot()
+	require.NoError(t, err)
+	t.Setenv(envOtelcSourceRoot, sourceRoot)
+
+	invalid := filepath.Join(tmp, "invalid")
+	writeInstrumentationModule(t, invalid, "example.com/invalid", false, nil)
+	modules := []string{filepath.Join(tmp, "a"), filepath.Join(tmp, "b")}
+	for _, moduleDir := range modules {
+		name := filepath.Base(moduleDir)
+		goMod := fmt.Sprintf(`module example.com/%s
+
+go 1.25
+
+require example.com/invalid v0.0.0
+
+replace example.com/invalid => %s
+`, name, invalid)
+		require.NoError(t, os.MkdirAll(moduleDir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(moduleDir, goModFileName), []byte(goMod), 0o644))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(moduleDir, instrumentationYAMLCanonical),
+			[]byte("# per-module selection\ninstrumentations:\n  - example.com/invalid\n"),
+			0o644,
+		))
+	}
+
+	_, err = pinLocked(t.Context(), PinOptions{Prune: true, ModuleDirs: modules})
+	require.NoError(t, err)
+	for _, moduleDir := range modules {
+		imports, readErr := loadOtelYAMLImports(filepath.Join(moduleDir, instrumentationYAMLCanonical))
+		require.NoError(t, readErr)
+		require.Empty(t, imports, "each YAML root must prune its own invalid selection")
+	}
+}
+
+func TestAutoPinFailureRestoresEveryModule(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+	t.Setenv("GOWORK", "off")
+	sourceRoot, err := repositorySourceRoot()
+	require.NoError(t, err)
+	t.Setenv(envOtelcSourceRoot, sourceRoot)
+
+	valid := filepath.Join(tmp, "valid")
+	writeInstrumentationModule(t, valid, "example.com/invalid", false, nil)
+	first := filepath.Join(tmp, "a")
+	second := filepath.Join(tmp, "b")
+	firstMod := []byte(fmt.Sprintf(`module example.com/a
+
+go 1.25
+
+require example.com/invalid v0.0.0
+
+replace example.com/invalid => %s
+`, valid))
+	secondMod := []byte("invalid go.mod")
+	for _, moduleDir := range []string{first, second} {
+		require.NoError(t, os.MkdirAll(moduleDir, 0o755))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(moduleDir, instrumentationYAMLCanonical),
+			[]byte("instrumentations:\n  - example.com/invalid\n"),
+			0o644,
+		))
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(first, goModFileName), firstMod, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(second, goModFileName), secondMod, 0o644))
+
+	manager := newStateManager()
+	_, err = autoPin(contextWithStateManager(t.Context(), manager), []string{first, second}, subcmdBuild, nil)
+	require.ErrorContains(t, err, "ensuring otelc require")
+	require.NoError(t, manager.Revert())
+	require.NoError(t, manager.Discard())
+
+	for moduleDir, wantMod := range map[string][]byte{first: firstMod, second: secondMod} {
+		gotMod, readErr := os.ReadFile(filepath.Join(moduleDir, goModFileName))
+		require.NoError(t, readErr)
+		require.Equal(t, wantMod, gotMod)
+		require.NoFileExists(t, filepath.Join(moduleDir, toolFileCanonical))
+		require.NoFileExists(t, filepath.Join(moduleDir, goSumFileName))
+	}
+}
+
+func TestPinLockedEmptyYAMLLeavesNoTemporaryState(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmp, "go.mod"), []byte("module example.com/root\n\ngo 1.25\n"), 0o644,
+	))
+	require.NoError(t, os.WriteFile(filepath.Join(tmp, instrumentationYAMLCanonical), nil, 0o644))
+
+	beforeMod, err := os.ReadFile(filepath.Join(tmp, "go.mod"))
+	require.NoError(t, err)
+	_, err = pinLocked(t.Context(), PinOptions{Prune: true, ModuleDirs: []string{tmp}})
+	require.NoError(t, err)
+	afterMod, err := os.ReadFile(filepath.Join(tmp, "go.mod"))
+	require.NoError(t, err)
+	require.Equal(t, beforeMod, afterMod)
+	require.NoFileExists(t, filepath.Join(tmp, toolFileCanonical))
+}
+
+func TestPinLockedProcessesYAMLAndUnconfiguredModules(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	yamlRoot := filepath.Join(tmp, "yaml-root")
+	unconfiguredRoot := filepath.Join(tmp, "unconfigured-root")
+	require.NoError(t, os.MkdirAll(yamlRoot, 0o755))
+	require.NoError(t, os.MkdirAll(unconfiguredRoot, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(yamlRoot, goModFileName),
+		[]byte("module example.com/yaml-root\n\ngo 1.25\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(yamlRoot, instrumentationYAMLCanonical),
+		[]byte("instrumentations: []\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(unconfiguredRoot, goModFileName),
+		[]byte("module example.com/unconfigured-root\n\ngo 1.25\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(unconfiguredRoot, "main.go"),
+		[]byte("package main\n\nfunc main() {}\n"),
+		0o644,
+	))
+
+	result, err := pinLocked(t.Context(), PinOptions{ModuleDirs: []string{
+		yamlRoot,
+		unconfiguredRoot,
+	}})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Nil(t, result.AllDeps)
+	require.NoFileExists(t, filepath.Join(yamlRoot, toolFileCanonical))
+	require.FileExists(t, filepath.Join(unconfiguredRoot, toolFileCanonical))
+}
+
+func TestAutoPinYAMLDoesNotModifyYAML(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, tmp)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	invalid := filepath.Join(tmp, "invalid")
+	require.NoError(t, os.MkdirAll(invalid, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmp, "go.mod"),
+		fmt.Appendf(nil, `module example.com/root
+
+go 1.25
+
+require example.com/invalid v0.0.0
+
+replace example.com/invalid => %s
+`, invalid),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(invalid, "go.mod"), []byte("module example.com/invalid\n\ngo 1.25\n"), 0o644,
+	))
+	require.NoError(t, os.WriteFile(filepath.Join(invalid, "invalid.go"), []byte("package invalid\n"), 0o644))
+	yamlFile := filepath.Join(tmp, instrumentationYAMLCanonical)
+	yaml := []byte("instrumentations:\n  - example.com/invalid\n")
+	require.NoError(t, os.WriteFile(yamlFile, yaml, 0o644))
+
+	sm := newStateManager()
+	ctx := contextWithStateManager(t.Context(), sm)
+	_, err := autoPin(ctx, []string{tmp}, subcmdBuild, nil)
+	require.NoError(t, err)
+	afterYAML, err := os.ReadFile(yamlFile)
+	require.NoError(t, err)
+	require.YAMLEq(t, string(yaml), string(afterYAML))
+	toolData, err := os.ReadFile(filepath.Join(tmp, toolFileCanonical))
+	require.NoError(t, err)
+	require.NotContains(t, string(toolData), "example.com/invalid")
+}
+
+func TestAutoPinEmptyYAMLSuppressesDefaults(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, dir)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/app\n\ngo 1.25\n"), 0o644))
+	require.NoError(
+		t,
+		os.WriteFile(
+			filepath.Join(dir, "main.go"),
+			[]byte("package main\nimport _ \"net/http\"\nfunc main() {}\n"),
+			0o644,
+		),
+	)
+	yamlFile := filepath.Join(dir, instrumentationYAMLCanonical)
+	original := []byte("# deliberately disabled\ninstrumentations: []\n")
+	require.NoError(t, os.WriteFile(yamlFile, original, 0o644))
+	ctx := contextWithStateManager(t.Context(), newStateManager())
+	_, err := autoPin(ctx, []string{dir}, subcmdBuild, []string{"."})
+	require.NoError(t, err)
+	toolFile, err := os.ReadFile(filepath.Join(dir, toolFileCanonical))
+	require.NoError(t, err)
+	require.NotContains(t, string(toolFile), "go.opentelemetry.io/otelc/instrumentation/net/http")
+	require.NotContains(t, string(toolFile), "import (")
+	got, err := os.ReadFile(yamlFile)
+	require.NoError(t, err)
+	require.Equal(t, original, got)
+}
+
+func TestAutoPinMissingCheckoutDoesNotSnapshotModule(t *testing.T) {
+	for _, withYAML := range []bool{true, false} {
+		name := "built_in_defaults"
+		if withYAML {
+			name = "yaml"
+		}
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv(util.EnvOtelcWorkDir, dir)
+			t.Setenv("OTELC_SOURCE_ROOT", t.TempDir())
+			t.Setenv("GOWORK", "off")
+			t.Chdir(dir)
+			mod := []byte("module example.com/app\n\ngo 1.25\n")
+			require.NoError(t, os.WriteFile(filepath.Join(dir, goModFileName), mod, 0o644))
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"),
+				[]byte("package main\nimport _ \"net/http\"\nfunc main() {}\n"), 0o644))
+			if withYAML {
+				require.NoError(t, os.WriteFile(
+					filepath.Join(dir, instrumentationYAMLCanonical),
+					[]byte(
+						"instrumentations:\n  - go.opentelemetry.io/otelc/instrumentation/net/http/client\n",
+					),
+					0o644,
+				))
+			}
+			ctx := contextWithStateManager(t.Context(), newStateManager())
+			_, err := autoPin(ctx, []string{dir}, subcmdBuild, []string{"."})
+			require.ErrorContains(t, err, "otelc source checkout not found")
+			require.NoFileExists(t, util.GetBuildTemp(stateFileName), "no user files should have been snapshotted")
+			require.NoFileExists(t, filepath.Join(dir, toolFileCanonical))
+			got, err := os.ReadFile(filepath.Join(dir, goModFileName))
+			require.NoError(t, err)
+			require.Equal(t, mod, got)
+		})
+	}
+}
+
 func TestEnsureOtelcRequire(t *testing.T) {
 	const testVersion = "v1.2.3"
 
@@ -1241,7 +2019,7 @@ func TestUpdatePinnedProjects_NoInstrumentation(t *testing.T) {
 		nil,
 	)
 
-	_, err := updatePinnedProjects(t.Context(), []string{toolFile}, PinOptions{
+	err := updatePinnedProjects(t.Context(), []string{toolFile}, PinOptions{
 		Prune: true,
 	})
 
@@ -1277,7 +2055,7 @@ replace example.com/foo => %s
 		"example.com/foo",
 	)
 
-	_, err := updatePinnedProjects(
+	err := updatePinnedProjects(
 		t.Context(),
 		[]string{filepath.Join(root, toolFileCanonical)},
 		PinOptions{},
@@ -1320,7 +2098,7 @@ func TestUpdatePinnedProjects_InvalidRule(t *testing.T) {
 		0o644,
 	))
 
-	_, err := updatePinnedProjects(
+	err := updatePinnedProjects(
 		t.Context(),
 		[]string{toolFile},
 		PinOptions{
@@ -1412,6 +2190,108 @@ func main() {
 	// Verify tool is pinned in go.mod
 	require.Contains(t, string(goMod), "go.opentelemetry.io/otelc/tool/cmd/otelc")
 	require.Contains(t, string(goMod), "go.opentelemetry.io/otelc")
+}
+
+func TestGeneratePinnedProjectsSecondModuleFailure(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, root)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	repositoryDir, err := repositorySourceRoot()
+	require.NoError(t, err)
+	t.Setenv("OTELC_SOURCE_ROOT", repositoryDir)
+	t.Chdir(root)
+	first := filepath.Join(root, "a")
+	second := filepath.Join(root, "z")
+	require.NoError(t, os.MkdirAll(first, 0o755))
+	require.NoError(t, os.MkdirAll(second, 0o755))
+	require.NoError(
+		t,
+		os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/test\n\ngo 1.25\n"), 0o644),
+	)
+	require.NoError(
+		t,
+		os.WriteFile(
+			filepath.Join(root, "main.go"),
+			[]byte("package main\nimport _ \"net/http\"\nfunc main() {}\n"),
+			0o644,
+		),
+	)
+	require.NoError(
+		t,
+		os.WriteFile(filepath.Join(first, "go.mod"), []byte("module example.com/first\n\ngo 1.25\n"), 0o644),
+	)
+	require.NoError(t, os.WriteFile(filepath.Join(second, "go.mod"), []byte("invalid go.mod"), 0o644))
+	_, err = generatePinnedProjects(
+		t.Context(),
+		[]string{first, second},
+		PinOptions{Args: []string{"."}},
+	)
+	require.Error(t, err)
+	require.ErrorContains(t, err, filepath.Join(second, goModFileName))
+	require.FileExists(t, filepath.Join(first, toolFileCanonical), "the first module was already materialized")
+	require.FileExists(t, filepath.Join(second, toolFileCanonical), "the second write precedes go.mod validation")
+}
+
+func TestGeneratePinnedProjectsTwoModules(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, root)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	repositoryDir, err := repositorySourceRoot()
+	require.NoError(t, err)
+	t.Setenv("OTELC_SOURCE_ROOT", repositoryDir)
+	t.Chdir(root)
+	require.NoError(t, os.WriteFile(filepath.Join(root, goModFileName),
+		[]byte("module example.com/test\n\ngo 1.25\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "main.go"),
+		[]byte("package main\nimport _ \"net/http\"\nfunc main() {}\n"), 0o644))
+	first := filepath.Join(root, "a")
+	second := filepath.Join(root, "z")
+	for _, moduleDir := range []string{first, second} {
+		require.NoError(t, os.MkdirAll(moduleDir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(moduleDir, goModFileName),
+			[]byte("module example.com/"+filepath.Base(moduleDir)+"\n\ngo 1.25\n"), 0o644))
+	}
+
+	result, err := generatePinnedProjects(
+		t.Context(),
+		[]string{first, second},
+		PinOptions{Args: []string{"."}},
+	)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Nil(t, result.AllDeps)
+	for _, moduleDir := range []string{first, second} {
+		toolFile, readErr := os.ReadFile(filepath.Join(moduleDir, toolFileCanonical))
+		require.NoError(t, readErr)
+		require.Contains(t, string(toolFile), "go.opentelemetry.io/otelc/instrumentation/net/http/client")
+		goMod, readErr := os.ReadFile(filepath.Join(moduleDir, goModFileName))
+		require.NoError(t, readErr)
+		require.Contains(t, string(goMod), "tool go.opentelemetry.io/otelc/tool/cmd/otelc")
+	}
+}
+
+func TestGeneratePinnedProjectsNoMatchingInstrumentation(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, dir)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	t.Setenv("GOWORK", "off")
+	t.Chdir(dir)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, goModFileName),
+		[]byte("module example.com/empty\n\ngo 1.25\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "empty.go"),
+		[]byte("package empty\nfunc Example() {}\n"), 0o644))
+	result, err := generatePinnedProjects(t.Context(), []string{dir}, PinOptions{Args: []string{"."}})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotEmpty(t, result.AllDeps)
+	require.NoFileExists(t, filepath.Join(dir, toolFileCanonical))
+}
+
+func TestGeneratePinnedProjectsFindDepsError(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := generatePinnedProjects(ctx, []string{t.TempDir()}, PinOptions{})
+	require.Error(t, err)
 }
 
 func TestPrepareVendoredBuild_NotVendored(t *testing.T) {

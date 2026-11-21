@@ -13,7 +13,7 @@ $(error GNU Make 3.82 or later is required (found $(MAKE_VERSION)). On macOS, ru
 endif
 
 .PHONY: all test test-unit test-integration test-e2e format lint build build-all build/pkg install manifest verify-manifest clean \
-        build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
+        build-demo build-demo-grpc build-demo-http build-demo-images format/go format/yaml lint/go lint/yaml \
         lint/action lint/makefile lint/license-header lint/license-header/fix lint/dockerfile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
         ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed check-api-sync check-golden-files check-test-file-naming \
         test-unit/update-golden test-unit/race test-unit/tool test-unit/pkg test-unit/instrumentation test-unit/demo test-unit/helper \
@@ -216,6 +216,26 @@ build-demo-grpc: ## Build gRPC demo server and client
 
 build-demo-http: ## Build HTTP demo server and client
 	@$(MAKE) -C demo/app/http build
+
+DEMO_DOCKERFILES := demo/app/db/client/Dockerfile demo/app/db/server/Dockerfile \
+	demo/app/grpc/client/Dockerfile demo/app/grpc/server/Dockerfile \
+	demo/app/http/client/Dockerfile demo/app/http/server/Dockerfile \
+	demo/app/redis/client/Dockerfile
+
+.ONESHELL:
+build-demo-images: ## Smoke-build every demo Docker app-builder stage
+	@echo "Building demo Docker app-builder stages..."
+	set -euo pipefail
+	tags=()
+	cleanup() { docker image rm -f "$${tags[@]}" >/dev/null 2>&1 || true; }
+	trap cleanup EXIT
+	index=0
+	for dockerfile in $(DEMO_DOCKERFILES); do
+		tag="otelc-demo-smoke-$${GITHUB_RUN_ID:-local}-$$PPID-$$index"
+		tags+=("$$tag")
+		docker build --target app-builder --tag "$$tag" --file "$$dockerfile" .
+		index=$$((index + 1))
+	done
 
 ##@ Code Quality
 
@@ -729,9 +749,8 @@ test-integration/coverage: ## Run integration tests with coverage report
 test-integration/coverage: build build-demo
 	@echo "Running integration tests with coverage report..."
 	set -euo pipefail
-	# See test-integration: linodego builds need >20m when the suite is unsharded,
-	# and the unsharded suite can take more than 35m.
-	go -C "test" test -json -v -shuffle=on -timeout=50m -count=1 -tags integration ./integration/... -coverprofile=../coverage-integration.txt -covermode=atomic 2>&1 | tee ./gotest-integration.log
+	# Coverage slows the unsharded suite; allow time for the parallel build-lock cases too.
+	go -C "test" test -json -v -shuffle=on -timeout=65m -count=1 -tags integration ./integration/... -coverprofile=../coverage-integration.txt -covermode=atomic 2>&1 | tee ./gotest-integration.log
 
 .ONESHELL:
 test-e2e: ## Run e2e tests

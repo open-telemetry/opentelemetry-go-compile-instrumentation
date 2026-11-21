@@ -276,7 +276,7 @@ require go.opentelemetry.io/otelc/instrumentation/example.com/lib v0.0.0
 		moduleDir,
 	))
 
-	modFile, err := parseGoMod(filepath.Join(moduleDir, "go.mod"))
+	modFile, err := parseGoMod(filepath.Join(moduleDir, goModFileName))
 	require.NoError(t, err)
 	require.Condition(t, func() bool {
 		for _, replace := range modFile.Replace {
@@ -769,7 +769,7 @@ require (
 
 			readStdout := captureStdout(t)
 			readStderr := captureStderr(t)
-			require.NoError(t, warnVersion(ctx, gomodPath, before))
+			require.NoError(t, warnVersion(ctx, filepath.Dir(gomodPath), before))
 
 			// Stdout belongs to the build, for example go test -json events.
 			assert.Empty(t, readStdout())
@@ -806,7 +806,7 @@ require (
 
 	readStdout := captureStdout(t)
 	readStderr := captureStderr(t)
-	require.NoError(t, warnVersion(ctx, gomodPath, before))
+	require.NoError(t, warnVersion(ctx, filepath.Dir(gomodPath), before))
 
 	assert.Empty(t, readStdout())
 	assert.Equal(t, "Bumped dependency go.opentelemetry.io/otel (v1.38.0 -> v1.43.0)\n", readStderr())
@@ -839,14 +839,14 @@ require (
 		},
 	}
 
-	require.NoError(t, warnVersion(ctx, gomodPath, before))
+	require.NoError(t, warnVersion(ctx, filepath.Dir(gomodPath), before))
 
 	assert.Empty(t, buf.String())
 }
 
 func TestWarnVersion_MissingFile(t *testing.T) {
 	before := versionSnapshot{goVersion: "1.22.0", deps: map[string]string{}}
-	err := warnVersion(t.Context(), "/nonexistent/go.mod", before)
+	err := warnVersion(t.Context(), "/nonexistent", before)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unable to check for version bumps")
@@ -867,7 +867,7 @@ go 1.25.0
 		deps:      map[string]string{},
 	}
 
-	require.NoError(t, warnVersion(ctx, gomodPath, before))
+	require.NoError(t, warnVersion(ctx, filepath.Dir(gomodPath), before))
 
 	assert.Empty(t, buf.String())
 }

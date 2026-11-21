@@ -55,13 +55,15 @@ go list -m <module-path>
 ```
 
 **A `--rules` or `OTELC_RULES` override replaced the matching rules.** When either flag is
-set, `otelc` uses only those rules. The embedded bundle and any `otel.instrumentation.go`
-declarations are ignored. Remove the override or add your custom rules to the specified file.
+set, `otelc` uses only those rules. Manifest-based defaults and any
+`otel.instrumentation.go` or `otel.instrumentation.yml` selections are ignored. Remove the
+override or add your custom rules to the specified file.
 
 **The `otel.instrumentation.go` file declares packages with no matching rules.** When a tool
 file is present, `otelc` loads only the rules from the declared instrumentation packages and
-ignores the embedded bundle. If those packages contain no `*.otelc.yml` files, the matched
-set is empty. See [External Configuration Sources](external-configuration.md).
+does not infer additional built-in defaults. If those packages contain no `*.otelc.yml` files,
+no external library rules match; internal runtime support rules can still be present. See
+[External Configuration Sources](external-configuration.md).
 
 ### Instrumented but no spans appear
 
@@ -286,6 +288,16 @@ Correct the pattern or use an exact import path. See [Glob targets](rules.md#glo
 includes the captured build output. Common causes: the package path passed to `otelc go build`
 does not exist, or the module graph has errors. Run `go build` directly first to confirm the
 project builds without `otelc`.
+
+### `otelc source checkout not found`
+
+Until [#983](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/983)
+publishes the built-in instrumentation modules with versioned requirements, automatic built-in
+instrumentation and non-empty `otel.instrumentation.yml` selections need a full checkout of this
+repository. Run `otelc` from inside the checkout or set `OTELC_SOURCE_ROOT` to the checkout root.
+When multiple checkouts may be in scope, set the variable explicitly to the one matching the
+running `otelc` version. If a prior `otelc pin` was interrupted, run `otelc cleanup` before
+retrying.
 
 ### `Bumped go version (X -> Y)` / `Bumped dependency X (A -> B)`
 

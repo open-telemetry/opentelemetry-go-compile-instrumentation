@@ -17,6 +17,12 @@ RUN go build -o /otelc ./tool/cmd/otelc
 # Stage 2: Build the Redis client with instrumentation
 FROM golang:1.27-alpine@sha256:4c9fe60190a2a3350ddc51de80d0224b8a6698d12bdfc999fee45ea9d6c46dbc AS app-builder
 
+# Built-in instrumentation sources are resolved from the matching checkout.
+COPY --from=otelc-builder /build/go.mod /otelc-src/go.mod
+COPY --from=otelc-builder /build/pkg /otelc-src/pkg
+COPY --from=otelc-builder /build/instrumentation /otelc-src/instrumentation
+ENV OTELC_SOURCE_ROOT=/otelc-src
+
 WORKDIR /app
 
 # Install git for go mod download
