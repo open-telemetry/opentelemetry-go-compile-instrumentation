@@ -42,8 +42,18 @@ func F(x int) {}
         before: Before
         path: example.com/unused
 `)
-	runOtelcCommand(t, dir, append(os.Environ(), "OTELC_RULES=rules.yml", "OTELC_DEBUG=1"), otelcPath, "go", "build", ".")
-	data, err := os.ReadFile(filepath.Join(dir, ".otelc-build", "debug", "example_com_diagnostics", "setup.matches.jsonl"))
+	runOtelcCommand(
+		t,
+		dir,
+		append(os.Environ(), "OTELC_RULES=rules.yml", "OTELC_DEBUG=1"),
+		otelcPath,
+		"go",
+		"build",
+		".",
+	)
+	data, err := os.ReadFile(
+		filepath.Join(dir, ".otelc-build", "debug", "example_com_diagnostics", "setup.matches.jsonl"),
+	)
 	require.NoError(t, err)
 	found := false
 	for line := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
