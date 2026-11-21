@@ -114,8 +114,9 @@ func logLevel() slog.Level {
 // WithTelemetrySDK stamps telemetry.sdk.name/language/version, which
 // resource.Default() includes but resource.New() does not unless asked.
 // WithService stamps service.name (unknown_service:<executable>) and
-// service.instance.id. WithFromEnv stays last so OTEL_SERVICE_NAME and
-// OTEL_RESOURCE_ATTRIBUTES still win.
+// service.instance.id. Registered detectors run after the built-in ones.
+// WithFromEnv stays last so OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES
+// still win.
 func newResource(ctx context.Context) *resource.Resource {
 	res, err := resource.New(ctx,
 		resource.WithTelemetrySDK(),
@@ -124,6 +125,7 @@ func newResource(ctx context.Context) *resource.Resource {
 		resource.WithOS(),
 		resource.WithContainer(),
 		resource.WithHost(),
+		resource.WithDetectors(resourceDetectors.seal()...),
 		resource.WithFromEnv())
 	if err != nil {
 		// resource.New returns what the detectors that did succeed found along
