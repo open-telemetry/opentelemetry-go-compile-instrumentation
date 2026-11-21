@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -113,6 +114,30 @@ func TestParseGoMod_MissingFile(t *testing.T) {
 	_, err := parseGoMod("/nonexistent/go.mod")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to read go.mod file")
+}
+
+// TestWriteGoMod_SymlinkedGoMod checks that a go.mod that is a symbolic link
+// stays one. The link is how some repositories share one go.mod between
+// directories.
+func TestWriteGoMod_SymlinkedGoMod(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "shared.mod")
+	require.NoError(t, os.WriteFile(target, []byte("module example.com/old\n"), 0o644))
+	link := filepath.Join(dir, "go.mod")
+	if err := os.Symlink("shared.mod", link); err != nil {
+		t.Skipf("symlinks are not available: %v", err)
+	}
+
+	mf := &modfile.File{}
+	require.NoError(t, mf.AddModuleStmt("example.com/new"))
+	require.NoError(t, writeGoMod(link, mf))
+
+	info, err := os.Lstat(link)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink, "go.mod must stay a symbolic link")
+	content, err := os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "module example.com/new")
 }
 
 func TestWriteGoMod(t *testing.T) {
@@ -287,6 +312,61 @@ func TestSyncDepsFromSource_MismatchedInstrumentationModule(t *testing.T) {
 
 	err := syncDepsFromSource(t.Context(), map[string]bool{modulePath: true}, moduleDir, repositoryDir)
 	require.ErrorContains(t, err, "matched instrumentation module "+modulePath+" not found")
+	require.ErrorContains(t, err, "embedded manifest and source checkout may be from different otelc versions")
+}
+
+func TestInstrumentationModuleDir(t *testing.T) {
+	t.Run("external module", func(t *testing.T) {
+		dir, err := instrumentationModuleDir(t.TempDir(), "example.com/external")
+		require.NoError(t, err)
+		require.Empty(t, dir)
+	})
+
+	t.Run("missing built-in module", func(t *testing.T) {
+		_, repositoryDir, _ := setupSyncDepsTest(
+			t,
+			"module example.com/app\n\ngo 1.21\n",
+			[]string{"example.com/lib"},
+		)
+		modulePath := util.OtelcInstRoot + "/example.com/lib"
+		instDir := filepath.Join(repositoryDir, "instrumentation")
+		require.NoError(t, os.Remove(filepath.Join(instDir, "example.com", "lib", "go.mod")))
+
+		_, err := instrumentationModuleDir(instDir, modulePath)
+		require.ErrorContains(t, err, "loading matched instrumentation module "+modulePath)
+		require.ErrorContains(t, err, "embedded manifest and source checkout may be from different otelc versions")
+	})
+}
+
+func TestSyncDepsFromSource_InvalidConsumerGoMod(t *testing.T) {
+	moduleDir, repositoryDir, _ := setupSyncDepsTest(t, "invalid go.mod syntax\n", []string{"example.com/lib"})
+
+	err := syncDepsFromSource(
+		t.Context(),
+		map[string]bool{util.OtelcInstRoot + "/example.com/lib": true},
+		moduleDir,
+		repositoryDir,
+	)
+	require.ErrorContains(t, err, "failed to parse go.mod file")
+}
+
+func TestSyncDeps_PkgNestedModuleDiscoveryError(t *testing.T) {
+	moduleDir, repositoryDir, _ := setupSyncDepsTest(
+		t,
+		"module example.com/app\n\ngo 1.21\n",
+		[]string{"example.com/lib"},
+	)
+	malformedModule := filepath.Join(repositoryDir, "pkg", "netutil", "go.mod")
+	require.NoError(t, os.MkdirAll(filepath.Dir(malformedModule), 0o755))
+	require.NoError(t, os.WriteFile(malformedModule, []byte("not a valid go.mod"), 0o644))
+
+	err := syncDepsFromSource(
+		t.Context(),
+		map[string]bool{util.OtelcInstRoot + "/example.com/lib": true},
+		moduleDir,
+		repositoryDir,
+	)
+	require.ErrorContains(t, err, "discovering nested modules under "+filepath.Join(repositoryDir, "pkg"))
 }
 
 //nolint:revive // if we add named returns then nonamedreturns will complain
@@ -311,6 +391,7 @@ func setupSyncDepsTest(t *testing.T, goMod string, instPaths []string) (string, 
 		[]byte("module "+util.OtelcRoot+"\ngo 1.21\n"),
 		0o644,
 	))
+	t.Setenv("OTELC_SOURCE_ROOT", repositoryDir)
 
 	require.NoError(t, os.WriteFile(
 		filepath.Join(pkgDir, "go.mod"),
@@ -686,7 +767,13 @@ require (
 				},
 			}
 
+			readStdout := captureStdout(t)
+			readStderr := captureStderr(t)
 			require.NoError(t, warnVersion(ctx, gomodPath, before))
+
+			// Stdout belongs to the build, for example go test -json events.
+			assert.Empty(t, readStdout())
+			assert.Equal(t, "Bumped go version ("+test.goVersion+" -> 1.25.0)\n", readStderr())
 
 			logged := buf.String()
 			assert.Contains(t, logged, "bumped go version")
@@ -717,7 +804,12 @@ require (
 		},
 	}
 
+	readStdout := captureStdout(t)
+	readStderr := captureStderr(t)
 	require.NoError(t, warnVersion(ctx, gomodPath, before))
+
+	assert.Empty(t, readStdout())
+	assert.Equal(t, "Bumped dependency go.opentelemetry.io/otel (v1.38.0 -> v1.43.0)\n", readStderr())
 
 	logged := buf.String()
 	assert.Contains(t, logged, "bumped dependency")
@@ -778,4 +870,52 @@ go 1.25.0
 	require.NoError(t, warnVersion(ctx, gomodPath, before))
 
 	assert.Empty(t, buf.String())
+}
+
+func TestSyncDeps_DeterministicReplaceOrder(t *testing.T) {
+	goMod := `module example.com/test
+
+go 1.21
+`
+	instPaths := []string{
+		"google.golang.org/grpc",
+		"github.com/segmentio/kafka-go",
+		"github.com/gin-gonic/gin",
+		"net/http/client",
+	}
+
+	tempDir, _, goModPath := setupSyncDepsTest(t, goMod, instPaths)
+	modPaths := make(map[string]bool, len(instPaths))
+	for _, p := range instPaths {
+		modPaths[util.OtelcInstRoot+"/"+p] = true
+	}
+
+	require.NoError(t, syncDeps(t.Context(), modPaths, tempDir))
+
+	mf, err := parseGoMod(goModPath)
+	require.NoError(t, err)
+	require.NotEmpty(t, mf.Replace)
+
+	replacedPaths := make([]string, 0, len(mf.Replace))
+	for _, r := range mf.Replace {
+		replacedPaths = append(replacedPaths, r.Old.Path)
+	}
+
+	assert.True(
+		t,
+		slices.IsSorted(replacedPaths),
+		"expected replace directives to be sorted alphabetically, got: %v",
+		replacedPaths,
+	)
+}
+
+func TestSyncDeps_ModTidyFails(t *testing.T) {
+	// A go.mod with an invalid go toolchain/version causes runModTidy to fail in syncDeps.
+	goMod := `module example.com/test
+
+go 999.0.0
+`
+	tempDir, _, _ := setupSyncDepsTest(t, goMod, []string{"net/http/client"})
+	err := syncDeps(t.Context(), map[string]bool{util.OtelcInstRoot + "/net/http/client": true}, tempDir)
+	require.Error(t, err)
 }

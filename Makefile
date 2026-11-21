@@ -16,10 +16,11 @@ endif
         build-demo build-demo-grpc build-demo-http format/go format/yaml lint/go lint/yaml \
         lint/action lint/makefile lint/license-header lint/license-header/fix lint/dockerfile actionlint yamlfmt gotestfmt ratchet ratchet/pin \
         ratchet/update ratchet/check golangci-lint embedmd checkmake hadolint help docs check-embed check-api-sync check-golden-files check-test-file-naming \
+        test-unit/update-golden test-unit/race test-unit/tool test-unit/pkg test-unit/instrumentation test-unit/demo test-unit/helper \
         test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage test-unit/instrumentation/coverage \
         check-coverage test-integration/coverage test-e2e/coverage test-latestlibrun test-versionmatrix \
         weaver-install tidy/test-apps \
-        fetch-upstream-semconv lint-schema \
+        fetch-upstream-semconv lint-schema generate \
         adr-tools adr-new adr-list \
         benchmark/codspeed benchmark/threshold govulncheck govulncheck/instrumentation
 
@@ -112,7 +113,7 @@ checkmake: $(CHECKMAKE) ## Build checkmake from .tools
 
 # Dynamic variables
 GOOS ?= $(shell go env GOOS)
-VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+VERSION := $(shell git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo "v0.0.0")
 COMMIT_HASH := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME := $(shell date -u '+%Y-%m-%d')
 MODULE_PATH = go.opentelemetry.io/otelc
@@ -913,6 +914,11 @@ lint-schema: fetch-upstream-semconv
 	fi; \
 	echo "Upstream semconv dependency: v$$MANIFEST_VERSION (matches .semconv-version)"
 	@scripts/semconv/lint-schema.sh $(OCI_BIN) $(WEAVER_IMAGE) "$(OTELC_REGISTRY_DIR)"
+
+generate: ## Generate pkg/otelcconv from the attributes declared with `id:` in schemas/otelc/
+generate: fetch-upstream-semconv
+	@scripts/semconv/generate.sh $(OCI_BIN) $(WEAVER_IMAGE) "$(OTELC_REGISTRY_DIR)" \
+		"$(CURDIR)/schemas/templates/registry" "$(CURDIR)/pkg/otelcconv"
 
 # `lint/semantic-conventions` is the umbrella entry point used by CI and the
 # top-level `lint` target; it now validates the project's own registry.
