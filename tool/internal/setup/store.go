@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/compileindex"
 	"go.opentelemetry.io/otelc/tool/internal/instrument"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
@@ -145,7 +146,17 @@ func (sp *setupPhase) store(matched []*rule.InstRuleSet) error {
 	if err = sp.storeResolvedNames(); err != nil {
 		return err
 	}
-	return sp.storePGOProfile()
+	if err = sp.storePGOProfile(); err != nil {
+		return err
+	}
+	packages := make([]string, 0, len(matched))
+	for _, set := range matched {
+		packages = append(packages, set.ModulePath)
+	}
+	if err = compileindex.Store(packages); err != nil {
+		sp.Warn("Could not store optional compile index", "error", err)
+	}
+	return nil
 }
 
 // storePGOProfile records the PGO profile the build applies, for the nested

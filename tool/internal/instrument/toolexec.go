@@ -29,6 +29,7 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/compileindex"
 	"go.opentelemetry.io/otelc/tool/internal/imports"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
@@ -262,6 +263,13 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 			return nil, err
 		}
 		ip.importConfig = imports
+	}
+
+	// Setup's optional index can rule out a package without decoding either
+	// artifact. Candidates and stale/missing index data keep the exact loader,
+	// including its build-global ignored-call flag and file/test/cgo matching.
+	if compileindex.Excludes(util.FindFlagValue(args, "-p")) {
+		return args, nil
 	}
 
 	// Load matched hook rules from setup phase
