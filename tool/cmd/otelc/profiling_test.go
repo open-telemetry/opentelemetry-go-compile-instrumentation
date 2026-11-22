@@ -207,6 +207,12 @@ func TestIsSubPath(t *testing.T) {
 			expected: true,
 		},
 		{
+			name:     "directory whose name starts with two dots",
+			target:   filepath.Join(base, "..profiles"),
+			base:     base,
+			expected: true,
+		},
+		{
 			name:     "parent directory",
 			target:   filepath.Dir(base),
 			base:     base,
