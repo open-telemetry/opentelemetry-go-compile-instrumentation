@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -110,7 +111,7 @@ func (t *tracer) TraceQueryStart(
 
 	attrs := connAttributes(conn)
 	if data.SQL != "" {
-		attrs = append(attrs, semconv.DBQueryText(data.SQL))
+		attrs = append(attrs, semconv.DBQueryText(sanitizeSQL(data.SQL)))
 	}
 	if op != "" {
 		attrs = append(attrs, semconv.DBOperationName(op))
@@ -281,7 +282,7 @@ func (t *tracer) TracePrepareStart(
 	attrs := connAttributes(conn)
 	attrs = append(attrs, semconv.DBOperationName("PREPARE"))
 	if data.SQL != "" {
-		attrs = append(attrs, semconv.DBQueryText(data.SQL))
+		attrs = append(attrs, semconv.DBQueryText(sanitizeSQL(data.SQL)))
 	}
 	if data.Name != "" {
 		attrs = append(attrs, attribute.String("db.prepared_statement.name", data.Name))
@@ -331,9 +332,22 @@ type chainedTracer struct {
 	tracers []pgx.QueryTracer
 }
 
+func hasTracer(t pgx.QueryTracer) bool {
+	if _, ok := t.(*tracer); ok {
+		return true
+	}
+	if ct, ok := t.(*chainedTracer); ok {
+		return slices.ContainsFunc(ct.tracers, hasTracer)
+	}
+	return false
+}
+
 func chainTracer(existing, otelTracer pgx.QueryTracer) pgx.QueryTracer {
 	if existing == nil {
 		return otelTracer
+	}
+	if hasTracer(existing) {
+		return existing
 	}
 	if ct, ok := existing.(*chainedTracer); ok {
 		return &chainedTracer{tracers: append(ct.tracers, otelTracer)}

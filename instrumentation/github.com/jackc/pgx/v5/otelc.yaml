@@ -1,12 +1,12 @@
-version: "v1.0.0"
+version: "v1.2.0"
 
 pgx_hook_connect:
   target: github.com/jackc/pgx/v5
   where:
-    func: Connect
+    func: connect
   do:
     - inject_hooks:
-        after: AfterConnect
+        before: BeforeConnect
         path: "go.opentelemetry.io/otelc/instrumentation/github.com/jackc/pgx/v5"
 
 pgx_hook_connect_config:
@@ -18,15 +18,6 @@ pgx_hook_connect_config:
         before: BeforeConnectConfig
         path: "go.opentelemetry.io/otelc/instrumentation/github.com/jackc/pgx/v5"
 
-pgxpool_hook_new:
-  target: github.com/jackc/pgx/v5/pgxpool
-  where:
-    func: New
-  do:
-    - inject_hooks:
-        after: AfterNewPool
-        path: "go.opentelemetry.io/otelc/instrumentation/github.com/jackc/pgx/v5"
-
 pgxpool_hook_new_with_config:
   target: github.com/jackc/pgx/v5/pgxpool
   where:
@@ -35,4 +26,3 @@ pgxpool_hook_new_with_config:
     - inject_hooks:
         before: BeforeNewWithConfig
         path: "go.opentelemetry.io/otelc/instrumentation/github.com/jackc/pgx/v5"
-
