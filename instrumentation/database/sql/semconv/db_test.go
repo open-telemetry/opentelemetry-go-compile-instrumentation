@@ -274,7 +274,11 @@ func TestOperationName(t *testing.T) {
 		{name: "tab after first token", query: "SELECT\t* FROM users", want: "SELECT"},
 		{name: "repeated spaces after first token", query: "SELECT   * FROM users", want: "SELECT"},
 		{name: "trailing whitespace", query: "COMMIT  \n", want: "COMMIT"},
-		{name: "sqlc name comment", query: "-- name: GetAuthor :one\nSELECT id, name FROM authors WHERE id = $1", want: "SELECT"},
+		{
+			name:  "sqlc name comment",
+			query: "-- name: GetAuthor :one\nSELECT id, name FROM authors WHERE id = $1",
+			want:  "SELECT",
+		},
 		{name: "line comment with CRLF", query: "-- note\r\ninsert into t values (1)", want: "INSERT"},
 		{name: "several line comments", query: "\n\t-- one\n\t-- two\n\tCREATE INDEX i ON t(c)", want: "CREATE"},
 		{name: "block comment", query: "/* app=shop */ UPDATE users SET x=1", want: "UPDATE"},
