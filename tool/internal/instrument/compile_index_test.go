@@ -24,7 +24,7 @@ func indexedCompile(t *testing.T) []string {
 	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
 	require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), []byte(`[]`), 0o644))
 	require.NoError(t, os.WriteFile(util.GetImportNamesFile(), []byte(`{}`), 0o644))
-	require.NoError(t, compileindex.Store(nil))
+	require.NoError(t, compileindex.Store())
 	return []string{"compile", "-o", filepath.Join(t.TempDir(), "out.a"), "-p", "main"}
 }
 
@@ -48,7 +48,7 @@ func TestIndexedCandidatesKeepExactMatching(t *testing.T) {
 	data, err := json.Marshal(sets)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), data, 0o644))
-	require.NoError(t, compileindex.Store([]string{"main", "example.com/cgo", "example.com/other"}))
+	require.NoError(t, compileindex.Store())
 	ip := &instrumentPhase{logger: slog.Default(), workDir: dir}
 	loaded, err := ip.load()
 	require.NoError(t, err)

@@ -12,6 +12,7 @@ import (
 	"slices"
 
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -37,7 +38,7 @@ func filename() string { return util.GetBuildTemp("compile_index.json") }
 
 // Store publishes the index after setup has successfully stored both artifacts.
 // A concurrent reader of an older index falls back if either artifact changes.
-func Store(packages []string) error {
+func Store() error {
 	matched, err := os.ReadFile(util.GetMatchedRuleFile())
 	if err != nil {
 		return ex.Wrapf(err, "reading matched rules for compile index")
@@ -46,11 +47,13 @@ func Store(packages []string) error {
 	if err != nil {
 		return ex.Wrapf(err, "reading import names for compile index")
 	}
-	packages = slices.Clone(packages)
-	slices.Sort(packages)
+	packages, err := packagesFromArtifacts(matched, names)
+	if err != nil {
+		return err
+	}
 	data, err := json.Marshal(index{
 		Version:     version,
-		Packages:    slices.Compact(packages),
+		Packages:    packages,
 		MatchedHash: sha256.Sum256(matched),
 		NamesHash:   sha256.Sum256(names),
 	})
@@ -65,6 +68,28 @@ func Store(packages []string) error {
 		return ex.Wrapf(err, "writing compile index")
 	}
 	return nil
+}
+
+// Decode once during setup so routing and digests describe the same valid
+// bytes, even if an artifact was changed between its original write and Store.
+func packagesFromArtifacts(matched, names []byte) ([]string, error) {
+	var sets []*rule.InstRuleSet
+	if err := json.Unmarshal(matched, &sets); err != nil {
+		return nil, ex.Wrapf(err, "validating matched rules for compile index")
+	}
+	var resolvedNames map[string]string
+	if err := json.Unmarshal(names, &resolvedNames); err != nil {
+		return nil, ex.Wrapf(err, "validating import names for compile index")
+	}
+	packages := make([]string, 0, len(sets))
+	for _, set := range sets {
+		if set == nil {
+			return nil, ex.New("null rule set in compile index input")
+		}
+		packages = append(packages, set.ModulePath)
+	}
+	slices.Sort(packages)
+	return slices.Compact(packages), nil
 }
 
 // Excludes reports a verified negative. Missing, unreadable, stale or unknown
