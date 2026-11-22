@@ -71,9 +71,11 @@ Catalog generation requires network access to fetch the pinned immutable upstrea
 schema. Tests use fixture schemas and remain offline. The generated `catalog.yaml`
 is embedded by otelc; the source schemas and generator are not.
 
-Updating the upstream release requires updating the source snapshot, provenance
-constants, and checksum test together, reviewing changes to types and paths, and
-regenerating the catalog. No production `go.*` definitions are invented here.
+Updating the upstream release requires updating the pinned release and commit in
+`definitions.go` and the schema checksum in `tool/cmd/gen-config-catalog/main.go`.
+Review changes to types and paths, add compatibility entries for removed paths
+where needed, regenerate the catalog, and run the generator and configuration
+tests. No production `go.*` definitions are invented here.
 
 Environment names derive from the resolved `name`: strip `general.`, retain `go.`,
 and omit a terminal `/development` marker if the property actually has one.

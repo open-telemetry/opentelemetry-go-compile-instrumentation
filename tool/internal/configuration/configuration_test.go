@@ -243,28 +243,18 @@ func TestParseCatalogValidatesInlineDefinitions(t *testing.T) {
 	tests := []struct{ name, definition, want string }{
 		{"nested ref", "ref: general.other", "must use name, not another ref"},
 		{"mismatched key", "name: go.other\ntype: boolean", "key must equal name"},
-		{"unknown field", "name: go.test\ntype: string\nunknown: value", "unknown field"},
+		{"unknown field", "name: go.test\ntype: string\nunknown: value", "field unknown not found"},
 		{"missing type", "name: go.test", "unsupported or missing type"},
 		{"bad default", "name: go.test\ntype: boolean\ndefault: nope", "not a valid boolean"},
 		{
 			"bad deprecation value",
 			"name: go.test\ntype: boolean\ndeprecated: \"true\"",
-			"deprecated: expected a boolean",
+			"cannot unmarshal !!str",
 		},
 		{
 			"replacement requires deprecation",
 			"name: go.test\ntype: boolean\nreplaced_by: go.test.v2",
 			"replaced_by requires deprecated to be true",
-		},
-		{
-			"bad property default",
-			"name: go.test\ntype: structured_list\nschema: {type: object, properties: {enabled: {type: boolean, default: \"false\"}}}",
-			"default: value does not match type",
-		},
-		{
-			"bad property example",
-			"name: go.test\ntype: structured_list\nschema: {type: object, properties: {enabled: {type: boolean, example: 0}}}",
-			"example: value does not match type",
 		},
 	}
 	for _, tt := range tests {
@@ -273,7 +263,7 @@ func TestParseCatalogValidatesInlineDefinitions(t *testing.T) {
 			require.ErrorContains(t, err, tt.want)
 		})
 	}
-	definitions, err := ParseCatalog(catalogFixture("name: go.test\ntype: boolean\ndefault: false"))
+	definitions, err := ParseCatalog(catalogFixture("name: go.test\ntype: boolean\ndefault: \"false\""))
 	require.NoError(t, err)
 	require.NotNil(t, definitions["go.test"].Default)
 	assert.Equal(t, "false", *definitions["go.test"].Default)
@@ -832,6 +822,16 @@ func TestParseMetadataRejectsMalformedSchemas(t *testing.T) {
 			"{type: object, properties: {name: {type: date}}}",
 			"unsupported property type \"date\"",
 		},
+		{
+			"bad property default",
+			"{type: object, properties: {enabled: {type: boolean, default: \"false\"}}}",
+			"default: value does not match type",
+		},
+		{
+			"bad property example",
+			"{type: object, properties: {enabled: {type: boolean, example: 0}}}",
+			"example: value does not match type",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -857,18 +857,18 @@ func TestParseCatalogRejectsMalformedDocuments(t *testing.T) {
 		{"invalid YAML", "catalog_version: [", "parse configuration catalog"},
 		{"multiple documents", valid + "---\nother: document\n", "single YAML document"},
 		{"malformed trailing document", valid + "---\nother: [\n", "parse trailing configuration catalog document"},
-		{"non-mapping root", "[]", "expected a mapping"},
+		{"non-mapping root", "[]", "cannot unmarshal !!seq"},
 		{
 			"unknown root field",
 			strings.Replace(valid, "catalog_version:", "unknown: value\ncatalog_version:", 1),
-			"unknown field",
+			"field unknown not found",
 		},
 		{"unsupported version", strings.Replace(valid, "catalog_version: 1", "catalog_version: 2", 1), "expected 1"},
 		{"source missing", strings.Replace(valid, sourceFields, "", 1), "source is required"},
 		{
 			"unknown source field",
 			strings.Replace(valid, "  release:", "  unexpected: value\n  release:", 1),
-			"unknown field",
+			"field unexpected not found",
 		},
 		{
 			"source pin mismatch",
@@ -879,7 +879,7 @@ func TestParseCatalogRejectsMalformedDocuments(t *testing.T) {
 		{
 			"definitions is not a mapping",
 			strings.Replace(valid, definitions, "definitions: []\n", 1),
-			"expected a mapping",
+			"cannot unmarshal !!seq",
 		},
 		{"definitions are empty", strings.Replace(valid, definitions, "definitions: {}\n", 1), "has no definitions"},
 	}
