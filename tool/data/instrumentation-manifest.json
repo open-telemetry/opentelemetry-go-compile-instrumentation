@@ -41,6 +41,10 @@
     "versionRange": "v2.4.1"
   },
   {
+    "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/nats-io/nats.go",
+    "target": "github.com/nats-io/nats.go"
+  },
+  {
     "modulePath": "go.opentelemetry.io/otelc/instrumentation/github.com/olivere/elastic/v7",
     "target": "github.com/olivere/elastic/v7",
     "versionRange": "v7.0.0"

@@ -1,0 +1,87 @@
+version: "v1.2.0"
+
+nats_hook_publish:
+  target: github.com/nats-io/nats.go
+  where:
+    func: Publish
+    recv: "*Conn"
+  do:
+    - inject_hooks:
+        before: BeforePublish
+        after: AfterPublish
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/nats-io/nats.go"
+
+nats_hook_publish_msg:
+  target: github.com/nats-io/nats.go
+  where:
+    func: PublishMsg
+    recv: "*Conn"
+  do:
+    - inject_hooks:
+        before: BeforePublishMsg
+        after: AfterPublishMsg
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/nats-io/nats.go"
+
+nats_hook_request:
+  target: github.com/nats-io/nats.go
+  where:
+    func: Request
+    recv: "*Conn"
+  do:
+    - inject_hooks:
+        before: BeforeRequest
+        after: AfterRequest
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/nats-io/nats.go"
+
+nats_hook_request_with_context:
+  target: github.com/nats-io/nats.go
+  where:
+    func: RequestWithContext
+    recv: "*Conn"
+  do:
+    - inject_hooks:
+        before: BeforeRequestWithContext
+        after: AfterRequestWithContext
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/nats-io/nats.go"
+
+nats_hook_request_msg:
+  target: github.com/nats-io/nats.go
+  where:
+    func: RequestMsg
+    recv: "*Conn"
+  do:
+    - inject_hooks:
+        before: BeforeRequestMsg
+        after: AfterRequestMsg
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/nats-io/nats.go"
+
+nats_hook_request_msg_with_context:
+  target: github.com/nats-io/nats.go
+  where:
+    func: RequestMsgWithContext
+    recv: "*Conn"
+  do:
+    - inject_hooks:
+        before: BeforeRequestMsgWithContext
+        after: AfterRequestMsgWithContext
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/nats-io/nats.go"
+
+nats_hook_subscribe:
+  target: github.com/nats-io/nats.go
+  where:
+    func: Subscribe
+    recv: "*Conn"
+  do:
+    - inject_hooks:
+        before: BeforeSubscribe
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/nats-io/nats.go"
+
+nats_hook_queue_subscribe:
+  target: github.com/nats-io/nats.go
+  where:
+    func: QueueSubscribe
+    recv: "*Conn"
+  do:
+    - inject_hooks:
+        before: BeforeQueueSubscribe
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/nats-io/nats.go"
