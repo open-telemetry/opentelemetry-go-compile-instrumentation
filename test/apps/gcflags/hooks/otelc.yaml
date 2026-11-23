@@ -1,0 +1,8 @@
+hook_target:
+  target: main
+  where:
+    func: Target
+  do:
+    - inject_hooks:
+        before: Before
+        path: go.opentelemetry.io/otelc/test/apps/gcflags/hooks

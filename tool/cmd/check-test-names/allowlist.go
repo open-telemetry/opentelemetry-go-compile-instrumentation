@@ -13,20 +13,5 @@ var allowlist = []string{ //nolint:gochecknoglobals // private lookup table
 	"tool/internal/instrument/instrument_delegate_test.go",
 	"tool/util/assert_fatal_test.go",                    // pending fold into assert_test.go (#1189)
 	"tool/internal/configuration/configuration_test.go", // package-wide tests cover several configuration source files
-
-	"instrumentation/database/sql/dsnparse/parse_addr_test.go",
-	"instrumentation/database/sql/dsnparse/parse_dialects_test.go",
-	"instrumentation/database/sql/dsnparse/parse_fuzz_test.go", // fuzz target for parse.go
-	"tool/internal/ast/directive_fuzz_test.go",                 // fuzz target for directive.go
-	"instrumentation/database/sql/semconv/db_ipv6_test.go",
-
-	"instrumentation/github.com/openai/openai-go/middleware_integration_test.go",
-	"instrumentation/github.com/openai/openai-go/v2/middleware_integration_test.go",
-	"instrumentation/github.com/openai/openai-go/v3/middleware_integration_test.go",
-	"instrumentation/github.com/openai/openai-go/testhelpers_test.go",
-	"instrumentation/github.com/openai/openai-go/v2/testhelpers_test.go",
-	"instrumentation/github.com/openai/openai-go/v3/testhelpers_test.go",
-
-	"instrumentation/net/http/client/propagation_test.go",
-	"instrumentation/net/http/server/propagation_test.go",
+	"tool/internal/ast/directive_fuzz_test.go",          // fuzz target for directive.go
 }

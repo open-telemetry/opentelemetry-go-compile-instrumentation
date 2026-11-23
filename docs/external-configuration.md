@@ -125,7 +125,7 @@ Each rule file should declare its minimum required `otelc` version with the rese
 top-level `version` key:
 
 ```yaml
-version: "v1.0.0"
+version: "v1.2.0"
 
 my_rule:
   target: example.com/package
@@ -134,8 +134,13 @@ my_rule:
 
 The requirement is evaluated per file. If a package contains multiple rule files, the
 highest declared minimum is the package's effective requirement. This also keeps standalone
-files supplied through `--rules` self-contained. For compatibility, an unversioned file is
-currently treated as requiring `v1.0.0` and produces a warning.
+files supplied through `--rules` self-contained. An unversioned file is treated as
+requiring `v1.0.0` and produces a warning.
+
+> [!NOTE]
+> `otelc` v1.2.0 is the first release that supports the top-level `version` key, so
+> `v1.2.0` is the lowest meaningful value. Earlier releases parse every top-level key
+> as a rule and fail on a scalar `version` entry.
 
 ## Discovery and Resolution Protocol
 
@@ -200,22 +205,9 @@ retrying. See [Troubleshooting](troubleshooting.md#package-resolution-failures) 
 Instrumentation packages can re-use other instrumentation packages by including their own
 tool file. `otelc` discovers these nested tool files recursively.
 
-The `test/apps/gincustom` fixture in this repository demonstrates two-level composition:
+The `test/apps/customrules` fixture in this repository demonstrates two-level composition:
 
-**`test/apps/gincustom/otel.instrumentation.go`** — the application's tool file:
-
-```go
-//go:build tools
-
-package tools
-
-import (
-    _ "go.opentelemetry.io/otelc/test/apps/gincustom/instrumentation"
-)
-```
-
-**`test/apps/gincustom/instrumentation/otel.instrumentation.go`** — the intermediate
-package's tool file, which activates the standard HTTP server instrumentation:
+**`test/apps/customrules/otel.instrumentation.go`** — the application's tool file:
 
 ```go
 //go:build tools
@@ -223,30 +215,42 @@ package's tool file, which activates the standard HTTP server instrumentation:
 package tools
 
 import (
-    _ "go.opentelemetry.io/otelc/instrumentation/net/http/server"
+    _ "go.opentelemetry.io/otelc/test/apps/customrules/instrumentation"
 )
 ```
 
-**`test/apps/gincustom/instrumentation/otelc.yaml`** — a custom rule for Gin, shipped
-alongside the intermediate package:
+**`test/apps/customrules/instrumentation/otel.instrumentation.go`** — the intermediate
+package's tool file, which activates the base instrumentation:
+
+```go
+//go:build tools
+
+package tools
+
+import (
+    _ "go.opentelemetry.io/otelc/test/apps/customrules/base"
+)
+```
+
+**`test/apps/customrules/instrumentation/otelc.yaml`** — a custom rule shipped alongside the intermediate package:
 
 ```yaml
-gin_custom:
-  target: github.com/gin-gonic/gin
+custom_rule:
+  target: main
   where:
-    func: New
+    func: CustomTarget
   do:
     - inject_hooks:
-        after: afterNew
-        path: go.opentelemetry.io/otelc/test/apps/gincustom/instrumentation
+        before: BeforeCustom
+        path: go.opentelemetry.io/otelc/test/apps/customrules/instrumentation
 ```
 
 When `otelc` processes the application's tool file, it:
 
-1. Resolves `test/apps/gincustom/instrumentation` and finds `otelc.yaml` there.
+1. Resolves `test/apps/customrules/instrumentation` and finds `otelc.yaml` there.
 2. Finds `instrumentation/otel.instrumentation.go` in the same module — recurses.
-3. Resolves `instrumentation/net/http/server` and finds its `*.otelc.yml` rules.
-4. Loads both the custom gin rule and the standard HTTP server rules.
+3. Resolves `test/apps/customrules/base` and finds its `otelc.yaml` rules.
+4. Loads both the custom rule and the base rules.
 
 This pattern lets library authors or platform teams distribute pre-configured instrumentation
 bundles that applications activate with a single blank import.

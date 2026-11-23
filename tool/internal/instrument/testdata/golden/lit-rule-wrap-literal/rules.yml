@@ -1,0 +1,13 @@
+wrap_limited_readers:
+  target: main
+  where:
+    struct_literal: io.LimitedReader
+  do:
+    # set_fields runs first, so the wrapped literal already has its fields.
+    - set_fields:
+        field:
+          - name: N
+            wrap: "({{ . }}) * 2"
+    - wrap_literal:
+        pointer: "track({{ . }})"
+        value: "copyOf({{ . }})"

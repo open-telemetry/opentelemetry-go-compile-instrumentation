@@ -16,6 +16,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"strings"
 	"time"
 	"unsafe"
 
@@ -73,6 +74,12 @@ func Example() {
 	// [MyHook] hello world is instrumented!
 }
 
+// ReturnsValue is the target function for the hook_before_only_retvals rule.
+// It has a return value and only a before hook, so GetReturnVal/SetReturnVal/
+// GetReturnValCount run against a HookContextImpl whose returnVals the After
+// trampoline never populates.
+func ReturnsValue(p1 string, p2 int) string { return p1 }
+
 func Underscore(_ int, _ float32) {}
 
 func Ellipsis(p1 ...string) {}
@@ -94,7 +101,10 @@ func AutoDetect() {}
 
 func (MyStruct) Unnamed(int, float32) {}
 
+func recordNestedCall(value string) string { return "[" + value + "]" }
+
 func main() {
+	fmt.Printf("UnusedContext result: %d\n", UnusedContext(41))
 	ctx := &traceContext{
 		traceID: "123",
 		spanID:  "456",
@@ -131,8 +141,15 @@ func main() {
 
 	Underscore(1, 2)
 
+	_ = ReturnsValue("x", 1)
+
 	FunctionA(context.Background())
 
 	AutoDetect()
 	MyStruct{}.Unnamed(42, 2.7)
+	// Both calls must be wrapped, including the call inside the argument.
+	fmt.Println("Nested call wrappers:", strings.TrimSpace(strings.TrimSpace(" x ")))
 }
+
+//go:noinline
+func UnusedContext(n int) int { return n + 1 }

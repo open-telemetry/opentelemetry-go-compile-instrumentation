@@ -62,10 +62,14 @@ func (r *InstStructRule) validate() error {
 		if strings.TrimSpace(f.Type) == "" {
 			return ex.Newf("new_field[%d].type cannot be empty", i)
 		}
-		if seen[f.Name] {
-			return ex.Newf("new_field %q is declared more than once", f.Name)
+		// Go allows a struct to declare the blank identifier as a field name
+		// any number of times (e.g. padding fields), so "_" is exempt here.
+		if f.Name != "_" {
+			if seen[f.Name] {
+				return ex.Newf("new_field %q is declared more than once", f.Name)
+			}
+			seen[f.Name] = true
 		}
-		seen[f.Name] = true
 	}
 	return nil
 }

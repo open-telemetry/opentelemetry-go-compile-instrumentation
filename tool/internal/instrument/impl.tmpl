@@ -93,7 +93,7 @@ func OtelBeforeTrampoline() (hookContext *HookContextImpl, skipCall bool) {
 	return hookContext, hookContext.skipCall
 }
 
-func OtelAfterTrampoline(hookContext HookContext) {
+func OtelAfterTrampoline(hookContext OtelHookContext) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "OtelAfterNamePlaceholder")

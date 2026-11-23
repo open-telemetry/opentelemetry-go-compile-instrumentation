@@ -28,8 +28,8 @@ import (
 // unsafePackageName is the import path of package unsafe.
 const unsafePackageName = "unsafe"
 
-// ruleImport is an import that a rule adds to the package it instruments.
-type ruleImport struct {
+// addedImport is an import that a rule adds to the package it instruments.
+type addedImport struct {
 	rule string
 	path string
 	// match is set when the rule is listed for every file of the packages its
@@ -39,9 +39,9 @@ type ruleImport struct {
 	files []string
 }
 
-// ruleImportKey identifies a ruleImport: the import of path that rule adds
+// addedImportKey identifies a addedImport: the import of path that rule adds
 // to pkg, in the files that match finds.
-type ruleImportKey struct {
+type addedImportKey struct {
 	pkg, rule, path string
 	match           *fileMatch
 }
@@ -59,19 +59,20 @@ type fileMatch struct {
 	changes func(tree *dst.File, aliases map[string]string) bool
 }
 
-// ruleImports are imports that a rule adds, and the files it adds them to.
-type ruleImports struct {
+// addedImportGroup is a group of imports that a rule adds, and the files it
+// adds them to.
+type addedImportGroup struct {
 	imports map[string]string
 	match   *fileMatch
 }
 
 // collectRuleImports returns, for each instrumented package, the imports that
 // its matched rules add to it.
-func collectRuleImports(matched []*rule.InstRuleSet) map[string][]*ruleImport {
-	result := make(map[string][]*ruleImport)
-	seen := make(map[ruleImportKey]*ruleImport)
+func collectRuleImports(matched []*rule.InstRuleSet) map[string][]*addedImport {
+	result := make(map[string][]*addedImport)
+	seen := make(map[addedImportKey]*addedImport)
 	// A rule is listed once for each file it applies to.
-	byRule := make(map[rule.InstRule][]ruleImports)
+	byRule := make(map[rule.InstRule][]addedImportGroup)
 	for _, set := range matched {
 		pkg := set.ModulePath
 		add := func(file string, r rule.InstRule) {
@@ -86,10 +87,10 @@ func collectRuleImports(matched []*rule.InstRuleSet) map[string][]*ruleImport {
 					if path == "C" || path == unsafePackageName {
 						continue
 					}
-					key := ruleImportKey{pkg: pkg, rule: r.GetName(), path: path, match: ris.match}
+					key := addedImportKey{pkg: pkg, rule: r.GetName(), path: path, match: ris.match}
 					ri, found := seen[key]
 					if !found {
-						ri = &ruleImport{rule: r.GetName(), path: path, match: ris.match}
+						ri = &addedImport{rule: r.GetName(), path: path, match: ris.match}
 						seen[key] = ri
 						result[pkg] = append(result[pkg], ri)
 					}
@@ -109,7 +110,7 @@ func collectRuleImports(matched []*rule.InstRuleSet) map[string][]*ruleImport {
 	}
 
 	for _, imports := range result {
-		slices.SortFunc(imports, func(a, b *ruleImport) int {
+		slices.SortFunc(imports, func(a, b *addedImport) int {
 			return cmp.Or(cmp.Compare(a.path, b.path), cmp.Compare(a.rule, b.rule))
 		})
 		for _, ri := range imports {
@@ -131,26 +132,26 @@ func forEachRule[T rule.InstRule](rules map[string][]T, fn func(file string, r r
 // addedImports returns the imports that r adds to the files it applies to.
 // Each group tells how to find the files it is added to when r does not add
 // it to all of them.
-func addedImports(r rule.InstRule) []ruleImports {
+func addedImports(r rule.InstRule) []addedImportGroup {
 	switch rt := r.(type) {
 	case *rule.InstFuncRule:
 		// The hook code of a func rule is not in the target file, so only its
 		// blank and dot imports are added there.
 		imports := maps.Clone(rt.Imports)
 		maps.DeleteFunc(imports, func(alias, _ string) bool { return alias != "_" && alias != "." })
-		return []ruleImports{{imports: imports}}
+		return []addedImportGroup{{imports: imports}}
 	case *rule.InstStructRule:
 		types := make([]string, 0, len(rt.NewField))
 		for _, f := range rt.NewField {
 			types = append(types, f.Type)
 		}
-		return []ruleImports{{imports: referencedImports(rt.Imports, types...)}}
+		return []addedImportGroup{{imports: referencedImports(rt.Imports, types...)}}
 	case *rule.InstRawRule:
-		return []ruleImports{{imports: referencedImports(rt.Imports, rt.Raw)}}
+		return []addedImportGroup{{imports: referencedImports(rt.Imports, rt.Raw)}}
 	case *rule.InstDirectiveRule:
-		return []ruleImports{{imports: referencedImports(rt.Imports, rt.Template)}}
+		return []addedImportGroup{{imports: referencedImports(rt.Imports, rt.Template)}}
 	case *rule.InstDeclRule:
-		return []ruleImports{{imports: referencedImports(rt.Imports, rt.Replace, rt.Wrap)}}
+		return []addedImportGroup{{imports: referencedImports(rt.Imports, rt.Replace, rt.Wrap)}}
 	case *rule.InstCallRule:
 		// TODO: check method_call rules. To know if a call matches the method,
 		// setup must know the type of the receiver, and setup does not
@@ -171,9 +172,9 @@ func addedImports(r rule.InstRule) []ruleImports {
 // rule writes variadic_type only into a spread call, as in f(s...), and only
 // when it appends arguments. So an import that only variadic_type uses is
 // added only to the files with such a call.
-func callImports(r *rule.InstCallRule) []ruleImports {
+func callImports(r *rule.InstCallRule) []addedImportGroup {
 	imports := referencedImports(r.Imports, append([]string{r.Replace}, r.AppendArgs...)...)
-	groups := []ruleImports{{imports: imports, match: callMatch(r, false)}}
+	groups := []addedImportGroup{{imports: imports, match: callMatch(r, false)}}
 	if len(r.AppendArgs) == 0 {
 		return groups
 	}
@@ -183,7 +184,7 @@ func callImports(r *rule.InstCallRule) []ruleImports {
 		return found
 	})
 	if len(spread) > 0 {
-		groups = append(groups, ruleImports{imports: spread, match: callMatch(r, true)})
+		groups = append(groups, addedImportGroup{imports: spread, match: callMatch(r, true)})
 	}
 	return groups
 }
@@ -191,26 +192,26 @@ func callImports(r *rule.InstCallRule) []ruleImports {
 // litImports returns the imports that the literal rule r adds. Each literal
 // gets only the code of the fields that apply to it, so each import is added
 // only to the files with a literal that gets code that uses the import.
-func litImports(r *rule.InstLitRule) []ruleImports {
+func litImports(r *rule.InstLitRule) []addedImportGroup {
 	code := make([]string, 0, len(r.Field))
 	for _, f := range r.Field {
 		code = append(code, f.Value, f.Wrap)
 	}
 	used := referencedImports(r.Imports, code...)
-	groups := make([]ruleImports, 0, len(used))
+	groups := make([]addedImportGroup, 0, len(used))
 	blankAndDot := make(map[string]string)
 	for _, alias := range slices.Sorted(maps.Keys(used)) {
 		if alias == "_" || alias == "." {
 			blankAndDot[alias] = used[alias]
 			continue
 		}
-		groups = append(groups, ruleImports{
+		groups = append(groups, addedImportGroup{
 			imports: map[string]string{alias: used[alias]},
 			match:   litMatch(r, alias),
 		})
 	}
 	if len(blankAndDot) > 0 {
-		groups = append(groups, ruleImports{imports: blankAndDot, match: litMatch(r, "")})
+		groups = append(groups, addedImportGroup{imports: blankAndDot, match: litMatch(r, "")})
 	}
 	return groups
 }
@@ -411,9 +412,7 @@ func (sp *setupPhase) checkRuleImportCycles(
 		}
 	}
 	if len(missing) > 0 {
-		loadCtx, cancel := context.WithTimeout(ctx, packagesLoadTimeout)
-		defer cancel()
-		pkgs, err := pkgload.LoadPackages(loadCtx,
+		pkgs, err := pkgload.LoadPackages(ctx,
 			packages.NeedName|packages.NeedImports|packages.NeedDeps, sp.buildFlags, false, missing...)
 		if err != nil {
 			// The check only improves the error of a build that would fail
@@ -429,11 +428,11 @@ func (sp *setupPhase) checkRuleImportCycles(
 
 // findRuleImportCycle returns an error that describes the first cycle that the
 // rule imports in added form with the imports in graph.
-func (sp *setupPhase) findRuleImportCycle(graph map[string][]string, added map[string][]*ruleImport) error {
+func (sp *setupPhase) findRuleImportCycle(graph map[string][]string, added map[string][]*addedImport) error {
 	s := &cycleSearch{
 		graph:  graph,
 		added:  added,
-		adds:   func(pkg string, ri *ruleImport) (bool, error) { return sp.addsImport(graph, pkg, ri) },
+		adds:   func(pkg string, ri *addedImport) (bool, error) { return sp.addsImport(graph, pkg, ri) },
 		done:   make(map[string]bool),
 		onPath: make(map[string]int),
 	}
@@ -463,7 +462,7 @@ func (sp *setupPhase) findRuleImportCycle(graph map[string][]string, added map[s
 }
 
 // addsImport reports whether ri is added to pkg.
-func (sp *setupPhase) addsImport(graph map[string][]string, pkg string, ri *ruleImport) (bool, error) {
+func (sp *setupPhase) addsImport(graph map[string][]string, pkg string, ri *addedImport) (bool, error) {
 	if ri.match == nil {
 		return true, nil
 	}
@@ -508,8 +507,8 @@ type importEdge struct {
 // added. It visits each package at most once.
 type cycleSearch struct {
 	graph map[string][]string
-	added map[string][]*ruleImport
-	adds  func(pkg string, ri *ruleImport) (bool, error)
+	added map[string][]*addedImport
+	adds  func(pkg string, ri *addedImport) (bool, error)
 	done  map[string]bool
 	// onPath maps each package on the current path to the index in path of
 	// its first edge.

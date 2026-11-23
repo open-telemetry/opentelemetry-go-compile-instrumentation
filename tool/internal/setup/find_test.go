@@ -25,6 +25,9 @@ func TestHelperProcess(t *testing.T) {
 	if plan != "" {
 		fmt.Fprintln(os.Stderr, plan)
 	}
+	if stdout := os.Getenv("GO_HELPER_STDOUT"); stdout != "" {
+		fmt.Fprintln(os.Stdout, stdout)
+	}
 	if os.Getenv("GO_HELPER_BUILD_FAILS") == "1" {
 		os.Exit(1)
 	}
@@ -399,6 +402,42 @@ cd %s
 	assert.Equal(t, "sample.cgo1.go", deps[0].CgoFiles[deps[0].Sources[0]])
 }
 
+// TestFindDepsResolvesSourcesAgainstCdDir covers go build -C: the build plan
+// prints sources relative to the -C directory, not to otelc's own.
+func TestFindDepsResolvesSourcesAgainstCdDir(t *testing.T) {
+	oldExec := execCommandContext
+	t.Cleanup(func() {
+		execCommandContext = oldExec
+	})
+
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	appDir := filepath.Join(workDir, "app")
+	sourceFile := filepath.Join(appDir, "cmd", "main.go")
+	require.NoError(t, os.MkdirAll(filepath.Dir(sourceFile), 0o755))
+	require.NoError(t, os.WriteFile(sourceFile, []byte("package main\n"), 0o644))
+
+	buildPlan := fmt.Sprintf(`
+cd %s
+.../compile -o /w/b001/_pkg_.a -p main -buildid x ./cmd/main.go
+`, filepath.ToSlash(appDir))
+
+	exe, err := os.Executable()
+	require.NoError(t, err)
+	execCommandContext = func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
+		cmd := exec.CommandContext(ctx, exe, "-test.run=^TestHelperProcess$")
+		cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1", "GO_HELPER_BUILD_PLAN="+buildPlan)
+		return cmd
+	}
+
+	deps, err := findDeps(t.Context(), subcmdBuild, []string{"-C", appDir, "./cmd"})
+	require.NoError(t, err)
+	require.Len(t, deps, 1)
+	assert.Equal(t, []string{sourceFile}, deps[0].Sources)
+}
+
 // TestFindDepsMergesIdenticalCompiles covers builds where only some main
 // packages have a default.pgo: every shared package is then compiled once
 // with and once without -pgoprofile, from the same sources.
@@ -460,6 +499,7 @@ func TestListBuildPlan(t *testing.T) {
 		name          string
 		subcommand    string // defaults to "build" when empty
 		buildPlan     string
+		stdout        string // what the dry run writes to its stdout
 		args          []string
 		expected      []string
 		wantErr       bool
@@ -523,6 +563,35 @@ go: module example.com missing
 			expectedGoCmd: []string{
 				"build", "-a", "-x", "-n", "./bad",
 			},
+		},
+		{
+			// go test reports a test setup failure on stdout, so the error
+			// must carry it.
+			name:       "returns stdout of a failed build",
+			subcommand: "test",
+			buildPlan: `
+no required module provides package example.com/missing
+`,
+			stdout:        "FAIL\texample.com/bad [setup failed]",
+			args:          []string{"./bad"},
+			buildFails:    true,
+			wantErr:       true,
+			expectedGoCmd: []string{"test", "-a", "-x", "-n", "./bad"},
+		},
+		{
+			// go test writes "[no test files]" to stdout for a package without
+			// tests. The real run writes it again, so the dry run must not.
+			name:       "keeps the dry run's stdout out of the output",
+			subcommand: "test",
+			buildPlan: `
+.../compile -o /tmp/out.a -buildid abc -p main main.go
+`,
+			stdout: "?   \texample.com/cmd\t[no test files]",
+			args:   []string{"./..."},
+			expected: []string{
+				".../compile -o /tmp/out.a -buildid abc -p main main.go",
+			},
+			expectedGoCmd: []string{"test", "-a", "-x", "-n", "./..."},
 		},
 		{
 			name: "empty build plan",
@@ -611,6 +680,7 @@ echo nothing useful
 				cmd.Env = append(os.Environ(),
 					"GO_WANT_HELPER_PROCESS=1",
 					"GO_HELPER_BUILD_PLAN="+tt.buildPlan,
+					"GO_HELPER_STDOUT="+tt.stdout,
 				)
 				if tt.buildFails {
 					cmd.Env = append(cmd.Env, "GO_HELPER_BUILD_FAILS=1")
@@ -622,12 +692,15 @@ echo nothing useful
 			if subcommand == "" {
 				subcommand = "build"
 			}
+			readStdout := captureStdout(t)
 			buildPlan, err := listBuildPlan(t.Context(), subcommand, tt.args)
+			assert.Empty(t, readStdout())
 			if tt.wantErr {
 				require.Error(t, err)
 				if tt.buildPlan != "" {
 					assert.Contains(t, err.Error(), strings.TrimSpace(tt.buildPlan))
 				}
+				assert.Contains(t, err.Error(), tt.stdout)
 			} else {
 				require.NoError(t, err)
 				assert.Equal(t, tt.expected, buildPlan)
@@ -960,7 +1033,7 @@ func TestFindGoSources_RecordsTestBuild(t *testing.T) {
 		// The test main is generated later, so the file is not there yet.
 		{[]string{"-p", "main", "$WORK/b001/_testmain.go"}, true},
 	} {
-		dep, err := findGoSources(t.Context(), tc.args, map[string]string{})
+		dep, err := findGoSources(t.Context(), tc.args, "", map[string]string{})
 		require.NoError(t, err)
 		assert.Equal(t, tc.isTest, dep.IsTest, "args %v", tc.args)
 	}
@@ -974,7 +1047,7 @@ func TestFindGoSources(t *testing.T) {
 	require.NoError(t, os.WriteFile(srcB, []byte("package p\n"), 0o644))
 
 	args := []string{"-p", "example.com/p", srcA, srcB}
-	dep, err := findGoSources(context.Background(), args, map[string]string{})
+	dep, err := findGoSources(context.Background(), args, "", map[string]string{})
 	require.NoError(t, err)
 	require.NotNil(t, dep)
 
@@ -1001,5 +1074,54 @@ func TestListBuildPlan_JSONPreservesPackageBoundary(t *testing.T) {
 			require.NoError(t, planErr)
 			assert.Contains(t, strings.Join(plan, "\n"), "-p testmodule/a ")
 		})
+	}
+}
+
+func TestListBuildPlan_KeepsTestOutputOffStdout(t *testing.T) {
+	setupTestModule(t, []string{"a"})
+	t.Setenv("GOWORK", "off")
+	t.Setenv("GOFLAGS", "")
+	dir, err := os.Getwd()
+	require.NoError(t, err)
+	t.Setenv(util.EnvOtelcWorkDir, dir)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join("a", "main.go"), []byte("package a\n"), 0o644))
+
+	// Package a has no tests, so the go test dry run writes
+	// "?   testmodule/a [no test files]" to its stdout.
+	readStdout := captureStdout(t)
+	plan, err := listBuildPlan(t.Context(), subcmdTest, []string{"./a"})
+	require.NoError(t, err)
+	assert.Contains(t, strings.Join(plan, "\n"), "-p testmodule/a ")
+	assert.Empty(t, readStdout())
+}
+
+// captureStdout points os.Stdout at a file for the rest of the test and returns
+// a function that reads what was written to it.
+func captureStdout(t *testing.T) func() string {
+	t.Helper()
+	return captureOutput(t, &os.Stdout)
+}
+
+// captureStderr is captureStdout for os.Stderr.
+func captureStderr(t *testing.T) func() string {
+	t.Helper()
+	return captureOutput(t, &os.Stderr)
+}
+
+func captureOutput(t *testing.T, out **os.File) func() string {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "output")
+	require.NoError(t, err)
+	old := *out
+	*out = f
+	t.Cleanup(func() {
+		*out = old
+		_ = f.Close()
+	})
+	return func() string {
+		data, readErr := os.ReadFile(f.Name())
+		require.NoError(t, readErr)
+		return string(data)
 	}
 }

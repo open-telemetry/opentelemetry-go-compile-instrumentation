@@ -161,7 +161,10 @@ func isSubPath(target, base string) (bool, error) {
 	if err != nil {
 		return false, ex.Wrapf(err, "compute relative path from %q to %q", resolvedBase, resolvedTarget)
 	}
-	return rel == "." || !strings.HasPrefix(rel, ".."), nil
+	// A directory whose name only starts with two dots, such as "..cache", is
+	// inside base. Only ".." as a whole path element leaves it.
+	escapes := rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	return !escapes, nil
 }
 
 // resolveExistingAncestor resolves symbolic links in path's deepest existing

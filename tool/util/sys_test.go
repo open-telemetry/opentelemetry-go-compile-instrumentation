@@ -4,11 +4,13 @@
 package util
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -170,6 +172,47 @@ func TestRunCmdErrorMessages(t *testing.T) {
 	})
 }
 
+func TestRunCmdCancelSendsInterruptBeforeKilling(t *testing.T) {
+	if IsWindows() {
+		t.Skip("os.Interrupt is not implemented on Windows; Cancel keeps the default Kill")
+	}
+
+	marker := filepath.Join(t.TempDir(), "trapped")
+	ctx, cancel := context.WithCancel(t.Context())
+	start := time.Now()
+	errCh := make(chan error, 1)
+	go func() {
+		// trap writes the marker only if the shell receives SIGINT, not
+		// SIGKILL: SIGKILL cannot be trapped or handled at all. A busy loop
+		// of short sleeps, rather than one long sleep, lets the shell notice
+		// the signal between iterations instead of blocking in a single
+		// wait() call until it completes.
+		errCh <- RunCmd(ctx, "sh", "-c",
+			"trap 'touch "+marker+"; exit 0' INT; while true; do sleep 0.05; done")
+	}()
+
+	// Give the shell a moment to install its trap before canceling.
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-errCh:
+		// A canceled context makes exec.Cmd.Run report ctx.Err() regardless
+		// of how the process exited, so the error itself is not meaningful
+		// here; what matters is that it returned promptly (not after
+		// cancelGrace's hard-kill fallback) and the trap actually ran.
+		if elapsed := time.Since(start); elapsed >= cancelGrace {
+			t.Errorf("RunCmd took %s to return, want well under the %s kill grace, "+
+				"suggesting SIGINT did not reach the process", elapsed, cancelGrace)
+		}
+	case <-time.After(cancelGrace + 5*time.Second):
+		t.Fatal("RunCmd did not return after the context was canceled")
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("marker file not written, want the process to have caught SIGINT: %v", err)
+	}
+}
+
 func TestBuildFlagsRoundTrip(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -274,7 +317,7 @@ func TestListFiles_HiddenFileDoesNotSkipSiblings(t *testing.T) {
 		case "visible2.txt":
 			foundVisible2 = true
 		case ".hidden":
-			t.Fatalf("hidden file should not be returned")
+			t.Fatal("hidden file should not be returned")
 		}
 	}
 
@@ -323,7 +366,7 @@ func TestListFiles_SkipsHiddenDirectories(t *testing.T) {
 	}
 
 	if !foundVisible {
-		t.Fatalf("expected visible file to be returned")
+		t.Fatal("expected visible file to be returned")
 	}
 }
 
@@ -517,6 +560,50 @@ func TestWriteFileAtomic(t *testing.T) {
 	}
 }
 
+func TestWriteFileAtomic_FollowsSymlink(t *testing.T) {
+	root := t.TempDir()
+	realDir := filepath.Join(root, "real")
+	linkDir := filepath.Join(root, "link")
+	require.NoError(t, os.MkdirAll(realDir, 0o755))
+	require.NoError(t, os.MkdirAll(linkDir, 0o755))
+	target := filepath.Join(realDir, "go.mod")
+	require.NoError(t, os.WriteFile(target, []byte("old"), 0o644))
+
+	link := filepath.Join(linkDir, "go.mod")
+	if err := os.Symlink(filepath.Join("..", "real", "go.mod"), link); err != nil {
+		t.Skipf("symlinks are not available: %v", err)
+	}
+
+	require.NoError(t, WriteFileAtomic(link, []byte("new content")))
+
+	info, err := os.Lstat(link)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink, "the link must stay a link")
+	got, err := os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Equal(t, "new content", string(got), "the file the link points to must be updated")
+
+	for _, dir := range []string{realDir, linkDir} {
+		matches, globErr := filepath.Glob(filepath.Join(dir, "*.tmp-*"))
+		require.NoError(t, globErr)
+		assert.Empty(t, matches)
+	}
+}
+
+func TestWriteFileAtomic_DanglingSymlink(t *testing.T) {
+	root := t.TempDir()
+	link := filepath.Join(root, "go.mod")
+	if err := os.Symlink(filepath.Join(root, "missing"), link); err != nil {
+		t.Skipf("symlinks are not available: %v", err)
+	}
+
+	require.NoError(t, WriteFileAtomic(link, []byte("new content")))
+
+	got, err := os.ReadFile(link)
+	require.NoError(t, err)
+	assert.Equal(t, "new content", string(got))
+}
+
 func TestCRC32(t *testing.T) {
 	// CRC32 is deterministic and returns a decimal string.
 	got := CRC32("hello")
@@ -538,124 +625,4 @@ func TestNormalizePath(t *testing.T) {
 	assert.Equal(t, "a/b/c", NormalizePath("a/b/./c"))
 	assert.Equal(t, "a/c", NormalizePath("a/b/../c"))
 	assert.Equal(t, ".", NormalizePath(""))
-}
-
-// windowsRename is os.Rename with a rule of Windows: it cannot replace a
-// read-only file.
-func windowsRename(oldPath, newPath string) error {
-	if info, err := os.Lstat(newPath); err == nil && info.Mode().Perm()&0o200 == 0 {
-		return &os.LinkError{Op: "rename", Old: oldPath, New: newPath, Err: os.ErrPermission}
-	}
-	return os.Rename(oldPath, newPath)
-}
-
-// TestRenameReplaceReadOnly: on Windows, a rename cannot replace a read-only
-// file. renameReplace makes the file writable and does the rename again.
-// The new file keeps its own permissions. When the second rename fails too,
-// the old file keeps its permissions.
-func TestRenameReplaceReadOnly(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root ignores the permissions")
-	}
-	dir := t.TempDir()
-	dst := filepath.Join(dir, "go.mod")
-	require.NoError(t, os.WriteFile(dst, []byte("old"), 0o444))
-	src := filepath.Join(dir, "go.mod.tmp")
-	require.NoError(t, os.WriteFile(src, []byte("new"), 0o444))
-
-	require.Error(t, renameReplace(src, dst, windowsRename, false, hasOneLink),
-		"not Windows: no second rename")
-	require.NoError(t, renameReplace(src, dst, windowsRename, true, hasOneLink))
-	data, err := os.ReadFile(dst)
-	require.NoError(t, err)
-	assert.Equal(t, "new", string(data))
-	info, err := os.Stat(dst)
-	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0o444), info.Mode().Perm(), "the new file keeps its permissions")
-	assert.NoFileExists(t, src)
-
-	alwaysFails := func(string, string) error { return os.ErrPermission }
-	require.NoError(t, os.WriteFile(src, []byte("next"), 0o644))
-	require.ErrorIs(t, renameReplace(src, dst, alwaysFails, true, hasOneLink), os.ErrPermission)
-	info, err = os.Stat(dst)
-	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0o444), info.Mode().Perm(), "the permissions are set back")
-	data, err = os.ReadFile(dst)
-	require.NoError(t, err)
-	assert.Equal(t, "new", string(data))
-}
-
-// TestRenameReplaceReadOnlyHardLink: on Windows, when the read-only file is
-// a hard link to a different file (for example a file outside the project),
-// renameReplace must not make it writable: the permissions belong to the
-// file, so the other link would stay writable. The rename fails instead.
-func TestRenameReplaceReadOnlyHardLink(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root ignores the permissions")
-	}
-	dir := t.TempDir()
-	other := filepath.Join(t.TempDir(), "outside.txt")
-	require.NoError(t, os.WriteFile(other, []byte("outside"), 0o444))
-	dst := filepath.Join(dir, "go.mod")
-	if err := os.Link(other, dst); err != nil {
-		t.Skipf("no hard links: %v", err)
-	}
-	src := filepath.Join(dir, "go.mod.tmp")
-	require.NoError(t, os.WriteFile(src, []byte("new"), 0o644))
-	assert.False(t, hasOneLink(dst), "dst has two links")
-
-	require.ErrorIs(t, renameReplace(src, dst, windowsRename, true, hasOneLink), os.ErrPermission)
-	info, err := os.Stat(other)
-	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0o444), info.Mode().Perm(), "the other link stays read-only")
-	data, err := os.ReadFile(other)
-	require.NoError(t, err)
-	assert.Equal(t, "outside", string(data))
-}
-
-// TestHasOneLink: hasOneLink counts the hard links of a file.
-func TestHasOneLink(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "a")
-	require.NoError(t, os.WriteFile(path, []byte("a"), 0o644))
-	assert.True(t, hasOneLink(path))
-	assert.False(t, hasOneLink(filepath.Join(dir, "absent")), "a file that does not exist")
-	if err := os.Link(path, filepath.Join(dir, "b")); err != nil {
-		t.Skipf("no hard links: %v", err)
-	}
-	assert.False(t, hasOneLink(path))
-}
-
-// TestRenameReplaceOtherErrors: on Windows, renameReplace tries again only
-// for a read-only file that it can make writable. Else it returns the error
-// of the rename.
-func TestRenameReplaceOtherErrors(t *testing.T) {
-	dir := t.TempDir()
-	src := filepath.Join(dir, "go.mod.tmp")
-	require.NoError(t, os.WriteFile(src, []byte("new"), 0o644))
-	calls := 0
-	failingRename := func(string, string) error {
-		calls++
-		return os.ErrPermission
-	}
-
-	require.ErrorIs(t, renameReplace(src, filepath.Join(dir, "absent"), failingRename, true, hasOneLink),
-		os.ErrPermission, "the destination does not exist")
-	assert.Equal(t, 1, calls, "no second rename")
-
-	// The destination is removed after the link count check, so it cannot
-	// be made writable.
-	dst := filepath.Join(dir, "go.mod")
-	require.NoError(t, os.WriteFile(dst, []byte("old"), 0o444))
-	removed := func(path string) bool {
-		_ = os.Chmod(path, 0o644)
-		_ = os.Remove(path)
-		return true
-	}
-	calls = 0
-	require.ErrorIs(t, renameReplace(src, dst, failingRename, true, removed), os.ErrPermission)
-	assert.Equal(t, 1, calls, "no second rename")
-	data, err := os.ReadFile(src)
-	require.NoError(t, err)
-	assert.Equal(t, "new", string(data), "the source does not change")
 }

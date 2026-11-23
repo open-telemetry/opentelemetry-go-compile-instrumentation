@@ -36,6 +36,11 @@ const (
 	selectorAllOf             selector = "all-of"
 	selectorOneOf             selector = "one-of"
 	selectorNot               selector = "not"
+
+	// Signature selectors that check types with go/types.
+	selectorParamImplements      selector = "param_implements"
+	selectorResultImplements     selector = "result_implements"
+	selectorLastResultImplements selector = "last_result_implements"
 )
 
 // do modifiers (docs/rules.md § modifier names → rule types).
@@ -48,6 +53,7 @@ const (
 	modifierExpandDirective modifier = "expand_directive"
 	modifierAssignValue     modifier = "assign_value"
 	modifierSetFields       modifier = "set_fields"
+	modifierWrapLiteral     modifier = "wrap_literal"
 )
 
 // String forms used as YAML / map keys. Existing call sites (normalize,
@@ -73,6 +79,10 @@ const (
 	selPattern           = string(selectorPattern)
 	selPlacement         = string(selectorPlacement)
 
+	selParamImplements      = string(selectorParamImplements)
+	selResultImplements     = string(selectorResultImplements)
+	selLastResultImplements = string(selectorLastResultImplements)
+
 	whereFile = string(selectorFile)
 	combAllOf = string(selectorAllOf)
 	combOneOf = string(selectorOneOf)
@@ -80,7 +90,16 @@ const (
 
 	// rawField is the modifier-output key produced by normalize for raw rules.
 	rawField = "raw"
+
+	// orderField is the modifier key that sets the order in which a rule is
+	// applied to a file.
+	orderField = "order"
 )
+
+// acceptsOrder reports whether the modifier m accepts an order.
+func acceptsOrder(m string) bool {
+	return m == string(modifierInjectCode) || m == string(modifierExpandDirective)
+}
 
 // Structured top-level keys.
 const (
@@ -143,6 +162,9 @@ func allSelectors() []selector {
 		selectorResult,
 		selectorLastResult,
 		selectorParam,
+		selectorParamImplements,
+		selectorResultImplements,
+		selectorLastResultImplements,
 		selectorPattern,
 		selectorPlacement,
 		selectorFile,
@@ -163,5 +185,6 @@ func allModifiers() []modifier {
 		modifierExpandDirective,
 		modifierAssignValue,
 		modifierSetFields,
+		modifierWrapLiteral,
 	}
 }

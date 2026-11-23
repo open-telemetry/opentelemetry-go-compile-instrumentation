@@ -1,0 +1,11 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+//line /golden/work/main.go:6
+func Func1(p1 string, p2 int) (_unnamedRetVal0 float32, _unnamedRetVal1 error) {
+	/*line /<generated>:1*/ _ = 123
+	/*line /golden/work/main.go:7*/ println("Hello, World!")
+	return 0.0, nil
+}

@@ -22,3 +22,27 @@ late_target_flag:
   do:
     - assign_value:
         replace: "true"
+
+# Adds an import of leaf to inner. late imports inner, so the nested build that
+# resolves late for dep compiles inner, and that compile resolves leaf in a
+# nested build of its own.
+inner_wrap_call:
+  target: go.opentelemetry.io/otelc/test/apps/nestedimports/inner
+  where:
+    function_call: strings.ToLower
+  do:
+    - wrap_call:
+        replace: "(func() string { leaf.Note(); return {{ . }} })()"
+  imports:
+    leaf: go.opentelemetry.io/otelc/test/apps/nestedimports/leaf
+
+# Instruments leaf itself, so the archive the outer build links differs from an
+# uninstrumented one that the second nested build could leave for inner.
+leaf_target_flag:
+  target: go.opentelemetry.io/otelc/test/apps/nestedimports/leaf
+  where:
+    kind: var
+    identifier: Instrumented
+  do:
+    - assign_value:
+        replace: "true"

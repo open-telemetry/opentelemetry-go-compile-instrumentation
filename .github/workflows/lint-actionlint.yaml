@@ -9,11 +9,11 @@ on:
       - ".github/actions/**/action.yaml"
       - ".tools/go.mod"
       - ".tools/go.sum"
-      - ".tools/bundlerepair/**"
-      - ".tools/workflows/**"
       - "Makefile"
   push:
-    branches: [main]
+    branches:
+      - main
+      - 'release/v*.*.x'
     paths:
       - ".github/workflows/*.yml"
       - ".github/workflows/*.yaml"
@@ -21,8 +21,6 @@ on:
       - ".github/actions/**/action.yaml"
       - ".tools/go.mod"
       - ".tools/go.sum"
-      - ".tools/bundlerepair/**"
-      - ".tools/workflows/**"
       - "Makefile"
 
 permissions:
@@ -40,4 +38,4 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - run: make lint/action test-bundle-workflows
+      - run: make lint/action

@@ -1,0 +1,20 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+//line /golden/work/main.go:6
+import (
+	"fmt"
+
+	"go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/call-rule-implements/helpers/framework"
+)
+
+func handle(name string, c *framework.Context) {
+	(func() (int, error) {
+		println("parent ok:", c != nil)
+		return fmt.Println("hello", name)
+	})() /*line /golden/work/main.go:13*/
+}
+
+func main() { handle("world", &framework.Context{}) }

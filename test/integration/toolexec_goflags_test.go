@@ -6,7 +6,6 @@
 package test
 
 import (
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,39 +17,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.opentelemetry.io/otelc/test/testutil"
+	"go.opentelemetry.io/otelc/tool/util"
 )
-
-const preparedGoMod = `module example.com/otelc-prepared
-
-go 1.25.0
-`
-
-const preparedMainSource = `package main
-
-import (
-	"flag"
-	"io"
-	"log"
-	"net/http"
-)
-
-func main() {
-	addr := flag.String("addr", "", "server address")
-	flag.Parse()
-
-	resp, err := http.Get(*addr + "/hello")
-	if err != nil {
-		log.Fatal(err)
-	}
-	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
-		_ = resp.Body.Close()
-		log.Fatal(err)
-	}
-	if err := resp.Body.Close(); err != nil {
-		log.Fatal(err)
-	}
-}
-`
 
 func TestGOFLAGSPreparedBuild(t *testing.T) {
 	otelcPath, err := testutil.OtelcPath()
@@ -62,18 +30,18 @@ func TestGOFLAGSPreparedBuild(t *testing.T) {
 	goFlags := strconv.Quote("-toolexec=" + absoluteOtelcPath + " toolexec")
 
 	t.Run("fresh cache with empty work dir env", func(t *testing.T) {
-		build := newPreparedBuildCase(t, absoluteOtelcPath, baseEnv, goFlags, ".")
+		build := newPreparedBuildCase(t, absoluteOtelcPath, baseEnv, goFlags)
 		build.setup()
 
 		_, err := os.Stat(build.goCache)
 		require.ErrorIs(t, err, os.ErrNotExist, "GOCACHE must not exist before go build")
 		build.directBuild(build.moduleDir, true)
 		require.DirExists(t, build.goCache, "go build did not create the fresh GOCACHE")
-		build.runAndRequireHTTPSpan()
+		build.runAndRequireExecution()
 	})
 
 	t.Run("warm cache", func(t *testing.T) {
-		build := newPreparedBuildCase(t, absoluteOtelcPath, baseEnv, goFlags, ".")
+		build := newPreparedBuildCase(t, absoluteOtelcPath, baseEnv, goFlags)
 
 		_, err := os.Stat(build.goCache)
 		require.ErrorIs(t, err, os.ErrNotExist, "GOCACHE must not exist before plain go build")
@@ -83,21 +51,21 @@ func TestGOFLAGSPreparedBuild(t *testing.T) {
 		build.setup()
 		build.directBuild(build.moduleDir, false)
 		require.DirExists(t, build.goCache, "direct go build removed the warm GOCACHE")
-		build.runAndRequireHTTPSpan()
+		build.runAndRequireExecution()
 	})
 
 	t.Run("nested module directory", func(t *testing.T) {
-		build := newPreparedBuildCase(t, absoluteOtelcPath, baseEnv, goFlags, "cmd/app")
+		build := newPreparedBuildCase(t, absoluteOtelcPath, baseEnv, goFlags)
 		build.setup("./cmd/app")
 		build.directBuild(filepath.Join(build.moduleDir, "cmd", "app"), false)
-		build.runAndRequireHTTPSpan()
+		build.runAndRequireExecution()
 	})
 
 	t.Run("re-prepared cache", func(t *testing.T) {
-		build := newPreparedBuildCase(t, absoluteOtelcPath, baseEnv, goFlags, ".")
+		build := newPreparedBuildCase(t, absoluteOtelcPath, baseEnv, goFlags)
 		build.setup()
 		build.directBuild(build.moduleDir, false)
-		build.runAndRequireHTTPSpan()
+		build.runAndRequireExecution()
 		require.DirExists(t, build.goCache, "first direct build did not create GOCACHE")
 
 		build.cleanup()
@@ -105,12 +73,12 @@ func TestGOFLAGSPreparedBuild(t *testing.T) {
 		build.setup()
 
 		build.directBuild(build.moduleDir, false)
-		build.runAndRequireHTTPSpan()
+		build.runAndRequireExecution()
 	})
 
 	t.Run("debug diff direct mode integration", func(t *testing.T) {
 		debugEnv := append(baseEnv, "OTELC_DEBUG=1")
-		build := newPreparedBuildCase(t, absoluteOtelcPath, debugEnv, goFlags, ".")
+		build := newPreparedBuildCase(t, absoluteOtelcPath, debugEnv, goFlags)
 
 		// 1. Plant a stale debug artifact from a previous run
 		staleDir := filepath.Join(build.moduleDir, ".otelc-build", "debug", "stale_pkg")
@@ -128,20 +96,20 @@ func TestGOFLAGSPreparedBuild(t *testing.T) {
 		require.DirExists(t, debugDir)
 
 		// Verify setup runtime diff was generated in the package directory
-		runtimeDiff := filepath.Join(debugDir, "example_com_otelc-prepared", "otelc.runtime.go.diff")
+		runtimeDiff := filepath.Join(debugDir, util.EscapePackagePath("go.opentelemetry.io/otelc/test/apps/prepared"), "otelc.runtime.go.diff")
 		require.FileExists(t, runtimeDiff)
 
 		// 3. Run direct OTELC_DEBUG=1 go build -a to force package recompilation
 		build.directBuild(build.moduleDir, false, "-a")
 
-		compilerDiff := filepath.Join(debugDir, "net_http", "roundtrip.go.diff")
+		compilerDiff := filepath.Join(debugDir, "main", "main.go.diff")
 		require.FileExists(t, compilerDiff)
 
 		// 5. Verify runtime diff remains available
 		require.FileExists(t, runtimeDiff)
 
-		// Verify binary runs and produces HTTP span
-		build.runAndRequireHTTPSpan()
+		// Verify binary runs and executes hook
+		build.runAndRequireExecution()
 	})
 }
 
@@ -161,16 +129,11 @@ func newPreparedBuildCase(
 	otelcPath string,
 	baseEnv []string,
 	goFlags string,
-	mainPackage string,
 ) *preparedBuildCase {
 	t.Helper()
 
-	workspace := t.TempDir()
-	moduleDir := filepath.Join(workspace, "module")
-	mainDir := filepath.Join(moduleDir, filepath.FromSlash(mainPackage))
-	require.NoError(t, os.MkdirAll(mainDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(moduleDir, "go.mod"), []byte(preparedGoMod), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(mainDir, "main.go"), []byte(preparedMainSource), 0o644))
+	moduleDir := copyTestApp(t, "prepared")
+	workspace := filepath.Dir(moduleDir)
 
 	build := &preparedBuildCase{
 		t:         t,
@@ -208,7 +171,7 @@ func (b *preparedBuildCase) setup(args ...string) {
 	matchedPath := filepath.Join(b.moduleDir, ".otelc-build", "matched.json")
 	matched, err := os.ReadFile(matchedPath)
 	require.NoError(b.t, err)
-	require.Contains(b.t, string(matched), "/instrumentation/net/http/client")
+	require.Contains(b.t, string(matched), "go.opentelemetry.io/otelc/test/apps/prepared/hooks")
 }
 
 func (b *preparedBuildCase) cleanup() {
@@ -259,25 +222,15 @@ func (b *preparedBuildCase) directBuild(buildDir string, emptyWorkDirEnv bool, e
 	require.NoError(b.t, err, "go build failed:\n%s", output)
 }
 
-func (b *preparedBuildCase) runAndRequireHTTPSpan() {
+func (b *preparedBuildCase) runAndRequireExecution() {
 	b.t.Helper()
 
-	server := StartHTTPServerWithResponse(b.t, http.StatusOK, `{"message":"Hello"}`)
-	fixture := testutil.NewTestFixture(b.t, testutil.WithAppsDir(b.workspace))
-	fixture.Run("module", "-addr="+server.URL)
-
-	span := fixture.RequireSingleSpan()
-	testutil.RequireHTTPClientSemconv(
-		b.t,
-		span,
-		http.MethodGet,
-		server.URL+"/hello",
-		"127.0.0.1",
-		http.StatusOK,
-		server.Port(),
-		"1.1",
-		"http",
-	)
+	cmd := exec.CommandContext(b.t.Context(), b.appPath())
+	cmd.Dir = b.moduleDir
+	output, err := cmd.CombinedOutput()
+	require.NoError(b.t, err, "running app failed:\n%s", output)
+	require.Contains(b.t, string(output), "prepared hook executed")
+	require.Contains(b.t, string(output), "prepared work executed")
 }
 
 func preparedBuildBaseEnvironment() []string {

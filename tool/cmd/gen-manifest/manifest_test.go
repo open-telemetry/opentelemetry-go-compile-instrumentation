@@ -7,13 +7,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/mod/module"
 
 	"go.opentelemetry.io/otelc/tool/data"
 )
@@ -448,26 +451,162 @@ func TestEntryOmitsEmptyVersionRange(t *testing.T) {
 	assert.NotContains(t, string(content), "versionRange")
 }
 
+func TestParseTag(t *testing.T) {
+	tests := []struct {
+		tag     string
+		wantDir string
+		wantVer string
+		wantOk  bool
+	}{
+		{
+			tag:     "v0.1.0",
+			wantDir: ".",
+			wantVer: "v0.1.0",
+			wantOk:  true,
+		},
+		{
+			tag:     "instrumentation/net/http/otelchttp/client/v0.1.2",
+			wantDir: "instrumentation/net/http/otelchttp/client",
+			wantVer: "v0.1.2",
+			wantOk:  true,
+		},
+		{
+			tag:     "pkg/runtime/v1.0.0-rc1",
+			wantDir: "pkg/runtime",
+			wantVer: "v1.0.0-rc1",
+			wantOk:  true,
+		},
+		{
+			tag:    "not-semver",
+			wantOk: false,
+		},
+		{
+			tag:    "dir/not-semver",
+			wantOk: false,
+		},
+		{
+			tag:    "",
+			wantOk: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.tag, func(t *testing.T) {
+			dir, ver, ok := parseTag(tt.tag)
+			assert.Equal(t, tt.wantOk, ok)
+			if tt.wantOk {
+				assert.Equal(t, tt.wantDir, dir)
+				assert.Equal(t, tt.wantVer, ver)
+			}
+		})
+	}
+}
+
+func TestGenerate_SubmoduleTags(t *testing.T) {
+	root, evalErr := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, evalErr)
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "git %v: %s", args, string(out))
+	}
+	run("init")
+	run("config", "user.name", "test")
+	run("config", "user.email", "test@example.com")
+
+	instDir := filepath.Join(root, "instrumentation")
+	writeModule(t, instDir, "mod_a", "example.com/mod_a")
+	writeRuleFile(t, instDir, "mod_a/otelc.yaml", `
+rule:
+  target: example.com/target_a
+`)
+
+	writeModule(t, instDir, "mod_b", "example.com/mod_b")
+	writeRuleFile(t, instDir, "mod_b/otelc.yaml", `
+rule:
+  target: example.com/target_b
+`)
+
+	run("add", ".")
+	run("-c", "commit.gpgsign=false", "commit", "-m", "initial")
+	run("-c", "tag.gpgsign=false", "tag", "instrumentation/mod_a/v0.1.0")
+	run("-c", "tag.gpgsign=false", "tag", "instrumentation/mod_b/v0.2.0")
+
+	got, err := Generate(instDir, "v0.0.0-fallback")
+	require.NoError(t, err)
+
+	require.Equal(t, Manifest{
+		{ModulePath: "example.com/mod_a", Target: "example.com/target_a", Version: "v0.1.0"},
+		{ModulePath: "example.com/mod_b", Target: "example.com/target_b", Version: "v0.2.0"},
+	}, got)
+
+	// Also verify that passing a symlinked instrumentation root resolves cleanly.
+	symlinkRoot := filepath.Join(t.TempDir(), "symlink-root")
+	require.NoError(t, os.Symlink(root, symlinkRoot))
+	symlinkInstDir := filepath.Join(symlinkRoot, "instrumentation")
+	gotSymlink, err := Generate(symlinkInstDir, "v0.0.0-fallback")
+	require.NoError(t, err)
+	require.Equal(t, got, gotSymlink)
+}
+
+func TestGenerate_UntaggedSubmoduleAtCommit(t *testing.T) {
+	root, evalErr := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, evalErr)
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "git %v: %s", args, string(out))
+	}
+	run("init")
+	run("config", "user.name", "test")
+	run("config", "user.email", "test@example.com")
+
+	instDir := filepath.Join(root, "instrumentation")
+	writeModule(t, instDir, "mod_a", "example.com/mod_a")
+	writeRuleFile(t, instDir, "mod_a/otelc.yaml", `
+rule:
+  target: example.com/target_a
+`)
+
+	writeModule(t, instDir, "mod_b", "example.com/mod_b")
+	writeRuleFile(t, instDir, "mod_b/otelc.yaml", `
+rule:
+  target: example.com/target_b
+`)
+
+	run("add", ".")
+	run("-c", "commit.gpgsign=false", "commit", "-m", "initial")
+	// Root repository tag v0.1.0, and submodule tag for mod_a only
+	run("-c", "tag.gpgsign=false", "tag", "v0.1.0")
+	run("-c", "tag.gpgsign=false", "tag", "instrumentation/mod_a/v0.1.0")
+
+	// Call Generate with the root repository tag "v0.1.0"
+	got, err := Generate(instDir, "v0.1.0")
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+
+	// mod_a has a matching submodule tag so it receives v0.1.0
+	require.Equal(t, "example.com/mod_a", got[0].ModulePath)
+	require.Equal(t, "v0.1.0", got[0].Version)
+
+	// mod_b is untagged for v0.1.0, so it must not inherit the unresolvable root tag "v0.1.0".
+	// It must resolve to a valid pseudoversion at the commit.
+	require.Equal(t, "example.com/mod_b", got[1].ModulePath)
+	require.True(t, module.IsPseudoVersion(got[1].Version), "expected pseudoversion, got %s", got[1].Version)
+}
+
 func compareEntries(a, b Entry) int {
-	if a.ModulePath < b.ModulePath {
-		return -1
+	if cmp := strings.Compare(a.ModulePath, b.ModulePath); cmp != 0 {
+		return cmp
 	}
-	if a.ModulePath > b.ModulePath {
-		return 1
+	if cmp := strings.Compare(a.Target, b.Target); cmp != 0 {
+		return cmp
 	}
-	if a.Target < b.Target {
-		return -1
+	if cmp := strings.Compare(a.VersionRange, b.VersionRange); cmp != 0 {
+		return cmp
 	}
-	if a.Target > b.Target {
-		return 1
-	}
-	if a.VersionRange < b.VersionRange {
-		return -1
-	}
-	if a.VersionRange > b.VersionRange {
-		return 1
-	}
-	return 0
+	return strings.Compare(a.Version, b.Version)
 }
 
 func writeModule(t *testing.T, root, relative, modulePath string) {

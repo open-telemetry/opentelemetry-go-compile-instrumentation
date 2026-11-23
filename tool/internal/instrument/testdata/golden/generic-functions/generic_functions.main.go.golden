@@ -126,17 +126,13 @@ func OtelBeforeTrampoline_GenericFunc1523734358[T any](param0 *[]T, param1 *[]T)
 			}
 		}
 	}()
-	hookContext = &HookContextImpl1523734358{}
-	hookContext.params = []interface{}{param0, param1}
-	hookContext.funcName = "GenericFunc"
-	hookContext.packageName = "main"
 	if otelc_hook_3784484425_GenericFuncBefore != nil {
-		otelc_hook_3784484425_GenericFuncBefore(hookContext, *param0, *param1)
+		otelc_hook_3784484425_GenericFuncBefore(nil, *param0, *param1)
 	}
-	return hookContext, hookContext.skipCall
+	return nil, false
 }
 
-func OtelAfterTrampoline_GenericFunc1523734358[T any](hookContext HookContext, arg0 *[]T, arg1 *error) {
+func OtelAfterTrampoline_GenericFunc1523734358[T any](hookContext OtelHookContext, arg0 *[]T, arg1 *error) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "GenericFuncAfter")
@@ -149,17 +145,16 @@ func OtelAfterTrampoline_GenericFunc1523734358[T any](hookContext HookContext, a
 			}
 		}
 	}()
-	hookContext.(*HookContextImpl1523734358).returnVals = []interface{}{arg0, arg1}
 	if otelc_hook_3784484425_GenericFuncAfter != nil {
-		otelc_hook_3784484425_GenericFuncAfter(hookContext, *arg0, *arg1)
+		otelc_hook_3784484425_GenericFuncAfter(nil, *arg0, *arg1)
 	}
 }
 
 //go:linkname otelc_hook_3784484425_GenericFuncBefore testdata/golden/generic-functions.GenericFuncBefore
-func otelc_hook_3784484425_GenericFuncBefore(hookContext HookContext, param0 interface{}, param1 interface{})
+func otelc_hook_3784484425_GenericFuncBefore(hookContext OtelHookContext, param0 interface{}, param1 interface{})
 
 //go:linkname otelc_hook_3784484425_GenericFuncAfter testdata/golden/generic-functions.GenericFuncAfter
-func otelc_hook_3784484425_GenericFuncAfter(hookContext HookContext, arg0 interface{}, arg1 error)
+func otelc_hook_3784484425_GenericFuncAfter(hookContext OtelHookContext, arg0 interface{}, arg1 error)
 
 type HookContextImpl1139503255 struct {
 	params      []interface{}
@@ -266,17 +261,13 @@ func OtelBeforeTrampoline_GenericMethod1139503255[T any](recv0 **GenStruct[T], p
 			}
 		}
 	}()
-	hookContext = &HookContextImpl1139503255{}
-	hookContext.params = []interface{}{recv0, param0, param1}
-	hookContext.funcName = "GenericMethod"
-	hookContext.packageName = "main"
 	if otelc_hook_3784484425_GenericMethodBefore != nil {
-		otelc_hook_3784484425_GenericMethodBefore(hookContext, *recv0, *param0, *param1)
+		otelc_hook_3784484425_GenericMethodBefore(nil, *recv0, *param0, *param1)
 	}
-	return hookContext, hookContext.skipCall
+	return nil, false
 }
 
-func OtelAfterTrampoline_GenericMethod1139503255[T any](hookContext HookContext, arg0 *T, arg1 *error) {
+func OtelAfterTrampoline_GenericMethod1139503255[T any](hookContext OtelHookContext, arg0 *T, arg1 *error) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "GenericMethodAfter")
@@ -289,14 +280,13 @@ func OtelAfterTrampoline_GenericMethod1139503255[T any](hookContext HookContext,
 			}
 		}
 	}()
-	hookContext.(*HookContextImpl1139503255).returnVals = []interface{}{arg0, arg1}
 	if otelc_hook_3784484425_GenericMethodAfter != nil {
-		otelc_hook_3784484425_GenericMethodAfter(hookContext, *arg0, *arg1)
+		otelc_hook_3784484425_GenericMethodAfter(nil, *arg0, *arg1)
 	}
 }
 
 //go:linkname otelc_hook_3784484425_GenericMethodBefore testdata/golden/generic-functions.GenericMethodBefore
-func otelc_hook_3784484425_GenericMethodBefore(hookContext HookContext, recv0 interface{}, param0 interface{}, param1 string)
+func otelc_hook_3784484425_GenericMethodBefore(hookContext OtelHookContext, recv0 interface{}, param0 interface{}, param1 string)
 
 //go:linkname otelc_hook_3784484425_GenericMethodAfter testdata/golden/generic-functions.GenericMethodAfter
-func otelc_hook_3784484425_GenericMethodAfter(hookContext HookContext, arg0 interface{}, arg1 error)
+func otelc_hook_3784484425_GenericMethodAfter(hookContext OtelHookContext, arg0 interface{}, arg1 error)

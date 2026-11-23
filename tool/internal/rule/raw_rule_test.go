@@ -84,6 +84,18 @@ placement: after
 			wantErr: true,
 		},
 		{
+			name:    "missing func is rejected",
+			ruleID:  "raw-nofunc",
+			yaml:    "target: main\nraw: println()",
+			wantErr: true,
+		},
+		{
+			name:    "blank func is rejected",
+			ruleID:  "raw-blankfunc",
+			yaml:    "target: main\nfunc: \"  \"\nraw: println()",
+			wantErr: true,
+		},
+		{
 			name:    "missing raw is rejected",
 			ruleID:  "raw5",
 			yaml:    "target: main\nfunc: Bar",
@@ -123,6 +135,84 @@ raw: "println({{ .FuncArgument 0 }})"
 			name:    "invalid template syntax in raw is rejected",
 			ruleID:  "bad-template-raw",
 			yaml:    "target: main\nfunc: Bar\nraw: \"println({{ FuncArgument 0 )\"",
+			wantErr: true,
+		},
+		{
+			name:   "rule with exact signature",
+			ruleID: "raw-sig",
+			yaml: `
+target: main
+func: Bar
+raw: println()
+signature:
+  args: [context.Context, string]
+  returns: [error]
+`,
+			check: func(t *testing.T, r *InstRawRule) {
+				require.NotNil(t, r.Signature)
+				assert.Equal(t, []string{"context.Context", "string"}, r.Signature.Args)
+				assert.Equal(t, []string{"error"}, r.Signature.Returns)
+			},
+		},
+		{
+			name:   "rule with signature_contains",
+			ruleID: "raw-sig-contains",
+			yaml: `
+target: main
+func: Bar
+raw: println()
+signature_contains:
+  args: [context.Context]
+`,
+			check: func(t *testing.T, r *InstRawRule) {
+				require.NotNil(t, r.SignatureContains)
+				assert.Equal(t, []string{"context.Context"}, r.SignatureContains.Args)
+				assert.Nil(t, r.SignatureContains.Returns)
+			},
+		},
+		{
+			name:   "rule with result last_result and param",
+			ruleID: "raw-scalar-filters",
+			yaml: `
+target: main
+func: Bar
+raw: println()
+result: error
+last_result: error
+param: context.Context
+`,
+			check: func(t *testing.T, r *InstRawRule) {
+				assert.Equal(t, "error", r.Result)
+				assert.Equal(t, "error", r.LastResult)
+				assert.Equal(t, "context.Context", r.Param)
+			},
+		},
+		{
+			name:   "valid lang with go prefix",
+			ruleID: "raw-lang-go-prefix",
+			yaml:   "target: main\nfunc: Bar\nraw: println()\nlang: go1.18",
+			check: func(t *testing.T, r *InstRawRule) {
+				assert.Equal(t, "go1.18", r.Lang)
+			},
+		},
+		{
+			name:   "valid lang normalized without go prefix",
+			ruleID: "raw-lang-no-prefix",
+			yaml:   "target: main\nfunc: Bar\nraw: println()\nlang: 1.21",
+			check: func(t *testing.T, r *InstRawRule) {
+				assert.Equal(t, "go1.21", r.Lang)
+			},
+		},
+		{
+			name:    "invalid lang rejected",
+			ruleID:  "raw-lang-invalid",
+			yaml:    "target: main\nfunc: Bar\nraw: println()\nlang: invalid-version",
+			wantErr: true,
+		},
+		{
+			name:    "whitespace lang rejected",
+			ruleID:  "raw-lang-whitespace",
+			yaml:    "target: main\nfunc: Bar\nraw: println()\nlang: \"   \"",
 			wantErr: true,
 		},
 	}
@@ -192,6 +282,12 @@ func TestInstRawRule_Identity(t *testing.T) {
 	diffRaw["raw"] = `println("bye")`
 	assert.NotEqual(t, rawIdentity(t, "r", base()), rawIdentity(t, "r", diffRaw),
 		"rules differing only in raw must have distinct identities")
+
+	// Differing lang yields a distinct identity.
+	diffLang := base()
+	diffLang["lang"] = "go1.18"
+	assert.NotEqual(t, rawIdentity(t, "r", base()), rawIdentity(t, "r", diffLang),
+		"rules differing only in lang must have distinct identities")
 
 	// The length-prefixed encoding must not let field boundaries shift: moving
 	// characters from func into recv (same concatenation, different split)

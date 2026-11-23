@@ -10,6 +10,7 @@
   - [`where` semantics](#where-semantics)
   - [`where.file` semantics](#wherefile-semantics)
   - [`do` semantics](#do-semantics)
+    - [Application order](#application-order)
   - [Modifier names → rule types](#modifier-names--rule-types)
   - [Special `target` values](#special-target-values)
   - [Glob targets](#glob-targets)
@@ -46,7 +47,7 @@ Every rule file declares the minimum `otelc` version required to read it. The re
 top-level `version` key is followed by map entries whose keys are rule names:
 
 ```yaml
-version: "v1.0.0"
+version: "v1.2.0"
 
 rule_name:
   target: <package pattern or list>   # required
@@ -68,6 +69,16 @@ The file-level `version` is a released `otelc` semantic version. Each rule's nes
 rule applies. When a package contains multiple rule files, `otelc` enforces the highest
 minimum version declared by those files. Legacy files without a top-level `version` are
 treated as requiring `v1.0.0` and produce a warning.
+
+> [!NOTE]
+> `otelc` v1.2.0 is the first release that supports the top-level `version` key.
+> Earlier releases parse every top-level key as a rule and reject a scalar
+> `version` entry, so they cannot read a file that declares it; those releases
+> use the instrumentation rules bundled with them instead. Published
+> instrumentation rule files — including the rules bundled with `otelc` under
+> `instrumentation/` — declare `version: "v1.2.0"`. A rule file that relies on
+> functionality added in a later `otelc` release should declare that release as
+> its minimum version.
 
 ### Top-level fields
 
@@ -296,8 +307,58 @@ Rules:
 
 - The sequence form is canonical and used in all in-repo examples.
 - Each list item is a single-key map whose key names the modifier.
-- Duplicate modifier kinds are allowed; declaration order is preserved.
+- Duplicate modifier kinds are allowed. Items of the same kind are applied in declaration order. See [Application order](#application-order) for what this means for the generated code.
 - `do` must not be missing or empty.
+
+#### Application order
+
+otelc applies the rules that match a file one at a time. `add_file` rules come first. By default, the other rules are applied by modifier kind, in this order: `inject_hooks`, `add_struct_fields`, `inject_code`, `wrap_call`, `set_fields` and `wrap_literal`, `expand_directive`, `assign_value`. Rules of the same kind keep an order that does not change between builds, but that depends on where the rules come from.
+
+`expand_directive`, and `inject_code` without `pattern`, put their code above the code that is already at the start of the function, so the code of the rule applied last runs first. This is also true for two items of one `do` sequence: the code of the second item runs first. `inject_code` with `pattern` puts its code next to the matched statement. With `placement: before`, the code of the rule applied first runs first. With `placement: after`, the code of the rule applied last runs first.
+
+To set the order of this code, use `order` (integer, optional, default `0`) on an `inject_code` or `expand_directive` modifier. Rules with a lower `order` are applied first, so at the start of a function the code of a rule with a higher `order` runs first. Rules with the same `order` keep the default order. `order` changes the order of rules of all kinds. For example, an `inject_code` with a negative `order` is applied before the `inject_hooks` rules, so its code runs after their `before` hooks. The other modifiers do not accept `order`, and `order` is not accepted at the top level of a rule.
+
+In this example, the tracer must start before the span of an annotated `main` starts, and stop after the span ends:
+
+```yaml
+start_tracer:
+  target: main
+  where:
+    func: main
+  do:
+    - inject_code:
+        order: 50
+        raw: |-
+          tracer.Start()
+          defer tracer.Stop()
+  imports:
+    tracer: example.com/tracer
+
+span_directive:
+  target: main
+  where:
+    directive: "otelc:span"
+  do:
+    - expand_directive:
+        template: |-
+          span := tracer.StartSpan("{{ .FuncName }}")
+          defer span.End()
+  imports:
+    tracer: example.com/tracer
+```
+
+Without `order`, `start_tracer` is applied first and the span code runs before `tracer.Start()`. With `order: 50`, the result is:
+
+```go
+//otelc:span
+func main() {
+    tracer.Start()
+    defer tracer.Stop()
+    span := tracer.StartSpan("main")
+    defer span.End()
+    // original body
+}
+```
 
 ### Modifier names → rule types
 
@@ -311,12 +372,16 @@ Rules:
 | `expand_directive`  | `InstDirectiveRule` |
 | `assign_value`      | `InstDeclRule`      |
 | `set_fields`        | `InstLitRule`       |
+| `wrap_literal`      | `InstLitRule`       |
 
 **Planned:** rule type will be derived from the modifier key in `do`. The current implementation still infers from field presence and ignores the modifier name; see #546 for the planned migration.
 
 ### Special `target` values
 
-- `target: main` — matches the compile-time package named `main`.
+- `target: main` — matches the compile-time package named `main`. Under
+  `otelc go test`, the main package compiles under its import path instead, so
+  `target: main` does not reach it or its `_test.go` files. List `main` together
+  with `$root` (or the import path) to cover both builds and tests.
 - `target: test_main` — not currently supported; reserved for future work.
 - `target: $root` — matches the root module of the build and every package
   below it. If a build spans multiple modules, it matches the union of all
@@ -527,7 +592,7 @@ The tool automatically reads the hook source file and ensures all of its imports
 
 #### Signature Sub-Filters
 
-By default the rule matches any function with the given name (and optional receiver). Five optional sub-filters, placed under `where` alongside `func`, can narrow the match further by inspecting the function's parameter and result types. All specified sub-filters must match (AND logic); omitting a sub-filter places no constraint on that aspect of the signature.
+By default the rule matches any function with the given name (and optional receiver). Eight optional sub-filters, placed under `where` alongside `func`, can narrow the match further by inspecting the function's parameter and result types. All specified sub-filters must match (AND logic); omitting a sub-filter places no constraint on that aspect of the signature. The same sub-filters apply to `inject_code` rules.
 
 | Field | Type | Semantics |
 | --- | --- | --- |
@@ -536,6 +601,9 @@ By default the rule matches any function with the given name (and optional recei
 | `result` | string | Any return type matches the named type |
 | `last_result` | string | The last return type matches the named type |
 | `param` | string | Any parameter type matches the named type |
+| `param_implements` | string | Any parameter type is the named interface or implements it |
+| `result_implements` | string | Any return type is the named interface or implements it |
+| `last_result_implements` | string | The last return type is the named interface or implements it |
 
 `signature` and `signature_contains` each take an object with two optional lists:
 
@@ -544,9 +612,9 @@ By default the rule matches any function with the given name (and optional recei
 
 Type names follow the form `[*][pkg.]Name`, for example `error`, `context.Context`, `*http.Request`. Matching is structural (AST-level) rather than type-checker-based, so the package qualifier must match the local identifier used in the source file (typically the last path component, e.g. `http` for `"net/http"`).
 
-> **Note on scalar filter semantics:** Because there is no type checker at instrumentation time, `result`, `last_result`, and `param` perform an exact type-name match. For example, `result: error` matches functions that literally return the `error` type, but not functions that return a concrete type (e.g. `*MyError`) that happens to implement `error`.
+> **Note on scalar filter semantics:** `result`, `last_result`, and `param` perform an exact type-name match. For example, `result: error` matches functions that literally return the `error` type, but not functions that return a concrete type (e.g. `*MyError`) that happens to implement `error`. Use `result_implements`, `last_result_implements`, and `param_implements` to also match such types; see [Matching by interface](#matching-by-interface).
 >
-> **Unsupported type expressions:** Complex type expressions — `chan`, `func`, `map`, slice (`[]T`), and non-empty interface literals — cannot be matched by type-name filters. If a parameter or return value uses one of these forms, the filter will never match it.
+> **Unsupported type expressions:** Complex type expressions — `chan`, `func`, `map`, slice (`[]T`), and non-empty interface literals — cannot be matched by type-name filters. If a parameter or return value uses one of these forms, the filter will never match it (it is skipped, not a fatal error). `signature_contains` applies to the list of parameter and result types, not to types nested inside composites: `args: [string]` matches a `string` argument, not `[]string` or `chan string`.
 
 **Example — match only functions with a specific signature:**
 
@@ -594,6 +662,37 @@ hook_fallible:
         before: OnQuery
         path: example.com/hooks/db
 ```
+
+**Example — match by interface:**
+
+```yaml
+hook_fallible_custom:
+  target: example.com/db
+  where:
+    func: Query
+    param_implements: context.Context
+    last_result_implements: error
+  do:
+    - inject_hooks:
+        before: OnQuery
+        path: example.com/hooks/db
+```
+
+This rule matches `func Query(c *RequestContext, q string) (*Rows, *QueryError)` when `*RequestContext` implements `context.Context` (for example through an embedded `context.Context` field) and `*QueryError` implements `error`.
+
+#### Matching by interface
+
+The `param_implements`, `result_implements`, and `last_result_implements` selectors and the `FuncArgumentThatImplements` and `FuncReturnThatImplements` template helpers take the name of an interface type, written as `[pkg.]Name` where `pkg` is the import path of its package (for example `error`, `context.Context`, `net/http.Handler`). A parameter or result matches when its type is that interface or implements it:
+
+- The method set of the declared type decides, as in Go. A `T` value whose methods have pointer receivers does not implement the interface, and a `*T` does.
+- A struct that embeds the interface, such as `struct{ context.Context }`, implements it.
+- A parameter whose type is a type parameter matches when its constraint implements the interface, for example `T` in `func F[T context.Context](t T)`. A type parameter constrained by `any` does not match.
+- The receiver of a method is never a parameter.
+- A pointer type, or a name that resolves to a type that is not an interface (for example `int` or `net/http.Request`), is an error.
+
+otelc type checks the target package once, before it changes any file, and only when one of its rules uses these selectors or helpers. A setup-phase match does not use type information, so a function rule with these selectors is first matched by name, receiver and the other sub-filters, and the instrument phase then skips the functions that do not satisfy them.
+
+When there is no type information for a parameter or result, it matches by type name, as `param` and `FuncArgumentOfType` do. This happens when the package has a type error that affects that type (otelc ignores type errors in the rest of the package), and for every parameter when the package of the interface is not visible from the target package: the target package does not import it, and the exported API of its imports does not refer to it.
 
 **Stack frames and line markers:**
 
@@ -667,6 +766,7 @@ This rule injects a string of raw Go code at the beginning of a target function.
 
 - `func` (string, required): The name of the target function.
 - `recv` (string, optional): The receiver type for a method.
+- `signature`, `signature_contains`, `param`, `result`, `last_result` (optional): The same signature sub-filters as [Function Hook Rule](#signature-sub-filters). They narrow the match to functions whose parameter and result types satisfy the filter. A filter that does not match leaves the function uninstrumented.
 - `pattern` (string, optional): The position within the function where the raw code should be injected. By default, the code is injected at the start of the function body. If provided, the value must be a valid regular expression.
 
   The pattern is matched against the canonical gofmt representation for each statement in the function body (not always the exact original source formatting). The injected code is placed immediately before/after the first statement that matches the pattern.
@@ -679,18 +779,22 @@ This rule injects a string of raw Go code at the beginning of a target function.
 
 - `raw` (string, required): The raw Go code to be injected. The code will be inserted at the beginning of the target function. If the string contains `{{`, it is additionally rendered as a Go standard [text/template](https://pkg.go.dev/text/template) template using the shared function template variables below before being parsed; code with no `{{` is injected verbatim, unaffected by this rendering step.
 
+- `lang` (string, optional): The minimum Go language version required by the injected code (e.g. `go1.18` or `go1.21`). When set, `otelc` raises the `-lang` flag on the compile command when the target module declares an older Go version. This allows modern language features like `any` or generics to compile. Language versions higher than `lang` are never lowered.
+
 Top-level `imports` (map[string]string, optional): A map of imports to inject into the target file. Required when the injected code references packages not already imported by the target. Same format as [Top-level fields](#top-level-fields).
 
 **Template Placeholders:**
 
-| Placeholder              | Replaced with                                                                        |
-| ------------------------ | ------------------------------------------------------------------------------------ |
-| `{{.FuncName}}`          | The name of the target function                                                      |
-| `{{.FuncArgument N}}`    | The identifier of the N-th (0-indexed) parameter, excluding the receiver             |
-| `{{.FuncReturn N}}`      | The identifier of the N-th (0-indexed) return value                                  |
-| `{{.FuncArgumentCount}}` | The number of parameters, excluding the receiver                                     |
-| `{{.FuncReturnCount}}`   | The number of return values                                                          |
-| `{{.Receiver}}`          | The identifier of the target method's receiver; errors if the target has no receiver |
+| Placeholder                             | Replaced with                                                                                 |
+| --------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `{{.FuncName}}`                         | The name of the target function                                                               |
+| `{{.FuncArgument N}}`                   | The identifier of the N-th (0-indexed) parameter, excluding the receiver                      |
+| `{{.FuncReturn N}}`                     | The identifier of the N-th (0-indexed) return value                                           |
+| `{{.FuncArgumentCount}}`                | The number of parameters, excluding the receiver                                              |
+| `{{.FuncReturnCount}}`                  | The number of return values                                                                   |
+| `{{.Receiver}}`                         | The identifier of the target method's receiver; errors if the target has no receiver          |
+| `{{.FuncArgumentThatImplements iface}}` | The first parameter, excluding the receiver, whose type is or implements the interface, or "" |
+| `{{.FuncReturnThatImplements iface}}`   | The first return value whose type is or implements the interface, or ""                       |
 
 Whitespace and `-` trim markers around the placeholder are honored per normal `text/template` rules, so `{{.FuncName}}`, `{{ .FuncName }}`, and `{{- .FuncName -}}` are equivalent. Unnamed parameters and return values, and blank (`_`) names, are assigned a synthetic name the first time a template references them. A `{{ ... }}` span that names one of these placeholders but is otherwise malformed (an out-of-range index, or `{{.Receiver}}` on a function with no receiver) fails the build with a descriptive error. Because the template engine is Go's `text/template`, standard control-flow actions such as `{{if}}`/`{{else}}`/`{{end}}` and `{{range}}` are also available.
 
@@ -853,20 +957,22 @@ Currently supported replace string features:
 
 **Template Placeholders:**
 
-| Placeholder                    | Replaced with                                                                                               |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| `{{.FuncName}}`                | The name of the annotated function                                                                          |
-| `{{.FuncArgument N}}`          | The identifier of the N-th (0-indexed) parameter of the enclosing function, excluding the receiver          |
-| `{{.FuncReturn N}}`            | The identifier of the N-th (0-indexed) return value of the enclosing function                               |
-| `{{.FuncArgumentCount}}`       | The number of parameters of the enclosing function, excluding the receiver                                  |
-| `{{.FuncReturnCount}}`         | The number of return values of the enclosing function                                                       |
-| `{{.Receiver}}`                | The identifier of the enclosing method's receiver                                                           |
-| `{{.FuncArgumentOfType type}}` | The first parameter of the enclosing function, excluding the receiver, matching the given type              |
-| `{{.FuncReturnOfType type}}`   | The first return value of the enclosing function matching the given type                                    |
-| `{{.CallReceiver}}`            | The source text of the receiver expression of the wrapped method call itself (`log` in `log.Info(msg)`)     |
-| `{{.CallArgument N}}`          | The source text of the N-th (0-indexed) argument of the wrapped call expression itself                      |
-| `{{.CallArgumentCount}}`       | The number of arguments in the wrapped call expression itself                                               |
-| `{{.CallArguments}}`           | The source text of all arguments of the wrapped call expression itself, as written, including a final `...` |
+| Placeholder                             | Replaced with                                                                                                    |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `{{.FuncName}}`                         | The name of the annotated function                                                                               |
+| `{{.FuncArgument N}}`                   | The identifier of the N-th (0-indexed) parameter of the enclosing function, excluding the receiver               |
+| `{{.FuncReturn N}}`                     | The identifier of the N-th (0-indexed) return value of the enclosing function                                    |
+| `{{.FuncArgumentCount}}`                | The number of parameters of the enclosing function, excluding the receiver                                       |
+| `{{.FuncReturnCount}}`                  | The number of return values of the enclosing function                                                            |
+| `{{.Receiver}}`                         | The identifier of the enclosing method's receiver                                                                |
+| `{{.FuncArgumentOfType type}}`          | The first parameter of the enclosing function, excluding the receiver, matching the given type                   |
+| `{{.FuncReturnOfType type}}`            | The first return value of the enclosing function matching the given type                                         |
+| `{{.FuncArgumentThatImplements iface}}` | The first parameter of the enclosing function, excluding the receiver, whose type is or implements the interface |
+| `{{.FuncReturnThatImplements iface}}`   | The first return value of the enclosing function whose type is or implements the interface                       |
+| `{{.CallReceiver}}`                     | The source text of the receiver expression of the wrapped method call itself (`log` in `log.Info(msg)`)          |
+| `{{.CallArgument N}}`                   | The source text of the N-th (0-indexed) argument of the wrapped call expression itself                           |
+| `{{.CallArgumentCount}}`                | The number of arguments in the wrapped call expression itself                                                    |
+| `{{.CallArguments}}`                    | The source text of all arguments of the wrapped call expression itself, as written, including a final `...`      |
 
 These resolve against two different things: `Func*`/`Receiver` placeholders describe the **enclosing function** (the named top-level function whose body contains the matched call site), while `Call*` placeholders describe **the matched call expression itself** — e.g. for `fmt.Println("hello", name)`, `{{.CallArgument 0}}` is the literal `"hello"`, not one of the enclosing function's parameters. In the same way, in `func (s *Server) Handle(log *Logger) { log.Info("x") }`, `{{.Receiver}}` is `s` and `{{.CallReceiver}}` is `log`.
 
@@ -1049,6 +1155,7 @@ Examples:
 - `net/http.Get` matches `http.Get()` where `http` is imported from `"net/http"`
 - `github.com/redis/go-redis/v9.Get` matches `redis.Get()` from that package
 - `database/sql.Open` matches `sql.Open()` calls
+- `slices.Sort` matches both `slices.Sort(s)` and the instantiation `slices.Sort[[]int](s)`
 
 **What does NOT match:**
 
@@ -1305,17 +1412,19 @@ Top-level `imports` (map[string]string, optional): Additional imports needed by 
 
 **Template Placeholders:**
 
-| Placeholder                     | Replaced with                                                               |
-| ------------------------------- | --------------------------------------------------------------------------- |
-| `{{.FuncName}}`                 | The name of the annotated function, or "" for a function literal            |
-| `{{.FuncArgument N}}`           | The identifier of the N-th (0-indexed) parameter, excluding the receiver    |
-| `{{.FuncReturn N}}`             | The identifier of the N-th (0-indexed) return value                         |
-| `{{.FuncArgumentCount}}`        | The number of parameters, excluding the receiver                            |
-| `{{.FuncReturnCount}}`          | The number of return values                                                 |
-| `{{.FuncArgumentOfType type}}`  | The first parameter (excluding the receiver) matching the given type, or "" |
-| `{{.FuncReturnOfType type}}`    | The first return value matching the given type, or ""                       |
-| `{{.DirectiveArgs}}`            | The `key:value` arguments parsed from the matched directive comment         |
-| `{{.DirectiveArg key}}`         | The value of the named directive argument, or "" if not present             |
+| Placeholder                             | Replaced with                                                                                 |
+| --------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `{{.FuncName}}`                         | The name of the annotated function, or "" for a function literal                              |
+| `{{.FuncArgument N}}`                   | The identifier of the N-th (0-indexed) parameter, excluding the receiver                      |
+| `{{.FuncReturn N}}`                     | The identifier of the N-th (0-indexed) return value                                           |
+| `{{.FuncArgumentCount}}`                | The number of parameters, excluding the receiver                                              |
+| `{{.FuncReturnCount}}`                  | The number of return values                                                                   |
+| `{{.FuncArgumentOfType type}}`          | The first parameter (excluding the receiver) matching the given type, or ""                   |
+| `{{.FuncReturnOfType type}}`            | The first return value matching the given type, or ""                                         |
+| `{{.FuncArgumentThatImplements iface}}` | The first parameter (excluding the receiver) whose type is or implements the interface, or "" |
+| `{{.FuncReturnThatImplements iface}}`   | The first return value whose type is or implements the interface, or ""                       |
+| `{{.DirectiveArgs}}`                    | The `key:value` arguments parsed from the matched directive comment                           |
+| `{{.DirectiveArg key}}`                 | The value of the named directive argument, or "" if not present                               |
 
 Unnamed parameters and return values (e.g. `func(int, string)`) and blank (`_`) names are assigned a synthetic name the first time a template references them, so they can be read via `{{.FuncArgument N}}` / `{{.FuncReturn N}}` like any other. A `{{ ... }}` span that names one of these placeholders but is otherwise malformed (an out-of-range index) fails the build with an error.
 
@@ -1437,6 +1546,46 @@ With the first example rule above, the literal becomes:
         defer println("span end: ")
         return nil
     }
+
+**Example: `FuncArgumentThatImplements` and `FuncReturnThatImplements`**
+
+```yaml
+span_directive:
+  target: main
+  where:
+    directive: "otelc:span"
+  do:
+    - expand_directive:
+        template: |-
+          println("parent ctx:", {{ .FuncArgumentThatImplements "context.Context" }} != nil)
+          defer func() { println("failed:", {{ .FuncReturnThatImplements "error" }} != nil) }()
+```
+
+Given:
+
+```go
+// RequestContext implements context.Context, like *gin.Context.
+type RequestContext struct{ context.Context }
+
+type QueryError struct{}
+
+func (*QueryError) Error() string { return "query failed" }
+
+//otelc:span
+func query(c *RequestContext, q string) (int, *QueryError) {
+    return 0, nil
+}
+```
+
+`{{ .FuncArgumentThatImplements "context.Context" }}` resolves to `c`, and `{{ .FuncReturnThatImplements "error" }}` resolves to the synthesized name of the `*QueryError` result. `FuncArgumentOfType` and `FuncReturnOfType` would resolve to "" for both:
+
+```go
+//otelc:span
+func query(c *RequestContext, q string) (_unnamedRetVal0 int, _unnamedRetVal1 *QueryError) {
+    println("parent ctx:", c != nil)
+    defer func() { println("failed:", _unnamedRetVal1 != nil) }()
+    return 0, nil
+}
 ```
 
 **Important Notes:**
@@ -1447,7 +1596,7 @@ With the first example rule above, the literal becomes:
 - The `directive` field must not include the leading `//`.
 - Functions without the directive comment are not affected.
 - Multiple functions in the same file can carry the directive; each gets the template applied independently with its own placeholder values.
-- `FuncArgumentOfType` and `FuncReturnOfType` match on syntactic type name only (e.g. `context.Context`, `*http.Request`, `error`); they do not perform interface-satisfaction checks, so a custom type that merely implements `context.Context` is not matched.
+- `FuncArgumentOfType` and `FuncReturnOfType` match on syntactic type name only (e.g. `context.Context`, `*http.Request`, `error`); they do not perform interface-satisfaction checks, so a custom type that merely implements `context.Context` is not matched. Use `FuncArgumentThatImplements` and `FuncReturnThatImplements` for that; see [Matching by interface](#matching-by-interface).
 
 ### 6. File Addition Rule
 
@@ -1576,7 +1725,7 @@ This rule wraps the existing `http.DefaultTransport` value with `otelhttp.NewTra
 
 ### 8. Composite Literal Rule
 
-This rule sets fields on composite (struct) literals of a given type, wherever those literals are written in the target package. It reaches values that are constructed inline, which the Function Hook Rule and Call Wrapping Rule cannot see because there is no function to hook.
+This rule sets fields on composite (struct) literals of a given type, or wraps the whole literal, wherever those literals are written in the target package. It reaches values that are constructed inline, which the Function Hook Rule and Call Wrapping Rule cannot see because there is no function to hook.
 
 **Use Cases:**
 
@@ -1657,9 +1806,47 @@ instrument_clients:
 // → &http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport)}
 ```
 
+**Modifier (`do: - wrap_literal:`):**
+
+`set_fields` changes one field at a time, so it cannot pass several fields of the same literal to one function. `wrap_literal` wraps the literal as a whole, so the wrapping function receives every field.
+
+- `pointer` (string, optional): A Go expression template applied to `&T{...}`. `{{ . }}` is substituted with the whole `&T{...}` expression.
+- `value` (string, optional): A Go expression template applied to `T{...}`. `{{ . }}` is substituted with the `T{...}` expression.
+
+At least one of `pointer` or `value` must be set, and each must contain `{{ . }}`. `&T{...}` and `T{...}` have different types, so each form has its own template. A form without a template is left alone.
+
+**Example with `wrap_literal`:**
+
+```yaml
+observe_cluster:
+  target:
+    - "**"
+    - not: github.com/gocql/gocql/**
+  where:
+    struct_literal: github.com/gocql/gocql.ClusterConfig
+  do:
+    - wrap_literal:
+        pointer: "gocqltrace.Observe({{ . }})"
+        value: "*gocqltrace.Observe(&{{ . }})"
+  imports:
+    gocqltrace: example.com/gocqltrace
+```
+
+```go
+&gocql.ClusterConfig{Hosts: []string{"10.0.0.1"}, Keyspace: "app"}
+// → gocqltrace.Observe(&gocql.ClusterConfig{Hosts: []string{"10.0.0.1"}, Keyspace: "app"})
+
+gocql.ClusterConfig{Hosts: hosts}
+// → *gocqltrace.Observe(&gocql.ClusterConfig{Hosts: hosts})
+```
+
+The rewritten package imports `gocqltrace`, so `gocqltrace`'s `init` runs before any literal in that package is built, including one in a package-level variable.
+
+`set_fields` and `wrap_literal` can appear in the same rule. They run in `do` order, so with `set_fields` first, the wrapped literal already has its fields set.
+
 **Matching:**
 
-`struct_literal` uses the same qualified form as `function_call`. It matches both the `T{...}` and `&T{...}` spellings, which share one composite-literal node, and resolves the package qualifier through the file's imports, so an aliased import (`import nethttp "net/http"`) matches on the import path rather than the alias.
+`struct_literal` uses the same qualified form as `function_call`. It matches both the `T{...}` and `&T{...}` spellings, which share one composite-literal node, matches a generic type with explicit type arguments (`T[int]{...}`), and resolves the package qualifier through the file's imports, so an aliased import (`import nethttp "net/http"`) matches on the import path rather than the alias.
 
 **Notes:**
 
@@ -1668,5 +1855,7 @@ instrument_clients:
 - Go rejects a literal that mixes keyed and positional elements, so a positional literal (`image.Point{1, 2}`) cannot take these fields. Such literals are skipped with a warning rather than producing code that does not compile.
 - `value` must be a valid Go expression and `wrap` must produce one. Neither is type-checked against the field at rule-definition time, so a mismatch surfaces as a compile error in the instrumented build.
 - `wrap` must contain `{{ . }}`; a template without it is rejected at load time.
-- This rule sets named fields, so it cannot restructure a literal as a whole: no reordering or removing elements, and one field's expression cannot read another's.
+- `set_fields` sets named fields, so it cannot restructure a literal: no reordering or removing elements, and one field's expression cannot read another's. Use `wrap_literal` when the instrumentation needs several fields of the literal.
+- `wrap_literal` treats `&T{...}` and `&(T{...})` as the pointer form, and every other `T{...}` as the value form. It wraps positional literals too, since it adds no elements. Nested literals of the type are wrapped innermost first.
+- The `pointer` and `value` templates are not type-checked at load time. A template whose result has the wrong type surfaces as a compile error in the instrumented build.
 - Setting the same field twice in one rule is rejected at load time.

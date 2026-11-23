@@ -112,7 +112,7 @@ func runTest(t *testing.T, testName string) {
 		importPath:   importPath,
 		isTest:       isTest,
 	})
-	writeMatchedJSON(ruleSet)
+	writeMatchedJSON(ruleSet, testName)
 
 	testcaseDir := filepath.Join(testdataDir, goldenDir, testName)
 	helpers := buildTestcaseHelpers(ctx, t, testcaseDir)
@@ -324,11 +324,18 @@ func fileFilterMatches(t *testing.T, def *rule.FilterDef, isTest bool, tree *dst
 	}
 }
 
-func writeMatchedJSON(ruleSet *rule.InstRuleSet) {
+func writeMatchedJSON(ruleSet *rule.InstRuleSet, testName string) {
 	// Before writing we want to ensure r.ResolvedPath is set
 	// otherwise ip.instrument() would not know where to look for files.
 	for _, r := range ruleSet.AllFuncRules() {
-		if r.Path != "" {
+		switch r.Path {
+		case "":
+		case testdataDir:
+			// A func rule with the shared testdata path keeps its hooks in the
+			// test case's own hook.go. Hooks are only looked up in the files of
+			// the resolved directory, so resolve to that directory.
+			r.ResolvedPath = filepath.Join(testdataDir, goldenDir, testName)
+		default:
 			r.ResolvedPath = r.Path
 		}
 	}
@@ -709,6 +716,36 @@ func TestGroupRules(t *testing.T) {
 				},
 			},
 			expectedFiles: []string{"aaa.go", "mmm.go", "zzz.go"},
+		},
+		{
+			name: "rules are sorted by order, then by kind and match order",
+			ruleSet: &rule.InstRuleSet{
+				FuncRules: map[string][]*rule.InstFuncRule{
+					"file1.go": {{InstBaseRule: rule.InstBaseRule{Name: "hook"}}},
+				},
+				RawRules: map[string][]*rule.InstRawRule{
+					"file1.go": {
+						{InstBaseRule: rule.InstBaseRule{Name: "raw_100", Order: 100}},
+						{InstBaseRule: rule.InstBaseRule{Name: "raw_0_first"}},
+						{InstBaseRule: rule.InstBaseRule{Name: "raw_minus_1", Order: -1}},
+						{InstBaseRule: rule.InstBaseRule{Name: "raw_50", Order: 50}},
+						{InstBaseRule: rule.InstBaseRule{Name: "raw_0_second"}},
+					},
+				},
+				DirectiveRules: map[string][]*rule.InstDirectiveRule{
+					"file1.go": {{InstBaseRule: rule.InstBaseRule{Name: "directive"}}},
+				},
+			},
+			expectedFiles: []string{"file1.go"},
+			validate: func(t *testing.T, grouped map[string][]rule.InstRule) {
+				names := make([]string, 0, len(grouped["file1.go"]))
+				for _, r := range grouped["file1.go"] {
+					names = append(names, r.GetName())
+				}
+				assert.Equal(t, []string{
+					"raw_minus_1", "hook", "raw_0_first", "raw_0_second", "directive", "raw_50", "raw_100",
+				}, names)
+			},
 		},
 	}
 

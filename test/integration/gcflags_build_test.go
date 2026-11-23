@@ -30,23 +30,7 @@ func TestGcflagsBuildLinks(t *testing.T) {
 	otelcPath, err = filepath.Abs(otelcPath)
 	require.NoError(t, err)
 
-	moduleDir := t.TempDir()
-	writeTestFile(t, moduleDir, "go.mod", "module example.com/otelc-gcflags\n\ngo 1.25.0\n")
-	writeTestFile(t, moduleDir, "main.go", `// Copyright The OpenTelemetry Authors
-// SPDX-License-Identifier: Apache-2.0
-
-package main
-
-import (
-	"fmt"
-	"net/http"
-)
-
-func main() {
-	_, err := http.Get("http://127.0.0.1:1/")
-	fmt.Println(err != nil)
-}
-`)
+	moduleDir := copyTestApp(t, "gcflags")
 
 	tests := []struct {
 		name    string
@@ -70,7 +54,7 @@ func main() {
 			runOtelcCommand(t, moduleDir, os.Environ(), otelcPath, append(args, ".")...)
 
 			symbols := goOutput(t, moduleDir, "tool", "nm", binary)
-			require.Contains(t, symbols, "otelc/instrumentation/net/http", "net/http was not instrumented")
+			require.Contains(t, symbols, "go.opentelemetry.io/otelc/test/apps/gcflags/hooks.Before", "hook was not linked")
 			buildInfo := goOutput(t, moduleDir, "version", "-m", binary)
 			require.Contains(t, buildInfo, tt.recorded, "the binary was not built with the requested flags")
 
@@ -78,7 +62,8 @@ func main() {
 			run.Dir = moduleDir
 			out, runErr := run.CombinedOutput()
 			require.NoError(t, runErr, string(out))
-			require.Contains(t, string(out), "true")
+			require.Contains(t, string(out), "hook called")
+			require.Contains(t, string(out), "target called")
 		})
 	}
 }

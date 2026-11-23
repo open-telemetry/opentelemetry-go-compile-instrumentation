@@ -78,21 +78,27 @@ func (ip *instrumentPhase) applyRulesCapturingDiffsWithRenderer(
 		changes []ruleChange
 	)
 	for _, r := range rules {
-		var funcDecl *dst.FuncDecl
-		var found bool
-		if fr, ok := r.(*rule.InstFuncRule); ok {
-			var err error
-			funcDecl, found, err = ast.FindFuncDecl(root, fr, ip.importNames)
-			if err != nil {
-				return result, changes, ex.Wrapf(err, "finding function %s", fr.Func)
-			}
+		target, err := ip.findFuncRuleTarget(r, root, debug)
+		if err != nil {
+			return result, changes, err
 		}
-		if fileIgnored && ip.skipRuleForFileIgnore(r, funcDecl, found) {
+		if target.skip {
 			continue
 		}
-		res, err1 := ip.applyOneRule(ctx, r, root, funcDecl, found)
-		if err1 != nil {
-			return result, changes, ex.Wrapf(err1, "applying rule %s", r.GetName())
+		funcDecl, found := target.decl, target.found
+		if fileIgnored && ip.skipRuleForFileIgnore(r, funcDecl, found) {
+			if debug {
+				ip.reportDecision(r, "ignored")
+			}
+			continue
+		}
+		ignoredBefore := ip.ignoredCallSites
+		res, err := ip.applyOneRule(ctx, r, root, funcDecl, found)
+		if err != nil {
+			return result, changes, ex.Wrapf(err, "applying rule %s", r.GetName())
+		}
+		if debug {
+			ip.reportApplied(r, res, ip.ignoredCallSites > ignoredBefore)
 		}
 		result.modified = result.modified || res.modified
 		if res.needsGlobals {
@@ -117,6 +123,64 @@ func (ip *instrumentPhase) applyRulesCapturingDiffsWithRenderer(
 		prev = after
 	}
 	return result, changes, nil
+}
+
+// funcRuleTarget is the function a func rule targets in a file.
+type funcRuleTarget struct {
+	decl  *dst.FuncDecl
+	found bool
+	// skip reports that the function does not satisfy the rule's
+	// *_implements sub-filters.
+	skip bool
+}
+
+// findFuncRuleTarget finds the function r targets in root when r is a func
+// rule. It returns the zero value for other rules. Under debug, a failed
+// lookup or *_implements filter is reported as r's decision.
+func (ip *instrumentPhase) findFuncRuleTarget(r rule.InstRule, root *dst.File, debug bool) (funcRuleTarget, error) {
+	fr, ok := r.(*rule.InstFuncRule)
+	if !ok {
+		return funcRuleTarget{}, nil
+	}
+	reason := ""
+	var rejection *string
+	if debug {
+		rejection = &reason
+	}
+	decl, found, err := ast.FindFuncDeclReporting(root, fr, ip.importNames, rejection)
+	if err != nil {
+		return funcRuleTarget{}, ex.Wrapf(err, "finding function %s", fr.Func)
+	}
+	skip, err := ip.skipFuncRuleForImplements(fr, decl, found, root)
+	if err != nil {
+		return funcRuleTarget{}, ex.Wrapf(err, "matching function %s", fr.Func)
+	}
+	if skip {
+		reason = "signature_mismatch"
+	}
+	if debug && reason != "" {
+		ip.reportDecision(r, reason)
+	}
+	return funcRuleTarget{decl: decl, found: found, skip: skip}, nil
+}
+
+// reportApplied reports the decision for a rule that was applied. A function
+// rule is reported only when it changed the file: findFuncRuleTarget already
+// reported a failed lookup. ignoredSites reports that the rule skipped a
+// matching call site for //otelc:ignore.
+func (ip *instrumentPhase) reportApplied(r rule.InstRule, res ruleResult, ignoredSites bool) {
+	if _, isFunc := r.(*rule.InstFuncRule); isFunc && !res.modified {
+		return
+	}
+	reason := ""
+	switch {
+	case res.modified && !res.noJoinpoint:
+	case ignoredSites:
+		reason = "ignored"
+	default:
+		reason = "no_joinpoint"
+	}
+	ip.reportDecision(r, reason)
 }
 
 // removeStaleDiff removes a stale diff file at dest if it exists.

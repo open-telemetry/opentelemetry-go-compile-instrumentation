@@ -5,6 +5,7 @@ package instrument
 
 import (
 	"context"
+	"fmt"
 	"go/token"
 	"testing"
 
@@ -672,6 +673,53 @@ func run() *http.Transport {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "alias override conflict")
 	assert.Contains(t, err.Error(), "run", "the error names the offending function")
+}
+
+func TestApplyLitRule_WrapLiteralShadowCheckOnlyForWrappedForm(t *testing.T) {
+	// The parameter "f" shadows the file's alias for "fmt", which the rule's
+	// alias "traced" is rewritten to. Only a literal whose form has a
+	// template receives the rule's code, so only that one is a conflict.
+	const src = `package main
+
+import (
+	f "fmt"
+	"net/http"
+)
+
+func run(f sink) any {
+	return %s
+}
+`
+	tests := []struct {
+		name         string
+		lit          string
+		pointer      string
+		value        string
+		wantConflict bool
+	}{
+		{"pointer-only skips value form", "http.Transport{}", "traced.Sprint({{ . }})", "", false},
+		{"pointer-only checks pointer form", "&http.Transport{}", "traced.Sprint({{ . }})", "", true},
+		{"value-only skips pointer form", "&http.Transport{}", "", "traced.Sprint({{ . }})", false},
+		{"value-only checks value form", "http.Transport{}", "", "traced.Sprint({{ . }})", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := parseFile(t, fmt.Sprintf(src, tt.lit))
+			r := transportRule()
+			r.Pointer, r.Value = tt.pointer, tt.value
+			r.Imports = map[string]string{"traced": "fmt"}
+
+			modified, err := newTestPhase().applyLitRule(context.Background(), r, root)
+
+			if tt.wantConflict {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "alias override conflict")
+				return
+			}
+			require.NoError(t, err)
+			assert.False(t, modified, "a form without a template is left alone")
+		})
+	}
 }
 
 func TestApplyLitRule_OverrideNonShadowingSignatureAppliesRule(t *testing.T) {
