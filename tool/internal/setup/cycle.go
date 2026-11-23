@@ -162,10 +162,6 @@ func addedImports(r rule.InstRule) []addedImportGroup {
 	case *rule.InstDeclRule:
 		return []addedImportGroup{{imports: referencedImports(rt.Imports, rt.Replace, rt.Wrap)}}
 	case *rule.InstCallRule:
-		if rt.MethodCall != "" {
-			code := append([]string{rt.Replace, rt.VariadicType}, rt.AppendArgs...)
-			return []addedImportGroup{{imports: referencedImports(rt.Imports, code...), method: newMethodMatch(rt)}}
-		}
 		return callImports(rt)
 	case *rule.InstLitRule:
 		return litImports(rt)
@@ -174,23 +170,29 @@ func addedImports(r rule.InstRule) []addedImportGroup {
 	}
 }
 
-// callImports returns the imports that the function_call rule r adds. The
-// rule writes variadic_type only into a spread call, as in f(s...), and only
-// when it appends arguments. So an import that only variadic_type uses is
-// added only to the files with such a call.
+// callImports returns the imports that the wrap_call rule r adds. The rule
+// writes variadic_type only into a spread call, as in f(s...), and only when
+// it appends arguments. So an import that only variadic_type uses is added
+// only to the files with such a call.
 func callImports(r *rule.InstCallRule) []addedImportGroup {
+	group := func(imports map[string]string, spread bool) addedImportGroup {
+		if r.MethodCall != "" {
+			return addedImportGroup{imports: imports, method: newMethodMatch(r, spread)}
+		}
+		return addedImportGroup{imports: imports, match: callMatch(r, spread)}
+	}
 	imports := referencedImports(r.Imports, append([]string{r.Replace}, r.AppendArgs...)...)
-	groups := []addedImportGroup{{imports: imports, match: callMatch(r, false)}}
+	groups := []addedImportGroup{group(imports, false)}
 	if len(r.AppendArgs) == 0 {
 		return groups
 	}
-	spread := referencedImports(r.Imports, r.VariadicType)
-	maps.DeleteFunc(spread, func(alias, _ string) bool {
+	spreadOnly := referencedImports(r.Imports, r.VariadicType)
+	maps.DeleteFunc(spreadOnly, func(alias, _ string) bool {
 		_, found := imports[alias]
 		return found
 	})
-	if len(spread) > 0 {
-		groups = append(groups, addedImportGroup{imports: spread, match: callMatch(r, true)})
+	if len(spreadOnly) > 0 {
+		groups = append(groups, group(spreadOnly, true))
 	}
 	return groups
 }

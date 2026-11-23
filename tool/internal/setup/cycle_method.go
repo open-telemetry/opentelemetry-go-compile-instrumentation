@@ -28,12 +28,15 @@ type methodMatch struct {
 	// text matches the source text of each file with a call of the method. A
 	// text search skips most files faster than a parse.
 	text *regexp.Regexp
+	// spread is set when only a spread call, as in x.M(s...), counts.
+	spread bool
 }
 
-func newMethodMatch(r *rule.InstCallRule) *methodMatch {
+func newMethodMatch(r *rule.InstCallRule, spread bool) *methodMatch {
 	return &methodMatch{
-		rule: r,
-		text: regexp.MustCompile(`\.\s*` + regexp.QuoteMeta(r.FuncName) + `\b`),
+		rule:   r,
+		text:   regexp.MustCompile(`\.\s*` + regexp.QuoteMeta(r.FuncName) + `\b`),
+		spread: spread,
 	}
 }
 
@@ -64,7 +67,7 @@ func (m *methodMatch) callPositions(file string) ([]sourcePosition, error) {
 	var positions []sourcePosition
 	dst.Inspect(tree, func(node dst.Node) bool {
 		call, ok := node.(*dst.CallExpr)
-		if !ok {
+		if !ok || (m.spread && !call.Ellipsis) {
 			return true
 		}
 		sel, ok := call.Fun.(*dst.SelectorExpr)

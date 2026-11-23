@@ -529,7 +529,10 @@ func TestCheckRuleImportCycles_MethodCall(t *testing.T) {
 		helperImportsA bool
 		// reachA adds a rule import of a package that imports a, so the
 		// search visits a.
-		reachA        bool
+		reachA bool
+		// variadic makes the rule append an argument, with a variadic_type
+		// that is the only code that uses helper.
+		variadic      bool
 		wantErr       string
 		wantTypeCheck bool
 	}{
@@ -567,6 +570,22 @@ func TestCheckRuleImportCycles_MethodCall(t *testing.T) {
 			helperImportsA: true,
 		},
 		{
+			name:           "plain call of the method and an import that only variadic_type uses",
+			aSource:        "import \"example.com/app/lib\"\n\nvar X = (&lib.Client{}).Do()\n",
+			helperImportsA: true,
+			variadic:       true,
+		},
+		{
+			name: "spread call of the method and an import that only variadic_type uses",
+			aSource: "import \"example.com/app/lib\"\n\nvar opts []int\n\n" +
+				"var X = (&lib.Client{}).Do(opts...)\n",
+			helperImportsA: true,
+			variadic:       true,
+			wantErr: `rule "wrap_do" adds import "example.com/app/helper" to "example.com/app/a", ` +
+				`but example.com/app/helper imports example.com/app/a`,
+			wantTypeCheck: true,
+		},
+		{
 			name:    "rule import that cannot close a cycle",
 			aSource: "import \"example.com/app/lib\"\n\nvar X = (&lib.Client{}).Do()\n",
 			reachA:  true,
@@ -583,7 +602,7 @@ func TestCheckRuleImportCycles_MethodCall(t *testing.T) {
 				"go.mod": "module example.com/app\n\ngo 1.21\n",
 				"main.go": "package main\n\nimport (\n\t\"example.com/app/a\"\n\t\"example.com/app/helper\"\n)\n\n" +
 					"func main() { println(a.X, helper.Wrap(1)) }\n",
-				"lib/lib.go": "package lib\n\ntype Client struct{}\n\nfunc (*Client) Do() int { return 1 }\n\n" +
+				"lib/lib.go": "package lib\n\ntype Client struct{}\n\nfunc (*Client) Do(...int) int { return 1 }\n\n" +
 					"type Server struct{}\n\nfunc (*Server) Do() int { return 2 }\n",
 				"a/a.go":           "package a\n\n" + tt.aSource,
 				"helper/helper.go": helper,
@@ -600,15 +619,21 @@ func TestCheckRuleImportCycles_MethodCall(t *testing.T) {
 			_, allPkgs, err := getBuildPackages(t.Context(), subcmdBuild, nil)
 			require.NoError(t, err)
 
-			set := rule.NewInstRuleSet("example.com/app/a")
-			set.AddCallRule(filepath.Join(tmpDir, "a", "a.go"), &rule.InstCallRule{
+			r := &rule.InstCallRule{
 				InstBaseRule: baseRule("wrap_do", map[string]string{"helper": "example.com/app/helper"}),
 				MethodCall:   "example.com/app/lib.*Client.Do",
 				ImportPath:   "example.com/app/lib",
 				FuncName:     "Do",
 				RecvType:     "*Client",
 				Replace:      "helper.Wrap({{ . }})",
-			})
+			}
+			if tt.variadic {
+				r.Replace = ""
+				r.AppendArgs = []string{"1"}
+				r.VariadicType = "helper.Option"
+			}
+			set := rule.NewInstRuleSet("example.com/app/a")
+			set.AddCallRule(filepath.Join(tmpDir, "a", "a.go"), r)
 			matched := []*rule.InstRuleSet{set}
 			if tt.reachA {
 				other := rule.NewInstRuleSet("example.com/app/other")
