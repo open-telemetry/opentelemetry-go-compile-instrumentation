@@ -19,9 +19,7 @@ import (
 const (
 	OpenTelemetryConfigurationRepository = "open-telemetry/opentelemetry-configuration"
 	// OpenTelemetryConfigurationRelease and OpenTelemetryConfigurationCommit pin
-	// the schema snapshot from which the catalog's general.* definitions were
-	// derived. Keep the catalog offline and reproducible; update these together
-	// only when intentionally refreshing the checked-in catalog.
+	// the schema source used to generate catalog.yaml.
 	OpenTelemetryConfigurationRelease = "v1.2.0"
 	OpenTelemetryConfigurationCommit  = "3b04ae78576ec407854d734eb4da4f78a67f902c"
 	OpenTelemetryConfigurationFile    = "schema/instrumentation.yaml"
@@ -62,7 +60,7 @@ func CatalogDefinitions() (map[string]Entry, error) {
 func ParseCatalog(data []byte) (map[string]Entry, error) {
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
-	var document yaml.Node
+	var document catalogDocument
 	if err := decoder.Decode(&document); err != nil {
 		return nil, ex.Wrapf(err, "parse configuration catalog")
 	}
@@ -74,22 +72,34 @@ func ParseCatalog(data []byte) (map[string]Entry, error) {
 		return nil, ex.Wrapf(err, "parse trailing configuration catalog document")
 	}
 
-	definitionNodes, err := catalogDefinitionNodes(&document)
-	if err != nil {
-		return nil, err
+	if document.CatalogVersion != 1 {
+		return nil, ex.New("unsupported configuration catalog version; expected 1")
 	}
-	refs := make([]string, 0, len(definitionNodes))
-	for ref := range definitionNodes {
+	if document.Source == (catalogSource{}) {
+		return nil, ex.New("configuration catalog source is required")
+	}
+	if document.Source.Repository != OpenTelemetryConfigurationRepository ||
+		document.Source.Release != OpenTelemetryConfigurationRelease ||
+		document.Source.Commit != OpenTelemetryConfigurationCommit ||
+		document.Source.File != OpenTelemetryConfigurationFile {
+		return nil, ex.Newf(
+			"configuration catalog source must pin %s at %s",
+			OpenTelemetryConfigurationRelease,
+			OpenTelemetryConfigurationCommit,
+		)
+	}
+	if len(document.Definitions) == 0 {
+		return nil, ex.New("configuration catalog has no definitions")
+	}
+	refs := make([]string, 0, len(document.Definitions))
+	for ref := range document.Definitions {
 		refs = append(refs, ref)
 	}
 	slices.Sort(refs)
-	definitions := make(map[string]Entry, len(refs))
+	definitions := document.Definitions
 	for _, ref := range refs {
 		source := fmt.Sprintf("configuration catalog ref %q", ref)
-		entry, parseErr := parseEntry(definitionNodes[ref], source)
-		if parseErr != nil {
-			return nil, parseErr
-		}
+		entry := definitions[ref]
 		if entry.Ref != "" {
 			return nil, ex.Newf("%s: catalog definitions must use name, not another ref", source)
 		}
@@ -110,60 +120,4 @@ func ParseCatalog(data []byte) (map[string]Entry, error) {
 		definitions[ref] = entry
 	}
 	return definitions, nil
-}
-
-func catalogDefinitionNodes(document *yaml.Node) (map[string]*yaml.Node, error) {
-	if len(document.Content) != 1 {
-		return nil, ex.New("configuration catalog must be a mapping")
-	}
-	root, err := mappingFields(
-		document.Content[0],
-		"configuration catalog",
-		fieldSet("catalog_version", "source", "definitions"),
-	)
-	if err != nil {
-		return nil, err
-	}
-	version := root["catalog_version"]
-	if version == nil || version.Tag != "!!int" || version.Value != "1" {
-		return nil, ex.New("unsupported configuration catalog version; expected 1")
-	}
-	sourceNode := root["source"]
-	if sourceNode == nil {
-		return nil, ex.New("configuration catalog source is required")
-	}
-	if _, err = mappingFields(
-		sourceNode,
-		"configuration catalog source",
-		fieldSet("repository", "release", "commit", "file"),
-	); err != nil {
-		return nil, err
-	}
-	var source catalogSource
-	if err = sourceNode.Decode(&source); err != nil {
-		return nil, ex.Wrapf(err, "decode configuration catalog source")
-	}
-	if source.Repository != OpenTelemetryConfigurationRepository ||
-		source.Release != OpenTelemetryConfigurationRelease ||
-		source.Commit != OpenTelemetryConfigurationCommit ||
-		source.File != OpenTelemetryConfigurationFile {
-		return nil, ex.Newf(
-			"configuration catalog source must pin %s at %s",
-			OpenTelemetryConfigurationRelease,
-			OpenTelemetryConfigurationCommit,
-		)
-	}
-	definitionsNode := root["definitions"]
-	if definitionsNode == nil {
-		return nil, ex.New("configuration catalog has no definitions")
-	}
-	definitionNodes, err := mappingFields(definitionsNode, "configuration catalog definitions", nil)
-	if err != nil {
-		return nil, err
-	}
-	if len(definitionNodes) == 0 {
-		return nil, ex.New("configuration catalog has no definitions")
-	}
-
-	return definitionNodes, nil
 }

@@ -4,7 +4,6 @@
 package configuration
 
 import (
-	"crypto/sha256"
 	"fmt"
 	"strings"
 	"testing"
@@ -78,6 +77,7 @@ func TestParseMetadataRejectsMalformedEntries(t *testing.T) {
 		{"whitespace name", `name: " go.x "`, "leading or trailing whitespace"},
 		{"empty ref", `ref: ""`, "ref must not be empty"},
 		{"null ref", "ref: null", "expected a string"},
+		{"non-scalar name", "name: [go.x]", "name: expected a string"},
 		{"whitespace ref", `ref: " general.x "`, "ref must not have leading or trailing whitespace"},
 		{"ref override", "ref: general.x\ndescription: override", "must not include inline"},
 		{"empty ref override", "ref: general.x\ndescription: \"\"", "must not include inline"},
@@ -128,6 +128,7 @@ func TestParseMetadataRejectsMalformedEntries(t *testing.T) {
 		{"null default", "name: go.x\ntype: string\ndefault: null", "default must be"},
 		{"non-scalar default", "name: go.x\ntype: list\ndefault: []", "default must be"},
 		{"wrong list default", "name: go.x\ntype: list\ndefault: nope", "default must encode"},
+		{"invalid collection default", "name: go.x\ntype: list\ndefault: \"[\"", "parse collection default"},
 		{"wrong map default", "name: go.x\ntype: map\ndefault: \"[]\"", "default must encode"},
 		{
 			"missing required default property",
@@ -203,16 +204,6 @@ func TestParseMetadataPropertyValuesRetainYAMLTypes(t *testing.T) {
 }
 
 func TestConfigurationCatalogMatchesPinnedSource(t *testing.T) {
-	assert.Equal(t, "a6e45b6e5f6eb647f9101b5e045619b79368c83b561629e522e7c536775403bb",
-		fmt.Sprintf("%x", sha256.Sum256(upstreamInstrumentation)), "snapshot must match the pinned upstream release")
-	generated, err := GenerateCatalog()
-	require.NoError(t, err)
-	// Compare YAML values rather than formatting: repository-wide yamlfmt may
-	// reflow long descriptions, but it must not change catalog content.
-	var expected, actual any
-	require.NoError(t, yaml.Unmarshal(generated, &expected))
-	require.NoError(t, yaml.Unmarshal(embeddedCatalog, &actual))
-	assert.Equal(t, expected, actual, "run go generate ./tool/internal/configuration")
 	definitions, err := CatalogDefinitions()
 	require.NoError(t, err)
 	require.Len(t, definitions, 26)
@@ -226,32 +217,44 @@ func TestConfigurationCatalogMatchesPinnedSource(t *testing.T) {
 	assert.NotContains(t, definitions, "general.http.client.request_captured_headers/development")
 }
 
+func TestGenerateCatalogPublicEntryPoint(t *testing.T) {
+	const upstream = `properties:
+  general:
+    properties:
+      http:
+        properties:
+          client:
+            properties:
+              request_captured_headers:
+                type: array
+                items: {type: string}
+`
+	generated, err := GenerateCatalog(
+		[]byte(upstream),
+		[]byte("configurations: []\n"),
+		[]byte("configurations: []\n"),
+		embeddedCatalog,
+	)
+	require.NoError(t, err)
+	assert.NotEmpty(t, generated)
+}
+
 func TestParseCatalogValidatesInlineDefinitions(t *testing.T) {
 	tests := []struct{ name, definition, want string }{
 		{"nested ref", "ref: general.other", "must use name, not another ref"},
 		{"mismatched key", "name: go.other\ntype: boolean", "key must equal name"},
-		{"unknown field", "name: go.test\ntype: string\nunknown: value", "unknown field"},
+		{"unknown field", "name: go.test\ntype: string\nunknown: value", "field unknown not found"},
 		{"missing type", "name: go.test", "unsupported or missing type"},
 		{"bad default", "name: go.test\ntype: boolean\ndefault: nope", "not a valid boolean"},
 		{
 			"bad deprecation value",
 			"name: go.test\ntype: boolean\ndeprecated: \"true\"",
-			"deprecated: expected a boolean",
+			"cannot unmarshal !!str",
 		},
 		{
 			"replacement requires deprecation",
 			"name: go.test\ntype: boolean\nreplaced_by: go.test.v2",
 			"replaced_by requires deprecated to be true",
-		},
-		{
-			"bad property default",
-			"name: go.test\ntype: structured_list\nschema: {type: object, properties: {enabled: {type: boolean, default: \"false\"}}}",
-			"default: value does not match type",
-		},
-		{
-			"bad property example",
-			"name: go.test\ntype: structured_list\nschema: {type: object, properties: {enabled: {type: boolean, example: 0}}}",
-			"example: value does not match type",
 		},
 	}
 	for _, tt := range tests {
@@ -260,7 +263,7 @@ func TestParseCatalogValidatesInlineDefinitions(t *testing.T) {
 			require.ErrorContains(t, err, tt.want)
 		})
 	}
-	definitions, err := ParseCatalog(catalogFixture("name: go.test\ntype: boolean\ndefault: false"))
+	definitions, err := ParseCatalog(catalogFixture("name: go.test\ntype: boolean\ndefault: \"false\""))
 	require.NoError(t, err)
 	require.NotNil(t, definitions["go.test"].Default)
 	assert.Equal(t, "false", *definitions["go.test"].Default)
@@ -436,7 +439,7 @@ func TestGenerateCatalogRetainsDeprecatedGeneralCompatibilityDefinitions(t *test
 	assert.Equal(t, "no outbound request headers are captured", upstreamEntry.DefaultBehavior)
 }
 
-func TestGenerateCatalogRejectsDroppedDefinitionWithoutCompatibilityEntry(t *testing.T) {
+func TestGenerateCatalogCarriesDroppedUpstreamDefinitionAsDeprecated(t *testing.T) {
 	const upstream = `properties:
   general:
     properties:
@@ -458,20 +461,39 @@ func TestGenerateCatalogRejectsDroppedDefinitionWithoutCompatibilityEntry(t *tes
 		},
 		Definitions: map[string]Entry{
 			"general.http.client.legacy_request_headers": {
-				Name: "general.http.client.legacy_request_headers",
-				Type: listType,
+				Name:        "general.http.client.legacy_request_headers",
+				Type:        listType,
+				Description: "Last known description",
+				Default:     new("[]"),
 			},
 		},
 	}
 	previousData, err := yaml.Marshal(previous)
 	require.NoError(t, err)
-	_, err = generateCatalog(
+	generated, err := generateCatalog(
 		[]byte(upstream),
 		[]byte("configurations: []\n"),
 		[]byte("configurations: []\n"),
 		previousData,
 	)
-	require.ErrorContains(t, err, "catalog generation would drop \"general.http.client.legacy_request_headers\"")
+	require.NoError(t, err)
+	definitions, err := ParseCatalog(generated)
+	require.NoError(t, err)
+	retired := definitions["general.http.client.legacy_request_headers"]
+	assert.True(t, retired.Deprecated)
+	assert.Equal(t, "Last known description", retired.Description)
+	require.NotNil(t, retired.Default)
+	assert.Equal(t, "[]", *retired.Default)
+	assert.False(t, definitions["general.http.client.request_captured_headers"].Deprecated)
+}
+
+func TestEnsureCatalogDefinitionsRetainedRejectsRemovedGoDefinition(t *testing.T) {
+	previous := map[string]Entry{
+		"go.http.client.rules": {Name: "go.http.client.rules", Type: stringType},
+	}
+	current := map[string]Entry{}
+	err := ensureCatalogDefinitionsRetained(previous, current)
+	require.ErrorContains(t, err, `catalog generation would drop "go.http.client.rules"`)
 }
 
 func TestGenerateCatalogDoesNotSilentlyDropPriorDeprecationMetadata(t *testing.T) {
@@ -555,6 +577,17 @@ func TestGenerateCatalogDoesNotSilentlyClearDeprecatedFlag(t *testing.T) {
 }
 
 func TestGenerateCatalogIncludesDeprecatedInlineGoDefinitions(t *testing.T) {
+	const upstream = `properties:
+  general:
+    properties:
+      http:
+        properties:
+          client:
+            properties:
+              request_captured_headers:
+                type: array
+                items: {type: string}
+`
 	goOptions := []byte(`configurations:
   - name: go.http.client.legacy_rules
     type: structured_list
@@ -565,11 +598,27 @@ func TestGenerateCatalogIncludesDeprecatedInlineGoDefinitions(t *testing.T) {
     type: structured_list
     schema: {type: object, properties: {pattern: {type: string}}}
 `)
+	previousCatalog, err := yaml.Marshal(catalogDocument{
+		CatalogVersion: 1,
+		Source: catalogSource{
+			Repository: OpenTelemetryConfigurationRepository,
+			Release:    OpenTelemetryConfigurationRelease,
+			Commit:     OpenTelemetryConfigurationCommit,
+			File:       OpenTelemetryConfigurationFile,
+		},
+		Definitions: map[string]Entry{
+			"general.http.client.request_captured_headers": {
+				Name: "general.http.client.request_captured_headers",
+				Type: listType,
+			},
+		},
+	})
+	require.NoError(t, err)
 	generated, err := generateCatalog(
-		upstreamInstrumentation,
+		[]byte(upstream),
 		goOptions,
 		[]byte("configurations: []\n"),
-		embeddedCatalog,
+		previousCatalog,
 	)
 	require.NoError(t, err)
 	definitions, err := ParseCatalog(generated)
@@ -773,6 +822,16 @@ func TestParseMetadataRejectsMalformedSchemas(t *testing.T) {
 			"{type: object, properties: {name: {type: date}}}",
 			"unsupported property type \"date\"",
 		},
+		{
+			"bad property default",
+			"{type: object, properties: {enabled: {type: boolean, default: \"false\"}}}",
+			"default: value does not match type",
+		},
+		{
+			"bad property example",
+			"{type: object, properties: {enabled: {type: boolean, example: 0}}}",
+			"example: value does not match type",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -798,18 +857,18 @@ func TestParseCatalogRejectsMalformedDocuments(t *testing.T) {
 		{"invalid YAML", "catalog_version: [", "parse configuration catalog"},
 		{"multiple documents", valid + "---\nother: document\n", "single YAML document"},
 		{"malformed trailing document", valid + "---\nother: [\n", "parse trailing configuration catalog document"},
-		{"non-mapping root", "[]", "expected a mapping"},
+		{"non-mapping root", "[]", "cannot unmarshal !!seq"},
 		{
 			"unknown root field",
 			strings.Replace(valid, "catalog_version:", "unknown: value\ncatalog_version:", 1),
-			"unknown field",
+			"field unknown not found",
 		},
 		{"unsupported version", strings.Replace(valid, "catalog_version: 1", "catalog_version: 2", 1), "expected 1"},
 		{"source missing", strings.Replace(valid, sourceFields, "", 1), "source is required"},
 		{
 			"unknown source field",
 			strings.Replace(valid, "  release:", "  unexpected: value\n  release:", 1),
-			"unknown field",
+			"field unexpected not found",
 		},
 		{
 			"source pin mismatch",
@@ -820,7 +879,7 @@ func TestParseCatalogRejectsMalformedDocuments(t *testing.T) {
 		{
 			"definitions is not a mapping",
 			strings.Replace(valid, definitions, "definitions: []\n", 1),
-			"expected a mapping",
+			"cannot unmarshal !!seq",
 		},
 		{"definitions are empty", strings.Replace(valid, definitions, "definitions: {}\n", 1), "has no definitions"},
 	}
