@@ -227,7 +227,7 @@ func loadBuildPackages(
 		switch {
 		case len(fileTargets) > 0:
 			pkgs, targetErr = pkgload.LoadPackages(ctx, mode, buildFlags, tests, fileTargets...)
-			if targetErr == nil && len(pkgs) > 1 {
+			if targetErr == nil && countNonTestPackages(pkgs) > 1 {
 				targetErr = ex.New("multiple packages found for file targets")
 			}
 		case len(pkgTargets) > 0:
@@ -241,15 +241,7 @@ func loadBuildPackages(
 		return nil, nil, loadErr
 	}
 
-	// A test load sets ForTest on every test package it adds. The synthesized
-	// test binaries ("p.test") have no marker of their own, but each one is the
-	// ForTest value of a test package plus a ".test" suffix.
-	testBinaries := make(map[string]bool, len(pkgs))
-	for _, pkg := range pkgs {
-		if pkg.ForTest != "" {
-			testBinaries[pkg.ForTest+".test"] = true
-		}
-	}
+	testBinaries := testBinaryIDs(pkgs)
 
 	buildPkgs := make([]*packages.Package, 0, len(pkgs))
 	allPkgs := make([]*packages.Package, 0, len(pkgs))
@@ -278,6 +270,35 @@ func loadBuildPackages(
 	}
 
 	return buildPkgs, allPkgs, nil
+}
+
+// testBinaryIDs returns the IDs of the synthesized test binaries in a load.
+// A test load sets ForTest on every test package it adds. The synthesized
+// test binaries ("p.test") have no marker of their own, but each one is the
+// ForTest value of a test package plus a ".test" suffix.
+func testBinaryIDs(pkgs []*packages.Package) map[string]bool {
+	testBinaries := make(map[string]bool, len(pkgs))
+	for _, pkg := range pkgs {
+		if pkg.ForTest != "" {
+			testBinaries[pkg.ForTest+".test"] = true
+		}
+	}
+	return testBinaries
+}
+
+// countNonTestPackages counts the packages of a load that are not test
+// variants. A test load of file targets returns the package itself, its test
+// variant ("p [p.test]") and the synthesized test binary ("p.test"), which are
+// all one package as far as the file targets are concerned.
+func countNonTestPackages(pkgs []*packages.Package) int {
+	testBinaries := testBinaryIDs(pkgs)
+	n := 0
+	for _, pkg := range pkgs {
+		if pkg.ForTest == "" && !testBinaries[pkg.ID] {
+			n++
+		}
+	}
+	return n
 }
 
 //nolint:revive // if we add named returns then nonamedreturns will complain

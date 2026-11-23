@@ -2023,6 +2023,33 @@ func TestKeepForDebug_Fallbacks(t *testing.T) {
 	assert.FileExists(t, filepath.Join(setupDebugDir("sub"), "sub.go"))
 }
 
+func TestGetBuildPackages_TestFileTargets(t *testing.T) {
+	tmpDir := t.TempDir()
+	mustWriteFile(t, filepath.Join(tmpDir, "go.mod"), "module example.com/filetest\n\ngo 1.24\n")
+	mustWriteFile(t, filepath.Join(tmpDir, "a.go"), "package a\n\nfunc Add(x, y int) int { return x + y }\n")
+	mustWriteFile(t, filepath.Join(tmpDir, "a_test.go"),
+		"package a\n\nimport \"testing\"\n\nfunc TestAdd(t *testing.T) { _ = Add(1, 2) }\n")
+	t.Chdir(tmpDir)
+
+	pkgs, all, err := getBuildPackages(t.Context(), subcmdTest, []string{"a_test.go", "a.go"})
+	require.NoError(t, err)
+	require.Len(t, pkgs, 1)
+	assert.Equal(t, pkgload.CommandLineArgumentsPackage, pkgs[0].PkgPath)
+	assert.Greater(t, len(all), 1, "the test variant and test binary stay in the full package list")
+}
+
+func TestCountNonTestPackages(t *testing.T) {
+	const cla = pkgload.CommandLineArgumentsPackage
+	testLoad := []*packages.Package{
+		{ID: cla},
+		{ID: cla + " [" + cla + ".test]", ForTest: cla},
+		{ID: cla + ".test"},
+	}
+	assert.Equal(t, 1, countNonTestPackages(testLoad))
+	assert.Equal(t, 2, countNonTestPackages([]*packages.Package{{ID: "example.com/a"}, {ID: "example.com/b"}}))
+	assert.Equal(t, 0, countNonTestPackages(nil))
+}
+
 func TestGetBuildPackages_TestWithoutTargets(t *testing.T) {
 	setupTestModule(t, nil)
 	for _, args := range [][]string{{"-test.run", "TestName"}, {"-run", "TestName"}, {"--", "custom"}, {"-args", "custom"}, {"--args", "custom"}} {
