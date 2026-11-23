@@ -51,6 +51,11 @@ import (
 //	imports:
 //	  fmt: fmt
 func Normalize(fields map[string]any) ([]map[string]any, error) {
+	// Every key of a flat rule is at the top level, so a flat rule cannot set
+	// order either.
+	if _, hasOrder := fields[orderField]; hasOrder {
+		return nil, ex.Newf("order must be set on a do modifier, not at the top level of the rule")
+	}
 	_, hasWhere := fields[keyWhere]
 	_, hasDo := fields[keyDo]
 	if !hasWhere && !hasDo {
@@ -58,9 +63,6 @@ func Normalize(fields map[string]any) ([]map[string]any, error) {
 	}
 	if !hasDo {
 		return nil, ex.Newf("structured rule is missing do")
-	}
-	if _, hasOrder := fields[orderField]; hasOrder {
-		return nil, ex.Newf("order must be set on a do modifier, not at the top level of the rule")
 	}
 
 	common := make(map[string]any)
