@@ -24,9 +24,9 @@ reference. This document is the authoritative protocol specification.
 
 ## Overview
 
-By default, `otelc` instruments every dependency it finds using its embedded rule bundle.
-This all-or-nothing model works for getting started, but it does not give you reproducible
-builds: adding a new version of `otelc` may silently change which libraries get instrumented.
+By default, `otelc` instruments every dependency it finds using manifest-based automatic discovery.
+This zero-configuration model works for getting started, but an explicit tool file gives you reproducible,
+source-controlled builds.
 
 The tool file mechanism gives you explicit, source-controlled control. You declare which
 instrumentation packages to enable using the standard Go `tools.go` pattern. `otelc` reads
@@ -66,8 +66,8 @@ The tool file follows the standard Go `tools.go` pattern:
 package tools
 
 import (
-    _ "go.opentelemetry.io/otelc/instrumentation/net/http/server"
-    _ "go.opentelemetry.io/otelc/instrumentation/google.golang.org/grpc"
+    _ "go.opentelemetry.io/otelc-contrib/instrumentation/net/http/otelchttp/server"
+    _ "go.opentelemetry.io/otelc-contrib/instrumentation/google.golang.org/grpc/otelcgrpc/server"
 )
 ```
 
@@ -253,7 +253,7 @@ When `otelc` processes the application's tool file, it:
 4. Loads both the custom rule and the base rules.
 
 This pattern lets library authors or platform teams distribute pre-configured instrumentation
-bundles that applications activate with a single blank import.
+packages that applications activate with a single blank import.
 
 ## See Also
 

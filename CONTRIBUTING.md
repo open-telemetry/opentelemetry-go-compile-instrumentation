@@ -23,8 +23,6 @@ This project uses several tools for development. Most tools will be automaticall
   `gmake` (or add `$(brew --prefix make)/libexec/gnubin` to your `PATH` to use it as
   `make`)
 
-The tests of the bundle repair tool need only Git and Go.
-
 ### Getting Started
 
 > **Windows/WSL contributors:** make sure `core.autocrlf` is `false` before
@@ -44,25 +42,13 @@ The tests of the bundle repair tool need only Git and Go.
    cd opentelemetry-go-compile-instrumentation
    ```
 
-2. Configure the git merge driver for the instrumentation bundle (run once per clone):
-
-   ```sh
-   make setup-git
-   ```
-
-   `tool/data/otelc-bundle.tgz` is a binary archive generated from `pkg/` and
-   `instrumentation/`, so git cannot merge it and it conflicts on almost every
-   rebase. This registers a merge driver that keeps the current bundle instead
-   of stopping the rebase/merge; you then refresh it with `make package`. See
-   [Keeping the bundle in sync](#keeping-the-bundle-in-sync).
-
-3. Build the project:
+2. Build the project:
 
    ```sh
    make build
    ```
 
-4. Run tests:
+3. Run tests:
 
    ```sh
    make test
@@ -78,10 +64,11 @@ make help
 
 #### Build Targets
 
-- `make build` - Build the instrumentation tool (includes packaging)
+- `make build` - Build the instrumentation tool
 - `make install` - Install the `otelc` binary to `$GOPATH/bin`
-- `make package` - Package the instrumentation code into a binary archive
+- `make manifest` - Generate the instrumentation manifest
 - `make build-demo-grpc` - Build gRPC demo server and client
+- `make build-demo-http` - Build HTTP demo server and client
 
 #### Code Quality
 
@@ -112,25 +99,12 @@ The license header checker has a dedicated CI workflow (`check-license-headers.y
 - `make test` - Run all tests (unit + integration)
 - `make test-unit` - Run unit tests only with formatted output
 - `make test-integration` - Run integration tests only with formatted output
-- `make test-e2e` - Run end-to-end tests
-- `make test-bundle-workflows` - Test the bundle repair tool in `.tools/bundlerepair` and check the repair workflows
-- `make test-latestlibbuild` - Build instrumented test apps against the `@latest` version of each instrumented library
-- `make test-latestlibrun` - Bump instrumented test apps to `@latest` and run the full integration suite
 
 Test results are saved to `gotest-unit.log` and `gotest-integration.log` for review.
 
 #### Documentation
 
 - `make docs` - Update embedded documentation in markdown files
-
-#### Semantic Conventions
-
-- `make weaver-install` - Install OTel Weaver if not present
-- `make lint/semantic-conventions` - Validate semantic convention registry
-- `make semantic-conventions/diff` - Generate diff between two versions of semantic convention registry
-- `make semantic-conventions/resolve` - Resolve semantic convention registry schema
-
-For detailed information on managing semantic conventions, see [docs/semantic-conventions.md](docs/semantic-conventions.md).
 
 #### GitHub Actions Security
 
@@ -160,138 +134,18 @@ make all
 
 This will run: `build`, `format`, `lint`, and `test` in sequence.
 
-### Keeping the bundle in sync
+### Contributing Instrumentation Hooks
 
-`tool/data/otelc-bundle.tgz` is a reproducible archive of `pkg/` and
-`instrumentation/` that is embedded into `otelc` via `//go:embed`. It must stay
-committed so that `go install go.opentelemetry.io/otelc/tool/cmd/otelc@latest`
-works, but because it is binary, git cannot 3-way merge it — so any branch that
-touches the sources conflicts with `main` on this file.
+This repository contains the core compile-time instrumentation engine (`otelc`) and the hook API (`pkg/hook`).
 
-To make this painless, run `make setup-git` once per clone (see
-[Getting Started](#getting-started)). It registers a custom merge driver
-(defined in `.gitattributes` + `.github/scripts/merge-bundle.sh`) that keeps the
-current ("ours") bundle on conflict so the rebase/merge runs to completion
-without stopping. You then regenerate the bundle from the fully-merged sources:
+First-party library instrumentation packages (such as `net/http`, `gRPC`, `database/sql`, and various web frameworks), semantic convention telemetry schemas, and third-party compatibility test suites are maintained in [`open-telemetry/opentelemetry-go-compile-contrib`](https://github.com/open-telemetry/opentelemetry-go-compile-contrib).
 
-```sh
-git fetch origin main
-git merge origin/main    # no longer halts on the bundle
-make package             # regenerate tool/data/otelc-bundle.tgz from merged sources
-git add tool/data/otelc-bundle.tgz && git commit
-git push
-```
+If you want to:
+- Add an instrumentation hook for a new library or framework
+- Update an existing library instrumentation or add telemetry attributes
+- Fix a compatibility issue with an external library version
 
-Why the driver doesn't regenerate the bundle for you: when git invokes a merge
-driver it has not yet written the *other* merged source files to the working
-tree, so running `make package` at that moment would embed stale sources and
-miss the incoming changes. Regenerating after the rebase/merge completes is the
-only reliable point, hence the explicit `make package` step above.
-
-#### Automatic conflict resolution
-
-The `Auto-fix Bundle Conflicts` workflow runs on pushes to `main`, hourly, and
-on demand. It probes open, non-draft pull requests against `main` without
-executing contributor code. It calls the shared `Regenerate Bundle` workflow
-only when the bundle is the sole conflict. Forks must permit maintainer edits.
-The repair workflow checks the caller workflow and its `main` ref.
-
-The scanner permits ten automatic requests per repository per hour and one
-request per pull request per hour. Failed requests count toward both limits.
-The scanner counts its recorded selections, including requests whose repair
-jobs never start. Missing or incomplete history stops selection. A missing
-selection record can pause automation for the three-hour history window.
-
-The scanner and its repair jobs run serially with other scans. The scanner
-workflow starts at most two repairs in parallel, and the scanner enforces the
-hourly budget and the cooldown. GitHub API quotas do not set these limits.
-
-Automatic requests use the head and base commits that the scanner captured.
-The workflow rechecks eligibility before generation and publication. Requests
-expire one hour after GitHub creates the scanner run. Queue delays do not
-extend this deadline. Start a new scanner run to retry automatic repairs.
-Automatic reruns cannot start new repairs.
-
-Users with the GitHub `maintain` or `admin` role can comment
-`/regenerate-bundle` to request a repair, including during the automatic
-cooldown. The `write` role alone does not authorize the command. The workflow
-checks authorization before requests enter the shared queue. Requests for the
-same pull request run serially.
-
-Repair builds the archive with the Makefile and the bundle tool from `main`.
-It copies only `pkg/` and `instrumentation/` from the pull request. If `main`
-moves after a request is prepared, the generate job stops and the request must
-be made again.
-
-Verify Bundle runs only when `pkg/**`, `instrumentation/**`, or
-`tool/data/otelc-bundle.tgz` change. A pull request that changes only the
-bundle tool does not run it. In that case, CI does not catch a stale archive.
-The author must run `make package` locally and commit the archive.
-
-The repair workflows call one Go program, `bundlerepair`, in
-`.tools/bundlerepair`. It uses only the Go standard library. Each job builds it
-from the trusted checkout of `main`, with module downloads turned off. No job
-runs code or build tooling from the pull request. The trusted build packages
-the `pkg/` and `instrumentation/` sources. It resolves their module
-dependencies through the public Go proxy. The program has these subcommands:
-
-- `authorize` checks who may request a repair.
-- `prepare` checks the pull request and captures its head and base commits.
-- `select` chooses the conflicting pull requests for automatic repair.
-  `select --budget` reports the requests of the last hour.
-- `merge` merges the captured base commit into the pull request checkout.
-- `stage` copies `pkg/` and `instrumentation/` from the pull request into the
-  trusted checkout.
-- `publish` commits and pushes the regenerated archive.
-- `identity` checks the publisher token and reports its account.
-- `credentials` chooses between the App token and the environment token.
-
-Run the tests of the program with `make test-bundle-workflows`. The target also
-checks the structure of the repair workflows.
-
-Generation runs without write credentials or a shared cache. A separate
-publisher downloads the archive by its immutable artifact ID, merges the
-captured base commit, and copies the archive. It does not execute contributor
-scripts or Git hooks. It checks the current
-base, head, branch, and fork permission before pushing a descendant commit.
-An expected-head lease rejects concurrent branch updates.
-
-The publisher uses the repository App for branches in this repository when
-`OTELBOT_GO_COMPILE_INSTRUMENTATION_CLIENT_ID` and
-`OTELBOT_GO_COMPILE_INSTRUMENTATION_PRIVATE_KEY` are configured. Fork branches
-use the `OTELC_BUNDLE_PUSH_TOKEN` environment token, because GitHub does not let
-an App write workflow files to a fork. A fork author must allow edits from
-maintainers. A fork repair requires the token, so an App-only setup cannot
-repair forks.
-
-The `OTELC_BUNDLE_PUSH_TOKEN` environment token also serves repository branches
-when the App is not configured. To use the fallback, an administrator must:
-
-1. Create the `bundle-publisher` environment.
-2. Restrict its deployment branch rules to the `main` branch only. For
-   unattended repair, leave required reviewers unset.
-3. Add `OTELC_BUNDLE_PUSH_TOKEN` as an environment secret. Do not create a
-   repository or organization copy. Only the publisher uses this environment.
-
-The callers forward the secret by name. The `bundle-publisher` environment
-supplies the value. Only the publisher job reads the secret. A caller can pass
-an environment secret by name even when the value lives only in that environment
-([Reuse workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows)).
-
-Use an expiring classic token from a dedicated identity with push access to this
-repository. The token needs `public_repo` and `workflow` scopes. Organization
-policy and SSO authorization must permit its use. Do not put the token in a
-comment or a workflow file. The fork author must allow maintainer edits unless
-the token identity has direct write access to the fork.
-
-App and token pushes trigger normal pull request checks. The workflow reports
-missing credentials and denied updates in its logs and job summary. If
-publication fails, the generated artifact remains available for one day.
-
-To inspect automatic selection without starting repair jobs, run
-`Auto-fix Bundle Conflicts` from the Actions tab with `dry_run` enabled.
-The `verify-bundle` check still requires the committed archive to match the
-sources.
+Please contribute to [opentelemetry-go-compile-contrib](https://github.com/open-telemetry/opentelemetry-go-compile-contrib) instead.
 
 ### Tools
 
@@ -346,7 +200,7 @@ format:
 ╰─┬──╯╰───┬───╯│  ╰─────┬─────╯
   │       │    │        ╰─ Short description of the change (see below)
   │       │    ╰─ If, and only if the PR contains breaking changes
-  │       ╰─ Optional: change scope (e.g, 'cmd/otelc', `pkg/weaver`, ...)
+  │       ╰─ Optional: change scope (e.g, 'cmd/otelc', 'pkg/hook', ...)
   ╰─ Required: commit type (see below for accepted values)
 ```
 

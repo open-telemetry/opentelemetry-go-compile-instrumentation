@@ -75,8 +75,8 @@ treated as requiring `v1.0.0` and produce a warning.
 > Earlier releases parse every top-level key as a rule and reject a scalar
 > `version` entry, so they cannot read a file that declares it; those releases
 > use the instrumentation rules bundled with them instead. Published
-> instrumentation rule files — including the rules bundled with `otelc` under
-> `instrumentation/` — declare `version: "v1.2.0"`. A rule file that relies on
+> instrumentation rule files — including the rules published in
+> `opentelemetry-go-compile-contrib` — declare `version: "v1.2.0"`. A rule file that relies on
 > functionality added in a later `otelc` release should declare that release as
 > its minimum version.
 

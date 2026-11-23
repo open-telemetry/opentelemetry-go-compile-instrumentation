@@ -49,7 +49,6 @@ This runs `build`, `format`, `lint`, and `test` in sequence.
 Additional documentation:
 
 - [docs/testing.md](docs/testing.md) for testing strategy and infrastructure.
-- [docs/semantic-conventions.md](docs/semantic-conventions.md) for semantic convention management.
 
 ## Code Quality Standards
 

@@ -9,7 +9,7 @@ rule schema reference, see [Instrumentation Rules](rules.md).
 `OTELC_UNLOCKED_COMPILE=1` allows `otelc go build` and `otelc go install` of
 package targets to release the module lock after setup. Setup and restoration
 of `go.mod`, `go.sum`, and generated source files remain serialized. Compilation
-uses a Go overlay and an invocation-owned bundle and metadata directory outside
+uses a Go overlay and an invocation-owned metadata directory outside
 `.otelc-build`, so another invocation's setup or cleanup cannot delete its inputs.
 The invocation directory is removed when the command finishes; abrupt termination
 may leave a temporary directory behind.
@@ -23,14 +23,13 @@ against an unrestored module. Concurrent compilation may not improve wall time
 on CPU-limited machines and uses additional temporary disk space. Set `GOCACHE`
 to a persistent directory outside `.otelc-build` to reuse compiler outputs between
 unlocked builds; otherwise their default caches are invocation-owned too.
-Invocation-specific bundle and overlay paths can reduce warm-cache reuse even
+Invocation-specific overlay paths can reduce warm-cache reuse even
 with a persistent `GOCACHE`. Compare both full rebuilds and incremental builds
 before enabling this in CI; releasing the lock does not guarantee a speedup.
 
 ### Enable concurrent builds
 
-Use a binary built from this PR (or a release containing it). From your own
-module, enable the optimization for one package build:
+From your own module, enable the optimization for one package build:
 
 ```bash
 OTELC_UNLOCKED_COMPILE=1 otelc go build -o ./app ./cmd/app
@@ -79,7 +78,7 @@ mode with a warm cache in the other.
 
 ## Selecting Instrumentations
 
-By default, `otelc` applies all instrumentation rules from its embedded bundle to every
+By default, `otelc` discovers applicable instrumentation rules from the manifest for every
 dependency it finds in your module graph. This zero-configuration mode works well for
 getting started: run `otelc go build` and all [supported libraries](getting-started.md#supported-libraries)
 are instrumented automatically.
@@ -129,11 +128,11 @@ OTEL_GO_DISABLED_INSTRUMENTATIONS=nethttp ./myapp
    set.
 3. **Tool files** (`otel.instrumentation.go` / `otelc.tool.go`) — when the project declares
    instrumentations explicitly. See [External Configuration Sources](external-configuration.md).
-4. **Embedded defaults** — the instrumentation bundle built into `otelc`, applied when none of
-   the above are present.
+4. **Manifest-based automatic discovery** — dynamically discovers rules for dependencies matching the
+   instrumentation manifest when no explicit tool file or `--rules` flag is provided.
 
 Each source entirely replaces those below it. There is no merging: when `--rules` is provided,
-tool files and the embedded bundle are not consulted.
+tool files and manifest discovery are not consulted.
 
 ### Using `--rules` for development and debugging
 
@@ -322,7 +321,7 @@ One standard OTel variable worth calling out explicitly is **`OTEL_SDK_DISABLED`
 and no telemetry is collected or exported. Every other value, including unset, leaves the SDK
 enabled.
 
-See [GLS operation notes](../instrumentation/go.opentelemetry.io/otel/README.md) for the
+See the [GLS operation notes in opentelemetry-go-compile-contrib](https://github.com/open-telemetry/opentelemetry-go-compile-contrib/blob/main/docs/instrument-guide.md#gls-operation-for-otel-sdk-instrumentation) for the
 operational constraints.
 
 Run-time behavior can also be controlled using the two `otelc`-specific environment variables:

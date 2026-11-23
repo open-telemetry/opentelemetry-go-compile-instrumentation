@@ -41,10 +41,15 @@ create a pull request proposing yourself for that release.
 2. **Ensure the target branch is green.** All required CI workflows must be
    passing on the commit you intend to release.
 
-3. **Verify there are no pending breaking-change PRs** that should land before
+3. **Verify compatibility with `compile-contrib`.** Ensure all integration and
+   E2E test suites in [`open-telemetry/opentelemetry-go-compile-contrib`](https://github.com/open-telemetry/opentelemetry-go-compile-contrib)
+   pass against the commit or release candidate binary you intend to release.
+   Do not release if any test suite fails on `compile-contrib`.
+
+4. **Verify there are no pending breaking-change PRs** that should land before
    this release. Check for PRs labeled `breaking`.
 
-4. **Confirm the version number.** This project follows
+5. **Confirm the version number.** This project follows
    [Semantic Versioning](https://semver.org/):
    - `PATCH` (`v1.x.Y+1`) — bug fixes, no API changes
    - `MINOR` (`v1.X+1.0`) — new features, backward-compatible
@@ -206,7 +211,7 @@ After the release is published:
    Confirm it prints the expected version, commit hash, and build date.
 
 3. **Sync website documentation.** If the release includes user-facing changes
-   (new features, changed behavior, new instrumentations), update the
+   (new features, changed CLI flags or behavior), update the
    [compile-time instrumentation docs](https://opentelemetry.io/docs/zero-code/go/compile-time/)
    by opening a PR against the
    [opentelemetry.io repository](https://github.com/open-telemetry/opentelemetry.io/tree/main/content/en/docs/zero-code/go/compile-time).
