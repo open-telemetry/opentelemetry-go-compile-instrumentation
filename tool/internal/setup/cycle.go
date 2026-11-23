@@ -39,8 +39,8 @@ type addedImport struct {
 	files []string
 }
 
-// addedImportKey identifies a addedImport: the import of path that rule adds
-// to pkg, in the files that match finds.
+// addedImportKey identifies an addedImport: the import of path that rule
+// adds to pkg, in the files that match finds.
 type addedImportKey struct {
 	pkg, rule, path string
 	match           *fileMatch
