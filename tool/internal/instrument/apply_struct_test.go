@@ -222,13 +222,13 @@ func TestApplyStructRule_InvalidFieldType(t *testing.T) {
 	assert.Contains(t, err.Error(), `failed to parse type "func("`)
 }
 
-// --- import alias override tests ---
+// --- rule import alias tests ---
 
-func TestApplyStructRule_ImportAliasMismatchUsesFileExistingAlias(t *testing.T) {
+func TestApplyStructRule_ImportAliasMismatchImportsRuleAlias(t *testing.T) {
 	// The rule's field type is written against the alias "context" for
 	// "context". The file already imports "context" under its own alias
-	// "stdctx". The injected field type must use "stdctx", not fail the
-	// build.
+	// "stdctx". The field type keeps "context", and "context" is imported
+	// again under that alias.
 	root := parseFile(t, `package main
 
 import stdctx "context"
@@ -254,15 +254,15 @@ type S struct{}
 	require.True(t, ok, "expected *dst.SelectorExpr, got %T", field.Type)
 	ident, ok := sel.X.(*dst.Ident)
 	require.True(t, ok)
-	assert.Equal(t, "stdctx", ident.Name, "injected field type must use the file's existing alias, not the rule's")
+	assert.Equal(t, "context", ident.Name, "injected field type must keep the rule's alias")
 	assert.Equal(t, "Context", sel.Sel.Name)
-	assert.Equal(t, 1, countImportSpecs(root), "must not add a redundant import for an alias the rewrite eliminated")
+	assert.Equal(t, 2, countImportSpecs(root), "the rule's alias must be imported next to the file's import")
 }
 
-func TestApplyStructRule_AliasOverrideUsesResolvedName(t *testing.T) {
-	// The target file imports a divergent-name dependency unaliased, so the
-	// override must use ip.importNames' resolved real name, not a guess
-	// derived from the import path.
+func TestApplyStructRule_RuleAliasForUnaliasedImportedPath(t *testing.T) {
+	// The target file imports a divergent-name dependency unaliased. Its name
+	// comes from ip.importNames, not a live package lookup, and the rule's
+	// alias is imported next to it.
 	const importPath = "github.com/redis/go-redis/v9"
 	root := parseFile(t, `package main
 
@@ -294,9 +294,9 @@ type S struct{}
 	require.True(t, ok, "expected *dst.SelectorExpr, got %T", star.X)
 	ident, ok := sel.X.(*dst.Ident)
 	require.True(t, ok)
-	assert.Equal(t, "redis", ident.Name, "override must use the resolved real name, not the path-derived guess")
+	assert.Equal(t, "traced", ident.Name, "injected code must keep the rule's alias")
 	assert.Equal(t, "Client", sel.Sel.Name)
-	assert.Equal(t, 1, countImportSpecs(root), "must not add a redundant import for an alias the rewrite eliminated")
+	assert.Equal(t, 2, countImportSpecs(root), "the rule's alias must be imported next to the file's import")
 }
 
 func TestApplyStructRule_DotImportConflictSurfacesAsAnError(t *testing.T) {

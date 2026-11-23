@@ -7,7 +7,6 @@ import (
 	"context"
 	"go/token"
 	"slices"
-	"strings"
 
 	"github.com/dave/dst"
 	"github.com/dave/dst/dstutil"
@@ -36,10 +35,10 @@ func (ip *instrumentPhase) updateImportConfigForFile(ctx context.Context, root *
 
 // addRuleImports processes imports for a rule and updates the import config.
 //
-// This function validates that if a rule expects to use an import with a specific alias,
-// and the file already imports the same package with a different alias (whether explicit or
-// implicit), an error is returned. This prevents silent failures where injected code uses
-// an alias that doesn't exist in the file.
+// The rule's alias is imported even when the file already imports the same
+// path under another alias: Go accepts one path imported under several
+// aliases, so the injected code compiles as the rule wrote it. A dot import is
+// the exception, and the file must dot-import the path itself.
 func (ip *instrumentPhase) addRuleImports(
 	ctx context.Context,
 	root *dst.File,
@@ -50,41 +49,19 @@ func (ip *instrumentPhase) addRuleImports(
 		return nil
 	}
 
-	resolution := imports.FindNew(ctx, root, ruleImports)
+	resolution := imports.FindNew(ctx, root, ruleImports, ip.importNames)
 
-	// Validate: check for alias mismatches that would break injected code
-	for ruleAlias, importPath := range ruleImports {
-		if ruleAlias == "." {
-			// Dot-import conflict check: the file must dot-import the path itself
-			if aliases, pathExists := resolution.ExistingAliasSets[importPath]; pathExists {
-				if !slices.Contains(aliases, ".") {
-					return ex.Newf(
-						"%s: dot-import conflict for %q - "+
-							"file imports the path with aliases %v but rule requires dot-import; "+
-							"injected unqualified identifiers will not resolve; "+
-							"either update the file to use dot-import or adjust the rule",
-						ruleName, importPath, aliases)
-				}
-			}
-			continue
-		}
-		if ruleAlias == "_" {
-			continue // Blank imports are permissive
-		}
-
-		// Validate alias matches for all existing imports (both explicit and implicit).
-		// When a file already imports a path, we won't add a duplicate, so injected code
-		// must use an alias that actually exists in the file. A file may import the
-		// path under several aliases; each of them is valid.
-		if aliases, pathExists := resolution.ExistingAliasSets[importPath]; pathExists {
-			if !slices.Contains(aliases, ruleAlias) {
-				return ex.Newf(
-					"%s: import alias mismatch for %q - "+
-						"file uses aliases %v but rule expects %q; "+
-						"injected code will fail to compile; "+
-						"either update the file's import or adjust the rule's import alias",
-					ruleName, importPath, aliases, ruleAlias)
-			}
+	// A dot import needs the file to dot-import the path itself: another
+	// alias for the path does not bring its identifiers into scope.
+	if importPath, ok := ruleImports["."]; ok {
+		if aliases, pathExists := resolution.ExistingAliasSets[importPath]; pathExists &&
+			!slices.Contains(aliases, ".") {
+			return ex.Newf(
+				"%s: dot-import conflict for %q - "+
+					"file imports the path with aliases %v but rule requires dot-import; "+
+					"injected unqualified identifiers will not resolve; "+
+					"either update the file to use dot-import or adjust the rule",
+				ruleName, importPath, aliases)
 		}
 	}
 
@@ -93,7 +70,7 @@ func (ip *instrumentPhase) addRuleImports(
 	}
 
 	// Add import declarations to the AST
-	if err := imports.AddToFile(ctx, root, resolution.NewImports); err != nil {
+	if err := imports.AddToFile(ctx, root, resolution.NewImports, ip.importNames); err != nil {
 		return ex.Wrapf(err, "adding imports for %s", ruleName)
 	}
 
@@ -105,131 +82,75 @@ func (ip *instrumentPhase) addRuleImports(
 	return nil
 }
 
-// resolveImportOverrides computes root's current import aliases and the
-// per-rule-alias overrides a rule needs when the file already imports one of
-// ruleImports' paths under a different alias.
-//
-//nolint:revive // needed to balance confusing-results and nonamedreturns linters
-func (ip *instrumentPhase) resolveImportOverrides(
-	root *dst.File,
-	ruleImports map[string]string,
-) (map[string]string, map[string]string) {
-	importAliases := ast.ImportAliasMap(root, ip.importNames)
-
-	// Collect every alias the file uses for each path, sorted, so alias
-	// selection stays the same across every call
-	resolvedAliases := ast.ResolvedImportAliasMap(root, ip.importNames)
-	existingAliasSets := make(map[string][]string, len(resolvedAliases))
-	for alias, path := range resolvedAliases {
-		existingAliasSets[path] = append(existingAliasSets[path], alias)
-	}
-	for _, aliases := range existingAliasSets {
-		slices.Sort(aliases)
-	}
-	aliasOverrides := resolveAliasOverrides(ruleImports, existingAliasSets)
-	return importAliases, aliasOverrides
+// importAliasMap returns root's import aliases, each mapped to its import
+// path, for the template helpers that resolve a type name.
+func (ip *instrumentPhase) importAliasMap(root *dst.File) map[string]string {
+	return ast.ImportAliasMap(root, ip.importNames)
 }
 
-// resolveAliasOverrides reports the alias to substitute for each rule
-// import the target file already imports under a different alias.
-// Substituting the file's alias into generated code, instead of the
-// rule's alias, avoids a build failure.
-//
-// existingAliasSets maps each import path to every alias the file uses
-// for it. A rule alias that already names the path in the file needs no
-// substitution: the generated code compiles as written.
-//
-// existingAliasSets must resolve an unaliased import to its real name,
-// not a guess. A guessed name can be illegal as a Go identifier.
-//
-// The dot alias and the blank alias are exempt from substitution.
-func resolveAliasOverrides(ruleImports map[string]string, existingAliasSets map[string][]string) map[string]string {
-	var overrides map[string]string
-	for ruleAlias, importPath := range ruleImports {
-		if ruleAlias == "." || ruleAlias == "_" {
+// injectedRuleAliases returns the aliases of ruleImports that nodes use as the
+// qualifier of a selector, such as `alias.Func`. These are the aliases that a
+// local identifier at the injection point can shadow. The dot and blank aliases
+// are never returned.
+func injectedRuleAliases(ruleImports map[string]string, nodes ...dst.Node) map[string]bool {
+	aliases := make(map[string]bool)
+	if len(ruleImports) == 0 {
+		return aliases
+	}
+	for _, node := range nodes {
+		if node == nil {
 			continue
 		}
-		aliases, ok := existingAliasSets[importPath]
-		if !ok || slices.Contains(aliases, ruleAlias) {
-			continue
-		}
-		if overrides == nil {
-			overrides = make(map[string]string, len(ruleImports))
-		}
-		// The smallest alias keeps the substitution deterministic. Dot and
-		// blank aliases never reach the set; ast.ImportAliasMap skips them.
-		overrides[ruleAlias] = aliases[0]
-	}
-	return overrides
-}
-
-// replaceQualifierAliases rewrites a qualifier the rule wrote to use the
-// file's alias for an import, instead of the rule's alias. overrides maps
-// each rule alias to the file's alias.
-//
-// Call this before stripDynamicIdents, while a target-derived identifier
-// (an argument, receiver, or function name) still carries dynamicIdentMarker.
-// The marker makes its name a different string from any rule alias, so a
-// target name that happens to match a rule's alias is never mistaken for a
-// qualifier the rule wrote.
-func replaceQualifierAliases(node dst.Node, overrides map[string]string) {
-	if len(overrides) == 0 {
-		return
-	}
-	dst.Inspect(node, func(n dst.Node) bool {
-		sel, ok := n.(*dst.SelectorExpr)
-		if !ok {
+		dst.Inspect(node, func(n dst.Node) bool {
+			sel, ok := n.(*dst.SelectorExpr)
+			if !ok {
+				return true
+			}
+			ident, ok := sel.X.(*dst.Ident)
+			if !ok || ident.Name == "_" || ident.Name == "." {
+				return true
+			}
+			if _, isRuleAlias := ruleImports[ident.Name]; isRuleAlias {
+				aliases[ident.Name] = true
+			}
 			return true
-		}
-		ident, ok := sel.X.(*dst.Ident)
-		if !ok {
-			return true
-		}
-		if existingAlias, override := overrides[ident.Name]; override {
-			ident.Name = existingAlias
-		}
-		return true
-	})
+		})
+	}
+	return aliases
 }
 
-// stripDynamicIdents removes dynamicIdentMarker from every identifier and
-// string literal in node, restoring the target's original name. Call this
-// once on rendered template output.
-// replaceQualifierAliases should always be called before stripDynamicIdents.
-func stripDynamicIdents(node dst.Node) {
-	dst.Inspect(node, func(n dst.Node) bool {
-		switch lit := n.(type) {
-		case *dst.Ident:
-			lit.Name = strings.TrimPrefix(lit.Name, dynamicIdentMarker)
-		case *dst.BasicLit:
-			lit.Value = strings.ReplaceAll(lit.Value, dynamicIdentMarker, "")
-		}
-		return true
-	})
+// injectedStmtsRuleAliases is injectedRuleAliases for a list of statements.
+func injectedStmtsRuleAliases(ruleImports map[string]string, stmts []dst.Stmt) map[string]bool {
+	nodes := make([]dst.Node, len(stmts))
+	for i, stmt := range stmts {
+		nodes[i] = stmt
+	}
+	return injectedRuleAliases(ruleImports, nodes...)
 }
 
-// checkAliasOverrideShadowing reports an error when an override's file
-// alias names a receiver, parameter, named return value, or body-level
-// variable of `enclosing`, all of which shadow code injected at the function's
-// top level.
+// checkRuleAliasShadowing reports an error when a rule alias names a
+// receiver, parameter, named return value, or body-level variable of
+// enclosing, all of which shadow the import in code injected at the
+// function's top level.
 //
-// It is checkAliasOverrideShadowingAt without an injection point.
+// It is checkRuleAliasShadowingAt without an injection point.
 //
-// checkAliasOverrideShadowing reports no error when enclosing is nil.
-func checkAliasOverrideShadowing(overrides map[string]string, enclosing *dst.FuncDecl) error {
-	return checkAliasOverrideShadowingAt(overrides, enclosing, nil)
+// checkRuleAliasShadowing reports no error when enclosing is nil.
+func checkRuleAliasShadowing(aliases map[string]bool, enclosing *dst.FuncDecl) error {
+	return checkRuleAliasShadowingAt(aliases, enclosing, nil)
 }
 
-// checkAliasOverrideShadowingAt reports an error when an override's file alias
-// would resolve to a local instead of the import at target's injection point.
+// checkRuleAliasShadowingAt reports an error when a rule alias would resolve
+// to a local instead of the import at target's injection point.
 //
-// The override substitutes the file's alias for the rule's alias in generated
-// code. Code injected at the function's top level is guarded by the receiver,
-// parameter, named return, and body-level names alone. Rules that inject
-// deeper — call rules at the call site, raw rules with a pattern, and literal
-// rules at the literal — can also be shadowed by a name bound between the
-// function body and target: a nested block, a for/range/if/switch init
-// statement, a case or select clause, or a closure parameter.
+// The rule's alias is imported at file scope, so any name bound in a scope
+// around the injected code shadows it. Code injected at the function's top
+// level is guarded by the receiver, parameter, named return, and body-level
+// names alone. Rules that inject deeper (call rules at the call site, raw
+// rules with a pattern, and literal rules at the literal) can also be
+// shadowed by a name bound between the function body and target: a nested
+// block, a for/range/if/switch init statement, a case or select clause, or a
+// closure parameter.
 //
 // As with the top-level names, a name bound anywhere within a scope on the
 // path is reported even when it is declared after target, which keeps the
@@ -237,52 +158,56 @@ func checkAliasOverrideShadowing(overrides map[string]string, enclosing *dst.Fun
 //
 // A nil target checks only the function top level.
 //
-// checkAliasOverrideShadowingAt reports no error when enclosing is nil.
-func checkAliasOverrideShadowingAt(overrides map[string]string, enclosing *dst.FuncDecl, target dst.Node) error {
-	if len(overrides) == 0 || enclosing == nil {
+// checkRuleAliasShadowingAt reports no error when enclosing is nil.
+func checkRuleAliasShadowingAt(aliases map[string]bool, enclosing *dst.FuncDecl, target dst.Node) error {
+	if len(aliases) == 0 || enclosing == nil {
 		return nil
 	}
 	localNames := signatureNames(enclosing)
 	mergeNamesInto(localNames, topLevelBodyNames(enclosing))
-	if err := reportAliasOverrideConflict(overrides, enclosing.Name.Name, localNames,
+	if err := reportRuleAliasConflict(aliases, enclosing.Name.Name, localNames,
 		"a parameter, receiver, named return, or body-level variable"); err != nil {
 		return err
 	}
 	if target == nil {
 		return nil
 	}
-	return reportAliasOverrideConflict(overrides, enclosing.Name.Name, scopeNamesBetween(enclosing, target),
+	return reportRuleAliasConflict(aliases, enclosing.Name.Name, scopeNamesBetween(enclosing, target),
 		"a local declared between the function's top level and the injection point")
 }
 
-// checkAliasOverrideShadowingInDecl reports an error when an override's file
-// alias would resolve to a local instead of the import at target, a node in
-// the initializer of the package-level declaration decl. The locals are the
+// checkRuleAliasShadowingInDecl reports an error when a rule alias would
+// resolve to a local instead of the import at target, a node in the
+// initializer of the package-level declaration decl. The locals are the
 // parameters and body names of the function literals that enclose target.
-func checkAliasOverrideShadowingInDecl(overrides map[string]string, decl *dst.GenDecl, target dst.Node) error {
-	if len(overrides) == 0 {
+func checkRuleAliasShadowingInDecl(aliases map[string]bool, decl *dst.GenDecl, target dst.Node) error {
+	if len(aliases) == 0 {
 		return nil
 	}
-	return reportAliasOverrideConflict(overrides, "a package-level declaration", scopeNamesBetween(decl, target),
+	return reportRuleAliasConflict(aliases, "a package-level declaration", scopeNamesBetween(decl, target),
 		"a parameter or local of an enclosing function literal")
 }
 
-// reportAliasOverrideConflict returns an error when any of overrides' file
-// aliases names a local in localNames. description names what the alias would
-// resolve to.
-func reportAliasOverrideConflict(
-	overrides map[string]string,
+// reportRuleAliasConflict returns an error when any of aliases names a local
+// in localNames. description names what the alias would resolve to.
+func reportRuleAliasConflict(
+	aliases map[string]bool,
 	funcName string,
 	localNames map[string]bool,
 	description string,
 ) error {
-	for ruleAlias, fileAlias := range overrides {
-		if localNames[fileAlias] {
+	names := make([]string, 0, len(aliases))
+	for alias := range aliases {
+		names = append(names, alias)
+	}
+	slices.Sort(names)
+	for _, alias := range names {
+		if localNames[alias] {
 			return ex.Newf(
-				"alias override conflict in %s: substituting the file's alias %q for "+
-					"rule alias %q would resolve to %s instead of the import; rename the "+
-					"local identifier or the file's import alias",
-				funcName, fileAlias, ruleAlias, description)
+				"rule import alias conflict in %s: the injected code uses the rule alias %q, "+
+					"which resolves to %s instead of the import; rename the rule's import "+
+					"alias or the local identifier",
+				funcName, alias, description)
 		}
 	}
 	return nil
@@ -480,11 +405,8 @@ func addLocalName(names map[string]bool, name *dst.Ident) {
 // referenced somewhere in root. It must be called after the rule's generated
 // code has already been spliced into root.
 //
-// Blank ("_") and dot (".") aliases are always kept. An alias present in
-// aliasOverrides is dropped instead, never reaching addRuleImports:
-// resolveAliasOverrides only produces an override when the file already
-// imports that path under a different alias (see resolveAliasOverrides).
-func usedRuleImports(root *dst.File, ruleImports, aliasOverrides map[string]string) map[string]string {
+// Blank ("_") and dot (".") aliases are always kept.
+func usedRuleImports(root *dst.File, ruleImports map[string]string) map[string]string {
 	if len(ruleImports) == 0 {
 		return nil
 	}
@@ -492,9 +414,6 @@ func usedRuleImports(root *dst.File, ruleImports, aliasOverrides map[string]stri
 	used := make(map[string]string, len(ruleImports))
 	unresolved := make(map[string]string, len(ruleImports))
 	for alias, path := range ruleImports {
-		if _, overridden := aliasOverrides[alias]; overridden {
-			continue
-		}
 		if alias == "_" || alias == "." {
 			used[alias] = path
 			continue

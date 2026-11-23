@@ -72,7 +72,7 @@ func renderRawCode(
 	}
 	data := newFuncTemplateData(decl, nil, importAliases, hash)
 	data.typeInfo = typeInfo
-	return tmpl.Execute(renderingFuncTemplateData{data})
+	return tmpl.Execute(data)
 }
 
 type insertPos struct {
@@ -81,12 +81,12 @@ type insertPos struct {
 }
 
 // rawInsertion bundles the statements to insert, the position to insert them
-// at, and the alias overrides guarding that position, keeping
-// insertRawAtPattern's parameter count within the linter's limit.
+// at, and the rule aliases those statements use, keeping insertRawAtPattern's
+// parameter count within the linter's limit.
 type rawInsertion struct {
-	pos            insertPos
-	stmts          []dst.Stmt
-	aliasOverrides map[string]string
+	pos         insertPos
+	stmts       []dst.Stmt
+	ruleAliases map[string]bool
 }
 
 func insertRawAtPattern(
@@ -95,7 +95,7 @@ func insertRawAtPattern(
 	restorer *decorator.Restorer,
 	insertion rawInsertion,
 ) (bool, error) {
-	pos, stmts, aliasOverrides := insertion.pos, insertion.stmts, insertion.aliasOverrides
+	pos, stmts, ruleAliases := insertion.pos, insertion.stmts, insertion.ruleAliases
 	inserted := false
 	var shadowErr error
 	logger := util.LoggerFromContext(ctx)
@@ -126,8 +126,8 @@ func insertRawAtPattern(
 		}
 
 		// The raw code is injected at stmt, so a local bound between the
-		// function body and stmt would shadow the rewritten qualifiers there.
-		if shadowErr = checkAliasOverrideShadowingAt(aliasOverrides, decl, stmt); shadowErr != nil {
+		// function body and stmt would shadow the rule's imports there.
+		if shadowErr = checkRuleAliasShadowingAt(ruleAliases, decl, stmt); shadowErr != nil {
 			return false
 		}
 
@@ -169,13 +169,12 @@ func inStatementList(cursor *dstutil.Cursor) bool {
 	return false
 }
 
-// rawAliasContext bundles the file's import aliases, the rule-import
-// overrides and the file's type information that insertRaw needs, keeping
-// insertRaw's parameter count within the linter's limit.
+// rawAliasContext bundles the file's import aliases and the file's type
+// information that insertRaw needs, keeping insertRaw's parameter count within
+// the linter's limit.
 type rawAliasContext struct {
-	imports   map[string]string
-	overrides map[string]string
-	typeInfo  *funcTypes
+	imports  map[string]string
+	typeInfo *funcTypes
 }
 
 func insertRaw(
@@ -203,10 +202,7 @@ func insertRaw(
 		return err
 	}
 
-	for _, stmt := range stmts {
-		replaceQualifierAliases(stmt, aliases.overrides)
-		stripDynamicIdents(stmt)
-	}
+	ruleAliases := injectedStmtsRuleAliases(r.Imports, stmts)
 
 	// if specified, insert raw code at the position matched by the regex
 	if r.Pattern != "" {
@@ -225,9 +221,9 @@ func insertRaw(
 		}
 
 		inserted, insertErr := insertRawAtPattern(ctx, decl, restorer, rawInsertion{
-			pos:            pos,
-			stmts:          stmts,
-			aliasOverrides: aliases.overrides,
+			pos:         pos,
+			stmts:       stmts,
+			ruleAliases: ruleAliases,
 		})
 		if insertErr != nil {
 			return insertErr
@@ -237,6 +233,10 @@ func insertRaw(
 		}
 
 		return nil
+	}
+
+	if err = checkRuleAliasShadowing(ruleAliases, decl); err != nil {
+		return err
 	}
 
 	// Insert the raw code into target function body
@@ -277,18 +277,13 @@ func (ip *instrumentPhase) applyRawRule(ctx context.Context, rule *rule.InstRawR
 		}
 	}
 
-	importAliases, aliasOverrides := ip.resolveImportOverrides(root, rule.Imports)
-	if err = checkAliasOverrideShadowing(aliasOverrides, funcDecl); err != nil {
-		return err
-	}
-
-	aliases := rawAliasContext{imports: importAliases, overrides: aliasOverrides, typeInfo: ip.fileTypes()}
+	aliases := rawAliasContext{imports: ip.importAliasMap(root), typeInfo: ip.fileTypes()}
 	if err = insertRaw(ctx, rule, funcDecl, root, aliases); err != nil {
 		return err
 	}
 
 	// Handle imports if specified in the rule.
-	if err = ip.addRuleImports(ctx, root, usedRuleImports(root, rule.Imports, aliasOverrides), rule.Name); err != nil {
+	if err = ip.addRuleImports(ctx, root, usedRuleImports(root, rule.Imports), rule.Name); err != nil {
 		return err
 	}
 	if ip.appliedRawIdentities == nil {

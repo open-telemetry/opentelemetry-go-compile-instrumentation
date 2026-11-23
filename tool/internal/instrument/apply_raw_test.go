@@ -616,19 +616,19 @@ func TestRenderRawCode(t *testing.T) {
 			name:     "FuncName",
 			src:      "package main\nfunc Foo() {}",
 			raw:      "call({{.FuncName}})",
-			expected: "call(" + dynamicIdentMarker + "Foo)",
+			expected: "call(Foo)",
 		},
 		{
 			name:     "FuncArgument",
 			src:      "package main\nfunc Foo(ctx int, name string) {}",
 			raw:      "use({{ .FuncArgument 0 }}, {{ .FuncArgument 1 }})",
-			expected: "use(" + dynamicIdentMarker + "ctx, " + dynamicIdentMarker + "name)",
+			expected: "use(ctx, name)",
 		},
 		{
 			name:     "FuncReturn",
 			src:      "package main\nfunc Foo() (int, error) { return 0, nil }",
 			raw:      "check({{ .FuncReturn 0 }}, {{ .FuncReturn 1 }})",
-			expected: "check(" + dynamicIdentMarker + "_unnamedRetVal_h1_0, " + dynamicIdentMarker + "_unnamedRetVal_h1_1)",
+			expected: "check(_unnamedRetVal_h1_0, _unnamedRetVal_h1_1)",
 		},
 		{
 			name:     "counts",
@@ -640,55 +640,55 @@ func TestRenderRawCode(t *testing.T) {
 			name:     "trim markers",
 			src:      "package main\nfunc Foo() {}",
 			raw:      "call({{- .FuncName -}})",
-			expected: "call(" + dynamicIdentMarker + "Foo)",
+			expected: "call(Foo)",
 		},
 		{
 			name:     "receiver excluded from FuncArgument",
 			src:      "package main\ntype T struct{}\nfunc (t T) Foo(a int) {}",
 			raw:      "use({{ .FuncArgument 0 }})",
-			expected: "use(" + dynamicIdentMarker + "a)",
+			expected: "use(a)",
 		},
 		{
 			name:     "Receiver",
 			src:      "package main\ntype T struct{}\nfunc (t T) Foo(a int) {}",
 			raw:      "use({{ .Receiver }}, {{ .FuncArgument 0 }})",
-			expected: "use(" + dynamicIdentMarker + "t, " + dynamicIdentMarker + "a)",
+			expected: "use(t, a)",
 		},
 		{
 			name:     "blank receiver gets a synthetic name",
 			src:      "package main\ntype T struct{}\nfunc (_ T) Foo(a int) {}",
 			raw:      "use({{ .Receiver }})",
-			expected: "use(" + dynamicIdentMarker + "_ignoredParam_h1_0)",
+			expected: "use(_ignoredParam_h1_0)",
 		},
 		{
 			name:     "unnamed receiver gets a synthetic name",
 			src:      "package main\ntype T struct{}\nfunc (T) Foo(a int) {}",
 			raw:      "use({{ .Receiver }})",
-			expected: "use(" + dynamicIdentMarker + "_ignoredParam_h1_0)",
+			expected: "use(_ignoredParam_h1_0)",
 		},
 		{
 			name:     "unnamed parameter gets a synthetic name",
 			raw:      "use({{ .FuncArgument 0 }})",
 			src:      "package main\nfunc Foo(int) {}",
-			expected: "use(" + dynamicIdentMarker + "_ignoredParam_h1_0)",
+			expected: "use(_ignoredParam_h1_0)",
 		},
 		{
 			name:     "blank parameter gets a synthetic name",
 			src:      "package main\nfunc Foo(_ int) {}",
 			raw:      "use({{ .FuncArgument 0 }})",
-			expected: "use(" + dynamicIdentMarker + "_ignoredParam_h1_0)",
+			expected: "use(_ignoredParam_h1_0)",
 		},
 		{
 			name:     "blank named return gets a synthetic name",
 			src:      "package main\nfunc Foo() (_ int) { return 0 }",
 			raw:      "check({{ .FuncReturn 0 }})",
-			expected: "check(" + dynamicIdentMarker + "_ignoredRetVal_h1_0)",
+			expected: "check(_ignoredRetVal_h1_0)",
 		},
 		{
 			name:     "named return values are collected as-is",
 			src:      "package main\nfunc Foo() (a int, b error) { return 0, nil }",
 			raw:      "check({{ .FuncReturn 0 }}, {{ .FuncReturn 1 }})",
-			expected: "check(" + dynamicIdentMarker + "a, " + dynamicIdentMarker + "b)",
+			expected: "check(a, b)",
 		},
 		{
 			name:     "control-flow actions are available",
@@ -722,8 +722,8 @@ func TestRenderRawCode_HashSaltsSyntheticNames(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.NotEqual(t, result1, result2, "different hashes must salt the synthetic name differently")
-	assert.Equal(t, "use("+dynamicIdentMarker+"_ignoredParam_h1_0)", result1)
-	assert.Equal(t, "use("+dynamicIdentMarker+"_ignoredParam_h2_0)", result2)
+	assert.Equal(t, "use(_ignoredParam_h1_0)", result1)
+	assert.Equal(t, "use(_ignoredParam_h2_0)", result2)
 }
 
 func TestRenderRawCode_UnknownTagFails(t *testing.T) {
@@ -809,9 +809,9 @@ func TestRenderRawCode_NonIntegerArgumentIndex(t *testing.T) {
 	require.Error(t, err)
 }
 
-// --- import alias override tests ---
+// --- rule import alias tests ---
 
-func TestApplyRawRule_ImportAliasMismatchUsesFileExistingAlias(t *testing.T) {
+func TestApplyRawRule_ImportAliasMismatchImportsRuleAlias(t *testing.T) {
 	// The rule's raw code is written against the alias "traced" for "fmt".
 	// The file already imports "fmt" under its own alias "f". The injected
 	// code must use "f", not fail the build.
@@ -845,16 +845,16 @@ func Run() {}
 	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
 	ident, ok := sel.X.(*dst.Ident)
 	require.True(t, ok)
-	assert.Equal(t, "f", ident.Name, "injected code must use the file's existing alias, not the rule's")
+	assert.Equal(t, "traced", ident.Name, "injected code must keep the rule's alias")
 	assert.Equal(t, "Println", sel.Sel.Name)
 }
 
-func TestApplyRawRule_OverrideShadowedByParameterReportsConflict(t *testing.T) {
+func TestApplyRawRule_RuleAliasShadowedByParameterReportsConflict(t *testing.T) {
 	root := parseFile(t, `package main
 
 import f "fmt"
 
-func Run(f sink) {}
+func Run(traced sink) {}
 `)
 	r := &rule.InstRawRule{
 		InstBaseRule: rule.InstBaseRule{
@@ -868,22 +868,85 @@ func Run(f sink) {}
 	err := newTestPhase().applyRawRule(context.Background(), r, root)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "alias override conflict")
+	assert.Contains(t, err.Error(), "rule import alias conflict")
 	fn := findFuncDeclInFile(t, root, "Run")
 	assert.Empty(t, fn.Body.List, "must not inject code that would resolve to the wrong identifier")
 }
 
-func TestApplyRawRule_OverrideShadowedByBodyLocalReportsConflict(t *testing.T) {
-	// The file imports fmt as f and the target function declares f as a
-	// body-level local, so the rule's rewritten qualifier would resolve to
-	// the local instead of the import.
+func TestApplyRawRule_NewImportShadowedByParameterReportsConflict(t *testing.T) {
+	// The file does not import fmt, so the rule's alias is a new import. A
+	// parameter with the same name still shadows it in the injected code.
+	root := parseFile(t, `package main
+
+func Run(traced sink) {}
+`)
+	r := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "inject_fmt",
+			Imports: map[string]string{"traced": "fmt"},
+		},
+		Func: "Run",
+		Raw:  `traced.Println("hi")`,
+	}
+
+	err := newTestPhase().applyRawRule(context.Background(), r, root)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "rule import alias conflict")
+	assert.Zero(t, countImportSpecs(root), "must not import an alias that the injected code cannot use")
+}
+
+func TestApplyRawRule_UnusedRuleAliasNotCheckedForShadowing(t *testing.T) {
+	// The template does not use "traced" for this function, so a parameter
+	// with that name does not stop the rule.
+	root := parseFile(t, `package main
+
+func Run(traced sink) {}
+`)
+	r := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "inject_fmt",
+			Imports: map[string]string{"traced": "fmt"},
+		},
+		Func: "Run",
+		Raw:  `{{ if eq .FuncName "Other" }}traced.Println("hi"){{ else }}_ = 1{{ end }}`,
+	}
+
+	err := newTestPhase().applyRawRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	fn := findFuncDeclInFile(t, root, "Run")
+	require.Len(t, fn.Body.List, 1)
+	assert.Zero(t, countImportSpecs(root))
+}
+
+func TestRenderRawCode_TemplateLogicSeesRealNames(t *testing.T) {
+	// Template conditionals compare against the target's real names.
+	root := parseFile(t, `package main
+
+func Foo(ctx context) {}
+`)
+	decl := findFuncDeclInFile(t, root, "Foo")
+
+	result, err := renderRawCode(
+		`{{ if eq .FuncName "Foo" }}matched{{ else }}nomatch{{ end }}|`+
+			`{{ if eq (.FuncArgument 0) "ctx" }}arg{{ end }}|{{ len .FuncName }}`,
+		decl, nil, "h1", nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "matched|arg|3", result)
+}
+
+func TestApplyRawRule_RuleAliasShadowedByBodyLocalReportsConflict(t *testing.T) {
+	// The target function declares the rule's alias as a body-level local, so
+	// the rule's qualifier would resolve to the local instead of the import.
 	root := parseFile(t, `package main
 
 import f "fmt"
 
 func Run() {
-	f := sink{}
-	_ = f
+	traced := sink{}
+	_ = traced
 }
 `)
 	r := &rule.InstRawRule{
@@ -898,14 +961,14 @@ func Run() {
 	err := newTestPhase().applyRawRule(context.Background(), r, root)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "alias override conflict")
+	assert.Contains(t, err.Error(), "rule import alias conflict")
 	fn := findFuncDeclInFile(t, root, "Run")
 	assert.Len(t, fn.Body.List, 2, "must not inject code that would resolve to the wrong identifier")
 }
 
 func TestApplyRawRule_PatternShadowedByNestedLocalReportsConflict(t *testing.T) {
-	// The pattern matches a statement inside a nested block that rebinds the
-	// file's alias, so the injected qualifier would resolve to that local
+	// The pattern matches a statement inside a nested block that binds the
+	// rule's alias, so the injected qualifier would resolve to that local
 	// instead of the import.
 	root := parseFile(t, `package main
 
@@ -916,8 +979,8 @@ import (
 
 func Run(ok bool) {
 	if ok {
-		f := sink{}
-		_ = f
+		traced := sink{}
+		_ = traced
 		http.Get("url")
 	}
 }
@@ -935,7 +998,7 @@ func Run(ok bool) {
 	err := newTestPhase().applyRawRule(context.Background(), r, root)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "alias override conflict")
+	assert.Contains(t, err.Error(), "rule import alias conflict")
 	fn := findFuncDeclInFile(t, root, "Run")
 	stmt, ok := fn.Body.List[0].(*dst.IfStmt)
 	require.True(t, ok, "expected *dst.IfStmt, got %T", fn.Body.List[0])
@@ -959,8 +1022,8 @@ import (
 
 func Run(ok bool) {
 	if ok {
-		f := sink{}
-		_ = f
+		traced := sink{}
+		_ = traced
 	} else {
 		http.Get("url")
 	}
@@ -994,7 +1057,7 @@ func Run(ok bool) {
 	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
 	ident, ok := sel.X.(*dst.Ident)
 	require.True(t, ok)
-	assert.Equal(t, "f", ident.Name, "injected code must use the file's existing alias, not the rule's")
+	assert.Equal(t, "traced", ident.Name, "injected code must keep the rule's alias")
 	assert.Equal(t, "Println", sel.Sel.Name)
 }
 
@@ -1009,7 +1072,7 @@ func Run(traced Sink) {}
 		Func:         "Run",
 		Raw:          `{{ .FuncArgument 0 }}.Method()`,
 	}
-	aliases := rawAliasContext{overrides: map[string]string{"traced": "f"}}
+	aliases := rawAliasContext{}
 
 	err := insertRaw(context.Background(), r, funcDecl, root, aliases)
 
@@ -1026,10 +1089,10 @@ func Run(traced Sink) {}
 	assert.Equal(t, "Method", sel.Sel.Name)
 }
 
-func TestApplyRawRule_AliasOverrideUsesResolvedName(t *testing.T) {
-	// The target file imports a divergent-name dependency unaliased, so the
-	// override must use ip.importNames' resolved real name, not a guess
-	// derived from the import path.
+func TestApplyRawRule_RuleAliasForUnaliasedImportedPath(t *testing.T) {
+	// The target file imports a divergent-name dependency unaliased. Its name
+	// comes from ip.importNames, not a live package lookup, and the rule's
+	// alias is imported next to it.
 	const importPath = "github.com/redis/go-redis/v9"
 	root := parseFile(t, `package main
 
@@ -1062,9 +1125,9 @@ func Run() {}
 	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
 	ident, ok := sel.X.(*dst.Ident)
 	require.True(t, ok)
-	assert.Equal(t, "redis", ident.Name, "override must use the resolved real name, not the path-derived guess")
+	assert.Equal(t, "traced", ident.Name, "injected code must keep the rule's alias")
 	assert.Equal(t, "Ping", sel.Sel.Name)
-	assert.Equal(t, 1, countImportSpecs(root), "must not add a redundant import for an alias the rewrite eliminated")
+	assert.Equal(t, 2, countImportSpecs(root), "the rule's alias must be imported next to the file's import")
 }
 
 func TestApplyRawRule_RenderTemplateErrorWraps(t *testing.T) {

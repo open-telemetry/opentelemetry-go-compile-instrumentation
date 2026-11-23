@@ -276,6 +276,38 @@ func TestAddToFile(t *testing.T) {
 			errorMsg:    "import conflict",
 		},
 		{
+			name: "alias already declared in the file",
+			root: &dst.File{
+				Decls: []dst.Decl{
+					&dst.GenDecl{
+						Tok:   token.VAR,
+						Specs: []dst.Spec{&dst.ValueSpec{Names: []*dst.Ident{dst.NewIdent("traced")}}},
+					},
+				},
+			},
+			newImports:  map[string]string{"traced": "fmt"},
+			expectError: true,
+			errorMsg:    "is already declared in the file",
+		},
+		{
+			name: "method name does not block the alias",
+			root: &dst.File{
+				Decls: []dst.Decl{
+					&dst.FuncDecl{
+						Recv: &dst.FieldList{List: []*dst.Field{{Type: dst.NewIdent("T")}}},
+						Name: dst.NewIdent("traced"),
+						Type: &dst.FuncType{},
+					},
+				},
+			},
+			newImports: map[string]string{"traced": "fmt"},
+			checkResult: func(t *testing.T, root *dst.File) {
+				genDecl, ok := root.Decls[0].(*dst.GenDecl)
+				require.True(t, ok, "the import declaration must come first")
+				require.Len(t, genDecl.Specs, 1)
+			},
+		},
+		{
 			name: "duplicate import ignored",
 			root: &dst.File{
 				Decls: []dst.Decl{
@@ -322,7 +354,7 @@ func TestAddToFile(t *testing.T) {
 			},
 		},
 		{
-			name: "same path different alias - should skip",
+			name: "same path different alias - adds a second import",
 			root: &dst.File{
 				Decls: []dst.Decl{
 					&dst.GenDecl{
@@ -340,10 +372,13 @@ func TestAddToFile(t *testing.T) {
 			checkResult: func(t *testing.T, root *dst.File) {
 				require.Len(t, root.Decls, 1)
 				genDecl := root.Decls[0].(*dst.GenDecl)
-				assert.Len(t, genDecl.Specs, 1)
-				spec := genDecl.Specs[0].(*dst.ImportSpec)
-				require.NotNil(t, spec.Name)
-				assert.Equal(t, "ctx", spec.Name.Name)
+				require.Len(t, genDecl.Specs, 2)
+				for i, alias := range []string{"ctx", "c"} {
+					spec := genDecl.Specs[i].(*dst.ImportSpec)
+					require.NotNil(t, spec.Name)
+					assert.Equal(t, alias, spec.Name.Name)
+					assert.Equal(t, `"context"`, spec.Path.Value)
+				}
 			},
 		},
 		{
@@ -394,7 +429,7 @@ func TestAddToFile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := AddToFile(t.Context(), tt.root, tt.newImports)
+			err := AddToFile(t.Context(), tt.root, tt.newImports, nil)
 			if tt.expectError {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errorMsg)
@@ -492,7 +527,7 @@ func TestFindNew(t *testing.T) {
 				},
 			},
 			ruleImports:      map[string]string{"c": "context"},
-			expectedNew:      map[string]string{},
+			expectedNew:      map[string]string{"c": "context"},
 			expectedAliases:  map[string]string{"context": "ctx"},
 			expectedExplicit: map[string]bool{"context": true},
 		},
@@ -511,7 +546,7 @@ func TestFindNew(t *testing.T) {
 				},
 			},
 			ruleImports:      map[string]string{"ctx": "context"},
-			expectedNew:      map[string]string{},
+			expectedNew:      map[string]string{"ctx": "context"},
 			expectedAliases:  map[string]string{"context": "context"},
 			expectedExplicit: map[string]bool{},
 		},
@@ -539,7 +574,7 @@ func TestFindNew(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := FindNew(t.Context(), tt.root, tt.ruleImports)
+			result := FindNew(t.Context(), tt.root, tt.ruleImports, nil)
 			assert.Equal(t, tt.expectedNew, result.NewImports)
 			assert.Equal(t, tt.expectedAliases, result.ExistingAliases)
 			assert.Equal(t, tt.expectedExplicit, result.ExplicitAliases)
@@ -563,7 +598,7 @@ func TestFindNew_MultiAliasSets(t *testing.T) {
 		},
 	}
 
-	result := FindNew(t.Context(), root, map[string]string{"a": "fmt"})
+	result := FindNew(t.Context(), root, map[string]string{"a": "fmt"}, nil)
 
 	assert.Equal(t, map[string][]string{"fmt": {"a", "b"}}, result.ExistingAliasSets)
 	assert.Equal(t, "b", result.ExistingAliases["fmt"], "the last spec wins in the single-alias view")

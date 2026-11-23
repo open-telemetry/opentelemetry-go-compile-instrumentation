@@ -312,10 +312,10 @@ func TestApplyCallRule_AppendArgsFailureIsUnmodified(t *testing.T) {
 	assert.False(t, fileImportsPath(file, "example.com/traced"))
 }
 
-func TestApplyCallRule_ImportAliasMismatchUsesFileExistingAlias(t *testing.T) {
+func TestApplyCallRule_ImportAliasMismatchImportsRuleAlias(t *testing.T) {
 	// The rule is written against the alias "traced" for "fmt". The
 	// file already imports "fmt" under its own alias "f". The injected
-	// code must use "f", not fail the build.
+	// code keeps "traced", and "fmt" is imported again under that alias.
 	root := parseFile(t, `package main
 
 import (
@@ -341,11 +341,13 @@ func Run() {
 	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
 	ident, ok := sel.X.(*dst.Ident)
 	require.True(t, ok)
-	assert.Equal(t, "f", ident.Name, "injected code must use the file's existing alias, not the rule's")
+	assert.Equal(t, "traced", ident.Name, "injected code must keep the rule's alias")
 	assert.Equal(t, "Call", sel.Sel.Name)
+	assert.True(t, fileImportsAlias(root, "traced", "fmt"), "the rule's alias must be imported")
+	assert.True(t, fileImportsAlias(root, "f", "fmt"), "the file's own import must be kept")
 }
 
-func TestApplyCallRule_UnrelatedSelectorSharingRuleAliasDoesNotBlockOverride(t *testing.T) {
+func TestApplyCallRule_UnrelatedSelectorSharingRuleAliasDoesNotBlockRule(t *testing.T) {
 	root := parseFile(t, `package main
 
 import (
@@ -375,10 +377,10 @@ func Run() {
 	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
 	ident, ok := sel.X.(*dst.Ident)
 	require.True(t, ok)
-	assert.Equal(t, "f", ident.Name, "injected code must use the file's existing alias, not the rule's")
+	assert.Equal(t, "traced", ident.Name, "injected code must keep the rule's alias")
 }
 
-func TestApplyCallRule_OverrideShadowedByParameterReportsConflict(t *testing.T) {
+func TestApplyCallRule_RuleAliasShadowedByParameterReportsConflict(t *testing.T) {
 	root := parseFile(t, `package main
 
 import (
@@ -386,7 +388,7 @@ import (
 	"net/http"
 )
 
-func Run(f sink) {
+func Run(traced sink) {
 	http.Get("url")
 }
 `)
@@ -396,20 +398,19 @@ func Run(f sink) {
 	_, err := newTestPhase().applyCallRule(context.Background(), r, root)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "alias override conflict")
+	assert.Contains(t, err.Error(), "rule import alias conflict")
 	run := findFuncDeclInFile(t, root, "Run")
 	stmt, ok := run.Body.List[0].(*dst.ExprStmt)
 	require.True(t, ok, "expected *dst.ExprStmt, got %T", run.Body.List[0])
 	_, ok = stmt.X.(*dst.CallExpr)
 	require.True(t, ok, "expected *dst.CallExpr, got %T", stmt.X)
 	assert.Equal(t, "http", stmt.X.(*dst.CallExpr).Fun.(*dst.SelectorExpr).X.(*dst.Ident).Name,
-		"must not wrap the call when the override would resolve to the wrong identifier")
+		"must not wrap the call when the rule's alias would resolve to the wrong identifier")
 }
 
-func TestApplyCallRule_OverrideShadowedByNestedLocalReportsConflict(t *testing.T) {
-	// The file aliases fmt as f and a nested block rebinds f before the call
-	// site, so the rewritten qualifier would resolve to the local instead of
-	// the import.
+func TestApplyCallRule_RuleAliasShadowedByNestedLocalReportsConflict(t *testing.T) {
+	// A nested block binds traced before the call site, so the rule's
+	// qualifier would resolve to the local instead of the import.
 	root := parseFile(t, `package main
 
 import (
@@ -419,8 +420,8 @@ import (
 
 func Run(ok bool) {
 	if ok {
-		f := sink{}
-		_ = f
+		traced := sink{}
+		_ = traced
 		http.Get("url")
 	}
 }
@@ -431,17 +432,17 @@ func Run(ok bool) {
 	_, err := newTestPhase().applyCallRule(context.Background(), r, root)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "alias override conflict")
+	assert.Contains(t, err.Error(), "rule import alias conflict")
 	run := findFuncDeclInFile(t, root, "Run")
 	stmt, ok := run.Body.List[0].(*dst.IfStmt)
 	require.True(t, ok, "expected *dst.IfStmt, got %T", run.Body.List[0])
 	inner, ok := stmt.Body.List[len(stmt.Body.List)-1].(*dst.ExprStmt)
 	require.True(t, ok, "expected *dst.ExprStmt, got %T", stmt.Body.List[len(stmt.Body.List)-1])
 	assert.Equal(t, "http", inner.X.(*dst.CallExpr).Fun.(*dst.SelectorExpr).X.(*dst.Ident).Name,
-		"must not wrap the call when the override would resolve to the wrong identifier")
+		"must not wrap the call when the rule's alias would resolve to the wrong identifier")
 }
 
-func TestApplyCallRule_OverrideShadowedOutsideCallPathAppliesRule(t *testing.T) {
+func TestApplyCallRule_RuleAliasShadowedOutsideCallPathAppliesRule(t *testing.T) {
 	// The shadowing local lives in a block that does not contain the call
 	// site, so it cannot affect the injected qualifier and the rule applies.
 	root := parseFile(t, `package main
@@ -453,8 +454,8 @@ import (
 
 func Run() {
 	if true {
-		f := sink{}
-		_ = f
+		traced := sink{}
+		_ = traced
 	}
 	http.Get("url")
 }
@@ -474,14 +475,13 @@ func Run() {
 	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
 	ident, ok := sel.X.(*dst.Ident)
 	require.True(t, ok)
-	assert.Equal(t, "f", ident.Name, "injected code must use the file's existing alias, not the rule's")
+	assert.Equal(t, "traced", ident.Name, "injected code must keep the rule's alias")
 	assert.Equal(t, "Call", sel.Sel.Name)
 }
 
-func TestApplyCallRule_AppendArgsOverrideShadowedAtCallSiteReportsConflict(t *testing.T) {
-	// append_args injects the rule's alias at the call site as well; a local
-	// binding between the function entry and the call shadows the rewritten
-	// qualifier there too.
+func TestApplyCallRule_AppendArgsRuleAliasShadowedAtCallSiteReportsConflict(t *testing.T) {
+	// append_args injects the rule's alias at the call site as well, and a
+	// local bound between the function entry and the call shadows it there.
 	root := parseFile(t, `package main
 
 import (
@@ -491,8 +491,8 @@ import (
 
 func Run(ok bool) {
 	if ok {
-		f := sink{}
-		_ = f
+		traced := sink{}
+		_ = traced
 		http.Get("url")
 	}
 }
@@ -504,14 +504,14 @@ func Run(ok bool) {
 	_, err := newTestPhase().applyCallRule(context.Background(), r, root)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "alias override conflict")
+	assert.Contains(t, err.Error(), "rule import alias conflict")
 	run := findFuncDeclInFile(t, root, "Run")
 	stmt, ok := run.Body.List[0].(*dst.IfStmt)
 	require.True(t, ok, "expected *dst.IfStmt, got %T", run.Body.List[0])
 	inner, ok := stmt.Body.List[len(stmt.Body.List)-1].(*dst.ExprStmt)
 	require.True(t, ok, "expected *dst.ExprStmt, got %T", stmt.Body.List[len(stmt.Body.List)-1])
 	call := inner.X.(*dst.CallExpr)
-	assert.Len(t, call.Args, 1, "must not append arguments when the override would resolve to the wrong identifier")
+	assert.Len(t, call.Args, 1, "must not append arguments when the rule's alias would resolve to the wrong identifier")
 }
 
 func TestApplyCallReplace_DoesNotRewriteOriginalCallArguments(t *testing.T) {
@@ -524,9 +524,8 @@ func TestApplyCallReplace_DoesNotRewriteOriginalCallArguments(t *testing.T) {
 	root := makeCallFile(call)
 	r := httpGetRule(`traced.Wrap({{ . }})`)
 	importAliases := map[string]string{"http": "net/http"}
-	aliasOverrides := map[string]string{"traced": "f"}
 
-	modified, err := newTestPhase().applyCallReplace(t.Context(), r, root, importAliases, aliasOverrides)
+	modified, err := newTestPhase().applyCallReplace(t.Context(), r, root, importAliases)
 
 	require.NoError(t, err)
 	assert.True(t, modified)
@@ -535,7 +534,7 @@ func TestApplyCallReplace_DoesNotRewriteOriginalCallArguments(t *testing.T) {
 	require.True(t, ok, "expected *dst.CallExpr, got %T", stmt.X)
 	outerSel, ok := outer.Fun.(*dst.SelectorExpr)
 	require.True(t, ok, "expected *dst.SelectorExpr, got %T", outer.Fun)
-	assert.Equal(t, "f", outerSel.X.(*dst.Ident).Name, "the rule's own qualifier must move to the file's alias")
+	assert.Equal(t, "traced", outerSel.X.(*dst.Ident).Name, "the rule's own qualifier must be kept")
 	assert.Equal(t, "Wrap", outerSel.Sel.Name)
 	require.Len(t, outer.Args, 1)
 	inner, ok := outer.Args[0].(*dst.CallExpr)
@@ -793,6 +792,31 @@ func WithoutContext(name string) {
 
 // fileImportsPath reports whether root has a top-level import declaration
 // for the given import path.
+// fileImportsAlias reports whether root imports path under alias. An
+// unaliased import counts under the last element of its path.
+func fileImportsAlias(root *dst.File, alias, path string) bool {
+	for _, decl := range root.Decls {
+		gen, ok := decl.(*dst.GenDecl)
+		if !ok || gen.Tok != token.IMPORT {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			imp := spec.(*dst.ImportSpec)
+			if strings.Trim(imp.Path.Value, `"`) != path {
+				continue
+			}
+			name := path[strings.LastIndex(path, "/")+1:]
+			if imp.Name != nil {
+				name = imp.Name.Name
+			}
+			if name == alias {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func fileImportsPath(root *dst.File, path string) bool {
 	for _, decl := range root.Decls {
 		genDecl, ok := decl.(*dst.GenDecl)
@@ -1282,7 +1306,7 @@ func TestApplyCallAppendArgs_NoMatchReturnsFalse(t *testing.T) {
 
 	ip := newTestPhase()
 	importAliases := ast.ImportAliasMap(file, nil)
-	result, err := ip.applyCallAppendArgs(t.Context(), r, file, importAliases, nil)
+	result, err := ip.applyCallAppendArgs(t.Context(), r, file, importAliases)
 
 	require.NoError(t, err)
 	assert.False(t, result, "applyCallAppendArgs must return false when no calls match")
@@ -2751,7 +2775,7 @@ func Run() {
 	assert.Equal(t, "NewClient", sel.Sel.Name)
 }
 
-func TestApplyCallRule_AliasOverrideDoesNotResolvePackages(t *testing.T) {
+func TestApplyCallRule_RuleAliasForImportedPathDoesNotResolvePackages(t *testing.T) {
 	root := parseFile(t, `package main
 
 import (
@@ -2777,10 +2801,12 @@ func Run() {
 	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
 	ident, ok := sel.X.(*dst.Ident)
 	require.True(t, ok)
-	assert.Equal(t, "f", ident.Name, "override must use the file's existing alias without a live package lookup")
+	assert.Equal(t, "traced", ident.Name, "injected code must keep the rule's alias")
+	assert.True(t, fileImportsAlias(root, "traced", "example.com/does/not/exist"),
+		"the rule's alias must be imported without a live package lookup")
 }
 
-func TestApplyCallRule_AliasOverrideUsesResolvedName(t *testing.T) {
+func TestApplyCallRule_RuleAliasForUnaliasedImportedPath(t *testing.T) {
 	const importPath = "github.com/redis/go-redis/v9"
 	root := parseFile(t, `package main
 
@@ -2814,9 +2840,10 @@ func Run() {
 	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
 	ident, ok := sel.X.(*dst.Ident)
 	require.True(t, ok)
-	assert.Equal(t, "redis", ident.Name, "override must use the resolved real name, not the path-derived guess")
+	assert.Equal(t, "traced", ident.Name, "injected code must keep the rule's alias")
 	assert.Equal(t, "Wrap", sel.Sel.Name)
-	assert.Equal(t, 1, countImportSpecs(root), "must not add a redundant import for an alias the rewrite eliminated")
+	assert.Equal(t, 2, countImportSpecs(root), "the rule's alias must be imported next to the file's import")
+	assert.True(t, fileImportsAlias(root, "traced", importPath))
 }
 
 // callReceiverSource is a sample package for the {{ .CallReceiver }} tests.

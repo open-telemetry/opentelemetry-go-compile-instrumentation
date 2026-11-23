@@ -489,9 +489,9 @@ func TestApplyLitRule_InvalidValueExpression(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to parse value")
 }
 
-// --- import alias override tests ---
+// --- rule import alias tests ---
 
-func TestApplyLitRule_ValueAliasMismatchUsesFileExistingAlias(t *testing.T) {
+func TestApplyLitRule_ValueAliasMismatchImportsRuleAlias(t *testing.T) {
 	// The rule's field value is written against the alias "traced" for
 	// "fmt". The file already imports "fmt" under its own alias "f". The
 	// injected value must use "f", not fail the build.
@@ -522,11 +522,11 @@ func f2() *http.Transport {
 	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
 	ident, ok := sel.X.(*dst.Ident)
 	require.True(t, ok)
-	assert.Equal(t, "f", ident.Name, "injected value must use the file's existing alias, not the rule's")
+	assert.Equal(t, "traced", ident.Name, "injected value must keep the rule's alias")
 	assert.Equal(t, "Sprintf", sel.Sel.Name)
 }
 
-func TestApplyLitRule_WrapAliasMismatchUsesFileExistingAlias(t *testing.T) {
+func TestApplyLitRule_WrapAliasMismatchImportsRuleAlias(t *testing.T) {
 	// Same mismatch as above, but exercised through the wrap path instead
 	// of value, since the two are rewritten at different points.
 	root := parseFile(t, `package main
@@ -555,16 +555,16 @@ func f2() *http.Transport {
 	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
 	ident, ok := sel.X.(*dst.Ident)
 	require.True(t, ok)
-	assert.Equal(t, "f", ident.Name, "wrapped value must use the file's existing alias, not the rule's")
+	assert.Equal(t, "traced", ident.Name, "wrapped value must keep the rule's alias")
 	assert.Equal(t, "Sprint", sel.Sel.Name)
 	require.Len(t, call.Args, 1)
 	assert.Equal(t, "myProxy", call.Args[0].(*dst.Ident).Name)
 }
 
-func TestApplyLitRule_AliasOverrideUsesResolvedName(t *testing.T) {
-	// The target file imports a divergent-name dependency unaliased, so the
-	// override must use ip.importNames' resolved real name, not a guess
-	// derived from the import path.
+func TestApplyLitRule_RuleAliasForUnaliasedImportedPath(t *testing.T) {
+	// The target file imports a divergent-name dependency unaliased. Its name
+	// comes from ip.importNames, not a live package lookup, and the rule's
+	// alias is imported next to it.
 	const importPath = "github.com/redis/go-redis/v9"
 	root := parseFile(t, `package main
 
@@ -593,9 +593,9 @@ func f2() *http.Transport {
 	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
 	ident, ok := sel.X.(*dst.Ident)
 	require.True(t, ok)
-	assert.Equal(t, "redis", ident.Name, "override must use the resolved real name, not the path-derived guess")
+	assert.Equal(t, "traced", ident.Name, "injected code must keep the rule's alias")
 	assert.Equal(t, "NewClient", sel.Sel.Name)
-	assert.Equal(t, 2, countImportSpecs(root), "must not add a redundant import for an alias the rewrite eliminated")
+	assert.Equal(t, 3, countImportSpecs(root), "the rule's alias must be imported next to the file's imports")
 }
 
 func TestApplyLitRule_DotImportConflictSurfacesAsAnError(t *testing.T) {
@@ -619,11 +619,10 @@ func f2() *http.Transport {
 	assert.Contains(t, err.Error(), "dot-import conflict")
 }
 
-func TestApplyLitRule_OverrideShadowedByParameterReportsConflict(t *testing.T) {
-	// The rule writes its injected code against alias "traced" for "fmt",
-	// which the rewrite moves to the file's alias "f". The enclosing
-	// function's parameter is also named "f", so the rewritten code would
-	// resolve to the parameter while still compiling.
+func TestApplyLitRule_RuleAliasShadowedByParameterReportsConflict(t *testing.T) {
+	// The rule writes its injected code against alias "traced" for "fmt".
+	// The enclosing function's parameter is also named "traced", so the
+	// injected code would resolve to the parameter instead of the import.
 	root := parseFile(t, `package main
 
 import (
@@ -631,7 +630,7 @@ import (
 	"net/http"
 )
 
-func run(f sink) *http.Transport {
+func run(traced sink) *http.Transport {
 	return &http.Transport{Proxy: myProxy}
 }
 `)
@@ -641,13 +640,13 @@ func run(f sink) *http.Transport {
 	_, err := newTestPhase().applyLitRule(context.Background(), r, root)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "alias override conflict")
+	assert.Contains(t, err.Error(), "rule import alias conflict")
 	assert.Contains(t, err.Error(), "run", "the error names the offending function")
 }
 
-func TestApplyLitRule_OverrideShadowedByNestedLocalReportsConflict(t *testing.T) {
-	// The matched composite literal sits inside a nested block that rebinds
-	// the file's alias, so the wrapped field value would resolve to that local
+func TestApplyLitRule_RuleAliasShadowedByNestedLocalReportsConflict(t *testing.T) {
+	// The matched composite literal sits inside a nested block that binds the
+	// rule's alias, so the wrapped field value would resolve to that local
 	// instead of the import.
 	root := parseFile(t, `package main
 
@@ -658,8 +657,8 @@ import (
 
 func run() *http.Transport {
 	if myCond {
-		f := sink{}
-		_ = f
+		traced := sink{}
+		_ = traced
 		return &http.Transport{Proxy: myProxy}
 	}
 	return nil
@@ -671,14 +670,14 @@ func run() *http.Transport {
 	_, err := newTestPhase().applyLitRule(context.Background(), r, root)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "alias override conflict")
+	assert.Contains(t, err.Error(), "rule import alias conflict")
 	assert.Contains(t, err.Error(), "run", "the error names the offending function")
 }
 
 func TestApplyLitRule_WrapLiteralShadowCheckOnlyForWrappedForm(t *testing.T) {
-	// The parameter "f" shadows the file's alias for "fmt", which the rule's
-	// alias "traced" is rewritten to. Only a literal whose form has a
-	// template receives the rule's code, so only that one is a conflict.
+	// The parameter "traced" shadows the rule's alias for "fmt". Only a
+	// literal whose form has a template receives the rule's code, so only that
+	// one is a conflict.
 	const src = `package main
 
 import (
@@ -686,7 +685,7 @@ import (
 	"net/http"
 )
 
-func run(f sink) any {
+func run(traced sink) any {
 	return %s
 }
 `
@@ -713,7 +712,7 @@ func run(f sink) any {
 
 			if tt.wantConflict {
 				require.Error(t, err)
-				assert.Contains(t, err.Error(), "alias override conflict")
+				assert.Contains(t, err.Error(), "rule import alias conflict")
 				return
 			}
 			require.NoError(t, err)
@@ -722,10 +721,10 @@ func run(f sink) any {
 	}
 }
 
-func TestApplyLitRule_OverrideNonShadowingSignatureAppliesRule(t *testing.T) {
+func TestApplyLitRule_RuleAliasNonShadowingSignatureAppliesRule(t *testing.T) {
 	// Same rule and file aliases as the shadowing test above, but the
-	// enclosing function's signature does not name "f", so the rule applies
-	// and the wrapped value uses the file's alias.
+	// enclosing function's signature does not name "traced", so the rule
+	// applies and the wrapped value keeps the rule's alias.
 	root := parseFile(t, `package main
 
 import (
@@ -752,7 +751,7 @@ func run(s sink) *http.Transport {
 	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
 	ident, ok := sel.X.(*dst.Ident)
 	require.True(t, ok)
-	assert.Equal(t, "f", ident.Name, "wrapped value must use the file's existing alias, not the rule's")
+	assert.Equal(t, "traced", ident.Name, "wrapped value must keep the rule's alias")
 	assert.Equal(t, "Sprint", sel.Sel.Name)
 	require.Len(t, call.Args, 1)
 	assert.Equal(t, "myProxy", call.Args[0].(*dst.Ident).Name)

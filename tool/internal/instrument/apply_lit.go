@@ -19,12 +19,13 @@ import (
 // applyLitRule sets fields on, then wraps, every composite literal of the
 // rule's type found in the target file. It reports whether it changed root.
 func (ip *instrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule, root *dst.File) (bool, error) {
-	importAliases, aliasOverrides := ip.resolveImportOverrides(root, r.Imports)
+	importAliases := ip.importAliasMap(root)
 
-	setters, err := newLitFieldSetters(r, aliasOverrides, ip.fileTypes())
+	setters, err := newLitFieldSetters(r, ip.fileTypes())
 	if err != nil {
 		return false, err
 	}
+	valueAliases := litFieldValueRuleAliases(r, setters)
 	var pointerTmpl, valueTmpl *callTemplate
 	if r.Pointer != "" {
 		if pointerTmpl, err = newCallTemplate(r.Pointer); err != nil {
@@ -57,16 +58,16 @@ func (ip *instrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule
 		// Go rejects a literal that mixes keyed and positional elements, so a
 		// positional literal cannot take the keyed elements this rule produces.
 		// The skip also precedes the shadowing check: a literal the rule never
-		// injects code into cannot resolve a rewritten alias to a local.
+		// injects code into cannot resolve a rule alias to a local.
 		if hasPositionalElements(lit) {
 			ip.Warn("Skipping positional composite literal; set_fields requires keyed elements",
 				"rule", r.Name, "type", r.StructLiteral)
 			continue
 		}
-		if shadowErr := checkAliasOverrideShadowingAt(aliasOverrides, enclosing, lit); shadowErr != nil {
+		if shadowErr := checkRuleAliasShadowingAt(valueAliases, enclosing, lit); shadowErr != nil {
 			return false, shadowErr
 		}
-		litModified, setErr := ip.setLitFields(lit, enclosing, setters, r, aliasOverrides)
+		litModified, setErr := ip.setLitFields(lit, enclosing, setters, r)
 		if setErr != nil {
 			return false, setErr
 		}
@@ -74,7 +75,7 @@ func (ip *instrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule
 	}
 
 	if pointerTmpl != nil || valueTmpl != nil {
-		wrapped, wrapErr := wrapLiterals(root, matched, pointerTmpl, valueTmpl, aliasOverrides)
+		wrapped, wrapErr := wrapLiterals(root, matched, pointerTmpl, valueTmpl, r.Imports)
 		if wrapErr != nil {
 			return false, ex.Wrapf(wrapErr, "failed to wrap literal of %s", r.StructLiteral)
 		}
@@ -85,7 +86,7 @@ func (ip *instrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule
 		return false, nil
 	}
 
-	if err = ip.addRuleImports(ctx, root, usedRuleImports(root, r.Imports, aliasOverrides), r.Name); err != nil {
+	if err = ip.addRuleImports(ctx, root, usedRuleImports(root, r.Imports), r.Name); err != nil {
 		return false, err
 	}
 	ip.Info("Apply literal rule", "rule", r)
@@ -141,7 +142,7 @@ type litFieldSetter struct {
 // newLitFieldSetters returns the setters of the fields of r. typeInfo is for
 // the ThatImplements helpers in the wrap templates.
 func newLitFieldSetters(
-	r *rule.InstLitRule, aliasOverrides map[string]string, typeInfo *funcTypes,
+	r *rule.InstLitRule, typeInfo *funcTypes,
 ) ([]*litFieldSetter, error) {
 	setters := make([]*litFieldSetter, 0, len(r.Field))
 	for _, f := range r.Field {
@@ -151,7 +152,6 @@ func newLitFieldSetters(
 			if err != nil {
 				return nil, ex.Wrapf(err, "failed to parse value %q for field %q", f.Value, f.Name)
 			}
-			replaceQualifierAliases(value, aliasOverrides)
 			setter.value = value
 		}
 		if f.Wrap != "" {
@@ -167,6 +167,18 @@ func newLitFieldSetters(
 	return setters, nil
 }
 
+// litFieldValueRuleAliases returns the aliases of r's imports that the parsed
+// field values of setters use as a qualifier.
+func litFieldValueRuleAliases(r *rule.InstLitRule, setters []*litFieldSetter) map[string]bool {
+	nodes := make([]dst.Node, 0, len(setters))
+	for _, setter := range setters {
+		if setter.value != nil {
+			nodes = append(nodes, setter.value)
+		}
+	}
+	return injectedRuleAliases(r.Imports, nodes...)
+}
+
 // wrapLiterals replaces each matched literal with its wrap_literal template:
 // pointer for &T{...} (the whole & expression) and value for T{...}. A form
 // without a template is left alone. It reports whether root changed.
@@ -174,7 +186,7 @@ func wrapLiterals(
 	root *dst.File,
 	matched []litWithEnclosingFunc,
 	pointer, value *callTemplate,
-	aliasOverrides map[string]string,
+	ruleImports map[string]string,
 ) (bool, error) {
 	enclosingOf := make(map[*dst.CompositeLit]*dst.FuncDecl, len(matched))
 	for _, m := range matched {
@@ -217,13 +229,12 @@ func wrapLiterals(
 		if !isMatched || tmpl == nil {
 			return true
 		}
-		// Only a literal this rule wraps gets the rule's code, so only its
-		// scope can shadow a rewritten alias.
-		if err := checkAliasOverrideShadowingAt(aliasOverrides, enclosing, lit); err != nil {
-			wrapErr = err
-			return false
+		wrapped, usedAliases, err := tmpl.compileExpression(expr, callSite{}, enclosing, nil, ruleImports)
+		if err == nil {
+			// Only a literal this rule wraps gets the rule's code, so only its
+			// scope can shadow the rule's imports.
+			err = checkRuleAliasShadowingAt(usedAliases, enclosing, lit)
 		}
-		wrapped, err := tmpl.compileExpression(expr, callSite{}, enclosing, nil, aliasOverrides)
 		if err != nil {
 			wrapErr = err
 			return false
@@ -287,7 +298,6 @@ func (ip *instrumentPhase) setLitFields(
 	enclosing *dst.FuncDecl,
 	setters []*litFieldSetter,
 	r *rule.InstLitRule,
-	aliasOverrides map[string]string,
 ) (bool, error) {
 	changed := false
 	var prepend []dst.Expr
@@ -303,7 +313,16 @@ func (ip *instrumentPhase) setLitFields(
 			// enclosing, when the literal sits inside a function, makes the shared
 			// function template variables ({{ .FuncArgument N }} etc.) available
 			// in the wrap template alongside {{ . }}.
-			wrapped, err := setter.wrap.compileExpression(existing.Value, callSite{}, enclosing, nil, aliasOverrides)
+			wrapped, usedAliases, err := setter.wrap.compileExpression(
+				existing.Value,
+				callSite{},
+				enclosing,
+				nil,
+				r.Imports,
+			)
+			if err == nil {
+				err = checkRuleAliasShadowingAt(usedAliases, enclosing, lit)
+			}
 			if err != nil {
 				return false, ex.Wrapf(err, "failed to wrap field %q of %s", setter.name, r.StructLiteral)
 			}

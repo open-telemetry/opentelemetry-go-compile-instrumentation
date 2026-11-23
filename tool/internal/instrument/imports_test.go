@@ -5,6 +5,7 @@ package instrument
 
 import (
 	"go/token"
+	"strings"
 	"testing"
 
 	"github.com/dave/dst"
@@ -12,16 +13,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestHandleRuleImports_AliasMismatch(t *testing.T) {
+func TestAddRuleImports(t *testing.T) {
 	tests := []struct {
 		name        string
 		root        *dst.File
 		imports     map[string]string
 		expectError bool
 		errorMsg    string
+		// wantImport is an import, as "alias path", that the file must have
+		// after the call. The alias is empty for an unaliased import.
+		wantImport string
 	}{
 		{
-			name: "alias mismatch - file uses ctx but rule expects context",
+			name: "rule alias added next to the file's alias - file uses ctx, rule expects context",
 			root: &dst.File{
 				Decls: []dst.Decl{
 					&dst.GenDecl{
@@ -35,12 +39,11 @@ func TestHandleRuleImports_AliasMismatch(t *testing.T) {
 					},
 				},
 			},
-			imports:     map[string]string{"context": "context"},
-			expectError: true,
-			errorMsg:    "import alias mismatch",
+			imports:    map[string]string{"context": "context"},
+			wantImport: `context context`,
 		},
 		{
-			name: "implicit alias mismatch - file uses context but rule expects ctx",
+			name: "rule alias added next to the implicit alias - file uses context, rule expects ctx",
 			root: &dst.File{
 				Decls: []dst.Decl{
 					&dst.GenDecl{
@@ -53,9 +56,8 @@ func TestHandleRuleImports_AliasMismatch(t *testing.T) {
 					},
 				},
 			},
-			imports:     map[string]string{"ctx": "context"},
-			expectError: true,
-			errorMsg:    "import alias mismatch",
+			imports:    map[string]string{"ctx": "context"},
+			wantImport: `ctx context`,
 		},
 		{
 			name: "versioned path - no mismatch for implicit alias",
@@ -217,11 +219,12 @@ func TestHandleRuleImports_AliasMismatch(t *testing.T) {
 			if tt.expectError {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errorMsg)
-			} else if err != nil {
-				// Note: This may still fail at updateImportConfig step since we don't have
-				// a real importcfg setup. We're only testing the alias mismatch detection.
-				// If there's an error, it shouldn't be about alias mismatch.
-				assert.NotContains(t, err.Error(), "import alias mismatch")
+				return
+			}
+			// The call can still fail at the updateImportConfig step, since there is
+			// no real importcfg. The imports are already in the file by then.
+			if tt.wantImport != "" {
+				assert.Contains(t, fileImports(tt.root), tt.wantImport)
 			}
 		})
 	}
@@ -260,22 +263,9 @@ func TestUpdateImportConfigForFile(t *testing.T) {
 	})
 }
 
-// --- resolveImportOverrides tests ---
+// --- importAliasMap tests ---
 
-func TestResolveImportOverrides_NoRuleImportsProducesNoOverrides(t *testing.T) {
-	root := parseFile(t, `package main
-
-func f() {}
-`)
-
-	ip := newTestPhase()
-	importAliases, overrides := ip.resolveImportOverrides(root, nil)
-
-	assert.Empty(t, importAliases)
-	assert.Empty(t, overrides)
-}
-
-func TestResolveImportOverrides_ReturnsBothFileAliasesAndOverrides(t *testing.T) {
+func TestImportAliasMap_ReturnsFileAliases(t *testing.T) {
 	root := parseFile(t, `package main
 
 import f "fmt"
@@ -284,90 +274,14 @@ func run() {}
 `)
 
 	ip := newTestPhase()
-	importAliases, overrides := ip.resolveImportOverrides(root, map[string]string{"traced": "fmt"})
 
-	require.Equal(t, "fmt", importAliases["f"])
-	assert.Equal(t, map[string]string{"traced": "f"}, overrides)
+	assert.Equal(t, "fmt", ip.importAliasMap(root)["f"])
 }
 
-func TestResolveImportOverrides_DuplicatePathPicksStableAlias(t *testing.T) {
-	root := parseFile(t, `package main
-
-import (
-	a "fmt"
-	b "fmt"
-)
-
-func run() {}
-`)
-	ip := newTestPhase()
-
-	for range 20 {
-		_, overrides := ip.resolveImportOverrides(root, map[string]string{"traced": "fmt"})
-		assert.Equal(t, map[string]string{"traced": "a"}, overrides,
-			"the override must pick the same alias on every call")
-	}
-}
-
-func TestResolveImportOverrides_UnresolvedUnaliasedImportProducesNoOverride(t *testing.T) {
-	const importPath = "github.com/redis/go-redis/v9"
-	root := parseFile(t, `package main
-
-import "`+importPath+`"
-
-func run() {}
-`)
-
-	ip := newTestPhase()
-	_, overrides := ip.resolveImportOverrides(root, map[string]string{"redis": importPath})
-
-	assert.Empty(t, overrides)
-}
-
-func TestResolveImportOverrides_NoAliasOverrideWhenRuleAliasIsAFileAlias(t *testing.T) {
-	// A file may import one path under several aliases. When the rule alias
-	// already names the path in the file, the generated code compiles as
-	// written and must not be rewritten to a different file alias.
-	root := parseFile(t, `package main
-
-import (
-	a "fmt"
-	b "fmt"
-)
-
-func run() {}
-`)
-
-	ip := newTestPhase()
-	for _, ruleAlias := range []string{"a", "b"} {
-		_, overrides := ip.resolveImportOverrides(root, map[string]string{ruleAlias: "fmt"})
-		assert.Empty(t, overrides, "rule alias %q is one of the file's aliases for fmt", ruleAlias)
-	}
-}
-
-func TestResolveImportOverrides_OverrideWhenRuleAliasIsNotAFileAlias(t *testing.T) {
-	// When no file alias matches the rule alias, the override picks the
-	// lexicographically smallest file alias.
-	root := parseFile(t, `package main
-
-import (
-	a "fmt"
-	b "fmt"
-)
-
-func run() {}
-`)
-
-	ip := newTestPhase()
-	_, overrides := ip.resolveImportOverrides(root, map[string]string{"c": "fmt"})
-
-	assert.Equal(t, map[string]string{"c": "a"}, overrides)
-}
-
-func TestAddRuleImports_MultiAliasFileAcceptsEveryExistingAlias(t *testing.T) {
+func TestAddRuleImports_MultiAliasFile(t *testing.T) {
 	// A file may import one path under several aliases. A rule alias that
-	// names one of them must pass validation; a rule alias that names none
-	// of them must fail it.
+	// names one of them needs no new import. A rule alias that names none of
+	// them is imported next to them.
 	root := parseFile(t, `package main
 
 import (
@@ -384,96 +298,47 @@ func run() {}
 		require.NoError(t, err,
 			"rule alias %q is one of the file's aliases for fmt", ruleAlias)
 	}
+	assert.Equal(t, []string{"a fmt", "b fmt"}, fileImports(root))
 
-	err := ip.addRuleImports(t.Context(), root, map[string]string{"c": "fmt"}, "test-rule")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "import alias mismatch")
+	// The call fails at the updateImportConfig step, since there is no real
+	// importcfg. The import is already in the file by then.
+	_ = ip.addRuleImports(t.Context(), root, map[string]string{"c": "fmt"}, "test-rule")
+	assert.Equal(t, []string{"a fmt", "b fmt", "c fmt"}, fileImports(root))
 }
 
-// --- resolveAliasOverrides tests ---
+// --- injectedRuleAliases tests ---
 
-func TestResolveAliasOverrides_MismatchProducesOverride(t *testing.T) {
-	ruleImports := map[string]string{"traced": "fmt"}
-	existingAliasSets := map[string][]string{"fmt": {"f"}}
-
-	overrides := resolveAliasOverrides(ruleImports, existingAliasSets)
-
-	assert.Equal(t, map[string]string{"traced": "f"}, overrides)
-}
-
-func TestResolveAliasOverrides_MatchingAliasProducesNoOverride(t *testing.T) {
-	ruleImports := map[string]string{"redis": "github.com/redis/go-redis/v9"}
-	existingAliasSets := map[string][]string{"github.com/redis/go-redis/v9": {"redis"}}
-
-	overrides := resolveAliasOverrides(ruleImports, existingAliasSets)
-
-	assert.Empty(t, overrides)
-}
-
-func TestResolveAliasOverrides_PathNotYetImportedProducesNoOverride(t *testing.T) {
-	ruleImports := map[string]string{"redis": "github.com/redis/go-redis/v9"}
-	existingAliasSets := map[string][]string{} // path not present in the file yet
-
-	overrides := resolveAliasOverrides(ruleImports, existingAliasSets)
-
-	assert.Empty(t, overrides)
-}
-
-func TestResolveAliasOverrides_DotAndBlankAliasesAreExempt(t *testing.T) {
-	ruleImports := map[string]string{".": "fmt", "_": "net/http"}
-	existingAliasSets := map[string][]string{"fmt": {"f"}, "net/http": {"h"}}
-
-	overrides := resolveAliasOverrides(ruleImports, existingAliasSets)
-
-	assert.Empty(t, overrides, "'.' and '_' aliases must never be substituted")
-}
-
-// --- replaceQualifierAliases tests ---
-
-func TestReplaceQualifierAliases_RewritesMatchingQualifiers(t *testing.T) {
+func TestInjectedRuleAliases_QualifiersOnly(t *testing.T) {
 	expr := &dst.CallExpr{
-		Fun: &dst.SelectorExpr{
-			X:   &dst.Ident{Name: "traced"},
-			Sel: &dst.Ident{Name: "Call"},
-		},
+		Fun: &dst.SelectorExpr{X: &dst.Ident{Name: "traced"}, Sel: &dst.Ident{Name: "Call"}},
 		Args: []dst.Expr{
-			&dst.SelectorExpr{X: &dst.Ident{Name: "traced"}, Sel: &dst.Ident{Name: "Option"}},
-			&dst.Ident{Name: "unrelated"},
+			&dst.SelectorExpr{
+				X:   &dst.SelectorExpr{X: &dst.Ident{Name: "other"}, Sel: &dst.Ident{Name: "Sub"}},
+				Sel: &dst.Ident{Name: "Field"},
+			},
+			&dst.Ident{Name: "plain"},
 		},
 	}
+	ruleImports := map[string]string{"traced": "fmt", "other": "os", "plain": "strings", "unused": "io"}
 
-	replaceQualifierAliases(expr, map[string]string{"traced": "f"})
+	aliases := injectedRuleAliases(ruleImports, expr)
 
-	sel := expr.Fun.(*dst.SelectorExpr)
-	assert.Equal(t, "f", sel.X.(*dst.Ident).Name)
-	argSel := expr.Args[0].(*dst.SelectorExpr)
-	assert.Equal(t, "f", argSel.X.(*dst.Ident).Name)
-	assert.Equal(t, "unrelated", expr.Args[1].(*dst.Ident).Name)
+	assert.Equal(t, map[string]bool{"traced": true, "other": true}, aliases,
+		"only a rule alias used as a qualifier is returned")
 }
 
-func TestReplaceQualifierAliases_NoOverridesLeavesExprUntouched(t *testing.T) {
+func TestInjectedRuleAliases_DotAndBlankNeverReturned(t *testing.T) {
+	expr := &dst.SelectorExpr{X: &dst.Ident{Name: "_"}, Sel: &dst.Ident{Name: "X"}}
+
+	aliases := injectedRuleAliases(map[string]string{"_": "net/http/pprof", ".": "fmt"}, expr)
+
+	assert.Empty(t, aliases)
+}
+
+func TestInjectedRuleAliases_NoRuleImports(t *testing.T) {
 	expr := &dst.SelectorExpr{X: &dst.Ident{Name: "traced"}, Sel: &dst.Ident{Name: "Call"}}
 
-	replaceQualifierAliases(expr, nil)
-
-	assert.Equal(t, "traced", expr.X.(*dst.Ident).Name)
-}
-
-func TestReplaceQualifierAliases_NonIdentQualifier(t *testing.T) {
-	expr := &dst.SelectorExpr{
-		X: &dst.SelectorExpr{
-			X:   &dst.Ident{Name: "traced"},
-			Sel: &dst.Ident{Name: "Sub"},
-		},
-		Sel: &dst.Ident{Name: "Call"},
-	}
-
-	replaceQualifierAliases(expr, map[string]string{"traced": "f"})
-
-	inner := expr.X.(*dst.SelectorExpr)
-	assert.Equal(t, "f", inner.X.(*dst.Ident).Name, "the nested identifier must still be rewritten")
-	assert.Equal(t, "Sub", inner.Sel.Name)
-	assert.Equal(t, "Call", expr.Sel.Name)
+	assert.Empty(t, injectedRuleAliases(nil, expr))
 }
 
 // --- usedRuleImports tests ---
@@ -488,7 +353,7 @@ func f() {}
 		".": "example.com/dotimport",
 	}
 
-	used := usedRuleImports(root, ruleImports, nil)
+	used := usedRuleImports(root, ruleImports)
 
 	assert.Equal(t, ruleImports, used)
 }
@@ -505,7 +370,7 @@ func f() {
 		"unrelated": "example.com/unrelated",
 	}
 
-	used := usedRuleImports(root, ruleImports, nil)
+	used := usedRuleImports(root, ruleImports)
 
 	assert.Equal(t, map[string]string{"traced": "fmt"}, used)
 }
@@ -516,7 +381,7 @@ func TestUsedRuleImports_EmptyRuleImports(t *testing.T) {
 func f() {}
 `)
 
-	used := usedRuleImports(root, nil, nil)
+	used := usedRuleImports(root, nil)
 
 	assert.Nil(t, used)
 }
@@ -530,7 +395,7 @@ func f() {
 `)
 	ruleImports := map[string]string{"traced": "fmt"}
 
-	used := usedRuleImports(root, ruleImports, nil)
+	used := usedRuleImports(root, ruleImports)
 
 	assert.Empty(t, used)
 }
@@ -544,7 +409,7 @@ func f() {
 `)
 	ruleImports := map[string]string{"traced": "fmt"}
 
-	used := usedRuleImports(root, ruleImports, nil)
+	used := usedRuleImports(root, ruleImports)
 
 	assert.Empty(t, used)
 }
@@ -559,7 +424,7 @@ func f() {
 `)
 	ruleImports := map[string]string{"traced": "fmt"}
 
-	used := usedRuleImports(root, ruleImports, nil)
+	used := usedRuleImports(root, ruleImports)
 
 	assert.Equal(t, map[string]string{"traced": "fmt"}, used)
 }
@@ -578,7 +443,7 @@ func f() {
 		".":      "example.com/dotimport",
 	}
 
-	used := usedRuleImports(root, ruleImports, nil)
+	used := usedRuleImports(root, ruleImports)
 
 	assert.Equal(t, map[string]string{
 		"traced": "fmt",
@@ -587,22 +452,7 @@ func f() {
 	}, used)
 }
 
-func TestUsedRuleImports_OverriddenAliasExcludedEvenWhenReferencedElsewhere(t *testing.T) {
-	root := parseFile(t, `package main
-
-func f() {
-	traced.Value()
-}
-`)
-	ruleImports := map[string]string{"traced": "fmt"}
-	aliasOverrides := map[string]string{"traced": "f"}
-
-	used := usedRuleImports(root, ruleImports, aliasOverrides)
-
-	assert.Empty(t, used, "an overridden alias must never reach addRuleImports")
-}
-
-func TestCheckAliasOverrideShadowing_BodyLevelDeclReportsConflict(t *testing.T) {
+func TestCheckRuleAliasShadowing_BodyLevelDeclReportsConflict(t *testing.T) {
 	tests := []struct {
 		name string
 		body string
@@ -629,16 +479,16 @@ func TestCheckAliasOverrideShadowing_BodyLevelDeclReportsConflict(t *testing.T) 
 			root := parseFile(t, "package main\n\nfunc Run() {\n\t"+tt.body+"\n}\n")
 			fn := findFuncDeclInFile(t, root, "Run")
 
-			err := checkAliasOverrideShadowing(map[string]string{"traced": "f"}, fn)
+			err := checkRuleAliasShadowing(map[string]bool{"f": true}, fn)
 
 			require.Error(t, err)
-			assert.Contains(t, err.Error(), "alias override conflict")
+			assert.Contains(t, err.Error(), "rule import alias conflict")
 			assert.Contains(t, err.Error(), "body-level variable")
 		})
 	}
 }
 
-func TestCheckAliasOverrideShadowing_NestedLocalDoesNotReportConflict(t *testing.T) {
+func TestCheckRuleAliasShadowing_NestedLocalDoesNotReportConflict(t *testing.T) {
 	// Locals bound inside nested statements and closures are scoped there;
 	// they do not shadow code injected at the function's top level.
 	root := parseFile(t, `package main
@@ -660,12 +510,12 @@ func Run() {
 `)
 	fn := findFuncDeclInFile(t, root, "Run")
 
-	err := checkAliasOverrideShadowing(map[string]string{"traced": "f"}, fn)
+	err := checkRuleAliasShadowing(map[string]bool{"f": true}, fn)
 
 	assert.NoError(t, err)
 }
 
-func TestCheckAliasOverrideShadowing_NonDefineAssignDoesNotReportConflict(t *testing.T) {
+func TestCheckRuleAliasShadowing_NonDefineAssignDoesNotReportConflict(t *testing.T) {
 	// A plain assignment to a selector must not be collected as a binding.
 	root := parseFile(t, `package main
 
@@ -676,33 +526,33 @@ func Run() {
 `)
 	fn := findFuncDeclInFile(t, root, "Run")
 
-	err := checkAliasOverrideShadowing(map[string]string{"traced": "f"}, fn)
+	err := checkRuleAliasShadowing(map[string]bool{"f": true}, fn)
 
 	assert.NoError(t, err)
 }
 
-func TestCheckAliasOverrideShadowing_NilBodySignatureNameReportsConflict(t *testing.T) {
+func TestCheckRuleAliasShadowing_NilBodySignatureNameReportsConflict(t *testing.T) {
 	// External (e.g. assembly) functions have no body; signature names must
 	// still be checked.
 	root := parseFile(t, "package main\n\nfunc Run(f sink)\n")
 	fn := findFuncDeclInFile(t, root, "Run")
 	require.Nil(t, fn.Body)
 
-	err := checkAliasOverrideShadowing(map[string]string{"traced": "f"}, fn)
+	err := checkRuleAliasShadowing(map[string]bool{"f": true}, fn)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "alias override conflict")
+	assert.Contains(t, err.Error(), "rule import alias conflict")
 }
 
-func TestCheckAliasOverrideShadowing_NoOverridesOrNilEnclosingReportsNoError(t *testing.T) {
+func TestCheckRuleAliasShadowing_NoAliasesOrNilEnclosingReportsNoError(t *testing.T) {
 	root := parseFile(t, "package main\n\nfunc Run(f sink) {\n\tg := 1\n\t_ = g\n}\n")
 	fn := findFuncDeclInFile(t, root, "Run")
 
-	assert.NoError(t, checkAliasOverrideShadowing(nil, fn))
-	assert.NoError(t, checkAliasOverrideShadowing(map[string]string{"traced": "f"}, nil))
+	assert.NoError(t, checkRuleAliasShadowing(nil, fn))
+	assert.NoError(t, checkRuleAliasShadowing(map[string]bool{"f": true}, nil))
 }
 
-func TestCheckAliasOverrideShadowingAt_ScopeOnInjectionPathReportsConflict(t *testing.T) {
+func TestCheckRuleAliasShadowingAt_ScopeOnInjectionPathReportsConflict(t *testing.T) {
 	tests := []struct {
 		name string
 		body string
@@ -750,16 +600,16 @@ func TestCheckAliasOverrideShadowingAt_ScopeOnInjectionPathReportsConflict(t *te
 			fn := findFuncDeclInFile(t, root, "Run")
 			call := findCallInFunc(t, fn)
 
-			err := checkAliasOverrideShadowingAt(map[string]string{"traced": "f"}, fn, call)
+			err := checkRuleAliasShadowingAt(map[string]bool{"f": true}, fn, call)
 
 			require.Error(t, err)
-			assert.Contains(t, err.Error(), "alias override conflict")
+			assert.Contains(t, err.Error(), "rule import alias conflict")
 			assert.Contains(t, err.Error(), "injection point")
 		})
 	}
 }
 
-func TestCheckAliasOverrideShadowingAt_ScopeOutsideInjectionPathReportsNoError(t *testing.T) {
+func TestCheckRuleAliasShadowingAt_ScopeOutsideInjectionPathReportsNoError(t *testing.T) {
 	tests := []struct {
 		name string
 		body string
@@ -791,14 +641,14 @@ func TestCheckAliasOverrideShadowingAt_ScopeOutsideInjectionPathReportsNoError(t
 			fn := findFuncDeclInFile(t, root, "Run")
 			call := findCallInFunc(t, fn)
 
-			err := checkAliasOverrideShadowingAt(map[string]string{"traced": "f"}, fn, call)
+			err := checkRuleAliasShadowingAt(map[string]bool{"f": true}, fn, call)
 
 			assert.NoError(t, err)
 		})
 	}
 }
 
-func TestCheckAliasOverrideShadowingAt_NoOverridesOrNilEnclosingReportsNoError(t *testing.T) {
+func TestCheckRuleAliasShadowingAt_NoAliasesOrNilEnclosingReportsNoError(t *testing.T) {
 	root := parseFile(t, `package main
 
 func Run() {
@@ -812,8 +662,8 @@ func Run() {
 	fn := findFuncDeclInFile(t, root, "Run")
 	call := findCallInFunc(t, fn)
 
-	assert.NoError(t, checkAliasOverrideShadowingAt(nil, fn, call))
-	assert.NoError(t, checkAliasOverrideShadowingAt(map[string]string{"traced": "f"}, nil, call))
+	assert.NoError(t, checkRuleAliasShadowingAt(nil, fn, call))
+	assert.NoError(t, checkRuleAliasShadowingAt(map[string]bool{"f": true}, nil, call))
 }
 
 func TestScopeNamesBetween_TargetOutsideEnclosingPanics(t *testing.T) {
@@ -855,4 +705,25 @@ func findCallInFunc(t *testing.T, fn *dst.FuncDecl) *dst.CallExpr {
 	})
 	require.NotNil(t, found, "no Get call in %s", fn.Name.Name)
 	return found
+}
+
+// fileImports returns root's imports, each as "alias path" with an empty
+// alias for an unaliased import.
+func fileImports(root *dst.File) []string {
+	var specs []string
+	for _, decl := range root.Decls {
+		gen, ok := decl.(*dst.GenDecl)
+		if !ok || gen.Tok != token.IMPORT {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			imp := spec.(*dst.ImportSpec)
+			alias := ""
+			if imp.Name != nil {
+				alias = imp.Name.Name
+			}
+			specs = append(specs, alias+" "+strings.Trim(imp.Path.Value, `"`))
+		}
+	}
+	return specs
 }

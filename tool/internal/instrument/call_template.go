@@ -219,8 +219,9 @@ func (d *callTemplateData) FuncReturnThatImplements(iface string) (string, error
 }
 
 // renderingCallTemplateData wraps callTemplateData for use as text/template
-// render data. Use callTemplateData directly when the real name is needed
-// instead of the marked one, such as in tests.
+// render data. It renders the wrapped call's parts as placeholders; use
+// callTemplateData directly when their source text is needed, such as in
+// tests.
 type renderingCallTemplateData struct {
 	*callTemplateData
 
@@ -240,51 +241,10 @@ type renderedCallParts struct {
 	argumentList bool
 }
 
-func (d renderingCallTemplateData) FuncName() (string, error) {
-	name, err := d.callTemplateData.FuncName()
-	return markDynamicIdent(name), err
-}
-
-func (d renderingCallTemplateData) FuncArgument(idx int) (string, error) {
-	name, err := d.callTemplateData.FuncArgument(idx)
-	return markDynamicIdent(name), err
-}
-
-func (d renderingCallTemplateData) FuncReturn(idx int) (string, error) {
-	name, err := d.callTemplateData.FuncReturn(idx)
-	return markDynamicIdent(name), err
-}
-
-func (d renderingCallTemplateData) Receiver() (string, error) {
-	name, err := d.callTemplateData.Receiver()
-	return markDynamicIdent(name), err
-}
-
-func (d renderingCallTemplateData) FuncArgumentOfType(typeStr string) (string, error) {
-	name, err := d.callTemplateData.FuncArgumentOfType(typeStr)
-	return markDynamicIdent(name), err
-}
-
-func (d renderingCallTemplateData) FuncReturnOfType(typeStr string) (string, error) {
-	name, err := d.callTemplateData.FuncReturnOfType(typeStr)
-	return markDynamicIdent(name), err
-}
-
-func (d renderingCallTemplateData) FuncArgumentThatImplements(iface string) (string, error) {
-	name, err := d.callTemplateData.FuncArgumentThatImplements(iface)
-	return markDynamicIdent(name), err
-}
-
-func (d renderingCallTemplateData) FuncReturnThatImplements(iface string) (string, error) {
-	name, err := d.callTemplateData.FuncReturnThatImplements(iface)
-	return markDynamicIdent(name), err
-}
-
 // CallArgument renders the idx-th (0-indexed) argument of the wrapped call
 // expression as a fixed placeholder (see callArgPlaceholderIdent) instead of
-// the argument's source text, so replaceQualifierAliases cannot rewrite the
-// argument's own code. compileExpression swaps the placeholder for a copy of
-// the argument AST after the rewrite. Validation and error messages match
+// the argument's source text. compileExpression swaps the placeholder for a
+// copy of the argument AST, so the target's own code is kept as it was. Validation and error messages match
 // callTemplateData.CallArgument. Template usage: {{.CallArgument N}}
 func (d renderingCallTemplateData) CallArgument(idx int) (string, error) {
 	if err := d.checkCallArgument(idx); err != nil {
@@ -423,19 +383,21 @@ func (d *callTemplateData) checkCallReceiver() error {
 // FuncArgumentOfType / FuncReturnOfType need it to resolve aliased imports
 // and packages that share a default name. Pass nil when no import context
 // is available.
-// aliasOverrides maps each rule alias to the file's alias.
+// ruleImports are the rule's imports. compileExpression also returns the
+// aliases of ruleImports that the template's own code uses as a qualifier, so
+// the caller can check them against the locals at the injection point.
 //
 // The process:
 //  1. Execute the template with fixed placeholder strings (_.PLACEHOLDER_0 for
 //     "{{ . }}", _.CALLARG_<N> for "{{ .CallArgument N }}" and
 //     "{{ .CallArguments }}", _.CALLRECV for "{{ .CallReceiver }}")
 //  2. Parse the result as a Go statement snippet
-//  3. Rewrite the rule's own qualifiers in that parsed result
-//  4. Replace the placeholders with the actual AST nodes, which keeps the
-//     target's own code untouched by the rewrite in step 3
+//  3. Collect the rule aliases that the parsed template code uses
+//  4. Replace the placeholders with the actual AST nodes, so the target's own
+//     code is not counted in step 3
 func (t *callTemplate) compileExpression(
-	node dst.Expr, site callSite, enclosing *dst.FuncDecl, imports, aliasOverrides map[string]string,
-) (dst.Expr, error) {
+	node dst.Expr, site callSite, enclosing *dst.FuncDecl, imports, ruleImports map[string]string,
+) (dst.Expr, map[string]bool, error) {
 	data := &callTemplateData{clone: site.clone}
 	if data.clone == nil {
 		data.clone = func(expr dst.Expr) dst.Expr { return util.AssertType[dst.Expr](dst.Clone(expr)) }
@@ -459,7 +421,7 @@ func (t *callTemplate) compileExpression(
 	}
 	var sb strings.Builder
 	if err := t.template.Execute(&sb, renderData); err != nil {
-		return nil, ex.Wrapf(err, "failed to execute template")
+		return nil, nil, ex.Wrapf(err, "failed to execute template")
 	}
 	userResult := sb.String()
 
@@ -467,59 +429,57 @@ func (t *callTemplate) compileExpression(
 
 	stmts, err := toolast.NewAstParser().ParseSnippet(userResult)
 	if err != nil {
-		return nil, ex.Wrapf(err, "failed to parse generated code\nGenerated code:\n%s", userResult)
+		return nil, nil, ex.Wrapf(err, "failed to parse generated code\nGenerated code:\n%s", userResult)
 	}
 	if len(stmts) != 1 {
-		return nil, ex.Newf("expected single expression statement, got %d statements", len(stmts))
+		return nil, nil, ex.Newf("expected single expression statement, got %d statements", len(stmts))
 	}
 
 	exprStmt, ok := stmts[0].(*dst.ExprStmt)
 	if !ok {
-		return nil, ex.Newf("expected expression statement, got %T", stmts[0])
+		return nil, nil, ex.Newf("expected expression statement, got %T", stmts[0])
 	}
 
 	rendered := renderData.rendered
 	if !placeholderRendered && len(rendered.args) == 0 && !rendered.receiver && !rendered.argumentList {
-		return nil, ex.Newf(
+		return nil, nil, ex.Newf(
 			"template output did not use {{ . }}, {{ .CallReceiver }}, {{ .CallArguments }} "+
 				"or {{ .CallArgument N }}\nGenerated code:\n%s", userResult,
 		)
 	}
 
-	replaceQualifierAliases(exprStmt.X, aliasOverrides)
-	stripDynamicIdents(exprStmt.X)
+	usedAliases := injectedRuleAliases(ruleImports, exprStmt.X)
 
 	if rendered.receiver || rendered.argumentList || len(rendered.args) > 0 {
 		if err = checkCallPartsEvaluation(exprStmt.X, data, site.deferred); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
-	// Swap the call-part placeholders before the {{ . }} placeholder so
-	// all of them run after the qualifier rewrite; the swapped-in ASTs then
-	// keep the target's original code untouched.
+	// Swap the call-part placeholders before the {{ . }} placeholder. The
+	// swapped-in ASTs keep the target's original code untouched.
 	var swapped map[int]bool
 	exprStmt.X, swapped = data.replaceCallPartPlaceholders(exprStmt.X)
 	if err = checkSwappedCallParts(rendered, swapped, len(data.callArgs)); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	result, replaced := replacePlaceholder(exprStmt.X, node)
 	if placeholderRendered && !replaced {
-		return nil, ex.New(
+		return nil, nil, ex.New(
 			"template output did not contain expected placeholder expression for {{ . }}",
 		)
 	}
 
 	resultExpr, ok := result.(dst.Expr)
 	if !ok {
-		return nil, ex.New("placeholder replacement didn't produce an expression")
+		return nil, nil, ex.New("placeholder replacement didn't produce an expression")
 	}
 	if name, found := findPlaceholder(resultExpr); found {
-		return nil, ex.Newf("template output uses _.%s, a name reserved for otelc placeholders", name)
+		return nil, nil, ex.Newf("template output uses _.%s, a name reserved for otelc placeholders", name)
 	}
 
-	return resultExpr, nil
+	return resultExpr, usedAliases, nil
 }
 
 // findPlaceholder returns the selector name of a placeholder left in expr,
