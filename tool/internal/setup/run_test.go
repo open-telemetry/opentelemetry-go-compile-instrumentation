@@ -293,3 +293,24 @@ func TestToolexecBuildArgs_RunFileTargets(t *testing.T) {
 		})
 	}
 }
+
+func TestGoSubcommand(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		wantSub  string
+		wantArgs []string
+	}{
+		{name: "no arguments", args: nil, wantSub: "", wantArgs: nil},
+		{name: "build keeps its arguments", args: []string{"build", "-o", "app", "."}, wantSub: "build", wantArgs: []string{"-o", "app", "."}},
+		{name: "test keeps its arguments", args: []string{"test", "./..."}, wantSub: "test", wantArgs: []string{"./..."}},
+		{name: "run becomes a build", args: []string{"run", "-exec", "env", "./cmd", "arg"}, wantSub: "build", wantArgs: []string{"./cmd"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sub, args := goSubcommand(tt.args)
+			assert.Equal(t, tt.wantSub, sub)
+			assert.Equal(t, tt.wantArgs, args)
+		})
+	}
+}

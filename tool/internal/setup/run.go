@@ -34,6 +34,20 @@ func runBuildArgs(args []string) []string {
 	return out
 }
 
+// goSubcommand splits the arguments of `otelc go` into the subcommand and its
+// arguments (build, install, run or test). For go run it returns the go build
+// that compiles the program, as the program's arguments and -exec do not belong
+// on that command line.
+func goSubcommand(args []string) (string, []string) {
+	if len(args) == 0 {
+		return "", nil
+	}
+	if args[0] == subcmdRun {
+		return subcmdBuild, runBuildArgs(args[1:])
+	}
+	return args[0], args[1:]
+}
+
 // runProgram runs the instrumented go run command args. On an interrupt, go run
 // waits for the program, which gets the signal from the terminal too. otelc
 // waits the same way: the command does not inherit the cancellation of ctx, so

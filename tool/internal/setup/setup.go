@@ -518,13 +518,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	args := cmd.Args().Slice()
 	subcommand := subcmdBuild
 	if cmd.Name == "go" {
-		subcommand = cmd.Args().First() // build / install / run / test
-		args = cmd.Args().Tail()        // trim the subcommand
-		if subcommand == subcmdRun {
-			// Set up the go build that compiles the program. The program's
-			// arguments and -exec do not belong on its command line.
-			subcommand, args = subcmdBuild, runBuildArgs(args)
-		}
+		subcommand, args = goSubcommand(cmd.Args().Slice())
 	} else if cleanErr := cleanupOwnedSession(); cleanErr != nil {
 		return ex.Wrapf(cleanErr, "cleaning the session directory")
 	} else if err := cleanupDebugArtifacts(); err != nil {
