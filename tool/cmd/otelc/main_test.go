@@ -9,12 +9,16 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
+	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/setup"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -660,5 +664,42 @@ func TestRootCommandFlagNamesUnique(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestExit runs exit in a child process of the test binary, because exit ends
+// the process.
+func TestExit(t *testing.T) {
+	switch os.Getenv("OTELC_TEST_EXIT") {
+	case "go run":
+		exit(ex.Wrapf(&setup.ExitCodeError{Code: 3}, "running the program"))
+	case "other":
+		exit(ex.New("setup failed"))
+	}
+	t.Setenv(envProfilePath, "")
+	t.Setenv(envEnabledProfiles, "")
+
+	for _, tt := range []struct {
+		mode   string
+		code   int
+		output string
+	}{
+		{mode: "go run", code: 3},
+		{mode: "other", code: 1, output: "setup failed"},
+	} {
+		t.Run(tt.mode, func(t *testing.T) {
+			cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestExit$")
+			cmd.Env = append(os.Environ(), "OTELC_TEST_EXIT="+tt.mode)
+			out, err := cmd.CombinedOutput()
+
+			var exitErr *exec.ExitError
+			require.ErrorAs(t, err, &exitErr)
+			assert.Equal(t, tt.code, exitErr.ExitCode())
+			if tt.output == "" {
+				assert.Empty(t, string(out), "go run has already reported the failure")
+			} else {
+				assert.Contains(t, string(out), tt.output)
+			}
+		})
 	}
 }

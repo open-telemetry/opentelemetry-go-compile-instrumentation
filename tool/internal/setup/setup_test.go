@@ -29,15 +29,15 @@ func TestGoBuild_RejectsUnsupportedSubcommand(t *testing.T) {
 		args []string
 	}{
 		{name: "no subcommand", args: []string{"go"}},
-		{name: "unsupported subcommand run", args: []string{"go", "run", "./..."}},
 		{name: "unsupported subcommand vet", args: []string{"go", "vet", "./..."}},
+		{name: "unsupported subcommand generate", args: []string{"go", "generate", "./..."}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cmd := &cli.Command{Name: "go", SkipFlagParsing: true, Action: GoBuild}
 			err := cmd.Run(t.Context(), tt.args)
 			require.Error(t, err)
-			require.Contains(t, err.Error(), "supported")
+			require.Contains(t, err.Error(), "'go run'")
 		})
 	}
 }

@@ -113,6 +113,7 @@ func isSetup() bool {
 const (
 	subcmdBuild   = "build"
 	subcmdInstall = "install"
+	subcmdRun     = "run"
 	subcmdTest    = "test"
 
 	goModFileName = "go.mod"
@@ -138,6 +139,8 @@ const (
 	// coverage for; see nestedCoverFlags.
 	flagCover    = "-cover"
 	flagCoverpkg = "-coverpkg"
+	// flagExec names the program that go run and go test run the binary with.
+	flagExec = "-exec"
 )
 
 // isGoFileTarget reports whether a build target names a Go source file. The go
@@ -536,8 +539,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	args := cmd.Args().Slice()
 	subcommand := subcmdBuild
 	if cmd.Name == "go" {
-		subcommand = cmd.Args().First() // build / install / test
-		args = cmd.Args().Tail()        // trim the subcommand
+		subcommand, args = goSubcommand(cmd.Args().Slice())
 	} else if cleanErr := cleanupOwnedSession(); cleanErr != nil {
 		return ex.Wrapf(cleanErr, "cleaning the session directory")
 	} else if err := cleanupDebugArtifacts(); err != nil {
@@ -1059,6 +1061,9 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool, ext
 		return ex.Wrapf(err, "configuring go cache")
 	}
 
+	if subcommand == subcmdRun {
+		return runProgram(ctx, env, newArgs)
+	}
 	return runBuildCmd(ctx, env, newArgs...)
 }
 
@@ -1066,14 +1071,14 @@ func GoBuild(ctx context.Context, cmd *cli.Command) (err error) {
 	// Validate the invocation before taking the build lock: a bad command
 	// line must fail immediately, not wait behind a running build.
 	if !cmd.Args().Present() {
-		return ex.Newf("no command provided. Only 'go build', 'go install' and 'go test' are supported")
+		return ex.Newf("no command provided. Only 'go build', 'go install', 'go run' and 'go test' are supported")
 	}
 
 	switch cmd.Args().First() {
-	case subcmdBuild, subcmdInstall, subcmdTest:
+	case subcmdBuild, subcmdInstall, subcmdRun, subcmdTest:
 		// supported
 	default:
-		return ex.Newf("unsupported command: %s. Only 'go build', 'go install' and 'go test' are supported",
+		return ex.Newf("unsupported command: %s. Only 'go build', 'go install', 'go run' and 'go test' are supported",
 			cmd.Args().First())
 	}
 
