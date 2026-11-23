@@ -4,6 +4,7 @@
 package instrument
 
 import (
+	"cmp"
 	"context"
 	"maps"
 	"path/filepath"
@@ -22,6 +23,9 @@ import (
 // hits while walking the files it's given, so an unsorted order would make
 // which failure gets reported (and the order of per-file log lines) vary
 // between identical runs of the same input.
+//
+// The rules of a file are in the order they are applied: by rule order,
+// lowest first, then by rule kind, then in the order setup matched them.
 func groupRules(workDir string, rset *rule.InstRuleSet) (map[string][]rule.InstRule, []string) {
 	file2rules := make(map[string][]rule.InstRule)
 	addRulesToMap(rset.FuncRules, file2rules, rset.CgoFileMap, workDir)
@@ -32,6 +36,11 @@ func groupRules(workDir string, rset *rule.InstRuleSet) (map[string][]rule.InstR
 	addRulesToMap(rset.DirectiveRules, file2rules, rset.CgoFileMap, workDir)
 	addRulesToMap(rset.DeclRules, file2rules, rset.CgoFileMap, workDir)
 	addIgnoredCallFilesToMap(rset.IgnoredCallFiles, file2rules, rset.CgoFileMap, workDir)
+	for _, rules := range file2rules {
+		slices.SortStableFunc(rules, func(a, b rule.InstRule) int {
+			return cmp.Compare(a.GetOrder(), b.GetOrder())
+		})
+	}
 	return file2rules, slices.Sorted(maps.Keys(file2rules))
 }
 

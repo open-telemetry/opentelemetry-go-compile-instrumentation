@@ -4,6 +4,7 @@
 package rule
 
 import (
+	"fmt"
 	"maps"
 
 	"go.opentelemetry.io/otelc/tool/ex"
@@ -50,6 +51,11 @@ import (
 //	imports:
 //	  fmt: fmt
 func Normalize(fields map[string]any) ([]map[string]any, error) {
+	// Every key of a flat rule is at the top level, so a flat rule cannot set
+	// order either.
+	if _, hasOrder := fields[orderField]; hasOrder {
+		return nil, ex.Newf("order must be set on a do modifier, not at the top level of the rule")
+	}
 	_, hasWhere := fields[keyWhere]
 	_, hasDo := fields[keyDo]
 	if !hasWhere && !hasDo {
@@ -88,9 +94,8 @@ func Normalize(fields map[string]any) ([]map[string]any, error) {
 	}
 
 	// Expand each do modifier into its own flat rule, preserving do-sequence
-	// order. Downstream application follows this order, which is the only
-	// ordering guarantee today. Explicit, controllable ordering is tracked in
-	// issue #583.
+	// order. The instrument phase keeps this order between rules of the same
+	// kind unless a modifier sets order.
 	normalized := make([]map[string]any, 0, len(doItems))
 	for _, item := range doItems {
 		flat := maps.Clone(common)
@@ -182,6 +187,9 @@ func normalizeDoSequence(items []any) ([]map[string]any, error) {
 			if !hasModifierFields {
 				return nil, ex.Newf("do[%d] modifier payload must be a map", idx)
 			}
+			if err := checkOrder(fmt.Sprintf("do[%d]: ", idx), modifierName, modifierFields); err != nil {
+				return nil, err
+			}
 			normalized = append(normalized, maps.Clone(modifierFields))
 		}
 	}
@@ -207,6 +215,9 @@ func normalizeDoMap(modifier map[string]any) ([]map[string]any, error) {
 		if !ok {
 			return nil, ex.Newf("do modifier payload must be a map")
 		}
+		if err := checkOrder("", modifierName, modifierFields); err != nil {
+			return nil, err
+		}
 		return []map[string]any{maps.Clone(modifierFields)}, nil
 	}
 	// The len-1 map check above guarantees the loop body runs exactly once
@@ -214,4 +225,22 @@ func normalizeDoMap(modifier map[string]any) ([]map[string]any, error) {
 	// iteration contract.
 	util.ShouldNotReachHere()
 	return nil, nil
+}
+
+// checkOrder reports an error when the payload of the modifier named
+// modifierName sets an order that the modifier does not accept, or that is
+// not an integer. prefix starts the error message.
+func checkOrder(prefix, modifierName string, payload map[string]any) error {
+	value, ok := payload[orderField]
+	if !ok {
+		return nil
+	}
+	if !acceptsOrder(modifierName) {
+		return ex.Newf("%smodifier %q does not accept order; only %q and %q accept it",
+			prefix, modifierName, modifierInjectCode, modifierExpandDirective)
+	}
+	if _, isInt := value.(int); !isInt {
+		return ex.Newf("%sorder must be an integer, got %v", prefix, value)
+	}
+	return nil
 }
