@@ -1,0 +1,5 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+# Add real otelc-owned go.* definitions here, then run go generate from
+# tool/internal/configuration to refresh catalog.yaml.
+configurations: []

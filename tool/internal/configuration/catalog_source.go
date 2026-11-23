@@ -5,7 +5,6 @@ package configuration
 
 import (
 	"bytes"
-	_ "embed"
 	"slices"
 	"strings"
 
@@ -13,20 +12,7 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-//go:generate go run ../../cmd/gen-config-catalog -output catalog.yaml
-
-// upstreamInstrumentation is the unmodified schema/instrumentation.yaml from
-// OpenTelemetryConfigurationCommit. Keep this snapshot and the provenance in
-// definitions.go together; generation and tests do not access the network.
-//
-//go:embed upstream-instrumentation.yaml
-var upstreamInstrumentation []byte
-
-//go:embed go-configurations.yaml
-var goConfigurations []byte
-
-//go:embed general-compatibility.yaml
-var generalCompatibility []byte
+//go:generate go run ../../cmd/gen-config-catalog -output catalog.yaml -previous catalog.yaml
 
 type upstreamSchema struct {
 	Ref             string                     `yaml:"$ref"`
@@ -38,13 +24,11 @@ type upstreamSchema struct {
 	Items           *upstreamSchema            `yaml:"items"`
 }
 
-// GenerateCatalog builds the offline catalog from the pinned general schema,
-// otelc's go.* definitions, and deprecated general.* compatibility entries.
+// GenerateCatalog builds a catalog from a fetched pinned upstream schema,
+// otelc's go.* definitions, compatibility entries, and the previous catalog.
 // It checks the prior catalog so upstream removals cannot silently drop paths.
-// Names are relative to instrumentation/development; that root suffix is not
-// added to leaves.
-func GenerateCatalog() ([]byte, error) {
-	return generateCatalog(upstreamInstrumentation, goConfigurations, generalCompatibility, embeddedCatalog)
+func GenerateCatalog(upstream, goOptions, compatibilityOptions, previousCatalog []byte) ([]byte, error) {
+	return generateCatalog(upstream, goOptions, compatibilityOptions, previousCatalog)
 }
 
 func generateCatalog(upstream, goOptions, compatibilityOptions, previousCatalog []byte) ([]byte, error) {
@@ -142,8 +126,9 @@ func parsePreviousCatalogDefinitions(data []byte) (map[string]Entry, error) {
 }
 
 // ensureCatalogDefinitionsRetained prevents a schema refresh from silently
-// dropping an existing configuration path. Retired entries must remain in the
-// compatibility source or in otelc's go-configurations.yaml as deprecated.
+// dropping an existing configuration path. Retired general.* entries are
+// carried forward as deprecated; retired go.* entries still require an
+// explicit definition in the generator inputs.
 func ensureCatalogDefinitionsRetained(previous, current map[string]Entry) error {
 	names := make([]string, 0, len(previous))
 	for name := range previous {
@@ -154,6 +139,15 @@ func ensureCatalogDefinitionsRetained(previous, current map[string]Entry) error 
 		previousEntry := previous[name]
 		currentEntry, exists := current[name]
 		if !exists {
+			if strings.HasPrefix(name, "general.") {
+				// Preserve an upstream definition when it disappears from a newer
+				// pinned schema. Keep its last-known type, default, schema, and
+				// description so existing users can still be validated, but mark it
+				// deprecated until an explicit replacement is provided.
+				previousEntry.Deprecated = true
+				current[name] = previousEntry
+				continue
+			}
 			return ex.Newf(
 				"catalog generation would drop %q; retain it as deprecated in the compatibility source",
 				name,

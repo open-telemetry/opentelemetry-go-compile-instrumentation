@@ -533,6 +533,27 @@ func (sp *setupPhase) validateAndStoreSelectedConfigurationMetadata(matched []*r
 	return nil
 }
 
+// buildDeps returns the dependencies of the build. Auto-pin, which also
+// generates or updates the otel.instrumentation.go file, returns them when it
+// runs. Otherwise they come from the build plan.
+func (sp *setupPhase) buildDeps(
+	ctx context.Context,
+	moduleDirs []string,
+	subcommand string,
+	args []string,
+) ([]*Dependency, error) {
+	if sp.ruleConfig == "" && os.Getenv(util.EnvOtelcRules) == "" {
+		pinResult, err := autoPin(ctx, moduleDirs, subcommand, args)
+		if err != nil {
+			return nil, err
+		}
+		if pinResult.AllDeps != nil {
+			return pinResult.AllDeps, nil
+		}
+	}
+	return findDeps(ctx, subcommand, args)
+}
+
 func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	// Since Setup can be invoked in different contexts (i.e, via `otelc setup` or as part of `otelc go build`),
 	// we need to handle the arguments accordingly. If the command is `go build` or `go install`, we should trim the first argument
@@ -614,28 +635,19 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		ctx = contextWithStateManager(ctx, stateManager)
 	}
 
-	// Auto-pin generates/updates otel.instrumentation.go file
-	var deps []*Dependency
-	if sp.ruleConfig == "" && os.Getenv(util.EnvOtelcRules) == "" {
-		pinResult, pinErr := autoPin(ctx, moduleDirs, subcommand, args)
-		if pinErr != nil {
-			return pinErr
-		}
-		deps = pinResult.AllDeps
-	}
-
-	if deps == nil {
-		// Find all dependencies of the project being build
-		deps, err = findDeps(ctx, subcommand, args)
-		if err != nil {
-			return err
-		}
+	deps, err := sp.buildDeps(ctx, moduleDirs, subcommand, args)
+	if err != nil {
+		return err
 	}
 
 	// Match the hook code with these dependencies, including dependencies
 	// introduced by the generated runtime imports.
 	matched, err := sp.matchAllDeps(ctx, deps, moduleDirs, sp.buildFlags)
 	if err != nil {
+		return err
+	}
+
+	if err = sp.checkRuleImportCycles(ctx, matched, allPkgs); err != nil {
 		return err
 	}
 
