@@ -302,9 +302,21 @@ func TestGoSubcommand(t *testing.T) {
 		wantArgs []string
 	}{
 		{name: "no arguments", args: nil, wantSub: "", wantArgs: nil},
-		{name: "build keeps its arguments", args: []string{"build", "-o", "app", "."}, wantSub: "build", wantArgs: []string{"-o", "app", "."}},
-		{name: "test keeps its arguments", args: []string{"test", "./..."}, wantSub: "test", wantArgs: []string{"./..."}},
-		{name: "run becomes a build", args: []string{"run", "-exec", "env", "./cmd", "arg"}, wantSub: "build", wantArgs: []string{"./cmd"}},
+		{
+			name:    "build keeps its arguments",
+			args:    []string{"build", "-o", "app", "."},
+			wantSub: "build", wantArgs: []string{"-o", "app", "."},
+		},
+		{
+			name:    "test keeps its arguments",
+			args:    []string{"test", "./..."},
+			wantSub: "test", wantArgs: []string{"./..."},
+		},
+		{
+			name:    "run becomes a build",
+			args:    []string{"run", "-exec", "env", "./cmd", "arg"},
+			wantSub: "build", wantArgs: []string{"./cmd"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
