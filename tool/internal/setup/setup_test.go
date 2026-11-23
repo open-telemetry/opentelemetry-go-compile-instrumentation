@@ -386,35 +386,30 @@ func TestBuildWithToolexec(t *testing.T) {
 			"context-affecting flags are forwarded to the toolexec child")
 	})
 
-	t.Run("does not build when the go cache cannot be prepared", func(t *testing.T) {
-		dir := t.TempDir()
-		t.Chdir(dir)
-		t.Setenv(util.EnvOtelcWorkDir, dir)
-		t.Setenv("GOCACHE", "") // so setupGoCache allocates its own cache dir
-		require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
-		// A regular file where the cache directory belongs makes MkdirAll fail.
-		require.NoError(t, os.WriteFile(util.GetBuildTemp("gocache"), []byte("x"), 0o644))
+	t.Run("leaves GOCACHE to the go command when it is not set", func(t *testing.T) {
+		t.Setenv("GOCACHE", "")
+		require.NoError(t, os.Unsetenv("GOCACHE"))
+		got := runBuildWithToolexec(t, []string{"go", "build", "."}, false)
 
-		ran := false
-		original := runBuildCmd
-		t.Cleanup(func() { runBuildCmd = original })
-		runBuildCmd = func(context.Context, []string, ...string) error {
-			ran = true
-			return nil
+		for _, e := range got.env {
+			assert.False(t, strings.HasPrefix(e, "GOCACHE="),
+				"the build must use the go command's default cache, got %q", e)
 		}
+		assert.NoDirExists(t, util.GetBuildTemp("gocache"))
+	})
 
-		cmd := &cli.Command{
-			Name:            "go",
-			SkipFlagParsing: true,
-			Action: func(ctx context.Context, c *cli.Command) error {
-				return buildWithToolexec(ctx, c, false)
-			},
+	t.Run("keeps the GOCACHE the user set", func(t *testing.T) {
+		userCache := t.TempDir()
+		t.Setenv("GOCACHE", userCache)
+		got := runBuildWithToolexec(t, []string{"go", "build", "."}, false)
+
+		var caches []string
+		for _, e := range got.env {
+			if v, ok := strings.CutPrefix(e, "GOCACHE="); ok {
+				caches = append(caches, v)
+			}
 		}
-		err := cmd.Run(t.Context(), []string{"go", "build", "."})
-
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "go cache")
-		assert.False(t, ran, "the build must not start when the cache is unusable")
+		assert.Equal(t, []string{userCache}, caches)
 	})
 
 	t.Run("returns error when executable path cannot be quoted", func(t *testing.T) {
@@ -1116,53 +1111,6 @@ func TestRootModulePaths(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, []string{"example.com/app", "example.com/direct"}, got)
-}
-
-func TestSetupGoCache(t *testing.T) {
-	t.Run("respects existing GOCACHE", func(t *testing.T) {
-		t.Setenv("GOCACHE", "/existing/cache")
-		env, err := setupGoCache(t.Context(), nil)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		for _, e := range env {
-			if strings.HasPrefix(e, "GOCACHE=") {
-				t.Error("should not add GOCACHE when already set")
-			}
-		}
-	})
-
-	t.Run("creates persistent cache in .otelc-build/gocache", func(t *testing.T) {
-		tempDir := t.TempDir()
-		t.Setenv(util.EnvOtelcWorkDir, tempDir)
-		if err := os.MkdirAll(util.GetBuildTempDir(), 0o755); err != nil {
-			t.Fatal(err)
-		}
-
-		env, err := setupGoCache(t.Context(), nil)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		var cacheDir string
-		for _, e := range env {
-			if suffix, ok := strings.CutPrefix(e, "GOCACHE="); ok {
-				cacheDir = suffix
-				break
-			}
-		}
-		if cacheDir == "" {
-			t.Fatal("GOCACHE not set in environment")
-		}
-		expectedCacheDir := util.GetBuildTemp("gocache")
-		if cacheDir != expectedCacheDir {
-			t.Errorf("expected cache directory %s, got %s", expectedCacheDir, cacheDir)
-		}
-		if _, statErr := os.Stat(cacheDir); os.IsNotExist(statErr) {
-			t.Errorf("cache directory not created: %s", cacheDir)
-		}
-	})
 }
 
 func TestExtractBuildFlags(t *testing.T) {
