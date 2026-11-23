@@ -212,7 +212,15 @@ func TestConfigurationCatalogMatchesPinnedSource(t *testing.T) {
 	assert.Equal(t, "Configure headers to capture for outbound http requests.", header.Description)
 	assert.Equal(t, "no outbound request headers are captured", header.DefaultBehavior)
 	assert.Nil(t, header.Default, "prose defaultBehavior must not become an executable default")
-	assert.Equal(t, "int", definitions["general.http.semconv.version"].Type)
+	require.NotNil(t, header.Validation)
+	require.NotNil(t, header.Validation.MinItems)
+	assert.Equal(t, 1, *header.Validation.MinItems)
+	assert.Equal(t, stringType, header.Validation.ItemsType)
+	version := definitions["general.http.semconv.version"]
+	assert.Equal(t, "int", version.Type)
+	require.NotNil(t, version.Validation)
+	require.NotNil(t, version.Validation.Minimum)
+	assert.InDelta(t, 0.0, *version.Validation.Minimum, 0.0)
 	assert.Equal(t, "boolean", definitions["general.http.semconv.experimental"].Type)
 	assert.NotContains(t, definitions, "general.http.client.request_captured_headers/development")
 }
@@ -227,7 +235,13 @@ func TestGenerateCatalogPublicEntryPoint(t *testing.T) {
             properties:
               request_captured_headers:
                 type: array
+                minItems: 1
                 items: {type: string}
+          semconv:
+            properties:
+              version:
+                type: integer
+                minimum: 0
 `
 	generated, err := GenerateCatalog(
 		[]byte(upstream),
@@ -237,6 +251,17 @@ func TestGenerateCatalogPublicEntryPoint(t *testing.T) {
 	)
 	require.NoError(t, err)
 	assert.NotEmpty(t, generated)
+	definitions, err := ParseCatalog(generated)
+	require.NoError(t, err)
+	header := definitions["general.http.client.request_captured_headers"]
+	require.NotNil(t, header.Validation)
+	require.NotNil(t, header.Validation.MinItems)
+	assert.Equal(t, 1, *header.Validation.MinItems)
+	assert.Equal(t, stringType, header.Validation.ItemsType)
+	version := definitions["general.http.semconv.version"]
+	require.NotNil(t, version.Validation)
+	require.NotNil(t, version.Validation.Minimum)
+	assert.InDelta(t, 0.0, *version.Validation.Minimum, 0.0)
 }
 
 func TestParseCatalogValidatesInlineDefinitions(t *testing.T) {
@@ -1083,4 +1108,38 @@ func TestEnvironmentVariableNameRejectsInvalidPaths(t *testing.T) {
 			require.ErrorContains(t, err, tt.want)
 		})
 	}
+}
+
+func TestCloneEntryPreservesValidationConstraints(t *testing.T) {
+	minimum, maximum := 0.0, 10.0
+	minItems, maxItems := 1, 3
+	entry := Entry{Validation: &ValueConstraints{
+		Minimum: &minimum, Maximum: &maximum,
+		MinItems: &minItems, MaxItems: &maxItems, ItemsType: stringType,
+	}}
+	clone := cloneEntry(entry)
+	*clone.Validation.Minimum = 2
+	*clone.Validation.Maximum = 4
+	*clone.Validation.MinItems = 2
+	*clone.Validation.MaxItems = 4
+	clone.Validation.ItemsType = booleanType
+
+	assert.InDelta(t, 0.0, *entry.Validation.Minimum, 0.0)
+	assert.InDelta(t, 10.0, *entry.Validation.Maximum, 0.0)
+	assert.Equal(t, 1, *entry.Validation.MinItems)
+	assert.Equal(t, 3, *entry.Validation.MaxItems)
+	assert.Equal(t, stringType, entry.Validation.ItemsType)
+	assert.Nil(t, cloneEntry(Entry{}).Validation)
+}
+
+func TestEquivalentIncludesValueConstraints(t *testing.T) {
+	minimum := 1
+	left := Entry{
+		Name: "general.http.client.request_captured_headers", Type: listType,
+		Validation: &ValueConstraints{MinItems: &minimum, ItemsType: stringType},
+	}
+	right := cloneEntry(left)
+	assert.True(t, equivalent(left, right))
+	*right.Validation.MinItems = 2
+	assert.False(t, equivalent(left, right))
 }

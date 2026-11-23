@@ -676,8 +676,8 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 func setupCommandArgs(cmd *cli.Command) (string, []string, error) {
 	args := cmd.Args().Slice()
 	if cmd.Name == "go" {
-		subcommand, args := goSubcommand(args)
-		return subcommand, args, nil
+		goSubcommandName, goArgs := goSubcommand(args)
+		return goSubcommandName, goArgs, nil
 	}
 	if err := cleanupOwnedSession(); err != nil {
 		return "", nil, ex.Wrapf(err, "cleaning the session directory")

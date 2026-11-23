@@ -12,7 +12,6 @@ require (
 	github.com/dave/dst v0.28.0
 	github.com/gofrs/flock v0.13.1
 	github.com/google/go-cmp v0.7.0
-	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/stretchr/testify v1.12.1
 	github.com/urfave/cli/v3 v3.14.0
 	github.com/valyala/fasttemplate v1.2.2

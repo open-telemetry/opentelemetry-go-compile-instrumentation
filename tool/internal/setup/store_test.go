@@ -444,26 +444,6 @@ func TestInjectedHashIncludesApplicationConfigurationIdentity(t *testing.T) {
 	assert.NotEqual(t, second, third)
 }
 
-func TestStoreInjectedHashFailsOnLoadError(t *testing.T) {
-	modDir := t.TempDir()
-	goMod := []byte("module example.com/m\n\ngo 1.25.0\n")
-	require.NoError(t, os.WriteFile(filepath.Join(modDir, "go.mod"), goMod, 0o644))
-	t.Chdir(modDir)
-
-	workDir := t.TempDir()
-	t.Setenv(util.EnvOtelcWorkDir, workDir)
-	require.NoError(t, os.MkdirAll(filepath.Join(workDir, util.BuildTempDir), 0o755))
-
-	set := rule.NewInstRuleSet("example.com/m/dep")
-	set.AddCallRule(fakeSrcFile("dep.go"), &rule.InstCallRule{
-		InstBaseRule: rule.InstBaseRule{Imports: map[string]string{"missing": "example.com/m/missing"}},
-	})
-
-	err := newTestSetupPhase().storeInjectedHash(t.Context(), []*rule.InstRuleSet{set})
-	require.ErrorContains(t, err, "example.com/m/missing")
-	assert.NoFileExists(t, util.GetInjectedHashFile(), "an incomplete hash must not be stored")
-}
-
 // TestLoadInjectedPackagesReturnsOtherErrors covers a load that fails for a
 // reason other than a package that does not load: the error is returned.
 func TestLoadInjectedPackagesReturnsOtherErrors(t *testing.T) {

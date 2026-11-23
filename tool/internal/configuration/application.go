@@ -15,15 +15,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/santhosh-tekuri/jsonschema/v6"
 	otelconfx "go.opentelemetry.io/contrib/otelconf/x"
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.yaml.in/yaml/v3"
 )
-
-const instrumentationSchemaURL = "https://raw.githubusercontent.com/" +
-	OpenTelemetryConfigurationRepository + "/" + OpenTelemetryConfigurationCommit + "/" +
-	OpenTelemetryConfigurationFile
 
 const (
 	generalConfigurationSection = "general"
@@ -65,31 +60,6 @@ type ValidatedApplicationConfiguration struct {
 	Snapshot       []byte
 	Identity       []byte
 	Warnings       []ApplicationConfigurationWarning
-}
-
-func loadInstrumentationSchema() (*jsonschema.Schema, error) {
-	var rawSchema any
-	if err := yaml.Unmarshal(upstreamInstrumentation, &rawSchema); err != nil {
-		return nil, ex.Wrapf(err, "decode pinned instrumentation schema")
-	}
-	jsonSchema, err := json.Marshal(rawSchema)
-	if err != nil {
-		return nil, ex.Wrapf(err, "encode pinned instrumentation schema")
-	}
-	var schemaValue any
-	if err = json.Unmarshal(jsonSchema, &schemaValue); err != nil {
-		return nil, ex.Wrapf(err, "normalize pinned instrumentation schema")
-	}
-	compiler := jsonschema.NewCompiler()
-	compiler.DefaultDraft(jsonschema.Draft2020)
-	if err = compiler.AddResource(instrumentationSchemaURL, schemaValue); err != nil {
-		return nil, ex.Wrapf(err, "load pinned instrumentation schema")
-	}
-	schema, err := compiler.Compile(instrumentationSchemaURL)
-	if err != nil {
-		return nil, ex.Wrapf(err, "compile pinned instrumentation schema")
-	}
-	return schema, nil
 }
 
 // ParseApplicationConfiguration reads one YAML document and parses its SDK
@@ -534,9 +504,6 @@ func parseAndValidateSelectedApplicationConfiguration(
 		if err = instrumentationNode.Decode(&normalized); err != nil {
 			return nil, nil, ex.Wrapf(err, "decode selected instrumentation configuration %s", application.Source)
 		}
-		if err = validateInstrumentationSchema(normalized, application.Source); err != nil {
-			return nil, nil, explainDeprecatedApplicationField(err, application, selected)
-		}
 	}
 	return parsed, normalized, nil
 }
@@ -554,6 +521,25 @@ func validateSelectedApplicationValues(
 		location := application.SourceLocations[path]
 		source := fmt.Sprintf("%s:%d:%d (%s)", location.File, location.Line, location.Column, path)
 		if err := ValidateApplicationValue(definition, values[path], source); err != nil {
+			if definition.Deprecated {
+				if definition.ReplacedBy != nil {
+					return nil, nil, ex.Newf(
+						"%s:%d:%d: deprecated configuration %q is not valid; migrate to %q",
+						location.File,
+						location.Line,
+						location.Column,
+						path,
+						*definition.ReplacedBy,
+					)
+				}
+				return nil, nil, ex.Newf(
+					"%s:%d:%d: deprecated configuration %q is not valid",
+					location.File,
+					location.Line,
+					location.Column,
+					path,
+				)
+			}
 			return nil, nil, err
 		}
 		if definition.Deprecated {
@@ -630,22 +616,6 @@ func applicationConfigurationError(application ApplicationConfiguration, path, m
 	return ex.Newf("%s:%d:%d: %s %q", location.File, location.Line, location.Column, message, path)
 }
 
-func validateInstrumentationSchema(instrumentation map[string]any, source string) error {
-	schema, err := loadInstrumentationSchema()
-	if err != nil {
-		return err
-	}
-	if err = schema.Validate(instrumentation); err != nil {
-		return ex.Wrapf(
-			err,
-			"%s: validate instrumentation/development against OpenTelemetry Configuration %s",
-			source,
-			OpenTelemetryConfigurationRelease,
-		)
-	}
-	return nil
-}
-
 func explainDeprecatedApplicationField(
 	err error,
 	application ApplicationConfiguration,
@@ -679,47 +649,7 @@ func explainDeprecatedApplicationField(
 			)
 		}
 	}
-	if schemaError, ok := errors.AsType[*jsonschema.ValidationError](err); ok {
-		if path, entry, found := deprecatedValidationPath(schemaError, selected); found {
-			location := application.SourceLocations[path]
-			if entry.ReplacedBy != nil {
-				return ex.Newf(
-					"%s:%d:%d: deprecated or removed option %q is not accepted by the pinned schema; migrate to %q",
-					application.Source,
-					location.Line,
-					location.Column,
-					path,
-					*entry.ReplacedBy,
-				)
-			}
-			return ex.Newf(
-				"%s:%d:%d: deprecated or removed option %q is not accepted by the pinned schema",
-				application.Source,
-				location.Line,
-				location.Column,
-				path,
-			)
-		}
-	}
 	return err
-}
-
-func deprecatedValidationPath(
-	validationError *jsonschema.ValidationError,
-	selected map[string]Entry,
-) (string, Entry, bool) {
-	path := strings.Join(validationError.InstanceLocation, ".")
-	if entry, ok := selected[path]; ok && entry.Deprecated {
-		return path, entry, true
-	}
-	if index := slices.IndexFunc(validationError.Causes, func(cause *jsonschema.ValidationError) bool {
-		_, _, found := deprecatedValidationPath(cause, selected)
-		return found
-	}); index >= 0 {
-		cause := validationError.Causes[index]
-		return deprecatedValidationPath(cause, selected)
-	}
-	return "", Entry{}, false
 }
 
 func missingModuleMetadataError(

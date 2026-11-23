@@ -180,9 +180,9 @@ func TestValidateApplicationConfigurationFileFormatAndPinnedParser(t *testing.T)
 			want: "unsupported field \"sanitization\" in pinned otelconf/x model",
 		},
 		{
-			name: "selected value violates pinned upstream schema",
+			name: "selected list violates generated upstream constraints",
 			data: "file_format: '1.2'\ninstrumentation/development:\n  general:\n    http:\n      client:\n        request_captured_headers: []\n",
-			want: "validate instrumentation/development against OpenTelemetry Configuration",
+			want: "must contain at least 1 items",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -198,11 +198,10 @@ func TestValidateApplicationConfigurationFileFormatAndPinnedParser(t *testing.T)
 					Type: listType,
 				}}
 			}
-			if strings.Contains(test.name, "schema") {
-				selected = []Entry{{
-					Name: "general.http.client.request_captured_headers",
-					Type: listType,
-				}}
+			if strings.Contains(test.name, "generated upstream constraints") {
+				catalog, catalogErr := CatalogDefinitions()
+				require.NoError(t, catalogErr)
+				selected = []Entry{catalog["general.http.client.request_captured_headers"]}
 			}
 			_, err = ValidateApplicationOptions(app, selected, nil)
 			require.ErrorContains(t, err, test.want)
@@ -393,13 +392,13 @@ instrumentation/development:
 `), "app.yaml")
 	require.NoError(t, err)
 	replacement := "general.http.client.request_captured_headers.v2"
+	catalog, err := CatalogDefinitions()
+	require.NoError(t, err)
+	definition := catalog["general.http.client.request_captured_headers"]
+	definition.Deprecated = true
+	definition.ReplacedBy = &replacement
 
-	_, err = ValidateApplicationOptions(app, []Entry{{
-		Name:       "general.http.client.request_captured_headers",
-		Type:       listType,
-		Deprecated: true,
-		ReplacedBy: &replacement,
-	}}, nil)
+	_, err = ValidateApplicationOptions(app, []Entry{definition}, nil)
 	require.ErrorContains(t, err, "migrate to")
 	require.ErrorContains(t, err, replacement)
 }
@@ -528,6 +527,42 @@ func TestValidateApplicationValue(t *testing.T) {
 		require.Error(t, ValidateApplicationValue(entry, value, "app.yaml:1:1"))
 	}
 	require.Error(t, ValidateApplicationValue(Entry{Name: "go.enabled", Type: booleanType}, "true", "app.yaml:1:1"))
+}
+
+func TestValidateApplicationValueEnforcesCatalogConstraints(t *testing.T) {
+	minItems := 1
+	listEntry := Entry{
+		Name: "general.http.client.request_captured_headers",
+		Type: listType,
+		Validation: &ValueConstraints{
+			MinItems:  &minItems,
+			ItemsType: stringType,
+		},
+	}
+	require.NoError(t, ValidateApplicationValue(listEntry, []any{"x-request-id"}, "app.yaml:1:1"))
+	require.ErrorContains(
+		t,
+		ValidateApplicationValue(listEntry, []any{}, "app.yaml:1:1"),
+		"must contain at least 1 items",
+	)
+	require.ErrorContains(
+		t,
+		ValidateApplicationValue(listEntry, []any{1}, "app.yaml:1:1"),
+		"item 0",
+	)
+
+	minimum := float64(0)
+	intEntry := Entry{
+		Name:       "general.http.semconv.version",
+		Type:       integerType,
+		Validation: &ValueConstraints{Minimum: &minimum},
+	}
+	require.NoError(t, ValidateApplicationValue(intEntry, 0, "app.yaml:1:1"))
+	require.ErrorContains(
+		t,
+		ValidateApplicationValue(intEntry, -1, "app.yaml:1:1"),
+		"must be at least 0",
+	)
 }
 
 func TestOverlayEnvironmentValuesRejectsInvalidNormalizedShapes(t *testing.T) {

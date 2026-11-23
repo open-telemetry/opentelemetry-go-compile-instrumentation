@@ -128,6 +128,7 @@ func main() { _, _ = http.Get("http://127.0.0.1:1/") }
 // time, each with its own work dir. They all edit the go.mod of the module,
 // so they must wait for each other and leave go.mod as it was.
 func TestConcurrentBuildsInOneModule(t *testing.T) {
+	t.Parallel()
 	otelcPath, err := testutil.OtelcPath()
 	require.NoError(t, err)
 	otelcPath, err = filepath.Abs(otelcPath)

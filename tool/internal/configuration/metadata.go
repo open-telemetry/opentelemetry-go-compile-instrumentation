@@ -53,6 +53,18 @@ type Property struct {
 	hasExample bool
 }
 
+// ValueConstraints contains the subset of pinned upstream constraints that
+// application validation needs at runtime. The generator projects these from
+// the fetched schema into the checked-in catalog instead of embedding the raw
+// upstream schema in otelc.
+type ValueConstraints struct {
+	Minimum   *float64 `json:"minimum,omitempty"    yaml:"minimum,omitempty"`
+	Maximum   *float64 `json:"maximum,omitempty"    yaml:"maximum,omitempty"`
+	MinItems  *int     `json:"min_items,omitempty"  yaml:"min_items,omitempty"`
+	MaxItems  *int     `json:"max_items,omitempty"  yaml:"max_items,omitempty"`
+	ItemsType string   `json:"items_type,omitempty" yaml:"items_type,omitempty"`
+}
+
 // Entry describes one Go instrumentation configuration option. In source
 // metadata it has either a Name (an inline declarative path) or a Ref.
 type Entry struct {
@@ -70,6 +82,9 @@ type Entry struct {
 	Examples []string `json:"examples,omitempty" yaml:"examples,omitempty"`
 	// Schema describes the item object shape for a structured_list.
 	Schema *Schema `json:"schema,omitempty" yaml:"schema,omitempty"`
+	// Validation contains constraints projected from the pinned upstream schema
+	// for generated general.* catalog definitions.
+	Validation *ValueConstraints `json:"validation,omitempty" yaml:"validation,omitempty"`
 	// DefaultBehavior is the prose default behavior from the declarative schema.
 	DefaultBehavior string `json:"default_behavior,omitempty" yaml:"default_behavior,omitempty"`
 	// Indicates whether this configuration option is deprecated.
@@ -271,6 +286,9 @@ func validateEntry(entry Entry, source string) error {
 	if !supportedType(entry.Type) {
 		return ex.Newf("%s: unsupported or missing type %q", source, entry.Type)
 	}
+	if err := validateValueConstraints(entry, source); err != nil {
+		return err
+	}
 	if entry.Schema != nil && entry.Type != structuredListType {
 		return ex.Newf("%s: schema requires type structured_list", source)
 	}
@@ -296,12 +314,138 @@ func ValidateApplicationValue(entry Entry, value any, source string) error {
 	if !valueMatchesType(value, entry.Type) {
 		return ex.Newf("%s: value for %q must have type %s", source, entry.Name, entry.Type)
 	}
+	if err := validateApplicationValueConstraints(entry, value, source); err != nil {
+		return err
+	}
 	if entry.Type == structuredListType {
 		if err := validateStructuredValue(value, entry.Schema, source); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func validateValueConstraints(entry Entry, source string) error {
+	constraints := entry.Validation
+	if constraints == nil {
+		return nil
+	}
+	if (constraints.Minimum != nil || constraints.Maximum != nil) && entry.Type != integerType {
+		return ex.Newf("%s: numeric validation constraints require type %q", source, integerType)
+	}
+	if constraints.Minimum != nil && constraints.Maximum != nil && *constraints.Minimum > *constraints.Maximum {
+		return ex.Newf("%s: validation minimum exceeds maximum", source)
+	}
+	hasItemConstraints := constraints.MinItems != nil || constraints.MaxItems != nil || constraints.ItemsType != ""
+	if hasItemConstraints && entry.Type != listType {
+		return ex.Newf("%s: item validation constraints require type %q", source, listType)
+	}
+	if constraints.MinItems != nil && *constraints.MinItems < 0 {
+		return ex.Newf("%s: min_items must not be negative", source)
+	}
+	if constraints.MaxItems != nil && *constraints.MaxItems < 0 {
+		return ex.Newf("%s: max_items must not be negative", source)
+	}
+	if constraints.MinItems != nil && constraints.MaxItems != nil && *constraints.MinItems > *constraints.MaxItems {
+		return ex.Newf("%s: validation min_items exceeds max_items", source)
+	}
+	if constraints.ItemsType != "" && !supportedType(constraints.ItemsType) {
+		return ex.Newf("%s: unsupported items_type %q", source, constraints.ItemsType)
+	}
+	return nil
+}
+
+func validateApplicationValueConstraints(entry Entry, value any, source string) error {
+	constraints := entry.Validation
+	if constraints == nil {
+		return nil
+	}
+	if err := validateApplicationNumberConstraints(entry, value, source, constraints); err != nil {
+		return err
+	}
+	return validateApplicationListConstraints(entry, value, source, constraints)
+}
+
+func validateApplicationNumberConstraints(
+	entry Entry,
+	value any,
+	source string,
+	constraints *ValueConstraints,
+) error {
+	if constraints.Minimum == nil && constraints.Maximum == nil {
+		return nil
+	}
+	number, ok := integerNumber(value)
+	if !ok {
+		return ex.Newf("%s: value for %q must be an integer", source, entry.Name)
+	}
+	if constraints.Minimum != nil && number < *constraints.Minimum {
+		return ex.Newf("%s: value for %q must be at least %v", source, entry.Name, *constraints.Minimum)
+	}
+	if constraints.Maximum != nil && number > *constraints.Maximum {
+		return ex.Newf("%s: value for %q must be at most %v", source, entry.Name, *constraints.Maximum)
+	}
+	return nil
+}
+
+func validateApplicationListConstraints(
+	entry Entry,
+	value any,
+	source string,
+	constraints *ValueConstraints,
+) error {
+	if constraints.MinItems == nil && constraints.MaxItems == nil && constraints.ItemsType == "" {
+		return nil
+	}
+	items := reflect.ValueOf(value)
+	if constraints.MinItems != nil && items.Len() < *constraints.MinItems {
+		return ex.Newf("%s: value for %q must contain at least %d items", source, entry.Name, *constraints.MinItems)
+	}
+	if constraints.MaxItems != nil && items.Len() > *constraints.MaxItems {
+		return ex.Newf("%s: value for %q must contain at most %d items", source, entry.Name, *constraints.MaxItems)
+	}
+	if constraints.ItemsType == "" {
+		return nil
+	}
+	for i := range items.Len() {
+		if !valueMatchesType(items.Index(i).Interface(), constraints.ItemsType) {
+			return ex.Newf(
+				"%s: item %d for %q must have type %s",
+				source,
+				i,
+				entry.Name,
+				constraints.ItemsType,
+			)
+		}
+	}
+	return nil
+}
+
+func integerNumber(value any) (float64, bool) {
+	switch value := value.(type) {
+	case int:
+		return float64(value), true
+	case int8:
+		return float64(value), true
+	case int16:
+		return float64(value), true
+	case int32:
+		return float64(value), true
+	case int64:
+		return float64(value), true
+	case uint:
+		return float64(value), true
+	case uint8:
+		return float64(value), true
+	case uint16:
+		return float64(value), true
+	case uint32:
+		return float64(value), true
+	case uint64:
+		return float64(value), true
+	default:
+		return 0, false
+	}
 }
 
 func isConfigurationPath(value string) bool {

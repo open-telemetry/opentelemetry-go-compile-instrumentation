@@ -40,13 +40,15 @@ those resolved records.
 `general.*` is generated from OpenTelemetry Configuration **v1.2.0**, commit
 `3b04ae78576ec407854d734eb4da4f78a67f902c`, `schema/instrumentation.yaml`.
 `gen-config-catalog` fetches that immutable URL and verifies its SHA-256 before
-generation. The upstream schema is not embedded in the runtime package. Tests
-exercise generation with small in-memory schema fixtures and do not use the
-network.
+generation. It projects the value constraints needed by application validation
+into the catalog; the raw upstream schema is not embedded in the runtime
+package. Tests exercise generation with small in-memory schema fixtures and do
+not use the network.
 Names preserve property paths: `instrumentation/development` is the enclosing
 root, so `/development` is not added to each general leaf. The snapshot also
 retains upstream constraints for subsequent application-configuration validation;
-this metadata catalog projects leaf names, types, descriptions, and default behavior.
+the catalog projects leaf names, types, descriptions, defaults, and the supported
+value constraints.
 
 `general-compatibility.yaml` (owned by the generator under
 `tool/cmd/gen-config-catalog/`) records deprecated `general.*` paths. For a path
@@ -92,9 +94,9 @@ instrumentation options; its environment substitutions are resolved during
 setup. Declared runtime environment overrides remain a separate follow-up.
 
 The application must use `file_format` major version 1 and a minor version no
-newer than the pinned OpenTelemetry Configuration v1.2.0 schema. The
-`instrumentation/development` subtree is checked against the pinned upstream
-schema before its values are compared with selected instrumentation metadata.
+newer than the pinned OpenTelemetry Configuration v1.2.0 schema. Selected values
+in `instrumentation/development` are checked against module metadata and the
+upstream value constraints projected into the generated catalog.
 Selected fields omitted by the pinned `otelconf/x` model are rejected rather
 than silently discarded. This parser/schema compatibility boundary must be
 revisited when either pin changes.
@@ -106,9 +108,10 @@ validated while a selected module lacks metadata, setup reports the missing
 module roots. Configuration never changes instrumentation selection.
 
 When validation succeeds, selected values and metadata defaults are normalized
-into a deterministic snapshot. Setup embeds that snapshot in generated runtime
-code and includes the selected metadata plus resolved values in the build-cache
-identity. The application does not need the source YAML file at runtime.
+into a deterministic snapshot retained by setup for the later embedding phase.
+Selected metadata and resolved values contribute to the build-cache identity.
+This PR validates configuration; applying it at runtime remains a separate
+follow-up and does not change the public hook API.
 
 ## Metadata discovery during setup
 

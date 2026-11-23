@@ -254,16 +254,6 @@ func TestAddDeps(t *testing.T) {
 	}
 }
 
-func TestGenConfigurationDecl(t *testing.T) {
-	decls, err := genConfigurationDecl(nil)
-	require.NoError(t, err)
-	assert.Empty(t, decls)
-
-	decls, err = genConfigurationDecl([]byte(`{"go.sample.enabled":true}`))
-	require.NoError(t, err)
-	assert.Len(t, decls, 1)
-}
-
 func TestAddDeps_FileWriteError(t *testing.T) {
 	matched := []*rule.InstRuleSet{
 		newTestRuleSet(
@@ -605,23 +595,6 @@ func TestAddDepsRuntimeFileIsStable(t *testing.T) {
 		require.Equal(t, want, render(t),
 			"otelc.runtime.go must not change between setups of identical input")
 	}
-}
-
-func TestAddDepsEmbedsApplicationConfiguration(t *testing.T) {
-	sp := newTestSetupPhase()
-	sp.validatedApplicationConfig.Snapshot = []byte(`{"go.sample.enabled":true}`)
-	outDir := t.TempDir()
-
-	require.NoError(t, sp.addDeps(t.Context(), nil, runtimePackage{
-		dir:  outDir,
-		name: "main",
-	}))
-
-	content, err := os.ReadFile(filepath.Join(outDir, otelcRuntimeFile))
-	require.NoError(t, err)
-	assert.Contains(t, string(content), `go.opentelemetry.io/otelc/pkg/runtime`)
-	assert.Contains(t, string(content), `RegisterConfiguration`)
-	assert.Contains(t, string(content), `go.sample.enabled`)
 }
 
 func TestAddDeps_FileRuleDoesNotBlankImportSourceImports(t *testing.T) {

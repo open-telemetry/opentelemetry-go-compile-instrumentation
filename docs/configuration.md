@@ -136,6 +136,9 @@ separate runtime concern. Selected fields not represented by the pinned parser
 are rejected rather than silently discarded; unselected blocks are warned
 about and ignored.
 
+This option validates configuration during setup. Applying the validated values
+to instrumentation at runtime is a separate follow-up.
+
 The file does not select or enable instrumentation. Configuration for
 unselected instrumentation is warned about and ignored. Selected modules
 without `metadata.yaml` are reported when the supplied configuration cannot be
