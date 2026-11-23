@@ -187,7 +187,7 @@ func TestAcquireBuildLockFindsDeadlockWhileWaiting(t *testing.T) {
 	select {
 	case err := <-done:
 		require.ErrorContains(t, err, "would deadlock")
-	case <-time.After(10 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("a waiting invocation must find a cycle that closes after its wait started")
 	}
 }

@@ -21,22 +21,22 @@ func After0() int { return 1 }
 func Both0() int { return 1 }
 
 //go:noinline
-func Before3(p0, p1, p2 int) int { return p0 + p1 + p2 }
+func Before3(p0 int, p1 int, p2 int) int { return p0 + p1 + p2 }
 
 //go:noinline
-func After3(p0, p1, p2 int) int { return p0 + p1 + p2 }
+func After3(p0 int, p1 int, p2 int) int { return p0 + p1 + p2 }
 
 //go:noinline
-func Both3(p0, p1, p2 int) int { return p0 + p1 + p2 }
+func Both3(p0 int, p1 int, p2 int) int { return p0 + p1 + p2 }
 
 //go:noinline
-func Before6(p0, p1, p2, p3, p4, p5 int) int { return p0 + p1 + p2 + p3 + p4 + p5 }
+func Before6(p0 int, p1 int, p2 int, p3 int, p4 int, p5 int) int { return p0 + p1 + p2 + p3 + p4 + p5 }
 
 //go:noinline
-func After6(p0, p1, p2, p3, p4, p5 int) int { return p0 + p1 + p2 + p3 + p4 + p5 }
+func After6(p0 int, p1 int, p2 int, p3 int, p4 int, p5 int) int { return p0 + p1 + p2 + p3 + p4 + p5 }
 
 //go:noinline
-func Both6(p0, p1, p2, p3, p4, p5 int) int { return p0 + p1 + p2 + p3 + p4 + p5 }
+func Both6(p0 int, p1 int, p2 int, p3 int, p4 int, p5 int) int { return p0 + p1 + p2 + p3 + p4 + p5 }
 
 func main() {
 	testing.Init()

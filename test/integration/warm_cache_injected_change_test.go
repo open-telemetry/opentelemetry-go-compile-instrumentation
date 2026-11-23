@@ -38,18 +38,13 @@ func TestWarmCacheSeesInjectedPackageChange(t *testing.T) {
 
 	writeTestFile(t, appDir, filepath.Join("extra2", "go.mod"), "module example.com/extra2\n\ngo 1.25.0\n")
 	writeExtra2 := func(tag string) {
-		writeTestFile(
-			t,
-			appDir,
-			filepath.Join("extra2", "extra2.go"),
-			fmt.Sprintf(`// Copyright The OpenTelemetry Authors
+		writeTestFile(t, appDir, filepath.Join("extra2", "extra2.go"), fmt.Sprintf(`// Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package extra2
 
 const Tag = %q
-`, tag),
-		)
+`, tag))
 	}
 	writeExtra2("v1")
 
