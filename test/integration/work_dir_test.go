@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -71,7 +72,11 @@ func main() {
 				require.Empty(t, workDirs, "default build left Go work directories behind")
 			}
 			symbols := goOutput(t, moduleDir, "tool", "nm", binary)
-			require.Contains(t, symbols, "otelc/instrumentation/net/http", "net/http was not instrumented")
+			require.True(t,
+				strings.Contains(symbols, "otelc/instrumentation/net/http") ||
+					strings.Contains(symbols, "otelc-contrib/instrumentation/net/http"),
+				"net/http was not instrumented",
+			)
 		})
 	}
 }

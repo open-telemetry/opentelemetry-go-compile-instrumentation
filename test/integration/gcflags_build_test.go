@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -70,7 +71,11 @@ func main() {
 			runOtelcCommand(t, moduleDir, os.Environ(), otelcPath, append(args, ".")...)
 
 			symbols := goOutput(t, moduleDir, "tool", "nm", binary)
-			require.Contains(t, symbols, "otelc/instrumentation/net/http", "net/http was not instrumented")
+			require.True(t,
+				strings.Contains(symbols, "otelc/instrumentation/net/http") ||
+					strings.Contains(symbols, "otelc-contrib/instrumentation/net/http"),
+				"net/http was not instrumented",
+			)
 			buildInfo := goOutput(t, moduleDir, "version", "-m", binary)
 			require.Contains(t, buildInfo, tt.recorded, "the binary was not built with the requested flags")
 

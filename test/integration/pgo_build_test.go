@@ -108,8 +108,11 @@ func main() {
 	runOtelcCommand(t, moduleDir, os.Environ(), otelcPath, "go", "build", "-o", binary, ".")
 
 	symbols := goOutput(t, moduleDir, "tool", "nm", binary)
-	require.Contains(t, symbols, "otelc/instrumentation/net/http",
-		"net/http was not instrumented in a build with default.pgo")
+	require.True(t,
+		strings.Contains(symbols, "otelc/instrumentation/net/http") ||
+			strings.Contains(symbols, "otelc-contrib/instrumentation/net/http"),
+		"net/http was not instrumented in a build with default.pgo",
+	)
 
 	buildInfo := goOutput(t, moduleDir, "version", "-m", binary)
 	require.Contains(t, buildInfo, "-pgo="+profile, "the build no longer applies the PGO profile")

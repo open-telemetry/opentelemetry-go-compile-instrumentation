@@ -232,6 +232,14 @@ func walkInstrumentation(ctx context.Context, toolFiles []string, visit instrume
 		seenToolFiles[toolFile] = true
 	}
 
+	rootDirs := make([]string, 0, len(toolFiles))
+	for _, f := range toolFiles {
+		d := filepath.Dir(f)
+		if !slices.Contains(rootDirs, d) {
+			rootDirs = append(rootDirs, d)
+		}
+	}
+
 	p := ast.NewAstParser()
 	for len(queue) > 0 {
 		toolFile := queue[0]
@@ -247,7 +255,7 @@ func walkInstrumentation(ctx context.Context, toolFiles []string, visit instrume
 			return collectErr
 		}
 
-		cfgs, resolveErr := resolveInstrumentationConfigs(ctx, filepath.Dir(toolFile), importPaths)
+		cfgs, resolveErr := resolveConfigsWithFallback(ctx, filepath.Dir(toolFile), rootDirs, importPaths)
 		if resolveErr != nil {
 			return resolveErr
 		}
@@ -279,4 +287,64 @@ func walkInstrumentation(ctx context.Context, toolFiles []string, visit instrume
 	}
 
 	return nil
+}
+
+// resolveConfigsWithFallback resolves instrumentation configurations for importPaths.
+// When resolving nested tool files in cached module directories (e.g. under GOPATH/pkg/mod),
+// internal relative replace directives cannot resolve. Resolution then falls back to the
+// consumer application's rootDirs where transitive dependencies exist in the module graph.
+func resolveConfigsWithFallback(
+	ctx context.Context,
+	dir string,
+	rootDirs []string,
+	importPaths []string,
+) (map[string]*instrumentationConfig, error) {
+	cfgs, err := resolveInstrumentationConfigs(ctx, dir, importPaths)
+	if !hasUnresolvedConfigs(cfgs, importPaths) && err == nil {
+		return cfgs, nil
+	}
+
+	for _, rootDir := range rootDirs {
+		if rootDir == "" || rootDir == dir {
+			continue
+		}
+		rootCfgs, rootErr := resolveInstrumentationConfigs(ctx, rootDir, importPaths)
+		if rootErr != nil {
+			continue
+		}
+		cfgs = mergeResolvedConfigs(cfgs, rootCfgs, importPaths)
+		if !hasUnresolvedConfigs(cfgs, importPaths) {
+			return cfgs, nil
+		}
+	}
+
+	return cfgs, err
+}
+
+func mergeResolvedConfigs(
+	target, fallback map[string]*instrumentationConfig,
+	importPaths []string,
+) map[string]*instrumentationConfig {
+	if target == nil {
+		return fallback
+	}
+	for _, imp := range importPaths {
+		curr := target[imp]
+		if (curr == nil || curr.Error != nil) && fallback[imp] != nil && fallback[imp].Error == nil {
+			target[imp] = fallback[imp]
+		}
+	}
+	return target
+}
+
+func hasUnresolvedConfigs(cfgs map[string]*instrumentationConfig, importPaths []string) bool {
+	if len(cfgs) == 0 {
+		return true
+	}
+	for _, imp := range importPaths {
+		if cfg := cfgs[imp]; cfg == nil || cfg.Error != nil {
+			return true
+		}
+	}
+	return false
 }
