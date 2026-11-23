@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -38,19 +37,7 @@ func TestBuildRemovesGoWorkDir(t *testing.T) {
 		{name: "debug", debug: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			moduleDir := t.TempDir()
-			writeTestFile(t, moduleDir, "go.mod", "module example.com/otelc-work-dir\n\ngo 1.25.0\n")
-			writeTestFile(t, moduleDir, "main.go", `// Copyright The OpenTelemetry Authors
-// SPDX-License-Identifier: Apache-2.0
-
-package main
-
-import "net/http"
-
-func main() {
-	_, _ = http.Get("http://127.0.0.1:1/")
-}
-`)
+			moduleDir := copyTestApp(t, "workdir")
 			tmpDir, err := filepath.EvalSymlinks(t.TempDir())
 			require.NoError(t, err)
 			t.Setenv("GOTMPDIR", tmpDir)
@@ -72,11 +59,7 @@ func main() {
 				require.Empty(t, workDirs, "default build left Go work directories behind")
 			}
 			symbols := goOutput(t, moduleDir, "tool", "nm", binary)
-			require.True(t,
-				strings.Contains(symbols, "otelc/instrumentation/net/http") ||
-					strings.Contains(symbols, "otelc-contrib/instrumentation/net/http"),
-				"net/http was not instrumented",
-			)
+			require.Contains(t, symbols, "go.opentelemetry.io/otelc/test/apps/workdir/hooks.Before", "hooks were not instrumented")
 		})
 	}
 }

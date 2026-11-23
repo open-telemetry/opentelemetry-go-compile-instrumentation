@@ -1,0 +1,8 @@
+hook_work:
+  target: main
+  where:
+    func: RunApp
+  do:
+    - inject_hooks:
+        before: Before
+        path: go.opentelemetry.io/otelc/test/apps/vendored/hooks
