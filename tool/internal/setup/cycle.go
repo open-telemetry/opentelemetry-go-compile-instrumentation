@@ -33,26 +33,33 @@ type ruleImport struct {
 	rule string
 	path string
 	// match is set when the rule is listed for every file of the packages its
-	// target matches, but changes only some of these files. The rule adds its
-	// imports only to the files that it changes. files are the files to check.
+	// target matches, but adds the import only to some of these files. files
+	// are the files to check.
 	match *fileMatch
 	files []string
 }
 
-// fileMatch finds the files that a function_call rule or a literal rule
-// changes.
+// ruleImportKey identifies a ruleImport: the import of path that rule adds
+// to pkg, in the files that match finds.
+type ruleImportKey struct {
+	pkg, rule, path string
+	match           *fileMatch
+}
+
+// fileMatch finds the files that a function_call rule or a literal rule adds
+// an import to.
 type fileMatch struct {
 	// importPath is the package that a changed file imports.
 	importPath string
 	// text matches the source text of each file that the rule can change. A
 	// text search skips most files faster than a parse.
 	text *regexp.Regexp
-	// changes reports whether the rule changes tree. aliases maps the import
-	// names of tree to import paths.
+	// changes reports whether the rule adds the import to tree. aliases maps
+	// the import names of tree to import paths.
 	changes func(tree *dst.File, aliases map[string]string) bool
 }
 
-// ruleImports are the imports that a rule adds, and the files it adds them to.
+// ruleImports are imports that a rule adds, and the files it adds them to.
 type ruleImports struct {
 	imports map[string]string
 	match   *fileMatch
@@ -62,31 +69,33 @@ type ruleImports struct {
 // its matched rules add to it.
 func collectRuleImports(matched []*rule.InstRuleSet) map[string][]*ruleImport {
 	result := make(map[string][]*ruleImport)
-	seen := make(map[[3]string]*ruleImport)
+	seen := make(map[ruleImportKey]*ruleImport)
 	// A rule is listed once for each file it applies to.
-	byRule := make(map[rule.InstRule]ruleImports)
+	byRule := make(map[rule.InstRule][]ruleImports)
 	for _, set := range matched {
 		pkg := set.ModulePath
 		add := func(file string, r rule.InstRule) {
-			ris, ok := byRule[r]
+			groups, ok := byRule[r]
 			if !ok {
-				ris = addedImports(r)
-				byRule[r] = ris
+				groups = addedImports(r)
+				byRule[r] = groups
 			}
-			for _, path := range ris.imports {
-				// Neither has dependencies.
-				if path == "C" || path == unsafePackageName {
-					continue
-				}
-				key := [3]string{pkg, r.GetName(), path}
-				ri, found := seen[key]
-				if !found {
-					ri = &ruleImport{rule: r.GetName(), path: path, match: ris.match}
-					seen[key] = ri
-					result[pkg] = append(result[pkg], ri)
-				}
-				if ris.match != nil {
-					ri.files = append(ri.files, file)
+			for _, ris := range groups {
+				for _, path := range ris.imports {
+					// Neither has dependencies.
+					if path == "C" || path == unsafePackageName {
+						continue
+					}
+					key := ruleImportKey{pkg: pkg, rule: r.GetName(), path: path, match: ris.match}
+					ri, found := seen[key]
+					if !found {
+						ri = &ruleImport{rule: r.GetName(), path: path, match: ris.match}
+						seen[key] = ri
+						result[pkg] = append(result[pkg], ri)
+					}
+					if ris.match != nil {
+						ri.files = append(ri.files, file)
+					}
 				}
 			}
 		}
@@ -119,47 +128,91 @@ func forEachRule[T rule.InstRule](rules map[string][]T, fn func(file string, r r
 	}
 }
 
-// addedImports returns the imports that r adds to the files it applies to,
-// and how to find these files when r does not change all of them.
-func addedImports(r rule.InstRule) ruleImports {
+// addedImports returns the imports that r adds to the files it applies to.
+// Each group tells how to find the files it is added to when r does not add
+// it to all of them.
+func addedImports(r rule.InstRule) []ruleImports {
 	switch rt := r.(type) {
 	case *rule.InstFuncRule:
 		// The hook code of a func rule is not in the target file, so only its
 		// blank and dot imports are added there.
 		imports := maps.Clone(rt.Imports)
 		maps.DeleteFunc(imports, func(alias, _ string) bool { return alias != "_" && alias != "." })
-		return ruleImports{imports: imports}
+		return []ruleImports{{imports: imports}}
 	case *rule.InstStructRule:
 		types := make([]string, 0, len(rt.NewField))
 		for _, f := range rt.NewField {
 			types = append(types, f.Type)
 		}
-		return ruleImports{imports: referencedImports(rt.Imports, types...)}
+		return []ruleImports{{imports: referencedImports(rt.Imports, types...)}}
 	case *rule.InstRawRule:
-		return ruleImports{imports: referencedImports(rt.Imports, rt.Raw)}
+		return []ruleImports{{imports: referencedImports(rt.Imports, rt.Raw)}}
 	case *rule.InstDirectiveRule:
-		return ruleImports{imports: referencedImports(rt.Imports, rt.Template)}
+		return []ruleImports{{imports: referencedImports(rt.Imports, rt.Template)}}
 	case *rule.InstDeclRule:
-		return ruleImports{imports: referencedImports(rt.Imports, rt.Replace, rt.Wrap)}
+		return []ruleImports{{imports: referencedImports(rt.Imports, rt.Replace, rt.Wrap)}}
 	case *rule.InstCallRule:
 		// TODO: check method_call rules. To know if a call matches the method,
 		// setup must know the type of the receiver, and setup does not
 		// type-check packages. A match by the method name only would fail
 		// builds that do not have a cycle.
 		if rt.MethodCall != "" {
-			return ruleImports{}
+			return nil
 		}
-		code := append([]string{rt.Replace, rt.VariadicType}, rt.AppendArgs...)
-		return ruleImports{imports: referencedImports(rt.Imports, code...), match: callMatch(rt)}
+		return callImports(rt)
 	case *rule.InstLitRule:
-		code := make([]string, 0, len(rt.Field))
-		for _, f := range rt.Field {
-			code = append(code, f.Value, f.Wrap)
-		}
-		return ruleImports{imports: referencedImports(rt.Imports, code...), match: litMatch(rt)}
+		return litImports(rt)
 	default:
-		return ruleImports{}
+		return nil
 	}
+}
+
+// callImports returns the imports that the function_call rule r adds. The
+// rule writes variadic_type only into a spread call, as in f(s...), and only
+// when it appends arguments. So an import that only variadic_type uses is
+// added only to the files with such a call.
+func callImports(r *rule.InstCallRule) []ruleImports {
+	imports := referencedImports(r.Imports, append([]string{r.Replace}, r.AppendArgs...)...)
+	groups := []ruleImports{{imports: imports, match: callMatch(r, false)}}
+	if len(r.AppendArgs) == 0 {
+		return groups
+	}
+	spread := referencedImports(r.Imports, r.VariadicType)
+	maps.DeleteFunc(spread, func(alias, _ string) bool {
+		_, found := imports[alias]
+		return found
+	})
+	if len(spread) > 0 {
+		groups = append(groups, ruleImports{imports: spread, match: callMatch(r, true)})
+	}
+	return groups
+}
+
+// litImports returns the imports that the literal rule r adds. Each literal
+// gets only the code of the fields that apply to it, so each import is added
+// only to the files with a literal that gets code that uses the import.
+func litImports(r *rule.InstLitRule) []ruleImports {
+	code := make([]string, 0, len(r.Field))
+	for _, f := range r.Field {
+		code = append(code, f.Value, f.Wrap)
+	}
+	used := referencedImports(r.Imports, code...)
+	groups := make([]ruleImports, 0, len(used))
+	blankAndDot := make(map[string]string)
+	for _, alias := range slices.Sorted(maps.Keys(used)) {
+		if alias == "_" || alias == "." {
+			blankAndDot[alias] = used[alias]
+			continue
+		}
+		groups = append(groups, ruleImports{
+			imports: map[string]string{alias: used[alias]},
+			match:   litMatch(r, alias),
+		})
+	}
+	if len(blankAndDot) > 0 {
+		groups = append(groups, ruleImports{imports: blankAndDot, match: litMatch(r, "")})
+	}
+	return groups
 }
 
 // referencedImports returns the blank and dot imports in imports, and the
@@ -205,8 +258,8 @@ func addSelectedNames(src string, names map[string]bool) {
 
 // callMatch returns how to find the files that the function_call rule r
 // changes: the files with a call of the function, at a call site without
-// //otelc:ignore.
-func callMatch(r *rule.InstCallRule) *fileMatch {
+// //otelc:ignore. With spread, only a spread call, as in f(s...), counts.
+func callMatch(r *rule.InstCallRule, spread bool) *fileMatch {
 	return &fileMatch{
 		importPath: r.ImportPath,
 		text:       regexp.MustCompile(`\.\s*` + regexp.QuoteMeta(r.FuncName) + `\b`),
@@ -214,7 +267,7 @@ func callMatch(r *rule.InstCallRule) *fileMatch {
 			stmts := ast.CallEnclosingStmts(tree)
 			return containsNode(tree, func(node dst.Node) bool {
 				call, ok := node.(*dst.CallExpr)
-				if !ok {
+				if !ok || (spread && !call.Ellipsis) {
 					return false
 				}
 				sel, ok := call.Fun.(*dst.SelectorExpr)
@@ -229,17 +282,18 @@ func callMatch(r *rule.InstCallRule) *fileMatch {
 	}
 }
 
-// litMatch returns how to find the files that the literal rule r changes: the
-// files with a keyed or empty literal of the rule's type that one of the
-// rule's fields changes.
-func litMatch(r *rule.InstLitRule) *fileMatch {
+// litMatch returns how to find the files that the literal rule r adds the
+// import named alias to: the files with a keyed or empty literal of the rule's
+// type that gets code from the rule that selects from alias. With an empty
+// alias, any code counts.
+func litMatch(r *rule.InstLitRule, alias string) *fileMatch {
 	return &fileMatch{
 		importPath: r.ImportPath,
 		text:       regexp.MustCompile(`\.\s*` + regexp.QuoteMeta(r.TypeName) + `\s*\{`),
 		changes: func(tree *dst.File, aliases map[string]string) bool {
 			return containsNode(tree, func(node dst.Node) bool {
 				lit, ok := node.(*dst.CompositeLit)
-				return ok && isRuleLiteral(lit, r, aliases) && changesLiteral(lit, r)
+				return ok && isRuleLiteral(lit, r, aliases) && changesLiteral(lit, r, alias)
 			})
 		},
 	}
@@ -262,11 +316,10 @@ func isRuleLiteral(lit *dst.CompositeLit, r *rule.InstLitRule, aliases map[strin
 	return aliases[ident.Name] == r.ImportPath
 }
 
-// changesLiteral reports whether the literal rule r changes lit. The rule
-// skips a literal with positional elements. A field with a value always
-// changes the literal, and a field with only a wrap changes it when the
-// literal sets that field.
-func changesLiteral(lit *dst.CompositeLit, r *rule.InstLitRule) bool {
+// changesLiteral reports whether the literal rule r writes code into lit that
+// selects from the import name alias, or any code when alias is empty. The
+// rule skips a literal with positional elements.
+func changesLiteral(lit *dst.CompositeLit, r *rule.InstLitRule, alias string) bool {
 	keys := make(map[string]bool, len(lit.Elts))
 	for _, elt := range lit.Elts {
 		kv, ok := elt.(*dst.KeyValueExpr)
@@ -278,8 +331,27 @@ func changesLiteral(lit *dst.CompositeLit, r *rule.InstLitRule) bool {
 		}
 	}
 	return slices.ContainsFunc(r.Field, func(f *rule.InstLitField) bool {
-		return f.Value != "" || keys[f.Name]
+		code := appliedCode(f, keys[f.Name])
+		return code != "" && (alias == "" || selectsFrom(code, alias))
 	})
+}
+
+// appliedCode returns the code that the field f writes into a literal: its
+// wrap when the literal sets the field and f has a wrap, else its value. set
+// reports whether the literal sets the field. A wrap does not change a
+// literal that does not set the field.
+func appliedCode(f *rule.InstLitField, set bool) string {
+	if set && f.Wrap != "" {
+		return f.Wrap
+	}
+	return f.Value
+}
+
+// selectsFrom reports whether code selects from name, as in name.X.
+func selectsFrom(code, name string) bool {
+	names := make(map[string]bool)
+	addSelectedNames(code, names)
+	return names[name]
 }
 
 // containsNode reports whether a node in tree satisfies match.
