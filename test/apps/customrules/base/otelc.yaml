@@ -1,0 +1,8 @@
+base_rule:
+  target: main
+  where:
+    func: BaseTarget
+  do:
+    - inject_hooks:
+        before: BeforeBase
+        path: go.opentelemetry.io/otelc/test/apps/customrules/base

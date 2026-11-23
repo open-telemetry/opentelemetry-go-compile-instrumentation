@@ -1,0 +1,8 @@
+hook_work:
+  target: go.opentelemetry.io/otelc/test/apps/pgo/lib
+  where:
+    func: Work
+  do:
+    - inject_hooks:
+        before: Before
+        path: go.opentelemetry.io/otelc/test/apps/pgo/hooks

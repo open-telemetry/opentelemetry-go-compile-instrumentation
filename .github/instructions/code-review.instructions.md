@@ -35,8 +35,8 @@ CI already checks these:
 
 - Diagnostics the `golangci-lint` CI run already reports for this PR. The enabled linters are in
   `.tools/golangci.yml`. A real problem is still worth raising if the linter doesn't report it.
-- Formatting, typos, markdown lint, license headers, conventional-commit PR titles, an outdated
-  `tool/data/otelc-bundle.tgz` or outdated golden files, test file names and the coverage floor.
+- Formatting, typos, markdown lint, license headers, conventional-commit PR titles,
+  outdated golden files, test file names and the coverage floor.
 
 Also skip:
 
