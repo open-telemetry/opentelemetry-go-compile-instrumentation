@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/tools/go/packages"
 
+	"go.opentelemetry.io/otelc/tool/internal/compileindex"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -36,6 +37,18 @@ func TestSetupPhaseStore(t *testing.T) {
 	data, err := os.ReadFile(matchedFile)
 	require.NoError(t, err)
 	assert.Equal(t, "[]", string(data))
+	assert.True(t, compileindex.Excludes("example.com/unmatched"))
+}
+
+func TestSetupPhaseStoreIndexErrorIsNonfatal(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	require.NoError(t, os.MkdirAll(util.GetBuildTemp("compile_index.json"), 0o755))
+	sp := newTestSetupPhase()
+	require.NoError(t, sp.store([]*rule.InstRuleSet{}))
+	assert.False(t, compileindex.Excludes("example.com/unmatched"))
+	data, err := os.ReadFile(util.GetMatchedRuleFile())
+	require.NoError(t, err)
+	assert.JSONEq(t, "[]", string(data))
 }
 
 func TestSetupPhaseStoreCreateError(t *testing.T) {
@@ -60,6 +73,8 @@ func TestSetupPhaseStore_AllowsIgnoredCallFiles(t *testing.T) {
 	sp := newTestSetupPhase()
 	err := sp.store([]*rule.InstRuleSet{other})
 	require.NoError(t, err)
+	assert.False(t, compileindex.Excludes("example.com/other"))
+	assert.True(t, compileindex.Excludes("example.com/unmatched"))
 }
 
 func TestSetupPhaseStorePGOProfile(t *testing.T) {

@@ -535,3 +535,137 @@ func TestProbe(t *testing.T) {
 		})
 	}
 }
+
+func TestClassifyArgs_Run(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		args []string
+		want []ClassifiedArg
+	}{
+		{
+			name: "flags before the package",
+			args: []string{"-tags", "foo", "-race", "./cmd", "arg"},
+			want: []ClassifiedArg{
+				{Index: 0, Raw: "-tags", Kind: ArgBuildFlag, FlagName: "-tags"},
+				{Index: 1, Raw: "foo", Kind: ArgBuildFlagValue, FlagName: "-tags", Value: "foo"},
+				{Index: 2, Raw: "-race", Kind: ArgBuildFlag, FlagName: "-race"},
+				{Index: 3, Raw: "./cmd", Kind: ArgTarget},
+				{Index: 4, Raw: "arg", Kind: ArgProgramArg},
+			},
+		},
+		{
+			name: "program arguments that look like flags",
+			args: []string{".", "-tags", "foo", "-C", "dir", "--", "-exec", "x.go"},
+			want: []ClassifiedArg{
+				{Index: 0, Raw: ".", Kind: ArgTarget},
+				{Index: 1, Raw: "-tags", Kind: ArgProgramArg},
+				{Index: 2, Raw: "foo", Kind: ArgProgramArg},
+				{Index: 3, Raw: "-C", Kind: ArgProgramArg},
+				{Index: 4, Raw: "dir", Kind: ArgProgramArg},
+				{Index: 5, Raw: "--", Kind: ArgProgramArg},
+				{Index: 6, Raw: "-exec", Kind: ArgProgramArg},
+				{Index: 7, Raw: "x.go", Kind: ArgProgramArg},
+			},
+		},
+		{
+			name: "single .go file",
+			args: []string{"main.go", "-flag=value"},
+			want: []ClassifiedArg{
+				{Index: 0, Raw: "main.go", Kind: ArgTarget},
+				{Index: 1, Raw: "-flag=value", Kind: ArgProgramArg},
+			},
+		},
+		{
+			name: "consecutive .go files form the package",
+			args: []string{"main.go", "extra.go", "arg", "later.go"},
+			want: []ClassifiedArg{
+				{Index: 0, Raw: "main.go", Kind: ArgTarget},
+				{Index: 1, Raw: "extra.go", Kind: ArgTarget},
+				{Index: 2, Raw: "arg", Kind: ArgProgramArg},
+				{Index: 3, Raw: "later.go", Kind: ArgProgramArg},
+			},
+		},
+		{
+			name: "separated and joined -exec",
+			args: []string{"-exec", "xprog", "--exec=yprog", "."},
+			want: []ClassifiedArg{
+				{Index: 0, Raw: "-exec", Kind: ArgRunFlag, FlagName: flagExec},
+				{Index: 1, Raw: "xprog", Kind: ArgRunFlagValue, FlagName: flagExec, Value: "xprog"},
+				{Index: 2, Raw: "--exec=yprog", Kind: ArgRunFlag, FlagName: flagExec, HasValue: true, Value: "yprog"},
+				{Index: 3, Raw: ".", Kind: ArgTarget},
+			},
+		},
+		{
+			name: "-exec without a value",
+			args: []string{"-exec"},
+			want: []ClassifiedArg{
+				{Index: 0, Raw: "-exec", Kind: ArgRunFlag, FlagName: flagExec},
+			},
+		},
+		{
+			name: "terminator ends the flags",
+			args: []string{"-v", "--", "main.go", "-v"},
+			want: []ClassifiedArg{
+				{Index: 0, Raw: "-v", Kind: ArgBuildFlag, FlagName: "-v"},
+				{Index: 1, Raw: "--", Kind: ArgFlagTerminator},
+				{Index: 2, Raw: "main.go", Kind: ArgTarget},
+				{Index: 3, Raw: "-v", Kind: ArgProgramArg},
+			},
+		},
+		{
+			name: "no package",
+			args: []string{"-trimpath"},
+			want: []ClassifiedArg{
+				{Index: 0, Raw: "-trimpath", Kind: ArgBuildFlag, FlagName: "-trimpath"},
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, classifyArgs(subcmdRun, tt.args))
+		})
+	}
+}
+
+func TestClassifyArgs_GoRunParity(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module probe\ngo 1.26\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"), []byte(`package main
+import (
+ "encoding/json"
+ "fmt"
+ "os"
+)
+func main() {
+ args, err := json.Marshal(os.Args[1:])
+ if err != nil { panic(err) }
+ fmt.Printf("PROBE_ARGS=%s\n", args)
+}
+`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "extra.go"), []byte("package main\n"), 0o644))
+	for _, args := range [][]string{
+		{".", "-x", "value"},
+		{"-tags", "probe", ".", "-tags", "other"},
+		{"-C", ".", ".", "-C", "elsewhere"},
+		{"main.go", "-flag=value"},
+		{"main.go", "extra.go", "arg", "later.go"},
+		{"-trimpath", "--", "main.go", "--", "-args"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			cmd := exec.CommandContext(t.Context(), "go", append([]string{"run"}, args...)...)
+			cmd.Dir = dir
+			cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=")
+			output, err := cmd.CombinedOutput()
+			require.NoError(t, err, "%s", output)
+
+			programArgs := []string{}
+			for _, arg := range classifyArgs(subcmdRun, args) {
+				if arg.Kind == ArgProgramArg {
+					programArgs = append(programArgs, arg.Raw)
+				}
+			}
+			want, err := json.Marshal(programArgs)
+			require.NoError(t, err)
+			assert.Contains(t, string(output), "PROBE_ARGS="+string(want)+"\n")
+		})
+	}
+}

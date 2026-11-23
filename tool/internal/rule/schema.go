@@ -90,7 +90,16 @@ const (
 
 	// rawField is the modifier-output key produced by normalize for raw rules.
 	rawField = "raw"
+
+	// orderField is the modifier key that sets the order in which a rule is
+	// applied to a file.
+	orderField = "order"
 )
+
+// acceptsOrder reports whether the modifier m accepts an order.
+func acceptsOrder(m string) bool {
+	return m == string(modifierInjectCode) || m == string(modifierExpandDirective)
+}
 
 // Structured top-level keys.
 const (

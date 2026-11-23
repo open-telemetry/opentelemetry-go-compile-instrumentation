@@ -1,0 +1,15 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+//otelc:span
+//line /golden/work/main.go:7
+func main() {
+	/*line /<generated>:1*/ println("crashtracker start")
+	println("tracer start")
+	defer println("tracer stop")
+	println("span start: main")
+	defer println("span end: main")
+	/*line /golden/work/main.go:8*/ println("hello")
+}

@@ -334,6 +334,7 @@ path: github.com/example/lib
 		{
 			name: "raw rule creation",
 			yamlContent: `
+func: Foo
 raw: test
 target: github.com/example/lib
 `,

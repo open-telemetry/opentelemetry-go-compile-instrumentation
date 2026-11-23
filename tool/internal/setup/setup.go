@@ -113,6 +113,7 @@ func isSetup() bool {
 const (
 	subcmdBuild   = "build"
 	subcmdInstall = "install"
+	subcmdRun     = "run"
 	subcmdTest    = "test"
 
 	goModFileName = "go.mod"
@@ -138,6 +139,8 @@ const (
 	// coverage for; see nestedCoverFlags.
 	flagCover    = "-cover"
 	flagCoverpkg = "-coverpkg"
+	// flagExec names the program that go run and go test run the binary with.
+	flagExec = "-exec"
 )
 
 // isGoFileTarget reports whether a build target names a Go source file. The go
@@ -227,7 +230,7 @@ func loadBuildPackages(
 		switch {
 		case len(fileTargets) > 0:
 			pkgs, targetErr = pkgload.LoadPackages(ctx, mode, buildFlags, tests, fileTargets...)
-			if targetErr == nil && len(pkgs) > 1 {
+			if targetErr == nil && countNonTestPackages(pkgs) > 1 {
 				targetErr = ex.New("multiple packages found for file targets")
 			}
 		case len(pkgTargets) > 0:
@@ -241,15 +244,7 @@ func loadBuildPackages(
 		return nil, nil, loadErr
 	}
 
-	// A test load sets ForTest on every test package it adds. The synthesized
-	// test binaries ("p.test") have no marker of their own, but each one is the
-	// ForTest value of a test package plus a ".test" suffix.
-	testBinaries := make(map[string]bool, len(pkgs))
-	for _, pkg := range pkgs {
-		if pkg.ForTest != "" {
-			testBinaries[pkg.ForTest+".test"] = true
-		}
-	}
+	testBinaries := testBinaryIDs(pkgs)
 
 	buildPkgs := make([]*packages.Package, 0, len(pkgs))
 	allPkgs := make([]*packages.Package, 0, len(pkgs))
@@ -278,6 +273,35 @@ func loadBuildPackages(
 	}
 
 	return buildPkgs, allPkgs, nil
+}
+
+// testBinaryIDs returns the IDs of the synthesized test binaries in a load.
+// A test load sets ForTest on every test package it adds. The synthesized
+// test binaries ("p.test") have no marker of their own, but each one is the
+// ForTest value of a test package plus a ".test" suffix.
+func testBinaryIDs(pkgs []*packages.Package) map[string]bool {
+	testBinaries := make(map[string]bool, len(pkgs))
+	for _, pkg := range pkgs {
+		if pkg.ForTest != "" {
+			testBinaries[pkg.ForTest+".test"] = true
+		}
+	}
+	return testBinaries
+}
+
+// countNonTestPackages counts the packages of a load that are not test
+// variants. A test load of file targets returns the package itself, its test
+// variant ("p [p.test]") and the synthesized test binary ("p.test"), which are
+// all one package as far as the file targets are concerned.
+func countNonTestPackages(pkgs []*packages.Package) int {
+	testBinaries := testBinaryIDs(pkgs)
+	n := 0
+	for _, pkg := range pkgs {
+		if pkg.ForTest == "" && !testBinaries[pkg.ID] {
+			n++
+		}
+	}
+	return n
 }
 
 //nolint:revive // if we add named returns then nonamedreturns will complain
@@ -515,8 +539,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	args := cmd.Args().Slice()
 	subcommand := subcmdBuild
 	if cmd.Name == "go" {
-		subcommand = cmd.Args().First() // build / install / test
-		args = cmd.Args().Tail()        // trim the subcommand
+		subcommand, args = goSubcommand(cmd.Args().Slice())
 	} else if cleanErr := cleanupOwnedSession(); cleanErr != nil {
 		return ex.Wrapf(cleanErr, "cleaning the session directory")
 	} else if err := cleanupDebugArtifacts(); err != nil {
@@ -1038,6 +1061,9 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool, ext
 		return ex.Wrapf(err, "configuring go cache")
 	}
 
+	if subcommand == subcmdRun {
+		return runProgram(ctx, env, newArgs)
+	}
 	return runBuildCmd(ctx, env, newArgs...)
 }
 
@@ -1045,14 +1071,14 @@ func GoBuild(ctx context.Context, cmd *cli.Command) (err error) {
 	// Validate the invocation before taking the build lock: a bad command
 	// line must fail immediately, not wait behind a running build.
 	if !cmd.Args().Present() {
-		return ex.Newf("no command provided. Only 'go build', 'go install' and 'go test' are supported")
+		return ex.Newf("no command provided. Only 'go build', 'go install', 'go run' and 'go test' are supported")
 	}
 
 	switch cmd.Args().First() {
-	case subcmdBuild, subcmdInstall, subcmdTest:
+	case subcmdBuild, subcmdInstall, subcmdRun, subcmdTest:
 		// supported
 	default:
-		return ex.Newf("unsupported command: %s. Only 'go build', 'go install' and 'go test' are supported",
+		return ex.Newf("unsupported command: %s. Only 'go build', 'go install', 'go run' and 'go test' are supported",
 			cmd.Args().First())
 	}
 

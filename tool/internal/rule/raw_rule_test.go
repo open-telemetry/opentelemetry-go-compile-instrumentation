@@ -84,6 +84,18 @@ placement: after
 			wantErr: true,
 		},
 		{
+			name:    "missing func is rejected",
+			ruleID:  "raw-nofunc",
+			yaml:    "target: main\nraw: println()",
+			wantErr: true,
+		},
+		{
+			name:    "blank func is rejected",
+			ruleID:  "raw-blankfunc",
+			yaml:    "target: main\nfunc: \"  \"\nraw: println()",
+			wantErr: true,
+		},
+		{
 			name:    "missing raw is rejected",
 			ruleID:  "raw5",
 			yaml:    "target: main\nfunc: Bar",
