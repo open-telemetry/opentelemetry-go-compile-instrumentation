@@ -9,15 +9,22 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"golang.org/x/mod/semver"
 )
 
 const (
-	EnvOtelcWorkDir    = "OTELC_WORK_DIR"
-	EnvOtelcRules      = "OTELC_RULES"
-	EnvOtelcBuildFlags = "OTELC_BUILD_FLAGS"
+	EnvOtelcWorkDir = "OTELC_WORK_DIR"
+	// EnvOtelcInvocationDir holds one build's extracted bundle, metadata,
+	// import tracking files, runtime packages, and session.
+	// otelc sets it for the go command of a build that runs after it
+	// released the build lock, so the next build's setup cannot change them.
+	// When it is unset, these files are in the build temp directory.
+	EnvOtelcInvocationDir = "OTELC_INVOCATION_DIR"
+	EnvOtelcRules         = "OTELC_RULES"
+	EnvOtelcBuildFlags    = "OTELC_BUILD_FLAGS"
 	// EnvOtelcStats enables per-toolexec timing stats when set to "1".
 	// Set automatically when --stats is used; propagated to child processes.
 	EnvOtelcStats = "OTELC_STATS"
@@ -27,18 +34,55 @@ const (
 	// EnvOtelcNestedToolexec marks toolexec invocations spawned by a go
 	// command otelc itself ran (e.g. `go list -export`).
 	EnvOtelcNestedToolexec = "OTELC_NESTED_TOOLEXEC"
+	// EnvOtelcHeldBuildLocks lists the build lock files that a parent otelc
+	// invocation holds, as a JSON array of paths. otelc sets it for
+	// the go command it runs, so an otelc invocation started under that
+	// command (for example from a test) does not wait for its own parent.
+	EnvOtelcHeldBuildLocks = "OTELC_HELD_BUILD_LOCKS"
+	// EnvOtelcParentWorkDirs lists the work dirs of the parent otelc
+	// invocations, in the format of EnvOtelcHeldBuildLocks. An otelc
+	// invocation that uses one of them fails, because it would overwrite the
+	// .otelc-build of that parent.
+	EnvOtelcParentWorkDirs = "OTELC_PARENT_WORK_DIRS"
 	// EnvOtelcNestedResolving lists, outermost first, the compiles waiting on
 	// a nested build to resolve an import a rule added, as comma-separated
 	// "package>added import" entries. Import paths cannot contain "," or ">",
 	// so the entries need no escaping.
 	EnvOtelcNestedResolving = "OTELC_NESTED_RESOLVING"
-	BuildTempDir            = ".otelc-build"
-	BuildLockFile           = BuildTempDir + ".lock"
-	OtelcRoot               = "go.opentelemetry.io/otelc"
-	OtelcPkgRoot            = OtelcRoot + "/pkg"
-	OtelcInstRoot           = OtelcRoot + "/instrumentation"
-	OtelcToolCmdRoot        = OtelcRoot + "/tool/cmd/otelc"
-	OtelcToolExe            = "otelc"
+	// EnvOtelcSessionDir names the session directory the outermost otelc
+	// build owns and every otelc process under it inherits: its toolexec
+	// processes, nested go commands, and nested otelc builds such as the
+	// ones a test binary runs. It holds the export memo and the load slots.
+	// SessionOff disables both.
+	EnvOtelcSessionDir = "OTELC_SESSION_DIR"
+	// EnvOtelcMaxParallelLoads bounds how many heavy package loads otelc
+	// processes of one session run at once. A positive integer sets the
+	// bound, 0 removes it, and anything else falls back to runtime.NumCPU().
+	EnvOtelcMaxParallelLoads = "OTELC_MAX_PARALLEL_LOADS"
+	// EnvOtelcBuildDeadline carries the absolute deadline (RFC 3339, nanosecond
+	// precision) that --timeout/OTELC_BUILD_TIMEOUT computed for the whole
+	// build, set once by the outermost `otelc go` and inherited by every
+	// process under it: the go command it runs, the toolexec processes that
+	// spawns, and any nested otelc build. Carrying an absolute deadline
+	// rather than a duration means a nested build shares the outer build's
+	// remaining budget instead of restarting its own full timeout.
+	EnvOtelcBuildDeadline = "OTELC_BUILD_DEADLINE"
+	// SessionOff is the EnvOtelcSessionDir value that disables the session.
+	SessionOff = "off"
+	// SessionTempDir is the build temp entry an owning build uses as its
+	// session directory.
+	SessionTempDir   = "session"
+	BuildTempDir     = ".otelc-build"
+	BuildLockFile    = BuildTempDir + ".lock"
+	OtelcRoot        = "go.opentelemetry.io/otelc"
+	OtelcPkgRoot     = OtelcRoot + "/pkg"
+	OtelcInstRoot    = OtelcRoot + "/instrumentation"
+	OtelcToolCmdRoot = OtelcRoot + "/tool/cmd/otelc"
+	OtelcToolExe     = "otelc"
+	// InternalPath is a sentinel Path value for compiler-internal rules and
+	// synthetic files (e.g. runtime GLS context propagation) injected directly
+	// by otelc rather than loaded from an external Go package.
+	InternalPath = "<internal>"
 )
 
 // DirectiveIgnore and DirectiveInstrument live in util, not ast or rule. ast
@@ -65,27 +109,53 @@ func IsRuleFile(name string) bool {
 
 func GetMatchedRuleFile() string {
 	const matchedRuleFile = "matched.json"
-	return GetBuildTemp(matchedRuleFile)
+	return GetInvocationTemp(matchedRuleFile)
 }
 
 // GetImportNamesFile returns the path to the import name table file.
 func GetImportNamesFile() string {
 	const importNamesFile = "import_names.json"
-	return GetBuildTemp(importNamesFile)
+	return GetInvocationTemp(importNamesFile)
 }
 
 // GetPGOProfileFile returns the path to the file that records the build's PGO
 // profile for the nested builds toolexec runs.
 func GetPGOProfileFile() string {
 	const pgoProfileFile = "pgo_profile"
-	return GetBuildTemp(pgoProfileFile)
+	return GetInvocationTemp(pgoProfileFile)
+}
+
+// GetInjectedHashFile returns the path to the file that records the content
+// hash of the packages rules add to the build.
+func GetInjectedHashFile() string {
+	const injectedHashFile = "injected_hash"
+	return GetInvocationTemp(injectedHashFile)
 }
 
 // GetAddedImportsFileForProcess returns the per-process import tracking file.
 // Each compile process writes to its own file to avoid inter-process race conditions.
 func GetAddedImportsFileForProcess() string {
 	pid := os.Getpid()
-	return GetBuildTemp(fmt.Sprintf("added_imports.%d.json", pid))
+	return GetInvocationTemp(fmt.Sprintf("added_imports.%d.json", pid))
+}
+
+// FormatBuildDeadline encodes deadline for EnvOtelcBuildDeadline.
+func FormatBuildDeadline(deadline time.Time) string {
+	return deadline.Format(time.RFC3339Nano)
+}
+
+// BuildDeadlineFromEnv returns the deadline a parent otelc process set in
+// EnvOtelcBuildDeadline, and whether one was set and well formed.
+func BuildDeadlineFromEnv() (time.Time, bool) {
+	value := os.Getenv(EnvOtelcBuildDeadline)
+	if value == "" {
+		return time.Time{}, false
+	}
+	deadline, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return deadline, true
 }
 
 // GetOtelcWorkDir returns the otelc working directory. It first checks the
@@ -134,9 +204,55 @@ func GetBuildTempDir() string {
 	return filepath.Join(GetOtelcWorkDir(), BuildTempDir)
 }
 
+// GetInvocationDir returns the directory of the files that belong to one
+// build: $OTELC_INVOCATION_DIR, else the build temp directory.
+func GetInvocationDir() string {
+	if dir := os.Getenv(EnvOtelcInvocationDir); dir != "" {
+		return dir
+	}
+	return GetBuildTempDir()
+}
+
+// GetInvocationTemp returns the path of name in GetInvocationDir.
+func GetInvocationTemp(name string) string {
+	return filepath.Join(GetInvocationDir(), name)
+}
+
 // GetBuildTemp returns the path to the build temp directory $BUILD_TEMP/name
 func GetBuildTemp(name string) string {
 	return filepath.Join(GetOtelcWorkDir(), BuildTempDir, name)
+}
+
+// GetSessionDir returns the session directory of this otelc process: the
+// inherited EnvOtelcSessionDir value, else the build temp session directory.
+// It returns SessionOff when the session is disabled.
+func GetSessionDir() string {
+	if dir := os.Getenv(EnvOtelcSessionDir); dir != "" {
+		return dir
+	}
+	return GetInvocationTemp(SessionTempDir)
+}
+
+// InheritedSession reports whether this process runs under a session an outer
+// otelc build owns, as opposed to one it owns itself or none at all.
+func InheritedSession() bool {
+	dir := os.Getenv(EnvOtelcSessionDir)
+	return dir != "" && dir != SessionOff
+}
+
+// GetResolutionScopeFile returns the path to the file in which setup records
+// the digest that scopes the export memo to this build's inputs.
+func GetResolutionScopeFile() string {
+	const resolutionScopeFile = "resolution_scope"
+	return GetInvocationTemp(resolutionScopeFile)
+}
+
+// GetSetupGenerationFile returns the path to the file in which each setup
+// records a fresh token. The resolution scope carries the token of the setup
+// that wrote it, so a scope left by an earlier setup is recognized as stale.
+func GetSetupGenerationFile() string {
+	const setupGenerationFile = "setup_generation"
+	return GetInvocationTemp(setupGenerationFile)
 }
 
 // GetBuildFlags returns the build flags from OTELC_BUILD_FLAGS environment variable.

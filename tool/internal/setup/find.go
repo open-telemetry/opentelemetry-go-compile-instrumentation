@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"golang.org/x/mod/module"
 
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/session"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -125,10 +127,12 @@ func listBuildPlan(ctx context.Context, subcommand string, cmdArgs []string) ([]
 	logger.InfoContext(ctx, "go build command", "args", args)
 
 	cmd := execCommandContext(ctx, "go", args...)
-	// This is a little anti-intuitive as the error message is not printed to
-	// the stderr, instead it is printed to the stdout, only the build tool
-	// knows the reason why.
-	cmd.Stdout = os.Stdout
+	// The plan is on stderr. Stdout is kept out of the user's output: go test
+	// writes a "[no test files]" line there for each package without tests,
+	// and the real run writes it again. Some failures, such as a test setup
+	// failure, are reported on stdout, so it is kept for the error.
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
 	cmd.Stderr = buildPlanLog
 	// @@Note that dir should not be set, as the dry build should be run in the
 	// same directory as the original build command
@@ -137,7 +141,7 @@ func listBuildPlan(ctx context.Context, subcommand string, cmdArgs []string) ([]
 	if err != nil {
 		// Read the build plan log to see what went wrong
 		logContent, _ := os.ReadFile(util.GetBuildTemp(buildPlanLogName))
-		return nil, ex.Wrapf(err, "failed to run build plan: \n%s", string(logContent))
+		return nil, ex.Wrapf(err, "failed to run build plan: \n%s%s", string(logContent), stdout.String())
 	}
 
 	// Find compile commands from build plan log
@@ -186,8 +190,10 @@ func findModVersion(path string) string {
 }
 
 // findGoSources extracts Go source files from compile command arguments,
-// resolving CGO files using the provided objDir->sourceDir mapping.
-func findGoSources(ctx context.Context, args []string, cgoObjDirs map[string]string) (*Dependency, error) {
+// resolving CGO files using the provided objDir->sourceDir mapping. The build
+// plan prints source paths relative to the directory of the last cd line, dir,
+// which is not ours when the build runs with -C.
+func findGoSources(ctx context.Context, args []string, dir string, cgoObjDirs map[string]string) (*Dependency, error) {
 	logger := util.LoggerFromContext(ctx)
 
 	dep := &Dependency{
@@ -203,7 +209,11 @@ func findGoSources(ctx context.Context, args []string, cgoObjDirs map[string]str
 		if !util.IsGoFile(arg) {
 			continue
 		}
-		if !util.PathExists(arg) {
+		path := arg
+		if dir != "" && !filepath.IsAbs(path) {
+			path = filepath.Join(dir, path)
+		}
+		if !util.PathExists(path) {
 			// Try to resolve as CGO generated file
 			objDir := util.NormalizePath(filepath.Dir(arg))
 			sourceDir, ok := cgoObjDirs[objDir]
@@ -223,7 +233,7 @@ func findGoSources(ctx context.Context, args []string, cgoObjDirs map[string]str
 		}
 
 		// This is a Go source file, add it to the dependency sources
-		abs, err := filepath.Abs(arg)
+		abs, err := filepath.Abs(path)
 		if err != nil {
 			return nil, ex.Wrapf(err, "failed to get absolute path of source file %s", arg)
 		}
@@ -240,7 +250,12 @@ func findGoSources(ctx context.Context, args []string, cgoObjDirs map[string]str
 func findDeps(ctx context.Context, subcommand string, cmdArgs []string) ([]*Dependency, error) {
 	logger := util.LoggerFromContext(ctx)
 
-	buildPlan, err := listBuildPlan(ctx, subcommand, cmdArgs)
+	var buildPlan []string
+	err := session.WithLoadSlot(ctx, func(ctx context.Context) error {
+		var planErr error
+		buildPlan, planErr = listBuildPlan(ctx, subcommand, cmdArgs)
+		return planErr
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -263,7 +278,7 @@ func findDeps(ctx context.Context, subcommand string, cmdArgs []string) ([]*Depe
 
 		args := util.SplitCompileCmds(cmd)
 		if util.IsCompileCommandWithArgs(args) {
-			dep, err1 := findGoSources(ctx, args, cgoObjDirs)
+			dep, err1 := findGoSources(ctx, args, currentDir, cgoObjDirs)
 			if err1 != nil {
 				return nil, err1
 			}
@@ -281,6 +296,5 @@ func findDeps(ctx context.Context, subcommand string, cmdArgs []string) ([]*Depe
 			logger.DebugContext(ctx, "Found CGO objdir mapping", "objDir", objDir, "sourceDir", currentDir)
 		}
 	}
-	fillVendoredVersions(ctx, deps)
 	return deps, nil
 }

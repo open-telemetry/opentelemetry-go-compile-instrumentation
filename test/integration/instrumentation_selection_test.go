@@ -6,83 +6,51 @@
 package test
 
 import (
-	"fmt"
-	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 
 	"go.opentelemetry.io/otelc/test/testutil"
-	"go.opentelemetry.io/otelc/tool/util"
 )
 
 func TestExplicitInstrumentationSelection(t *testing.T) {
 	t.Parallel()
 
-	testutil.Build(t, "", "gincustom", "go", "build", "-a")
+	app := copyTestApp(t, "customrules")
+	appsDir := filepath.Dir(app)
+	appName := filepath.Base(app)
 
-	// Verify .otelc-build/matched.json only contains net/http, custom gin instrumentation
-	// but not the built-in gin instrumentation:
-	matched := filepath.Join("../", "apps", "gincustom", ".otelc-build", "matched.json")
-	require.FileExists(t, matched)
+	testutil.Build(t, appsDir, appName, "go", "build", "-a")
 
-	matchedData, readErr := os.ReadFile(matched)
-	require.NoError(t, readErr)
-	require.Contains(
-		t,
-		string(matchedData),
-		util.OtelcRoot+"/instrumentation/net/http/server",
-	)
-	require.Contains(
-		t,
-		string(matchedData),
-		util.OtelcRoot+"/test/apps/gincustom/instrumentation",
-	)
-	require.NotContains(
-		t,
-		string(matchedData),
-		util.OtelcRoot+"/instrumentation/github.com/gin-gonic/gin",
-	)
+	matchedPath := filepath.Join(app, ".otelc-build", "matched.json")
+	require.FileExists(t, matchedPath)
 
-	f := testutil.NewTestFixture(t)
-	port := testutil.FreePort(t)
+	raw, err := os.ReadFile(matchedPath)
+	require.NoError(t, err)
 
-	f.Start("gincustom", fmt.Sprintf("-port=%d", port))
-	testutil.WaitForTCP(t, fmt.Sprintf("127.0.0.1:%d", port))
+	// Verify recursive composition: both intermediate and base rules were discovered and matched.
+	assert.Contains(t, string(raw), "go.opentelemetry.io/otelc/test/apps/customrules/instrumentation",
+		"intermediate instrumentation rule must be selected")
+	assert.Contains(t, string(raw), "go.opentelemetry.io/otelc/test/apps/customrules/base",
+		"recursively composed base instrumentation rule must be selected")
 
-	resp, getErr := http.Get(
-		fmt.Sprintf("http://127.0.0.1:%d/hello/OpenTelemetry", port),
-	) //nolint:noctx
-	require.NoError(t, getErr)
-	require.NoError(t, resp.Body.Close())
-	require.Equal(t, http.StatusOK, resp.StatusCode)
+	binPath := filepath.Join(app, "app")
+	if runtime.GOOS == "windows" {
+		binPath += ".exe"
+	}
+	cmd := exec.CommandContext(t.Context(), binPath)
+	cmd.Dir = app
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(out))
 
-	f.WaitForSpans(1)
-
-	f.RequireTraceCount(1)
-	f.RequireSpansPerTrace(1)
-
-	span := testutil.RequireSpan(t, f.Traces(), testutil.IsServer)
-
-	// The app is instrumented with a custom gin instrumentation
-	// instead of otelc's default gin instrumentation, so the span
-	// name must remain the plain HTTP method name ("GET") and
-	// http.route attribute must not be set
-	assert.Equal(t, "GET", span.Name(),
-		"span name must remain the plain HTTP method")
-
-	_, hasRoute := testutil.Attrs(span)[string(semconv.HTTPRouteKey)]
-	assert.False(t, hasRoute,
-		"http.route must not be set when gin instrumentation is not enabled")
-
-	testutil.RequireAttribute(t, span, string(semconv.HTTPRequestMethodKey), "GET")
-	testutil.RequireAttribute(t, span, string(semconv.HTTPResponseStatusCodeKey), int64(http.StatusOK))
-	testutil.RequireAttribute(t, span, string(semconv.URLPathKey), "/hello/OpenTelemetry")
-
-	// We also want to ensure our custom gin attribute is set correctly
-	testutil.RequireAttribute(t, span, "gin.otelc.custom", true)
+	output := string(out)
+	assert.Contains(t, output, "custom hook called")
+	assert.Contains(t, output, "base hook called")
+	assert.Contains(t, output, "custom target called")
+	assert.Contains(t, output, "base target called")
 }

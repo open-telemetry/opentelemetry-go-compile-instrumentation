@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"go/parser"
 	"go/token"
-	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -24,6 +24,7 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/manifest"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -164,95 +165,6 @@ func generateOtelInstrumentationGo(imports map[string]bool, opts PinOptions) *ds
 	}
 }
 
-type yamlRule struct {
-	Target       rule.Target `yaml:"target"`
-	VersionRange string      `yaml:"version"`
-}
-
-func loadModuleRules(
-	ctx context.Context,
-	moduleDir, module, currentVersion string,
-	loaded map[string][]yamlRule,
-) error {
-	return filepath.WalkDir(moduleDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return ex.Wrap(err)
-		}
-
-		if d.IsDir() {
-			// Skip any submodules
-			if path != moduleDir && util.PathExists(filepath.Join(path, goModFileName)) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		if !util.IsRuleFile(d.Name()) {
-			return nil
-		}
-
-		data, readErr := os.ReadFile(path) //nolint:gosec // walking embedded rules from extractOtelcBundle
-		if readErr != nil {
-			return ex.Wrapf(readErr, "reading rule file %s", path)
-		}
-
-		doc, parseErr := rule.ParseFile(data)
-		if parseErr != nil {
-			return ex.Wrapf(parseErr, "parsing rule file %s", path)
-		}
-		if versionErr := checkRuleFileVersion(ctx, path, doc, currentVersion); versionErr != nil {
-			return versionErr
-		}
-
-		for _, entry := range doc.Entries {
-			var r yamlRule
-			if decodeErr := entry.Node.Decode(&r); decodeErr != nil {
-				return ex.Wrapf(decodeErr, "parsing rule %q in %s", entry.Name, path)
-			}
-			if r.Target.IsZero() {
-				continue
-			}
-			if validateErr := r.Target.Validate(); validateErr != nil {
-				return ex.Wrapf(validateErr, "validating target for rule %q in %s", entry.Name, path)
-			}
-			loaded[module] = append(loaded[module], r)
-		}
-
-		return nil
-	})
-}
-
-func loadMinimalRules(
-	ctx context.Context,
-	rulesRoot, currentVersion string,
-) (map[string][]yamlRule, error) {
-	loaded := make(map[string][]yamlRule)
-
-	err := filepath.WalkDir(rulesRoot, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return ex.Wrap(err)
-		}
-		// rulesRoot is instrumentation/
-		// We want to load rules for submodules within instrumentation/
-		// Look for go.mod nested within instrumentation/
-		if d.IsDir() || d.Name() != goModFileName || filepath.Dir(path) == rulesRoot {
-			return nil
-		}
-
-		modFile, err := parseGoMod(path)
-		if err != nil {
-			return ex.Wrapf(err, "loading %s", path)
-		}
-
-		return loadModuleRules(ctx, filepath.Dir(path), modFile.Module.Mod.Path, currentVersion, loaded)
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return loaded, nil
-}
-
 func ensureOtelcRequireVersion(f *modfile.File, version string) (bool, error) {
 	if !semver.IsValid(version) || version == "v0.0.0" || module.IsPseudoVersion(version) {
 		return false, nil
@@ -332,9 +244,55 @@ func ensureOtelcRequire(moduleDir, version string) (bool, error) {
 	return true, nil
 }
 
+func ensureInstrumentationRequires(
+	moduleDir string,
+	imports map[string]bool,
+	versions map[string]string,
+) error {
+	if len(imports) == 0 || len(versions) == 0 {
+		return nil
+	}
+	goModPath := filepath.Join(moduleDir, goModFileName)
+	f, err := parseGoMod(goModPath)
+	if err != nil {
+		return err
+	}
+
+	modified := false
+	for m := range imports {
+		v, ok := versions[m]
+		if !ok || v == "" {
+			continue
+		}
+		needsAdd := true
+		for _, req := range f.Require {
+			if req.Mod.Path == m {
+				if semver.Compare(req.Mod.Version, v) >= 0 {
+					needsAdd = false
+				}
+				break
+			}
+		}
+		if needsAdd {
+			if addErr := f.AddRequire(m, v); addErr != nil {
+				return ex.Wrap(addErr)
+			}
+			modified = true
+		}
+	}
+
+	if modified {
+		if writeErr := writeGoMod(goModPath, f); writeErr != nil {
+			return writeErr
+		}
+	}
+
+	return nil
+}
+
 func matchInstrumentationImports(
 	deps []*Dependency,
-	ruleset map[string][]yamlRule,
+	entries []manifest.Entry,
 	warn func(msg string, args ...any),
 ) map[string]bool {
 	imports := make(map[string]bool)
@@ -346,25 +304,23 @@ func matchInstrumentationImports(
 
 	// Match only on target + version.
 	for _, dep := range deps {
-		for modPath, rules := range ruleset {
-			for _, r := range rules {
-				tm := instrumentationRuleMatchesDep(dep, r)
-				if tm.isRoot {
-					// always add root targets; they are further matched in setup
-					imports[modPath] = true
-					continue
-				}
-				if !tm.matched {
-					continue
-				}
-
-				if !util.VersionInRange(dep.Version, r.VersionRange) {
-					recordUnresolvedSkip(skipped, modPath, dep, r.VersionRange)
-					continue
-				}
-
-				imports[modPath] = true
+		for _, entry := range entries {
+			target := rule.NewTarget(entry.Target)
+			if target.IncludesRoot() {
+				// Always add root targets; they are further matched in setup.
+				imports[entry.ModulePath] = true
+				continue
 			}
+			if !target.Matches(dep.ImportPath, nil) {
+				continue
+			}
+
+			if !util.VersionInRange(dep.Version, entry.VersionRange) {
+				recordUnresolvedSkip(skipped, entry.ModulePath, dep, entry.VersionRange)
+				continue
+			}
+
+			imports[entry.ModulePath] = true
 		}
 	}
 
@@ -375,23 +331,6 @@ func matchInstrumentationImports(
 type unresolvedSkip struct {
 	dep          string
 	versionRange string
-}
-
-type instrumentationTargetMatch struct {
-	matched bool
-	isRoot  bool
-}
-
-// instrumentationRuleMatchesDep reports whether r's target matches dep.
-// Targets that include $root always pin the instrumentation module; setup
-// matches them precisely later. Other targets are matched without the root
-// module paths, so an excluded $root excludes nothing here, which can only
-// pin a module that setup then leaves unused.
-func instrumentationRuleMatchesDep(dep *Dependency, r yamlRule) instrumentationTargetMatch {
-	if r.Target.IncludesRoot() {
-		return instrumentationTargetMatch{matched: true, isRoot: true}
-	}
-	return instrumentationTargetMatch{matched: r.Target.Matches(dep.ImportPath, nil)}
 }
 
 func recordUnresolvedSkip(
@@ -453,7 +392,7 @@ func updateToolFile(ctx context.Context, toolFile string, prunedImports map[stri
 		}
 	}
 
-	updateGenerateDirective(f, vendorPinOptions(ctx, filepath.Dir(toolFile), opts))
+	updateGenerateDirective(f, opts)
 
 	updated, printErr := ast.RenderFile(f)
 	if printErr != nil {
@@ -465,13 +404,6 @@ func updateToolFile(ctx context.Context, toolFile string, prunedImports map[stri
 		if writeErr := util.WriteFileAtomic(toolFile, updated); writeErr != nil {
 			return writeErr
 		}
-	}
-
-	// In vendor mode, go.mod is not tidied: vendorSync already added the
-	// modules of the hook code, and "go mod tidy" would load all the modules
-	// of the user from the module cache.
-	if vendored, _ := vendorModeFromContext(ctx); vendored {
-		return nil
 	}
 
 	goModChanged, ensureErr := ensureOtelcRequire(filepath.Dir(toolFile), util.Version)
@@ -489,52 +421,6 @@ func updateToolFile(ctx context.Context, toolFile string, prunedImports map[stri
 	}
 
 	return runModTidy(ctx, filepath.Dir(toolFile))
-}
-
-// vendorPinOptions returns opts for the tool file of the module in moduleDir.
-// In vendor mode, otelc does not add the tool directive of otelc to go.mod, so
-// `go tool otelc` does not work. Then the //go:generate directive is removed,
-// unless go.mod has the tool directive already.
-func vendorPinOptions(ctx context.Context, moduleDir string, opts PinOptions) PinOptions {
-	if vendored, _ := vendorModeFromContext(ctx); !vendored || hasOtelcTool(moduleDir) {
-		return opts
-	}
-	generate := false
-	opts.Generate = &generate
-	return opts
-}
-
-// hasOtelcTool reports whether the go.mod file in moduleDir has the tool
-// directive of otelc.
-func hasOtelcTool(moduleDir string) bool {
-	f, err := parseGoMod(filepath.Join(moduleDir, goModFileName))
-	if err != nil {
-		return false
-	}
-	return slices.ContainsFunc(f.Tool, func(t *modfile.Tool) bool { return t.Path == util.OtelcToolCmdRoot })
-}
-
-// vendorSyncToolFiles runs vendorSync for the imports of each tool file.
-func vendorSyncToolFiles(ctx context.Context, toolFiles []string) error {
-	p := ast.NewAstParser()
-	for _, toolFile := range toolFiles {
-		f, err := p.Parse(toolFile, parser.ImportsOnly)
-		if err != nil {
-			return err
-		}
-		importPaths, err := collectImports(toolFile, f, make(map[string]bool))
-		if err != nil {
-			return err
-		}
-		imports := make(map[string]bool, len(importPaths))
-		for _, importPath := range importPaths {
-			imports[importPath] = true
-		}
-		if err = vendorSync(ctx, imports, filepath.Dir(toolFile)); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func validateRuleFiles(ctx context.Context, ruleFiles []string) error {
@@ -563,14 +449,6 @@ func updatePinnedProjects(
 	opts PinOptions,
 ) (*PinResult, error) {
 	logger := util.LoggerFromContext(ctx)
-
-	// In vendor mode, the go command finds the instrumentation packages only
-	// in vendor/. Add them before the walk below loads them.
-	if vendored, _ := vendorModeFromContext(ctx); vendored {
-		if err := vendorSyncToolFiles(ctx, toolFiles); err != nil {
-			return nil, err
-		}
-	}
 	prunedImports := make(map[string]map[string]bool, len(toolFiles))
 
 	walkErr := walkInstrumentation(ctx, toolFiles,
@@ -645,22 +523,19 @@ func generatePinnedProjects(ctx context.Context, moduleDirs []string, opts PinOp
 		return nil, findDepsErr
 	}
 
-	extractErr := extractOtelcBundle()
-	if extractErr != nil {
-		return nil, extractErr
-	}
-
-	ruleset, err := loadMinimalRules(
-		ctx,
-		filepath.Join(util.GetBuildTempDir(), unzippedInstDir),
-		util.Version,
-	)
+	entries, err := manifest.Load()
 	if err != nil {
-		return nil, err
+		return nil, ex.Wrapf(err, "loading instrumentation manifest")
+	}
+	moduleVersions := make(map[string]string, len(entries))
+	for _, entry := range entries {
+		if entry.Version != "" {
+			moduleVersions[entry.ModulePath] = entry.Version
+		}
 	}
 
 	// We expect every built-in instrumentation module to be importable
-	imports := matchInstrumentationImports(deps, ruleset, func(msg string, args ...any) {
+	imports := matchInstrumentationImports(deps, entries, func(msg string, args ...any) {
 		logger.WarnContext(ctx, msg, args...)
 	})
 
@@ -679,27 +554,23 @@ func generatePinnedProjects(ctx context.Context, moduleDirs []string, opts PinOp
 	}
 
 	// Generate otel.instrumentation.go file with imports for all matched rules.
+	f := generateOtelInstrumentationGo(imports, opts)
 	for _, moduleDir := range normalizeModuleDirs(moduleDirs) {
-		f := generateOtelInstrumentationGo(imports, vendorPinOptions(ctx, moduleDir, opts))
 		path := filepath.Join(moduleDir, toolFileCanonical)
 		if writeErr := ast.WriteFileAtomic(path, f); writeErr != nil {
 			return nil, ex.Wrapf(writeErr, "writing %s", path)
 		}
 
-		if vendored, _ := vendorModeFromContext(ctx); vendored {
-			// The tool directive of otelc would need all the modules of otelc
-			// itself in vendor/, so it is not added in vendor mode.
-			if syncErr := vendorSync(ctx, imports, moduleDir); syncErr != nil {
-				return nil, syncErr
-			}
-		} else {
-			if _, ensureErr := ensureOtelcRequire(moduleDir, util.Version); ensureErr != nil {
-				return nil, ensureErr
-			}
+		if _, ensureErr := ensureOtelcRequire(moduleDir, util.Version); ensureErr != nil {
+			return nil, ensureErr
+		}
 
-			if syncErr := syncDeps(ctx, imports, moduleDir); syncErr != nil {
-				return nil, syncErr
-			}
+		if ensureErr := ensureInstrumentationRequires(moduleDir, imports, moduleVersions); ensureErr != nil {
+			return nil, ensureErr
+		}
+
+		if syncErr := syncDeps(ctx, moduleDir); syncErr != nil {
+			return nil, syncErr
 		}
 
 		keepForDebug(ctx, path, "")
@@ -709,6 +580,25 @@ func generatePinnedProjects(ctx context.Context, moduleDirs []string, opts PinOp
 	// Since we ran syncDeps, the dependencies may have been updated
 	// Therefore, we want to ensure we rerun findDeps in setup phase.
 	return &PinResult{}, nil
+}
+
+func prepareVendoredBuild(
+	ctx context.Context,
+	logger *slog.Logger,
+	subcommand string,
+	args []string,
+) ([]string, error) {
+	if !vendoringActive(ctx, buildDir(subcommand, args)) {
+		return args, nil
+	}
+
+	logger.InfoContext(ctx, "vendored project detected; building with -mod=mod")
+
+	if err := os.Setenv("GOFLAGS", forceModMod(os.Getenv("GOFLAGS"))); err != nil {
+		return nil, ex.Wrapf(err, "forcing module mode for vendored build")
+	}
+
+	return rewriteModVendor(subcommand, args), nil
 }
 
 type PinOptions struct {
@@ -741,7 +631,8 @@ type PinResult struct {
 // re-parsing compile commands again.
 func Pin(ctx context.Context, opts PinOptions) (*PinResult, error) {
 	var result *PinResult
-	err := withBuildLock(ctx, func(ctx context.Context) error {
+	dir, _ := leadingDirFlag(opts.Args)
+	err := withBuildLock(ctx, dir, func(ctx context.Context) error {
 		var pinErr error
 		result, pinErr = pinLocked(ctx, opts)
 		return pinErr
@@ -750,23 +641,22 @@ func Pin(ctx context.Context, opts PinOptions) (*PinResult, error) {
 }
 
 func pinLocked(ctx context.Context, opts PinOptions) (*PinResult, error) {
-	subcommand := opts.Subcommand
-	if subcommand == "" {
-		subcommand = subcmdBuild
-	}
-
-	// A vendored project keeps vendor mode. The modules of the hook code are
-	// added to vendor/ (see vendorSync) instead of a "go mod tidy", which
-	// would load all the modules of the user from the module cache.
-	ctx, err := contextWithBuildMode(ctx, subcommand, opts.Args)
-	if err != nil {
-		return nil, err
-	}
-
 	moduleDirs := normalizeModuleDirs(opts.ModuleDirs)
 	// moduleDirs being empty means Pin was invoked as a standalone command
 	// (not as part of a setup run), so use opts.Args to find module directories.
 	if len(moduleDirs) == 0 {
+		subcommand := opts.Subcommand
+		if subcommand == "" {
+			subcommand = subcmdBuild
+		}
+		// For same reason as Setup, we have to check vendoring state before
+		// forcing module mode and rewriting vendor/ paths to module mode.
+		args, err := prepareVendoredBuild(ctx, util.LoggerFromContext(ctx), subcommand, opts.Args)
+		if err != nil {
+			return nil, err
+		}
+		opts.Args = args
+
 		// Use opts.Args to find module directories
 		moduleDirs, err = findBuildModuleDirs(ctx, subcommand, opts.Args)
 		if err != nil {
@@ -798,7 +688,7 @@ func autoPin(ctx context.Context, moduleDirs []string, subcommand string, args [
 		return nil, ex.New("state manager not found in context")
 	}
 
-	backupFiles, getBackupErr := getBackupFiles(ctx, moduleDirs)
+	backupFiles, getBackupErr := getBackupFiles(ctx, buildDir(subcommand, args), moduleDirs)
 	if getBackupErr != nil {
 		return nil, getBackupErr
 	}

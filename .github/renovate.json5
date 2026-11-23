@@ -8,18 +8,11 @@
     'before 8am on the 1st and 15th day of the month',
   ],
   updateNotScheduled: false,
-  // Cooldown: don't raise a bump PR until a release has aged, so yanked or
-  // compromised releases are caught before they enter the tree. Renovate's
-  // equivalent of Dependabot's `cooldown`.
   minimumReleaseAge: '5 days',
   internalChecksFilter: 'strict',
-  // Renovate's default go.sum update only records the /go.mod hashes when a
-  // bump shifts transitive module versions, so the committed go.sum can miss
-  // the full module hashes that `go build` needs and CI fails with "missing
-  // go.sum entry". Run `go mod tidy` after each Go update so the committed
-  // go.mod and go.sum files stay consistent.
   postUpdateOptions: [
-    'gomodTidy',
+    'gomodTidyAll',
+    'gomodUpdateImportPaths',
   ],
   customManagers: [
     {
@@ -35,18 +28,35 @@
   ],
   packageRules: [
     {
-      matchFileNames: [
-        '.github/**',
+      dependencyDashboardCategory: 'CI Tooling',
+      matchCategories: [
+        'ci',
       ],
-      enabled: false,
+      matchUpdateTypes: [
+        'major',
+      ],
+      dependencyDashboardApproval: true,
+    },
+    {
+      groupName: 'all ci dependencies',
+      groupSlug: 'all-ci deps',
+      matchCategories: [
+        'ci',
+      ],
+      matchUpdateTypes: [
+        '!major',
+      ],
+      schedule: '* 0-7 1 * *',
     },
     {
       groupName: 'all dependencies',
       groupSlug: 'all-deps',
+      matchCategories: [
+        '!ci',
+      ],
       matchUpdateTypes: [
         'patch',
         'minor',
-        'major',
         'digest',
       ],
       matchPackageNames: [
@@ -54,13 +64,21 @@
       ],
     },
     {
-      // Each instrumentation module deliberately targets a single major of the
-      // library it instruments, so supporting a new major means adding a new
-      // module directory (openai-go -> openai-go/v2 -> openai-go/v3), never
-      // bumping in place. Renovate's Go major update instead adds the new
-      // major's module path alongside the old one; `go mod tidy` strips it
-      // again because no code imports it, so such a PR can never go green.
-      // When a new major gains its own module directory, list its path here.
+      groupName: 'all major docker dependencies',
+      matchCategories: [
+        'docker',
+      ],
+      matchUpdateTypes: [
+        'major',
+      ],
+    },
+    {
+      matchManagers: [
+        'gomod',
+      ],
+      separateMultipleMajor: true,
+    },
+    {
       matchManagers: [
         'gomod',
       ],
@@ -68,10 +86,30 @@
         'major',
       ],
       matchPackageNames: [
-        'github.com/openai/openai-go',
-        'github.com/openai/openai-go/v2',
-        'github.com/openai/openai-go/v3',
-        'go.mongodb.org/mongo-driver',
+        '!github.com/stretchr/testify',
+        '!go.opentelemetry.io/**',
+      ],
+      dependencyDashboardApproval: true,
+      dependencyDashboardCategory: 'Instrumentation Targets',
+      dependencyDashboard: {
+        header: 'The below instrumentation targets are needing a new module directory created.',
+      },
+    },
+    {
+      matchManagers: [
+        'gomod',
+      ],
+      matchUpdateTypes: [
+        'major',
+      ],
+      matchPackageNames: [
+        '!github.com/stretchr/testify',
+        '!go.opentelemetry.io/**',
+      ],
+      matchFileNames: [
+        'instrumentation/github.com/openai/openai-go/go.mod',
+        'instrumentation/github.com/openai/openai-go/v2/go.mod',
+        'instrumentation/go.mongodb.org/mongo-driver/mongo/go.mod',
       ],
       enabled: false,
     },

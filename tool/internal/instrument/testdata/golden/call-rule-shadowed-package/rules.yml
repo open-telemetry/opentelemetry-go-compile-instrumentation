@@ -1,0 +1,7 @@
+wrap_to_upper:
+  target: main
+  where:
+    function_call: strings.ToUpper
+  do:
+    - wrap_call:
+        replace: "Wrapper({{ . }})"

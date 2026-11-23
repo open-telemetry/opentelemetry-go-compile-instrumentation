@@ -4,6 +4,7 @@
 package instrument
 
 import (
+	"cmp"
 	"context"
 	"maps"
 	"path/filepath"
@@ -22,6 +23,9 @@ import (
 // hits while walking the files it's given, so an unsorted order would make
 // which failure gets reported (and the order of per-file log lines) vary
 // between identical runs of the same input.
+//
+// The rules of a file are in the order they are applied: by rule order,
+// lowest first, then by rule kind, then in the order setup matched them.
 func groupRules(workDir string, rset *rule.InstRuleSet) (map[string][]rule.InstRule, []string) {
 	file2rules := make(map[string][]rule.InstRule)
 	addRulesToMap(rset.FuncRules, file2rules, rset.CgoFileMap, workDir)
@@ -32,6 +36,11 @@ func groupRules(workDir string, rset *rule.InstRuleSet) (map[string][]rule.InstR
 	addRulesToMap(rset.DirectiveRules, file2rules, rset.CgoFileMap, workDir)
 	addRulesToMap(rset.DeclRules, file2rules, rset.CgoFileMap, workDir)
 	addIgnoredCallFilesToMap(rset.IgnoredCallFiles, file2rules, rset.CgoFileMap, workDir)
+	for _, rules := range file2rules {
+		slices.SortStableFunc(rules, func(a, b rule.InstRule) int {
+			return cmp.Compare(a.GetOrder(), b.GetOrder())
+		})
+	}
 	return file2rules, slices.Sorted(maps.Keys(file2rules))
 }
 
@@ -80,6 +89,10 @@ type ruleResult struct {
 	// files that contain a match; the other rule kinds only reach files setup
 	// already matched.
 	modified bool
+	// noJoinpoint reports that the rule found nothing to instrument in the
+	// file. A directive rule still sets modified then, so the file is
+	// rewritten as before.
+	noJoinpoint bool
 }
 
 // applyOneRule applies a single rule to the target file.
@@ -106,8 +119,9 @@ func (ip *instrumentPhase) applyOneRule(ctx context.Context, r rule.InstRule, ro
 		modified, err := ip.applyLitRule(ctx, rt, root)
 		return ruleResult{needsGlobals: false, modified: modified}, err
 	case *rule.InstDirectiveRule:
-		needsGlobals, err := ip.applyDirectiveRule(ctx, rt, root)
-		return ruleResult{needsGlobals: needsGlobals, modified: true}, err
+		// applyDirectiveRule reports whether it instrumented a function.
+		applied, err := ip.applyDirectiveRule(ctx, rt, root)
+		return ruleResult{needsGlobals: applied, modified: true, noJoinpoint: err == nil && !applied}, err
 	default:
 		util.ShouldNotReachHere()
 		return ruleResult{needsGlobals: false, modified: false}, nil
@@ -164,6 +178,9 @@ func (ip *instrumentPhase) instrumentFile(ctx context.Context, file string, rule
 			"file", file)
 	}
 
+	if DiffDebugEnabled() {
+		ip.diagnosticSource = file
+	}
 	result, changes, err := ip.applyRulesCapturingDiffs(ctx, rules, root)
 	if err != nil {
 		return false, err
@@ -215,10 +232,10 @@ func (ip *instrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSe
 			return ex.Wrapf(err, "applying file rule %s to package %s", rule.Name, rset.PackageName)
 		}
 	}
-	// Run the method_call type-check once, before any file in the package is
-	// rewritten.
-	if rsetHasMethodCallRule(rset) {
-		ip.ensureMethodCallInfo()
+	// Run the type-check once, before any file in the package is rewritten,
+	// and only when a rule needs it.
+	if rsetHasMethodCallRule(rset) || rsetUsesImplements(rset) {
+		ip.ensureMethodCallInfo(ctx)
 	}
 
 	file2rules, files := groupRules(ip.workDir, rset)

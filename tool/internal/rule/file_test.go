@@ -97,6 +97,31 @@ version: "v1.1.0"
 	}
 }
 
+func TestParseLegacyFilePreservesRules(t *testing.T) {
+	// An unversioned file is the legacy baseline: it parses to LegacyVersion
+	// and its entries are returned unchanged.
+	doc, err := ParseFile([]byte(`server_hook:
+  target: net/http
+  where:
+    func: ServeHTTP
+    recv: serverHandler
+  do:
+    - inject_hooks:
+        before: BeforeServeHTTP
+        after: AfterServeHTTP
+        path: example.com/hooks
+`))
+	require.NoError(t, err)
+	assert.Equal(t, LegacyVersion, doc.MinimumVersion)
+	assert.True(t, doc.Legacy)
+
+	rules, err := doc.Rules()
+	require.NoError(t, err)
+	require.Len(t, rules, 1)
+	assert.Equal(t, "server_hook", rules[0].GetName())
+	assert.Equal(t, "net/http", rules[0].GetTarget().String())
+}
+
 func TestFileRules(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -165,6 +190,11 @@ func TestFileRules(t *testing.T) {
 			wantErr: "no recognised selector",
 		},
 		{
+			name:    "inject_code without func",
+			content: "rule:\n  target: example.com/pkg\n  do:\n    - inject_code:\n        raw: _ = 0\n",
+			wantErr: "func cannot be empty",
+		},
+		{
 			name:    "empty target",
 			content: "rule:\n  target: '  '\n  func: Run\n  raw: _ = 0\n",
 			wantErr: "empty target",
@@ -225,6 +255,127 @@ func TestFileRules(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, rules, 1)
 			assert.IsType(t, test.wantType, rules[0])
+		})
+	}
+}
+
+func TestFileRules_InjectCodeKeepsSignatureFilters(t *testing.T) {
+	file, err := ParseFile([]byte(`rule:
+  target: example.com/pkg
+  where:
+    func: Process
+    signature:
+      args: [context.Context]
+    signature_contains:
+      args: [context.Context]
+    param: context.Context
+    result: error
+    last_result: error
+  do:
+    - inject_code:
+        raw: _ = 0
+`))
+	require.NoError(t, err)
+
+	rules, err := file.Rules()
+	require.NoError(t, err)
+	require.Len(t, rules, 1)
+	raw, ok := rules[0].(*InstRawRule)
+	require.True(t, ok)
+	require.NotNil(t, raw.Signature)
+	assert.Equal(t, []string{"context.Context"}, raw.Signature.Args)
+	require.NotNil(t, raw.SignatureContains)
+	assert.Equal(t, []string{"context.Context"}, raw.SignatureContains.Args)
+	assert.Equal(t, "context.Context", raw.Param)
+	assert.Equal(t, "error", raw.Result)
+	assert.Equal(t, "error", raw.LastResult)
+}
+
+func TestFileRules_Order(t *testing.T) {
+	tests := []struct {
+		name      string
+		content   string
+		wantOrder []int
+		wantErr   string
+	}{
+		{
+			name:      "inject_code",
+			content:   "rule:\n  target: main\n  where:\n    func: main\n  do:\n    - inject_code:\n        raw: _ = 0\n        order: 50\n",
+			wantOrder: []int{50},
+		},
+		{
+			name: "expand_directive",
+			content: "rule:\n  target: main\n  where:\n    directive: otelc:span\n" +
+				"  do:\n    - expand_directive:\n        template: _ = 0\n        order: -10\n",
+			wantOrder: []int{-10},
+		},
+		{
+			name:      "map form",
+			content:   "rule:\n  target: main\n  where:\n    func: main\n  do:\n    inject_code:\n      raw: _ = 0\n      order: 7\n",
+			wantOrder: []int{7},
+		},
+		{
+			name: "each do item keeps its own order",
+			content: "rule:\n  target: main\n  where:\n    func: main\n  do:\n" +
+				"    - inject_code:\n        raw: _ = 1\n        order: 2\n" +
+				"    - inject_code:\n        raw: _ = 2\n",
+			wantOrder: []int{2, 0},
+		},
+		{
+			name: "inject_hooks",
+			content: "rule:\n  target: main\n  where:\n    func: main\n" +
+				"  do:\n    - inject_hooks:\n        before: Before\n        path: example.com/hooks\n        order: 1\n",
+			wantErr: `do[0]: modifier "inject_hooks" does not accept order`,
+		},
+		{
+			name: "add_struct_fields",
+			content: "rule:\n  target: main\n  where:\n    struct: Server\n" +
+				"  do:\n    add_struct_fields:\n      new_field:\n        - name: X\n          type: int\n      order: 1\n",
+			wantErr: `modifier "add_struct_fields" does not accept order`,
+		},
+		{
+			name:    "top level",
+			content: "rule:\n  target: main\n  order: 1\n  where:\n    func: main\n  do:\n    - inject_code:\n        raw: _ = 0\n",
+			wantErr: "order must be set on a do modifier",
+		},
+		{
+			name:    "flat inject_hooks",
+			content: "rule:\n  target: main\n  func: main\n  before: Before\n  path: example.com/hooks\n  order: 1\n",
+			wantErr: "order must be set on a do modifier",
+		},
+		{
+			name:    "flat inject_code",
+			content: "rule:\n  target: main\n  func: main\n  raw: _ = 0\n  order: 1\n",
+			wantErr: "order must be set on a do modifier",
+		},
+		{
+			name:    "string",
+			content: "rule:\n  target: main\n  where:\n    func: main\n  do:\n    - inject_code:\n        raw: _ = 0\n        order: high\n",
+			wantErr: "order must be an integer, got high",
+		},
+		{
+			name:    "float",
+			content: "rule:\n  target: main\n  where:\n    func: main\n  do:\n    - inject_code:\n        raw: _ = 0\n        order: 1.5\n",
+			wantErr: "order must be an integer, got 1.5",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file, err := ParseFile([]byte(test.content))
+			require.NoError(t, err)
+
+			rules, err := file.Rules()
+			if test.wantErr != "" {
+				require.ErrorContains(t, err, test.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			got := make([]int, 0, len(rules))
+			for _, r := range rules {
+				got = append(got, r.GetOrder())
+			}
+			assert.Equal(t, test.wantOrder, got)
 		})
 	}
 }

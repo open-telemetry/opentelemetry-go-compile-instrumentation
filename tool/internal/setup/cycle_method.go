@@ -89,7 +89,7 @@ func (m *methodMatch) callPositions(file string) ([]sourcePosition, error) {
 type methodCheck struct {
 	sp    *setupPhase
 	graph map[string][]string
-	added map[string][]*ruleImport
+	added map[string][]*addedImport
 	// deps maps a package to the packages that it imports directly or
 	// indirectly in the source code.
 	deps map[string]map[string]bool
@@ -101,7 +101,7 @@ type methodCheck struct {
 	selections map[string]map[sourcePosition]*types.Selection
 }
 
-func newMethodCheck(sp *setupPhase, graph map[string][]string, added map[string][]*ruleImport) *methodCheck {
+func newMethodCheck(sp *setupPhase, graph map[string][]string, added map[string][]*addedImport) *methodCheck {
 	return &methodCheck{
 		sp:         sp,
 		graph:      graph,
@@ -113,16 +113,16 @@ func newMethodCheck(sp *setupPhase, graph map[string][]string, added map[string]
 }
 
 // adds reports whether the method_call rule of ri adds ri to pkg.
-func (c *methodCheck) adds(ctx context.Context, pkg string, ri *ruleImport) (bool, error) {
+func (c *methodCheck) adds(ctx context.Context, pkg string, ri *addedImport) (bool, error) {
 	r := ri.method.rule
 	// A package can only call a method of a type of its own package or of a
 	// package it depends on.
-	if pkg != r.ImportPath && !reachable(c.deps, c.graph, nil, pkg, r.ImportPath) {
+	if pkg != r.ImportPath && !dependsOn(c.deps, c.graph, nil, pkg, r.ImportPath) {
 		return false, nil
 	}
 	// An import that is not on a cycle does not change the result of the
 	// search, so the type check is not necessary.
-	if ri.path != pkg && !reachable(c.reach, c.graph, c.added, ri.path, pkg) {
+	if ri.path != pkg && !dependsOn(c.reach, c.graph, c.added, ri.path, pkg) {
 		return false, nil
 	}
 
@@ -171,11 +171,9 @@ func (c *methodCheck) packageSelections(ctx context.Context, pkg string) map[sou
 }
 
 func (c *methodCheck) loadSelections(ctx context.Context, pkg string) (map[sourcePosition]*types.Selection, error) {
-	ctx, cancel := context.WithTimeout(ctx, packagesLoadTimeout)
-	defer cancel()
 	pkgs, err := pkgload.LoadPackages(ctx,
 		packages.NeedName|packages.NeedSyntax|packages.NeedTypes|packages.NeedTypesInfo,
-		c.sp.buildFlags, c.sp.tests, pkg)
+		c.sp.buildFlags, c.sp.testMode, pkg)
 	if err != nil {
 		return nil, err
 	}
@@ -193,14 +191,14 @@ func (c *methodCheck) loadSelections(ctx context.Context, pkg string) (map[sourc
 	return selections, nil
 }
 
-// reachable reports whether from imports to, directly or indirectly, through
+// dependsOn reports whether from imports to, directly or indirectly, through
 // the imports in graph and the rule imports in added. memo keeps, for each
 // package, the packages that it imports, and must only be used with the same
 // graph and added.
-func reachable(
+func dependsOn(
 	memo map[string]map[string]bool,
 	graph map[string][]string,
-	added map[string][]*ruleImport,
+	added map[string][]*addedImport,
 	from, to string,
 ) bool {
 	seen, ok := memo[from]

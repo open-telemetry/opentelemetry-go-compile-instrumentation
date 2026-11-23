@@ -17,9 +17,6 @@ import (
 	"github.com/dave/dst"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/tools/go/packages"
-
-	"go.opentelemetry.io/otelc/tool/util"
 )
 
 func TestFindToolFile(t *testing.T) {
@@ -883,89 +880,78 @@ func TestWalkInstrumentationParseError(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestVendoredInstrumentationDirs: in vendor mode the go command gives no
-// module directory. For an otelc package, otelc uses the directories of the
-// extracted bundle; for a different package, the directories in vendor/.
-func TestVendoredInstrumentationDirs(t *testing.T) {
-	workDir := t.TempDir()
-	t.Setenv(util.EnvOtelcWorkDir, workDir)
-	instMod := filepath.Join(workDir, util.BuildTempDir, unzippedInstDir, "example")
-	mustWriteFile(t, filepath.Join(instMod, goModFileName), "module "+util.OtelcInstRoot+"/example\n")
-	mustWriteFile(t, filepath.Join(instMod, "server", "otelc.yaml"), "")
-
-	modDir, pkgDir, ok := vendoredInstrumentationDirs(&packages.Package{
-		PkgPath: util.OtelcInstRoot + "/example/server",
-		Module:  &packages.Module{Path: util.OtelcInstRoot + "/example"},
-	})
-	require.True(t, ok)
-	assert.Equal(t, instMod, modDir, "the module directory of the bundle has the go.mod file")
-	assert.Equal(t, filepath.Join(instMod, "server"), pkgDir)
-
-	vendorPkg := filepath.Join(workDir, "vendor", "example.com", "m", "sub")
-	modDir, pkgDir, ok = vendoredInstrumentationDirs(&packages.Package{
-		PkgPath: "example.com/m/sub",
-		Module:  &packages.Module{Path: "example.com/m"},
-		GoFiles: []string{filepath.Join(vendorPkg, "a.go")},
-	})
-	require.True(t, ok)
-	assert.Equal(t, filepath.Join(workDir, "vendor", "example.com", "m"), modDir)
-	assert.Equal(t, vendorPkg, pkgDir)
-
-	modDir, _, ok = vendoredInstrumentationDirs(&packages.Package{
-		PkgPath: "example.com/m",
-		Module:  &packages.Module{Path: "example.com/m"},
-		GoFiles: []string{filepath.Join(workDir, "vendor", "example.com", "m", "a.go")},
-	})
-	require.True(t, ok)
-	assert.Equal(t, filepath.Join(workDir, "vendor", "example.com", "m"), modDir, "the module root is the package")
-
-	_, _, ok = vendoredInstrumentationDirs(&packages.Package{
-		PkgPath: "example.com/m",
-		Module:  &packages.Module{Path: "example.com/m"},
-		GoFiles: []string{filepath.Join(workDir, "src", "a.go")},
-	})
-	assert.False(t, ok, "a package that is not in vendor/")
-	_, _, ok = vendoredInstrumentationDirs(&packages.Package{PkgPath: "example.com/m", Module: &packages.Module{}})
-	assert.False(t, ok, "a package without files")
-
-	_, found := enclosingModuleDir(filepath.Join(t.TempDir(), "no", "module"))
-	assert.False(t, found)
+func TestHasUnresolvedConfigs(t *testing.T) {
+	require.True(t, hasUnresolvedConfigs(nil, []string{"a"}))
+	require.True(t, hasUnresolvedConfigs(map[string]*instrumentationConfig{}, []string{"a"}))
+	require.True(t, hasUnresolvedConfigs(map[string]*instrumentationConfig{
+		"a": nil,
+	}, []string{"a"}))
+	require.True(t, hasUnresolvedConfigs(map[string]*instrumentationConfig{
+		"a": {Error: errors.New("err")},
+	}, []string{"a"}))
+	require.True(t, hasUnresolvedConfigs(map[string]*instrumentationConfig{
+		"a": {},
+	}, []string{"a", "b"}))
+	require.False(t, hasUnresolvedConfigs(map[string]*instrumentationConfig{
+		"a": {},
+		"b": {},
+	}, []string{"a", "b"}))
 }
 
-// TestFillInstrumentationConfigNotInstrumentation: a package without rule
-// files and tool file is not an instrumentation package. The error has the
-// load errors of the package.
-func TestFillInstrumentationConfigNotInstrumentation(t *testing.T) {
-	dir := t.TempDir()
-	mustWriteFile(t, filepath.Join(dir, goModFileName), "module example.com/m\n")
-	cfg := &instrumentationConfig{ImportPath: "example.com/m"}
-	fillInstrumentationConfig(cfg, &packages.Package{
-		Errors: []packages.Error{{Msg: "load failed"}},
-	}, dir, dir)
-	require.ErrorIs(t, cfg.Error, errNotInstrumentation)
-	assert.Contains(t, cfg.Error.Error(), "load failed")
+func TestMergeResolvedConfigs(t *testing.T) {
+	valid := &instrumentationConfig{ImportPath: "example.com/mod"}
+	errCfg := &instrumentationConfig{ImportPath: "example.com/mod", Error: errors.New("failed")}
 
-	mustWriteFile(t, filepath.Join(dir, "otelc.yaml"), "")
-	cfg = &instrumentationConfig{ImportPath: "example.com/m"}
-	fillInstrumentationConfig(cfg, &packages.Package{}, dir, dir)
-	require.NoError(t, cfg.Error)
-	assert.Equal(t, []string{filepath.Join(dir, "otelc.yaml")}, cfg.RuleFiles)
+	// nil target returns fallback
+	merged := mergeResolvedConfigs(
+		nil,
+		map[string]*instrumentationConfig{"example.com/mod": valid},
+		[]string{"example.com/mod"},
+	)
+	require.Equal(t, valid, merged["example.com/mod"])
+
+	// target with error is replaced by valid fallback
+	target := map[string]*instrumentationConfig{"example.com/mod": errCfg}
+	fallback := map[string]*instrumentationConfig{"example.com/mod": valid}
+	merged = mergeResolvedConfigs(target, fallback, []string{"example.com/mod"})
+	require.Equal(t, valid, merged["example.com/mod"])
+
+	// target with valid config is not overwritten
+	customValid := &instrumentationConfig{ImportPath: "example.com/mod"}
+	target = map[string]*instrumentationConfig{"example.com/mod": customValid}
+	merged = mergeResolvedConfigs(target, fallback, []string{"example.com/mod"})
+	require.Equal(t, customValid, merged["example.com/mod"])
+
+	// fallback with error does not overwrite target error
+	fallbackErr := map[string]*instrumentationConfig{"example.com/mod": errCfg}
+	target = map[string]*instrumentationConfig{"example.com/mod": errCfg}
+	merged = mergeResolvedConfigs(target, fallbackErr, []string{"example.com/mod"})
+	require.Equal(t, errCfg, merged["example.com/mod"])
 }
 
-// TestFillInstrumentationConfigWalkError: a directory of the package that
-// otelc cannot read is an error of the config.
-func TestFillInstrumentationConfigWalkError(t *testing.T) {
-	skipWithoutPermissions(t)
-	dir := t.TempDir()
-	mustWriteFile(t, filepath.Join(dir, goModFileName), "module example.com/m\n")
-	locked := filepath.Join(dir, "locked")
-	require.NoError(t, os.MkdirAll(locked, 0o755))
-	require.NoError(t, os.Chmod(locked, 0o000))
-	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+func TestResolveConfigsWithFallback(t *testing.T) {
+	tmp := t.TempDir()
 
-	cfg := &instrumentationConfig{ImportPath: "example.com/m"}
-	fillInstrumentationConfig(cfg, &packages.Package{}, dir, dir)
-	require.Error(t, cfg.Error)
-	assert.Contains(t, cfg.Error.Error(), "walking instrumentation package example.com/m")
-	assert.Empty(t, cfg.RuleFiles)
+	// Root module knows where both foo and bar live
+	rootDir := filepath.Join(tmp, "app")
+	writeInstrumentationModule(t, rootDir, "example.com/app", false, map[string]string{
+		"example.com/foo": filepath.Join(tmp, "foo"),
+		"example.com/bar": filepath.Join(tmp, "bar"),
+	})
+
+	// Foo module has no replace directive for bar
+	fooDir := filepath.Join(tmp, "foo")
+	writeInstrumentationModule(t, fooDir, "example.com/foo", true, nil)
+
+	// Bar module
+	barDir := filepath.Join(tmp, "bar")
+	writeInstrumentationModule(t, barDir, "example.com/bar", true, nil)
+
+	// Resolving bar from fooDir alone fails or cannot find bar
+	// But passing rootDir in rootDirs allows resolving bar via fallback
+	cfgs, err := resolveConfigsWithFallback(t.Context(), fooDir, []string{rootDir}, []string{"example.com/bar"})
+	require.NoError(t, err)
+	require.NotNil(t, cfgs["example.com/bar"])
+	require.NoError(t, cfgs["example.com/bar"].Error)
+	require.NotEmpty(t, cfgs["example.com/bar"].RuleFiles)
 }

@@ -92,6 +92,55 @@ OTELC_DEBUG=1 otelc go build .
 Debug output goes to `.otelc-build/debug.log`. The file is opened in append mode, so
 entries accumulate across runs. Delete it between runs if you want a clean log.
 
+### Rule matching decisions
+
+With `--debug` (or `OTELC_DEBUG=1`), the real matcher also writes experimental
+JSON Lines diagnostics under `.otelc-build/debug/<escaped-package>/`:
+
+- `setup.matches.jsonl`: target/version and per-source AST decisions during setup.
+- `<source-base>.matches.jsonl`: decisions when toolexec applies rules to that source.
+
+For example, a function exists but its argument types differ from the rule:
+
+```json
+{"package":"example.com/foo","rule":"client_hook","phase":"setup","source":"/src/foo.go","matched":false,"reason":"signature_mismatch"}
+```
+
+Records describe individual decisions, not a package-wide verdict. A rule can fail
+in one file and match another. An omitted `source` means a package-level decision.
+`matched: true` omits `reason`; in setup it means eligibility, not an applied change.
+Call and literal rules are eligible in every file passing `where`; their join points
+are resolved during instrumentation. Use the `.diff` reports to inspect changes.
+
+The initial closed set of rejection codes is:
+
+| Code | Decision |
+| --- | --- |
+| `version_mismatch` | The resolved version failed the rule's range (including unresolved versions). |
+| `no_source_files` | There were no files for precise matching. |
+| `where_mismatch` | The real `where` predicate tree returned false for this file. |
+| `function_not_found` | No declaration had the requested function name. |
+| `receiver_mismatch` | The name existed, but no receiver matched. |
+| `signature_mismatch` | A signature, parameter, or result filter failed, including the `*_implements` filters. |
+| `struct_not_found` | The requested struct was absent. |
+| `directive_not_found` | The requested directive was absent. |
+| `declaration_not_found` | No named declaration of the requested kind existed. |
+| `ignored` | An `otelc:ignore` directive suppressed instrumentation, of the file, the function, or every matching call site. |
+| `no_joinpoint` | A call, literal, or directive rule found nothing to instrument in this file. |
+
+A rule whose target (exact, glob, list, or `$root`) does not select a package is
+never a candidate for it and produces no record, so the stream lists only rules
+that could have applied. Duplicate glob candidates are also omitted. Parse, predicate
+construction, and transformation errors remain build errors. Predicate failures
+report the whole `where` clause, including its combinators, rather than inventing
+a single failing leaf. A file rule whose added file is excluded by its build
+constraints produces no record: that is decided when the file is added, not by
+the matcher. These diagnostics do not alter `matched.json` or build IDs.
+Debug setup clears old artifacts; direct toolexec runs append. Record order across
+setup workers is unspecified. Go may reuse cached packages without running toolexec;
+use `go build -a` when you need fresh instrumentation decisions. The format is
+experimental and may change.
+
 ### Instrumentation Diffs
 
 When running with `--debug` (or `OTELC_DEBUG=1`), `otelc` writes unified `.diff` reports
@@ -144,6 +193,36 @@ showing all source modifications and source additions introduced into the Go com
 otelc --stats go build .
 ```
 
+With `--stats`, each link logs a `rule-added import resolution` line with
+`resolve_phase=link`. Each compile that a rule adds imports to logs the same
+line with `resolve_phase=compile`. The line shows how many imports that rules
+add the step had to find (`candidates`), how many it read from the session memo
+(`memo_hits`), and how many `go list -export` runs it needed (`go_list_calls`).
+
+### Sessions: `OTELC_SESSION_DIR` and `OTELC_MAX_PARALLEL_LOADS`
+
+An `otelc go build`, `go install`, or `go test` owns a session directory,
+`.otelc-build/session`. Every otelc process under that build uses it, including
+`otelc go build` commands that a test binary runs. The session keeps the export
+files that links found for imports that rules add, so other builds in the same
+session do not run `go list -export` again. A new outer build removes the old
+session.
+
+When you run `otelc setup` and then `go build -toolexec otelc` yourself, no
+otelc build owns the session. It stays in `.otelc-build/session` between your
+`go build` runs, until the next `otelc setup` or `otelc go ...` command removes
+it. Set `OTELC_SESSION_DIR=off` if you change library sources between those
+runs.
+
+- `OTELC_SESSION_DIR=<dir>` makes builds use `<dir>` as their session. otelc
+  sets it for the processes it starts, so you rarely need to set it.
+- `OTELC_SESSION_DIR=off` turns the session off. Use it if a test changes
+  library sources between nested otelc builds that run under one outer build.
+- `OTELC_MAX_PARALLEL_LOADS=<n>` limits how many large package loads the otelc
+  processes of one session run at the same time. The default is the number of
+  CPUs. `0` removes the limit. There is no time limit: a load waits until a
+  slot is free.
+
 ### `otelc version --verbose`
 
 Prints the tool version, build commit, and build time:
@@ -179,10 +258,10 @@ Without `--debug`, Go removes the directory as usual.
 
 ## Common Errors
 
-### `no command provided. Only 'go build', 'go install' and 'go test' are supported`
+### `no command provided. Only 'go build', 'go install', 'go run' and 'go test' are supported`
 
 `otelc go` was called without a subcommand, or with a subcommand other than `build`,
-`install`, or `test`. Only these three are supported.
+`install`, `run`, or `test`. Only these four are supported.
 
 ### `rule %q has no recognised selector`
 
@@ -215,77 +294,6 @@ These are warnings, not errors. `otelc` adds its own packages as `replace` direc
 dependency, `otelc` warns you. The build continues. Run `git restore go.mod go.sum` after
 `otelc cleanup` if you do not want to keep the changes.
 
-`otelc vendor` prints the same messages when it updates a vendored module or the `go`
-directive. These changes are in `go.mod`, `go.sum` and `vendor/` together. To undo them,
-restore all three, for example `git restore go.mod go.sum vendor/`. If you restore only
-`go.mod` and `go.sum`, the go command reports `inconsistent vendoring`.
-
-### `otelc needs go 1.14 or higher in .../go.mod for vendor mode`
-
-You used `-mod=vendor` (in the arguments or in `GOFLAGS`) or `otelc vendor`,
-and the `go` directive of `go.mod` is lower than 1.14 (or missing). The go
-command does not support the vendor directory of such a module in the same
-way, and `otelc` does not support it. Raise the go version and vendor again:
-
-```bash
-go mod edit -go=1.14
-go mod vendor
-```
-
-Without a `-mod` flag, `otelc` builds such a module in module mode, as the go
-command does.
-
-### `state file ... outside the otelc work directory`
-
-A build stopped before it restored the files that it changed (for example after a kill or
-an out-of-memory error). The next `otelc` command restores them from `.otelc-build/`.
-`.otelc-build/` is part of the project, so `otelc` does not trust all the paths in it. It
-restores only these files:
-
-- All the files in the otelc work directory, but not the files in `.otelc-build/`. When
-  the work directory is the module root, this includes all the files of the module.
-- When the module root (the directory of the nearest `go.mod` file) is a parent of the
-  work directory: in the module root, only `go.mod`, `go.sum`, `otel.instrumentation.go`,
-  `otelc.tool.go` and the files in `vendor/`.
-- The `go.work.sum` file of the workspace.
-
-If the build changed a different file (for example in a different module of the
-workspace), restore it by hand (the original files are in `.otelc-build/state/`), then
-remove `.otelc-build/`. To prevent this, run `otelc` from the root directory of the
-workspace.
-
-The message `state file ... in the otelc build directory` tells that the state file names
-a path in `.otelc-build/`. `otelc` never tracks such a path, so the state file is not from
-`otelc`. Remove `.otelc-build/`.
-
-### `vendor conflict`
-
-Your module vendors its dependencies, and the hook code of `otelc` (or one of
-its dependencies, for example `google.golang.org/grpc`) needs a higher version
-of a vendored module. A build never changes vendored code, so the build stops.
-The message names the module, the vendored version, the required version and
-the module that needs it. To fix it, do one of these:
-
-- Update the module and vendor again, for example:
-
-  ```bash
-  go get golang.org/x/net@v0.58.0
-  go mod vendor
-  ```
-
-- Run `otelc vendor` (it needs network access). It gets the higher versions,
-  changes `go.mod` and `vendor/`, and prints each change.
-
-When the hook code needs a package of a vendored module that `vendor/` does
-not have, `otelc` gets the module at the vendored version. If it cannot (for
-example a private module, or no network), the build stops and names the
-package and the module version. Import the package in your module and run
-`go mod vendor`, or run `otelc vendor` with network access. If `go.mod`
-replaces the module with another module, `otelc` gets the replacement. If
-`go.mod` replaces it with a local directory, `otelc` does not download
-anything: the build stops, and the only fix is to import the package in your
-module and run `go mod vendor`.
-
 ### Package-resolution failures
 
 Errors from `pkgload` (for example, `"failed to resolve package name for ..."` or
@@ -308,6 +316,21 @@ the instrumentation. See [Adding a New Instrumentation Hook](instrument-guide.md
 **Generic functions.** When the target function is generic, `HookContext` APIs that modify
 parameters or return values (`SetParam`, `SetReturnVal`) cannot be used. The type parameters
 are not available to the injected code.
+
+**Package initialization order.** A hook can run before its own package's variable
+initializers and `init()` functions, when the instrumented function is called during
+package initialization (for example from a driver's `init()`). The hook package is only
+imported from package `main`, so Go does not order it before the target package. A hook
+that uses state set up at initialization time panics, and the trampoline prints
+`failed to exec Before hook` or `failed to exec After hook` while the build and the tests
+still pass. Hooks must create such state on first use. See
+[Adding a New Instrumentation Hook](instrument-guide.md#limitations).
+
+Operations that run during package initialization, before `pkg/runtime` has initialized,
+are skipped by the instrumentation and emit no telemetry. This covers, for example, a
+database query or an HTTP request made from an `init()` function or a package-level
+variable initializer. Clients and servers created at that time are still instrumented, so
+the calls they make after initialization are traced.
 
 **Goroutine-local storage scope.** Some instrumentation uses goroutine-local storage (GLS)
 to propagate trace context across boundaries that do not pass `context.Context`. GLS state

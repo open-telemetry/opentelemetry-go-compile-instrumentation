@@ -1,0 +1,7 @@
+track_limited_readers:
+  target: main
+  where:
+    struct_literal: io.LimitedReader
+  do:
+    - wrap_literal:
+        pointer: "track({{ . }})"

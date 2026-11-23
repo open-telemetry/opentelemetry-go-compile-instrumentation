@@ -8,12 +8,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
-
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -34,7 +34,7 @@ func TestCleanup(t *testing.T) {
 				mustWriteFile(t, otelcRuntimeGoPath, "package main \n\n// dummy runtime file")
 				// The instrumentation package is extracted inside .otelc-build/pkg/,
 				// not at the project root. It is removed as part of .otelc-build/ cleanup.
-				mustWriteFile(t, filepath.Join(dir, util.BuildTempDir, unzippedPkgDir, "a.go"), "dummy")
+				mustWriteFile(t, filepath.Join(dir, util.BuildTempDir, "pkg", "a.go"), "dummy")
 				mustWriteFile(t, filepath.Join(dir, util.BuildTempDir, "matched.json"), "{}")
 				return contextWithStateManager(t.Context(), stateManager)
 			},
@@ -331,9 +331,7 @@ func TestCleanup_KeepsSnapshotsWhenRevertFails(t *testing.T) {
 	// Sabotage one snapshot so Revert fails partially.
 	require.NoError(t, os.Remove(filepath.Join(util.GetBuildTemp(stateDir), stateSnapshotPath(otherFile))))
 
-	err := Cleanup(t.Context(), true)
-	require.Error(t, err, "a failed restore must be reported")
-	assert.Contains(t, err.Error(), "otelc cleanup", "the error tells how to try again")
+	require.NoError(t, Cleanup(t.Context(), true))
 
 	// Even with cleanAll, a failed revert must not delete the remaining
 	// snapshots as they are the only path left to recovery.
@@ -341,43 +339,6 @@ func TestCleanup_KeepsSnapshotsWhenRevertFails(t *testing.T) {
 		"manifest must survive a failed revert even with cleanAll")
 	assert.True(t, util.PathExists(filepath.Join(util.GetBuildTemp(stateDir), stateSnapshotPath(goMod))),
 		"snapshots must survive a failed revert even with cleanAll")
-}
-
-func TestRecoverLeftoverState(t *testing.T) {
-	tmp := t.TempDir()
-	t.Chdir(tmp)
-	t.Setenv(util.EnvOtelcWorkDir, tmp)
-
-	require.NoError(t, recoverLeftoverState(t.Context()), "no manifest: nothing to do")
-
-	goMod := filepath.Join(tmp, "go.mod")
-	mustWriteFile(t, goMod, "module example.com/app\n")
-	dying := newStateManager()
-	require.NoError(t, dying.Track(goMod))
-	mustWriteFile(t, goMod, "module example.com/app\n\nreplace x => ./.otelc-build/x\n")
-
-	require.NoError(t, recoverLeftoverState(t.Context()))
-	content, err := os.ReadFile(goMod)
-	require.NoError(t, err)
-	assert.Equal(t, "module example.com/app\n", string(content))
-	assert.False(t, util.PathExists(util.GetBuildTemp(stateFileName)), "consumed manifest must be discarded")
-}
-
-func TestRecoverLeftoverStateFailureKeepsManifest(t *testing.T) {
-	tmp := t.TempDir()
-	t.Chdir(tmp)
-	t.Setenv(util.EnvOtelcWorkDir, tmp)
-
-	goMod := filepath.Join(tmp, "go.mod")
-	mustWriteFile(t, goMod, "module example.com/app\n")
-	dying := newStateManager()
-	require.NoError(t, dying.Track(goMod))
-	require.NoError(t, os.Remove(filepath.Join(util.GetBuildTemp(stateDir), stateSnapshotPath(goMod))))
-
-	err := recoverLeftoverState(t.Context())
-	require.Error(t, err, "a build must not start when the old changes cannot be restored")
-	assert.Contains(t, err.Error(), "previous otelc build")
-	assert.True(t, util.PathExists(util.GetBuildTemp(stateFileName)), "the manifest must stay for recovery")
 }
 
 // mustWriteFile creates a file with the given content, creating parent dirs as needed.
@@ -391,85 +352,137 @@ func mustWriteFile(t *testing.T, path, content string) {
 	}
 }
 
-// TestBuildAndSetupFailOnBadManifest: a manifest that otelc cannot trust
-// stops otelc go build and a standalone otelc setup before they change
-// anything.
-func TestBuildAndSetupFailOnBadManifest(t *testing.T) {
-	tmp := t.TempDir()
-	t.Chdir(tmp)
-	t.Setenv(util.EnvOtelcWorkDir, tmp)
-	t.Setenv("GOWORK", "off")
-	outside := filepath.Join(t.TempDir(), "x")
-	manifest, err := json.Marshal([]string{"-" + outside})
-	require.NoError(t, err)
-	mustWriteFile(t, util.GetBuildTemp(stateFileName), string(manifest))
-
-	err = GoBuild(t.Context(), newParsedCommand(t, "go", "build", "."))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "outside the otelc work directory")
-
-	err = Setup(t.Context(), newParsedCommand(t, "setup"))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "outside the otelc work directory")
-}
-
-// newParsedCommand returns the command name after it parsed args (args[0]
-// is the name).
-func newParsedCommand(t *testing.T, args ...string) *cli.Command {
+// leaveInterruptedBuild mimics a build that is killed after it changed go.mod
+// and generated a tool file: the manifest and the snapshots stay behind.
+func leaveInterruptedBuild(t *testing.T, dir string) string {
 	t.Helper()
-	var parsed *cli.Command
-	cmd := &cli.Command{
-		Name:            args[0],
-		SkipFlagParsing: true,
-		Action: func(_ context.Context, c *cli.Command) error {
-			parsed = c
-			return nil
-		},
-	}
-	require.NoError(t, cmd.Run(t.Context(), args))
-	return parsed
+
+	goMod := filepath.Join(dir, "go.mod")
+	toolFile := filepath.Join(dir, toolFileCanonical)
+	mustWriteFile(t, goMod, "module example.com/app\n\ngo 1.25.0\n")
+
+	dying := newStateManager()
+	require.NoError(t, dying.TrackAll(goMod, toolFile))
+	mustWriteFile(t, goMod, "module example.com/app\n\ngo 1.25.0\n\nreplace x => ./.otelc-build/x\n")
+	mustWriteFile(t, toolFile, "package tools\n")
+	return goMod
 }
 
-// TestCleanupFromPackageDir: otelc cleanup in a package directory below the
-// module root restores go.mod at the module root from the manifest.
-func TestCleanupFromPackageDir(t *testing.T) {
-	modRoot := t.TempDir()
-	workDir := filepath.Join(modRoot, "cmd", "app")
-	require.NoError(t, os.MkdirAll(workDir, 0o755))
-	t.Chdir(workDir)
-	t.Setenv(util.EnvOtelcWorkDir, workDir)
-	t.Setenv("GOWORK", "off")
-
-	goMod := filepath.Join(modRoot, "go.mod")
-	mustWriteFile(t, goMod, "module example.com/mod\n")
-	s := newStateManager()
-	require.NoError(t, s.Track(goMod))
-	mustWriteFile(t, goMod, "module example.com/mod\n\nreplace x => ./x\n")
-
-	require.NoError(t, Cleanup(t.Context(), true))
-	data, err := os.ReadFile(goMod)
-	require.NoError(t, err)
-	assert.Equal(t, "module example.com/mod\n", string(data))
-	assert.NoDirExists(t, util.GetBuildTempDir())
-}
-
-// TestRevertStateDiscardFails: the files are restored, but the state cannot
-// be removed. The error names the state directory, and the manifest stays.
-func TestRevertStateDiscardFails(t *testing.T) {
-	skipWithoutPermissions(t)
+func TestRestoreInterruptedBuild(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
-	t.Setenv(util.EnvOtelcWorkDir, tmp)
-	goMod := filepath.Join(tmp, goModFileName)
-	mustWriteFile(t, goMod, "module example.com/app\n")
-	s := newStateManager()
-	require.NoError(t, s.Track(goMod))
-	mustWriteFile(t, goMod, "module example.com/changed\n")
-	makeReadOnly(t, util.GetBuildTempDir())
+	goMod := leaveInterruptedBuild(t, tmp)
+	toolFile := filepath.Join(tmp, toolFileCanonical)
 
-	err := revertState(s)
+	require.NoError(t, restoreInterruptedBuild(t.Context()))
+
+	content, err := os.ReadFile(goMod)
+	require.NoError(t, err)
+	assert.Equal(t, "module example.com/app\n\ngo 1.25.0\n", string(content))
+	assert.NoFileExists(t, toolFile)
+	assert.NoFileExists(t, util.GetBuildTemp(stateFileName))
+	assert.NoDirExists(t, util.GetBuildTemp(stateDir))
+}
+
+func TestRestoreInterruptedBuildWithoutManifest(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+	goMod := filepath.Join(tmp, "go.mod")
+	mustWriteFile(t, goMod, "module example.com/app\n")
+
+	require.NoError(t, restoreInterruptedBuild(t.Context()))
+
+	content, err := os.ReadFile(goMod)
+	require.NoError(t, err)
+	assert.Equal(t, "module example.com/app\n", string(content))
+}
+
+func TestRestoreInterruptedBuildInvalidManifest(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+	mustWriteFile(t, util.GetBuildTemp(stateFileName), "{not json")
+
+	err := restoreInterruptedBuild(t.Context())
+
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "removing the restored state in "+util.GetBuildTemp(stateDir))
-	assert.Equal(t, "module example.com/app\n", readAppFile(t, tmp, goModFileName), "go.mod is restored")
+	assert.Contains(t, err.Error(), "failed to decode state JSON")
+}
+
+func TestRestoreInterruptedBuildKeepsStateWhenRestoreFails(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+	goMod := filepath.Join(tmp, "go.mod")
+	mustWriteFile(t, goMod, "module example.com/app\n\nreplace x => ./y\n")
+	// The manifest names go.mod, but its snapshot is gone.
+	mustWriteFile(t, util.GetBuildTemp(stateFileName), `["`+filepath.ToSlash(goMod)+`"]`)
+
+	err := restoreInterruptedBuild(t.Context())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "restoring the files of an interrupted build")
 	assert.FileExists(t, util.GetBuildTemp(stateFileName))
+}
+
+func TestRunGoBuildRestoresInterruptedBuild(t *testing.T) {
+	setupTestModule(t, nil)
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	goMod := leaveInterruptedBuild(t, cwd)
+
+	cmd := &cli.Command{
+		Name:            "go",
+		SkipFlagParsing: true,
+		Action:          GoBuild,
+	}
+	// A package that does not exist makes Setup fail before it tracks any
+	// file, so only the restore of the interrupted build can change go.mod.
+	require.Error(t, cmd.Run(t.Context(), []string{"go", "build", "./nonexistent_pkg"}))
+
+	content, readErr := os.ReadFile(goMod)
+	require.NoError(t, readErr)
+	assert.Equal(t, "module example.com/app\n\ngo 1.25.0\n", string(content))
+}
+
+func TestRestoreInterruptedBuildWhenStateCannotBeDiscarded(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory permissions do not prevent removal on Windows")
+	}
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+	goMod := leaveInterruptedBuild(t, tmp)
+	// The files are restored, but the manifest cannot be removed from a
+	// read-only build directory. That is only worth a warning.
+	buildDir := filepath.Dir(util.GetBuildTemp(stateFileName))
+	require.NoError(t, os.Chmod(buildDir, 0o555))
+	t.Cleanup(func() { _ = os.Chmod(buildDir, 0o755) })
+
+	require.NoError(t, restoreInterruptedBuild(t.Context()))
+
+	content, err := os.ReadFile(goMod)
+	require.NoError(t, err)
+	assert.Equal(t, "module example.com/app\n\ngo 1.25.0\n", string(content))
+}
+
+func TestRunGoBuildStopsWhenInterruptedBuildCannotBeRestored(t *testing.T) {
+	setupTestModule(t, nil)
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	goMod := filepath.Join(cwd, "go.mod")
+	before, err := os.ReadFile(goMod)
+	require.NoError(t, err)
+	// The manifest names go.mod, but its snapshot is gone.
+	mustWriteFile(t, util.GetBuildTemp(stateFileName), `["`+filepath.ToSlash(goMod)+`"]`)
+
+	cmd := &cli.Command{
+		Name:            "go",
+		SkipFlagParsing: true,
+		Action:          GoBuild,
+	}
+	err = cmd.Run(t.Context(), []string{"go", "build", "./..."})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "restoring the files of an interrupted build")
+	after, readErr := os.ReadFile(goMod)
+	require.NoError(t, readErr)
+	assert.Equal(t, string(before), string(after))
 }

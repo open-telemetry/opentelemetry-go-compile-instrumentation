@@ -4,51 +4,77 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"os"
+	"os/exec"
+	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/module"
+	"golang.org/x/mod/semver"
 
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/manifest"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
-// Entry describes a distinct instrumentation module, target package, and
-// minimum version bound.
-type Entry struct {
-	ModulePath string `json:"modulePath"`
-	Target     string `json:"target"`
-	// VersionRange is a minimum version bound. Empty means all versions.
-	VersionRange string `json:"versionRange,omitempty"`
-}
-
-type Manifest []Entry
+type (
+	Entry    = manifest.Entry
+	Manifest = manifest.Manifest
+)
 
 type yamlRule struct {
 	Target       rule.Target `yaml:"target"`
 	VersionRange string      `yaml:"version"`
 }
 
-func Generate(instrumentationRoot string) (Manifest, error) {
+func Generate(instrumentationRoot string, version ...string) (Manifest, error) {
+	if resolved, evalErr := filepath.EvalSymlinks(instrumentationRoot); evalErr == nil {
+		instrumentationRoot = resolved
+	}
+	var ver string
+	if len(version) > 0 {
+		ver = version[0]
+	}
+	repoRoot, tags := loadCommitTags(instrumentationRoot)
+	var ci *commitInfo
+	if repoRoot != "" {
+		ci, _ = loadCommitInfo(repoRoot)
+	}
+
 	manifest := make(Manifest, 0)
-	err := filepath.WalkDir(instrumentationRoot, func(path string, d os.DirEntry, err error) error {
+	err := filepath.WalkDir(instrumentationRoot, func(entryPath string, d os.DirEntry, err error) error {
 		if err != nil {
 			return ex.Wrap(err)
 		}
-		if d.IsDir() || d.Name() != "go.mod" || filepath.Dir(path) == instrumentationRoot {
+		if d.IsDir() || d.Name() != "go.mod" || filepath.Dir(entryPath) == instrumentationRoot {
 			return nil
 		}
 
-		modulePath, parseErr := loadModulePath(path)
+		modulePath, parseErr := loadModulePath(entryPath)
 		if parseErr != nil {
 			return parseErr
 		}
-		entries, loadErr := loadModuleEntries(filepath.Dir(path), modulePath)
+
+		modDir := filepath.Dir(entryPath)
+		modVer := ver
+		if repoRoot != "" {
+			if rel, relErr := filepath.Rel(repoRoot, modDir); relErr == nil {
+				cleanRel := path.Clean(filepath.ToSlash(rel))
+				modVer = resolveSubmoduleVersion(repoRoot, cleanRel, tags, ci, ver)
+			}
+		}
+
+		entries, loadErr := loadModuleEntries(modDir, modulePath, modVer)
 		if loadErr != nil {
 			return loadErr
 		}
@@ -66,10 +92,160 @@ func Generate(instrumentationRoot string) (Manifest, error) {
 		if cmp := strings.Compare(a.Target, b.Target); cmp != 0 {
 			return cmp
 		}
-		return strings.Compare(a.VersionRange, b.VersionRange)
+		if cmp := strings.Compare(a.VersionRange, b.VersionRange); cmp != 0 {
+			return cmp
+		}
+		return strings.Compare(a.Version, b.Version)
 	})
 	manifest = slices.Compact(manifest)
 	return manifest, nil
+}
+
+//nolint:revive // multiple string return types are clear in context
+func parseTag(tag string) (string, string, bool) {
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return "", "", false
+	}
+	idx := strings.LastIndex(tag, "/")
+	if idx == -1 {
+		if semver.IsValid(tag) {
+			return ".", tag, true
+		}
+		return "", "", false
+	}
+	dir := tag[:idx]
+	ver := tag[idx+1:]
+	if semver.IsValid(ver) {
+		return path.Clean(dir), ver, true
+	}
+	return "", "", false
+}
+
+func loadCommitTags(dir string) (string, map[string]string) {
+	tags := make(map[string]string)
+	if resolved, evalErr := filepath.EvalSymlinks(dir); evalErr == nil {
+		dir = resolved
+	}
+	cmd := exec.CommandContext(context.Background(), "git", "-C", dir, "rev-parse", "--show-toplevel")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", tags
+	}
+	repoRoot := filepath.Clean(strings.TrimSpace(string(out)))
+	if resolved, evalErr := filepath.EvalSymlinks(repoRoot); evalErr == nil {
+		repoRoot = resolved
+	}
+
+	cmd = exec.CommandContext(context.Background(), "git", "-C", dir, "tag", "--points-at", "HEAD")
+	out, err = cmd.Output()
+	if err != nil {
+		return repoRoot, tags
+	}
+
+	for line := range strings.SplitSeq(string(out), "\n") {
+		subDir, ver, ok := parseTag(line)
+		if !ok {
+			continue
+		}
+		if existing, exists := tags[subDir]; !exists || semver.Compare(ver, existing) > 0 {
+			tags[subDir] = ver
+		}
+	}
+	return repoRoot, tags
+}
+
+const (
+	minGitLogFields = 2
+	shortHashLen    = 12
+	describeMatches = 4
+)
+
+var describePattern = regexp.MustCompile(`^(.*?)-(\d+)-g([0-9a-f]+)$`)
+
+type commitInfo struct {
+	time time.Time
+	hash string
+}
+
+func loadCommitInfo(dir string) (*commitInfo, error) {
+	cmd := exec.CommandContext(context.Background(), "git", "-C", dir, "log", "-1", "--format=%ct %H", "HEAD")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	fields := strings.Fields(strings.TrimSpace(string(out)))
+	if len(fields) < minGitLogFields {
+		return nil, ex.New("unexpected git log output")
+	}
+	sec, err := strconv.ParseInt(fields[0], 10, 64)
+	if err != nil {
+		return nil, err
+	}
+	return &commitInfo{
+		time: time.Unix(sec, 0).UTC(),
+		hash: fields[1],
+	}, nil
+}
+
+func resolveSubmoduleVersion(
+	repoRoot, subDir string,
+	tags map[string]string,
+	ci *commitInfo,
+	fallbackVer string,
+) string {
+	if tagVer, ok := tags[subDir]; ok && tagVer != "" {
+		return tagVer
+	}
+	if ci != nil && repoRoot != "" {
+		return resolveSubmodulePseudoversion(repoRoot, subDir, ci)
+	}
+	return fallbackVer
+}
+
+func resolveSubmodulePseudoversion(repoRoot, subDir string, ci *commitInfo) string {
+	hash := ci.hash
+	if len(hash) > shortHashLen {
+		hash = hash[:shortHashLen]
+	}
+
+	pattern := subDir + "/v*"
+	cmd := exec.CommandContext(
+		context.Background(),
+		"git",
+		"-C",
+		repoRoot,
+		"describe",
+		"--tags",
+		"--match",
+		pattern,
+		"HEAD",
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return module.PseudoVersion("v0", "", ci.time, hash)
+	}
+
+	desc := strings.TrimSpace(string(out))
+	if desc == "" {
+		return module.PseudoVersion("v0", "", ci.time, hash)
+	}
+
+	baseTag := desc
+	isAhead := false
+	if m := describePattern.FindStringSubmatch(desc); len(m) == describeMatches {
+		baseTag = m[1]
+		isAhead = true
+	}
+	baseTag = strings.TrimPrefix(baseTag, subDir+"/")
+	if !semver.IsValid(baseTag) {
+		return module.PseudoVersion("v0", "", ci.time, hash)
+	}
+	if !isAhead {
+		return baseTag
+	}
+	major := semver.Major(baseTag)
+	return module.PseudoVersion(major, baseTag, ci.time, hash)
 }
 
 func loadModulePath(path string) (string, error) {
@@ -87,7 +263,11 @@ func loadModulePath(path string) (string, error) {
 	return file.Module.Mod.Path, nil
 }
 
-func loadModuleEntries(moduleDir, modulePath string) (Manifest, error) {
+func loadModuleEntries(moduleDir, modulePath string, version ...string) (Manifest, error) {
+	var ver string
+	if len(version) > 0 {
+		ver = version[0]
+	}
 	entries := make(Manifest, 0)
 	root, err := os.OpenRoot(moduleDir)
 	if err != nil {
@@ -119,7 +299,7 @@ func loadModuleEntries(moduleDir, modulePath string) (Manifest, error) {
 		if readErr != nil {
 			return ex.Wrapf(readErr, "reading rule file %s", path)
 		}
-		ruleEntries, parseErr := parseRuleEntries(content, path, modulePath)
+		ruleEntries, parseErr := parseRuleEntries(content, path, modulePath, ver)
 		if parseErr != nil {
 			return parseErr
 		}
@@ -132,11 +312,23 @@ func loadModuleEntries(moduleDir, modulePath string) (Manifest, error) {
 	return entries, nil
 }
 
-func parseRuleEntries(content []byte, path, modulePath string) (Manifest, error) {
-	return parseRuleEntriesForVersion(content, path, modulePath, util.Version)
+func parseRuleEntries(content []byte, path, modulePath string, version ...string) (Manifest, error) {
+	var ver string
+	if len(version) > 0 {
+		ver = version[0]
+	}
+	return parseRuleEntriesForVersion(content, path, modulePath, util.Version, ver)
 }
 
-func parseRuleEntriesForVersion(content []byte, path, modulePath, currentVersion string) (Manifest, error) {
+func parseRuleEntriesForVersion(
+	content []byte,
+	path, modulePath, currentVersion string,
+	version ...string,
+) (Manifest, error) {
+	var ver string
+	if len(version) > 0 {
+		ver = version[0]
+	}
 	doc, err := rule.ParseFile(content)
 	if err != nil {
 		return nil, ex.Wrapf(err, "parsing rule file %s", path)
@@ -167,6 +359,7 @@ func parseRuleEntriesForVersion(content []byte, path, modulePath, currentVersion
 				ModulePath:   modulePath,
 				Target:       target,
 				VersionRange: ruleConfig.VersionRange,
+				Version:      ver,
 			})
 		}
 	}

@@ -1,0 +1,2 @@
+configurations:
+  - ref: general.http.client.request_captured_headers

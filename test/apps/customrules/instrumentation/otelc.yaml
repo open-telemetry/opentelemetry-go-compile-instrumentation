@@ -1,0 +1,8 @@
+custom_rule:
+  target: main
+  where:
+    func: CustomTarget
+  do:
+    - inject_hooks:
+        before: BeforeCustom
+        path: go.opentelemetry.io/otelc/test/apps/customrules/instrumentation

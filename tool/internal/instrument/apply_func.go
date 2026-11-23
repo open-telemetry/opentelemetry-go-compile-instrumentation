@@ -8,6 +8,7 @@ import (
 	_ "embed"
 	"fmt"
 	"go/parser"
+	"go/token"
 	"path/filepath"
 	"strings"
 
@@ -116,6 +117,7 @@ func collectArguments(funcDecl *dst.FuncDecl, hash string) []string {
 	args := make([]string, 0)
 	next := syntheticNamer(funcDecl, hash)
 	if ast.HasReceiver(funcDecl) {
+		nameBlankReceiverTypeParams(funcDecl.Recv.List[0].Type, next)
 		if recv := funcDecl.Recv.List[0]; recv.Names != nil {
 			// Named receiver, e.g. func (r R) F() {} or func (_ R) F() {}
 			receiver := recv.Names[0].Name
@@ -154,6 +156,28 @@ func collectArguments(funcDecl *dst.FuncDecl, hash string) []string {
 		}
 	}
 	return args
+}
+
+// nameBlankReceiverTypeParams gives each blank type parameter of a generic
+// receiver, such as the _ in func (s *Set[_]) Len() int, a generated name.
+// The trampolines declare the receiver's type parameters again and the jump
+// passes them as type arguments, but _ cannot be used as a type.
+func nameBlankReceiverTypeParams(recvType dst.Expr, next func(prefix string) string) {
+	if star, ok := recvType.(*dst.StarExpr); ok {
+		recvType = star.X
+	}
+	var indices []dst.Expr
+	switch t := recvType.(type) {
+	case *dst.IndexExpr:
+		indices = []dst.Expr{t.Index}
+	case *dst.IndexListExpr:
+		indices = t.Indices
+	}
+	for _, index := range indices {
+		if ident, ok := index.(*dst.Ident); ok && ident.Name == ast.IdentIgnore {
+			ident.Name = next(ignoredTypeParam)
+		}
+	}
 }
 
 func createTrampArgs(names []string) []dst.Expr {
@@ -299,6 +323,7 @@ func (ip *instrumentPhase) writeGlobals(pkgName string) error {
 	if err != nil {
 		return ex.Wrapf(err, "parsing api template")
 	}
+	renameHookContextDecl(api.Decls)
 	trampoline.Decls = append(trampoline.Decls, api.Decls...)
 
 	// Write trampoline code to file
@@ -311,6 +336,23 @@ func (ip *instrumentPhase) writeGlobals(pkgName string) error {
 	ip.keepForDebug(path)
 	ip.writeGlobalsDiffForDebug(path, ip.globalsContributors)
 	return nil
+}
+
+// renameHookContextDecl renames the HookContext interface declaration to
+// trampolineHookContextType so the symbol injected into the target package does
+// not clash with a user-defined HookContext in the same package scope (#1820).
+func renameHookContextDecl(decls []dst.Decl) {
+	for _, decl := range decls {
+		genDecl, ok := decl.(*dst.GenDecl)
+		if !ok || genDecl.Tok != token.TYPE {
+			continue
+		}
+		for _, spec := range genDecl.Specs {
+			if typeSpec, isType := spec.(*dst.TypeSpec); isType && typeSpec.Name.Name == hookContextPublicType {
+				typeSpec.Name.Name = trampolineHookContextType
+			}
+		}
+	}
 }
 
 func (ip *instrumentPhase) writeInstrumented(root *dst.File, oldFile string, changes []ruleChange) error {
@@ -382,6 +424,9 @@ func (ip *instrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFun
 	// matches it. The func rule then contributes no instrumented function, so it
 	// must not force a globals file to be written for the package.
 	if ast.FuncLeadHasDirective(funcDecl, util.DirectiveIgnore) {
+		if DiffDebugEnabled() {
+			ip.reportDecision(rule, "ignored")
+		}
 		ip.Debug("Skip func rule due to //otelc:ignore", "func", rule.Func, "rule", rule.Name)
 		return false, nil
 	}
@@ -395,7 +440,8 @@ func (ip *instrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFun
 
 	// Skip package runtime itself to avoid a self-import.
 	if ip.buildUsesIgnoreDirective && !ip.isSuppressHooksPackage() {
-		suppressImport := map[string]string{suppressHooksPackage: suppressHooksPackage}
+		ip.suppressHooksQualifier = suppressHooksAlias(ctx, root)
+		suppressImport := map[string]string{ip.suppressHooksQualifier: suppressHooksPackage}
 		if err = ip.addRuleImports(ctx, root, suppressImport, rule.Name); err != nil {
 			return false, err
 		}

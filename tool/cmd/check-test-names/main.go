@@ -31,12 +31,8 @@ var skipDirNames = map[string]bool{ //nolint:gochecknoglobals // private lookup 
 // apps rather than pairing 1:1 with a source file, so the naming rule below
 // does not apply to them.
 var exemptScenarioDirs = map[string]bool{ //nolint:gochecknoglobals // private lookup table
-	"test/integration":    true,
-	"test/e2e":            true,
-	"test/bench":          true,
-	"test/latestlibbuild": true,
-	"test/latestlibrun":   true,
-	"test/versionmatrix":  true,
+	"test/integration": true,
+	"test/bench":       true,
 }
 
 func main() {

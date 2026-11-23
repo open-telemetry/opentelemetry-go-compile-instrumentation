@@ -13,9 +13,17 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 )
+
+// cancelGrace is how long a canceled command gets to exit after SIGINT
+// before cmd.Cancel's caller falls back to killing it. os/exec's default
+// Cancel (used when WaitDelay is set but Cancel is not overridden) is
+// cmd.Process.Kill, so this still ends in a hard kill if the process does
+// not exit in time.
+const cancelGrace = 10 * time.Second
 
 func runCmd(ctx context.Context, dir string, env []string, args ...string) error {
 	if len(args) == 0 {
@@ -33,6 +41,22 @@ func runCmd(ctx context.Context, dir string, env []string, args ...string) error
 	}
 	if env != nil {
 		cmd.Env = env
+	}
+
+	// A canceled context otherwise hard-kills only this direct child: Ctrl-C
+	// reaches the whole foreground process group, but exec.CommandContext's
+	// default Cancel sends SIGKILL to this process alone, so any toolexec or
+	// compile/link child it spawned can keep running after this process
+	// exits. Signaling it to interrupt first gives it a chance to shut down
+	// its own children the way it already does for Ctrl-C, with WaitDelay
+	// falling back to a hard kill if it ignores that. Interrupt is not
+	// implemented on Windows (os/exec.Signal would just return an error),
+	// so Windows keeps the default Kill-only behavior.
+	if !IsWindows() {
+		cmd.Cancel = func() error {
+			return cmd.Process.Signal(os.Interrupt)
+		}
+		cmd.WaitDelay = cancelGrace
 	}
 
 	err := cmd.Run()
@@ -149,8 +173,14 @@ func ListFiles(dir string) ([]string, error) {
 
 // WriteFileAtomic writes data to a file atomically by first writing to a temporary file and then renaming it.
 // Permission precedence: explicit perm argument > existing file's permissions > default 0644.
+// A symbolic link is followed, so the file it points to is replaced and the
+// link stays in place. Renaming over the link itself would turn it into a
+// regular file and leave its target as it was.
 func WriteFileAtomic(filePath string, data []byte, perm ...os.FileMode) error {
 	const defaultPerm = 0o644
+	if resolved, err := filepath.EvalSymlinks(filePath); err == nil {
+		filePath = resolved
+	}
 	mode := os.FileMode(defaultPerm)
 	if fi, statErr := os.Stat(filePath); statErr == nil {
 		mode = fi.Mode().Perm()
@@ -186,57 +216,10 @@ func WriteFileAtomic(filePath string, data []byte, perm ...os.FileMode) error {
 	// Atomic replacement on Unix-like systems when source and destination are on
 	// the same filesystem. On non-Unix platforms, os.Rename may replace the file
 	// but the operation is not guaranteed to be atomic.
-	if renameErr := RenameReplace(tmpPath, filePath); renameErr != nil {
+	if renameErr := os.Rename(tmpPath, filePath); renameErr != nil {
 		return ex.Wrapf(renameErr, "failed to atomically replace %s", filePath)
 	}
 
-	return nil
-}
-
-// RenameReplace renames oldPath to newPath. When newPath exists, it is
-// replaced. On Windows, a rename cannot replace a read-only file. Then
-// RenameReplace makes newPath writable and does the rename again. If the
-// second rename fails too, it sets the permissions of newPath back. On the
-// other systems, RenameReplace is os.Rename.
-//
-// The permissions belong to the file, not to its name. Thus RenameReplace
-// does not change the permissions of a newPath that has more than one hard
-// link: else a different file (the other link, which can be outside the
-// project) stays writable after the rename. Then the first error is returned.
-func RenameReplace(oldPath, newPath string) error {
-	return renameReplace(oldPath, newPath, os.Rename, IsWindows(), hasOneLink)
-}
-
-// renameReplace is RenameReplace with the rename function, the Windows
-// behavior and the link count check as parameters, so that a test on a
-// different system can examine the Windows behavior.
-func renameReplace(
-	oldPath, newPath string,
-	rename func(string, string) error,
-	windows bool,
-	oneLink func(string) bool,
-) error {
-	err := rename(oldPath, newPath)
-	if err == nil || !windows {
-		return err
-	}
-	info, statErr := os.Lstat(newPath)
-	if statErr != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o200 != 0 {
-		// newPath is not a read-only file: the error has a different cause.
-		return err
-	}
-	if !oneLink(newPath) {
-		// A different hard link shares the permissions of newPath.
-		return err
-	}
-	perm := info.Mode().Perm()
-	if chmodErr := os.Chmod(newPath, perm|0o200); chmodErr != nil {
-		return err
-	}
-	if err = rename(oldPath, newPath); err != nil {
-		_ = os.Chmod(newPath, perm)
-		return err
-	}
 	return nil
 }
 

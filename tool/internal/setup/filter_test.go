@@ -268,7 +268,7 @@ func TestBuild_IsTestFilter(t *testing.T) {
 			t.Fatalf("build(IsTest=true) returned %T, want *isTestFilter", f)
 		}
 		if !itf.ShouldMatch {
-			t.Errorf("isTestFilter.ShouldMatch = false, want true")
+			t.Error("isTestFilter.ShouldMatch = false, want true")
 		}
 	})
 
@@ -283,7 +283,7 @@ func TestBuild_IsTestFilter(t *testing.T) {
 			t.Fatalf("build(IsTest=false) returned %T, want *isTestFilter", f)
 		}
 		if itf.ShouldMatch {
-			t.Errorf("isTestFilter.ShouldMatch = true, want false")
+			t.Error("isTestFilter.ShouldMatch = true, want false")
 		}
 	})
 

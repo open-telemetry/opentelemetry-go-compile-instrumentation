@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -221,10 +222,38 @@ func TestGetBuildTempPaths(t *testing.T) {
 	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "matched.json"), GetMatchedRuleFile())
 	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "import_names.json"), GetImportNamesFile())
 	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "pgo_profile"), GetPGOProfileFile())
+	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "injected_hash"), GetInjectedHashFile())
 
 	// The per-process import file embeds the current PID.
 	want := filepath.Join(workDir, BuildTempDir, fmt.Sprintf("added_imports.%d.json", os.Getpid()))
 	assert.Equal(t, want, GetAddedImportsFileForProcess())
+}
+
+func TestInvocationPaths(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(EnvOtelcWorkDir, workDir)
+	t.Setenv(EnvOtelcSessionDir, "")
+	for _, invocation := range []string{"", t.TempDir()} {
+		t.Setenv(EnvOtelcInvocationDir, invocation)
+		base := invocation
+		if base == "" {
+			base = filepath.Join(workDir, BuildTempDir)
+		}
+		assert.Equal(t, base, GetInvocationDir())
+		assert.Equal(t, filepath.Join(base, "file.go"), GetInvocationTemp("file.go"))
+		for name, getter := range map[string]func() string{
+			"matched.json":      GetMatchedRuleFile,
+			"import_names.json": GetImportNamesFile,
+			"pgo_profile":       GetPGOProfileFile,
+			"injected_hash":     GetInjectedHashFile,
+			"resolution_scope":  GetResolutionScopeFile,
+			"setup_generation":  GetSetupGenerationFile,
+			SessionTempDir:      GetSessionDir,
+			fmt.Sprintf("added_imports.%d.json", os.Getpid()): GetAddedImportsFileForProcess,
+		} {
+			assert.Equal(t, filepath.Join(base, name), getter())
+		}
+	}
 }
 
 func TestEncodeBuildFlagsEmpty(t *testing.T) {
@@ -239,6 +268,34 @@ func TestEncodeBuildFlagsRoundTrip(t *testing.T) {
 	// The encoding must be valid JSON that preserves spaces in tokens.
 	assert.True(t, strings.HasPrefix(encoded, "["))
 	assert.Contains(t, encoded, "foo bar")
+}
+
+func TestBuildDeadlineFromEnv(t *testing.T) {
+	t.Run("unset env means no deadline", func(t *testing.T) {
+		t.Setenv(EnvOtelcBuildDeadline, "")
+
+		_, ok := BuildDeadlineFromEnv()
+
+		assert.False(t, ok)
+	})
+
+	t.Run("malformed env means no deadline", func(t *testing.T) {
+		t.Setenv(EnvOtelcBuildDeadline, "not-a-time")
+
+		_, ok := BuildDeadlineFromEnv()
+
+		assert.False(t, ok)
+	})
+
+	t.Run("round trips through FormatBuildDeadline", func(t *testing.T) {
+		want := time.Now().Add(90 * time.Minute)
+		t.Setenv(EnvOtelcBuildDeadline, FormatBuildDeadline(want))
+
+		got, ok := BuildDeadlineFromEnv()
+
+		require.True(t, ok)
+		assert.True(t, want.Equal(got), "got %s, want %s", got, want)
+	})
 }
 
 func TestDiscoverWorkDir(t *testing.T) {
@@ -290,4 +347,25 @@ func TestDiscoverWorkDir(t *testing.T) {
 			t.Errorf("DiscoverWorkDir() = %q, want empty", got)
 		}
 	})
+}
+
+func TestSessionDirHelpers(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv(EnvOtelcWorkDir, workDir)
+
+	t.Setenv(EnvOtelcSessionDir, "")
+	assert.Equal(t, filepath.Join(workDir, BuildTempDir, SessionTempDir), GetSessionDir(),
+		"without an inherited session the build owns one in its build temp dir")
+	assert.False(t, InheritedSession())
+
+	t.Setenv(EnvOtelcSessionDir, SessionOff)
+	assert.Equal(t, SessionOff, GetSessionDir())
+	assert.False(t, InheritedSession(), "a disabled session is not inherited")
+
+	inherited := t.TempDir()
+	t.Setenv(EnvOtelcSessionDir, inherited)
+	assert.Equal(t, inherited, GetSessionDir())
+	assert.True(t, InheritedSession())
+
+	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "resolution_scope"), GetResolutionScopeFile())
 }

@@ -97,14 +97,10 @@ func TestCollectRuleImports(t *testing.T) {
 		),
 	})
 	set.AddStructRule(file, structRuleWithImports("struct", map[string]string{"x": "example.com/x", "_": "unsafe"}))
-	set.AddCallRule(
-		file,
-		callRuleWithImports("call", map[string]string{"h": "example.com/h"}),
-	)
-	set.AddCallRule(
-		other,
-		callRuleWithImports("call", map[string]string{"h": "example.com/h"}),
-	)
+	// Setup lists the same rule for each file it applies to.
+	call := callRuleWithImports("call", map[string]string{"h": "example.com/h"})
+	set.AddCallRule(file, call)
+	set.AddCallRule(other, call)
 	set.AddCallRule(file, &rule.InstCallRule{
 		InstBaseRule: baseRule("method", map[string]string{"m": "example.com/m"}),
 		MethodCall:   "example.com/lib.*T.Do",
@@ -213,6 +209,8 @@ func TestFindRuleImportCycle(t *testing.T) {
 	ignoresNew := writeGoFile(t, "package a\n\nimport \"example.com/lib\"\n\n"+
 		"func x() int {\n\t//otelc:ignore\n\tv := lib.New()\n\treturn v\n}\n")
 	aliasesNew := writeGoFile(t, "package a\n\nimport l \"example.com/lib\"\n\nvar X = l.New()\n")
+	spreadsNew := writeGoFile(t, "package a\n\nimport \"example.com/lib\"\n\n"+
+		"func x(opts []lib.Option) { lib.New(opts...) }\n")
 	keyedConfig := writeGoFile(t, "package a\n\nimport \"example.com/lib\"\n\nvar X = &lib.Config{A: 1}\n")
 	emptyConfig := writeGoFile(t, "package a\n\nimport l \"example.com/lib\"\n\nvar X = l.Config {}\n")
 	positionalConfig := writeGoFile(t, "package a\n\nimport \"example.com/lib\"\n\nvar X = lib.Config{1}\n")
@@ -230,14 +228,31 @@ func TestFindRuleImportCycle(t *testing.T) {
 		return set
 	}
 
-	withLit := func(file string, field *rule.InstLitField) *rule.InstRuleSet {
+	// withVariadic returns a rule that appends appendArgs to the calls of
+	// lib.New. Only its variadic_type uses helper.
+	withVariadic := func(file string, appendArgs ...string) *rule.InstRuleSet {
 		set := rule.NewInstRuleSet("example.com/a")
-		set.AddLitRule(file, litRule("set_config", map[string]string{"helper": "example.com/helper"}, field))
+		r := callRuleWithReplace("wrap_new", map[string]string{"helper": "example.com/helper"}, "")
+		r.AppendArgs = appendArgs
+		r.VariadicType = "helper.Option"
+		set.AddCallRule(file, r)
+		return set
+	}
+	callErr := `rule "wrap_new" adds import "example.com/helper" to "example.com/a", ` +
+		`but example.com/helper imports example.com/a`
+
+	withLit := func(file string, fields ...*rule.InstLitField) *rule.InstRuleSet {
+		set := rule.NewInstRuleSet("example.com/a")
+		set.AddLitRule(file, litRule("set_config", map[string]string{"helper": "example.com/helper"}, fields...))
 		return set
 	}
 	setsA := &rule.InstLitField{Name: "A", Wrap: "helper.Wrap({{ . }})"}
 	setsB := &rule.InstLitField{Name: "B", Wrap: "helper.Wrap({{ . }})"}
 	defaultsB := &rule.InstLitField{Name: "B", Value: "helper.Default"}
+	defaultsC := &rule.InstLitField{Name: "C", Value: "1"}
+	// The literal uses the value when it does not set A, and the wrap when
+	// it does. Only the value uses helper.
+	defaultsOrWrapsA := &rule.InstLitField{Name: "A", Value: "helper.Default", Wrap: "({{ . }})"}
 	litCycle := map[string][]string{
 		"example.com/a":      {"example.com/lib"},
 		"example.com/helper": {"example.com/a"},
@@ -357,6 +372,22 @@ func TestFindRuleImportCycle(t *testing.T) {
 			}(),
 		},
 		{
+			name:    "call rule whose variadic type is only used by a spread call, and a plain call",
+			graph:   litCycle,
+			matched: []*rule.InstRuleSet{withVariadic(callsNew, "lib.Extra()")},
+		},
+		{
+			name:    "call rule that appends to a spread call with a variadic type",
+			graph:   litCycle,
+			matched: []*rule.InstRuleSet{withVariadic(spreadsNew, "lib.Extra()")},
+			wantErr: callErr,
+		},
+		{
+			name:    "call rule with a variadic type and no arguments to append, and a spread call",
+			graph:   litCycle,
+			matched: []*rule.InstRuleSet{withVariadic(spreadsNew)},
+		},
+		{
 			name:    "literal rule that wraps a field the literal sets",
 			graph:   litCycle,
 			matched: []*rule.InstRuleSet{withLit(keyedConfig, setsA)},
@@ -372,6 +403,22 @@ func TestFindRuleImportCycle(t *testing.T) {
 			name:    "literal rule that wraps a field the literal does not set",
 			graph:   litCycle,
 			matched: []*rule.InstRuleSet{withLit(keyedConfig, setsB)},
+		},
+		{
+			name:    "literal rule whose value uses the import, and a literal that sets the field",
+			graph:   litCycle,
+			matched: []*rule.InstRuleSet{withLit(keyedConfig, defaultsOrWrapsA)},
+		},
+		{
+			name:    "literal rule whose value uses the import, and a literal that does not set the field",
+			graph:   litCycle,
+			matched: []*rule.InstRuleSet{withLit(emptyConfig, defaultsOrWrapsA)},
+			wantErr: litErr,
+		},
+		{
+			name:    "literal rule whose wrap uses the import, and a literal that another field changes",
+			graph:   litCycle,
+			matched: []*rule.InstRuleSet{withLit(keyedConfig, setsB, defaultsC)},
 		},
 		{
 			name:    "literal rule and a positional literal",

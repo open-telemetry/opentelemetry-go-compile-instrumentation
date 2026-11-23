@@ -33,8 +33,17 @@ const (
 	// or unknown/custom test flags and their values/positionals).
 	ArgTestBinary
 
-	// ArgFlagTerminator represents "--" in go build / go install.
+	// ArgFlagTerminator represents "--" in go build / go install / go run.
 	ArgFlagTerminator
+
+	// ArgRunFlag represents a go run flag that go build does not accept (-exec).
+	ArgRunFlag
+
+	// ArgRunFlagValue represents the separated value argument for an ArgRunFlag.
+	ArgRunFlagValue
+
+	// ArgProgramArg represents an argument that go run passes to the program.
+	ArgProgramArg
 )
 
 // ClassifiedArg contains the classification metadata for a single command-line argument token.
@@ -52,8 +61,9 @@ func isBuildFlagWithValue(name string) bool {
 	switch name {
 	case "-C", "-o", "-p", "-covermode", "-coverpkg",
 		"-asmflags", "-buildmode", "-compiler",
+		"-debug-actiongraph", "-debug-runtime-trace", "-debug-trace",
 		"-gccgoflags", flagGcflags, "-installsuffix", "-ldflags",
-		"-mod", "-modfile", "-overlay", "-pgo", "-pkgdir",
+		flagMod, flagModfile, flagOverlay, "-pgo", "-pkgdir",
 		"-tags", "-toolexec":
 		return true
 	default:
@@ -131,7 +141,7 @@ func isTestAliasBoolFlag(name string) bool {
 // isBuildContextFlagWithValue reports whether name affects the build context and takes a value.
 func isBuildContextFlagWithValue(name string) bool {
 	switch name {
-	case "-C", "-overlay", "-tags", "-mod", "-modfile", flagGcflags:
+	case "-C", flagOverlay, "-tags", flagMod, flagModfile, flagGcflags, "-covermode", flagCoverpkg:
 		return true
 	default:
 		return false
@@ -438,11 +448,65 @@ func classifyTestArgs(args []string) []ClassifiedArg {
 	return classified
 }
 
+// classifyRunFlagToken classifies the flag at args[i] of a go run command line.
+// -exec is the only flag that go run adds to the build flags.
+func classifyRunFlagToken(args []string, i int) (int, []ClassifiedArg) {
+	if flagName(args[i]) != flagExec {
+		return classifyBuildFlagToken(args, i)
+	}
+	_, value, hasValue := strings.Cut(args[i], "=")
+	tok := flagToken{normName: flagExec, hasValue: hasValue, value: value}
+	consumed, items := classifyValueFlag(args, i, tok, false)
+	items[0].Kind = ArgRunFlag
+	if len(items) > 1 {
+		items[1].Kind = ArgRunFlagValue
+	}
+	return consumed, items
+}
+
+// classifyRunArgs follows `go run [build flags] [-exec xprog] package [arguments...]`.
+// The flags end at the first non-flag argument or after "--". The package is
+// that argument, or every .go file in a row from there. Everything after the
+// package belongs to the program, flags included.
+func classifyRunArgs(args []string) []ClassifiedArg {
+	classified := make([]ClassifiedArg, 0, len(args))
+	i := 0
+	for i < len(args) && strings.HasPrefix(args[i], "-") {
+		if args[i] == delimiterDashDash {
+			classified = append(classified, ClassifiedArg{Index: i, Raw: args[i], Kind: ArgFlagTerminator})
+			i++
+			break
+		}
+		consumed, items := classifyRunFlagToken(args, i)
+		classified = append(classified, items...)
+		i += consumed
+	}
+
+	end := i
+	for end < len(args) && strings.HasSuffix(args[end], ".go") {
+		end++
+	}
+	if end == i && i < len(args) {
+		end++
+	}
+	for ; i < len(args); i++ {
+		kind := ArgProgramArg
+		if i < end {
+			kind = ArgTarget
+		}
+		classified = append(classified, ClassifiedArg{Index: i, Raw: args[i], Kind: kind})
+	}
+	return classified
+}
+
 // classifyArgs scans args and classifies each token according to Go command and subcommand semantics.
 // It is non-validating: it preserves tokens as-is and lets cmd/go produce canonical validation errors.
 func classifyArgs(subcommand string, args []string) []ClassifiedArg {
 	if subcommand == subcmdTest {
 		return classifyTestArgs(args)
+	}
+	if subcommand == subcmdRun {
+		return classifyRunArgs(args)
 	}
 	return classifyBuildArgs(args)
 }

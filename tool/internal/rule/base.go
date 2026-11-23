@@ -5,6 +5,8 @@ package rule
 
 import (
 	"fmt"
+	"go/version"
+	"iter"
 	"maps"
 	"path/filepath"
 	"slices"
@@ -26,6 +28,7 @@ type InstRule interface {
 	GetTarget() *Target  // The packages the rule applies to
 	GetVersion() string  // The version range of target module if available, e.g "v1.0.0,v2.0.0"
 	GetWhere() *WhereDef // Optional non-package selectors that remain after normalization
+	GetOrder() int       // The order in which the rule is applied to a file, lowest first
 }
 
 // FilterDef describes file predicates nested under where.file.
@@ -75,6 +78,11 @@ type InstBaseRule struct {
 	Version string            `json:"version,omitempty" yaml:"version,omitempty"`
 	Imports map[string]string `json:"imports,omitempty" yaml:"imports,omitempty"`
 	Where   *WhereDef         `json:"where,omitempty"   yaml:"where,omitempty"`
+	// Order is the order in which the rule is applied to a file. Rules with
+	// a lower order are applied first, and rules with the same order keep
+	// the order they are matched in. Only the inject_code and
+	// expand_directive modifiers accept it.
+	Order int `json:"order,omitempty" yaml:"order,omitempty"`
 }
 
 func (ibr *InstBaseRule) String() string      { return ibr.Name }
@@ -82,6 +90,12 @@ func (ibr *InstBaseRule) GetName() string     { return ibr.Name }
 func (ibr *InstBaseRule) GetTarget() *Target  { return &ibr.Target }
 func (ibr *InstBaseRule) GetVersion() string  { return ibr.Version }
 func (ibr *InstBaseRule) GetWhere() *WhereDef { return ibr.Where }
+func (ibr *InstBaseRule) GetOrder() int       { return ibr.Order }
+
+// Base returns the embedded base rule. Every rule kind promotes this method,
+// so code that holds any rule kind can reach the fields all kinds share, such
+// as the imports the rule declares.
+func (ibr *InstBaseRule) Base() *InstBaseRule { return ibr }
 
 // InstRuleSet represents a collection of instrumentation rules that apply to a
 // single Go package within a specific module. It acts as a container for rules,
@@ -151,6 +165,44 @@ func (irs *InstRuleSet) IsEmpty() bool {
 			len(irs.IgnoredCallFiles) == 0)
 }
 
+// MaxRequiredLang returns the highest minimum Go language version required
+// across all raw rules in this rule set, or an empty string if no rule specifies a language version.
+func (irs *InstRuleSet) MaxRequiredLang() string {
+	if irs == nil {
+		return ""
+	}
+	var maxLang string
+	for _, rawRules := range irs.RawRules {
+		for _, r := range rawRules {
+			if r.Lang != "" {
+				if maxLang == "" || version.Compare(r.Lang, maxLang) > 0 {
+					maxLang = r.Lang
+				}
+			}
+		}
+	}
+	return maxLang
+}
+
+// IsInternal reports whether the rule set consists of compiler-internal
+// rules (such as runtime GLS context propagation) rather than external instrumentation.
+func (irs *InstRuleSet) IsInternal() bool {
+	if irs == nil || irs.IsEmpty() {
+		return false
+	}
+	for _, fr := range irs.FileRules {
+		if fr.Path == util.InternalPath {
+			return true
+		}
+	}
+	for _, fr := range irs.AllFuncRules() {
+		if fr.Path == util.InternalPath {
+			return true
+		}
+	}
+	return false
+}
+
 // AddRule is a generic method that adds any type of rule to the appropriate map.
 // It works with any rule type that implements the InstRule interface.
 func addRule[T InstRule](file string, rule T, rulesMap map[string][]T) {
@@ -197,6 +249,30 @@ func (irs *InstRuleSet) AddFileRule(rule *InstFileRule) {
 	irs.FileRules = append(irs.FileRules, rule)
 }
 
+// AllRules returns every rule in the set in a stable order. Rule maps are
+// traversed by sorted source file, with rule kinds visited in a fixed order.
+func (irs *InstRuleSet) AllRules() iter.Seq[InstRule] {
+	return func(yield func(InstRule) bool) {
+		if irs == nil {
+			return
+		}
+		if !yieldRuleMap(irs.RawRules, yield) ||
+			!yieldRuleMap(irs.FuncRules, yield) ||
+			!yieldRuleMap(irs.StructRules, yield) ||
+			!yieldRuleMap(irs.CallRules, yield) ||
+			!yieldRuleMap(irs.LitRules, yield) ||
+			!yieldRuleMap(irs.DirectiveRules, yield) ||
+			!yieldRuleMap(irs.DeclRules, yield) {
+			return
+		}
+		for _, r := range irs.FileRules {
+			if !yield(r) {
+				return
+			}
+		}
+	}
+}
+
 func (irs *InstRuleSet) SetPackageName(name string) {
 	util.Assert(name != "", "package name is empty")
 	irs.PackageName = name
@@ -219,6 +295,15 @@ func allRules[T InstRule](rulesByFile map[string][]T) []T {
 		rules = append(rules, rulesByFile[file]...)
 	}
 	return rules
+}
+
+func yieldRuleMap[T InstRule](rulesByFile map[string][]T, yield func(InstRule) bool) bool {
+	for _, r := range allRules(rulesByFile) {
+		if !yield(r) {
+			return false
+		}
+	}
+	return true
 }
 
 // AllFuncRules returns all function rules from the rule set as a flat slice,
