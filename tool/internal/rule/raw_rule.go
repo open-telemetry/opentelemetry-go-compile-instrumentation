@@ -70,6 +70,9 @@ func NewInstRawRule(data []byte, name string) (*InstRawRule, error) {
 }
 
 func (r *InstRawRule) validate() error {
+	if strings.TrimSpace(r.Func) == "" {
+		return ex.Newf("func cannot be empty")
+	}
 	if strings.TrimSpace(r.Raw) == "" {
 		return ex.Newf("raw cannot be empty")
 	}

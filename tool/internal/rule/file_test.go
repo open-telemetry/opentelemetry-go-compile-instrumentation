@@ -190,6 +190,11 @@ func TestFileRules(t *testing.T) {
 			wantErr: "no recognised selector",
 		},
 		{
+			name:    "inject_code without func",
+			content: "rule:\n  target: example.com/pkg\n  do:\n    - inject_code:\n        raw: _ = 0\n",
+			wantErr: "func cannot be empty",
+		},
+		{
 			name:    "empty target",
 			content: "rule:\n  target: '  '\n  func: Run\n  raw: _ = 0\n",
 			wantErr: "empty target",
