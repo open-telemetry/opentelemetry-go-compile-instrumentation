@@ -28,6 +28,9 @@ func TestBasic(t *testing.T) {
 		"UnusedContext after: 42",
 		"UnusedContext result: 42",
 		"failed to exec Before hook",
+		// UnusedContextBefore panics with a string; the recovered value must
+		// be printed, not only errors.
+		"unused context recovery",
 		"Every2",
 		"Every3",
 		"MyStruct.Example",

@@ -99,8 +99,13 @@ func OtelBeforeTrampoline_GenericFuncBeforeOnly3330034316[T any](param0 *T, para
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec Before hook", "GenericFuncBeforeOnlyBefore")
-			if e, ok := err.(error); ok {
+			switch e := err.(type) {
+			case error:
 				println(e.Error())
+			case interface{ String() string }:
+				println(e.String())
+			case string:
+				println(e)
 			}
 			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
 			if fetchStack != nil && printStack != nil {

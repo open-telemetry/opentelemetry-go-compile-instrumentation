@@ -134,8 +134,13 @@ func OtelAfterTrampoline_AfterOnly4237239717(hookContext OtelHookContext, arg0 *
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "UnusedAfter")
-			if e, ok := err.(error); ok {
+			switch e := err.(type) {
+			case error:
 				println(e.Error())
+			case interface{ String() string }:
+				println(e.String())
+			case string:
+				println(e)
 			}
 			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
 			if fetchStack != nil && printStack != nil {
@@ -235,8 +240,13 @@ func OtelBeforeTrampoline_AfterUses1226803491(param0 *int) (hookContext *HookCon
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec Before hook", "UnusedBefore")
-			if e, ok := err.(error); ok {
+			switch e := err.(type) {
+			case error:
 				println(e.Error())
+			case interface{ String() string }:
+				println(e.String())
+			case string:
+				println(e)
 			}
 			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
 			if fetchStack != nil && printStack != nil {
@@ -258,8 +268,13 @@ func OtelAfterTrampoline_AfterUses1226803491(hookContext OtelHookContext, arg0 *
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "UsedAfter")
-			if e, ok := err.(error); ok {
+			switch e := err.(type) {
+			case error:
 				println(e.Error())
+			case interface{ String() string }:
+				println(e.String())
+			case string:
+				println(e)
 			}
 			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
 			if fetchStack != nil && printStack != nil {
@@ -348,8 +363,13 @@ func OtelBeforeTrampoline_BeforeOnly1412719616(param0 *int) (hookContext *HookCo
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec Before hook", "UnusedBefore")
-			if e, ok := err.(error); ok {
+			switch e := err.(type) {
+			case error:
 				println(e.Error())
+			case interface{ String() string }:
+				println(e.String())
+			case string:
+				println(e)
 			}
 			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
 			if fetchStack != nil && printStack != nil {
@@ -447,8 +467,13 @@ func OtelBeforeTrampoline_BeforeUses956811467(param0 *int) (hookContext *HookCon
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec Before hook", "UsedBefore")
-			if e, ok := err.(error); ok {
+			switch e := err.(type) {
+			case error:
 				println(e.Error())
+			case interface{ String() string }:
+				println(e.String())
+			case string:
+				println(e)
 			}
 			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
 			if fetchStack != nil && printStack != nil {
@@ -470,8 +495,13 @@ func OtelAfterTrampoline_BeforeUses956811467(hookContext OtelHookContext, arg0 *
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "UnusedAfter")
-			if e, ok := err.(error); ok {
+			switch e := err.(type) {
+			case error:
 				println(e.Error())
+			case interface{ String() string }:
+				println(e.String())
+			case string:
+				println(e)
 			}
 			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
 			if fetchStack != nil && printStack != nil {
@@ -572,8 +602,13 @@ func OtelBeforeTrampoline_BothUnused1986096774(param0 *int) (hookContext *HookCo
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec Before hook", "UnusedBefore")
-			if e, ok := err.(error); ok {
+			switch e := err.(type) {
+			case error:
 				println(e.Error())
+			case interface{ String() string }:
+				println(e.String())
+			case string:
+				println(e)
 			}
 			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
 			if fetchStack != nil && printStack != nil {
@@ -591,8 +626,13 @@ func OtelAfterTrampoline_BothUnused1986096774(hookContext OtelHookContext, arg0 
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "UnusedAfter")
-			if e, ok := err.(error); ok {
+			switch e := err.(type) {
+			case error:
 				println(e.Error())
+			case interface{ String() string }:
+				println(e.String())
+			case string:
+				println(e)
 			}
 			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
 			if fetchStack != nil && printStack != nil {
