@@ -61,6 +61,80 @@ instrumentation/development:
 	assert.NotContains(t, validated.Values, "go.sample.enabled")
 }
 
+func TestValidateApplicationOptionsResolvesTypedMetadataDefaults(t *testing.T) {
+	app, err := ParseApplicationConfiguration([]byte(`file_format: "1.2"
+instrumentation/development:
+  go:
+    sample: {}
+`), "app.yaml")
+	require.NoError(t, err)
+
+	tests := []struct {
+		name         string
+		metadata     string
+		option       string
+		want         any
+		wantSnapshot string
+	}{
+		{
+			name: "boolean numeric spelling",
+			metadata: `configurations:
+  - name: go.sample.enabled
+    type: boolean
+    default: "1"
+`,
+			option:       "go.sample.enabled",
+			want:         true,
+			wantSnapshot: `{"go.sample.enabled":true}`,
+		},
+		{
+			name: "boolean letter spelling",
+			metadata: `configurations:
+  - name: go.sample.enabled
+    type: boolean
+    default: "t"
+`,
+			option:       "go.sample.enabled",
+			want:         true,
+			wantSnapshot: `{"go.sample.enabled":true}`,
+		},
+		{
+			name: "integer leading zero is decimal",
+			metadata: `configurations:
+  - name: go.sample.limit
+    type: int
+    default: "010"
+`,
+			option:       "go.sample.limit",
+			want:         int64(10),
+			wantSnapshot: `{"go.sample.limit":10}`,
+		},
+		{
+			name: "string numeric spelling remains unchanged",
+			metadata: `configurations:
+  - name: go.sample.mode
+    type: string
+    default: "010"
+`,
+			option:       "go.sample.mode",
+			want:         "010",
+			wantSnapshot: `{"go.sample.mode":"010"}`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			metadata, parseErr := ParseMetadata([]byte(test.metadata), "metadata.yaml")
+			require.NoError(t, parseErr)
+
+			validated, validateErr := ValidateApplicationOptions(app, metadata.Entries, nil)
+			require.NoError(t, validateErr)
+			assert.Equal(t, test.want, validated.ResolvedValues[test.option])
+			assert.NotContains(t, validated.Values, test.option)
+			assert.JSONEq(t, test.wantSnapshot, string(validated.Snapshot))
+		})
+	}
+}
+
 func TestValidateApplicationOptionsAppliesStringDefault(t *testing.T) {
 	app, err := ParseApplicationConfiguration([]byte(`file_format: "1.2"
 instrumentation/development:

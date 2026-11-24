@@ -325,14 +325,25 @@ func resolveApplicationDefaults(selected map[string]Entry, values map[string]any
 }
 
 func applicationDefaultValue(defaultValue, typeName string) (any, error) {
-	if typeName == stringType {
+	switch typeName {
+	case stringType:
 		return defaultValue, nil
+	case booleanType:
+		return strconv.ParseBool(defaultValue)
+	case integerType:
+		return strconv.ParseInt(defaultValue, 10, 64)
+	case mapType, listType, structuredListType:
+		var value any
+		if err := yaml.Unmarshal([]byte(defaultValue), &value); err != nil {
+			return nil, err
+		}
+		if !valueMatchesType(value, typeName) {
+			return nil, ex.Newf("default must encode a YAML value of type %q", typeName)
+		}
+		return value, nil
+	default:
+		return nil, ex.Newf("unsupported application configuration default type %q", typeName)
 	}
-	var value any
-	if err := yaml.Unmarshal([]byte(defaultValue), &value); err != nil {
-		return nil, err
-	}
-	return value, nil
 }
 
 func configurationDefinitionIdentity(selected map[string]Entry) map[string]Entry {
