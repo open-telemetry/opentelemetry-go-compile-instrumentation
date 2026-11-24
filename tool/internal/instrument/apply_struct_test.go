@@ -233,6 +233,8 @@ func TestApplyStructRule_ImportAliasMismatchImportsRuleAlias(t *testing.T) {
 
 import stdctx "context"
 
+var _ = stdctx.Background
+
 type S struct{}
 `)
 	r := &rule.InstStructRule{
@@ -267,6 +269,8 @@ func TestApplyStructRule_RuleAliasForUnaliasedImportedPath(t *testing.T) {
 	root := parseFile(t, `package main
 
 import "`+importPath+`"
+
+var _ = redis.Nil
 
 type S struct{}
 `)

@@ -5,6 +5,7 @@ package imports
 
 import (
 	"go/token"
+	"strings"
 	"testing"
 
 	"github.com/dave/dst"
@@ -366,11 +367,11 @@ func TestAddToFile(t *testing.T) {
 							},
 						},
 					},
+					useIdent("ctx"),
 				},
 			},
 			newImports: map[string]string{"c": "context"},
 			checkResult: func(t *testing.T, root *dst.File) {
-				require.Len(t, root.Decls, 1)
 				genDecl := root.Decls[0].(*dst.GenDecl)
 				require.Len(t, genDecl.Specs, 2)
 				for i, alias := range []string{"ctx", "c"} {
@@ -379,6 +380,91 @@ func TestAddToFile(t *testing.T) {
 					assert.Equal(t, alias, spec.Name.Name)
 					assert.Equal(t, `"context"`, spec.Path.Value)
 				}
+			},
+		},
+		{
+			name: "same path, file's import unused - renamed to the rule's alias",
+			root: &dst.File{
+				Decls: []dst.Decl{
+					&dst.GenDecl{
+						Tok: token.IMPORT,
+						Specs: []dst.Spec{
+							&dst.ImportSpec{Name: dst.NewIdent("ctx"), Path: &dst.BasicLit{Value: `"context"`}},
+						},
+					},
+				},
+			},
+			newImports: map[string]string{"c": "context"},
+			checkResult: func(t *testing.T, root *dst.File) {
+				assert.Equal(t, []string{"c context"}, specsOf(root))
+			},
+		},
+		{
+			name: "same path, unaliased import unused - renamed to the rule's alias",
+			root: &dst.File{
+				Decls: []dst.Decl{
+					&dst.GenDecl{
+						Tok:   token.IMPORT,
+						Specs: []dst.Spec{&dst.ImportSpec{Path: &dst.BasicLit{Value: `"context"`}}},
+					},
+				},
+			},
+			newImports: map[string]string{"c": "context"},
+			checkResult: func(t *testing.T, root *dst.File) {
+				assert.Equal(t, []string{"c context"}, specsOf(root))
+			},
+		},
+		{
+			name: "same path, used import kept and unused import renamed",
+			root: &dst.File{
+				Decls: []dst.Decl{
+					&dst.GenDecl{
+						Tok: token.IMPORT,
+						Specs: []dst.Spec{
+							&dst.ImportSpec{Name: dst.NewIdent("x"), Path: &dst.BasicLit{Value: `"context"`}},
+							&dst.ImportSpec{Name: dst.NewIdent("y"), Path: &dst.BasicLit{Value: `"context"`}},
+						},
+					},
+					useIdent("x"),
+				},
+			},
+			newImports: map[string]string{"c": "context"},
+			checkResult: func(t *testing.T, root *dst.File) {
+				assert.Equal(t, []string{"x context", "c context"}, specsOf(root))
+			},
+		},
+		{
+			name: "same path, one unused import and two rule aliases - renames once",
+			root: &dst.File{
+				Decls: []dst.Decl{
+					&dst.GenDecl{
+						Tok: token.IMPORT,
+						Specs: []dst.Spec{
+							&dst.ImportSpec{Name: dst.NewIdent("ctx"), Path: &dst.BasicLit{Value: `"context"`}},
+						},
+					},
+				},
+			},
+			newImports: map[string]string{"a": "context", "b": "context"},
+			checkResult: func(t *testing.T, root *dst.File) {
+				assert.Equal(t, []string{"a context", "b context"}, specsOf(root))
+			},
+		},
+		{
+			name: "unused blank import of the same path is never renamed",
+			root: &dst.File{
+				Decls: []dst.Decl{
+					&dst.GenDecl{
+						Tok: token.IMPORT,
+						Specs: []dst.Spec{
+							&dst.ImportSpec{Name: dst.NewIdent("_"), Path: &dst.BasicLit{Value: `"context"`}},
+						},
+					},
+				},
+			},
+			newImports: map[string]string{"c": "context"},
+			checkResult: func(t *testing.T, root *dst.File) {
+				assert.Equal(t, []string{"_ context", "c context"}, specsOf(root))
 			},
 		},
 		{
@@ -672,4 +758,37 @@ func TestCollectImportPaths(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+// useIdent returns `var _ = name.X`, a declaration that uses name as the
+// qualifier of a selector.
+func useIdent(name string) dst.Decl {
+	return &dst.GenDecl{
+		Tok: token.VAR,
+		Specs: []dst.Spec{&dst.ValueSpec{
+			Names:  []*dst.Ident{dst.NewIdent("_")},
+			Values: []dst.Expr{&dst.SelectorExpr{X: dst.NewIdent(name), Sel: dst.NewIdent("X")}},
+		}},
+	}
+}
+
+// specsOf returns every import spec of root as "name path", where name is
+// empty for an unaliased import.
+func specsOf(root *dst.File) []string {
+	var specs []string
+	for _, decl := range root.Decls {
+		genDecl, ok := decl.(*dst.GenDecl)
+		if !ok || genDecl.Tok != token.IMPORT {
+			continue
+		}
+		for _, spec := range genDecl.Specs {
+			importSpec := spec.(*dst.ImportSpec)
+			name := ""
+			if importSpec.Name != nil {
+				name = importSpec.Name.Name
+			}
+			specs = append(specs, name+" "+strings.Trim(importSpec.Path.Value, `"`))
+		}
+	}
+	return specs
 }

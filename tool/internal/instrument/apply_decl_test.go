@@ -471,12 +471,14 @@ func TestDeclRuleWrapRejectsIotaCascadeIntoLaterSibling(t *testing.T) {
 func TestApplyDeclRule_ReplaceAliasMismatchImportsRuleAlias(t *testing.T) {
 	// The rule's replacement value is written against the alias "traced" for
 	// "fmt". The file already imports "fmt" under its own alias "f". The
-	// injected value must use "f", not fail the build.
+	// injected value keeps "traced", and "fmt" is imported again under it.
 	file := parseTestFile(t, `package main
 
 import f "fmt"
 
 var X = 1
+
+var Y = f.Sprint(0)
 `)
 	r := &rule.InstDeclRule{
 		InstBaseRule: rule.InstBaseRule{
@@ -503,6 +505,8 @@ func TestApplyDeclRule_WrapAliasMismatchImportsRuleAlias(t *testing.T) {
 import f "fmt"
 
 var X = 1
+
+var Y = f.Sprint(0)
 `)
 	r := &rule.InstDeclRule{
 		InstBaseRule: rule.InstBaseRule{
@@ -521,6 +525,35 @@ var X = 1
 	assert.Equal(t, 2, countImportSpecs(file), "the rule's alias must be imported next to the file's import")
 }
 
+func TestApplyDeclRule_ReplaceLastUseRenamesFileImport(t *testing.T) {
+	// The replacement removes the only use of the file's alias "f" for
+	// "fmt". Adding "traced" next to "f" would leave "f" unused, so the
+	// file's import is renamed to the rule's alias instead.
+	file := parseTestFile(t, `package main
+
+import f "fmt"
+
+var X = f.Sprint(1)
+`)
+	r := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "replace_x",
+			Imports: map[string]string{"traced": "fmt"},
+		},
+		Kind:       "var",
+		Identifier: "X",
+		Replace:    `traced.Sprint(2)`,
+	}
+
+	err := newTestPhase().applyDeclRule(context.Background(), r, file)
+
+	require.NoError(t, err)
+	src := renderFile(t, file)
+	assert.Contains(t, src, "var X = traced.Sprint(2)")
+	assert.Contains(t, src, `import traced "fmt"`)
+	assert.Equal(t, 1, countImportSpecs(file), "the unused import must not stay in the file")
+}
+
 func TestApplyDeclRule_RuleAliasForUnaliasedImportedPath(t *testing.T) {
 	// The target file imports a divergent-name dependency unaliased. Its name
 	// comes from ip.importNames, not a live package lookup, and the rule's
@@ -531,6 +564,8 @@ func TestApplyDeclRule_RuleAliasForUnaliasedImportedPath(t *testing.T) {
 import "`+importPath+`"
 
 var X = 1
+
+var Y = redis.Nil
 `)
 	r := &rule.InstDeclRule{
 		InstBaseRule: rule.InstBaseRule{

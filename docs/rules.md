@@ -105,7 +105,7 @@ Field notes:
     _: "unsafe"      # Blank import: import _ "unsafe"
   ```
 
-  The injected code uses the aliases as written. When the instrumented file already imports a path under another alias, otelc imports the path again under the rule's alias. The build fails when a parameter, result, or local variable at the place where the code is injected has the same name as an alias that the code uses, or when a declaration in the file does. A dot import is the exception: the file must dot-import the path itself.
+  The injected code uses the aliases as written. When the instrumented file already imports a path under another alias, otelc imports the path again under the rule's alias. If the file no longer uses its own import of that path after the rule is applied, otelc renames that import to the rule's alias instead. The build fails when a parameter, result, or local variable at the place where the code is injected has the same name as an alias that the code uses, or when a declaration in the file does. A dot import is the exception: the file must dot-import the path itself.
 
 #### Added-import cycles
 

@@ -1098,6 +1098,8 @@ func TestApplyRawRule_RuleAliasForUnaliasedImportedPath(t *testing.T) {
 
 import "`+importPath+`"
 
+var _ = redis.Nil
+
 func Run() {}
 `)
 	r := &rule.InstRawRule{

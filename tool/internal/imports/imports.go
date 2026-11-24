@@ -66,16 +66,10 @@ func parseFile(
 				continue
 			}
 			importPath := strings.Trim(importSpec.Path.Value, `"`)
-
-			var alias string
 			if importSpec.Name != nil {
-				alias = importSpec.Name.Name
 				maps.ExplicitAlias[importPath] = true
-			} else if name, resolved := resolvedNames[importPath]; resolved {
-				alias = name
-			} else {
-				alias = pkgload.ResolvePackageName(ctx, importPath, buildFlags...)
 			}
+			alias := specAlias(ctx, importSpec, resolvedNames, buildFlags...)
 
 			maps.AliasToPath[alias] = importPath
 			maps.PathToAlias[importPath] = alias
@@ -86,6 +80,22 @@ func parseFile(
 		slices.Sort(aliases)
 	}
 	return maps
+}
+
+// specAlias returns the name that spec binds in the file: its explicit alias,
+// or else the package name of its path. See parseFile for how the package
+// name is resolved.
+func specAlias(
+	ctx context.Context, spec *dst.ImportSpec, resolvedNames map[string]string, buildFlags ...string,
+) string {
+	if spec.Name != nil {
+		return spec.Name.Name
+	}
+	importPath := strings.Trim(spec.Path.Value, `"`)
+	if name, resolved := resolvedNames[importPath]; resolved {
+		return name
+	}
+	return pkgload.ResolvePackageName(ctx, importPath, buildFlags...)
 }
 
 // FindNew determines which imports from the rule are not already present in the file.
@@ -215,6 +225,31 @@ func AddToFile(
 	for _, importPath := range existingImports {
 		importedPaths[importPath] = true
 	}
+
+	// The injected code can replace the last use of the file's own import of
+	// a path, for example when a rule assigns a new value. That import is
+	// renamed to the rule's alias, because Go rejects an unused import.
+	qualifiers := selectorQualifiers(root)
+	aliasOf := func(spec *dst.ImportSpec) string {
+		return specAlias(ctx, spec, resolvedNames, buildFlags...)
+	}
+	aliases = slices.DeleteFunc(aliases, func(alias string) bool {
+		importPath := newImports[alias]
+		if alias == "_" || alias == "." || !importedPaths[importPath] {
+			return false
+		}
+		spec := unusedSpec(root, importPath, qualifiers, aliasOf)
+		if spec == nil {
+			return false
+		}
+		spec.Name = dst.NewIdent(alias)
+		qualifiers[alias] = true // the renamed import is taken
+		return true
+	})
+	if len(aliases) == 0 {
+		return nil
+	}
+
 	newSpec := func(alias string) *dst.ImportSpec {
 		importPath := newImports[alias]
 		if importedPaths[importPath] && alias != "_" && alias != "." {
@@ -246,6 +281,50 @@ func AddToFile(
 		root.Decls = append([]dst.Decl{newImportDecl}, root.Decls...)
 	}
 
+	return nil
+}
+
+// selectorQualifiers returns every identifier that root uses as the qualifier
+// of a selector, such as f in f.Sprint.
+func selectorQualifiers(root *dst.File) map[string]bool {
+	names := make(map[string]bool)
+	dst.Inspect(root, func(n dst.Node) bool {
+		if sel, ok := n.(*dst.SelectorExpr); ok {
+			if ident, isIdent := sel.X.(*dst.Ident); isIdent {
+				names[ident.Name] = true
+			}
+		}
+		return true
+	})
+	return names
+}
+
+// unusedSpec returns an import of importPath in root whose name is not in
+// qualifiers, or nil if there is none. aliasOf returns the name that an
+// import binds. Blank and dot imports are never returned, nor is the cgo
+// import "C".
+func unusedSpec(
+	root *dst.File, importPath string, qualifiers map[string]bool, aliasOf func(*dst.ImportSpec) string,
+) *dst.ImportSpec {
+	if importPath == "C" {
+		return nil
+	}
+	for _, decl := range root.Decls {
+		genDecl, ok := decl.(*dst.GenDecl)
+		if !ok || genDecl.Tok != token.IMPORT {
+			continue
+		}
+		for _, spec := range genDecl.Specs {
+			importSpec, isImport := spec.(*dst.ImportSpec)
+			if !isImport || importSpec.Path == nil || strings.Trim(importSpec.Path.Value, `"`) != importPath {
+				continue
+			}
+			alias := aliasOf(importSpec)
+			if alias != "_" && alias != "." && !qualifiers[alias] {
+				return importSpec
+			}
+		}
+	}
 	return nil
 }
 

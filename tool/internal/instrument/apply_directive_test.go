@@ -475,6 +475,13 @@ func TestApplyDirectiveRule(t *testing.T) {
 					},
 				},
 				funcDecl,
+				&dst.GenDecl{
+					Tok: token.VAR,
+					Specs: []dst.Spec{&dst.ValueSpec{
+						Names:  []*dst.Ident{dst.NewIdent("_")},
+						Values: []dst.Expr{&dst.SelectorExpr{X: dst.NewIdent("ctx"), Sel: dst.NewIdent("Background")}},
+					}},
+				},
 			},
 		}
 
@@ -583,6 +590,8 @@ func TestApplyDirectiveRule_RuleAliasForUnaliasedImportedPath(t *testing.T) {
 	root, err := ast.NewAstParser().ParseSource(`package main
 
 import "` + importPath + `"
+
+var _ = redis.Nil
 
 //otelc:test
 func foo() {

@@ -289,6 +289,8 @@ import (
     b "fmt"
 )
 
+var _, _ = a.Sprint, b.Sprint
+
 func run() {}
 `)
 

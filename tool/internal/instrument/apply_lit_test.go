@@ -573,6 +573,8 @@ import (
 	"`+importPath+`"
 )
 
+var _ = redis.Nil
+
 func f2() *http.Transport {
 	return &http.Transport{}
 }

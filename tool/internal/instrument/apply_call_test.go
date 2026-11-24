@@ -323,6 +323,8 @@ import (
 	"net/http"
 )
 
+var _ = f.Sprint
+
 func Run() {
 	http.Get("url")
 }
