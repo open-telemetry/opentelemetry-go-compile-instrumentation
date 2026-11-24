@@ -31,16 +31,16 @@ import (
 // instrumentation code according to the provided replacement template. It
 // reports whether it changed root.
 func (ip *instrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRule, root *dst.File) (bool, error) {
-	importAliases, aliasOverrides := ip.resolveImportOverrides(root, r.Imports)
+	importAliases := ip.importAliasMap(root)
 
-	appendModified, err := ip.applyCallAppendArgs(ctx, r, root, importAliases, aliasOverrides)
+	appendModified, err := ip.applyCallAppendArgs(ctx, r, root, importAliases)
 	if err != nil {
 		return false, err
 	}
 
 	replaceModified := false
 	if r.Replace != "" {
-		replaceModified, err = ip.applyCallReplace(ctx, r, root, importAliases, aliasOverrides)
+		replaceModified, err = ip.applyCallReplace(ctx, r, root, importAliases)
 		if err != nil {
 			return false, err
 		}
@@ -50,7 +50,7 @@ func (ip *instrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRu
 		return false, nil
 	}
 
-	if err = ip.addRuleImports(ctx, root, usedRuleImports(root, r.Imports, aliasOverrides), r.Name); err != nil {
+	if err = ip.addRuleImports(ctx, root, usedRuleImports(root, r.Imports), r.Name); err != nil {
 		return false, err
 	}
 	ip.Info("Apply call rule", "rule", r)
@@ -94,7 +94,6 @@ func (ip *instrumentPhase) applyCallReplace(
 	r *rule.InstCallRule,
 	root *dst.File,
 	importAliases map[string]string,
-	aliasOverrides map[string]string,
 ) (bool, error) {
 	tmpl, err := newCallTemplate(r.Replace)
 	if err != nil {
@@ -120,10 +119,6 @@ func (ip *instrumentPhase) applyCallReplace(
 			ip.ignoredCallSites++
 			ip.Debug("Skip call site due to //otelc:ignore", "rule", r.Name)
 			return true
-		}
-		if shadowErr := checkAliasOverrideShadowingAt(aliasOverrides, enclosing, call); shadowErr != nil {
-			wrapError = shadowErr
-			return false
 		}
 		candidates[call] = candidate{enclosing: enclosing, site: callSite{
 			methodCall: r.MethodCall != "",
@@ -152,7 +147,18 @@ func (ip *instrumentPhase) applyCallReplace(
 		if !found {
 			return true
 		}
-		wrapped, wrapErr := tmpl.compileExpression(call, match.site, match.enclosing, importAliases, aliasOverrides)
+		wrapped, usedAliases, wrapErr := tmpl.compileExpression(
+			call,
+			match.site,
+			match.enclosing,
+			importAliases,
+			r.Imports,
+		)
+		if wrapErr == nil {
+			// The wrapper is injected at the call, so a local bound around
+			// the call would shadow the rule's imports in it.
+			wrapErr = checkRuleAliasShadowingAt(usedAliases, match.enclosing, call)
+		}
 		if wrapErr == nil && match.site.deferred {
 			if _, isCall := wrapped.(*dst.CallExpr); !isCall {
 				wrapErr = ex.Newf("the template output is a %T, but the matched call is the call of a defer "+
@@ -221,16 +227,16 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 	r *rule.InstCallRule,
 	root *dst.File,
 	importAliases map[string]string,
-	aliasOverrides map[string]string,
 ) (bool, error) {
 	if len(r.AppendArgs) == 0 {
 		return false, nil
 	}
 
-	newArgs, err := parseAppendArgs(r.AppendArgs, aliasOverrides)
+	newArgs, err := parseAppendArgs(r.AppendArgs)
 	if err != nil {
 		return false, err
 	}
+	usedAliases := appendArgsRuleAliases(r, newArgs)
 
 	stmts := ast.CallEnclosingStmts(root)
 	var matchingCalls []*dst.CallExpr
@@ -244,7 +250,7 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 			ip.Debug("Skip call site due to //otelc:ignore", "rule", r.Name)
 			return true
 		}
-		if shadowErr = checkAliasOverrideShadowingAt(aliasOverrides, enclosing, call); shadowErr != nil {
+		if shadowErr = checkRuleAliasShadowingAt(usedAliases, enclosing, call); shadowErr != nil {
 			return false
 		}
 		matchingCalls = append(matchingCalls, call)
@@ -259,7 +265,7 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 		for i, arg := range newArgs {
 			callArgs[i] = util.AssertType[dst.Expr](dst.Clone(arg))
 		}
-		ok, appendErr := appendParsedCallArgs(call, r, callArgs, aliasOverrides)
+		ok, appendErr := appendParsedCallArgs(call, r, callArgs)
 		if appendErr != nil {
 			return false, appendErr
 		}
@@ -273,21 +279,36 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 // For ellipsis calls, an IIFE wrapper is generated using r.VariadicType.
 // Returns (true, nil) if the call was modified, (false, nil) if AppendArgs is empty.
 func appendCallArgs(call *dst.CallExpr, r *rule.InstCallRule) (bool, error) {
-	newArgs, err := parseAppendArgs(r.AppendArgs, nil)
+	newArgs, err := parseAppendArgs(r.AppendArgs)
 	if err != nil {
 		return false, err
 	}
-	return appendParsedCallArgs(call, r, newArgs, nil)
+	return appendParsedCallArgs(call, r, newArgs)
 }
 
-func parseAppendArgs(args []string, aliasOverrides map[string]string) ([]dst.Expr, error) {
+// appendArgsRuleAliases returns the aliases of r's imports that the appended
+// arguments and the variadic type use as a qualifier.
+func appendArgsRuleAliases(r *rule.InstCallRule, newArgs []dst.Expr) map[string]bool {
+	nodes := make([]dst.Node, 0, len(newArgs)+1)
+	for _, arg := range newArgs {
+		nodes = append(nodes, arg)
+	}
+	if r.VariadicType != "" {
+		// A parse error is reported when the type is used.
+		if varType, err := parseGoTypeExpression(r.VariadicType); err == nil {
+			nodes = append(nodes, varType)
+		}
+	}
+	return injectedRuleAliases(r.Imports, nodes...)
+}
+
+func parseAppendArgs(args []string) ([]dst.Expr, error) {
 	newArgs := make([]dst.Expr, 0, len(args))
 	for _, argStr := range args {
 		argExpr, err := parseGoExpression(argStr)
 		if err != nil {
 			return nil, ex.Wrapf(err, "failed to parse append_args entry %q", argStr)
 		}
-		replaceQualifierAliases(argExpr, aliasOverrides)
 		newArgs = append(newArgs, argExpr)
 	}
 	return newArgs, nil
@@ -297,7 +318,6 @@ func appendParsedCallArgs(
 	call *dst.CallExpr,
 	r *rule.InstCallRule,
 	newArgs []dst.Expr,
-	aliasOverrides map[string]string,
 ) (bool, error) {
 	if len(newArgs) == 0 {
 		return false, nil
@@ -323,7 +343,6 @@ func appendParsedCallArgs(
 	if err != nil {
 		return false, ex.Wrapf(err, "failed to parse variadic_type %q", r.VariadicType)
 	}
-	replaceQualifierAliases(varTypeExpr, aliasOverrides)
 
 	// Replace the spread arg with an IIFE that appends the new args before spreading.
 	// call.Ellipsis remains true — the outer call is still a spread call.
