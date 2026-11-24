@@ -304,6 +304,52 @@ func TestParseCatalogValidatesInlineDefinitions(t *testing.T) {
 	assert.Equal(t, replacement, *definitions["go.test"].ReplacedBy)
 }
 
+func TestParseCatalogRejectsInvalidValueConstraints(t *testing.T) {
+	tests := []struct{ name, definition, want string }{
+		{
+			"numeric constraints on non-integer",
+			"name: go.test\ntype: string\nvalidation:\n  minimum: 0",
+			"numeric validation constraints require type",
+		},
+		{
+			"minimum exceeds maximum",
+			"name: go.test\ntype: integer\nvalidation:\n  minimum: 1\n  maximum: 0",
+			"validation minimum exceeds maximum",
+		},
+		{
+			"item constraints on non-list",
+			"name: go.test\ntype: string\nvalidation:\n  min_items: 1",
+			"item validation constraints require type",
+		},
+		{
+			"negative minimum item count",
+			"name: go.test\ntype: list\nvalidation:\n  min_items: -1",
+			"min_items must not be negative",
+		},
+		{
+			"negative maximum item count",
+			"name: go.test\ntype: list\nvalidation:\n  max_items: -1",
+			"max_items must not be negative",
+		},
+		{
+			"minimum item count exceeds maximum",
+			"name: go.test\ntype: list\nvalidation:\n  min_items: 2\n  max_items: 1",
+			"validation min_items exceeds max_items",
+		},
+		{
+			"unsupported item type",
+			"name: go.test\ntype: list\nvalidation:\n  items_type: scalar",
+			`unsupported items_type "scalar"`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := ParseCatalog(catalogFixture(test.definition))
+			require.ErrorContains(t, err, test.want)
+		})
+	}
+}
+
 func catalogFixture(definition string) []byte {
 	return []byte(
 		"catalog_version: 1\nsource:\n  repository: " + OpenTelemetryConfigurationRepository + "\n  release: " + OpenTelemetryConfigurationRelease +

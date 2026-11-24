@@ -78,6 +78,19 @@ instrumentation/development:
 	assert.Equal(t, "client", validated.ResolvedValues["go.sample.mode"])
 }
 
+func TestValidateApplicationOptionsRejectsMalformedMetadataDefault(t *testing.T) {
+	app, err := ParseApplicationConfiguration([]byte(`file_format: "1.2"
+`), "app.yaml")
+	require.NoError(t, err)
+
+	_, err = ValidateApplicationOptions(app, []Entry{{
+		Name:    "go.sample.values",
+		Type:    listType,
+		Default: new("["),
+	}}, nil)
+	require.ErrorContains(t, err, "decode default for go.sample.values")
+}
+
 func TestParseApplicationConfigurationExpandsEnvironmentDuringSetup(t *testing.T) {
 	t.Setenv("OTELC_TEST_FILE_FORMAT", "1.2")
 	t.Setenv("OTELC_TEST_ENABLED", "false")
@@ -138,6 +151,16 @@ func TestParseApplicationConfigurationRejectsInvalidDocuments(t *testing.T) {
 			name: "unknown SDK field",
 			data: "file_format: '1.2'\nunknown_sdk_field: true\n",
 			want: "unsupported application configuration field \"unknown_sdk_field\"",
+		},
+		{
+			name: "unknown nested SDK field",
+			data: "file_format: '1.2'\nresource:\n  unknown_sdk_field: true\n",
+			want: `unsupported field "unknown_sdk_field" in pinned otelconf/x model`,
+		},
+		{
+			name: "invalid SDK value shape",
+			data: "file_format: '1.2'\nresource: []\n",
+			want: "parse SDK configuration",
 		},
 		{
 			name: "missing file format",
@@ -403,6 +426,24 @@ instrumentation/development:
 	require.ErrorContains(t, err, replacement)
 }
 
+func TestValidateApplicationOptionsExplainsInvalidDeprecatedOptionWithoutReplacement(t *testing.T) {
+	app, err := ParseApplicationConfiguration([]byte(`file_format: "1.2"
+instrumentation/development:
+  general:
+    http:
+      client:
+        request_captured_headers: []
+`), "app.yaml")
+	require.NoError(t, err)
+	catalog, err := CatalogDefinitions()
+	require.NoError(t, err)
+	definition := catalog["general.http.client.request_captured_headers"]
+	definition.Deprecated = true
+
+	_, err = ValidateApplicationOptions(app, []Entry{definition}, nil)
+	require.ErrorContains(t, err, `deprecated configuration "general.http.client.request_captured_headers" is not valid`)
+}
+
 func TestApplicationHelpers(t *testing.T) {
 	for _, test := range []struct {
 		name  string
@@ -563,6 +604,61 @@ func TestValidateApplicationValueEnforcesCatalogConstraints(t *testing.T) {
 		ValidateApplicationValue(intEntry, -1, "app.yaml:1:1"),
 		"must be at least 0",
 	)
+}
+
+func TestValidateApplicationValueEnforcesMaximumAndCountOnlyConstraints(t *testing.T) {
+	maximum := float64(2)
+	intEntry := Entry{
+		Name:       "general.http.semconv.version",
+		Type:       integerType,
+		Validation: &ValueConstraints{Maximum: &maximum},
+	}
+	require.NoError(t, ValidateApplicationValue(intEntry, 2, "app.yaml:1:1"))
+	require.ErrorContains(
+		t,
+		ValidateApplicationValue(intEntry, 3, "app.yaml:1:1"),
+		"must be at most 2",
+	)
+
+	minItems, maxItems := 0, 2
+	listEntry := Entry{
+		Name: "go.sample.values",
+		Type: listType,
+		Validation: &ValueConstraints{
+			MinItems: &minItems,
+			MaxItems: &maxItems,
+		},
+	}
+	require.NoError(t, ValidateApplicationValue(listEntry, []any{1, 2}, "app.yaml:1:1"))
+	require.ErrorContains(
+		t,
+		ValidateApplicationValue(listEntry, []any{1, 2, 3}, "app.yaml:1:1"),
+		"must contain at most 2 items",
+	)
+}
+
+func TestValidateApplicationValueAcceptsAllNativeIntegerTypes(t *testing.T) {
+	minimum := float64(0)
+	entry := Entry{
+		Name:       "go.sample.value",
+		Type:       integerType,
+		Validation: &ValueConstraints{Minimum: &minimum},
+	}
+	for _, value := range []any{
+		int8(0),
+		int16(0),
+		int32(0),
+		int64(0),
+		uint(0),
+		uint8(0),
+		uint16(0),
+		uint32(0),
+		uint64(0),
+	} {
+		require.NoError(t, ValidateApplicationValue(entry, value, "app.yaml:1:1"))
+	}
+	_, ok := integerNumber(float64(1))
+	assert.False(t, ok)
 }
 
 func TestOverlayEnvironmentValuesRejectsInvalidNormalizedShapes(t *testing.T) {
@@ -897,11 +993,13 @@ func TestYAMLStructFieldsSkipsUnexportedAndIgnoredFields(t *testing.T) {
 	type config struct {
 		Visible string `yaml:"visible"`
 		Ignored string `yaml:"-"`
+		hidden  string `yaml:"hidden"`
 	}
 
 	fields := yamlStructFields(reflect.TypeFor[config]())
 	assert.Contains(t, fields, "visible")
 	assert.NotContains(t, fields, "Ignored")
+	assert.NotContains(t, fields, "hidden")
 }
 
 func TestValidateApplicationRootFieldsHandlesNilAndInvalidKeys(t *testing.T) {
