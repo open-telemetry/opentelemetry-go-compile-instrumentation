@@ -313,7 +313,7 @@ func TestParseCatalogRejectsInvalidValueConstraints(t *testing.T) {
 		},
 		{
 			"minimum exceeds maximum",
-			"name: go.test\ntype: integer\nvalidation:\n  minimum: 1\n  maximum: 0",
+			"name: go.test\ntype: int\nvalidation:\n  minimum: 1\n  maximum: 0",
 			"validation minimum exceeds maximum",
 		},
 		{

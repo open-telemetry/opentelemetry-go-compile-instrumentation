@@ -441,7 +441,11 @@ instrumentation/development:
 	definition.Deprecated = true
 
 	_, err = ValidateApplicationOptions(app, []Entry{definition}, nil)
-	require.ErrorContains(t, err, `deprecated configuration "general.http.client.request_captured_headers" is not valid`)
+	require.ErrorContains(
+		t,
+		err,
+		`deprecated configuration "general.http.client.request_captured_headers" is not valid`,
+	)
 }
 
 func TestApplicationHelpers(t *testing.T) {
@@ -993,10 +997,10 @@ func TestYAMLStructFieldsSkipsUnexportedAndIgnoredFields(t *testing.T) {
 	type config struct {
 		Visible string `yaml:"visible"`
 		Ignored string `yaml:"-"`
-		hidden  string `yaml:"hidden"`
+		hidden  string
 	}
 
-	fields := yamlStructFields(reflect.TypeFor[config]())
+	fields := yamlStructFields(reflect.TypeOf(config{hidden: "private"}))
 	assert.Contains(t, fields, "visible")
 	assert.NotContains(t, fields, "Ignored")
 	assert.NotContains(t, fields, "hidden")
