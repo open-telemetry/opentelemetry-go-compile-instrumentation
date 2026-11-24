@@ -4,6 +4,9 @@
 package rule
 
 import (
+	"bytes"
+	"errors"
+	"io"
 	"sort"
 
 	"go.yaml.in/yaml/v3"
@@ -30,8 +33,8 @@ type File struct {
 }
 
 func ParseFile(data []byte) (File, error) {
-	var root yaml.Node
-	if err := yaml.Unmarshal(data, &root); err != nil {
+	root, err := decodeSingleDocument(data)
+	if err != nil {
 		return File{}, err
 	}
 	if len(root.Content) == 0 {
@@ -145,4 +148,27 @@ func CheckVersion(current, required string) error {
 		return ex.Newf("requires otelc >= %s, current version is %s", required, current)
 	}
 	return nil
+}
+
+// decodeSingleDocument decodes data as one YAML document. yaml.Unmarshal reads
+// only the first document of a stream, so a rule file split with "---" would
+// silently lose every rule after the first separator, along with any syntax
+// error in them.
+func decodeSingleDocument(data []byte) (yaml.Node, error) {
+	var root yaml.Node
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	if err := dec.Decode(&root); err != nil && !errors.Is(err, io.EOF) {
+		return yaml.Node{}, err
+	}
+	var extra yaml.Node
+	switch err := dec.Decode(&extra); {
+	case errors.Is(err, io.EOF):
+		return root, nil
+	case err != nil:
+		return yaml.Node{}, err
+	default:
+		return yaml.Node{}, ex.Newf(
+			"rule file contains a second YAML document starting at line %d; put all rules in one document",
+			extra.Line)
+	}
 }
