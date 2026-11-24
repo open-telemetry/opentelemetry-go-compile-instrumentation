@@ -994,13 +994,11 @@ func TestApplicationValidationHelperBranches(t *testing.T) {
 }
 
 func TestYAMLStructFieldsSkipsUnexportedAndIgnoredFields(t *testing.T) {
-	type config struct {
+	fields := yamlStructFields(reflect.TypeFor[struct {
 		Visible string `yaml:"visible"`
 		Ignored string `yaml:"-"`
 		hidden  string
-	}
-
-	fields := yamlStructFields(reflect.TypeOf(config{hidden: "private"}))
+	}]())
 	assert.Contains(t, fields, "visible")
 	assert.NotContains(t, fields, "Ignored")
 	assert.NotContains(t, fields, "hidden")
