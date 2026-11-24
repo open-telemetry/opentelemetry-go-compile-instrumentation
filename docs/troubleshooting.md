@@ -55,12 +55,12 @@ go list -m <module-path>
 ```
 
 **A `--rules` or `OTELC_RULES` override replaced the matching rules.** When either flag is
-set, `otelc` uses only those rules. The embedded bundle and any `otel.instrumentation.go`
+set, `otelc` uses only those rules. Manifest-based automatic discovery and any `otel.instrumentation.go`
 declarations are ignored. Remove the override or add your custom rules to the specified file.
 
 **The `otel.instrumentation.go` file declares packages with no matching rules.** When a tool
 file is present, `otelc` loads only the rules from the declared instrumentation packages and
-ignores the embedded bundle. If those packages contain no `*.otelc.yml` files, the matched
+bypasses automatic manifest discovery. If those packages contain no rule files (`otelc.yaml`, `*.otelc.yaml`, or `*.otelc.yml`), the matched
 set is empty. See [External Configuration Sources](external-configuration.md).
 
 ### Instrumented but no spans appear
@@ -311,7 +311,7 @@ it must not introduce circular dependencies. Imports from the target library its
 OpenTelemetry packages, and the Go standard library are always safe. Additional third-party
 packages are possible if declared in the instrumentation module's `go.mod`, but keep them to
 a minimum — every extra dependency widens the transitive dependency graph for every user of
-the instrumentation. See [Adding a New Instrumentation Hook](instrument-guide.md#limitations).
+the instrumentation. See the [Instrumentation Authoring Guide](https://github.com/open-telemetry/opentelemetry-go-compile-contrib/blob/main/docs/instrument-guide.md#limitations).
 
 **Generic functions.** When the target function is generic, `HookContext` APIs that modify
 parameters or return values (`SetParam`, `SetReturnVal`) cannot be used. The type parameters
@@ -323,10 +323,10 @@ package initialization (for example from a driver's `init()`). The hook package 
 imported from package `main`, so Go does not order it before the target package. A hook
 that uses state set up at initialization time panics, and the trampoline prints
 `failed to exec Before hook` or `failed to exec After hook` while the build and the tests
-still pass. Hooks must create such state on first use. See
-[Adding a New Instrumentation Hook](instrument-guide.md#limitations).
+still pass. Hooks must create such state on first use. See the
+[Instrumentation Authoring Guide](https://github.com/open-telemetry/opentelemetry-go-compile-contrib/blob/main/docs/instrument-guide.md#limitations).
 
-Operations that run during package initialization, before `pkg/runtime` has initialized,
+Operations that run during package initialization, before runtime initialization has completed,
 are skipped by the instrumentation and emit no telemetry. This covers, for example, a
 database query or an HTTP request made from an `init()` function or a package-level
 variable initializer. Clients and servers created at that time are still instrumented, so
@@ -336,8 +336,8 @@ the calls they make after initialization are traced.
 to propagate trace context across boundaries that do not pass `context.Context`. GLS state
 is scoped to the goroutine that wrote it: spans started in a goroutine spawned from the
 instrumented function are not automatically visible to that function's GLS slot.
-GLS is an internal mechanism, not a public API. See
-[GLS operation notes](../instrumentation/go.opentelemetry.io/otel/README.md)
+GLS is an internal mechanism, not a public API. See the
+[GLS operation notes in opentelemetry-go-compile-contrib](https://github.com/open-telemetry/opentelemetry-go-compile-contrib/blob/main/docs/instrument-guide.md#gls-operation-for-otel-sdk-instrumentation)
 for the full operational model.
 
 ## Getting Help

@@ -2,36 +2,18 @@
 
 The project structure is as follows:
 
-- `demo`: Demo applications showing instrumentation in action
-- `pkg`: Public APIs used by instrumentation packages
-  - `hook`: Core instrumentation context and hook interface
-  - `runtime`: Shared runtime utilities and OTel SDK setup
-- `instrumentation`: Instrumentation implementations for each protocol/library
-  - `basic`: Example instrumentation
-  - `database/sql`: `database/sql` instrumentation
-  - `github.com/`:
-    - `aws/aws-sdk-go-v2`: AWS SDK for Go v2 instrumentation
-    - `gin-gonic/gin`: Gin instrumentation
-    - `olivere/elastic/v7`: Elasticsearch instrumentation
-    - `rabbitmq/amqp091-go`: RabbitMQ messaging instrumentation
-    - `go-redis/redis/v9`: Redis instrumentation
-  - `go.mongodb.org/mongo-driver/mongo`: MongoDB instrumentation
-  - `go.mongodb.org/mongo-driver/v2/mongo`: MongoDB instrumentation
-  - `go.opentelemetry.io/otel`: OpenTelemetry SDK instrumentation
-  - `google.golang.org/grpc`: gRPC instrumentation
-    - `client`: gRPC client hooks
-    - `server`: gRPC server hooks
-    - `semconv`: Semantic conventions for gRPC
-  - `k8s.io/client-go`: Kubernetes client-go informers instrumentation
-  - `net/http`: HTTP client and server instrumentation
-    - `client`: HTTP client hooks
-    - `server`: HTTP server hooks
-    - `semconv`: Semantic conventions for HTTP
-  - `runtime`: Runtime instrumentation
-- `tool`: Compile-time instrumentation tool
-  - `internal/setup`: Setup phase, prepares the environment for instrumentation
-  - `internal/instrument`: Instrument phase, applies actual instrumentation
-  - `internal/rule`: Rule definitions for matching and instrumenting functions
+- `cmd/otelc`: Main entry point for the `otelc` binary
+- `demo`: Demo applications showing compile-time instrumentation in action
+- `pkg`: Public APIs used by external instrumentation packages
+  - `hook`: Core instrumentation context (`HookContext`) and hook function contracts
+- `test`: Testing fixtures and integration test suite
+  - `apps`: Standalone minimal Go application fixtures for compiler and build tests
+  - `integration`: Tool execution, caching, flag forwarding, and hook behavior integration tests
+  - `testutil`: Shared test assertions and in-memory OTLP receiver
+- `tool`: Compile-time instrumentation engine
+  - `internal/setup`: Module analysis, dependency scanning, and build environment preparation
+  - `internal/instrument`: AST rewriting, trampoline generation, and code injection
+  - `internal/rule`: Rule parsing, validation, and matching engine
 
 ## Architecture Overview
 
@@ -245,43 +227,6 @@ The instrumentation respects standard OpenTelemetry environment variables:
 
 ## Adding New Instrumentation
 
-To add instrumentation for a new library:
+Instrumentation for third-party libraries and frameworks is developed and maintained in [`open-telemetry/opentelemetry-go-compile-contrib`](https://github.com/open-telemetry/opentelemetry-go-compile-contrib).
 
-1. Create a new directory under `instrumentation/<import_path>`, where `import_path` is the Go import path of the library being instrumented.
-2. Implement Before/After hook functions.
-3. Create semantic convention helpers in a `semconv` subdirectory.
-4. Define rules in `instrumentation/<import_path>/.../otelc.yaml`.
-Rule files must be named either:
-
-- `otelc.yaml`
-- `*.otelc.yaml`
-
-All matching rule files within an instrumentation package are discovered and loaded automatically.
-5. Add tests and documentation.
-
-Examples:
-
-```text
-instrumentation/net/http/
-instrumentation/google.golang.org/grpc/
-instrumentation/github.com/gin-gonic/gin/
-instrumentation/github.com/go-redis/redis/v9/
-```
-
-Example structure:
-
-```text
-instrumentation/mylibrary/
-├── client/
-│   ├── client_hook.go       # Before/After hooks
-│   └── client_hook_test.go
-├── server/
-│   ├── server_hook.go
-│   └── server_hook_test.go
-├── semconv/
-│   ├── client.go            # Client semantic conventions
-│   ├── server.go            # Server semantic conventions
-│   └── util.go              # Shared utilities
-├── go.mod
-└── README.md
-```
+To contribute new library instrumentation or learn how hooks, rules, and semantic conventions are implemented, refer to the [Instrumentation Authoring Guide](https://github.com/open-telemetry/opentelemetry-go-compile-contrib/blob/main/docs/instrument-guide.md) in `compile-contrib`.

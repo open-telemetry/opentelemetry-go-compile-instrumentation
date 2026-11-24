@@ -9,8 +9,11 @@
 
 ## Overview
 
-This project provides a tool to automatically instrument Go applications with [OpenTelemetry](https://opentelemetry.io/) at compile-time.
+This project provides `otelc`, a tool to automatically instrument Go applications with [OpenTelemetry](https://opentelemetry.io/) at compile-time.
 It modifies the Go build process to inject OpenTelemetry code into the application **without requiring manual changes to the source code**.
+
+> [!NOTE]
+> This repository contains the core `otelc` compiler instrumentation engine and hook interface (`pkg/hook`). First-party library instrumentation packages, semantic convention schemas, and compatibility test suites are maintained in [`open-telemetry/opentelemetry-go-compile-contrib`](https://github.com/open-telemetry/opentelemetry-go-compile-contrib).
 
 Highlights:
 
@@ -57,13 +60,12 @@ make test
 - [UX Design](./docs/ux-design.md) - Configuration options
 - [Implementation Details](./docs/implementation.md) - Technical architecture
 - [API Design](./docs/api-design-and-project-structure.md) - API structure
-- [Semantic Conventions](./docs/semantic-conventions.md) - Managing semantic conventions
-- [Instrumentation Guide](./docs/instrument-guide.md) - Add instrumentation hook for new libraries
 - [Instrumentation Rules](./docs/rules.md) - Rule types and YAML format reference
 - [Configuration and Fine-Tuning](./docs/configuration.md) - Scope, filter, and tune instrumentation
 - [Troubleshooting](./docs/troubleshooting.md) - Diagnose why instrumentation was not applied
 - [External Configuration Sources](./docs/external-configuration.md) - Declare instrumentations via `otel.instrumentation.go`
 - [Testing](./docs/testing.md) - Testing strategy, categories, and how to run tests
+- [Compile-Time Instrumentations](https://github.com/open-telemetry/opentelemetry-go-compile-contrib) - First-party hooks, supported libraries, and hook development guide
 
 ### Video Talks
 
