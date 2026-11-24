@@ -41,26 +41,11 @@ func (ip *instrumentPhase) applyDirectiveRule(
 		return false, ex.Wrap(err)
 	}
 
-	imports, aliasOverrides := ip.resolveImportOverrides(root, r.Imports)
+	imports := ip.importAliasMap(root)
 
 	for _, match := range matches {
 		funcDecl, name := ip.directiveTarget(match)
 		util.Assert(funcDecl.Body != nil, "function must have a body")
-		if err = checkAliasOverrideShadowing(aliasOverrides, funcDecl); err != nil {
-			return false, ex.Wrapf(err, "checking import aliases for func %s", name)
-		}
-		// A literal's body can also be shadowed by the names in scope around it.
-		if match.Lit != nil {
-			switch enclosing := match.Enclosing.(type) {
-			case *dst.FuncDecl:
-				err = checkAliasOverrideShadowingAt(aliasOverrides, enclosing, match.Lit)
-			case *dst.GenDecl:
-				err = checkAliasOverrideShadowingInDecl(aliasOverrides, enclosing, match.Lit)
-			}
-			if err != nil {
-				return false, ex.Wrapf(err, "checking import aliases for func %s", name)
-			}
-		}
 		var (
 			snippet string
 			stmts   []dst.Stmt //nolint:prealloc // Slice allocated by `p.ParseSnippet`
@@ -76,20 +61,17 @@ func (ip *instrumentPhase) applyDirectiveRule(
 		if err != nil {
 			return false, ex.Wrapf(err, "parsing rendered template for func %s", name)
 		}
-		for _, stmt := range stmts {
-			replaceQualifierAliases(stmt, aliasOverrides)
-			stripDynamicIdents(stmt)
+		if err = checkDirectiveRuleAliases(injectedStmtsRuleAliases(r.Imports, stmts), match, funcDecl); err != nil {
+			return false, ex.Wrapf(err, "checking import aliases for func %s", name)
 		}
 		funcDecl.Body.List = append(stmts, funcDecl.Body.List...)
 		ip.Info("Apply directive rule", "rule", r, "func", name)
 	}
 
-	// Runs after injection so that an import the rewrite above eliminated (by
-	// reusing the file's existing alias) is not added back as a duplicate.
 	if importErr := ip.addRuleImports(
 		ctx,
 		root,
-		usedRuleImports(root, r.Imports, aliasOverrides),
+		usedRuleImports(root, r.Imports),
 		r.Name,
 	); importErr != nil {
 		return false, importErr
@@ -139,5 +121,29 @@ func (ip *instrumentPhase) position(node dst.Node) string {
 // renderDirective executes the template with the given data and returns the
 // resulting Go source snippet.
 func renderDirective(tmpl *rule.FuncTemplate, data *funcTemplateData) (string, error) {
-	return tmpl.Execute(renderingFuncTemplateData{data})
+	return tmpl.Execute(data)
+}
+
+// checkDirectiveRuleAliases reports an error when a local at the injection
+// point of match shadows one of ruleAliases. The code is injected at the top
+// of funcDecl, the function or the literal that holds the directive. A
+// literal's body can also be shadowed by the names in scope around it.
+func checkDirectiveRuleAliases(
+	ruleAliases map[string]bool,
+	match ast.FuncDirectiveMatch,
+	funcDecl *dst.FuncDecl,
+) error {
+	if err := checkRuleAliasShadowing(ruleAliases, funcDecl); err != nil {
+		return err
+	}
+	if match.Lit == nil {
+		return nil
+	}
+	switch enclosing := match.Enclosing.(type) {
+	case *dst.FuncDecl:
+		return checkRuleAliasShadowingAt(ruleAliases, enclosing, match.Lit)
+	case *dst.GenDecl:
+		return checkRuleAliasShadowingInDecl(ruleAliases, enclosing, match.Lit)
+	}
+	return nil
 }

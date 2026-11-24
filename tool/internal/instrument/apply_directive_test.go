@@ -90,25 +90,25 @@ func TestRenderDirective(t *testing.T) {
 			name:     "FuncName no spaces",
 			src:      "package main\nfunc Foo() {}",
 			template: "call({{.FuncName}})",
-			expected: "call(" + dynamicIdentMarker + "Foo)",
+			expected: "call(Foo)",
 		},
 		{
 			name:     "FuncName with spaces",
 			src:      "package main\nfunc Foo() {}",
 			template: "call({{ .FuncName }})",
-			expected: "call(" + dynamicIdentMarker + "Foo)",
+			expected: "call(Foo)",
 		},
 		{
 			name:     "FuncArgument",
 			src:      "package main\nfunc Foo(ctx int, name string) {}",
 			template: "use({{ .FuncArgument 0 }}, {{ .FuncArgument 1 }})",
-			expected: "use(" + dynamicIdentMarker + "ctx, " + dynamicIdentMarker + "name)",
+			expected: "use(ctx, name)",
 		},
 		{
 			name:     "FuncReturn",
 			src:      "package main\nfunc Foo() (int, error) { return 0, nil }",
 			template: "check({{ .FuncReturn 0 }}, {{ .FuncReturn 1 }})",
-			expected: "check(" + dynamicIdentMarker + "_unnamedRetVal_h1_0, " + dynamicIdentMarker + "_unnamedRetVal_h1_1)",
+			expected: "check(_unnamedRetVal_h1_0, _unnamedRetVal_h1_1)",
 		},
 		{
 			name:     "counts",
@@ -126,14 +126,14 @@ func TestRenderDirective(t *testing.T) {
 			name:     "trim markers",
 			src:      "package main\nfunc Foo() {}",
 			template: "call({{- .FuncName -}})",
-			expected: "call(" + dynamicIdentMarker + "Foo)",
+			expected: "call(Foo)",
 		},
 		{
 			name:        "FuncArgumentOfType matched",
 			src:         "package main\nimport \"context\"\nfunc Foo(ctx context.Context, name string) {}",
 			template:    "use({{ .FuncArgumentOfType \"context.Context\" }})",
 			withImports: true,
-			expected:    "use(" + dynamicIdentMarker + "ctx)",
+			expected:    "use(ctx)",
 		},
 		{
 			name:        "FuncArgumentOfType no match",
@@ -147,7 +147,7 @@ func TestRenderDirective(t *testing.T) {
 			src:         "package main\nfunc Foo() (int, error) { return 0, nil }",
 			template:    "check({{ .FuncReturnOfType \"error\" }})",
 			withImports: true,
-			expected:    "check(" + dynamicIdentMarker + "_unnamedRetVal_h1_1)",
+			expected:    "check(_unnamedRetVal_h1_1)",
 		},
 		{
 			name:        "FuncReturnOfType no match",
@@ -161,7 +161,7 @@ func TestRenderDirective(t *testing.T) {
 			src:         "package main\nimport \"context\"\nfunc Foo(name string, ctx context.Context) {}",
 			template:    "use({{ .FuncArgumentThatImplements \"context.Context\" }})",
 			withImports: true,
-			expected:    "use(" + dynamicIdentMarker + "ctx)",
+			expected:    "use(ctx)",
 		},
 		{
 			name:        "FuncArgumentThatImplements no match",
@@ -175,7 +175,7 @@ func TestRenderDirective(t *testing.T) {
 			src:         "package main\nfunc Foo() (int, error) { return 0, nil }",
 			template:    "check({{ .FuncReturnThatImplements \"error\" }})",
 			withImports: true,
-			expected:    "check(" + dynamicIdentMarker + "_unnamedRetVal_h1_1)",
+			expected:    "check(_unnamedRetVal_h1_1)",
 		},
 		{
 			name:          "DirectiveArgs ranges over key:value pairs",
@@ -399,8 +399,8 @@ func TestApplyDirectiveRule(t *testing.T) {
 
 	t.Run("declared-but-unused rule import does not error on an alias conflict", func(t *testing.T) {
 		// The rule declares an import that its own template never
-		// references, so the conflict with the file's existing alias is
-		// moot: nothing in the injected code needs "context" to resolve.
+		// references, so nothing in the injected code needs "context" to
+		// resolve and the import is not added.
 		r := &rule.InstDirectiveRule{
 			InstBaseRule: rule.InstBaseRule{
 				Name:    "test_directive",
@@ -440,10 +440,11 @@ func TestApplyDirectiveRule(t *testing.T) {
 		assert.True(t, modified)
 	})
 
-	t.Run("rule import alias mismatch uses the file's existing alias", func(t *testing.T) {
+	t.Run("rule import alias mismatch imports the rule's alias", func(t *testing.T) {
 		// The template references "context", the rule's own alias for
 		// "context", but the file already imports it as "ctx". The
-		// injected code must use "ctx", not fail the build.
+		// injected code keeps "context", and "context" is imported again
+		// under that alias.
 		r := &rule.InstDirectiveRule{
 			InstBaseRule: rule.InstBaseRule{
 				Name:    "test_directive",
@@ -474,6 +475,13 @@ func TestApplyDirectiveRule(t *testing.T) {
 					},
 				},
 				funcDecl,
+				&dst.GenDecl{
+					Tok: token.VAR,
+					Specs: []dst.Spec{&dst.ValueSpec{
+						Names:  []*dst.Ident{dst.NewIdent("_")},
+						Values: []dst.Expr{&dst.SelectorExpr{X: dst.NewIdent("ctx"), Sel: dst.NewIdent("Background")}},
+					}},
+				},
 			},
 		}
 
@@ -491,13 +499,13 @@ func TestApplyDirectiveRule(t *testing.T) {
 		require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
 		ident, ok := sel.X.(*dst.Ident)
 		require.True(t, ok)
-		assert.Equal(t, "ctx", ident.Name, "injected code must use the file's existing alias, not the rule's")
+		assert.Equal(t, "context", ident.Name, "injected code must keep the rule's alias")
 		assert.Equal(t, "TODO", sel.Sel.Name)
 		assert.Equal(
 			t,
-			1,
+			2,
 			countImportSpecs(root),
-			"must not add a redundant import for an alias the rewrite eliminated",
+			"the rule's alias must be imported next to the file's import",
 		)
 	})
 
@@ -574,14 +582,16 @@ func TestApplyDirectiveRule(t *testing.T) {
 	})
 }
 
-func TestApplyDirectiveRule_AliasOverrideUsesResolvedName(t *testing.T) {
-	// The target file imports a divergent-name dependency unaliased, so the
-	// override must use ip.importNames' resolved real name, not a guess
-	// derived from the import path.
+func TestApplyDirectiveRule_RuleAliasForUnaliasedImportedPath(t *testing.T) {
+	// The target file imports a divergent-name dependency unaliased. Its name
+	// comes from ip.importNames, not a live package lookup, and the rule's
+	// alias is imported next to it.
 	const importPath = "github.com/redis/go-redis/v9"
 	root, err := ast.NewAstParser().ParseSource(`package main
 
 import "` + importPath + `"
+
+var _ = redis.Nil
 
 //otelc:test
 func foo() {
@@ -616,18 +626,18 @@ func foo() {
 	require.True(t, ok, "expected *dst.SelectorExpr, got %T", call.Fun)
 	ident, ok := sel.X.(*dst.Ident)
 	require.True(t, ok)
-	assert.Equal(t, "redis", ident.Name, "override must use the resolved real name, not the path-derived guess")
+	assert.Equal(t, "traced", ident.Name, "injected code must keep the rule's alias")
 	assert.Equal(t, "NewClient", sel.Sel.Name)
-	assert.Equal(t, 1, countImportSpecs(root), "must not add a redundant import for an alias the rewrite eliminated")
+	assert.Equal(t, 2, countImportSpecs(root), "the rule's alias must be imported next to the file's import")
 }
 
-func TestApplyDirectiveRule_OverrideShadowedByParameterReportsConflict(t *testing.T) {
+func TestApplyDirectiveRule_RuleAliasShadowedByParameterReportsConflict(t *testing.T) {
 	root, err := ast.NewAstParser().ParseSource(`package main
 
 import f "fmt"
 
 //otelc:test
-func foo(f sink) {
+func foo(traced sink) {
 	println("hello")
 }
 `)
@@ -645,13 +655,13 @@ func foo(f sink) {
 	modified, err := newTestPhase().applyDirectiveRule(context.Background(), r, root)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "alias override conflict")
+	assert.Contains(t, err.Error(), "rule import alias conflict")
 	assert.False(t, modified)
 	funcDecl := findFuncDeclInFile(t, root, "foo")
 	require.Len(t, funcDecl.Body.List, 1, "must not inject code that would resolve to the wrong identifier")
 }
 
-func TestApplyDirectiveRule_FuncLitOverrideShadowedByEnclosingScopeReportsConflict(t *testing.T) {
+func TestApplyDirectiveRule_FuncLitRuleAliasShadowedByEnclosingScopeReportsConflict(t *testing.T) {
 	tests := []struct {
 		name string
 		src  string
@@ -662,7 +672,7 @@ func TestApplyDirectiveRule_FuncLitOverrideShadowedByEnclosingScopeReportsConfli
 
 import f "fmt"
 
-func foo(f sink) {
+func foo(traced sink) {
 	//otelc:test
 	inner := func() {
 		println("hello")
@@ -678,7 +688,7 @@ func foo(f sink) {
 import f "fmt"
 
 func foo() {
-	if f := 1; f > 0 {
+	if traced := 1; traced > 0 {
 		//otelc:test
 		inner := func() {
 			println("hello")
@@ -694,7 +704,7 @@ func foo() {
 
 import f "fmt"
 
-var outer = func(f int) {
+var outer = func(traced int) {
 	//otelc:test
 	inner := func() {
 		println("hello")
@@ -710,10 +720,10 @@ var outer = func(f int) {
 import f "fmt"
 
 var outer = func() {
-	f := 1
+	traced := 1
 	//otelc:test
 	inner := func() {
-		println(f)
+		println(traced)
 	}
 	inner()
 }
@@ -737,7 +747,7 @@ var outer = func() {
 			modified, err := newTestPhase().applyDirectiveRule(context.Background(), r, root)
 
 			require.Error(t, err)
-			assert.Contains(t, err.Error(), "alias override conflict")
+			assert.Contains(t, err.Error(), "rule import alias conflict")
 			assert.False(t, modified)
 		})
 	}
@@ -821,8 +831,7 @@ func TestRenderDirective_FuncLit(t *testing.T) {
 		newFuncTemplateData(funcLitDecl(lit), []ast.DirectiveArg{{Key: "k", Value: "v"}}, nil, "h1"))
 
 	require.NoError(t, err)
-	m := dynamicIdentMarker
-	assert.Equal(t, "|2|"+m+"a|"+m+"_ignoredParam_h1_0|2|"+m+"_unnamedRetVal_h1_0|"+m+"a|v", result)
+	assert.Equal(t, "|2|a|_ignoredParam_h1_0|2|_unnamedRetVal_h1_0|a|v", result)
 	assert.Equal(t, "_ignoredParam_h1_0", lit.Type.Params.List[1].Names[0].Name,
 		"a blank parameter of the literal must be renamed in place")
 	assert.Equal(t, "_unnamedRetVal_h1_0", lit.Type.Results.List[0].Names[0].Name,
