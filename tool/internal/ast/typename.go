@@ -175,26 +175,49 @@ func ResolvedImportAliasMap(file *dst.File, resolvedNames map[string]string) map
 	return importAliasMap(file, resolvedNames, false)
 }
 
+// FileImports reports whether file imports the package at path, with any
+// import name. It returns false when file is nil.
+func FileImports(file *dst.File, path string) bool {
+	for _, imp := range importSpecs(file) {
+		if imp.Path == nil {
+			continue
+		}
+		if importPath, err := strconv.Unquote(imp.Path.Value); err == nil && importPath == path {
+			return true
+		}
+	}
+	return false
+}
+
+// importSpecs returns the import specs of file. A file built in memory can
+// leave file.Imports empty, so its import declarations are read instead.
+func importSpecs(file *dst.File) []*dst.ImportSpec {
+	if file == nil {
+		return nil
+	}
+	if len(file.Imports) > 0 {
+		return file.Imports
+	}
+	var specs []*dst.ImportSpec
+	for _, decl := range file.Decls {
+		genDecl, ok := decl.(*dst.GenDecl)
+		if !ok || genDecl.Tok != token.IMPORT {
+			continue
+		}
+		for _, spec := range genDecl.Specs {
+			if importSpec, isImport := spec.(*dst.ImportSpec); isImport {
+				specs = append(specs, importSpec)
+			}
+		}
+	}
+	return specs
+}
+
 func importAliasMap(file *dst.File, resolvedNames map[string]string, allowGuess bool) map[string]string {
 	if file == nil {
 		return nil
 	}
-	var specs []*dst.ImportSpec
-	if len(file.Imports) > 0 {
-		specs = file.Imports
-	} else {
-		for _, decl := range file.Decls {
-			genDecl, ok := decl.(*dst.GenDecl)
-			if !ok || genDecl.Tok != token.IMPORT {
-				continue
-			}
-			for _, spec := range genDecl.Specs {
-				if importSpec, isImport := spec.(*dst.ImportSpec); isImport {
-					specs = append(specs, importSpec)
-				}
-			}
-		}
-	}
+	specs := importSpecs(file)
 
 	aliases := make(map[string]string, len(specs))
 	for _, imp := range specs {

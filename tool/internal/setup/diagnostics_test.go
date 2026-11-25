@@ -21,7 +21,7 @@ func TestMatchDiagnostics(t *testing.T) {
 	for _, code := range []string{
 		"", "version_mismatch", "no_source_files", "where_mismatch",
 		"function_not_found", "receiver_mismatch", "signature_mismatch", "struct_not_found",
-		"directive_not_found", "declaration_not_found",
+		"directive_not_found", "declaration_not_found", "import_not_found",
 	} {
 		t.Run("reason="+code, func(t *testing.T) {
 			t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
@@ -50,6 +50,10 @@ func TestMatchDiagnostics(t *testing.T) {
 				r = &rule.InstDirectiveRule{InstBaseRule: base, Directive: "otelc:missing"}
 			case "declaration_not_found":
 				r = &rule.InstDeclRule{InstBaseRule: base, Identifier: "Missing", Kind: "var"}
+			case "import_not_found":
+				r = &rule.InstCallRule{
+					InstBaseRule: base, FunctionCall: "net/http.Get", ImportPath: "net/http", FuncName: "Get",
+				}
 			}
 			exact := map[string][]rule.InstRule{dep.ImportPath: {r}}
 			set, err := newTestSetupPhase().runMatch(t.Context(), dep, exact, nil)
