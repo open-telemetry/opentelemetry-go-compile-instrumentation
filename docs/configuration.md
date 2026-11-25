@@ -76,6 +76,22 @@ them. Warm each mode separately, alternate run order, and report full rebuilds
 (`-a`) separately from normal cached builds. Do not compare a cold cache in one
 mode with a warm cache in the other.
 
+### Build lock scope and concurrency evaluation
+
+`otelc` uses advisory file locks to protect state during setup and build execution. Understanding what each lock coordinates helps distinguish expected contention from build failures:
+
+- **Work-directory lock (`.otelc-build.lock`):** Protects the `.otelc-build` directory, intermediate overlays, and generated build artifacts. When the work directory is located at the module root, this and the module lock share the same underlying path.
+- **Module lock (`go.mod.lock`):** Protects `go.mod`, `go.sum`, and temporary tool requirements during setup and teardown. Because `otelc` temporarily mutates module files, invocations targeting the same Go module contend on the module lock even if distinct `--work-dir` directories are provided.
+- **Workspace lock (`go.work.lock`):** In Go workspace mode (`go.work`), coordinates updates to `go.work.sum` across member modules.
+
+In standard mode (`OTELC_UNLOCKED_COMPILE=0`), `otelc` holds these locks across the setup phase, the invoked Go compiler subprocess, and cleanup. Note that while `otelc` serializes separate command invocations targeting the same module, Go itself compiles packages in parallel within each subprocess using its configured worker threads (`GOMAXPROCS`).
+
+When evaluating concurrency gains:
+
+- **Use representative multi-target workloads:** Synthetic single-package builds do not reflect real compilation bottlenecks.
+- **Isolate disk I/O and cache effects:** Verify that compiler outputs can be cached across invocations by keeping `GOCACHE` pointed to a persistent directory outside `.otelc-build`.
+- **Monitor lock wait logs:** If concurrent commands spend significant time waiting on locks, check whether they share a Go module root before considering decoupled build targets or opt-in unlocked compilation.
+
 ## Selecting Instrumentations
 
 By default, `otelc` discovers applicable instrumentation rules from the manifest for every
