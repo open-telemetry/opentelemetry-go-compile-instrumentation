@@ -98,3 +98,39 @@ func TestRegisterReleaseBuild_GoroutineSafety(t *testing.T) {
 	wg.Wait()
 	require.Equal(t, 0, buildRefsCount(tmpDir), "final ref count must be 0")
 }
+
+func TestRegisterReleaseBuild_ParallelSubtests(t *testing.T) {
+	tmpDir := t.TempDir()
+	appBin := "app"
+	binPath := filepath.Join(tmpDir, appBin)
+	buildDir := filepath.Join(tmpDir, ".otelc-build")
+	lockFile := filepath.Join(tmpDir, ".otelc-build.lock")
+
+	require.NoError(t, os.WriteFile(binPath, []byte("fake-binary"), 0o755))
+	require.NoError(t, os.Mkdir(buildDir, 0o755))
+	require.NoError(t, os.WriteFile(lockFile, []byte("lock"), 0o644))
+
+	const numSubtests = 4
+	var startBarrier sync.WaitGroup
+	startBarrier.Add(numSubtests)
+
+	for i := 0; i < numSubtests; i++ {
+		t.Run("parallel-consumer", func(t *testing.T) {
+			t.Parallel()
+
+			registerBuild(tmpDir)
+			t.Cleanup(func() {
+				releaseBuild(tmpDir, appBin)
+			})
+
+			startBarrier.Done()
+			startBarrier.Wait()
+
+			// While any parallel test is running, buildDir and binary must be preserved
+			require.GreaterOrEqual(t, buildRefsCount(tmpDir), 1)
+			require.DirExists(t, buildDir)
+			require.FileExists(t, binPath)
+			require.FileExists(t, lockFile)
+		})
+	}
+}
