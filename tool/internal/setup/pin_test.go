@@ -726,6 +726,19 @@ func TestMatchInstrumentationImports(t *testing.T) {
 			},
 		},
 		{
+			name: "root target with no dependencies",
+			deps: nil,
+			entries: []manifest.Entry{
+				{
+					ModulePath: "example.com/instrumentation/foo",
+					Target:     rule.TargetRoot,
+				},
+			},
+			want: map[string]bool{
+				"example.com/instrumentation/foo": true,
+			},
+		},
+		{
 			name: "target list including root",
 			deps: []*Dependency{{ImportPath: "example.com/foo"}},
 			entries: []manifest.Entry{
