@@ -24,8 +24,10 @@ import (
 
 const (
 	// Allowed names for the instrumentation config file.
-	toolFileCanonical = "otel.instrumentation.go"
-	toolFileAlias     = "otelc.tool.go"
+	toolFileCanonical            = "otel.instrumentation.go"
+	toolFileAlias                = "otelc.tool.go"
+	instrumentationYAMLCanonical = "otel.instrumentation.yml"
+	instrumentationYAMLAlias     = "otel.instrumentation.yaml"
 )
 
 type instrumentationConfig struct {
@@ -36,22 +38,17 @@ type instrumentationConfig struct {
 	Error      error
 }
 
-//nolint:forbidigo // sentinel error; must not carry mutable stack state
-var errNotInstrumentation = errors.New("not an instrumentation package")
+func findOneOf(moduleDir, canonicalName, aliasName, label string) (string, error) {
+	canonical := filepath.Join(moduleDir, canonicalName)
+	alias := filepath.Join(moduleDir, aliasName)
 
-func findToolFile(moduleDir string) (string, error) {
-	canonical := filepath.Join(moduleDir, toolFileCanonical)
-	alias := filepath.Join(moduleDir, toolFileAlias)
-
-	canonicalExists := util.PathExists(canonical)
-	aliasExists := util.PathExists(alias)
-
-	switch {
+	switch canonicalExists, aliasExists := util.PathExists(canonical), util.PathExists(alias); {
 	case canonicalExists && aliasExists:
 		return "", ex.Newf(
-			"both %q and %q exist; only one instrumentation config file is allowed",
-			toolFileCanonical,
-			toolFileAlias,
+			"both %q and %q exist; only one %s file is allowed",
+			canonicalName,
+			aliasName,
+			label,
 		)
 	case canonicalExists:
 		return canonical, nil
@@ -60,6 +57,22 @@ func findToolFile(moduleDir string) (string, error) {
 	default:
 		return "", nil
 	}
+}
+
+func findInstrumentationYAMLFile(moduleDir string) (string, error) {
+	return findOneOf(
+		moduleDir,
+		instrumentationYAMLCanonical,
+		instrumentationYAMLAlias,
+		"instrumentation YAML",
+	)
+}
+
+//nolint:forbidigo // sentinel error; must not carry mutable stack state
+var errNotInstrumentation = errors.New("not an instrumentation package")
+
+func findToolFile(moduleDir string) (string, error) {
+	return findOneOf(moduleDir, toolFileCanonical, toolFileAlias, "instrumentation config")
 }
 
 func findToolFiles(moduleDirs []string) ([]string, error) {
@@ -225,19 +238,48 @@ func collectImports(toolFile string, f *dst.File, seenImports map[string]bool) (
 
 // walkInstrumentation walks the instrumentation tool files and calls the visitor function for each.
 func walkInstrumentation(ctx context.Context, toolFiles []string, visit instrumentationVisitor) error {
+	return walkInstrumentationWithRoots(ctx, toolFiles, instrumentationRootDirs(toolFiles), visit)
+}
+
+// walkInstrumentationPerRoot keeps import deduplication local to each root
+// tool file while still allowing resolution to fall back to every participating
+// module root. This preserves pruning ownership when multiple YAML selections
+// contain the same import.
+func walkInstrumentationPerRoot(
+	ctx context.Context,
+	toolFiles []string,
+	visit instrumentationVisitor,
+) error {
+	rootDirs := instrumentationRootDirs(toolFiles)
+	for _, toolFile := range toolFiles {
+		if err := walkInstrumentationWithRoots(ctx, []string{toolFile}, rootDirs, visit); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func instrumentationRootDirs(toolFiles []string) []string {
+	rootDirs := make([]string, 0, len(toolFiles))
+	for _, toolFile := range toolFiles {
+		dir := filepath.Dir(toolFile)
+		if !slices.Contains(rootDirs, dir) {
+			rootDirs = append(rootDirs, dir)
+		}
+	}
+	return rootDirs
+}
+
+func walkInstrumentationWithRoots(
+	ctx context.Context,
+	toolFiles, rootDirs []string,
+	visit instrumentationVisitor,
+) error {
 	queue := append([]string(nil), toolFiles...)
 	seenImports := make(map[string]bool)
 	seenToolFiles := make(map[string]bool, len(toolFiles))
 	for _, toolFile := range toolFiles {
 		seenToolFiles[toolFile] = true
-	}
-
-	rootDirs := make([]string, 0, len(toolFiles))
-	for _, f := range toolFiles {
-		d := filepath.Dir(f)
-		if !slices.Contains(rootDirs, d) {
-			rootDirs = append(rootDirs, d)
-		}
 	}
 
 	p := ast.NewAstParser()
