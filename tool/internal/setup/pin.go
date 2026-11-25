@@ -302,13 +302,21 @@ func matchInstrumentationImports(
 	// was not imported by any other rule/dep (avoids false positives).
 	skipped := make(map[string]unresolvedSkip)
 
-	// Match only on target + version.
+	// Root targets apply to the main module build itself, not to a
+	// dependency, so they are always added regardless of deps -- including
+	// when deps is empty. They are further matched in setup.
+	for _, entry := range entries {
+		target := rule.NewTarget(entry.Target)
+		if target.IncludesRoot() {
+			imports[entry.ModulePath] = true
+		}
+	}
+
+	// Match the rest only on target + version.
 	for _, dep := range deps {
 		for _, entry := range entries {
 			target := rule.NewTarget(entry.Target)
 			if target.IncludesRoot() {
-				// Always add root targets; they are further matched in setup.
-				imports[entry.ModulePath] = true
 				continue
 			}
 			if !target.Matches(dep.ImportPath, nil) {

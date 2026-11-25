@@ -377,18 +377,9 @@ func (sp *setupPhase) matchOneRule(
 			sp.Info("Match raw rule", "rule", rt, "dep", dep)
 		}
 	case *rule.InstCallRule:
-		// Call rules are added unconditionally to all source files in the
-		// target package. Unlike func/struct/raw rules, there is no cheap
-		// AST predicate to pre-filter files (the matching requires import
-		// alias resolution which happens during the instrument phase).
-		// Files without matching calls are a no-op in applyCallRule.
-		set.AddCallRule(source, rt)
-		sp.Info("Match call rule", "rule", rt, "dep", dep)
+		reason = sp.matchCallRule(tree, source, rt, set, dep)
 	case *rule.InstLitRule:
-		// Added unconditionally for the same reason as call rules above:
-		// resolving the literal's type needs the file's import aliases.
-		set.AddLitRule(source, rt)
-		sp.Info("Match literal rule", "rule", rt, "dep", dep)
+		reason = sp.matchLitRule(tree, source, rt, set, dep)
 	case *rule.InstDirectiveRule:
 		reason = "directive_not_found"
 		if ast.FileHasDirective(tree, rt.Directive) {
@@ -410,6 +401,47 @@ func (sp *setupPhase) matchOneRule(
 	}
 	sp.reportDecision(source, r, reason)
 	return nil
+}
+
+// matchCallRule adds the call rule r to source in set. It returns the reason
+// when r cannot change source, and "" otherwise.
+//
+// A function_call rule changes only a call written as pkg.Func(), where pkg is
+// an import of the rule's package, so a file without that import has nothing
+// to change. A method_call rule can match a value whose type comes from a
+// package the file does not import, so it is added to every file. The calls
+// themselves are found during the instrument phase.
+func (sp *setupPhase) matchCallRule(
+	tree *dst.File,
+	source string,
+	r *rule.InstCallRule,
+	set *rule.InstRuleSet,
+	dep *Dependency,
+) string {
+	if r.MethodCall == "" && !ast.FileImports(tree, r.ImportPath) {
+		return "import_not_found"
+	}
+	set.AddCallRule(source, r)
+	sp.Info("Match call rule", "rule", r, "dep", dep)
+	return ""
+}
+
+// matchLitRule adds the literal rule r to source in set. It returns the reason
+// when r cannot change source, and "" otherwise. A literal rule changes only a
+// literal written as pkg.Type{}, where pkg is an import of the rule's package.
+func (sp *setupPhase) matchLitRule(
+	tree *dst.File,
+	source string,
+	r *rule.InstLitRule,
+	set *rule.InstRuleSet,
+	dep *Dependency,
+) string {
+	if !ast.FileImports(tree, r.ImportPath) {
+		return "import_not_found"
+	}
+	set.AddLitRule(source, r)
+	sp.Info("Match literal rule", "rule", r, "dep", dep)
+	return ""
 }
 
 func rulesFromDir(path string, skipSubmodules bool) ([]string, error) {

@@ -1058,17 +1058,22 @@ func TestPreciseMatching_WhereFileAllOf(t *testing.T) {
 	require.NotContains(t, result.FuncRules, noMatchFile)
 }
 
-func TestPreciseMatching_CallRuleAddedToAllFiles(t *testing.T) {
-	matchFile := writeGoSource(
+func TestPreciseMatching_CallRuleAddedToFilesThatImportItsPackage(t *testing.T) {
+	callFile := writeGoSource(
 		t,
 		"calls.go",
 		"package main\n\nimport \"unsafe\"\n\nfunc CallSizeof() {\n\t_ = unsafe.Sizeof(42)\n}\n",
 	)
-	noMatchFile := writeGoSource(t, "other.go", "package main\n\nfunc Helper() { println(\"hi\") }\n")
+	importOnlyFile := writeGoSource(
+		t,
+		"import_only.go",
+		"package main\n\nimport \"unsafe\"\n\nvar _ unsafe.Pointer\n",
+	)
+	noImportFile := writeGoSource(t, "other.go", "package main\n\nfunc Helper() { println(\"hi\") }\n")
 
 	dep := &Dependency{
 		ImportPath: "example.com/app",
-		Sources:    []string{matchFile, noMatchFile},
+		Sources:    []string{callFile, importOnlyFile, noImportFile},
 	}
 
 	callRule := &rule.InstCallRule{
@@ -1088,8 +1093,76 @@ func TestPreciseMatching_CallRuleAddedToAllFiles(t *testing.T) {
 	result, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{callRule}, set)
 	require.NoError(t, err)
 	require.Len(t, result.CallRules, 2)
-	require.Contains(t, result.CallRules, matchFile)
-	require.Contains(t, result.CallRules, noMatchFile)
+	require.Contains(t, result.CallRules, callFile)
+	require.Contains(t, result.CallRules, importOnlyFile)
+	require.NotContains(t, result.CallRules, noImportFile)
+}
+
+// A method call can be on a value whose type comes from a package that the
+// file does not import, so a method_call rule stays on every file.
+func TestPreciseMatching_MethodCallRuleAddedToAllFiles(t *testing.T) {
+	noImportFile := writeGoSource(
+		t,
+		"do.go",
+		"package main\n\nimport \"example.com/clients\"\n\nfunc Do() { clients.Default().Do(nil) }\n",
+	)
+
+	dep := &Dependency{
+		ImportPath: "example.com/app",
+		Sources:    []string{noImportFile},
+	}
+
+	callRule := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "wrap-client-do",
+			Target: rule.NewTarget("example.com/app"),
+		},
+		MethodCall: "(*net/http.Client).Do",
+		ImportPath: "net/http",
+		RecvType:   "*Client",
+		FuncName:   "Do",
+		Replace:    "Wrapper({{ . }})",
+	}
+
+	sp := newTestSetupPhase()
+	set := rule.NewInstRuleSet(dep.ImportPath)
+
+	result, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{callRule}, set)
+	require.NoError(t, err)
+	require.Contains(t, result.CallRules, noImportFile)
+}
+
+func TestPreciseMatching_LitRuleAddedToFilesThatImportItsPackage(t *testing.T) {
+	litFile := writeGoSource(
+		t,
+		"transport.go",
+		"package main\n\nimport \"net/http\"\n\nvar T = &http.Transport{}\n",
+	)
+	noImportFile := writeGoSource(t, "other.go", "package main\n\nfunc Helper() { println(\"hi\") }\n")
+
+	dep := &Dependency{
+		ImportPath: "example.com/app",
+		Sources:    []string{litFile, noImportFile},
+	}
+
+	litRule := &rule.InstLitRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "transport-literal",
+			Target: rule.NewTarget("example.com/app"),
+		},
+		StructLiteral: "net/http.Transport",
+		ImportPath:    "net/http",
+		TypeName:      "Transport",
+	}
+
+	sp := newTestSetupPhase()
+	set := rule.NewInstRuleSet(dep.ImportPath)
+
+	result, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{litRule}, set)
+	require.NoError(t, err)
+	require.Len(t, result.LitRules, 1)
+	require.Contains(t, result.LitRules, litFile)
+	require.NotContains(t, result.LitRules, noImportFile)
 }
 
 func TestPreciseMatching_WhereFileOneOf(t *testing.T) {
@@ -2211,6 +2284,10 @@ func TestRunMatch_WarnsOnUnresolvedVersion(t *testing.T) {
 
 const matchOneRuleSource = `package sample
 
+import "net/http"
+
+var _ = http.Get
+
 const MaxRetries = 3
 
 type Widget struct{ x int }
@@ -2283,13 +2360,39 @@ func TestMatchOneRule(t *testing.T) {
 			},
 		},
 		{
-			name: "call rule is added unconditionally",
+			name: "call rule matches a file that imports its package",
 			rule: &rule.InstCallRule{
 				InstBaseRule: rule.InstBaseRule{Target: rule.NewTarget("example.com/sample")},
 				FunctionCall: "net/http.Get",
+				ImportPath:   "net/http",
+				FuncName:     "Get",
 			},
 			verify: func(t *testing.T, set *rule.InstRuleSet) {
 				assert.Len(t, set.CallRules[source], 1)
+			},
+		},
+		{
+			name: "call rule does not match a file without its import",
+			rule: &rule.InstCallRule{
+				InstBaseRule: rule.InstBaseRule{Target: rule.NewTarget("example.com/sample")},
+				FunctionCall: "example.com/missing.Get",
+				ImportPath:   "example.com/missing",
+				FuncName:     "Get",
+			},
+			verify: func(t *testing.T, set *rule.InstRuleSet) {
+				assert.Empty(t, set.CallRules[source])
+			},
+		},
+		{
+			name: "literal rule does not match a file without its import",
+			rule: &rule.InstLitRule{
+				InstBaseRule:  rule.InstBaseRule{Target: rule.NewTarget("example.com/sample")},
+				StructLiteral: "example.com/missing.Config",
+				ImportPath:    "example.com/missing",
+				TypeName:      "Config",
+			},
+			verify: func(t *testing.T, set *rule.InstRuleSet) {
+				assert.Empty(t, set.LitRules[source])
 			},
 		},
 		{

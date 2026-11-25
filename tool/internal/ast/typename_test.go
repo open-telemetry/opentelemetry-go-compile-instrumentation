@@ -361,6 +361,42 @@ func firstParamType(t *testing.T, file *dst.File) dst.Expr {
 	return nil
 }
 
+func TestFileImports(t *testing.T) {
+	t.Run("nil file imports nothing", func(t *testing.T) {
+		assert.False(t, FileImports(nil, "net/http"))
+	})
+
+	t.Run("finds an import with any import name", func(t *testing.T) {
+		file, err := NewAstParser().ParseSource(`package main
+
+import (
+	"net/http"
+	tpl "text/template"
+	_ "unsafe"
+	. "fmt"
+)
+`)
+		require.NoError(t, err)
+
+		for _, path := range []string{"net/http", "text/template", "unsafe", "fmt"} {
+			assert.True(t, FileImports(file, path), path)
+		}
+		assert.False(t, FileImports(file, "net"))
+		assert.False(t, FileImports(file, "html/template"))
+	})
+
+	t.Run("reads the import declarations of a file without file.Imports", func(t *testing.T) {
+		file := &dst.File{
+			Name: dst.NewIdent("main"),
+			Decls: []dst.Decl{
+				ImportDecl("", "net/http"),
+			},
+		}
+		assert.True(t, FileImports(file, "net/http"))
+		assert.False(t, FileImports(file, "fmt"))
+	})
+}
+
 func TestImportAliasMap(t *testing.T) {
 	t.Run("nil file returns nil", func(t *testing.T) {
 		assert.Nil(t, ImportAliasMap(nil, nil))
