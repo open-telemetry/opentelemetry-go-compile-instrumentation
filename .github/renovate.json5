@@ -10,22 +10,15 @@
   updateNotScheduled: false,
   minimumReleaseAge: '5 days',
   internalChecksFilter: 'strict',
+  platformAutomerge: true,
   postUpdateOptions: [
     'gomodTidyAll',
     'gomodUpdateImportPaths',
   ],
-  customManagers: [
-    {
-      customType: 'regex',
-      managerFilePatterns: [
-        '/^Makefile$/',
-      ],
-      matchStrings: [
-        'WEAVER_IMAGE\\s*\\?=\\s*(?<depName>[^:]+):v(?<currentValue>[^\\s]+)',
-      ],
-      datasourceTemplate: 'docker',
-    },
-  ],
+  vulnerabilityAlerts: {
+    enabled: true,
+    automerge: true,
+  },
   packageRules: [
     {
       dependencyDashboardCategory: 'CI Tooling',
@@ -47,6 +40,7 @@
         '!major',
       ],
       schedule: '* 0-7 1 * *',
+      automerge: true,
     },
     {
       groupName: 'all dependencies',
@@ -62,6 +56,7 @@
       matchPackageNames: [
         '*',
       ],
+      automerge: true,
     },
     {
       groupName: 'all major docker dependencies',
@@ -77,41 +72,6 @@
         'gomod',
       ],
       separateMultipleMajor: true,
-    },
-    {
-      matchManagers: [
-        'gomod',
-      ],
-      matchUpdateTypes: [
-        'major',
-      ],
-      matchPackageNames: [
-        '!github.com/stretchr/testify',
-        '!go.opentelemetry.io/**',
-      ],
-      dependencyDashboardApproval: true,
-      dependencyDashboardCategory: 'Instrumentation Targets',
-      dependencyDashboard: {
-        header: 'The below instrumentation targets are needing a new module directory created.',
-      },
-    },
-    {
-      matchManagers: [
-        'gomod',
-      ],
-      matchUpdateTypes: [
-        'major',
-      ],
-      matchPackageNames: [
-        '!github.com/stretchr/testify',
-        '!go.opentelemetry.io/**',
-      ],
-      matchFileNames: [
-        'instrumentation/github.com/openai/openai-go/go.mod',
-        'instrumentation/github.com/openai/openai-go/v2/go.mod',
-        'instrumentation/go.mongodb.org/mongo-driver/mongo/go.mod',
-      ],
-      enabled: false,
     },
   ],
   labels: [
