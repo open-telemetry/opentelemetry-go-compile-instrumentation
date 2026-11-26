@@ -68,7 +68,7 @@ func TestIndexedCandidatesKeepExactMatching(t *testing.T) {
 	ip := &instrumentPhase{logger: slog.Default(), workDir: dir}
 	loaded, err := ip.load()
 	require.NoError(t, err)
-	assert.True(t, anyRuleSetHasIgnoredCallFiles(loaded))
+	assert.True(t, rule.AnySetHasIgnoredCallFiles(loaded))
 	for _, tt := range []struct {
 		path      string
 		files     []string
@@ -1404,6 +1404,71 @@ func TestMarkedToolVersion(t *testing.T) {
 		assert.NotEqual(t, without, first)
 		assert.NotEqual(t, first, second)
 		assert.Equal(t, without, markedToolVersion(raw), "an empty hash file must not change the rules hash")
+	})
+
+	t.Run("prefers rules_digest file over matched.json", func(t *testing.T) {
+		workDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, workDir)
+		t.Setenv("GOFLAGS", "")
+		t.Setenv(util.EnvOtelcBuildFlags, "")
+		require.NoError(t, os.MkdirAll(filepath.Join(workDir, util.BuildTempDir), 0o755))
+		require.NoError(t, os.WriteFile(util.GetRulesDigestFile(), []byte("0123456789abcdef\n"), 0o644))
+
+		assert.Equal(t, "0123456789abcdef", RulesDigest())
+		assert.Equal(t, "compile version go1.26.5 otelc@"+util.Version+"/0123456789abcdef", markedToolVersion(raw))
+
+		// Different matched.json must not alter RulesDigest when rules_digest is present.
+		require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), []byte(`[{"module_path":"other"}]`), 0o644))
+		assert.Equal(t, "0123456789abcdef", RulesDigest())
+
+		// An empty rules_digest falls back to matched.json.
+		require.NoError(t, os.WriteFile(util.GetRulesDigestFile(), []byte("  \n"), 0o644))
+		assert.NotEqual(t, "0123456789abcdef", RulesDigest())
+		assert.Regexp(t, `^[0-9a-f]{16}$`, RulesDigest())
+	})
+
+	t.Run("build tags change RulesDigest when rules_digest is present", func(t *testing.T) {
+		workDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, workDir)
+		t.Setenv("GOFLAGS", "")
+		t.Setenv(util.EnvOtelcBuildFlags, "")
+		require.NoError(t, os.MkdirAll(filepath.Join(workDir, util.BuildTempDir), 0o755))
+		require.NoError(t, os.WriteFile(util.GetRulesDigestFile(), []byte("0123456789abcdef\n"), 0o644))
+
+		untagged := RulesDigest()
+		assert.Equal(t, "0123456789abcdef", untagged)
+
+		t.Setenv("GOFLAGS", "-tags=enterprise")
+		taggedGoflags := RulesDigest()
+		assert.Regexp(t, `^[0-9a-f]{16}$`, taggedGoflags)
+		assert.NotEqual(t, untagged, taggedGoflags)
+
+		t.Setenv("GOFLAGS", "-tags=beta")
+		otherTag := RulesDigest()
+		assert.Regexp(t, `^[0-9a-f]{16}$`, otherTag)
+		assert.NotEqual(t, untagged, otherTag)
+		assert.NotEqual(t, taggedGoflags, otherTag)
+
+		t.Setenv("GOFLAGS", "")
+		t.Setenv(util.EnvOtelcBuildFlags, util.EncodeBuildFlags([]string{"-tags=enterprise"}))
+		assert.Equal(t, taggedGoflags, RulesDigest())
+	})
+}
+
+func BenchmarkRulesDigest(b *testing.B) {
+	b.Run("rules_digest", func(b *testing.B) {
+		workDir := b.TempDir()
+		b.Setenv(util.EnvOtelcWorkDir, workDir)
+		b.Setenv("GOFLAGS", "")
+		b.Setenv(util.EnvOtelcBuildFlags, "")
+		require.NoError(b, os.MkdirAll(filepath.Join(workDir, util.BuildTempDir), 0o755))
+		require.NoError(b, os.WriteFile(util.GetRulesDigestFile(), []byte("0123456789abcdef"), 0o644))
+
+		for b.Loop() {
+			if d := RulesDigest(); d != "0123456789abcdef" {
+				b.Fatalf("unexpected digest %q", d)
+			}
+		}
 	})
 }
 

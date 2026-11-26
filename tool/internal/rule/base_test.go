@@ -294,3 +294,25 @@ func TestInstRuleSet_MaxRequiredLang(t *testing.T) {
 	irs.AddRawRule(fileA, &InstRawRule{Func: "Baz", Raw: "_ = 3", Lang: "go1.16"})
 	assert.Equal(t, "go1.21", irs.MaxRequiredLang())
 }
+
+func TestAnySetHasIgnoredCallFiles(t *testing.T) {
+	t.Run("empty set", func(t *testing.T) {
+		assert.False(t, AnySetHasIgnoredCallFiles(nil))
+	})
+	t.Run("no rule set has one", func(t *testing.T) {
+		allSet := []*InstRuleSet{
+			NewInstRuleSet("example.com/a"),
+			NewInstRuleSet("example.com/b"),
+		}
+		assert.False(t, AnySetHasIgnoredCallFiles(allSet))
+	})
+	t.Run("one rule set has one, not necessarily the caller's own", func(t *testing.T) {
+		other := NewInstRuleSet("example.com/other")
+		other.AddIgnoredCallFile(filepath.Join(t.TempDir(), "other.go"))
+		allSet := []*InstRuleSet{
+			NewInstRuleSet("example.com/mine"),
+			other,
+		}
+		assert.True(t, AnySetHasIgnoredCallFiles(allSet))
+	})
+}

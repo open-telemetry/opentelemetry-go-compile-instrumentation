@@ -9,8 +9,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -22,6 +24,7 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/instrument"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	toolruntime "go.opentelemetry.io/otelc/tool/internal/runtime"
 	"go.opentelemetry.io/otelc/tool/util"
 	"golang.org/x/tools/go/packages"
 )
@@ -127,6 +130,12 @@ func findMatchingPackage(pkgs []*packages.Package, importPath string) (*packages
 // It's the pair of the InstrumentPhase.load.
 // Rule paths must already be resolved via resolveRulePaths.
 func (sp *setupPhase) store(matched []*rule.InstRuleSet) error {
+	for _, stale := range []string{util.GetRulesDigestFile(), util.GetInjectedHashFile()} {
+		if err := os.Remove(stale); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return ex.Wrapf(err, "removing stale %s", stale)
+		}
+	}
+
 	bs, err := json.Marshal(matched)
 	if err != nil {
 		return ex.Wrapf(err, "failed to marshal rules to JSON")
@@ -172,89 +181,292 @@ func (sp *setupPhase) storePGOProfile() error {
 	return nil
 }
 
-// storeInjectedHash records a hash of the packages that rules add to the build.
-// go computes the action ID of a compile from the package as written, so a
-// package that only a rule's imports or add_file source bring in never reaches
-// it. markedToolVersion folds this hash into the tool ID, so a change in one of
-// those packages still invalidates the cached compiles. Setup fails when the
-// hash cannot be computed: an incomplete hash would let a warm build reuse a
-// compile made against an older injected package. A rule import that does not
-// load is not part of any compile, so it is left out (see injectedHash).
-//
-// The hash reads the files on disk, so it misses two inputs of the compile: a
-// file replaced through -overlay, where only the overlay's backing file
-// changed, and cgo settings such as CGO_CFLAGS that change what an injected
-// cgo package exports. Neither is common for the packages rules inject.
-func (sp *setupPhase) storeInjectedHash(ctx context.Context, matched []*rule.InstRuleSet) error {
-	hash, err := sp.injectedHash(ctx, matched)
+func (sp *setupPhase) hashInjectedPaths(ctx context.Context, h io.Writer, paths []string) error {
+	slices.Sort(paths)
+	paths = slices.Compact(paths)
+	if len(paths) == 0 {
+		return nil
+	}
+	pkgs, unloadable, err := sp.loadInjectedPackages(ctx, paths)
 	if err != nil {
-		return ex.Wrapf(err, "hashing the packages otelc injects into the build")
+		return err
 	}
-	f := util.GetInjectedHashFile()
-	if err = util.WriteFileAtomic(f, []byte(hash)); err != nil {
-		return ex.Wrapf(err, "failed to write injected package hash to file %s", f)
+	// A rule import that does not load from the main module never reaches
+	// a cached compile: a compile that adds it resolves it with the same
+	// go list and fails, and the link skips it. Its path still goes into
+	// the hash, so the hash changes once it loads.
+	if len(unloadable) > 0 {
+		slices.Sort(unloadable)
+		sp.Info("Leaving rule imports that do not load out of the injected package hash",
+			"imports", unloadable)
+		for _, path := range unloadable {
+			_, _ = fmt.Fprintf(h, "%s unloadable\n", path)
+		}
 	}
-	sp.Info("Stored injected package hash", "path", f, "hash", hash)
+	goroot, err := pkgload.GOROOT(ctx, sp.buildFlags)
+	if err != nil {
+		return err
+	}
+	return hashPackages(h, goroot, pkgs)
+}
+
+// storeRulesDigest computes and atomically writes the stable 16-hex-char digest
+// used for the -V=full tool ID. Decoupled from target-specific matched.json so
+// different targets in the same module with identical loaded rules share Go's
+// build cache.
+func (sp *setupPhase) storeRulesDigest(ctx context.Context, matched []*rule.InstRuleSet, moduleDirs []string) error {
+	res, err := sp.computeRulesDigest(ctx, matched, moduleDirs, toolruntime.RuntimeGLSSource)
+	if err != nil {
+		return ex.Wrapf(err, "computing rules digest")
+	}
+	injFile := util.GetInjectedHashFile()
+	if err = util.WriteFileAtomic(injFile, []byte(res.injected)); err != nil {
+		return ex.Wrapf(err, "failed to write injected package hash to file %s", injFile)
+	}
+	f := util.GetRulesDigestFile()
+	if err = util.WriteFileAtomic(f, []byte(res.digest)); err != nil {
+		return ex.Wrapf(err, "failed to write rules digest to file %s", f)
+	}
+	sp.Info("Stored rules digest", "path", f, "digest", res.digest)
 	return nil
 }
 
-// injectedHash returns a hash of the imports the matched rules declare, the
-// source files of their add_file rules, and the dependencies of both.
-func (sp *setupPhase) injectedHash(ctx context.Context, matched []*rule.InstRuleSet) (string, error) {
+type rulesDigestResult struct {
+	digest   string
+	injected string
+}
+
+// computeRulesDigest computes the 16-hex-char tool-ID digest and the 16-hex-char
+// injected-package hash from all loaded rules (not target-specific matched),
+// active build tags, embedded GLS source, and the global ignore-directive bit.
+func (sp *setupPhase) computeRulesDigest(
+	ctx context.Context,
+	matched []*rule.InstRuleSet,
+	moduleDirs []string,
+	glsSource []byte,
+) (rulesDigestResult, error) {
 	h := sha256.New()
-	var paths []string
-	for _, set := range matched {
-		paths = appendRuleImports(paths, set.RawRules)
-		paths = appendRuleImports(paths, set.FuncRules)
-		paths = appendRuleImports(paths, set.StructRules)
-		paths = appendRuleImports(paths, set.CallRules)
-		paths = appendRuleImports(paths, set.LitRules)
-		paths = appendRuleImports(paths, set.DirectiveRules)
-		paths = appendRuleImports(paths, set.DeclRules)
-		for _, r := range set.FileRules {
-			paths = slices.AppendSeq(paths, maps.Values(r.Imports))
-			srcImports, err := sp.fileRuleSourceImports(r)
+
+	usesRoot, err := hashCanonicalRules(h, sp.loadedRules)
+	if err != nil {
+		return rulesDigestResult{}, err
+	}
+	if usesRoot {
+		roots := slices.Clone(sp.rootModulePaths)
+		slices.Sort(roots)
+		_, _ = fmt.Fprintf(h, "roots=%s\n", strings.Join(roots, ","))
+	}
+
+	injected, err := sp.injectedHashForLoadedRules(ctx, moduleDirs)
+	if err != nil {
+		return rulesDigestResult{}, err
+	}
+	_, _ = fmt.Fprintf(h, "injected=%s\n", injected)
+
+	if tags := sp.activeBuildTags(); len(tags) > 0 {
+		sortedTags := slices.Clone(tags)
+		slices.Sort(sortedTags)
+		sortedTags = slices.Compact(sortedTags)
+		_, _ = fmt.Fprintf(h, "tags=%s\n", strings.Join(sortedTags, ","))
+	}
+
+	glsSum := sha256.Sum256(glsSource)
+	_, _ = fmt.Fprintf(h, "gls=%x\n", glsSum)
+
+	ignoreBit := 0
+	if rule.AnySetHasIgnoredCallFiles(matched) {
+		ignoreBit = 1
+	}
+	_, _ = fmt.Fprintf(h, "ignore=%d\n", ignoreBit)
+
+	return rulesDigestResult{
+		digest:   hex.EncodeToString(h.Sum(nil)[:8]),
+		injected: injected,
+	}, nil
+}
+
+func hashCanonicalRules(w io.Writer, rules []rule.InstRule) (bool, error) {
+	encoded := make([]string, 0, len(rules))
+	usesRoot := false
+	for _, r := range rules {
+		if r.GetTarget().UsesRoot() {
+			usesRoot = true
+		}
+		entry, err := canonicalRuleJSON(r)
+		if err != nil {
+			return false, err
+		}
+		encoded = append(encoded, entry)
+	}
+	slices.Sort(encoded)
+	for _, entry := range encoded {
+		_, _ = fmt.Fprintf(w, "rule=%s\n", entry)
+	}
+	return usesRoot, nil
+}
+
+func (sp *setupPhase) injectedHashForLoadedRules(ctx context.Context, moduleDirs []string) (string, error) {
+	resolvedDirs := resolveFileRuleDirs(ctx, sp.loadedRules, moduleDirs, sp.buildFlags)
+	type addFileEntry struct {
+		normalized string
+		path       string
+	}
+	var importPaths []string
+	var addFiles []addFileEntry
+	for _, r := range sp.loadedRules {
+		if br, ok := r.(interface{ Base() *rule.InstBaseRule }); ok {
+			importPaths = slices.AppendSeq(importPaths, maps.Values(br.Base().Imports))
+		}
+		switch rt := r.(type) {
+		case *rule.InstFuncRule:
+			if rt.Path != "" && rt.Path != util.InternalPath {
+				importPaths = append(importPaths, rt.Path)
+			}
+		case *rule.InstFileRule:
+			dir := resolvedFileRuleDir(rt, resolvedDirs)
+			if dir == "" || rt.File == "" {
+				continue
+			}
+			fullPath := filepath.Join(dir, rt.File)
+			addFiles = append(addFiles, addFileEntry{
+				normalized: string(instrument.WithoutWorkDirPaths([]byte(fullPath))),
+				path:       fullPath,
+			})
+			cp := *rt
+			cp.ResolvedPath = dir
+			srcImports, err := sp.fileRuleSourceImports(&cp)
 			if err != nil {
 				return "", err
 			}
-			paths = append(paths, srcImports...)
-			// An add_file source is often excluded from its own package with
-			// //go:build ignore, so the package hash below does not cover it.
-			if r.ResolvedPath != "" && r.File != "" {
-				if err = hashFileAs(h, filepath.Join(r.ResolvedPath, r.File)); err != nil {
-					return "", err
-				}
-			}
+			importPaths = append(importPaths, srcImports...)
 		}
 	}
-	slices.Sort(paths)
-	paths = slices.Compact(paths)
-	if len(paths) > 0 {
-		pkgs, unloadable, err := sp.loadInjectedPackages(ctx, paths)
-		if err != nil {
-			return "", err
-		}
-		// A rule import that does not load from the main module never reaches
-		// a cached compile: a compile that adds it resolves it with the same
-		// go list and fails, and the link skips it. Its path still goes into
-		// the hash, so the hash changes once it loads.
-		if len(unloadable) > 0 {
-			slices.Sort(unloadable)
-			sp.Info("Leaving rule imports that do not load out of the injected package hash",
-				"imports", unloadable)
-			for _, path := range unloadable {
-				_, _ = fmt.Fprintf(h, "%s unloadable\n", path)
-			}
-		}
-		goroot, err := pkgload.GOROOT(ctx, sp.buildFlags)
-		if err != nil {
-			return "", err
-		}
-		if err = hashPackages(h, goroot, pkgs); err != nil {
+	slices.SortFunc(addFiles, func(a, b addFileEntry) int {
+		return strings.Compare(a.normalized, b.normalized)
+	})
+	addFiles = slices.CompactFunc(addFiles, func(a, b addFileEntry) bool {
+		return a.normalized == b.normalized
+	})
+
+	injHash := sha256.New()
+	for _, af := range addFiles {
+		if err := hashFileAs(injHash, af.path); err != nil {
 			return "", err
 		}
 	}
-	return hex.EncodeToString(h.Sum(nil)[:8]), nil
+	if err := sp.hashInjectedPaths(ctx, injHash, importPaths); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(injHash.Sum(nil)[:8]), nil
+}
+
+func resolvedFileRuleDir(fr *rule.InstFileRule, resolvedDirs map[string]string) string {
+	if fr.ResolvedPath != "" {
+		return fr.ResolvedPath
+	}
+	if fr.Path != "" && fr.Path != util.InternalPath {
+		return resolvedDirs[fr.Path]
+	}
+	return ""
+}
+
+func (sp *setupPhase) activeBuildTags() []string {
+	buildFlags := sp.buildFlags
+	if len(buildFlags) == 0 {
+		buildFlags = util.GetBuildFlags()
+	}
+	return util.UserBuildTags(util.SplitGoflags(os.Getenv("GOFLAGS")), buildFlags)
+}
+
+func canonicalRuleJSON(r rule.InstRule) (string, error) {
+	val := any(r)
+	switch rt := r.(type) {
+	case *rule.InstFuncRule:
+		cp := *rt
+		cp.ResolvedPath = ""
+		val = &cp
+	case *rule.InstFileRule:
+		cp := *rt
+		cp.ResolvedPath = ""
+		val = &cp
+	}
+	raw, err := json.Marshal(val)
+	if err != nil {
+		return "", ex.Wrapf(err, "marshaling rule %q for digest", r.GetName())
+	}
+	return fmt.Sprintf("%T:%s", r, instrument.WithoutWorkDirPaths(raw)), nil
+}
+
+// resolveFileRuleDirs best-effort resolves the package directories of loaded
+// file rules that were not already resolved during matching.
+func resolveFileRuleDirs(
+	ctx context.Context,
+	rules []rule.InstRule,
+	moduleDirs, buildFlags []string,
+) map[string]string {
+	var pending []string
+	for _, r := range rules {
+		fr, ok := r.(*rule.InstFileRule)
+		if !ok || fr.ResolvedPath != "" || fr.Path == "" || fr.Path == util.InternalPath {
+			continue
+		}
+		pending = append(pending, fr.Path)
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+	slices.Sort(pending)
+	pending = slices.Compact(pending)
+
+	dirs := normalizeModuleDirs(moduleDirs)
+	resolved := make(map[string]string, len(pending))
+	for _, moduleDir := range dirs {
+		if len(pending) == 0 {
+			break
+		}
+		found := resolveDirsInModule(ctx, moduleDir, buildFlags, pending)
+		next := pending[:0]
+		for _, p := range pending {
+			if dir, ok := found[p]; ok {
+				resolved[p] = dir
+			} else {
+				next = append(next, p)
+			}
+		}
+		pending = next
+	}
+	return resolved
+}
+
+func resolveDirsInModule(ctx context.Context, moduleDir string, buildFlags, paths []string) map[string]string {
+	pkgs, err := packages.Load(&packages.Config{
+		Mode:       packages.NeedName | packages.NeedFiles,
+		Context:    ctx,
+		Dir:        moduleDir,
+		BuildFlags: buildFlags,
+	}, paths...)
+	if err != nil {
+		if len(paths) <= 1 || !pkgload.IsLoadFailure(err) {
+			return nil
+		}
+		const halves = 2
+		mid := len(paths) / halves
+		left := resolveDirsInModule(ctx, moduleDir, buildFlags, paths[:mid])
+		right := resolveDirsInModule(ctx, moduleDir, buildFlags, paths[mid:])
+		if left == nil {
+			return right
+		}
+		maps.Copy(left, right)
+		return left
+	}
+	resolved := make(map[string]string, len(pkgs))
+	for _, p := range paths {
+		pkg, findErr := findMatchingPackage(pkgs, p)
+		if findErr == nil && pkg != nil {
+			resolved[p] = pkg.Dir
+		}
+	}
+	return resolved
 }
 
 // loadInjectedPackages loads the rule imports in roots and returns the ones
@@ -332,17 +544,6 @@ func onlyLoadFailures(pkg *packages.Package) bool {
 // load failure.
 func isLoadFailure(err packages.Error) bool {
 	return (err.Kind == packages.ListError || err.Kind == packages.UnknownError) && pkgload.IsLoadFailure(err)
-}
-
-func appendRuleImports[T interface{ Base() *rule.InstBaseRule }](
-	paths []string, rulesByFile map[string][]T,
-) []string {
-	for _, rules := range rulesByFile {
-		for _, r := range rules {
-			paths = slices.AppendSeq(paths, maps.Values(r.Base().Imports))
-		}
-	}
-	return paths
 }
 
 // hashPackages writes pkgs and their dependencies to w in import path order.

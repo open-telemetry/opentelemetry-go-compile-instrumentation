@@ -54,6 +54,9 @@ type setupPhase struct {
 	// ruleModuleRoots keeps instrumentation rule ownership outside the rules
 	// themselves so setup can resolve module-local metadata for matched rules.
 	ruleModuleRoots map[rule.InstRule]string
+	// loadedRules holds all active rules loaded during loadRuleIndex,
+	// independent of which packages the current build target matched.
+	loadedRules []rule.InstRule
 	// graph caches the package graph loads setup shares between phases.
 	graph packageGraph
 }
@@ -666,7 +669,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	if err = sp.store(matched); err != nil {
 		return err
 	}
-	if err = sp.storeInjectedHash(ctx, matched); err != nil {
+	if err = sp.storeRulesDigest(ctx, matched, moduleDirs); err != nil {
 		return err
 	}
 	sp.recordResolutionScope(ctx, moduleDirs)

@@ -15,6 +15,7 @@ import (
 	"golang.org/x/tools/go/packages"
 
 	"go.opentelemetry.io/otelc/tool/internal/compileindex"
+	"go.opentelemetry.io/otelc/tool/internal/instrument"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -23,6 +24,8 @@ func TestSetupPhaseStore(t *testing.T) {
 	workDir := t.TempDir()
 	t.Setenv(util.EnvOtelcWorkDir, workDir)
 	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	require.NoError(t, os.WriteFile(util.GetRulesDigestFile(), []byte("stale-digest"), 0o644))
+	require.NoError(t, os.WriteFile(util.GetInjectedHashFile(), []byte("stale-injected"), 0o644))
 
 	sp := newTestSetupPhase()
 
@@ -30,6 +33,9 @@ func TestSetupPhaseStore(t *testing.T) {
 	// matched-rule file.
 	err := sp.store([]*rule.InstRuleSet{})
 	require.NoError(t, err)
+
+	assert.NoFileExists(t, util.GetRulesDigestFile())
+	assert.NoFileExists(t, util.GetInjectedHashFile())
 
 	matchedFile := util.GetMatchedRuleFile()
 	assert.Equal(t, filepath.Join(util.GetBuildTempDir(), "matched.json"), matchedFile)
@@ -326,17 +332,15 @@ func TestSetupPhaseInjectedHash(t *testing.T) {
 	writeFile("hooks/added.go", "//go:build ignore\n\npackage hooks\n")
 	t.Chdir(modDir)
 
-	set := rule.NewInstRuleSet("example.com/m/dep")
-	set.AddCallRule(fakeSrcFile("dep.go"), &rule.InstCallRule{
-		InstBaseRule: rule.InstBaseRule{Imports: map[string]string{"extra": "example.com/m/extra"}},
-	})
-	set.AddFileRule(&rule.InstFileRule{File: "added.go", ResolvedPath: filepath.Join(modDir, "hooks")})
-	matched := []*rule.InstRuleSet{set}
-
-	sp := newTestSetupPhase()
+	sp := newTestSetupPhaseWithRules(
+		&rule.InstCallRule{
+			InstBaseRule: rule.InstBaseRule{Imports: map[string]string{"extra": "example.com/m/extra"}},
+		},
+		&rule.InstFileRule{File: "added.go", ResolvedPath: filepath.Join(modDir, "hooks")},
+	)
 	hash := func() string {
 		t.Helper()
-		h, err := sp.injectedHash(t.Context(), matched)
+		h, err := sp.injectedHashForLoadedRules(t.Context(), []string{modDir})
 		require.NoError(t, err)
 		return h
 	}
@@ -357,7 +361,7 @@ func TestSetupPhaseInjectedHash(t *testing.T) {
 	assert.NotEqual(t, third, hash(), "a change of the go directive alone must change the hash")
 
 	require.NoError(t, os.Remove(filepath.Join(modDir, "hooks", "added.go")))
-	_, err := sp.injectedHash(t.Context(), matched)
+	_, err := sp.injectedHashForLoadedRules(t.Context(), []string{modDir})
 	require.ErrorContains(t, err, "added.go", "a missing add_file source must fail the hash")
 }
 
@@ -390,8 +394,7 @@ func TestStoreInjectedHashSkipsUnloadableImports(t *testing.T) {
 	t.Setenv(util.EnvOtelcWorkDir, workDir)
 	require.NoError(t, os.MkdirAll(filepath.Join(workDir, util.BuildTempDir), 0o755))
 
-	set := rule.NewInstRuleSet("example.com/m/dep")
-	set.AddCallRule(fakeSrcFile("dep.go"), &rule.InstCallRule{
+	sp := newTestSetupPhaseWithRules(&rule.InstCallRule{
 		InstBaseRule: rule.InstBaseRule{Imports: map[string]string{
 			"extra":   "example.com/m/extra",
 			"missing": "example.com/m/missing",
@@ -399,17 +402,15 @@ func TestStoreInjectedHashSkipsUnloadableImports(t *testing.T) {
 			"bp":      "example.com/b/bp",
 		}},
 	})
-	matched := []*rule.InstRuleSet{set}
-
-	sp := newTestSetupPhase()
-	require.NoError(t, sp.storeInjectedHash(t.Context(), matched))
+	modDir := filepath.Join(root, "m")
+	require.NoError(t, sp.storeRulesDigest(t.Context(), nil, []string{modDir}))
 	stored, err := os.ReadFile(util.GetInjectedHashFile())
 	require.NoError(t, err)
 	first := string(stored)
 
 	hash := func() string {
 		t.Helper()
-		h, hashErr := sp.injectedHash(t.Context(), matched)
+		h, hashErr := sp.injectedHashForLoadedRules(t.Context(), []string{modDir})
 		require.NoError(t, hashErr)
 		return h
 	}
@@ -455,12 +456,11 @@ func TestInjectedHashFailsOnBrokenImport(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(brokenDir, "broken.go"), []byte("package\n"), 0o644))
 	t.Chdir(modDir)
 
-	set := rule.NewInstRuleSet("example.com/m/dep")
-	set.AddCallRule(fakeSrcFile("dep.go"), &rule.InstCallRule{
+	sp := newTestSetupPhaseWithRules(&rule.InstCallRule{
 		InstBaseRule: rule.InstBaseRule{Imports: map[string]string{"broken": "example.com/m/broken"}},
 	})
 
-	_, err := newTestSetupPhase().injectedHash(t.Context(), []*rule.InstRuleSet{set})
+	_, err := sp.injectedHashForLoadedRules(t.Context(), []string{modDir})
 	require.ErrorContains(t, err, "example.com/m/broken",
 		"an import that exists but does not parse must fail the hash")
 }
@@ -582,4 +582,187 @@ func TestHashPackages(t *testing.T) {
 	// A file hashed by content must be readable.
 	gone := &packages.Package{PkgPath: "example.com/gone", GoFiles: []string{filepath.Join(t.TempDir(), "gone.go")}}
 	require.ErrorContains(t, hashPackages(io.Discard, goroot, []*packages.Package{gone}), "gone.go")
+}
+
+func TestStoreRulesDigest_TargetIndependent(t *testing.T) {
+	modDir := t.TempDir()
+	mustWriteFile(t, filepath.Join(modDir, "go.mod"), "module example.com/app\n\ngo 1.25.0\n")
+	mustWriteFile(t, filepath.Join(modDir, "depa", "depa.go"), "package depa\n\nfunc Foo() {}\n")
+	mustWriteFile(t, filepath.Join(modDir, "depb", "depb.go"), "package depb\n\nfunc Bar() {}\n")
+	mustWriteFile(t, filepath.Join(modDir, "extra", "extra.go"), "package extra\n\nconst Tag = \"v1\"\n")
+	mustWriteFile(t, filepath.Join(modDir, "hooks", "hooks.go"), "package hooks\n\nfunc Before() {}\n")
+	mustWriteFile(t, filepath.Join(modDir, "hooks", "added.go"),
+		"//go:build ignore\n\npackage hooks\n\nimport _ \"example.com/app/extra\"\n")
+
+	ruleFile := filepath.Join(modDir, "rules.yaml")
+	mustWriteFile(t, ruleFile, `depaRule:
+  target: example.com/app/depa
+  func: Foo
+  before: Before
+  path: example.com/app/hooks
+  imports:
+    extra: example.com/app/extra
+depbFileRule:
+  target: example.com/app/depb
+  file: added.go
+  path: example.com/app/hooks
+`)
+	t.Chdir(modDir)
+	t.Setenv("GOFLAGS", "")
+	t.Setenv(util.EnvOtelcBuildFlags, "")
+
+	runTarget := func(dep *Dependency) (string, []byte) {
+		t.Helper()
+		workDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, workDir)
+		require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+		sp := newTestSetupPhase()
+		sp.ruleConfig = ruleFile
+		matched, err := sp.matchAllDeps(t.Context(), []*Dependency{dep}, []string{modDir}, nil)
+		require.NoError(t, err)
+		require.NoError(t, sp.store(matched))
+		require.NoError(t, sp.storeRulesDigest(t.Context(), matched, []string{modDir}))
+
+		matchedBytes, err := os.ReadFile(util.GetMatchedRuleFile())
+		require.NoError(t, err)
+		storedDigest, err := os.ReadFile(util.GetRulesDigestFile())
+		require.NoError(t, err)
+		assert.Regexp(t, `^[0-9a-f]{16}$`, string(storedDigest))
+		assert.Equal(t, string(storedDigest), instrument.RulesDigest())
+		return instrument.RulesDigest(), matchedBytes
+	}
+
+	digestA, matchedA := runTarget(&Dependency{
+		ImportPath: "example.com/app/depa",
+		Sources:    []string{filepath.Join(modDir, "depa", "depa.go")},
+	})
+	digestB, matchedB := runTarget(&Dependency{
+		ImportPath: "example.com/app/depb",
+		Sources:    []string{filepath.Join(modDir, "depb", "depb.go")},
+	})
+
+	assert.NotEqual(t, string(matchedA), string(matchedB), "targets must match different rule sets")
+	assert.Equal(t, digestA, digestB, "different targets with identical loaded rules must share RulesDigest")
+}
+
+func TestComputeRulesDigest_Sensitivity(t *testing.T) {
+	modDir := t.TempDir()
+	mustWriteFile(t, filepath.Join(modDir, "go.mod"), "module example.com/app\n\ngo 1.25.0\n")
+	mustWriteFile(t, filepath.Join(modDir, "extra", "extra.go"), "package extra\n\nconst Tag = \"v1\"\n")
+	mustWriteFile(t, filepath.Join(modDir, "hooks", "hooks.go"), "package hooks\n")
+	mustWriteFile(t, filepath.Join(modDir, "hooks", "added.go"), "//go:build ignore\n\npackage hooks\n")
+	t.Chdir(modDir)
+	t.Setenv("GOFLAGS", "")
+	t.Setenv(util.EnvOtelcBuildFlags, "")
+
+	callRule := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "callRule",
+			Target:  rule.NewTarget("example.com/app/depa"),
+			Imports: map[string]string{"extra": "example.com/app/extra"},
+		},
+		FunctionCall: "Foo",
+	}
+	fileRule := &rule.InstFileRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "fileRule",
+			Target: rule.NewTarget("example.com/app/depb"),
+		},
+		File: "added.go",
+		Path: "example.com/app/hooks",
+	}
+
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "funcRule",
+			Target: rule.NewTarget("example.com/app/depa"),
+		},
+		Func:   "Foo",
+		Before: "Before",
+		Path:   "example.com/app/hooks",
+	}
+
+	compute := func(sp *setupPhase, matched []*rule.InstRuleSet, gls []byte) string {
+		t.Helper()
+		res, err := sp.computeRulesDigest(t.Context(), matched, []string{modDir}, gls)
+		require.NoError(t, err)
+		assert.Regexp(t, `^[0-9a-f]{16}$`, res.digest)
+		return res.digest
+	}
+
+	baseSP := newTestSetupPhase()
+	baseSP.loadedRules = []rule.InstRule{callRule, fileRule, funcRule}
+	baseSP.rootModulePaths = []string{"example.com/app"}
+	base := compute(baseSP, nil, []byte("gls-v1"))
+
+	// Rule order does not affect digest.
+	reorderedSP := newTestSetupPhase()
+	reorderedSP.loadedRules = []rule.InstRule{fileRule, funcRule, callRule}
+	reorderedSP.rootModulePaths = []string{"example.com/app"}
+	assert.Equal(t, base, compute(reorderedSP, nil, []byte("gls-v1")))
+
+	// rootModulePaths does not affect digest when no loaded rule uses $root.
+	diffRootSP := newTestSetupPhase()
+	diffRootSP.loadedRules = []rule.InstRule{callRule, fileRule, funcRule}
+	diffRootSP.rootModulePaths = []string{"example.com/other"}
+	assert.Equal(t, base, compute(diffRootSP, nil, []byte("gls-v1")))
+
+	// Changing a loaded rule changes the digest.
+	modifiedRule := *callRule
+	modifiedRule.FunctionCall = "Bar"
+	diffRuleSP := newTestSetupPhase()
+	diffRuleSP.loadedRules = []rule.InstRule{&modifiedRule, fileRule, funcRule}
+	assert.NotEqual(t, base, compute(diffRuleSP, nil, []byte("gls-v1")))
+
+	// Changing build tags changes the digest.
+	taggedSP := newTestSetupPhase()
+	taggedSP.loadedRules = []rule.InstRule{callRule, fileRule, funcRule}
+	taggedSP.buildFlags = []string{"-tags=enterprise"}
+	assert.NotEqual(t, base, compute(taggedSP, nil, []byte("gls-v1")))
+
+	// Changing RuntimeGLSSource changes the digest.
+	assert.NotEqual(t, base, compute(baseSP, nil, []byte("gls-v2")))
+
+	// Changing buildUsesIgnoreDirective changes the digest.
+	ignoredSet := rule.NewInstRuleSet("example.com/app/depa")
+	ignoredSet.AddIgnoredCallFile(fakeSrcFile("depa.go"))
+	assert.NotEqual(t, base, compute(baseSP, []*rule.InstRuleSet{ignoredSet}, []byte("gls-v1")))
+
+	// Changing a $root rule's rootModulePaths changes the digest.
+	rootRule := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "rootRule",
+			Target: rule.NewTarget(rule.TargetRoot),
+		},
+		FunctionCall: "Baz",
+	}
+	rootA := newTestSetupPhase()
+	rootA.loadedRules = []rule.InstRule{rootRule}
+	rootA.rootModulePaths = []string{"example.com/a"}
+	rootB := newTestSetupPhase()
+	rootB.loadedRules = []rule.InstRule{rootRule}
+	rootB.rootModulePaths = []string{"example.com/b"}
+	assert.NotEqual(t, compute(rootA, nil, []byte("gls-v1")), compute(rootB, nil, []byte("gls-v1")))
+
+	// Changing a local injected package file changes the digest even when matched is nil.
+	mustWriteFile(t, filepath.Join(modDir, "extra", "extra.go"), "package extra\n\nconst Tag = \"v2\"\n")
+	afterExtra := compute(newTestSetupPhaseWithRules(callRule, fileRule, funcRule), nil, []byte("gls-v1"))
+	assert.NotEqual(t, base, afterExtra)
+
+	// Changing an add_file source file changes the digest even when matched is nil.
+	mustWriteFile(t, filepath.Join(modDir, "hooks", "added.go"), "//go:build ignore\n\npackage hooks\n\nvar _ = 1\n")
+	afterAddFile := compute(newTestSetupPhaseWithRules(callRule, fileRule, funcRule), nil, []byte("gls-v1"))
+	assert.NotEqual(t, afterExtra, afterAddFile)
+
+	mustWriteFile(t, filepath.Join(modDir, "hooks", "hooks.go"), "package hooks\n\nfunc Before() { _ = 1 }\n")
+	afterHookEdit := compute(newTestSetupPhaseWithRules(callRule, fileRule, funcRule), nil, []byte("gls-v1"))
+	assert.NotEqual(t, afterAddFile, afterHookEdit,
+		"changing a local hook package referenced by InstFuncRule.Path must change the digest")
+}
+
+func newTestSetupPhaseWithRules(rules ...rule.InstRule) *setupPhase {
+	sp := newTestSetupPhase()
+	sp.loadedRules = rules
+	return sp
 }

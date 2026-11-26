@@ -277,7 +277,7 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	ip.buildUsesIgnoreDirective = anyRuleSetHasIgnoredCallFiles(allSet)
+	ip.buildUsesIgnoreDirective = rule.AnySetHasIgnoredCallFiles(allSet)
 
 	// Load the import name table, if one exists. A missing table is
 	// not fatal.
@@ -1379,11 +1379,21 @@ func markedToolVersion(rawOutput string) string {
 	return toolVersionLine(strings.TrimSpace(rawOutput), RulesDigest())
 }
 
-// RulesDigest returns a short hash of the matched rules setup stored plus the
-// active build tags and the hash of the packages rules inject, or "" when no
-// matched rules exist. It feeds the tool ID
-// otelc reports and the export memo's resolution scope.
+// RulesDigest returns a short hash of the loaded rules and build inputs setup
+// stored in rules_digest, falling back to hashing matched.json, active build
+// tags, embedded GLS source, and injected_hash when rules_digest is absent.
+// It returns "" when neither rules_digest nor matched.json exists. It feeds the
+// tool ID otelc reports and the export memo's resolution scope.
 func RulesDigest() string {
+	if digest, err := os.ReadFile(util.GetRulesDigestFile()); err == nil {
+		if trimmed := strings.TrimSpace(string(digest)); trimmed != "" {
+			if tags := util.ActiveBuildTags(); len(tags) > 0 {
+				sum := sha256.Sum256([]byte(trimmed + "\ntags=" + strings.Join(tags, ",")))
+				return hex.EncodeToString(sum[:8])
+			}
+			return trimmed
+		}
+	}
 	content, err := os.ReadFile(util.GetMatchedRuleFile())
 	if err != nil {
 		return ""
