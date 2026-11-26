@@ -41,6 +41,9 @@ type setupPhase struct {
 	// resolvedNames maps an import path to a package name, built from
 	// buildPackages' dependency graph.
 	resolvedNames map[string]string
+	// pkgImports maps each (importPath, isTest) package in allPkgs and its
+	// transitive dependencies to its direct import paths.
+	pkgImports map[pkgImportKey]map[string]struct{}
 
 	// fileImportsCache caches discovered source imports for add_file rules during setup.
 	fileImportsCache map[string][]string
@@ -624,6 +627,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	// table, because they carry imports that only _test.go files use.
 	sp.buildPackages = buildPkgs
 	sp.resolvedNames = pkgload.CollectPackageNames(allPkgs)
+	sp.pkgImports = collectPackageImports(allPkgs)
 	sp.testPackages = testPackages(buildPkgs, allPkgs)
 
 	// Find the module directories for the build packages

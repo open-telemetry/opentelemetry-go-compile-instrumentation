@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/dave/dst"
@@ -55,6 +56,10 @@ type matchContext struct {
 
 	// SourceFile is the absolute path to the source file being evaluated.
 	SourceFile string
+
+	// PackageName is the declared package name of the source file. Used when
+	// AST is nil (fast path).
+	PackageName string
 
 	// AST is the parsed dst tree of the source file. Filters must treat it
 	// as read-only; node updates would corrupt downstream rule matching.
@@ -114,7 +119,10 @@ type packageNameFilter struct {
 }
 
 func (f *packageNameFilter) Match(ctx *matchContext) bool {
-	return ctx.AST.Name.Name == f.Name
+	if ctx.AST != nil {
+		return ctx.AST.Name.Name == f.Name
+	}
+	return ctx.PackageName == f.Name
 }
 
 // directiveFilter matches source files that contain the specified directive.
@@ -184,6 +192,22 @@ var _ filter = (*not)(nil)
 type not struct{ Inner filter }
 
 func (n *not) Match(ctx *matchContext) bool { return !n.Inner.Match(ctx) }
+
+// filterNeedsAST reports whether evaluating f requires a parsed *dst.File.
+func filterNeedsAST(f filter) bool {
+	switch ft := f.(type) {
+	case nil, *isTestFilter, *packageNameFilter:
+		return false
+	case allOf:
+		return slices.ContainsFunc(ft, filterNeedsAST)
+	case oneOf:
+		return slices.ContainsFunc(ft, filterNeedsAST)
+	case *not:
+		return filterNeedsAST(ft.Inner)
+	default:
+		return true
+	}
+}
 
 // --- build ---
 
