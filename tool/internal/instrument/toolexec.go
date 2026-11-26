@@ -256,15 +256,6 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 		importConfigPath: importCfgPath,
 	}
 
-	// Parse existing importcfg if present
-	if importCfgPath != "" {
-		imports, err := imports.ParseImportCfg(importCfgPath)
-		if err != nil {
-			return nil, err
-		}
-		ip.importConfig = imports
-	}
-
 	// Setup's optional index can rule out a package without decoding either
 	// artifact. Candidates and stale/missing index data keep the exact loader,
 	// including its build-global ignored-call flag and file/test/cgo matching.
@@ -288,26 +279,36 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 
 	// Check if the current compile command matches the rules.
 	matched := ip.match(allSet, args)
-	if !matched.IsEmpty() {
-		if err = ip.ensurePackageName(matched); err != nil {
-			return nil, err
-		}
-
-		ip.Info("Instrument package", "rules", matched, "args", args)
-		// Okay, this package should be instrumented.
-		err = ip.instrument(ctx, matched)
-		if err != nil {
-			return nil, ex.Wrapf(err, "instrumenting package %s", matched.ModulePath)
-		}
-
-		// Strip -complete flag as we may insert some hook points that are
-		// not ready yet, i.e. they don't have function body
-		ip.compileArgs = stripCompleteFlag(ip.compileArgs)
-		if reqLang := matched.MaxRequiredLang(); reqLang != "" {
-			ip.compileArgs = raiseLangFlag(ip.compileArgs, reqLang)
-		}
-		ip.Info("Run instrumented command", "args", ip.compileArgs)
+	if matched.IsEmpty() {
+		return ip.compileArgs, nil
 	}
+
+	if importCfgPath != "" {
+		cfg, parseErr := imports.ParseImportCfg(importCfgPath)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		ip.importConfig = cfg
+	}
+
+	if err = ip.ensurePackageName(matched); err != nil {
+		return nil, err
+	}
+
+	ip.Info("Instrument package", "rules", matched, "args", args)
+	// Okay, this package should be instrumented.
+	err = ip.instrument(ctx, matched)
+	if err != nil {
+		return nil, ex.Wrapf(err, "instrumenting package %s", matched.ModulePath)
+	}
+
+	// Strip -complete flag as we may insert some hook points that are
+	// not ready yet, i.e. they don't have function body
+	ip.compileArgs = stripCompleteFlag(ip.compileArgs)
+	if reqLang := matched.MaxRequiredLang(); reqLang != "" {
+		ip.compileArgs = raiseLangFlag(ip.compileArgs, reqLang)
+	}
+	ip.Info("Run instrumented command", "args", ip.compileArgs)
 
 	return ip.compileArgs, nil
 }

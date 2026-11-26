@@ -135,13 +135,36 @@ func TestIndexedCompilePreservesMissingNamesFallback(t *testing.T) {
 	assert.Equal(t, args, got)
 }
 
-func TestIndexedCompileStillParsesImportCfg(t *testing.T) {
-	args := indexedCompile(t)
-	args = append(args, "-importcfg", filepath.Join(t.TempDir(), "missing.importcfg"))
-	ctx := util.ContextWithLogger(t.Context(), slog.Default())
-	_, err := interceptCompile(ctx, args)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "importcfg")
+func TestInterceptCompileDefersImportCfg(t *testing.T) {
+	t.Run("excluded", func(t *testing.T) {
+		args := indexedCompile(t)
+		args = append(args, "-importcfg", filepath.Join(t.TempDir(), "missing.importcfg"))
+		ctx := util.ContextWithLogger(t.Context(), slog.Default())
+		got, err := interceptCompile(ctx, args)
+		require.NoError(t, err)
+		assert.Equal(t, args, got)
+	})
+
+	t.Run("unmatched", func(t *testing.T) {
+		indexedCompile(t)
+		dir := t.TempDir()
+		set := rule.NewInstRuleSet("main")
+		set.AddFuncRule(filepath.Join(dir, "other.go"), &rule.InstFuncRule{Func: "Target"})
+		data, err := json.Marshal([]*rule.InstRuleSet{set})
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), data, 0o644))
+		require.NoError(t, compileindex.Store())
+
+		args := []string{
+			"compile", "-p", "main", "-o", filepath.Join(dir, "_pkg_.a"),
+			"-importcfg", filepath.Join(dir, "missing.importcfg"),
+			filepath.Join(dir, "unrelated.go"),
+		}
+		ctx := util.ContextWithLogger(t.Context(), slog.Default())
+		got, err := interceptCompile(ctx, args)
+		require.NoError(t, err)
+		assert.Equal(t, args, got)
+	})
 }
 
 func TestPGOBuildFlags(t *testing.T) {
@@ -873,15 +896,25 @@ func TestKeepForDebugCopyError(t *testing.T) {
 
 func TestInterceptCompileImportCfgParseError(t *testing.T) {
 	ctx := util.ContextWithLogger(t.Context(), slog.Default())
-	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	srcFile := filepath.Join(workDir, "main.go")
+	rset := rule.NewInstRuleSet("main")
+	rset.AddFileRule(&rule.InstFileRule{InstBaseRule: rule.InstBaseRule{Name: "r"}, File: "extra.go"})
+	data, err := json.Marshal([]*rule.InstRuleSet{rset})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), data, 0o644))
 
 	args := []string{
 		"compile",
 		"-o", filepath.Join(t.TempDir(), "out.a"),
 		"-importcfg", filepath.Join(t.TempDir(), "missing.importcfg"),
 		"-p", "main",
+		srcFile,
 	}
-	_, err := interceptCompile(ctx, args)
+	_, err = interceptCompile(ctx, args)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "importcfg")
 }

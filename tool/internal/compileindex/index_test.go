@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -129,6 +130,70 @@ func TestStoreRejectsInvalidArtifacts(t *testing.T) {
 				require.Error(t, Store())
 				assert.False(t, Excludes("unmatched"))
 			})
+		}
+	}
+}
+
+func TestStoreFromArtifactsMatchesStore(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	sets := []*rule.InstRuleSet{
+		rule.NewInstRuleSet("net/http"),
+		rule.NewInstRuleSet("example.org/a<b>"),
+		rule.NewInstRuleSet("net/http"),
+	}
+	matched, err := json.Marshal(sets)
+	require.NoError(t, err)
+	names, err := json.Marshal(map[string]string{"net/http": "http"})
+	require.NoError(t, err)
+
+	require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), matched, 0o644))
+	require.NoError(t, os.WriteFile(util.GetImportNamesFile(), names, 0o644))
+
+	require.NoError(t, Store())
+	want, err := os.ReadFile(filename())
+	require.NoError(t, err)
+
+	require.NoError(t, os.Remove(filename()))
+	require.NoError(t, StoreFromArtifacts(matched, names, sets))
+	got, err := os.ReadFile(filename())
+	require.NoError(t, err)
+
+	assert.Equal(t, want, got)
+	assert.False(t, Excludes("net/http"))
+	assert.False(t, Excludes("example.org/a<b>"))
+	assert.True(t, Excludes("unmatched"))
+
+	require.Error(t, StoreFromArtifacts(matched, names, []*rule.InstRuleSet{nil}))
+}
+
+func BenchmarkCompileIndexExcludes(b *testing.B) {
+	b.Setenv(util.EnvOtelcWorkDir, b.TempDir())
+	if err := os.MkdirAll(util.GetBuildTempDir(), 0o755); err != nil {
+		b.Fatal(err)
+	}
+	sets := make([]*rule.InstRuleSet, 0, 50)
+	for i := range 50 {
+		sets = append(sets, rule.NewInstRuleSet("example.com/pkg/"+string(rune('a'+i/26))+string(rune('a'+i%26))))
+	}
+	matched, err := json.Marshal(sets)
+	if err != nil {
+		b.Fatal(err)
+	}
+	names := []byte(`{}`)
+	if err = os.WriteFile(util.GetMatchedRuleFile(), matched, 0o644); err != nil {
+		b.Fatal(err)
+	}
+	if err = os.WriteFile(util.GetImportNamesFile(), names, 0o644); err != nil {
+		b.Fatal(err)
+	}
+	if err = StoreFromArtifacts(matched, names, sets); err != nil {
+		b.Fatal(err)
+	}
+	for b.Loop() {
+		if !Excludes("example.com/unmatched/pkg") {
+			b.Fatal("expected package to be excluded")
 		}
 	}
 }

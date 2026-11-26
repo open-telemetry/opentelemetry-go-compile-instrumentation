@@ -36,8 +36,9 @@ type document struct {
 
 func filename() string { return util.GetBuildTemp("compile_index.json") }
 
-// Store publishes the index after setup has successfully stored both artifacts.
-// A concurrent reader of an older index falls back if either artifact changes.
+// Store is a test and recovery helper that publishes the index from the
+// on-disk matched rules and import names artifacts. Production setup uses
+// StoreFromArtifacts.
 func Store() error {
 	matched, err := os.ReadFile(util.GetMatchedRuleFile())
 	if err != nil {
@@ -51,6 +52,20 @@ func Store() error {
 	if err != nil {
 		return err
 	}
+	return writeIndex(matched, names, packages)
+}
+
+// StoreFromArtifacts publishes the index from already-marshaled setup
+// artifacts and rule sets, avoiding a redundant read and JSON decode.
+func StoreFromArtifacts(matched, names []byte, sets []*rule.InstRuleSet) error {
+	packages, err := packagesFromSets(sets)
+	if err != nil {
+		return err
+	}
+	return writeIndex(matched, names, packages)
+}
+
+func writeIndex(matched, names []byte, packages []string) error {
 	data, err := json.Marshal(index{
 		Version:     version,
 		Packages:    packages,
@@ -81,6 +96,10 @@ func packagesFromArtifacts(matched, names []byte) ([]string, error) {
 	if err := json.Unmarshal(names, &resolvedNames); err != nil {
 		return nil, ex.Wrapf(err, "validating import names for compile index")
 	}
+	return packagesFromSets(sets)
+}
+
+func packagesFromSets(sets []*rule.InstRuleSet) ([]string, error) {
 	packages := make([]string, 0, len(sets))
 	for _, set := range sets {
 		if set == nil {
