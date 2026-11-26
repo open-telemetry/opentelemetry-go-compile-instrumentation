@@ -22,6 +22,13 @@ import (
 
 const CommandLineArgumentsPackage = "command-line-arguments"
 
+// LoadOptions holds optional flags and process environment for package loads.
+type LoadOptions struct {
+	BuildFlags []string
+	Env        []string
+	Tests      bool
+}
+
 // LoadPackages wraps packages.Load with context and build flags.
 func LoadPackages(
 	ctx context.Context,
@@ -30,7 +37,18 @@ func LoadPackages(
 	tests bool,
 	patterns ...string,
 ) ([]*packages.Package, error) {
-	dir, buildFlags, err := loadDirFromBuildFlags(buildFlags)
+	return LoadPackagesWithOptions(ctx, mode, LoadOptions{BuildFlags: buildFlags, Tests: tests}, patterns...)
+}
+
+// LoadPackagesWithOptions wraps packages.Load with build flags and an optional
+// process environment override. A nil Env inherits the current process environment.
+func LoadPackagesWithOptions(
+	ctx context.Context,
+	mode packages.LoadMode,
+	opts LoadOptions,
+	patterns ...string,
+) ([]*packages.Package, error) {
+	dir, buildFlags, err := loadDirFromBuildFlags(opts.BuildFlags)
 	if err != nil {
 		return nil, err
 	}
@@ -38,8 +56,9 @@ func LoadPackages(
 		Mode:       mode,
 		Context:    ctx,
 		BuildFlags: buildFlags,
+		Env:        opts.Env,
 		Dir:        dir,
-		Tests:      tests,
+		Tests:      opts.Tests,
 	}
 	pkgs, err := packages.Load(cfg, patterns...)
 	if err != nil {
@@ -194,7 +213,7 @@ func ResolveExportFilesBatch(
 	importPaths []string,
 	buildFlags ...string,
 ) (map[string]string, map[string]error, error) {
-	res, err := loadExportClosures(ctx, importPaths, buildFlags...)
+	res, err := loadExportClosures(ctx, importPaths, nil, buildFlags...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -222,7 +241,18 @@ func ResolveExportClosures(
 	importPaths []string,
 	buildFlags ...string,
 ) (map[string]map[string]string, map[string]error, error) {
-	res, err := loadExportClosures(ctx, importPaths, buildFlags...)
+	return ResolveExportClosuresWithEnv(ctx, importPaths, nil, buildFlags...)
+}
+
+// ResolveExportClosuresWithEnv is ResolveExportClosures with an optional
+// process environment override for the nested go list invocation.
+func ResolveExportClosuresWithEnv(
+	ctx context.Context,
+	importPaths []string,
+	env []string,
+	buildFlags ...string,
+) (map[string]map[string]string, map[string]error, error) {
+	res, err := loadExportClosures(ctx, importPaths, env, buildFlags...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -242,13 +272,18 @@ type exportClosures struct {
 
 // loadExportClosures is ResolveExportClosures that also returns the partial
 // closures of the requested roots that failed.
-func loadExportClosures(ctx context.Context, importPaths []string, buildFlags ...string) (*exportClosures, error) {
+func loadExportClosures(
+	ctx context.Context,
+	importPaths []string,
+	env []string,
+	buildFlags ...string,
+) (*exportClosures, error) {
 	if len(importPaths) == 0 {
 		return &exportClosures{closures: map[string]map[string]string{}}, nil
 	}
 
 	mode := packages.NeedName | packages.NeedImports | packages.NeedDeps | packages.NeedExportFile
-	pkgs, err := LoadPackages(ctx, mode, buildFlags, false, importPaths...)
+	pkgs, err := LoadPackagesWithOptions(ctx, mode, LoadOptions{BuildFlags: buildFlags, Env: env}, importPaths...)
 	if err != nil {
 		return nil, err
 	}

@@ -1424,7 +1424,7 @@ func TestMarkedToolVersion(t *testing.T) {
 	t.Run("no rules hash when matched.json is absent", func(t *testing.T) {
 		t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
 
-		got := markedToolVersion(raw)
+		got := markedToolVersion(t.Context(), raw)
 		assert.Equal(t, "compile version go1.26.5 otelc@"+util.Version, got)
 	})
 
@@ -1434,7 +1434,7 @@ func TestMarkedToolVersion(t *testing.T) {
 		require.NoError(t, os.MkdirAll(filepath.Join(workDir, util.BuildTempDir), 0o755))
 		require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), []byte(`[{"module_path":"main"}]`), 0o644))
 
-		got := markedToolVersion(raw)
+		got := markedToolVersion(t.Context(), raw)
 		assert.Regexp(t, `^compile version go1\.26\.5 otelc@\S+/[0-9a-f]{16}$`, got)
 	})
 
@@ -1446,11 +1446,11 @@ func TestMarkedToolVersion(t *testing.T) {
 		require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), []byte(`[{"module_path":"main"}]`), 0o644))
 
 		t.Setenv(util.EnvOtelcBuildFlags, util.EncodeBuildFlags(nil))
-		untagged := markedToolVersion(raw)
+		untagged := markedToolVersion(t.Context(), raw)
 		t.Setenv(util.EnvOtelcBuildFlags, util.EncodeBuildFlags([]string{"-tags=enterprise"}))
-		tagged := markedToolVersion(raw)
+		tagged := markedToolVersion(t.Context(), raw)
 		t.Setenv(util.EnvOtelcBuildFlags, util.EncodeBuildFlags([]string{"-tags=beta"}))
-		otherTag := markedToolVersion(raw)
+		otherTag := markedToolVersion(t.Context(), raw)
 
 		assert.NotEqual(t, untagged, tagged)
 		assert.NotEqual(t, tagged, otherTag)
@@ -1471,16 +1471,21 @@ func TestMarkedToolVersion(t *testing.T) {
 		require.NoError(t, os.MkdirAll(filepath.Join(workDir, util.BuildTempDir), 0o755))
 		require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), []byte(`[{"module_path":"main"}]`), 0o644))
 
-		without := markedToolVersion(raw)
+		without := markedToolVersion(t.Context(), raw)
 		require.NoError(t, os.WriteFile(util.GetInjectedHashFile(), []byte("0011223344556677"), 0o644))
-		first := markedToolVersion(raw)
+		first := markedToolVersion(t.Context(), raw)
 		require.NoError(t, os.WriteFile(util.GetInjectedHashFile(), []byte("8899aabbccddeeff"), 0o644))
-		second := markedToolVersion(raw)
+		second := markedToolVersion(t.Context(), raw)
 		require.NoError(t, os.WriteFile(util.GetInjectedHashFile(), nil, 0o644))
 
 		assert.NotEqual(t, without, first)
 		assert.NotEqual(t, first, second)
-		assert.Equal(t, without, markedToolVersion(raw), "an empty hash file must not change the rules hash")
+		assert.Equal(
+			t,
+			without,
+			markedToolVersion(t.Context(), raw),
+			"an empty hash file must not change the rules hash",
+		)
 	})
 
 	t.Run("prefers rules_digest file over matched.json", func(t *testing.T) {
@@ -1492,7 +1497,11 @@ func TestMarkedToolVersion(t *testing.T) {
 		require.NoError(t, os.WriteFile(util.GetRulesDigestFile(), []byte("0123456789abcdef\n"), 0o644))
 
 		assert.Equal(t, "0123456789abcdef", RulesDigest())
-		assert.Equal(t, "compile version go1.26.5 otelc@"+util.Version+"/0123456789abcdef", markedToolVersion(raw))
+		assert.Equal(
+			t,
+			"compile version go1.26.5 otelc@"+util.Version+"/0123456789abcdef",
+			markedToolVersion(t.Context(), raw),
+		)
 
 		// Different matched.json must not alter RulesDigest when rules_digest is present.
 		require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), []byte(`[{"module_path":"other"}]`), 0o644))

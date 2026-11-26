@@ -21,6 +21,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/buildserver"
 	"go.opentelemetry.io/otelc/tool/internal/configuration"
 	"go.opentelemetry.io/otelc/tool/internal/instrument"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
@@ -1101,10 +1102,78 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool, ext
 		return ex.Wrapf(err, "configuring go cache")
 	}
 
+	env, closeBuildServer := startBuildServerForBuild(ctx, env, execPath)
+	defer closeBuildServer()
+
 	if subcommand == subcmdRun {
 		return runProgram(ctx, env, newArgs)
 	}
 	return runBuildCmd(ctx, env, newArgs...)
+}
+
+// startBuildServerForBuild starts a per-build in-memory server serving this
+// invocation's setup artifacts and coalescing `go list -export` calls. Always
+// starts a fresh server so nested `otelc go` invocations with their own
+// work-dir never query an outer build's server. Falls back silently on error.
+func startBuildServerForBuild(ctx context.Context, env []string, execPath string) ([]string, func()) {
+	logger := util.LoggerFromContext(ctx)
+	// Strip any inherited build server env vars first so a failure below
+	// never leaks an outer build's server into this build's toolexec.
+	addrPrefix := util.EnvOtelcBuildServer + "="
+	tokenPrefix := util.EnvOtelcBuildServerAuth + "="
+	env = slices.DeleteFunc(env, func(kv string) bool {
+		return strings.HasPrefix(kv, addrPrefix) || strings.HasPrefix(kv, tokenPrefix)
+	})
+
+	cfg, err := buildserver.LoadConfigFromDisk(instrument.RulesDigestFromDisk())
+	if err != nil {
+		logger.DebugContext(ctx, "skipping build server startup", "error", err)
+		return env, func() {}
+	}
+	srv, err := buildserver.Start(ctx, cfg)
+	if err != nil {
+		logger.WarnContext(ctx, "failed to start build server; falling back to disk", "error", err)
+		return env, func() {}
+	}
+
+	serverEnv := append(slices.Clone(env), srv.Env()...)
+	resolveEnv, err := nestedResolveEnv(serverEnv, execPath)
+	if err != nil {
+		logger.WarnContext(ctx, "failed to configure build server nested env; falling back to disk", "error", err)
+		if closeErr := srv.Close(ctx); closeErr != nil {
+			logger.DebugContext(ctx, "failed to close build server", "error", closeErr)
+		}
+		return env, func() {}
+	}
+	srv.SetResolveEnv(resolveEnv)
+	logger.DebugContext(ctx, "started build server", "addr", srv.Addr())
+	return serverEnv, func() {
+		if closeErr := srv.Close(ctx); closeErr != nil {
+			logger.DebugContext(ctx, "failed to close build server", "error", closeErr)
+		}
+	}
+}
+
+// nestedResolveEnv constructs the environment for `go list -export` spawned by
+// the build server: the build's env plus -toolexec in GOFLAGS and
+// OTELC_NESTED_TOOLEXEC=1, matching EnableNestedToolexec.
+func nestedResolveEnv(buildEnv []string, execPath string) ([]string, error) {
+	resolveEnv := slices.Clone(buildEnv)
+	var currentGoflags string
+	for _, kv := range resolveEnv {
+		if v, ok := strings.CutPrefix(kv, "GOFLAGS="); ok {
+			currentGoflags = v
+		}
+	}
+	goflags, err := instrument.NestedToolexecGoflags(execPath, currentGoflags)
+	if err != nil {
+		return nil, err
+	}
+	resolveEnv = slices.DeleteFunc(resolveEnv, func(kv string) bool {
+		return strings.HasPrefix(kv, "GOFLAGS=") || strings.HasPrefix(kv, util.EnvOtelcNestedToolexec+"=")
+	})
+	resolveEnv = append(resolveEnv, "GOFLAGS="+goflags, util.EnvOtelcNestedToolexec+"=1")
+	return resolveEnv, nil
 }
 
 func GoBuild(ctx context.Context, cmd *cli.Command) (err error) {
