@@ -5,12 +5,15 @@
     'helpers:pinGitHubActionDigestsToSemver',
   ],
   schedule: [
-    'before 8am on the 1st and 15th day of the month',
+    '* 0-7 1,15 * *',
+  ],
+  automergeSchedule: [
+    '* * 8-14,22-28 * *',
   ],
   updateNotScheduled: false,
-  minimumReleaseAge: '5 days',
+  minimumReleaseAge: '7 days',
   internalChecksFilter: 'strict',
-  platformAutomerge: true,
+  platformAutomerge: false,
   postUpdateOptions: [
     'gomodTidyAll',
     'gomodUpdateImportPaths',
