@@ -143,13 +143,14 @@ func (sp *setupPhase) store(matched []*rule.InstRuleSet) error {
 	}
 	sp.Info("Stored matched sets", "path", f)
 
-	if err = sp.storeResolvedNames(); err != nil {
+	namesBytes, err := sp.storeResolvedNames()
+	if err != nil {
 		return err
 	}
 	if err = sp.storePGOProfile(); err != nil {
 		return err
 	}
-	if err = compileindex.Store(); err != nil {
+	if err = compileindex.StoreFromArtifacts(bs, namesBytes, matched); err != nil {
 		sp.Warn("Could not store optional compile index", "error", err)
 	}
 	return nil
@@ -432,18 +433,18 @@ func hashFileAs(w io.Writer, path string) error {
 // storeResolvedNames persists the import name table built during
 // setup, so later toolexec processes need not guess a package name
 // from its import path.
-func (sp *setupPhase) storeResolvedNames() error {
+func (sp *setupPhase) storeResolvedNames() ([]byte, error) {
 	bs, err := json.Marshal(sp.resolvedNames)
 	if err != nil {
-		return ex.Wrapf(err, "failed to marshal import names to JSON")
+		return nil, ex.Wrapf(err, "failed to marshal import names to JSON")
 	}
 
 	f := util.GetImportNamesFile()
 	if writeErr := util.WriteFileAtomic(f, bs); writeErr != nil {
-		return ex.Wrapf(writeErr, "failed to write import names to file %s", f)
+		return nil, ex.Wrapf(writeErr, "failed to write import names to file %s", f)
 	}
 	sp.Info("Stored resolved import names", "path", f, "count", len(sp.resolvedNames))
-	return nil
+	return bs, nil
 }
 
 // setupGenerationBytes is the size of the random setup generation token.
