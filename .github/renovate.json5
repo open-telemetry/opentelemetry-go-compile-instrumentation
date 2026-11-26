@@ -32,7 +32,7 @@
     },
     {
       groupName: 'all ci dependencies',
-      groupSlug: 'all-ci deps',
+      groupSlug: 'all-ci-deps',
       matchCategories: [
         'ci',
       ],
