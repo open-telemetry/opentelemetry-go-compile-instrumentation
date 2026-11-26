@@ -15,6 +15,15 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+type applicationTestInlineUnmarshaler struct {
+	called bool
+}
+
+func (u *applicationTestInlineUnmarshaler) UnmarshalYAML(*yaml.Node) error {
+	u.called = true
+	return nil
+}
+
 func TestParseApplicationConfiguration(t *testing.T) {
 	app, err := ParseApplicationConfiguration([]byte(`file_format: "1.2"
 instrumentation/development:
@@ -176,14 +185,21 @@ func TestApplicationIntegerDefaultUsesInt64WhenNativeIntCannotRepresentIt(t *tes
 			require.NoError(t, err)
 			parsed, err := strconv.ParseInt(value, 10, 64)
 			require.NoError(t, err)
-			native := int(parsed)
-			if int64(native) == parsed {
-				assert.Equal(t, native, got)
-				assert.Equal(t, reflect.TypeFor[int](), reflect.TypeOf(got))
-			} else {
-				assert.Equal(t, parsed, got)
-				assert.Equal(t, reflect.TypeFor[int64](), reflect.TypeOf(got))
+			wantType := reflect.TypeFor[int]()
+			if strconv.IntSize == 32 {
+				wantType = reflect.TypeFor[int64]()
 			}
+			assert.Equal(t, wantType, reflect.TypeOf(got))
+			assert.EqualValues(t, parsed, got)
+		})
+	}
+}
+
+func TestApplicationIntegerDefaultRejectsInvalidAndOverflowingValues(t *testing.T) {
+	for _, value := range []string{"not-an-integer", "9223372036854775808", "-9223372036854775809"} {
+		t.Run(value, func(t *testing.T) {
+			_, err := applicationDefaultValue(value, integerType)
+			require.Error(t, err)
 		})
 	}
 }
@@ -954,6 +970,54 @@ instrumentation/development:
 	assert.Equal(t, originalGo["sample"].Line, filteredGo["sample"].Line)
 }
 
+func TestSelectedApplicationSourceHelpersCloneNilAndUnsupportedShapes(t *testing.T) {
+	assert.Nil(t, selectedApplicationSourceDocument(nil, nil, nil))
+	assert.Nil(t, cloneYAMLNode(nil))
+	assert.Nil(t, filterSelectedYAMLNode(nil, nil, "", nil))
+
+	scalar := &yaml.Node{Kind: yaml.ScalarNode, Value: "value", Line: 4, Column: 2}
+	clonedScalar := selectedApplicationSourceDocument(scalar, nil, nil)
+	require.NotSame(t, scalar, clonedScalar)
+	assert.Equal(t, scalar.Value, clonedScalar.Value)
+	assert.Equal(t, scalar.Line, clonedScalar.Line)
+
+	source := &yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{
+		{Kind: yaml.ScalarNode, Value: "known"},
+		{Kind: yaml.MappingNode, Content: []*yaml.Node{
+			{Kind: yaml.ScalarNode, Value: "nested"},
+			{Kind: yaml.ScalarNode, Value: "value"},
+		}},
+	}}
+	cloned := filterSelectedYAMLNode(source, "not a map", "", nil)
+	require.NotSame(t, source, cloned)
+	require.NotSame(t, source.Content[1], cloned.Content[1])
+	require.NotSame(t, source.Content[1].Content[1], cloned.Content[1].Content[1])
+
+	sequence := &yaml.Node{Kind: yaml.SequenceNode, Content: []*yaml.Node{
+		{Kind: yaml.ScalarNode, Value: "value"},
+	}}
+	clonedSequence := filterSelectedYAMLNode(sequence, map[string]any{}, "", nil)
+	require.NotSame(t, sequence, clonedSequence)
+	require.NotSame(t, sequence.Content[0], clonedSequence.Content[0])
+
+	withNonStringKey := &yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{
+		{Kind: yaml.SequenceNode, Content: []*yaml.Node{{Kind: yaml.ScalarNode, Value: "invalid"}}},
+		{Kind: yaml.ScalarNode, Value: "ignored"},
+		{Kind: yaml.ScalarNode, Value: "known", Line: 4, Column: 3},
+		{Kind: yaml.ScalarNode, Value: "kept"},
+	}}
+	filtered := filterSelectedYAMLNode(
+		withNonStringKey,
+		map[string]any{"known": "kept"},
+		"",
+		map[string]Entry{"known": {Name: "known", Type: stringType}},
+	)
+	require.Len(t, filtered.Content, yamlMappingPairSize)
+	assert.Equal(t, "known", filtered.Content[0].Value)
+	assert.Equal(t, 4, filtered.Content[0].Line)
+	assert.Equal(t, 3, filtered.Content[0].Column)
+}
+
 func TestApplicationDefaultValueRejectsMalformedYAML(t *testing.T) {
 	_, err := applicationDefaultValue("[", listType)
 	require.Error(t, err)
@@ -1197,8 +1261,14 @@ func TestValidateYAMLFieldsMatchesYAMLV3StructFieldSemantics(t *testing.T) {
 	type inlineConfig struct {
 		Embedded `yaml:",inline"`
 	}
+	type namedInlineConfig struct {
+		Payload Embedded `yaml:",inline"`
+	}
 	type pointerInlineConfig struct {
 		*Embedded `yaml:",inline"`
+	}
+	type namedPointerInlineConfig struct {
+		Payload *Embedded `yaml:",inline"`
 	}
 	type mapInlineConfig struct {
 		Known  string            `yaml:"known"`
@@ -1206,6 +1276,12 @@ func TestValidateYAMLFieldsMatchesYAMLV3StructFieldSemantics(t *testing.T) {
 	}
 	type nestedMapInlineConfig struct {
 		Extras map[string]Embedded `yaml:",inline"`
+	}
+	type NestedInlineMap struct {
+		Extras map[string]Embedded `yaml:",inline"`
+	}
+	type nestedInlineMapConfig struct {
+		NestedInlineMap `yaml:",inline"`
 	}
 
 	for _, test := range []struct {
@@ -1216,7 +1292,9 @@ func TestValidateYAMLFieldsMatchesYAMLV3StructFieldSemantics(t *testing.T) {
 	}{
 		{name: "lowercases the full untagged acronym name", data: "url: value\n", typeOf: reflect.TypeFor[struct{ URL string }]()},
 		{name: "flattens only explicitly inline structs", data: "value: item\n", typeOf: reflect.TypeFor[inlineConfig]()},
+		{name: "inlines a named struct field", data: "value: item\n", typeOf: reflect.TypeFor[namedInlineConfig]()},
 		{name: "supports pointers to inline structs", data: "value: item\n", typeOf: reflect.TypeFor[pointerInlineConfig]()},
+		{name: "inlines a named pointer field", data: "value: item\n", typeOf: reflect.TypeFor[namedPointerInlineConfig]()},
 		{name: "accepts unknown fields through an inline map", data: "known: item\nextra: value\n", typeOf: reflect.TypeFor[mapInlineConfig]()},
 		{name: "validates values in inline maps", data: "extra:\n  unknown: true\n", typeOf: reflect.TypeFor[nestedMapInlineConfig](), want: "unsupported field"},
 		{name: "rejects acronym with lowercased first letter only", data: "uRL: value\n", typeOf: reflect.TypeFor[struct{ URL string }](), want: "unsupported field"},
@@ -1246,6 +1324,117 @@ func TestValidateYAMLFieldsMatchesYAMLV3StructFieldSemantics(t *testing.T) {
 	}
 	_, err = yamlStructFields(reflect.TypeFor[InvalidInlineMap]())
 	require.ErrorContains(t, err, "must have string keys")
+
+	data := "extra:\n  value: item\n"
+	var document yaml.Node
+	require.NoError(t, yaml.Unmarshal([]byte(data), &document))
+	fieldSet, err := yamlStructFields(reflect.TypeFor[nestedInlineMapConfig]())
+	require.NoError(t, err)
+	assert.Nil(t, fieldSet.inlineMap, "yaml.v3 does not promote a nested inline map")
+	require.ErrorContains(t,
+		validateYAMLFields(document.Content[0], reflect.TypeFor[nestedInlineMapConfig](), "app.yaml", ""),
+		`unsupported field "extra"`,
+	)
+
+	var decoded nestedInlineMapConfig
+	decoder := yaml.NewDecoder(strings.NewReader(data))
+	decoder.KnownFields(true)
+	require.ErrorContains(t, decoder.Decode(&decoded), "field extra not found")
+}
+
+func TestYAMLStructFieldsHandlesInvalidLayoutsAndInlineFallbacks(t *testing.T) {
+	type MultipleInlineMaps struct {
+		First  map[string]string `yaml:",inline"`
+		Second map[string]string `yaml:",inline"`
+	}
+	type InvalidInlinePointer struct {
+		Value *int `yaml:",inline"`
+	}
+	type InvalidInlineScalar struct {
+		Value string `yaml:",inline"`
+	}
+	invalidTag := reflect.StructOf([]reflect.StructField{{
+		Name: "Value",
+		Type: reflect.TypeFor[string](),
+		Tag:  `yaml:"value,unsupported"`,
+	}})
+	duplicateFields := reflect.StructOf([]reflect.StructField{
+		{Name: "First", Type: reflect.TypeFor[string](), Tag: `yaml:"duplicate"`},
+		{Name: "Second", Type: reflect.TypeFor[string](), Tag: `yaml:"duplicate"`},
+	})
+	nestedInvalidTag := reflect.StructOf([]reflect.StructField{{
+		Name: "Nested",
+		Type: invalidTag,
+		Tag:  `yaml:",inline"`,
+	}})
+
+	for _, test := range []struct {
+		name   string
+		typeOf reflect.Type
+		want   string
+	}{
+		{name: "invalid tag", typeOf: invalidTag, want: `unsupported flag "unsupported"`},
+		{name: "duplicate ordinary keys", typeOf: duplicateFields, want: "duplicated key"},
+		{name: "multiple inline maps", typeOf: reflect.TypeFor[MultipleInlineMaps](), want: "multiple inline maps"},
+		{name: "inline pointer to non-struct", typeOf: reflect.TypeFor[InvalidInlinePointer](), want: "must be a struct or map"},
+		{name: "inline scalar", typeOf: reflect.TypeFor[InvalidInlineScalar](), want: "must be a struct or map"},
+		{name: "nested invalid tag", typeOf: nestedInvalidTag, want: `unsupported flag "unsupported"`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := yamlStructFields(test.typeOf)
+			require.ErrorContains(t, err, test.want)
+		})
+	}
+
+	data := []byte("known: retained\nfuture: delegated\n")
+	var document yaml.Node
+	require.NoError(t, yaml.Unmarshal(data, &document))
+	type InlineUnmarshalerConfig struct {
+		Hook  *applicationTestInlineUnmarshaler `yaml:",inline"`
+		Known string                            `yaml:"known"`
+	}
+	assert.False(t, reflect.TypeFor[*InlineUnmarshalerConfig]().Implements(reflect.TypeFor[yaml.Unmarshaler]()))
+	fields, err := yamlStructFields(reflect.TypeFor[InlineUnmarshalerConfig]())
+	require.NoError(t, err)
+	assert.True(t, fields.inlineUnmarshaler)
+	require.NoError(t, validateYAMLFields(
+		document.Content[0], reflect.TypeFor[InlineUnmarshalerConfig](), "app.yaml", "",
+	))
+	require.NoError(t, validateApplicationRootFields(
+		document.Content[0], reflect.TypeFor[InlineUnmarshalerConfig](), "app.yaml",
+	))
+	var decoded InlineUnmarshalerConfig
+	require.NoError(t, yaml.Unmarshal(data, &decoded))
+	require.NotNil(t, decoded.Hook)
+	assert.True(t, decoded.Hook.called)
+	assert.Equal(t, "retained", decoded.Known)
+
+	type InlineValue struct {
+		Allowed string `yaml:"allowed"`
+	}
+	type InlineMapRoot struct {
+		Values map[string]InlineValue `yaml:",inline"`
+	}
+	var validRoot, invalidRoot yaml.Node
+	require.NoError(t, yaml.Unmarshal([]byte("custom:\n  allowed: value\n"), &validRoot))
+	require.NoError(t, validateApplicationRootFields(
+		validRoot.Content[0], reflect.TypeFor[InlineMapRoot](), "app.yaml",
+	))
+	require.NoError(t, yaml.Unmarshal([]byte("custom:\n  unknown: true\n"), &invalidRoot))
+	require.ErrorContains(t, validateApplicationRootFields(
+		invalidRoot.Content[0], reflect.TypeFor[InlineMapRoot](), "app.yaml",
+	), `unsupported field "unknown"`)
+
+	_, err = yamlStructFields(reflect.TypeFor[int]())
+	require.NoError(t, err)
+	var invalidSchema yaml.Node
+	require.NoError(t, yaml.Unmarshal([]byte("value: item\n"), &invalidSchema))
+	require.ErrorContains(t, validateYAMLFields(
+		invalidSchema.Content[0], invalidTag, "app.yaml", "",
+	), "inspect YAML fields")
+	require.ErrorContains(t, validateApplicationRootFields(
+		invalidSchema.Content[0], invalidTag, "app.yaml",
+	), "inspect YAML fields")
 }
 
 func TestValidateApplicationRootFieldsHandlesNilAndInvalidKeys(t *testing.T) {

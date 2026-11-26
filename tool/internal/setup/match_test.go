@@ -578,6 +578,15 @@ func TestLoadCustomRulesRecordsModuleOwnership(t *testing.T) {
 	}
 }
 
+func TestRecordCustomRuleModuleRootsSkipsEmptyRoot(t *testing.T) {
+	instRule := &rule.InstRawRule{}
+	ruleModuleRoots := make(map[rule.InstRule]string)
+	recordCustomRuleModuleRoots(ruleModuleRoots, map[string][]rule.InstRule{
+		"custom": {instRule},
+	}, "")
+	assert.Empty(t, ruleModuleRoots)
+}
+
 func TestLoadCustomRulesWithApplicationConfigurationAllowsStandaloneRules(t *testing.T) {
 	for _, source := range []string{"rules flag", "OTELC_RULES"} {
 		t.Run(source, func(t *testing.T) {

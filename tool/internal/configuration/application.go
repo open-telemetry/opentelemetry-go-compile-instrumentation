@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"math"
 	"reflect"
 	"slices"
 	"strconv"
@@ -335,9 +336,8 @@ func applicationDefaultValue(defaultValue, typeName string) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		nativeValue := int(value)
-		if int64(nativeValue) == value {
-			return nativeValue, nil
+		if value >= math.MinInt && value <= math.MaxInt {
+			return int(value), nil
 		}
 		return value, nil
 	case mapType, listType, structuredListType:
@@ -1172,12 +1172,6 @@ func mergeYAMLInlineStruct(fieldSet *yamlStructFieldSet, inlineFields yamlStruct
 		}
 		fieldSet.fields[key] = fieldType
 		fieldSet.fieldOrder = append(fieldSet.fieldOrder, key)
-	}
-	if inlineFields.inlineMap != nil {
-		if fieldSet.inlineMap != nil {
-			return ex.Newf("multiple inline maps in YAML struct %s", target)
-		}
-		fieldSet.inlineMap = inlineFields.inlineMap
 	}
 	fieldSet.inlineUnmarshaler = fieldSet.inlineUnmarshaler || inlineFields.inlineUnmarshaler
 	return nil

@@ -1908,6 +1908,29 @@ func TestSetup_RuleLoadError(t *testing.T) {
 	require.ErrorContains(t, err, "loading hook rules")
 }
 
+func TestSetup_RejectsInvalidApplicationConfigurationBeforeBuildDiscovery(t *testing.T) {
+	setupTestModule(t, []string{"cmd"})
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	configPath := filepath.Join(".", "invalid-instrumentation.yaml")
+	mustWriteFile(t, configPath, "file_format: [\n")
+
+	cmd := &cli.Command{
+		Name: "setup",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: FlagInstrumentationConfig},
+		},
+		Action: Setup,
+	}
+	err := cmd.Run(t.Context(), []string{
+		"setup",
+		"--" + FlagInstrumentationConfig,
+		configPath,
+		".",
+	})
+
+	require.ErrorContains(t, err, "parse application configuration")
+}
+
 func TestSetup_ResolveRulePathsError(t *testing.T) {
 	setupTestModule(t, []string{"cmd"})
 	_ = os.RemoveAll(util.GetBuildTempDir())
