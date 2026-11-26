@@ -1,0 +1,16 @@
+wrap_println:
+  target: main
+  where:
+    function_call: fmt.Println
+  do:
+    - wrap_call:
+        replace: |-
+          {{- $ctx := .FuncArgumentThatImplements "context.Context" -}}
+          {{- if $ctx -}}
+          (func() (int, error) {
+            println("ctx:", {{ $ctx }} != nil)
+            return {{ . }}
+          })()
+          {{- else -}}
+          {{ . }}
+          {{- end -}}
