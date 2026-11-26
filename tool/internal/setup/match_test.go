@@ -8,6 +8,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	goparser "go/parser"
+	"go/token"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -981,9 +983,9 @@ func TestPreciseMatching_CallRuleAddedToFilesThatImportItsPackage(t *testing.T) 
 
 	result, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{callRule}, set)
 	require.NoError(t, err)
-	require.Len(t, result.CallRules, 2)
+	require.Len(t, result.CallRules, 1)
 	require.Contains(t, result.CallRules, callFile)
-	require.Contains(t, result.CallRules, importOnlyFile)
+	require.NotContains(t, result.CallRules, importOnlyFile)
 	require.NotContains(t, result.CallRules, noImportFile)
 }
 
@@ -2487,12 +2489,12 @@ func TestPreciseMatching_MatchOneRuleError(t *testing.T) {
 }
 
 func TestKnownDirectiveNames(t *testing.T) {
-	rules := []rule.InstRule{
-		&rule.InstFuncRule{InstBaseRule: rule.InstBaseRule{Name: "f"}, Func: "Foo"},
-		&rule.InstDirectiveRule{InstBaseRule: rule.InstBaseRule{Name: "d"}, Directive: "otelc:span"},
+	ruleFilters := []ruleFilter{
+		{rule: &rule.InstFuncRule{InstBaseRule: rule.InstBaseRule{Name: "f"}, Func: "Foo"}},
+		{rule: &rule.InstDirectiveRule{InstBaseRule: rule.InstBaseRule{Name: "d"}, Directive: "otelc:span"}},
 	}
 
-	known := knownDirectiveNames(rules)
+	known := knownDirectiveNames(ruleFilters)
 
 	assert.True(t, known[util.DirectiveIgnore])
 	assert.True(t, known[util.DirectiveInstrument])
@@ -3114,4 +3116,772 @@ func TestLoadRules_LogsSource(t *testing.T) {
 			assert.NotContains(t, logs.String(), "!BADKEY")
 		})
 	}
+}
+
+func TestPreciseMatching_CallAndLitExactMatching(t *testing.T) {
+	statusOnly := writeGoSource(t, "status.go",
+		"package app\n\nimport \"net/http\"\n\nconst Code = http.StatusOK\n")
+	aliasedCall := writeGoSource(t, "aliased.go",
+		"package app\n\nimport h \"net/http\"\n\nfunc F() { _, _ = h.Get(\"x\") }\n")
+	shadowedCall := writeGoSource(t, "shadowed.go",
+		"package app\n\nimport \"net/http\"\n\ntype c struct{}\n"+
+			"func (c) Get(string) {}\nfunc F() { http := c{}; http.Get(\"x\"); _ = http }\n")
+	genericCall := writeGoSource(t, "generic.go",
+		"package app\n\nimport \"example.com/gen\"\n\nfunc F() { gen.Fn[int](); gen.Fn2[int, string]() }\n")
+	litPtr := writeGoSource(t, "lit_ptr.go",
+		"package app\n\nimport \"net/http\"\n\nvar T = &http.Transport{}\n")
+	litGeneric := writeGoSource(t, "lit_gen.go",
+		"package app\n\nimport \"example.com/gen\"\n\nvar B = gen.Box[int]{}\n")
+	resolvedNameCall := writeGoSource(t, "redis.go",
+		"package app\n\nimport \"github.com/redis/go-redis/v9\"\n\nfunc F() { _ = redis.NewClient(nil) }\n")
+
+	dep := &Dependency{
+		ImportPath: "example.com/app",
+		Sources:    []string{statusOnly, aliasedCall, shadowedCall, genericCall, litPtr, litGeneric, resolvedNameCall},
+	}
+
+	httpGet := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "http-get", Target: rule.NewTarget("**")},
+		FunctionCall: "net/http.Get", ImportPath: "net/http", FuncName: "Get",
+	}
+	genFn := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "gen-fn", Target: rule.NewTarget("**")},
+		FunctionCall: "example.com/gen.Fn", ImportPath: "example.com/gen", FuncName: "Fn",
+	}
+	genFn2 := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "gen-fn2", Target: rule.NewTarget("**")},
+		FunctionCall: "example.com/gen.Fn2", ImportPath: "example.com/gen", FuncName: "Fn2",
+	}
+	redisNew := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "redis-new", Target: rule.NewTarget("**")},
+		FunctionCall: "github.com/redis/go-redis/v9.NewClient",
+		ImportPath:   "github.com/redis/go-redis/v9", FuncName: "NewClient",
+	}
+	httpTransport := &rule.InstLitRule{
+		InstBaseRule:  rule.InstBaseRule{Name: "http-transport", Target: rule.NewTarget("**")},
+		StructLiteral: "net/http.Transport", ImportPath: "net/http", TypeName: "Transport",
+	}
+	genBox := &rule.InstLitRule{
+		InstBaseRule:  rule.InstBaseRule{Name: "gen-box", Target: rule.NewTarget("**")},
+		StructLiteral: "example.com/gen.Box", ImportPath: "example.com/gen", TypeName: "Box",
+	}
+
+	sp := newTestSetupPhase()
+	sp.resolvedNames = map[string]string{"github.com/redis/go-redis/v9": "redis"}
+	set := rule.NewInstRuleSet(dep.ImportPath)
+
+	got, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{
+		httpGet, genFn, genFn2, redisNew, httpTransport, genBox,
+	}, set)
+	require.NoError(t, err)
+
+	assert.NotContains(t, got.CallRules, statusOnly)
+	assert.NotContains(t, got.CallRules, shadowedCall)
+	assert.Equal(t, []*rule.InstCallRule{httpGet}, got.CallRules[aliasedCall])
+	assert.Equal(t, []*rule.InstCallRule{genFn, genFn2}, got.CallRules[genericCall])
+	assert.Equal(t, []*rule.InstCallRule{redisNew}, got.CallRules[resolvedNameCall])
+
+	assert.NotContains(t, got.LitRules, statusOnly)
+	assert.Equal(t, []*rule.InstLitRule{httpTransport}, got.LitRules[litPtr])
+	assert.Equal(t, []*rule.InstLitRule{genBox}, got.LitRules[litGeneric])
+}
+
+func TestRunMatch_PkgImportsPreFilter(t *testing.T) {
+	httpGet := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "http-get", Target: rule.NewTarget("**")},
+		FunctionCall: "net/http.Get", ImportPath: "net/http", FuncName: "Get",
+	}
+	httpTransport := &rule.InstLitRule{
+		InstBaseRule:  rule.InstBaseRule{Name: "http-transport", Target: rule.NewTarget("**")},
+		StructLiteral: "net/http.Transport", ImportPath: "net/http", TypeName: "Transport",
+	}
+	glob := []targetRule{
+		{target: &httpGet.Target, rule: httpGet},
+		{target: &httpTransport.Target, rule: httpTransport},
+	}
+
+	t.Run("skips non-importing package without parsing files", func(t *testing.T) {
+		t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+		t.Setenv(util.EnvOtelcDebug, "1")
+		// Invalid Go syntax without //otelc:ignore: would fail if parsed.
+		unparsable := writeGoSource(t, "bad.go", "not valid go {{{")
+		dep := &Dependency{
+			ImportPath: "example.com/nohttp",
+			Sources:    []string{unparsable},
+		}
+		sp := newTestSetupPhase()
+		sp.pkgImports = collectPackageImports([]*packages.Package{
+			{
+				PkgPath: "example.com/nohttp",
+				GoFiles: []string{unparsable},
+				Imports: map[string]*packages.Package{},
+			},
+		})
+
+		got, err := sp.runMatch(t.Context(), dep, nil, glob)
+		require.NoError(t, err)
+		assert.True(t, got.IsEmpty())
+
+		data, err := os.ReadFile(filepath.Join(setupDebugDir(dep.ImportPath), "setup.matches.jsonl"))
+		require.NoError(t, err)
+		assert.Contains(t, string(data), `"reason":"import_not_found"`)
+	})
+
+	t.Run("IsTest preserves test-only imports", func(t *testing.T) {
+		pkgDir := t.TempDir()
+		prodSrc := filepath.Join(pkgDir, "p.go")
+		require.NoError(t, os.WriteFile(prodSrc, []byte("package p\n\nfunc F() {}\n"), 0o644))
+		testSrc := filepath.Join(pkgDir, "p_test.go")
+		require.NoError(t, os.WriteFile(testSrc,
+			[]byte("package p\n\nimport \"net/http\"\n\nfunc TestF() { _, _ = http.Get(\"x\") }\n"), 0o644))
+
+		netHTTP := &packages.Package{PkgPath: "net/http", Name: "http"}
+		allPkgs := []*packages.Package{
+			{
+				PkgPath: "example.com/p",
+				Name:    "p",
+				GoFiles: []string{prodSrc},
+				Imports: map[string]*packages.Package{},
+			},
+			{
+				PkgPath: "example.com/p",
+				Name:    "p",
+				ForTest: "example.com/p",
+				GoFiles: []string{prodSrc, testSrc},
+				Imports: map[string]*packages.Package{"net/http": netHTTP},
+			},
+		}
+		sp := newTestSetupPhase()
+		sp.pkgImports = collectPackageImports(allPkgs)
+
+		prodSet, err := sp.runMatch(t.Context(), &Dependency{
+			ImportPath: "example.com/p", Sources: []string{prodSrc}, IsTest: false,
+		}, nil, glob)
+		require.NoError(t, err)
+		assert.True(t, prodSet.IsEmpty())
+
+		testSet, err := sp.runMatch(t.Context(), &Dependency{
+			ImportPath: "example.com/p", Sources: []string{prodSrc, testSrc}, IsTest: true,
+		}, nil, glob)
+		require.NoError(t, err)
+		assert.Equal(t, []*rule.InstCallRule{httpGet}, testSet.CallRules[testSrc])
+		assert.NotContains(t, testSet.CallRules, prodSrc)
+	})
+
+	t.Run("unknown package falls through to file-level matching", func(t *testing.T) {
+		src := writeGoSource(t, "main.go",
+			"package main\n\nimport \"net/http\"\n\nfunc main() { _, _ = http.Get(\"x\") }\n")
+		sp := newTestSetupPhase()
+		sp.pkgImports = collectPackageImports([]*packages.Package{
+			{
+				PkgPath: "example.com/other",
+				GoFiles: []string{filepath.Join(t.TempDir(), "other.go")},
+				Imports: map[string]*packages.Package{},
+			},
+		})
+
+		got, err := sp.runMatch(t.Context(), &Dependency{
+			ImportPath: "main", Sources: []string{src},
+		}, nil, glob)
+		require.NoError(t, err)
+		assert.Equal(t, []*rule.InstCallRule{httpGet}, got.CallRules[src])
+	})
+
+	t.Run("module main and cmd/server sharing main in different dirs do not collide", func(t *testing.T) {
+		rootMain := writeGoSource(t, "main.go", "not valid go {{{")
+		serverMain := writeGoSource(t, "main.go",
+			"package main\n\nimport \"net/http\"\n\nfunc main() { _, _ = http.Get(\"x\") }\n")
+
+		netHTTP := &packages.Package{PkgPath: "net/http", Name: "http"}
+		sp := newTestSetupPhase()
+		sp.pkgImports = collectPackageImports([]*packages.Package{
+			{
+				PkgPath: "main",
+				Name:    "main",
+				GoFiles: []string{rootMain},
+				Imports: map[string]*packages.Package{},
+			},
+			{
+				PkgPath: "main",
+				Name:    "main",
+				GoFiles: []string{serverMain},
+				Imports: map[string]*packages.Package{"net/http": netHTTP},
+			},
+		})
+
+		rootSet, err := sp.runMatch(t.Context(), &Dependency{
+			ImportPath: "main", Sources: []string{rootMain},
+		}, nil, glob)
+		require.NoError(t, err)
+		assert.True(t, rootSet.IsEmpty())
+
+		serverSet, err := sp.runMatch(t.Context(), &Dependency{
+			ImportPath: "main", Sources: []string{serverMain},
+		}, nil, glob)
+		require.NoError(t, err)
+		assert.Equal(t, []*rule.InstCallRule{httpGet}, serverSet.CallRules[serverMain])
+	})
+
+	t.Run("bumped dependency directory mismatch falls through to file-level matching", func(t *testing.T) {
+		oldDir := filepath.Join(t.TempDir(), "lib@v1.0.0")
+		newDir := filepath.Join(t.TempDir(), "lib@v1.1.0")
+		require.NoError(t, os.MkdirAll(oldDir, 0o755))
+		require.NoError(t, os.MkdirAll(newDir, 0o755))
+		oldSrc := filepath.Join(oldDir, "lib.go")
+		newSrc := filepath.Join(newDir, "lib.go")
+		require.NoError(t, os.WriteFile(oldSrc, []byte("package lib\n"), 0o644))
+		require.NoError(t, os.WriteFile(newSrc,
+			[]byte("package lib\n\nimport \"net/http\"\n\nfunc F() { _, _ = http.Get(\"x\") }\n"), 0o644))
+
+		sp := newTestSetupPhase()
+		sp.pkgImports = collectPackageImports([]*packages.Package{
+			{
+				PkgPath: "example.com/lib",
+				Name:    "lib",
+				GoFiles: []string{oldSrc},
+				Imports: map[string]*packages.Package{},
+			},
+		})
+
+		got, err := sp.runMatch(t.Context(), &Dependency{
+			ImportPath: "example.com/lib",
+			Version:    "v1.1.0",
+			Sources:    []string{newSrc},
+		}, nil, glob)
+		require.NoError(t, err)
+		assert.Equal(t, []*rule.InstCallRule{httpGet}, got.CallRules[newSrc])
+	})
+
+	t.Run("external foo_test package uses its own key", func(t *testing.T) {
+		pkgDir := t.TempDir()
+		prodSrc := filepath.Join(pkgDir, "foo.go")
+		extTestSrc := filepath.Join(pkgDir, "foo_test.go")
+		require.NoError(t, os.WriteFile(prodSrc, []byte("not valid go {{{"), 0o644))
+		require.NoError(t, os.WriteFile(extTestSrc,
+			[]byte("package foo_test\n\nimport \"net/http\"\n\nfunc TestFoo() { _, _ = http.Get(\"x\") }\n"), 0o644))
+
+		netHTTP := &packages.Package{PkgPath: "net/http", Name: "http"}
+		sp := newTestSetupPhase()
+		sp.pkgImports = collectPackageImports([]*packages.Package{
+			{
+				PkgPath: "example.com/foo",
+				Name:    "foo",
+				GoFiles: []string{prodSrc},
+				Imports: map[string]*packages.Package{},
+			},
+			{
+				PkgPath: "example.com/foo_test",
+				Name:    "foo_test",
+				ForTest: "example.com/foo",
+				GoFiles: []string{extTestSrc},
+				Imports: map[string]*packages.Package{"net/http": netHTTP},
+			},
+		})
+
+		prodSet, err := sp.runMatch(t.Context(), &Dependency{
+			ImportPath: "example.com/foo", Sources: []string{prodSrc}, IsTest: false,
+		}, nil, glob)
+		require.NoError(t, err)
+		assert.True(t, prodSet.IsEmpty())
+
+		extSet, err := sp.runMatch(t.Context(), &Dependency{
+			ImportPath: "example.com/foo_test", Sources: []string{extTestSrc}, IsTest: true,
+		}, nil, glob)
+		require.NoError(t, err)
+		assert.Equal(t, []*rule.InstCallRule{httpGet}, extSet.CallRules[extTestSrc])
+	})
+}
+
+func TestCollectPackageImports(t *testing.T) {
+	pkgDir := t.TempDir()
+	extTestSrc := filepath.Join(pkgDir, "foo_test.go")
+	netHTTP := &packages.Package{PkgPath: "net/http", Name: "http"}
+
+	got := collectPackageImports([]*packages.Package{
+		{
+			PkgPath: "example.com/empty",
+			Imports: map[string]*packages.Package{"net/http": netHTTP},
+		},
+		{
+			PkgPath: "example.com/foo_test",
+			Name:    "foo_test",
+			ForTest: "example.com/foo",
+			GoFiles: []string{extTestSrc},
+			Imports: map[string]*packages.Package{"net/http": netHTTP},
+		},
+	})
+
+	assert.Len(t, got, 1)
+	key := pkgImportKey{
+		importPath: "example.com/foo_test",
+		isTest:     true,
+		dir:        filepath.Clean(pkgDir),
+	}
+	assert.Contains(t, got, key)
+	assert.Contains(t, got[key], "net/http")
+
+	sp := newTestSetupPhase()
+	sp.pkgImports = got
+
+	imps, ok := sp.packageImports(&Dependency{
+		ImportPath: "example.com/foo_test",
+		IsTest:     true,
+		Sources:    []string{extTestSrc},
+	})
+	require.True(t, ok)
+	assert.Contains(t, imps, "net/http")
+
+	_, ok = sp.packageImports(&Dependency{
+		ImportPath: "example.com/foo_test",
+		IsTest:     false,
+		Sources:    []string{extTestSrc},
+	})
+	assert.False(t, ok)
+
+	_, ok = sp.packageImports(&Dependency{
+		ImportPath: "example.com/foo_test",
+		IsTest:     true,
+		Sources:    nil,
+	})
+	assert.False(t, ok)
+}
+
+func TestPreciseMatching_GeneralPathCallAndLitWithWhere(t *testing.T) {
+	aliasedCall := writeGoSource(t, "aliased.go",
+		"package app\n\nimport h \"net/http\"\n\nfunc Init() {}\nfunc F() { _, _ = h.Get(\"x\") }\n")
+	genericCall := writeGoSource(t, "generic.go",
+		"package app\n\nimport g \"example.com/gen\"\n\nfunc Init() {}\n"+
+			"func F() { g.Fn[int](); g.Fn2[int, string](); _ = g.Box[int]{} }\n")
+	statusOnly := writeGoSource(t, "status.go",
+		"package app\n\nimport \"net/http\"\n\nfunc Init() {}\nconst Code = http.StatusOK\n")
+	noInit := writeGoSource(t, "no_init.go",
+		"package app\n\nimport \"net/http\"\n\nfunc F() { _, _ = http.Get(\"x\") }\n")
+
+	whereInit := &rule.WhereDef{File: &rule.FilterDef{HasFunc: "Init"}}
+	httpGet := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "http-get", Target: rule.NewTarget("**"), Where: whereInit},
+		FunctionCall: "net/http.Get", ImportPath: "net/http", FuncName: "Get",
+	}
+	genFn := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "gen-fn", Target: rule.NewTarget("**"), Where: whereInit},
+		FunctionCall: "example.com/gen.Fn", ImportPath: "example.com/gen", FuncName: "Fn",
+	}
+	genFn2 := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "gen-fn2", Target: rule.NewTarget("**"), Where: whereInit},
+		FunctionCall: "example.com/gen.Fn2", ImportPath: "example.com/gen", FuncName: "Fn2",
+	}
+	genBox := &rule.InstLitRule{
+		InstBaseRule:  rule.InstBaseRule{Name: "gen-box", Target: rule.NewTarget("**"), Where: whereInit},
+		StructLiteral: "example.com/gen.Box", ImportPath: "example.com/gen", TypeName: "Box",
+	}
+
+	dep := &Dependency{
+		ImportPath: "example.com/app",
+		Sources:    []string{aliasedCall, genericCall, statusOnly, noInit},
+	}
+	sp := newTestSetupPhase()
+	set := rule.NewInstRuleSet(dep.ImportPath)
+	got, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{httpGet, genFn, genFn2, genBox}, set)
+	require.NoError(t, err)
+
+	assert.Equal(t, []*rule.InstCallRule{httpGet}, got.CallRules[aliasedCall])
+	assert.Equal(t, []*rule.InstCallRule{genFn, genFn2}, got.CallRules[genericCall])
+	assert.Equal(t, []*rule.InstLitRule{genBox}, got.LitRules[genericCall])
+	assert.NotContains(t, got.CallRules, statusOnly)
+	assert.NotContains(t, got.CallRules, noInit)
+}
+
+func TestPreciseMatching_PreservesOrderMixingMethodAndFunctionCalls(t *testing.T) {
+	src := writeGoSource(t, "mix.go",
+		"package app\n\nimport \"net/http\"\n\nconst Code = http.StatusOK\n")
+	dep := &Dependency{ImportPath: "example.com/app", Sources: []string{src}}
+
+	funcCall1 := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "http-get", Target: rule.NewTarget("**")},
+		FunctionCall: "net/http.Get", ImportPath: "net/http", FuncName: "Get",
+	}
+	methodCall := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "client-do", Target: rule.NewTarget("**")},
+		MethodCall:   "net/http.Client.Do", ImportPath: "net/http", FuncName: "Do",
+	}
+	funcCall2 := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "http-post", Target: rule.NewTarget("**")},
+		FunctionCall: "net/http.Post", ImportPath: "net/http", FuncName: "Post",
+	}
+
+	sp := newTestSetupPhase()
+	set := rule.NewInstRuleSet(dep.ImportPath)
+	got, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{funcCall1, methodCall, funcCall2}, set)
+	require.NoError(t, err)
+
+	assert.Equal(t, []*rule.InstCallRule{funcCall1, methodCall, funcCall2}, got.CallRules[src])
+}
+
+func TestPreciseMatching_CallLitFastPathDirectives(t *testing.T) {
+	src := writeGoSource(t, "dir.go",
+		"package p\n\nimport \"net/http\"\n\n//otelc:typo\nfunc F() {\n\t//otelc:ignore\n\t_, _ = http.Get(\"x\")\n}\n")
+	dep := &Dependency{ImportPath: "example.com/p", Sources: []string{src}}
+	callRule := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "http-get", Target: rule.NewTarget("**")},
+		FunctionCall: "net/http.Get", ImportPath: "net/http", FuncName: "Get",
+	}
+
+	var logs bytes.Buffer
+	sp := &setupPhase{logger: slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))}
+	got, err := sp.runMatch(t.Context(), dep, nil, []targetRule{{target: &callRule.Target, rule: callRule}})
+	require.NoError(t, err)
+	assert.Equal(t, []string{src}, got.IgnoredCallFiles)
+	assert.Equal(t, []*rule.InstCallRule{callRule}, got.CallRules[src])
+	assert.Contains(t, logs.String(), "otelc:typo")
+}
+
+func TestPreciseMatching_MixedRulesConservativeFallback(t *testing.T) {
+	matchedFile := writeGoSource(t, "matched.go",
+		"package p\n\nimport \"net/http\"\n\nfunc Target() { _ = http.StatusOK }\n")
+	unmatchedFile := writeGoSource(t, "unmatched.go",
+		"package p\n\nimport \"net/http\"\n\nfunc Other() { _ = http.StatusOK }\n")
+
+	dep := &Dependency{
+		ImportPath: "example.com/p",
+		Sources:    []string{matchedFile, unmatchedFile},
+	}
+	funcRule := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "fn", Target: rule.NewTarget("example.com/p")},
+		Func:         "Target", Before: "BeforeTarget", Path: "example.com/hooks",
+	}
+	callRule := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "http-get", Target: rule.NewTarget("**")},
+		FunctionCall: "net/http.Get", ImportPath: "net/http", FuncName: "Get",
+	}
+
+	sp := newTestSetupPhase()
+	set := rule.NewInstRuleSet(dep.ImportPath)
+	got, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{callRule, funcRule}, set)
+	require.NoError(t, err)
+
+	// matchedFile has a matching func rule, so imported callRule is kept conservatively.
+	assert.Contains(t, got.FuncRules, matchedFile)
+	assert.Equal(t, []*rule.InstCallRule{callRule}, got.CallRules[matchedFile])
+	// unmatchedFile has no matching code-injecting rule, so callsite check drops callRule.
+	assert.NotContains(t, got.FuncRules, unmatchedFile)
+	assert.NotContains(t, got.CallRules, unmatchedFile)
+}
+
+func TestRunMatch_InvalidWhereValidatedBeforePkgImportPrefilter(t *testing.T) {
+	src := writeGoSource(t, "no_http.go", "package app\n\nfunc F() {}\n")
+	dep := &Dependency{ImportPath: "example.com/app", Sources: []string{src}}
+
+	badRule := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "bad-where-call",
+			Target: rule.NewTarget("**"),
+			Where: &rule.WhereDef{
+				File: &rule.FilterDef{HasFunc: "F", HasStruct: "S"},
+			},
+		},
+		FunctionCall: "net/http.Get",
+		ImportPath:   "net/http",
+		FuncName:     "Get",
+	}
+
+	sp := newTestSetupPhase()
+	sp.pkgImports = collectPackageImports([]*packages.Package{
+		{
+			PkgPath: "example.com/app",
+			Name:    "app",
+			GoFiles: []string{src},
+			Imports: map[string]*packages.Package{},
+		},
+	})
+
+	_, err := sp.runMatch(t.Context(), dep, nil, []targetRule{{target: &badRule.Target, rule: badRule}})
+	require.ErrorContains(t, err, `build where filter for rule "bad-where-call"`)
+	require.ErrorContains(t, err, "has_func, has_struct")
+}
+
+func TestPreciseMatching_StructRuleTriggersConservativeCallFallback(t *testing.T) {
+	withStruct := writeGoSource(t, "with_struct.go",
+		"package p\n\nimport \"unsafe\"\n\ntype MyStruct struct{}\nvar _ unsafe.Pointer\n")
+	withoutStruct := writeGoSource(t, "without_struct.go",
+		"package p\n\nimport \"unsafe\"\n\nvar _ unsafe.Pointer\n")
+
+	dep := &Dependency{
+		ImportPath: "example.com/p",
+		Sources:    []string{withStruct, withoutStruct},
+	}
+	structRule := &rule.InstStructRule{
+		InstBaseRule: rule.InstBaseRule{Name: "add-field", Target: rule.NewTarget("example.com/p")},
+		Struct:       "MyStruct",
+		NewField:     []*rule.InstStructField{{Name: "pad", Type: "[unsafe.Sizeof(0)]byte"}},
+	}
+	callRule := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "unsafe-sizeof", Target: rule.NewTarget("**")},
+		FunctionCall: "unsafe.Sizeof",
+		ImportPath:   "unsafe",
+		FuncName:     "Sizeof",
+	}
+
+	sp := newTestSetupPhase()
+	set := rule.NewInstRuleSet(dep.ImportPath)
+	got, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{callRule, structRule}, set)
+	require.NoError(t, err)
+
+	assert.Contains(t, got.StructRules, withStruct)
+	assert.Equal(t, []*rule.InstCallRule{callRule}, got.CallRules[withStruct])
+	assert.NotContains(t, got.StructRules, withoutStruct)
+	assert.NotContains(t, got.CallRules, withoutStruct)
+}
+
+func TestPreciseMatching_ChainedCallAndLitRulesPreserved(t *testing.T) {
+	t.Run("fast path preserves subsequent eligible rules after injecting call rule", func(t *testing.T) {
+		src := writeGoSource(t, "chain_fast.go",
+			"package app\n\nimport \"strings\"\n\nfunc F(s string) string { return strings.TrimSpace(s) }\n")
+		dep := &Dependency{ImportPath: "example.com/app", Sources: []string{src}}
+
+		earlierMiss := &rule.InstCallRule{
+			InstBaseRule: rule.InstBaseRule{Name: "earlier-lower", Target: rule.NewTarget("**")},
+			FunctionCall: "strings.ToLower",
+			ImportPath:   "strings",
+			FuncName:     "ToLower",
+			Replace:      "wrap({{ . }})",
+		}
+		trimRule := &rule.InstCallRule{
+			InstBaseRule: rule.InstBaseRule{Name: "trim-to-upper", Target: rule.NewTarget("**")},
+			FunctionCall: "strings.TrimSpace",
+			ImportPath:   "strings",
+			FuncName:     "TrimSpace",
+			Replace:      "strings.ToUpper({{ . }})",
+		}
+		chainedUpper := &rule.InstCallRule{
+			InstBaseRule: rule.InstBaseRule{Name: "wrap-upper", Target: rule.NewTarget("**")},
+			FunctionCall: "strings.ToUpper",
+			ImportPath:   "strings",
+			FuncName:     "ToUpper",
+			Replace:      "wrap({{ . }})",
+		}
+		unimported := &rule.InstCallRule{
+			InstBaseRule: rule.InstBaseRule{Name: "http-get", Target: rule.NewTarget("**")},
+			FunctionCall: "net/http.Get",
+			ImportPath:   "net/http",
+			FuncName:     "Get",
+			Replace:      "wrap({{ . }})",
+		}
+
+		sp := newTestSetupPhase()
+		set := rule.NewInstRuleSet(dep.ImportPath)
+		got, err := sp.preciseMatching(
+			t.Context(),
+			dep,
+			[]rule.InstRule{earlierMiss, trimRule, chainedUpper, unimported},
+			set,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, []*rule.InstCallRule{trimRule, chainedUpper}, got.CallRules[src])
+	})
+
+	t.Run("general path preserves subsequent eligible rules after injecting call rule", func(t *testing.T) {
+		src := writeGoSource(
+			t,
+			"chain_general.go",
+			"package app\n\nimport \"strings\"\n\n"+
+				"func Init() {}\nfunc F(s string) string { return strings.TrimSpace(s) }\n",
+		)
+		dep := &Dependency{ImportPath: "example.com/app", Sources: []string{src}}
+		whereInit := &rule.WhereDef{File: &rule.FilterDef{HasFunc: "Init"}}
+
+		trimRule := &rule.InstCallRule{
+			InstBaseRule: rule.InstBaseRule{Name: "trim-to-upper", Target: rule.NewTarget("**"), Where: whereInit},
+			FunctionCall: "strings.TrimSpace",
+			ImportPath:   "strings",
+			FuncName:     "TrimSpace",
+			Replace:      "strings.ToUpper({{ . }})",
+		}
+		chainedUpper := &rule.InstCallRule{
+			InstBaseRule: rule.InstBaseRule{Name: "wrap-upper", Target: rule.NewTarget("**"), Where: whereInit},
+			FunctionCall: "strings.ToUpper",
+			ImportPath:   "strings",
+			FuncName:     "ToUpper",
+			Replace:      "wrap({{ . }})",
+		}
+
+		sp := newTestSetupPhase()
+		set := rule.NewInstRuleSet(dep.ImportPath)
+		got, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{trimRule, chainedUpper}, set)
+		require.NoError(t, err)
+		assert.Equal(t, []*rule.InstCallRule{trimRule, chainedUpper}, got.CallRules[src])
+	})
+
+	t.Run("literal rule with set fields preserves subsequent eligible call rule", func(t *testing.T) {
+		src := writeGoSource(t, "chain_lit.go",
+			"package app\n\nimport \"net/http\"\n\nfunc F() any { return &http.Transport{} }\n")
+		dep := &Dependency{ImportPath: "example.com/app", Sources: []string{src}}
+
+		litRule := &rule.InstLitRule{
+			InstBaseRule:  rule.InstBaseRule{Name: "set-transport", Target: rule.NewTarget("**")},
+			StructLiteral: "net/http.Transport",
+			ImportPath:    "net/http",
+			TypeName:      "Transport",
+			Field:         []*rule.InstLitField{{Name: "Proxy", Value: "http.ProxyFromEnvironment"}},
+		}
+		chainedCall := &rule.InstCallRule{
+			InstBaseRule: rule.InstBaseRule{Name: "http-get", Target: rule.NewTarget("**")},
+			FunctionCall: "net/http.Get",
+			ImportPath:   "net/http",
+			FuncName:     "Get",
+			Replace:      "wrap({{ . }})",
+		}
+
+		sp := newTestSetupPhase()
+		set := rule.NewInstRuleSet(dep.ImportPath)
+		got, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{litRule, chainedCall}, set)
+		require.NoError(t, err)
+		assert.Equal(t, []*rule.InstLitRule{litRule}, got.LitRules[src])
+		assert.Equal(t, []*rule.InstCallRule{chainedCall}, got.CallRules[src])
+	})
+}
+
+func BenchmarkMatchDeps_GlobCallRules(b *testing.B) {
+	dir := b.TempDir()
+	const numPkgs = 200
+	deps := make([]*Dependency, 0, numPkgs)
+	pkgs := make([]*packages.Package, 0, numPkgs)
+	netHTTP := &packages.Package{PkgPath: "net/http", Name: "http"}
+
+	for i := range numPkgs {
+		pkgPath := fmt.Sprintf("example.com/pkg%03d", i)
+		var content string
+		imps := map[string]*packages.Package{}
+		switch {
+		case i < 10:
+			content = "package p\n\nimport \"net/http\"\n\nfunc F() { _, _ = http.Get(\"x\") }\n"
+			imps["net/http"] = netHTTP
+		case i < 40:
+			content = "package p\n\nimport \"net/http\"\n\nconst C = http.StatusOK\n"
+			imps["net/http"] = netHTTP
+		default:
+			content = "package p\n\nimport \"fmt\"\n\nfunc F() { fmt.Println(\"hi\") }\n"
+		}
+		src := filepath.Join(dir, fmt.Sprintf("pkg%03d.go", i))
+		if err := os.WriteFile(src, []byte(content), 0o644); err != nil {
+			b.Fatal(err)
+		}
+		deps = append(deps, &Dependency{ImportPath: pkgPath, Sources: []string{src}, CgoFiles: map[string]string{}})
+		pkgs = append(pkgs, &packages.Package{PkgPath: pkgPath, Name: "p", GoFiles: []string{src}, Imports: imps})
+	}
+
+	target := rule.NewTarget("**")
+	globRules := []targetRule{
+		{target: &target, rule: &rule.InstCallRule{
+			InstBaseRule: rule.InstBaseRule{Name: "http-get", Target: target},
+			FunctionCall: "net/http.Get", ImportPath: "net/http", FuncName: "Get",
+		}},
+		{target: &target, rule: &rule.InstCallRule{
+			InstBaseRule: rule.InstBaseRule{Name: "http-post", Target: target},
+			FunctionCall: "net/http.Post", ImportPath: "net/http", FuncName: "Post",
+		}},
+		{target: &target, rule: &rule.InstCallRule{
+			InstBaseRule: rule.InstBaseRule{Name: "http-head", Target: target},
+			FunctionCall: "net/http.Head", ImportPath: "net/http", FuncName: "Head",
+		}},
+		{target: &target, rule: &rule.InstLitRule{
+			InstBaseRule:  rule.InstBaseRule{Name: "http-transport", Target: target},
+			StructLiteral: "net/http.Transport", ImportPath: "net/http", TypeName: "Transport",
+		}},
+	}
+	idx := &ruleIndex{exactRules: map[string][]rule.InstRule{}, globRules: globRules}
+
+	sp := &setupPhase{
+		logger:     slog.New(slog.DiscardHandler),
+		pkgImports: collectPackageImports(pkgs),
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		matched, err := sp.matchDeps(b.Context(), deps, idx)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(matched) != 10 {
+			b.Fatalf("expected 10 matched packages, got %d", len(matched))
+		}
+	}
+}
+
+func TestMatchCallLitFastEdgeCases(t *testing.T) {
+	src := `package p
+
+import "net/http"
+
+type local struct{}
+
+func f() {
+	plain()
+	get().Do()
+	_ = local{}
+	_ = []http.Client{}
+	_, _ = http.Get("x")
+	_ = http.Transport{}
+}
+`
+	fset := token.NewFileSet()
+	goFile, err := goparser.ParseFile(fset, "p.go", src, 0)
+	require.NoError(t, err)
+	aliases := map[string]string{"http": "net/http"}
+	goFound := collectGoASTCallsAndLiterals(goFile, aliases)
+	assert.Contains(t, goFound.calls, qualifiedName{importPath: "net/http", name: "Get"})
+	assert.Contains(t, goFound.literals, qualifiedName{importPath: "net/http", name: "Transport"})
+
+	dstFile, err := ast.ParseBytesFast("p.go", []byte(src))
+	require.NoError(t, err)
+	dstFound := collectDSTCallsAndLiterals(dstFile, aliases)
+	assert.Equal(t, goFound.calls, dstFound.calls)
+	assert.Equal(t, goFound.literals, dstFound.literals)
+
+	assert.False(t, callLitRuleCanInjectCode(&rule.InstFuncRule{Func: "F"}))
+
+	httpGet := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "http-get", Target: rule.NewTarget("**")},
+		FunctionCall: "net/http.Get", ImportPath: "net/http", FuncName: "Get",
+	}
+	sp := newTestSetupPhase()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	dep := &Dependency{ImportPath: "example.com/app", Sources: []string{filepath.Join(t.TempDir(), "missing.go")}}
+	_, err = sp.preciseMatching(ctx, dep, []rule.InstRule{httpGet}, rule.NewInstRuleSet(dep.ImportPath))
+	require.ErrorIs(t, err, context.Canceled)
+
+	_, err = sp.preciseMatching(t.Context(), dep, []rule.InstRule{httpGet}, rule.NewInstRuleSet(dep.ImportPath))
+	require.ErrorContains(t, err, "failed to read file")
+
+	badPkg := writeGoSource(t, "bad_pkg.go", "not valid go\n")
+	dep.Sources = []string{badPkg}
+	_, err = sp.preciseMatching(t.Context(), dep, []rule.InstRule{httpGet}, rule.NewInstRuleSet(dep.ImportPath))
+	require.ErrorContains(t, err, "failed to parse file")
+
+	badDirective := writeGoSource(t, "bad_dir.go", "package p\n\n//otelc:ignore\nfunc (\n")
+	dep.Sources = []string{badDirective}
+	_, err = sp.preciseMatching(t.Context(), dep, []rule.InstRule{httpGet}, rule.NewInstRuleSet(dep.ImportPath))
+	require.Error(t, err)
+
+	badBody := writeGoSource(t, "bad_body.go", "package p\n\nimport \"net/http\"\n\nfunc F() { http.Get( }\n")
+	dep.Sources = []string{badBody}
+	_, err = sp.preciseMatching(t.Context(), dep, []rule.InstRule{httpGet}, rule.NewInstRuleSet(dep.ImportPath))
+	require.ErrorContains(t, err, "failed to parse file")
+
+	isTestTrue := true
+	whereTest := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:   "test-only",
+			Target: rule.NewTarget("**"),
+			Where:  &rule.WhereDef{File: &rule.FilterDef{IsTest: &isTestTrue}},
+		},
+		FunctionCall: "net/http.Get", ImportPath: "net/http", FuncName: "Get",
+	}
+	good := writeGoSource(t, "good.go", "package p\n\nimport \"net/http\"\n\nfunc F() { _, _ = http.Get(\"x\") }\n")
+	dep.Sources = []string{good}
+	set, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{whereTest}, rule.NewInstRuleSet(dep.ImportPath))
+	require.NoError(t, err)
+	assert.Empty(t, set.CallRules)
 }

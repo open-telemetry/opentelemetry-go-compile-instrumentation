@@ -7,6 +7,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	goast "go/ast"
+	"go/parser"
+	"go/token"
 	"io/fs"
 	"maps"
 	"os"
@@ -18,6 +21,7 @@ import (
 
 	"github.com/dave/dst"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/tools/go/packages"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
@@ -127,6 +131,84 @@ func markIgnoredCallFiles(dep *Dependency, set *rule.InstRuleSet) error {
 	return nil
 }
 
+type pkgImportKey struct {
+	importPath string
+	isTest     bool
+	dir        string
+}
+
+func collectPackageImports(pkgs []*packages.Package) map[pkgImportKey]map[string]struct{} {
+	result := make(map[pkgImportKey]map[string]struct{})
+	packages.Visit(pkgs, nil, func(pkg *packages.Package) {
+		if pkg.PkgPath == "" || len(pkg.Errors) > 0 || len(pkg.GoFiles) == 0 {
+			return
+		}
+		key := pkgImportKey{
+			importPath: pkg.PkgPath,
+			isTest:     pkg.ForTest != "",
+			dir:        filepath.Clean(filepath.Dir(pkg.GoFiles[0])),
+		}
+		imps := result[key]
+		if imps == nil {
+			imps = make(map[string]struct{}, len(pkg.Imports))
+			result[key] = imps
+		}
+		for impPath, impPkg := range pkg.Imports {
+			imps[impPath] = struct{}{}
+			if impPkg != nil && impPkg.PkgPath != "" {
+				imps[impPkg.PkgPath] = struct{}{}
+			}
+		}
+	})
+	return result
+}
+
+func (sp *setupPhase) packageImports(dep *Dependency) (map[string]struct{}, bool) {
+	if sp.pkgImports == nil || len(dep.Sources) == 0 {
+		return nil, false
+	}
+	key := pkgImportKey{
+		importPath: dep.ImportPath,
+		isTest:     dep.IsTest,
+		dir:        filepath.Clean(filepath.Dir(dep.Sources[0])),
+	}
+	imps, ok := sp.pkgImports[key]
+	return imps, ok
+}
+
+// directImportRequirement returns the import path a package must directly
+// import for r to possibly match. Rules that do not require a direct import
+// (such as method_call, func, raw, struct, decl, directive) return ("", false).
+func directImportRequirement(r rule.InstRule) (string, bool) {
+	switch rt := r.(type) {
+	case *rule.InstCallRule:
+		if rt.MethodCall == "" {
+			return rt.ImportPath, true
+		}
+	case *rule.InstLitRule:
+		return rt.ImportPath, true
+	}
+	return "", false
+}
+
+func (sp *setupPhase) filterRulesByPkgImports(dep *Dependency, ruleFilters []ruleFilter) []ruleFilter {
+	directImports, known := sp.packageImports(dep)
+	if !known {
+		return ruleFilters
+	}
+	kept := ruleFilters[:0]
+	for _, rf := range ruleFilters {
+		if impPath, needsImport := directImportRequirement(rf.rule); needsImport {
+			if _, imported := directImports[impPath]; !imported {
+				sp.reportDecision("", rf.rule, "import_not_found")
+				continue
+			}
+		}
+		kept = append(kept, rf)
+	}
+	return kept
+}
+
 // runMatch performs precise matching of rules against the dependency's source code.
 // It parses source files and matches rules by examining AST nodes.
 //
@@ -151,10 +233,6 @@ func (sp *setupPhase) runMatch(
 		sp.Debug("Set CGO file map", "dep", dep.ImportPath, "cgoFiles", dep.CgoFiles)
 	}
 
-	if err := markIgnoredCallFiles(dep, set); err != nil {
-		return nil, err
-	}
-
 	// Fast path: exact-target rules via a single map lookup.
 	relevantRules := exactRules[dep.ImportPath]
 
@@ -168,6 +246,9 @@ func (sp *setupPhase) runMatch(
 	}
 
 	if len(relevantRules) == 0 {
+		if err := markIgnoredCallFiles(dep, set); err != nil {
+			return nil, err
+		}
 		return set, nil
 	}
 
@@ -202,11 +283,24 @@ func (sp *setupPhase) runMatch(
 		preciseRules = append(preciseRules, r)
 	}
 
-	if len(preciseRules) == 0 {
+	ruleFilters, err := compileRuleFilters(preciseRules)
+	if err != nil {
+		return nil, err
+	}
+
+	// Package-level import pre-filter: when the package's direct imports are
+	// known from the package graph, drop function_call and struct_literal rules
+	// whose target package is not imported before reading/parsing any files.
+	ruleFilters = sp.filterRulesByPkgImports(dep, ruleFilters)
+
+	if len(ruleFilters) == 0 {
+		if err = markIgnoredCallFiles(dep, set); err != nil {
+			return nil, err
+		}
 		if !set.IsEmpty() && len(dep.Sources) > 0 {
-			name, err := ast.ParsePackageName(dep.Sources[0])
-			if err != nil {
-				return nil, err
+			name, parseErr := ast.ParsePackageName(dep.Sources[0])
+			if parseErr != nil {
+				return nil, parseErr
 			}
 			set.SetPackageName(name)
 		}
@@ -214,7 +308,7 @@ func (sp *setupPhase) runMatch(
 		return set, nil
 	}
 
-	return sp.preciseMatching(ctx, dep, preciseRules, set)
+	return sp.preciseMatchingWithFilters(ctx, dep, ruleFilters, set)
 }
 
 // ruleFilter pairs a rule with its pre-compiled where filter (if any).
@@ -223,6 +317,327 @@ func (sp *setupPhase) runMatch(
 type ruleFilter struct {
 	rule  rule.InstRule
 	where filter // nil means no where clause — apply unconditionally
+}
+
+func compileRuleFilters(rules []rule.InstRule) ([]ruleFilter, error) {
+	ruleFilters := make([]ruleFilter, 0, len(rules))
+	for _, r := range rules {
+		var f filter
+		if where := r.GetWhere(); where != nil {
+			var err error
+			f, err = build(where)
+			if err != nil {
+				return nil, ex.Wrapf(err, "build where filter for rule %q", r.GetName())
+			}
+		}
+		ruleFilters = append(ruleFilters, ruleFilter{rule: r, where: f})
+	}
+	return ruleFilters, nil
+}
+
+// canUseFastCallLitPath reports whether every rule in ruleFilters is a
+// function_call or struct_literal rule whose where filter does not need a
+// full *dst.File.
+func canUseFastCallLitPath(ruleFilters []ruleFilter) bool {
+	for _, rf := range ruleFilters {
+		if filterNeedsAST(rf.where) {
+			return false
+		}
+		switch r := rf.rule.(type) {
+		case *rule.InstCallRule:
+			if r.MethodCall != "" {
+				return false
+			}
+		case *rule.InstLitRule:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+type qualifiedName struct {
+	importPath string
+	name       string
+}
+
+type fileCallLiterals struct {
+	calls    map[qualifiedName]struct{}
+	literals map[qualifiedName]struct{}
+}
+
+type preciseMatchEnv struct {
+	dep         *Dependency
+	ruleFilters []ruleFilter
+	isTest      bool
+	known       map[string]bool
+	set         *rule.InstRuleSet
+}
+
+func goastWithoutTypeArguments(expr goast.Expr) goast.Expr {
+	switch e := expr.(type) {
+	case *goast.IndexExpr:
+		return e.X
+	case *goast.IndexListExpr:
+		return e.X
+	default:
+		return expr
+	}
+}
+
+func dstWithoutTypeArguments(expr dst.Expr) dst.Expr {
+	switch e := expr.(type) {
+	case *dst.IndexExpr:
+		return e.X
+	case *dst.IndexListExpr:
+		return e.X
+	default:
+		return expr
+	}
+}
+
+func collectGoASTCallsAndLiterals(file *goast.File, aliases map[string]string) fileCallLiterals {
+	res := fileCallLiterals{
+		calls:    make(map[qualifiedName]struct{}),
+		literals: make(map[qualifiedName]struct{}),
+	}
+	goast.Inspect(file, func(n goast.Node) bool {
+		switch node := n.(type) {
+		case *goast.CallExpr:
+			sel, ok := goastWithoutTypeArguments(node.Fun).(*goast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			ident, isIdent := sel.X.(*goast.Ident)
+			if !isIdent || ident.Obj != nil {
+				return true
+			}
+			if pkgPath, hasAlias := aliases[ident.Name]; hasAlias {
+				res.calls[qualifiedName{importPath: pkgPath, name: sel.Sel.Name}] = struct{}{}
+			}
+		case *goast.CompositeLit:
+			sel, ok := goastWithoutTypeArguments(node.Type).(*goast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			ident, isIdent := sel.X.(*goast.Ident)
+			if !isIdent {
+				return true
+			}
+			if pkgPath, hasAlias := aliases[ident.Name]; hasAlias {
+				res.literals[qualifiedName{importPath: pkgPath, name: sel.Sel.Name}] = struct{}{}
+			}
+		}
+		return true
+	})
+	return res
+}
+
+func collectDSTCallsAndLiterals(file *dst.File, aliases map[string]string) fileCallLiterals {
+	res := fileCallLiterals{
+		calls:    make(map[qualifiedName]struct{}),
+		literals: make(map[qualifiedName]struct{}),
+	}
+	dst.Inspect(file, func(n dst.Node) bool {
+		switch node := n.(type) {
+		case *dst.CallExpr:
+			sel, ok := dstWithoutTypeArguments(node.Fun).(*dst.SelectorExpr)
+			if !ok {
+				return true
+			}
+			ident, isIdent := sel.X.(*dst.Ident)
+			if !isIdent {
+				return true
+			}
+			if pkgPath, hasAlias := aliases[ident.Name]; hasAlias {
+				res.calls[qualifiedName{importPath: pkgPath, name: sel.Sel.Name}] = struct{}{}
+			}
+		case *dst.CompositeLit:
+			sel, ok := dstWithoutTypeArguments(node.Type).(*dst.SelectorExpr)
+			if !ok {
+				return true
+			}
+			ident, isIdent := sel.X.(*dst.Ident)
+			if !isIdent {
+				return true
+			}
+			if pkgPath, hasAlias := aliases[ident.Name]; hasAlias {
+				res.literals[qualifiedName{importPath: pkgPath, name: sel.Sel.Name}] = struct{}{}
+			}
+		}
+		return true
+	})
+	return res
+}
+
+// matchCallLitFast matches function_call and struct_literal rules without DST
+// decoration. Each source file is read once, its imports parsed with
+// parser.ImportsOnly, and a plain go/parser full parse runs lazily only when at
+// least one rule's import and target identifier both appear in the file.
+func (sp *setupPhase) matchCallLitFast(ctx context.Context, env *preciseMatchEnv) (*rule.InstRuleSet, error) {
+	for _, source := range env.dep.Sources {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if err := sp.matchCallLitFile(env, source); err != nil {
+			return nil, err
+		}
+	}
+	return env.set, nil
+}
+
+func (sp *setupPhase) matchCallLitFile(env *preciseMatchEnv, source string) error {
+	src, err := os.ReadFile(source)
+	if err != nil {
+		return ex.Wrapf(err, "failed to read file %s", source)
+	}
+
+	fset := token.NewFileSet()
+	impFile, err := parser.ParseFile(fset, filepath.Base(source), src, parser.ImportsOnly)
+	if err != nil {
+		return ex.Wrapf(err, "failed to parse file %s", source)
+	}
+	env.set.SetPackageName(impFile.Name.Name)
+
+	if bytes.Contains(src, []byte("otelc:")) {
+		dstTree, parseErr := ast.ParseBytesFast(source, src)
+		if parseErr != nil {
+			return parseErr
+		}
+		sp.warnUnknownDirectives(source, dstTree, env.known)
+		if bytes.Contains(src, []byte("//"+util.DirectiveIgnore)) &&
+			ast.FileHasIgnoredCall(dstTree, util.DirectiveIgnore) {
+			env.set.AddIgnoredCallFile(source)
+		}
+	}
+
+	aliases, imported := ast.GoASTImportAliasMap(impFile, sp.resolvedNames)
+	mctx := matchContext{
+		IsTest:        env.isTest,
+		SourceFile:    source,
+		PackageName:   impFile.Name.Name,
+		ResolvedNames: sp.resolvedNames,
+	}
+
+	surviving := sp.filterCallLitCandidates(source, src, env.ruleFilters, &mctx, imported)
+	if len(surviving) == 0 {
+		return nil
+	}
+
+	fullFile, err := parser.ParseFile(fset, filepath.Base(source), src, 0)
+	if err != nil {
+		return ex.Wrapf(err, "failed to parse file %s", source)
+	}
+	found := collectGoASTCallsAndLiterals(fullFile, aliases)
+	sp.applyCallLitMatches(env, source, surviving, found)
+	return nil
+}
+
+func callLitRuleCanInjectCode(r rule.InstRule) bool {
+	switch rt := r.(type) {
+	case *rule.InstCallRule:
+		return rt.Replace != "" || len(rt.AppendArgs) > 0
+	case *rule.InstLitRule:
+		return rt.Pointer != "" || rt.Value != "" || len(rt.Field) > 0
+	default:
+		return false
+	}
+}
+
+func (sp *setupPhase) filterCallLitCandidates(
+	source string,
+	src []byte,
+	ruleFilters []ruleFilter,
+	mctx *matchContext,
+	imported map[string]bool,
+) []rule.InstRule {
+	var eligible []rule.InstRule
+	hasTextMatch := false
+	for _, rf := range ruleFilters {
+		if rf.where != nil && !rf.where.Match(mctx) {
+			sp.reportDecision(source, rf.rule, "where_mismatch")
+			continue
+		}
+		switch r := rf.rule.(type) {
+		case *rule.InstCallRule:
+			if !imported[r.ImportPath] {
+				sp.reportDecision(source, r, "import_not_found")
+				continue
+			}
+			eligible = append(eligible, r)
+			if !hasTextMatch && bytes.Contains(src, []byte(r.FuncName)) {
+				hasTextMatch = true
+			}
+		case *rule.InstLitRule:
+			if !imported[r.ImportPath] {
+				sp.reportDecision(source, r, "import_not_found")
+				continue
+			}
+			eligible = append(eligible, r)
+			if !hasTextMatch && bytes.Contains(src, []byte(r.TypeName)) {
+				hasTextMatch = true
+			}
+		}
+	}
+	if !hasTextMatch {
+		for _, r := range eligible {
+			switch r.(type) {
+			case *rule.InstCallRule:
+				sp.reportDecision(source, r, "call_not_found")
+			case *rule.InstLitRule:
+				sp.reportDecision(source, r, "literal_not_found")
+			}
+		}
+		return nil
+	}
+	return eligible
+}
+
+func (sp *setupPhase) applyCallLitMatches(
+	env *preciseMatchEnv,
+	source string,
+	rules []rule.InstRule,
+	found fileCallLiterals,
+) {
+	injected := false
+	for _, r := range rules {
+		switch rt := r.(type) {
+		case *rule.InstCallRule:
+			_, ok := found.calls[qualifiedName{importPath: rt.ImportPath, name: rt.FuncName}]
+			if ok || injected {
+				env.set.AddCallRule(source, rt)
+				sp.Info("Match call rule", "rule", rt, "dep", env.dep)
+				sp.reportDecision(source, rt, "")
+				if callLitRuleCanInjectCode(rt) {
+					injected = true
+				}
+			} else {
+				sp.reportDecision(source, rt, "call_not_found")
+			}
+		case *rule.InstLitRule:
+			_, ok := found.literals[qualifiedName{importPath: rt.ImportPath, name: rt.TypeName}]
+			if ok || injected {
+				env.set.AddLitRule(source, rt)
+				sp.Info("Match literal rule", "rule", rt, "dep", env.dep)
+				sp.reportDecision(source, rt, "")
+				if callLitRuleCanInjectCode(rt) {
+					injected = true
+				}
+			} else {
+				sp.reportDecision(source, rt, "literal_not_found")
+			}
+		}
+	}
+}
+
+func fileHasCodeInjectingRule(set *rule.InstRuleSet, source string) bool {
+	return len(set.FileRules) > 0 ||
+		len(set.FuncRules[source]) > 0 ||
+		len(set.StructRules[source]) > 0 ||
+		len(set.RawRules[source]) > 0 ||
+		len(set.DirectiveRules[source]) > 0 ||
+		len(set.DeclRules[source]) > 0 ||
+		len(set.CallRules[source]) > 0
 }
 
 // preciseMatching performs AST-based matching of instrumentation rules against
@@ -237,89 +652,164 @@ func (sp *setupPhase) preciseMatching(
 	rules []rule.InstRule,
 	set *rule.InstRuleSet,
 ) (*rule.InstRuleSet, error) {
+	ruleFilters, err := compileRuleFilters(rules)
+	if err != nil {
+		return nil, err
+	}
+	return sp.preciseMatchingWithFilters(ctx, dep, ruleFilters, set)
+}
+
+func (sp *setupPhase) preciseMatchingWithFilters(
+	ctx context.Context,
+	dep *Dependency,
+	ruleFilters []ruleFilter,
+	set *rule.InstRuleSet,
+) (*rule.InstRuleSet, error) {
 	if len(dep.Sources) == 0 {
-		for _, r := range rules {
-			sp.reportDecision("", r, "no_source_files")
+		for _, rf := range ruleFilters {
+			sp.reportDecision("", rf.rule, "no_source_files")
 		}
 		return set, nil
 	}
 
-	// Pre-build filter trees for rules that carry a where clause.
-	// Filters are compiled once per rule before source-file iteration, not
-	// once per source file. In practice each rule targets exactly one import
-	// path, so each filter is built once across the entire matchDeps run.
-	ruleFilters := make([]ruleFilter, 0, len(rules))
-	for _, r := range rules {
-		var f filter
-		if where := r.GetWhere(); where != nil {
-			var err error
-			f, err = build(where)
-			if err != nil {
-				return nil, ex.Wrapf(err, "build where filter for rule %q", r.GetName())
-			}
-		}
-		ruleFilters = append(ruleFilters, ruleFilter{rule: r, where: f})
+	env := &preciseMatchEnv{
+		dep:         dep,
+		ruleFilters: ruleFilters,
+		// IsTest is a property of the whole compile (every file in a test build
+		// shares it), so compute it once and reuse it across each file's context.
+		isTest: util.IsTestBuild(dep.Sources),
+		known:  knownDirectiveNames(ruleFilters),
+		set:    set,
 	}
 
-	// IsTest is a property of the whole compile (every file in a test build
-	// shares it), so compute it once and reuse it across each file's context.
-	isTest := util.IsTestBuild(dep.Sources)
-
-	known := knownDirectiveNames(rules)
+	if len(set.FileRules) == 0 && canUseFastCallLitPath(ruleFilters) {
+		return sp.matchCallLitFast(ctx, env)
+	}
 
 	for _, source := range dep.Sources {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		// Parse the source code. Since the only purpose here is to match,
-		// no node updates, we can use the fast variant.
-		//
-		// Contract: ParseFileFast returns (non-nil, nil) on success and
-		// (nil, non-nil error) on failure. A (nil, nil) return is not
-		// possible per the Go stdlib parser.ParseFile and dave/dst
-		// DecorateFile contracts that ParseFileFast composes.
-		tree, err := ast.ParseFileFast(source)
-		if err != nil {
+		if err := sp.matchGeneralFile(env, source); err != nil {
 			return nil, err
-		}
-		// All files in a Go package share the same declared package name, so
-		// this is idempotent across iterations; SetPackageName asserts non-empty.
-		set.SetPackageName(tree.Name.Name)
-
-		sp.warnUnknownDirectives(source, tree, known)
-
-		// mctx is allocated once per source file and reused across all rules
-		// evaluated against that file. All fields are constant for a given
-		// source file, so no updates are needed inside the inner loop.
-		mctx := matchContext{
-			IsTest:        isTest,
-			SourceFile:    source,
-			AST:           tree,
-			ResolvedNames: sp.resolvedNames,
-		}
-
-		for _, rf := range ruleFilters {
-			// Evaluate the where filter if one is defined for this rule.
-			// A nil filter means the rule applies to all files unconditionally.
-			if rf.where != nil && !rf.where.Match(&mctx) {
-				sp.reportDecision(source, rf.rule, "where_mismatch")
-				continue
-			}
-			if err = sp.matchOneRule(tree, source, rf.rule, set, dep); err != nil {
-				return nil, err
-			}
 		}
 	}
 	return set, nil
 }
 
-func knownDirectiveNames(rules []rule.InstRule) map[string]bool {
+func (sp *setupPhase) matchGeneralFile(env *preciseMatchEnv, source string) error {
+	src, err := os.ReadFile(source)
+	if err != nil {
+		return ex.Wrapf(err, "failed to read file %s", source)
+	}
+
+	tree, err := ast.ParseBytesFast(source, src)
+	if err != nil {
+		return err
+	}
+	// All files in a Go package share the same declared package name, so
+	// this is idempotent across iterations; SetPackageName asserts non-empty.
+	env.set.SetPackageName(tree.Name.Name)
+
+	if bytes.Contains(src, []byte("otelc:")) {
+		sp.warnUnknownDirectives(source, tree, env.known)
+		if bytes.Contains(src, []byte("//"+util.DirectiveIgnore)) &&
+			ast.FileHasIgnoredCall(tree, util.DirectiveIgnore) {
+			env.set.AddIgnoredCallFile(source)
+		}
+	}
+
+	// mctx is allocated once per source file and reused across all rules
+	// evaluated against that file. All fields are constant for a given
+	// source file, so no updates are needed inside the inner loop.
+	mctx := matchContext{
+		IsTest:        env.isTest,
+		SourceFile:    source,
+		PackageName:   tree.Name.Name,
+		AST:           tree,
+		ResolvedNames: sp.resolvedNames,
+	}
+
+	var deferredCallLit []rule.InstRule
+	hasMethodCall := false
+	for _, rf := range env.ruleFilters {
+		// Evaluate the where filter if one is defined for this rule.
+		// A nil filter means the rule applies to all files unconditionally.
+		if rf.where != nil && !rf.where.Match(&mctx) {
+			sp.reportDecision(source, rf.rule, "where_mismatch")
+			continue
+		}
+		switch rt := rf.rule.(type) {
+		case *rule.InstCallRule:
+			if rt.MethodCall != "" {
+				hasMethodCall = true
+			}
+			deferredCallLit = append(deferredCallLit, rt)
+			continue
+		case *rule.InstLitRule:
+			deferredCallLit = append(deferredCallLit, rt)
+			continue
+		}
+		if err = sp.matchOneRule(tree, source, rf.rule, env.set, env.dep); err != nil {
+			return err
+		}
+	}
+
+	if len(deferredCallLit) > 0 {
+		sp.matchDeferredCallLitRules(env, tree, source, deferredCallLit, hasMethodCall)
+	}
+	return nil
+}
+
+// matchDeferredCallLitRules resolves function_call and struct_literal rules on
+// the general path. If another code-injecting rule matched this file or package,
+// imported call/literal rules are kept conservatively because injected code may
+// introduce new calls or literals; otherwise exact AST callsite/literal
+// presence is required.
+func (sp *setupPhase) matchDeferredCallLitRules(
+	env *preciseMatchEnv,
+	tree *dst.File,
+	source string,
+	rules []rule.InstRule,
+	hasMethodCall bool,
+) {
+	if hasMethodCall || fileHasCodeInjectingRule(env.set, source) {
+		for _, r := range rules {
+			var reason string
+			switch rt := r.(type) {
+			case *rule.InstCallRule:
+				reason = sp.matchCallRule(tree, source, rt, env.set, env.dep)
+			case *rule.InstLitRule:
+				reason = sp.matchLitRule(tree, source, rt, env.set, env.dep)
+			}
+			sp.reportDecision(source, r, reason)
+		}
+		return
+	}
+
+	var imported []rule.InstRule
+	for _, r := range rules {
+		impPath, _ := directImportRequirement(r)
+		if !ast.FileImports(tree, impPath) {
+			sp.reportDecision(source, r, "import_not_found")
+			continue
+		}
+		imported = append(imported, r)
+	}
+	if len(imported) == 0 {
+		return
+	}
+	found := collectDSTCallsAndLiterals(tree, ast.ImportAliasMap(tree, sp.resolvedNames))
+	sp.applyCallLitMatches(env, source, imported, found)
+}
+
+func knownDirectiveNames(ruleFilters []ruleFilter) map[string]bool {
 	known := make(map[string]bool, len(util.BuiltinDirectives))
 	for _, name := range util.BuiltinDirectives {
 		known[name] = true
 	}
-	for _, r := range rules {
-		if dr, ok := r.(*rule.InstDirectiveRule); ok {
+	for _, rf := range ruleFilters {
+		if dr, ok := rf.rule.(*rule.InstDirectiveRule); ok {
 			known[dr.Directive] = true
 		}
 	}

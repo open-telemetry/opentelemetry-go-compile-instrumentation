@@ -4,6 +4,8 @@
 package ast
 
 import (
+	goast "go/ast"
+	goparser "go/parser"
 	"go/token"
 	"testing"
 
@@ -789,4 +791,39 @@ func TestMatchesTypeName_UnsupportedNodeDoesNotMatch(t *testing.T) {
 	matched, err := MatchesTypeName(sliceType, "context.Context", nil)
 	require.NoError(t, err)
 	assert.False(t, matched)
+}
+
+func TestGoASTImportAliasMap(t *testing.T) {
+	aliases, imported := GoASTImportAliasMap(nil, nil)
+	assert.Nil(t, aliases)
+	assert.Nil(t, imported)
+
+	src := `package p
+
+import (
+	"fmt"
+	h "net/http"
+	_ "database/sql"
+	. "strings"
+	"example.com/custom/v2"
+)
+`
+	fset := token.NewFileSet()
+	file, err := goparser.ParseFile(fset, "p.go", src, goparser.ImportsOnly)
+	require.NoError(t, err)
+	file.Imports = append(file.Imports, &goast.ImportSpec{})
+
+	aliases, imported = GoASTImportAliasMap(file, map[string]string{
+		"example.com/custom/v2": "custom",
+	})
+	assert.Equal(t, map[string]string{
+		"fmt":    "fmt",
+		"h":      "net/http",
+		"custom": "example.com/custom/v2",
+	}, aliases)
+	assert.True(t, imported["fmt"])
+	assert.True(t, imported["net/http"])
+	assert.True(t, imported["database/sql"])
+	assert.True(t, imported["strings"])
+	assert.True(t, imported["example.com/custom/v2"])
 }
