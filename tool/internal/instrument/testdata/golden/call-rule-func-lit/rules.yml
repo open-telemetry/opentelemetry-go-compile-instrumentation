@@ -1,0 +1,42 @@
+# The Func* helpers read the innermost function declaration or function
+# literal around the matched call. With no function around the call,
+# FuncArgumentOfType returns "", so the template keeps the original call.
+wrap_log:
+  target: main
+  where:
+    function_call: go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/call-rule-func-lit/helpers/logger.Log
+  do:
+    - wrap_call:
+        replace: |-
+          {{- $ctx := .FuncArgumentOfType "context.Context" -}}
+          {{- if $ctx -}}
+            logger.LogContext({{ $ctx }}, {{ .CallArgument 0 }})
+          {{- else -}}
+            {{ . }}
+          {{- end -}}
+  imports:
+    logger: go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/call-rule-func-lit/helpers/logger
+# A method call rebuilt around the context of the innermost function.
+wrap_info:
+  target: main
+  where:
+    method_call: go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/call-rule-func-lit/helpers/logger.*Logger.Info
+  do:
+    - wrap_call:
+        replace: |-
+          {{- $ctx := .FuncArgumentOfType "context.Context" -}}
+          {{- if $ctx -}}
+            {{ .CallReceiver }}.With({{ $ctx }}).Info({{ .CallArguments }})
+          {{- else -}}
+            {{ . }}
+          {{- end -}}
+# FuncName is "" in a function literal.
+wrap_name:
+  target: main
+  where:
+    function_call: go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/call-rule-func-lit/helpers/logger.Name
+  do:
+    - wrap_call:
+        replace: 'logger.Named("{{ .FuncName }}", {{ . }})'
+  imports:
+    logger: go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/call-rule-func-lit/helpers/logger

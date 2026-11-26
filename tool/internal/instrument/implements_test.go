@@ -370,8 +370,16 @@ func TestCallTemplate_ThatImplementsHelpers(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, `wrap(c, err, f())`, got)
 
-	_, _, err = tmpl.compileExpression(call, callSite{}, nil, importAliases, nil)
-	require.Error(t, err, "the helpers need an enclosing function")
+	tmpl, err = newCallTemplate(
+		`wrap("{{ .FuncArgumentThatImplements "context.Context" }}", "{{ .FuncReturnThatImplements "error" }}", {{ . }})`,
+	)
+	require.NoError(t, err)
+	tmpl.typeInfo = ip.fileTypes()
+	expr, _, err = tmpl.compileExpression(call, callSite{}, nil, importAliases, nil)
+	require.NoError(t, err)
+	got, err = ast.RenderExpr(expr)
+	require.NoError(t, err)
+	assert.Equal(t, `wrap("", "", f())`, got, "the helpers find nothing without an enclosing function")
 }
 
 func TestMatchesImplementsFilters(t *testing.T) {
@@ -555,4 +563,44 @@ func TestThatImplementsHelpers_FuncLit(t *testing.T) {
 	got, err := data.FuncArgumentThatImplements("context.Context")
 	require.NoError(t, err)
 	assert.Equal(t, "c", got, "*ReqCtx implements context.Context")
+}
+
+// callLiteralSource has calls in function literals whose parameters
+// implement context.Context, in a package-level variable and in a method.
+const callLiteralSource = `package sample
+
+import (
+	"context"
+	"net/http"
+)
+
+type ReqCtx struct{ context.Context }
+
+var handler = func(c *ReqCtx) {
+	http.Get("package literal")
+}
+
+func (c *ReqCtx) serve(n int) {
+	_ = func(inner *ReqCtx) {
+		http.Get("method literal")
+	}
+	http.Get("method")
+}
+`
+
+func TestCallRule_ThatImplementsHelpers_FuncLit(t *testing.T) {
+	ip, root := setupImplementsPhase(t, callLiteralSource)
+	require.NotNil(t, ip.ensureMethodCallInfo(t.Context()))
+	require.NoError(t, ip.methodCallInfo.firstTypeError)
+
+	r := httpGetRule(`{{- $c := .FuncArgumentThatImplements "context.Context" -}}
+{{- if $c }}wrap({{ $c }}, {{ . }}){{ else }}{{ . }}{{ end -}}`)
+	changed, err := ip.applyCallRule(t.Context(), r, root)
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	out := renderFile(t, root)
+	assert.Contains(t, out, `wrap(c, http.Get("package literal"))`, "*ReqCtx implements context.Context")
+	assert.Contains(t, out, `wrap(inner, http.Get("method literal"))`)
+	assert.Contains(t, out, "\thttp.Get(\"method\")\n", "the receiver is not a parameter")
 }

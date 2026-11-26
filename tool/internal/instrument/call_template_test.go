@@ -71,6 +71,15 @@ func TestCallTemplateData_FuncName(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "Handler", name)
 	})
+
+	t.Run("function literal is empty", func(t *testing.T) {
+		d := &callTemplateData{enclosing: newFuncTemplateData(parseFuncLit(t), nil, nil, "")}
+
+		name, err := d.FuncName()
+
+		require.NoError(t, err)
+		assert.Empty(t, name)
+	})
 }
 
 func TestCallTemplateData_FuncArgument(t *testing.T) {
@@ -177,6 +186,15 @@ func TestCallTemplateData_Receiver(t *testing.T) {
 		assert.Contains(t, err.Error(), "no receiver")
 	})
 
+	t.Run("function literal errors", func(t *testing.T) {
+		d := &callTemplateData{enclosing: newFuncTemplateData(parseFuncLit(t), nil, nil, "")}
+
+		_, err := d.Receiver()
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "a function literal has no receiver")
+	})
+
 	t.Run("delegates to enclosing function", func(t *testing.T) {
 		enclosing := parseFunc(t, "package main\ntype T struct{}\nfunc (t T) Handler() {}")
 		d := &callTemplateData{enclosing: newFuncTemplateData(enclosing, nil, nil, "")}
@@ -189,13 +207,13 @@ func TestCallTemplateData_Receiver(t *testing.T) {
 }
 
 func TestCallTemplateData_FuncReturnOfType(t *testing.T) {
-	t.Run("no enclosing function errors", func(t *testing.T) {
+	t.Run("no enclosing function is empty", func(t *testing.T) {
 		d := &callTemplateData{}
 
-		_, err := d.FuncReturnOfType("error")
+		ret, err := d.FuncReturnOfType("error")
 
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "no enclosing function is available")
+		require.NoError(t, err)
+		assert.Empty(t, ret)
 	})
 
 	t.Run("delegates to enclosing function", func(t *testing.T) {
@@ -207,6 +225,24 @@ func TestCallTemplateData_FuncReturnOfType(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "err", ret)
 	})
+}
+
+func TestCallTemplateData_SearchHelpersWithoutEnclosingFunc(t *testing.T) {
+	d := &callTemplateData{}
+	helpers := map[string]func(string) (string, error){
+		"FuncArgumentOfType":         d.FuncArgumentOfType,
+		"FuncReturnOfType":           d.FuncReturnOfType,
+		"FuncArgumentThatImplements": d.FuncArgumentThatImplements,
+		"FuncReturnThatImplements":   d.FuncReturnThatImplements,
+	}
+	for name, helper := range helpers {
+		t.Run(name, func(t *testing.T) {
+			got, err := helper("context.Context")
+
+			require.NoError(t, err)
+			assert.Empty(t, got)
+		})
+	}
 }
 
 func TestCompileExpression_ReceiverWithEnclosingMethod(t *testing.T) {
@@ -377,16 +413,18 @@ func TestCompileExpression_FuncArgumentOfType_SkipsUnsupportedParamTypes(t *test
 	assert.Equal(t, "ctx", argIdent.Name)
 }
 
-func TestCompileExpression_FuncArgumentOfType_NoEnclosingFuncErrors(t *testing.T) {
-	tmpl, err := newCallTemplate(`traced({{ .FuncArgumentOfType "context.Context" }})`)
+func TestCompileExpression_FuncArgumentOfType_NoEnclosingFuncIsEmpty(t *testing.T) {
+	tmpl, err := newCallTemplate(`traced("{{ .FuncArgumentOfType "context.Context" }}", {{ . }})`)
 	require.NoError(t, err)
 
 	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
 
-	_, _, err = tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
+	result, _, err := tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no enclosing function is available")
+	require.NoError(t, err)
+	got, err := toolast.RenderExpr(result)
+	require.NoError(t, err)
+	assert.Equal(t, `traced("", funcCall())`, got)
 }
 
 func TestCompileExpression_FuncReturnOfType_Found(t *testing.T) {
@@ -407,16 +445,18 @@ func TestCompileExpression_FuncReturnOfType_Found(t *testing.T) {
 	assert.Equal(t, "err", argIdent.Name)
 }
 
-func TestCompileExpression_FuncReturnOfType_NoEnclosingFuncErrors(t *testing.T) {
-	tmpl, err := newCallTemplate(`traced({{ .FuncReturnOfType "error" }})`)
+func TestCompileExpression_FuncReturnOfType_NoEnclosingFuncIsEmpty(t *testing.T) {
+	tmpl, err := newCallTemplate(`traced("{{ .FuncReturnOfType "error" }}", {{ . }})`)
 	require.NoError(t, err)
 
 	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
 
-	_, _, err = tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
+	result, _, err := tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no enclosing function is available")
+	require.NoError(t, err)
+	got, err := toolast.RenderExpr(result)
+	require.NoError(t, err)
+	assert.Equal(t, `traced("", funcCall())`, got)
 }
 
 func TestCompileExpression_CallArgumentIsWrappedCallNotEnclosingFunc(t *testing.T) {
@@ -1706,4 +1746,20 @@ func TestCompileExpression_EvaluationCheckSkippedWithOnlyOriginalCall(t *testing
 
 	require.NoError(t, err)
 	assert.Equal(t, `pair(log.Info(a()), log.Info(a()))`, renderResult(t, result))
+}
+
+// parseFuncLit returns the FuncDecl view of the function literal in a
+// package-level variable.
+func parseFuncLit(t *testing.T) *dst.FuncDecl {
+	t.Helper()
+	root := parseFile(t, "package main\nvar h = func(ctx context.Context) {}")
+	var lit *dst.FuncLit
+	dst.Inspect(root, func(node dst.Node) bool {
+		if l, ok := node.(*dst.FuncLit); ok {
+			lit = l
+		}
+		return lit == nil
+	})
+	require.NotNil(t, lit)
+	return funcLitDecl(lit)
 }

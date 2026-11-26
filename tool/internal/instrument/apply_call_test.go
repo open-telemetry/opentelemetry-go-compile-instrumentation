@@ -86,16 +86,75 @@ func B() {
 `)
 
 	var enclosingNames []string
-	walkCallsWithEnclosingFunc(root, func(_ *dst.CallExpr, enclosing *dst.FuncDecl) bool {
+	walkCallsWithEnclosingFunc(root, func(_ *dst.CallExpr, enclosing callEnclosing) bool {
 		name := "<none>"
-		if enclosing != nil {
-			name = enclosing.Name.Name
+		if enclosing.fn != nil {
+			name = enclosing.fn.Name.Name
 		}
 		enclosingNames = append(enclosingNames, name)
 		return true
 	})
 
 	assert.Equal(t, []string{"<none>", "A", "B", "B"}, enclosingNames)
+}
+
+func TestWalkCallsWithEnclosingFunc_InnermostFunction(t *testing.T) {
+	root := parseFile(t, `package main
+
+import "fmt"
+
+var handler = func(pkgLit string) {
+	fmt.Println("package literal")
+}
+
+var value = fmt.Sprint("package var")
+
+func A(a string) {
+	fmt.Println("declaration")
+	f := func(lit string) {
+		fmt.Println("literal")
+		g := func(nested string) { fmt.Println("nested literal") }
+		g(lit)
+		fmt.Println("literal after nested")
+	}
+	f(a)
+	fmt.Println("declaration after literal")
+	func(arg string) {}(fmt.Sprint("argument of a called literal"))
+}
+`)
+
+	// got maps the string argument of each call to the first parameter of
+	// its enclosing function.
+	got := make(map[string]string)
+	decls := make(map[string]dst.Decl)
+	walkCallsWithEnclosingFunc(root, func(call *dst.CallExpr, enclosing callEnclosing) bool {
+		msg, ok := call.Args[0].(*dst.BasicLit)
+		if !ok {
+			return true
+		}
+		param := "<none>"
+		if enclosing.fn != nil {
+			param = enclosing.fn.Type.Params.List[0].Names[0].Name
+		}
+		got[msg.Value] = param
+		decls[msg.Value] = enclosing.decl
+		return true
+	})
+
+	assert.Equal(t, map[string]string{
+		`"package literal"`:              "pkgLit",
+		`"package var"`:                  "<none>",
+		`"declaration"`:                  "a",
+		`"literal"`:                      "lit",
+		`"nested literal"`:               "nested",
+		`"literal after nested"`:         "lit",
+		`"declaration after literal"`:    "a",
+		`"argument of a called literal"`: "a",
+	}, got)
+	assert.Equal(t, root.Decls[1], decls[`"package literal"`], "the top-level declaration of a package-level literal")
+	assert.Equal(t, root.Decls[2], decls[`"package var"`])
+	a := findFuncDeclInFile(t, root, "A")
+	assert.Equal(t, dst.Decl(a), decls[`"nested literal"`], "the top-level declaration of a nested literal")
 }
 
 func TestWalkCallsWithEnclosingFunc_StopsWithinDecl(t *testing.T) {
@@ -110,7 +169,7 @@ func A() {
 `)
 
 	visited := 0
-	walkCallsWithEnclosingFunc(root, func(_ *dst.CallExpr, _ *dst.FuncDecl) bool {
+	walkCallsWithEnclosingFunc(root, func(_ *dst.CallExpr, _ callEnclosing) bool {
 		visited++
 		return false
 	})
@@ -133,8 +192,8 @@ func B() {
 `)
 
 	var visited []string
-	walkCallsWithEnclosingFunc(root, func(_ *dst.CallExpr, enclosing *dst.FuncDecl) bool {
-		visited = append(visited, enclosing.Name.Name)
+	walkCallsWithEnclosingFunc(root, func(_ *dst.CallExpr, enclosing callEnclosing) bool {
+		visited = append(visited, enclosing.fn.Name.Name)
 		return false
 	})
 
@@ -849,6 +908,192 @@ var resp, _ = http.Get("url")
 	require.Error(t, err)
 	require.False(t, modified, "a rule that matched nothing or failed must not report a change")
 	assert.Contains(t, err.Error(), "no enclosing function is available")
+}
+
+func TestApplyCallRule_FuncHelpersReadInnermostFunction(t *testing.T) {
+	replace := `{{- $ctx := .FuncArgumentOfType "context.Context" -}}
+{{- if $ctx -}}
+traced({{ $ctx }}, {{ .CallArgument 0 }})
+{{- else -}}
+{{ . }}
+{{- end -}}`
+
+	cases := []struct {
+		name  string
+		decls string
+		// want holds the code expected in the output. A case without want
+		// expects every call to be left as it is.
+		want []string
+	}{
+		{
+			name:  "package-level literal with ctx",
+			decls: `var h = func(ctx context.Context) { http.Get("url") }`,
+			want:  []string{`traced(ctx, "url")`},
+		},
+		{
+			name:  "package-level literal without ctx",
+			decls: `var h = func(name string) { http.Get("url") }`,
+		},
+		{
+			name:  "no function around the call",
+			decls: `var resp, err = http.Get("url")`,
+		},
+		{
+			name:  "call in a declaration",
+			decls: `func Run(ctx context.Context) { http.Get("url") }`,
+			want:  []string{`traced(ctx, "url")`},
+		},
+		{
+			name:  "literal with ctx in a declaration without ctx",
+			decls: `func Run() { _ = func(ctx context.Context) { http.Get("url") } }`,
+			want:  []string{`traced(ctx, "url")`},
+		},
+		{
+			name:  "literal with ctx in a declaration with another ctx",
+			decls: `func Run(ctx context.Context) { _ = func(inner context.Context) { http.Get("url") } }`,
+			want:  []string{`traced(inner, "url")`},
+		},
+		{
+			name:  "literal parameter shadows the declaration's ctx",
+			decls: `func Run(ctx context.Context) { _ = func(ctx string) { http.Get("url") } }`,
+		},
+		{
+			name:  "literal without ctx in a declaration with ctx",
+			decls: `func Run(ctx context.Context) { go func() { http.Get("url") }() }`,
+		},
+		{
+			name: "nested literals",
+			decls: `func Run(ctx context.Context) {
+	_ = func(outer context.Context) {
+		_ = func(inner context.Context) { http.Get("inner") }
+		http.Get("outer")
+	}
+}`,
+			want: []string{`traced(inner, "inner")`, `traced(outer, "outer")`},
+		},
+		{
+			name: "defer and go in a literal",
+			decls: `func Run() {
+	_ = func(ctx context.Context) {
+		defer http.Get("deferred")
+		go http.Get("go")
+	}
+}`,
+			want: []string{`defer traced(ctx, "deferred")`, `go traced(ctx, "go")`},
+		},
+		{
+			name:  "argument of a called literal",
+			decls: `func Run(ctx context.Context) { func(a, b any) {}(http.Get("url")) }`,
+			want:  []string{`func(a, b any) {}(traced(ctx, "url"))`},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := parseFile(t, "package main\n\nimport (\n\t\"context\"\n\t\"net/http\"\n)\n\n"+tc.decls+"\n")
+
+			_, err := newTestPhase().applyCallRule(context.Background(), httpGetRule(replace), root)
+
+			require.NoError(t, err)
+			out := renderFile(t, root)
+			for _, want := range tc.want {
+				assert.Contains(t, out, want)
+			}
+			if len(tc.want) == 0 {
+				assert.NotContains(t, out, "traced(")
+			}
+		})
+	}
+}
+
+func TestApplyCallRule_FuncNameAndReceiverInFuncLit(t *testing.T) {
+	source := `package main
+
+import "net/http"
+
+type Server struct{}
+
+func (s *Server) Handle() {
+	http.Get("method")
+	func() {
+		http.Get("literal")
+	}()
+}
+`
+
+	t.Run("FuncName is empty in a literal", func(t *testing.T) {
+		root := parseFile(t, source)
+		r := httpGetRule(`traced("{{ .FuncName }}", {{ . }})`)
+
+		_, err := newTestPhase().applyCallRule(context.Background(), r, root)
+
+		require.NoError(t, err)
+		out := renderFile(t, root)
+		assert.Contains(t, out, `traced("Handle", http.Get("method"))`)
+		assert.Contains(t, out, `traced("", http.Get("literal"))`)
+	})
+
+	t.Run("Receiver fails in a literal", func(t *testing.T) {
+		r := httpGetRule(`traced({{ .Receiver }}, {{ . }})`)
+
+		_, err := newTestPhase().applyCallRule(context.Background(), r, parseFile(t, source))
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "Receiver: a function literal has no receiver")
+	})
+
+	t.Run("FuncArgument reads the literal", func(t *testing.T) {
+		root := parseFile(t, `package main
+
+import "net/http"
+
+func Handle(name string) {
+	func() {
+		http.Get("literal")
+	}()
+}
+`)
+		r := httpGetRule(`traced({{ .FuncArgument 0 }}, {{ . }})`)
+
+		_, err := newTestPhase().applyCallRule(context.Background(), r, root)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "FuncArgument index 0 out of range [0, 0)")
+	})
+}
+
+func TestApplyCallRule_RuleAliasShadowedByPackageLevelLiteralParameterReportsConflict(t *testing.T) {
+	source := `package main
+
+import (
+	f "fmt"
+	"net/http"
+)
+
+var h = func(traced sink) {
+	http.Get("url")
+}
+`
+
+	t.Run("replace", func(t *testing.T) {
+		r := httpGetRule("traced.Call({{ . }})")
+		r.Imports = map[string]string{"traced": "fmt"}
+
+		_, err := newTestPhase().applyCallRule(context.Background(), r, parseFile(t, source))
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "rule import alias conflict")
+	})
+
+	t.Run("append_args", func(t *testing.T) {
+		r := httpGetRule("")
+		r.AppendArgs = []string{"traced.Context()"}
+		r.Imports = map[string]string{"traced": "fmt"}
+
+		_, err := newTestPhase().applyCallRule(context.Background(), r, parseFile(t, source))
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "rule import alias conflict")
+	})
 }
 
 // findFuncDeclInFile returns the top-level function declaration named name.

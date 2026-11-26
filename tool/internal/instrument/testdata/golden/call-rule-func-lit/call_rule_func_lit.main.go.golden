@@ -1,0 +1,97 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+//line /golden/work/main.go:6
+import (
+	"context"
+
+	"go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/call-rule-func-lit/helpers/logger"
+)
+
+var std = &logger.Logger{}
+
+// No function holds the call.
+var banner = logger.Log("package var")
+
+// A function literal outside any function declaration.
+var handler = func(ctx context.Context) {
+	logger.LogContext(ctx, "package literal")
+	/*line /golden/work/main.go:20*/ std.With(ctx).Info("package literal") /*line /golden/work/main.go:20*/
+}
+
+var plainHandler = func(name string) {
+	logger.Log("package literal without ctx")
+}
+
+// A call directly in a declaration reads the declaration.
+func direct(ctx context.Context) {
+	logger.LogContext(ctx, "declaration")
+	/*line /golden/work/main.go:30*/ std.With(ctx).Info("declaration") /*line /golden/work/main.go:30*/
+}
+
+// The literal has its own ctx, the declaration has none.
+func literalCtx() {
+	f := func(ctx context.Context) {
+		logger.LogContext(ctx, "literal")
+		/*line /golden/work/main.go:37*/ std.With(ctx).Info("literal") /*line /golden/work/main.go:37*/
+	}
+	f(context.Background())
+}
+
+// The innermost function wins over the declaration.
+func innermost(ctx context.Context) {
+	f := func(inner context.Context) {
+		logger.LogContext(inner, "inner literal") /*line /golden/work/main.go:45*/
+	}
+	f(ctx)
+	// The literal's ctx is a string, which shadows the declaration's ctx.
+	g := func(ctx string) {
+		logger.Log("shadowed ctx")
+	}
+	g("x")
+	// A literal without a ctx does not read the declaration's ctx.
+	h := func() {
+		std.Info("literal without ctx")
+	}
+	h()
+}
+
+func nested(ctx context.Context) {
+	func(outer context.Context) {
+		func(inner context.Context) {
+			logger.LogContext(inner, "nested") /*line /golden/work/main.go:63*/
+		}(outer)
+		logger.LogContext(outer, "after nested") /*line /golden/work/main.go:65*/
+	}(ctx)
+}
+
+func goAndDefer(ctx context.Context) {
+	func(inner context.Context) {
+		defer logger.LogContext(inner, "deferred")
+		/*line /golden/work/main.go:72*/ go std.With(inner).Info("go") /*line /golden/work/main.go:72*/
+	}(ctx)
+}
+
+type server struct{}
+
+// FuncName is "" in a function literal.
+func (s *server) handle() {
+	logger.Named("handle", logger.Name("method"))
+	/*line /golden/work/main.go:81*/ func() {
+		logger.Named("", logger.Name("literal in method")) /*line /golden/work/main.go:82*/
+	}()
+}
+
+func main() {
+	_ = banner
+	handler(context.Background())
+	plainHandler("x")
+	direct(context.Background())
+	literalCtx()
+	innermost(context.Background())
+	nested(context.Background())
+	goAndDefer(context.Background())
+	(&server{}).handle()
+}

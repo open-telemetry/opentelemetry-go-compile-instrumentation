@@ -89,10 +89,13 @@ func (d *funcTemplateData) arguments() []string {
 }
 
 // Receiver returns the identifier of the target method's receiver, or an
-// error if the target is a plain function with no receiver. Template usage:
-// {{.Receiver}}
+// error if the target is a plain function or a function literal. Template
+// usage: {{.Receiver}}
 func (d *funcTemplateData) Receiver() (string, error) {
 	if !ast.HasReceiver(d.funcDecl) {
+		if d.funcDecl.Name.Name == "" {
+			return "", ex.Newf("Receiver: a function literal has no receiver")
+		}
 		return "", ex.Newf("Receiver: function %s has no receiver", d.funcDecl.Name.Name)
 	}
 	return d.fullArguments()[0], nil

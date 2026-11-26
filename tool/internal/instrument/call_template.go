@@ -84,6 +84,10 @@ func (t *callTemplate) String() string {
 }
 
 type callTemplateData struct {
+	// enclosing is the enclosing function of the wrapped expression, or nil
+	// when there is none. The Func* helpers that search for a parameter or a
+	// result then return "", as when nothing matches, and the other Func*
+	// helpers return an error.
 	enclosing *funcTemplateData
 
 	// isCall, callArgs and callEllipsis describe the wrapped expression when
@@ -122,7 +126,8 @@ func noEnclosingFuncErr() error {
 	return ex.Newf("no enclosing function is available at this position")
 }
 
-// FuncName returns the enclosing function's name. Template usage: {{.FuncName}}
+// FuncName returns the enclosing function's name, or "" for a function
+// literal. Template usage: {{.FuncName}}
 func (d *callTemplateData) FuncName() (string, error) {
 	if d.enclosing == nil {
 		return "", noEnclosingFuncErr()
@@ -169,7 +174,7 @@ func (d *callTemplateData) FuncReturnCount() (int, error) {
 
 // Receiver returns the identifier of the enclosing method's receiver, or an
 // error if there is no enclosing function or the enclosing function has no
-// receiver. Template usage: {{.Receiver}}
+// receiver, such as a function literal. Template usage: {{.Receiver}}
 func (d *callTemplateData) Receiver() (string, error) {
 	if d.enclosing == nil {
 		return "", noEnclosingFuncErr()
@@ -178,42 +183,44 @@ func (d *callTemplateData) Receiver() (string, error) {
 }
 
 // FuncArgumentOfType returns the identifier of the first parameter of the
-// enclosing function (excluding the receiver) whose type matches typeStr
-// or "" if none match. Template usage: {{.FuncArgumentOfType "context.Context"}}
+// enclosing function (excluding the receiver) whose type matches typeStr,
+// or "" if none match or there is no enclosing function. Template usage:
+// {{.FuncArgumentOfType "context.Context"}}
 func (d *callTemplateData) FuncArgumentOfType(typeStr string) (string, error) {
 	if d.enclosing == nil {
-		return "", noEnclosingFuncErr()
+		return "", nil
 	}
 	return d.enclosing.FuncArgumentOfType(typeStr)
 }
 
 // FuncReturnOfType returns the identifier of the first return value of the
-// enclosing function whose type matches typeStr, or "" if none match.
-// Template usage: {{.FuncReturnOfType "error"}}
+// enclosing function whose type matches typeStr, or "" if none match or there
+// is no enclosing function. Template usage: {{.FuncReturnOfType "error"}}
 func (d *callTemplateData) FuncReturnOfType(typeStr string) (string, error) {
 	if d.enclosing == nil {
-		return "", noEnclosingFuncErr()
+		return "", nil
 	}
 	return d.enclosing.FuncReturnOfType(typeStr)
 }
 
 // FuncArgumentThatImplements returns the identifier of the first parameter of
 // the enclosing function (excluding the receiver) whose type is the interface
-// iface or implements it, or "" if none does. Template usage:
-// {{.FuncArgumentThatImplements "context.Context"}}
+// iface or implements it, or "" if none does or there is no enclosing
+// function. Template usage: {{.FuncArgumentThatImplements "context.Context"}}
 func (d *callTemplateData) FuncArgumentThatImplements(iface string) (string, error) {
 	if d.enclosing == nil {
-		return "", noEnclosingFuncErr()
+		return "", nil
 	}
 	return d.enclosing.FuncArgumentThatImplements(iface)
 }
 
 // FuncReturnThatImplements returns the identifier of the first return value
 // of the enclosing function whose type is the interface iface or implements
-// it, or "" if none does. Template usage: {{.FuncReturnThatImplements "error"}}
+// it, or "" if none does or there is no enclosing function. Template usage:
+// {{.FuncReturnThatImplements "error"}}
 func (d *callTemplateData) FuncReturnThatImplements(iface string) (string, error) {
 	if d.enclosing == nil {
-		return "", noEnclosingFuncErr()
+		return "", nil
 	}
 	return d.enclosing.FuncReturnThatImplements(iface)
 }
@@ -374,11 +381,10 @@ func (d *callTemplateData) checkCallReceiver() error {
 // site describes node when it is a matched call site: it makes the receiver
 // of a method call available to {{ .CallReceiver }}, and tells whether the
 // call is the call of a defer or go statement. Pass callSite{} otherwise.
-// enclosing is the function declaration that contains node, or
-// nil if node sits outside any function body (e.g. a package-level variable
-// initializer); when non-nil, it makes the shared function template
-// variables (FuncName, FuncArgument N, FuncReturn N, ...) available in the
-// template alongside {{ . }}.
+// enclosing is the function that contains node, as the view that funcLitDecl
+// builds for a function literal, or nil if node sits outside any function
+// (e.g. a package-level variable initializer). The shared function template
+// variables (FuncName, FuncArgument N, FuncReturn N, ...) read it.
 // imports is the target file's import alias map (see ast.ImportAliasMap);
 // FuncArgumentOfType / FuncReturnOfType need it to resolve aliased imports
 // and packages that share a default name. Pass nil when no import context
