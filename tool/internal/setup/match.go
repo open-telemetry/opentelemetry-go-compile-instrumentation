@@ -187,20 +187,7 @@ func (sp *setupPhase) runMatch(
 		filteredRules = append(filteredRules, r)
 	}
 
-	// Separate file rules from rules that need precise matching
-	preciseRules := make([]rule.InstRule, 0, len(filteredRules))
-	for _, r := range filteredRules {
-		// If the rule is a file rule, it is always applicable
-		if fr, ok := r.(*rule.InstFileRule); ok {
-			set.AddFileRule(fr)
-			sp.reportDecision("", r, "")
-			sp.Info("Match file rule", "rule", fr, "dep", dep)
-			continue
-		}
-		// We can't decide whether the rule is applicable yet, add it to the
-		// precise rules list to be processed later.
-		preciseRules = append(preciseRules, r)
-	}
+	preciseRules := sp.selectPreciseRules(dep, filteredRules, set)
 
 	if len(preciseRules) == 0 {
 		if !set.IsEmpty() && len(dep.Sources) > 0 {
@@ -215,6 +202,40 @@ func (sp *setupPhase) runMatch(
 	}
 
 	return sp.preciseMatching(ctx, dep, preciseRules, set)
+}
+
+// selectPreciseRules records unconditional file rules immediately, prunes
+// method_call rules whose target package is unreachable when the package's
+// import closure is known and complete, and returns the rules needing AST
+// matching.
+func (sp *setupPhase) selectPreciseRules(
+	dep *Dependency,
+	filteredRules []rule.InstRule,
+	set *rule.InstRuleSet,
+) []rule.InstRule {
+	preciseRules := make([]rule.InstRule, 0, len(filteredRules))
+	var pkgDeps map[string]bool
+	var hasDeps, depsChecked bool
+	for _, r := range filteredRules {
+		if fr, ok := r.(*rule.InstFileRule); ok {
+			set.AddFileRule(fr)
+			sp.reportDecision("", r, "")
+			sp.Info("Match file rule", "rule", fr, "dep", dep)
+			continue
+		}
+		if cr, ok := r.(*rule.InstCallRule); ok && cr.MethodCall != "" && len(dep.Sources) > 0 {
+			if !depsChecked {
+				pkgDeps, hasDeps = sp.packageDeps(dep.ImportPath)
+				depsChecked = true
+			}
+			if hasDeps && !pkgDeps[cr.ImportPath] {
+				sp.reportDecision("", r, "dependency_not_found")
+				continue
+			}
+		}
+		preciseRules = append(preciseRules, r)
+	}
+	return preciseRules
 }
 
 // ruleFilter pairs a rule with its pre-compiled where filter (if any).
@@ -298,6 +319,7 @@ func (sp *setupPhase) preciseMatching(
 			ResolvedNames: sp.resolvedNames,
 		}
 
+		fm := fileMatchState{sp: sp, tree: tree, source: source, dep: dep, set: set}
 		for _, rf := range ruleFilters {
 			// Evaluate the where filter if one is defined for this rule.
 			// A nil filter means the rule applies to all files unconditionally.
@@ -305,7 +327,7 @@ func (sp *setupPhase) preciseMatching(
 				sp.reportDecision(source, rf.rule, "where_mismatch")
 				continue
 			}
-			if err = sp.matchOneRule(tree, source, rf.rule, set, dep); err != nil {
+			if err = fm.matchRule(rf.rule); err != nil {
 				return nil, err
 			}
 		}
@@ -334,6 +356,26 @@ func (sp *setupPhase) warnUnknownDirectives(source string, tree *dst.File, known
 	}
 }
 
+// fileMatchState holds per-file matching inputs and caches call selector
+// names lazily across all rules evaluated on the same source file.
+type fileMatchState struct {
+	sp        *setupPhase
+	tree      *dst.File
+	source    string
+	dep       *Dependency
+	set       *rule.InstRuleSet
+	loaded    bool
+	selectors map[string]bool
+}
+
+func (f *fileMatchState) hasCallSelector(name string) bool {
+	if !f.loaded {
+		f.selectors = ast.FileCallSelectors(f.tree)
+		f.loaded = true
+	}
+	return f.selectors[name]
+}
+
 // matchOneRule performs precise AST matching for a single rule against a parsed
 // source file, adding the rule to the set if it matches.
 func (sp *setupPhase) matchOneRule(
@@ -343,86 +385,89 @@ func (sp *setupPhase) matchOneRule(
 	set *rule.InstRuleSet,
 	dep *Dependency,
 ) error {
+	fm := fileMatchState{sp: sp, tree: tree, source: source, dep: dep, set: set}
+	return fm.matchRule(r)
+}
+
+func (f *fileMatchState) matchRule(r rule.InstRule) error {
 	reason := ""
 
 	var rejection *string
-	if sp.decision != nil {
+	if f.sp.decision != nil {
 		rejection = &reason
 	}
 	switch rt := r.(type) {
 	case *rule.InstFuncRule:
-		_, ok, err := ast.FindFuncDeclReporting(tree, rt, sp.resolvedNames, rejection)
+		_, ok, err := ast.FindFuncDeclReporting(f.tree, rt, f.sp.resolvedNames, rejection)
 		if err != nil {
 			return err
 		}
 		if ok {
-			set.AddFuncRule(source, rt)
-			sp.Info("Match func rule", "rule", rt, "dep", dep)
+			f.set.AddFuncRule(f.source, rt)
+			f.sp.Info("Match func rule", "rule", rt, "dep", f.dep)
 		}
 	case *rule.InstStructRule:
-		structType := ast.FindStructType(tree, rt.Struct)
+		structType := ast.FindStructType(f.tree, rt.Struct)
 		reason = "struct_not_found"
 		if structType != nil {
 			reason = ""
-			set.AddStructRule(source, rt)
-			sp.Info("Match struct rule", "rule", rt, "dep", dep)
+			f.set.AddStructRule(f.source, rt)
+			f.sp.Info("Match struct rule", "rule", rt, "dep", f.dep)
 		}
 	case *rule.InstRawRule:
-		_, ok, err := ast.FindFuncDeclReporting(tree, rt, sp.resolvedNames, rejection)
+		_, ok, err := ast.FindFuncDeclReporting(f.tree, rt, f.sp.resolvedNames, rejection)
 		if err != nil {
 			return err
 		}
 		if ok {
-			set.AddRawRule(source, rt)
-			sp.Info("Match raw rule", "rule", rt, "dep", dep)
+			f.set.AddRawRule(f.source, rt)
+			f.sp.Info("Match raw rule", "rule", rt, "dep", f.dep)
 		}
 	case *rule.InstCallRule:
-		reason = sp.matchCallRule(tree, source, rt, set, dep)
+		reason = f.matchCallRule(rt)
 	case *rule.InstLitRule:
-		reason = sp.matchLitRule(tree, source, rt, set, dep)
+		reason = f.sp.matchLitRule(f.tree, f.source, rt, f.set, f.dep)
 	case *rule.InstDirectiveRule:
 		reason = "directive_not_found"
-		if ast.FileHasDirective(tree, rt.Directive) {
+		if ast.FileHasDirective(f.tree, rt.Directive) {
 			reason = ""
-			set.AddDirectiveRule(source, rt)
-			sp.Info("Match directive rule", "rule", rt, "dep", dep)
+			f.set.AddDirectiveRule(f.source, rt)
+			f.sp.Info("Match directive rule", "rule", rt, "dep", f.dep)
 		}
 	case *rule.InstDeclRule:
 		reason = "declaration_not_found"
-		if ast.FindNamedDecl(tree, rt.Identifier, rt.Kind) != nil {
+		if ast.FindNamedDecl(f.tree, rt.Identifier, rt.Kind) != nil {
 			reason = ""
-			set.AddDeclRule(source, rt)
-			sp.Info("Match decl rule", "rule", rt, "dep", dep)
+			f.set.AddDeclRule(f.source, rt)
+			f.sp.Info("Match decl rule", "rule", rt, "dep", f.dep)
 		}
 	case *rule.InstFileRule:
 		// Skip as it's already processed
 	default:
 		util.ShouldNotReachHere()
 	}
-	sp.reportDecision(source, r, reason)
+	f.sp.reportDecision(f.source, r, reason)
 	return nil
 }
 
-// matchCallRule adds the call rule r to source in set. It returns the reason
-// when r cannot change source, and "" otherwise.
+// matchCallRule adds the call rule r to f.source in f.set. It returns the reason
+// when r cannot change f.source, and "" otherwise.
 //
 // A function_call rule changes only a call written as pkg.Func(), where pkg is
 // an import of the rule's package, so a file without that import has nothing
 // to change. A method_call rule can match a value whose type comes from a
-// package the file does not import, so it is added to every file. The calls
-// themselves are found during the instrument phase.
-func (sp *setupPhase) matchCallRule(
-	tree *dst.File,
-	source string,
-	r *rule.InstCallRule,
-	set *rule.InstRuleSet,
-	dep *Dependency,
-) string {
-	if r.MethodCall == "" && !ast.FileImports(tree, r.ImportPath) {
+// package the file does not import, so any file containing a call expression
+// with the method's selector name remains eligible; exact receiver types are
+// checked during the instrument phase.
+func (f *fileMatchState) matchCallRule(r *rule.InstCallRule) string {
+	if r.MethodCall == "" && !ast.FileImports(f.tree, r.ImportPath) {
 		return "import_not_found"
 	}
-	set.AddCallRule(source, r)
-	sp.Info("Match call rule", "rule", r, "dep", dep)
+	if r.MethodCall != "" && !f.hasCallSelector(r.FuncName) {
+		return "call_not_found"
+	}
+	f.set.AddCallRule(f.source, r)
+	f.sp.Info("Match call rule", "rule", r, "dep", f.dep)
 	return ""
 }
 

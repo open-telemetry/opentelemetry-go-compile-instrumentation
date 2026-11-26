@@ -790,3 +790,37 @@ func TestMatchesTypeName_UnsupportedNodeDoesNotMatch(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, matched)
 }
+
+func TestFileCallSelectors(t *testing.T) {
+	src := `package main
+
+func helper() {}
+
+type genericClient struct{}
+
+func (genericClient) GenericDo[T any](v T) {}
+
+func run(c genericClient) {
+	helper()
+	c.Do(nil)
+	(getClient().Nested().Send)()
+	c.GenericDo[int](1)
+	var fn func()
+	_ = c.Uninvoked
+	if fn != nil {
+		fn()
+	}
+}
+`
+	file, err := NewAstParser().ParseSource(src)
+	require.NoError(t, err)
+
+	selectors := FileCallSelectors(file)
+	assert.True(t, selectors["Do"])
+	assert.True(t, selectors["Nested"])
+	assert.True(t, selectors["Send"])
+	assert.True(t, selectors["GenericDo"])
+	assert.False(t, selectors["helper"])
+	assert.False(t, selectors["Uninvoked"])
+	assert.Nil(t, FileCallSelectors(nil))
+}

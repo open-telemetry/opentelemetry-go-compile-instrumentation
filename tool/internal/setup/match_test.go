@@ -988,17 +988,23 @@ func TestPreciseMatching_CallRuleAddedToFilesThatImportItsPackage(t *testing.T) 
 }
 
 // A method call can be on a value whose type comes from a package that the
-// file does not import, so a method_call rule stays on every file.
-func TestPreciseMatching_MethodCallRuleAddedToAllFiles(t *testing.T) {
+// file does not import, so a method_call rule stays on files that invoke a
+// matching call selector and skips sibling files that do not.
+func TestPreciseMatching_MethodCallRuleAddedToFilesCallingMethod(t *testing.T) {
 	noImportFile := writeGoSource(
 		t,
 		"do.go",
 		"package main\n\nimport \"example.com/clients\"\n\nfunc Do() { clients.Default().Do(nil) }\n",
 	)
+	otherFile := writeGoSource(
+		t,
+		"other.go",
+		"package main\n\nfunc Helper() { println(\"hi\") }\n",
+	)
 
 	dep := &Dependency{
 		ImportPath: "example.com/app",
-		Sources:    []string{noImportFile},
+		Sources:    []string{noImportFile, otherFile},
 	}
 
 	callRule := &rule.InstCallRule{
@@ -1019,6 +1025,7 @@ func TestPreciseMatching_MethodCallRuleAddedToAllFiles(t *testing.T) {
 	result, err := sp.preciseMatching(t.Context(), dep, []rule.InstRule{callRule}, set)
 	require.NoError(t, err)
 	require.Contains(t, result.CallRules, noImportFile)
+	require.NotContains(t, result.CallRules, otherFile)
 }
 
 func TestPreciseMatching_LitRuleAddedToFilesThatImportItsPackage(t *testing.T) {
@@ -3114,4 +3121,235 @@ func TestLoadRules_LogsSource(t *testing.T) {
 			assert.NotContains(t, logs.String(), "!BADKEY")
 		})
 	}
+}
+
+func TestPreciseMatching_MethodCallRuleCallSelectorVariants(t *testing.T) {
+	chainedFile := writeGoSource(
+		t,
+		"chained.go",
+		"package app\n\nfunc Chained() { (getClient().Next().Do)(nil) }\n",
+	)
+	genericFile := writeGoSource(
+		t,
+		"generic.go",
+		"package app\n\nfunc Generic() { getClient().GenericDo[int](1) }\n",
+	)
+	nonCallFile := writeGoSource(
+		t,
+		"decl_only.go",
+		"package app\n\nfunc Do() { helper() }\nfunc helper() {}\nvar _ = getClient().Do\n",
+	)
+
+	dep := &Dependency{
+		ImportPath: "example.com/app",
+		Sources:    []string{chainedFile, genericFile, nonCallFile},
+	}
+
+	doRule := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap-do", Target: rule.NewTarget("**")},
+		MethodCall:   "net/http.*Client.Do",
+		ImportPath:   "net/http",
+		RecvType:     "*Client",
+		FuncName:     "Do",
+		Replace:      "Wrapper({{ . }})",
+	}
+	genericRule := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap-generic-do", Target: rule.NewTarget("**")},
+		MethodCall:   "net/http.*Client.GenericDo",
+		ImportPath:   "net/http",
+		RecvType:     "*Client",
+		FuncName:     "GenericDo",
+		Replace:      "Wrapper({{ . }})",
+	}
+
+	sp := newTestSetupPhase()
+	result, err := sp.preciseMatching(
+		t.Context(),
+		dep,
+		[]rule.InstRule{doRule, genericRule},
+		rule.NewInstRuleSet(dep.ImportPath),
+	)
+	require.NoError(t, err)
+	assert.Len(t, result.CallRules, 2)
+	assert.Equal(t, []*rule.InstCallRule{doRule}, result.CallRules[chainedFile])
+	assert.Equal(t, []*rule.InstCallRule{genericRule}, result.CallRules[genericFile])
+	assert.NotContains(t, result.CallRules, nonCallFile)
+}
+
+func TestRunMatch_MethodCallDependencyPruning(t *testing.T) {
+	doSource := func(name, pkg string) string {
+		return writeGoSource(t, name, fmt.Sprintf("package %s\n\nfunc f() { c.Do(nil) }\n", pkg))
+	}
+
+	httpPkg := &packages.Package{PkgPath: "net/http"}
+	fmtPkg := &packages.Package{PkgPath: "fmt"}
+	clientsPkg := &packages.Package{
+		PkgPath: "example.com/clients",
+		Imports: map[string]*packages.Package{"net/http": httpPkg},
+	}
+	appPkg := &packages.Package{
+		PkgPath: "example.com/app",
+		Imports: map[string]*packages.Package{"example.com/clients": clientsPkg},
+	}
+	unrelatedPkg := &packages.Package{
+		PkgPath: "example.com/unrelated",
+		Imports: map[string]*packages.Package{"fmt": fmtPkg},
+	}
+	badDepPkg := &packages.Package{
+		PkgPath: "example.com/bad",
+		Errors:  []packages.Error{{Msg: "missing package"}},
+	}
+	incompleteParentPkg := &packages.Package{
+		PkgPath: "example.com/broken",
+		Imports: map[string]*packages.Package{"example.com/bad": badDepPkg},
+	}
+
+	doRule := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap-do", Target: rule.NewTarget("**")},
+		MethodCall:   "net/http.*Client.Do",
+		ImportPath:   "net/http",
+		RecvType:     "*Client",
+		FuncName:     "Do",
+		Replace:      "Wrapper({{ . }})",
+	}
+	globRules := []targetRule{{target: &doRule.Target, rule: doRule}}
+
+	sp := newTestSetupPhase()
+	sp.recordImportGraph([]*packages.Package{httpPkg, appPkg, unrelatedPkg, incompleteParentPkg})
+
+	tests := []struct {
+		name      string
+		dep       *Dependency
+		wantMatch bool
+	}{
+		{
+			name:      "target package itself matches",
+			dep:       &Dependency{ImportPath: "net/http", Sources: []string{doSource("http.go", "http")}},
+			wantMatch: true,
+		},
+		{
+			name:      "direct importer matches",
+			dep:       &Dependency{ImportPath: "example.com/clients", Sources: []string{doSource("clients.go", "clients")}},
+			wantMatch: true,
+		},
+		{
+			name:      "transitive importer matches without direct import",
+			dep:       &Dependency{ImportPath: "example.com/app", Sources: []string{doSource("app.go", "app")}},
+			wantMatch: true,
+		},
+		{
+			name:      "unrelated package is pruned",
+			dep:       &Dependency{ImportPath: "example.com/unrelated", Sources: []string{doSource("unrelated.go", "unrelated")}},
+			wantMatch: false,
+		},
+		{
+			name:      "incomplete transitive dependency falls back conservatively",
+			dep:       &Dependency{ImportPath: "example.com/broken", Sources: []string{doSource("broken.go", "broken")}},
+			wantMatch: true,
+		},
+		{
+			name:      "unknown package falls back conservatively",
+			dep:       &Dependency{ImportPath: "example.com/unknown", Sources: []string{doSource("unknown.go", "unknown")}},
+			wantMatch: true,
+		},
+		{
+			name:      "empty sources skips cleanly",
+			dep:       &Dependency{ImportPath: "example.com/unrelated"},
+			wantMatch: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			set, runErr := sp.runMatch(t.Context(), tt.dep, nil, globRules)
+			require.NoError(t, runErr)
+			assert.Equal(t, !tt.wantMatch, set.IsEmpty())
+		})
+	}
+}
+
+func TestRunMatch_MethodCallDependencyPruning_KeepsFileRules(t *testing.T) {
+	src := writeGoSource(t, "unrelated.go", "package unrelated\n\nfunc f() {}\n")
+	fmtPkg := &packages.Package{PkgPath: "fmt"}
+	unrelatedPkg := &packages.Package{
+		PkgPath: "example.com/unrelated",
+		Imports: map[string]*packages.Package{"fmt": fmtPkg},
+	}
+
+	fileRule := &rule.InstFileRule{
+		InstBaseRule: rule.InstBaseRule{Name: "add-file", Target: rule.NewTarget("**")},
+		File:         "hook.go",
+		Path:         "example.com/hook",
+	}
+	doRule := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap-do", Target: rule.NewTarget("**")},
+		MethodCall:   "net/http.*Client.Do",
+		ImportPath:   "net/http",
+		RecvType:     "*Client",
+		FuncName:     "Do",
+		Replace:      "Wrapper({{ . }})",
+	}
+	globRules := []targetRule{
+		{target: &fileRule.Target, rule: fileRule},
+		{target: &doRule.Target, rule: doRule},
+	}
+
+	sp := newTestSetupPhase()
+	sp.recordImportGraph([]*packages.Package{unrelatedPkg})
+
+	set, err := sp.runMatch(
+		t.Context(),
+		&Dependency{ImportPath: "example.com/unrelated", Sources: []string{src}},
+		nil,
+		globRules,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "unrelated", set.PackageName)
+	assert.Len(t, set.FileRules, 1)
+	assert.Empty(t, set.CallRules)
+}
+
+func TestMatchDeps_MethodCallDependencyPruning_Concurrent(t *testing.T) {
+	t.Setenv(util.EnvOtelcRules, "")
+	ruleFile := writeCustomRules(t, "method_call.yaml", `version: v1.0.0
+
+wrap_do:
+  target: "**"
+  method_call: "net/http.*Client.Do"
+  replace: "Wrapper({{ . }})"
+`)
+	httpSrc := writeGoSource(t, "client.go", "package http\n\nfunc (c *Client) Do(r any) {}\nfunc use(c *Client) { c.Do(nil) }\n")
+	appSrc := writeGoSource(t, "app.go", "package app\n\nfunc run(c any) { _ = getClient().Do(c) }\n")
+	unrelatedSrc := writeGoSource(t, "u.go", "package unrelated\n\nfunc noop() { c.Do(nil) }\n")
+
+	httpPkg := &packages.Package{PkgPath: "net/http"}
+	clientsPkg := &packages.Package{
+		PkgPath: "example.com/clients",
+		Imports: map[string]*packages.Package{"net/http": httpPkg},
+	}
+	appPkg := &packages.Package{
+		PkgPath: "example.com/app",
+		Imports: map[string]*packages.Package{"example.com/clients": clientsPkg},
+	}
+	unrelatedPkg := &packages.Package{
+		PkgPath: "example.com/unrelated",
+		Imports: map[string]*packages.Package{},
+	}
+
+	sp := newTestSetupPhase()
+	sp.ruleConfig = ruleFile
+	sp.recordImportGraph([]*packages.Package{httpPkg, appPkg, unrelatedPkg})
+
+	idx, err := sp.loadRuleIndex(t.Context(), nil)
+	require.NoError(t, err)
+
+	deps := []*Dependency{
+		{ImportPath: "net/http", Sources: []string{httpSrc}},
+		{ImportPath: "example.com/app", Sources: []string{appSrc}},
+		{ImportPath: "example.com/unrelated", Sources: []string{unrelatedSrc}},
+	}
+	matched, err := sp.matchDeps(t.Context(), deps, idx)
+	require.NoError(t, err)
+	require.Len(t, matched, 2)
+	assert.Equal(t, []string{"example.com/app", "net/http"}, []string{matched[0].ModulePath, matched[1].ModulePath})
 }

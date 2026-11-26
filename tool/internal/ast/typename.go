@@ -189,6 +189,47 @@ func FileImports(file *dst.File, path string) bool {
 	return false
 }
 
+// FileCallSelectors returns the set of selector names invoked as the callee
+// of any call expression in file. It returns nil when file is nil or contains
+// no selector calls.
+func FileCallSelectors(file *dst.File) map[string]bool {
+	if file == nil {
+		return nil
+	}
+	var selectors map[string]bool
+	dst.Inspect(file, func(node dst.Node) bool {
+		call, ok := node.(*dst.CallExpr)
+		if !ok {
+			return true
+		}
+		if sel := unwrapCallSelector(call.Fun); sel != nil && sel.Sel != nil {
+			if selectors == nil {
+				selectors = make(map[string]bool)
+			}
+			selectors[sel.Sel.Name] = true
+		}
+		return true
+	})
+	return selectors
+}
+
+func unwrapCallSelector(expr dst.Expr) *dst.SelectorExpr {
+	for {
+		switch e := expr.(type) {
+		case *dst.ParenExpr:
+			expr = e.X
+		case *dst.IndexExpr:
+			expr = e.X
+		case *dst.IndexListExpr:
+			expr = e.X
+		case *dst.SelectorExpr:
+			return e
+		default:
+			return nil
+		}
+	}
+}
+
 // importSpecs returns the import specs of file. A file built in memory can
 // leave file.Imports empty, so its import declarations are read instead.
 func importSpecs(file *dst.File) []*dst.ImportSpec {

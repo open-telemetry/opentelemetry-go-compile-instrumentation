@@ -56,6 +56,10 @@ type setupPhase struct {
 	ruleModuleRoots map[rule.InstRule]string
 	// graph caches the package graph loads setup shares between phases.
 	graph packageGraph
+	// pkgImports and pkgIncomplete record the transitive package import graph
+	// sequentially during setupLocked and loadGraph before matchDeps reads them.
+	pkgImports    map[string][]string
+	pkgIncomplete map[string]bool
 }
 
 func (sp *setupPhase) getBuildContext() *gobuild.Context {
@@ -622,6 +626,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	sp.buildPackages = buildPkgs
 	sp.resolvedNames = pkgload.CollectPackageNames(allPkgs)
 	sp.testPackages = testPackages(buildPkgs, allPkgs)
+	sp.recordImportGraph(allPkgs)
 
 	// Find the module directories for the build packages
 	moduleDirs, findModErr := pkgload.FindModuleDirs(ctx, buildPkgs)

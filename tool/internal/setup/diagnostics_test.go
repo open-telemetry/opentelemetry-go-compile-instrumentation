@@ -22,6 +22,7 @@ func TestMatchDiagnostics(t *testing.T) {
 		"", "version_mismatch", "no_source_files", "where_mismatch",
 		"function_not_found", "receiver_mismatch", "signature_mismatch", "struct_not_found",
 		"directive_not_found", "declaration_not_found", "import_not_found",
+		"dependency_not_found", "call_not_found",
 	} {
 		t.Run("reason="+code, func(t *testing.T) {
 			t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
@@ -31,6 +32,7 @@ func TestMatchDiagnostics(t *testing.T) {
 			base := rule.InstBaseRule{Name: "candidate", Target: rule.NewTarget(dep.ImportPath)}
 			fr := &rule.InstFuncRule{InstBaseRule: base, Func: "F"}
 			var r rule.InstRule = fr
+			sp := newTestSetupPhase()
 			switch code {
 			case "version_mismatch":
 				fr.Version = "v2.0.0,v3.0.0"
@@ -54,9 +56,20 @@ func TestMatchDiagnostics(t *testing.T) {
 				r = &rule.InstCallRule{
 					InstBaseRule: base, FunctionCall: "net/http.Get", ImportPath: "net/http", FuncName: "Get",
 				}
+			case "dependency_not_found":
+				sp.pkgImports = map[string][]string{dep.ImportPath: nil}
+				r = &rule.InstCallRule{
+					InstBaseRule: base, MethodCall: "(*net/http.Client).Do", ImportPath: "net/http",
+					RecvType: "*Client", FuncName: "Do",
+				}
+			case "call_not_found":
+				r = &rule.InstCallRule{
+					InstBaseRule: base, MethodCall: "(*net/http.Client).Do", ImportPath: "net/http",
+					RecvType: "*Client", FuncName: "Do",
+				}
 			}
 			exact := map[string][]rule.InstRule{dep.ImportPath: {r}}
-			set, err := newTestSetupPhase().runMatch(t.Context(), dep, exact, nil)
+			set, err := sp.runMatch(t.Context(), dep, exact, nil)
 			require.NoError(t, err)
 			require.Equal(t, code != "", set.IsEmpty())
 			data, err := os.ReadFile(filepath.Join(setupDebugDir(dep.ImportPath), "setup.matches.jsonl"))

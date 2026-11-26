@@ -379,10 +379,24 @@ func containsNode(tree *dst.File, match func(dst.Node) bool) bool {
 // which maps an import path to the sorted import paths it imports. The
 // variants of a package in a test build merge into one entry.
 func addImportGraph(graph map[string][]string, pkgs []*packages.Package) {
+	addImportGraphRecordingErrors(graph, nil, pkgs)
+}
+
+// addImportGraphRecordingErrors populates graph like addImportGraph and, when
+// incomplete is non-nil, records any package whose loaded Package reported errors.
+func addImportGraphRecordingErrors(graph map[string][]string, incomplete map[string]bool, pkgs []*packages.Package) {
 	packages.Visit(pkgs, nil, func(pkg *packages.Package) {
+		if pkg.PkgPath == "" {
+			return
+		}
+		if incomplete != nil && len(pkg.Errors) > 0 {
+			incomplete[pkg.PkgPath] = true
+		}
 		imports := graph[pkg.PkgPath]
 		for _, imp := range pkg.Imports {
-			imports = append(imports, imp.PkgPath)
+			if imp != nil && imp.PkgPath != "" {
+				imports = append(imports, imp.PkgPath)
+			}
 		}
 		slices.Sort(imports)
 		graph[pkg.PkgPath] = slices.Compact(imports)

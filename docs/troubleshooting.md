@@ -110,7 +110,9 @@ Records describe individual decisions, not a package-wide verdict. A rule can fa
 in one file and match another. An omitted `source` means a package-level decision.
 `matched: true` omits `reason`; in setup it means eligibility, not an applied change.
 Function call and literal rules are eligible in every file passing `where` that imports
-the rule's package, and method call rules in every file passing `where`; their join
+the rule's package. Method call rules are eligible when the package itself is or
+transitively imports the rule's package (if that dependency graph is available and
+complete) and the file contains a call expression selecting the method's name; their join
 points are resolved during instrumentation. Use the `.diff` reports to inspect changes.
 
 The initial closed set of rejection codes is:
@@ -118,6 +120,7 @@ The initial closed set of rejection codes is:
 | Code | Decision |
 | --- | --- |
 | `version_mismatch` | The resolved version failed the rule's range (including unresolved versions). |
+| `dependency_not_found` | The package neither equals nor transitively imports the method call rule's target package. |
 | `no_source_files` | There were no files for precise matching. |
 | `where_mismatch` | The real `where` predicate tree returned false for this file. |
 | `function_not_found` | No declaration had the requested function name. |
@@ -127,6 +130,7 @@ The initial closed set of rejection codes is:
 | `directive_not_found` | The requested directive was absent. |
 | `declaration_not_found` | No named declaration of the requested kind existed. |
 | `import_not_found` | The file did not import the package of a function call or literal rule. |
+| `call_not_found` | The file had no call expression selecting the method call rule's method name. |
 | `ignored` | An `otelc:ignore` directive suppressed instrumentation, of the file, the function, or every matching call site. |
 | `no_joinpoint` | A call, literal, or directive rule found nothing to instrument in this file. |
 

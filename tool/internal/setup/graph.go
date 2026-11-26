@@ -81,6 +81,7 @@ func (sp *setupPhase) loadGraph(ctx context.Context, flags, paths []string) ([]*
 			return nil, err
 		}
 		g.store(missing, loaded)
+		sp.recordImportGraph(loaded)
 	}
 	pkgs := make([]*packages.Package, 0, len(paths))
 	seen := make(map[*packages.Package]bool, len(paths))
@@ -93,6 +94,52 @@ func (sp *setupPhase) loadGraph(ctx context.Context, flags, paths []string) ([]*
 		}
 	}
 	return pkgs, nil
+}
+
+// recordImportGraph merges pkgs and their transitive dependencies into the
+// setup phase's import graph and marks any packages with load errors.
+func (sp *setupPhase) recordImportGraph(pkgs []*packages.Package) {
+	if len(pkgs) == 0 {
+		return
+	}
+	if sp.pkgImports == nil {
+		sp.pkgImports = make(map[string][]string)
+		sp.pkgIncomplete = make(map[string]bool)
+	}
+	addImportGraphRecordingErrors(sp.pkgImports, sp.pkgIncomplete, pkgs)
+}
+
+// packageDeps returns the set of import paths in importPath's transitive import
+// closure (including importPath itself). It returns (nil, false) when the graph
+// is empty, lacks importPath or any reachable import, or hits a package that
+// reported load errors, so callers fall back to keeping candidate rules.
+func (sp *setupPhase) packageDeps(importPath string) (map[string]bool, bool) {
+	if len(sp.pkgImports) == 0 {
+		return nil, false
+	}
+	if _, ok := sp.pkgImports[importPath]; !ok || sp.pkgIncomplete[importPath] {
+		return nil, false
+	}
+	seen := map[string]bool{importPath: true}
+	queue := []string{importPath}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		for _, imp := range sp.pkgImports[cur] {
+			if seen[imp] {
+				continue
+			}
+			if sp.pkgIncomplete[imp] {
+				return nil, false
+			}
+			if _, ok := sp.pkgImports[imp]; !ok {
+				return nil, false
+			}
+			seen[imp] = true
+			queue = append(queue, imp)
+		}
+	}
+	return seen, true
 }
 
 // store records the roots one load returned for the requested paths. A
