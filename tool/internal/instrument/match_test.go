@@ -76,6 +76,52 @@ func TestMatchPicksRuleSetOfSameCompileKind(t *testing.T) {
 	})
 }
 
+func TestMatchCombinesRuleSetsOfThisPackage(t *testing.T) {
+	// The application's rules for runtime and otelc's own runtime rules reach
+	// setup as two sets with the same import path.
+	dir := t.TempDir()
+	runtime2 := filepath.Join(dir, "runtime2.go")
+	proc := filepath.Join(dir, "proc.go")
+	args := []string{"compile", "-o", "_pkg_.a", "-p", "runtime", "-buildid", "x", runtime2, proc}
+	ip := &instrumentPhase{logger: slog.Default(), workDir: dir}
+
+	user := rule.NewInstRuleSet("runtime")
+	user.PackageName = "runtime"
+	user.AddStructRule(runtime2, &rule.InstStructRule{
+		InstBaseRule: rule.InstBaseRule{Name: "user_field"}, Struct: "g",
+	})
+	builtin := rule.NewInstRuleSet("runtime")
+	builtin.PackageName = "runtime"
+	builtin.AddStructRule(runtime2, &rule.InstStructRule{
+		InstBaseRule: rule.InstBaseRule{Name: "add_gls_field"}, Struct: "g",
+	})
+	builtin.AddRawRule(proc, &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{Name: "goroutine_propagate"}, Func: "newproc1",
+	})
+	builtin.AddFileRule(&rule.InstFileRule{
+		InstBaseRule: rule.InstBaseRule{Name: "gls_linker"}, File: "runtime_gls.go",
+	})
+	allSet := []*rule.InstRuleSet{user, builtin}
+
+	got := ip.match(allSet, args)
+	require.NotNil(t, got)
+	require.Len(t, got.StructRules[runtime2], 2)
+	assert.Equal(t, "user_field", got.StructRules[runtime2][0].Name)
+	assert.Equal(t, "add_gls_field", got.StructRules[runtime2][1].Name)
+	assert.Len(t, got.RawRules[proc], 1)
+	require.Len(t, got.FileRules, 1)
+	assert.Equal(t, "gls_linker", got.FileRules[0].Name)
+	assert.Equal(t, "runtime", got.PackageName)
+
+	assert.Len(t, user.StructRules[runtime2], 1, "the matched sets must not change")
+	assert.Empty(t, user.FileRules)
+	assert.Len(t, builtin.StructRules[runtime2], 1)
+
+	// A set only applies to a compile that holds every file its rules name.
+	onlyProc := []string{"compile", "-o", "_pkg_.a", "-p", "runtime", "-buildid", "x", proc}
+	assert.Nil(t, ip.match(allSet, onlyProc))
+}
+
 func TestAnyRuleSetHasIgnoredCallFiles(t *testing.T) {
 	t.Run("empty set", func(t *testing.T) {
 		assert.False(t, anyRuleSetHasIgnoredCallFiles(nil))

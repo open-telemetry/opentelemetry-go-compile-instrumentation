@@ -84,13 +84,24 @@ func (ip *instrumentPhase) match(allSet []*rule.InstRuleSet, args []string) *rul
 			compiled[abs] = true
 		}
 	}
+	var matches []*rule.InstRuleSet
 	for _, rset := range allSet {
 		if rset.ModulePath == importPath && rset.IsTest == isTest && ip.compilesRuleFiles(rset, compiled) {
 			ip.Debug("Match rule set", "set", rset)
-			return rset
+			matches = append(matches, rset)
 		}
 	}
-	return nil
+	switch len(matches) {
+	case 0:
+		return nil
+	case 1:
+		return matches[0]
+	}
+	// Setup keeps rule sets from separate sources apart, such as the
+	// application's rules for runtime and otelc's own runtime rules. All of
+	// them apply to this compile, and applying only the first would drop the
+	// rest silently.
+	return rule.MergeRuleSets(matches...)
 }
 
 // compilesRuleFiles reports whether every file rset has rules for is in

@@ -294,3 +294,47 @@ func TestInstRuleSet_MaxRequiredLang(t *testing.T) {
 	irs.AddRawRule(fileA, &InstRawRule{Func: "Baz", Raw: "_ = 3", Lang: "go1.16"})
 	assert.Equal(t, "go1.21", irs.MaxRequiredLang())
 }
+
+func TestMergeRuleSets(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.go")
+	b := filepath.Join(dir, "b.go")
+
+	first := NewInstRuleSet("example.com/lib")
+	first.PackageName = "lib"
+	first.CgoFileMap["a.go"] = "a.cgo"
+	first.AddFuncRule(a, &InstFuncRule{InstBaseRule: InstBaseRule{Name: "f1"}})
+	first.AddRawRule(a, &InstRawRule{InstBaseRule: InstBaseRule{Name: "r1"}})
+	first.AddIgnoredCallFile(a)
+	first.AddFileRule(&InstFileRule{InstBaseRule: InstBaseRule{Name: "file1"}})
+
+	second := NewInstRuleSet("example.com/lib")
+	second.AddFuncRule(a, &InstFuncRule{InstBaseRule: InstBaseRule{Name: "f2"}})
+	second.AddFuncRule(b, &InstFuncRule{InstBaseRule: InstBaseRule{Name: "f3"}})
+	second.AddCallRule(b, &InstCallRule{InstBaseRule: InstBaseRule{Name: "c1"}})
+	second.AddIgnoredCallFile(a)
+	second.AddIgnoredCallFile(b)
+	second.AddFileRule(&InstFileRule{InstBaseRule: InstBaseRule{Name: "file2"}})
+
+	merged := MergeRuleSets(first, second)
+
+	assert.Equal(t, "example.com/lib", merged.ModulePath)
+	assert.Equal(t, "lib", merged.PackageName)
+	assert.Equal(t, map[string]string{"a.go": "a.cgo"}, merged.CgoFileMap)
+	require.Len(t, merged.FuncRules[a], 2)
+	assert.Equal(t, "f1", merged.FuncRules[a][0].Name)
+	assert.Equal(t, "f2", merged.FuncRules[a][1].Name)
+	assert.Len(t, merged.FuncRules[b], 1)
+	assert.Len(t, merged.RawRules[a], 1)
+	assert.Len(t, merged.CallRules[b], 1)
+	assert.Equal(t, []string{a, b}, merged.IgnoredCallFiles)
+	require.Len(t, merged.FileRules, 2)
+	assert.Equal(t, "file1", merged.FileRules[0].Name)
+	assert.Equal(t, "file2", merged.FileRules[1].Name)
+
+	// The inputs keep their own rules.
+	assert.Len(t, first.FuncRules[a], 1)
+	assert.Empty(t, first.FuncRules[b])
+	assert.Len(t, first.FileRules, 1)
+	assert.Equal(t, []string{a}, first.IgnoredCallFiles)
+}

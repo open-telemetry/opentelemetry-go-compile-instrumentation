@@ -203,6 +203,44 @@ func (irs *InstRuleSet) IsInternal() bool {
 	return false
 }
 
+// MergeRuleSets returns one rule set that holds the rules of every set given,
+// in the order of the arguments. The sets must target the same package and the
+// same kind of compile. The inputs are left unchanged, so a set that is also
+// matched against another compile keeps its own rules.
+func MergeRuleSets(sets ...*InstRuleSet) *InstRuleSet {
+	util.Assert(len(sets) > 0, "no rule sets to merge")
+	merged := NewInstRuleSet(sets[0].ModulePath)
+	merged.IsTest = sets[0].IsTest
+	for _, set := range sets {
+		util.Assert(set.ModulePath == merged.ModulePath && set.IsTest == merged.IsTest,
+			"merged rule sets must share a package and compile kind")
+		if merged.PackageName == "" {
+			merged.PackageName = set.PackageName
+		}
+		maps.Copy(merged.CgoFileMap, set.CgoFileMap)
+		mergeRuleMap(merged.RawRules, set.RawRules)
+		mergeRuleMap(merged.FuncRules, set.FuncRules)
+		mergeRuleMap(merged.StructRules, set.StructRules)
+		mergeRuleMap(merged.CallRules, set.CallRules)
+		mergeRuleMap(merged.LitRules, set.LitRules)
+		mergeRuleMap(merged.DirectiveRules, set.DirectiveRules)
+		mergeRuleMap(merged.DeclRules, set.DeclRules)
+		merged.FileRules = append(merged.FileRules, set.FileRules...)
+		for _, file := range set.IgnoredCallFiles {
+			if !slices.Contains(merged.IgnoredCallFiles, file) {
+				merged.IgnoredCallFiles = append(merged.IgnoredCallFiles, file)
+			}
+		}
+	}
+	return merged
+}
+
+func mergeRuleMap[T InstRule](dst, src map[string][]T) {
+	for file, rules := range src {
+		dst[file] = append(dst[file], rules...)
+	}
+}
+
 // AddRule is a generic method that adds any type of rule to the appropriate map.
 // It works with any rule type that implements the InstRule interface.
 func addRule[T InstRule](file string, rule T, rulesMap map[string][]T) {
