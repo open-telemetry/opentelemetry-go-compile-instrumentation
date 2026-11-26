@@ -87,7 +87,7 @@ var commandSetup = cli.Command{
 
 //nolint:gochecknoglobals // Implementation of a CLI command
 var commandToolexec = cli.Command{
-	Name:            "toolexec",
+	Name:            cmdToolexecName,
 	Description:     "Wrap a command run by the go toolchain",
 	SkipFlagParsing: true,
 	Hidden:          true,

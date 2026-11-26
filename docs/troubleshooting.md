@@ -89,8 +89,9 @@ otelc --debug go build .
 OTELC_DEBUG=1 otelc go build .
 ```
 
-Debug output goes to `.otelc-build/debug.log`. The file is opened in append mode, so
-entries accumulate across runs. Delete it between runs if you want a clean log.
+Debug output goes to `.otelc-build/debug.log`. Fresh `otelc go` and `otelc setup` runs
+truncate `debug.log` under the build lock, while `toolexec` processes and drop-in
+`go build -toolexec` runs append to it.
 
 ### Rule matching decisions
 
@@ -242,7 +243,7 @@ Run `otelc cleanup` to remove them.
 
 | File / Directory | Contents |
 | --- | --- |
-| `debug.log` | Full build log, appended each run (not truncated). |
+| `debug.log` | Full build log; truncated by fresh `otelc go` and `otelc setup` runs under the build lock, appended by `toolexec` processes and drop-in `go build -toolexec` runs. |
 | `matched.json` | Rules that matched dependencies; empty array when nothing matched. |
 | `debug/<package>/*.diff` | Instrumentation diff reports (per-rule and full diffs, plus `/dev/null` added files). |
 | `debug/<package>/*` | Retained copies of instrumented and generated source files sent to the compiler. |

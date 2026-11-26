@@ -74,6 +74,7 @@ const (
 	SessionTempDir   = "session"
 	BuildTempDir     = ".otelc-build"
 	BuildLockFile    = BuildTempDir + ".lock"
+	DebugLogFilename = "debug.log"
 	OtelcRoot        = "go.opentelemetry.io/otelc"
 	OtelcPkgRoot     = OtelcRoot + "/pkg"
 	OtelcInstRoot    = OtelcRoot + "/instrumentation"
@@ -243,6 +244,12 @@ func GetInvocationTemp(name string) string {
 // GetBuildTemp returns the path to the build temp directory $BUILD_TEMP/name
 func GetBuildTemp(name string) string {
 	return filepath.Join(GetOtelcWorkDir(), BuildTempDir, name)
+}
+
+// GetDebugLogFile returns the path to the debug log file,
+// $OTELC_WORK_DIR/.otelc-build/debug.log.
+func GetDebugLogFile() string {
+	return GetBuildTemp(DebugLogFilename)
 }
 
 // GetSessionDir returns the session directory of this otelc process: the
