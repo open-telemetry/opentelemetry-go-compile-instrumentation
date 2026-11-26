@@ -381,21 +381,41 @@ func emitUnresolvedSkipWarnings(
 const skipTidyMessage = "tool file and go.mod unchanged, skipping go mod tidy"
 
 func updateToolFile(ctx context.Context, toolFile string, prunedImports map[string]bool, opts PinOptions) error {
+	tidied, err := updateToolFileModule(ctx, toolFile, prunedImports, opts)
+	if err != nil {
+		return err
+	}
+	if !opts.Vendor {
+		return nil
+	}
+	vs := getVendorState(ctx, filepath.Dir(toolFile))
+	if vs.active() && (tidied || !vs.vendored) {
+		return syncVendor(ctx, vs.vendorRoot, vs.workspace)
+	}
+	return nil
+}
+
+func updateToolFileModule(
+	ctx context.Context,
+	toolFile string,
+	prunedImports map[string]bool,
+	opts PinOptions,
+) (bool, error) {
 	original, readErr := os.ReadFile(toolFile)
 	if readErr != nil {
-		return ex.Wrap(readErr)
+		return false, ex.Wrap(readErr)
 	}
 
 	p := ast.NewAstParser()
 
 	f, parseErr := p.Parse(toolFile, parser.ParseComments)
 	if parseErr != nil {
-		return parseErr
+		return false, parseErr
 	}
 
 	if len(prunedImports) > 0 {
 		if removeErr := removeImports(f, prunedImports); removeErr != nil {
-			return removeErr
+			return false, removeErr
 		}
 	}
 
@@ -403,20 +423,20 @@ func updateToolFile(ctx context.Context, toolFile string, prunedImports map[stri
 
 	updated, printErr := ast.RenderFile(f)
 	if printErr != nil {
-		return printErr
+		return false, printErr
 	}
 
 	toolFileChanged := !bytes.Equal(updated, original)
 	if toolFileChanged {
 		if writeErr := util.WriteFileAtomic(toolFile, updated); writeErr != nil {
-			return writeErr
+			return false, writeErr
 		}
 	}
 
 	moduleDir := filepath.Dir(toolFile)
 	goModChanged, ensureErr := ensureOtelcRequire(moduleDir, util.Version)
 	if ensureErr != nil {
-		return ensureErr
+		return false, ensureErr
 	}
 
 	// go mod tidy loads the whole module graph, so only run it when otelc
@@ -425,21 +445,13 @@ func updateToolFile(ctx context.Context, toolFile string, prunedImports map[stri
 	goSumPath := filepath.Join(moduleDir, "go.sum")
 	if !toolFileChanged && !goModChanged && util.PathExists(goSumPath) {
 		util.LoggerFromContext(ctx).DebugContext(ctx, skipTidyMessage, "toolFile", toolFile)
-		// if "otelc pin" sees that the vendor/modules.txt is not in sync with the tool file
-		// run go mod vendor
-		if opts.Vendor && getVendorState(ctx, moduleDir).needsModMod() {
-			return syncVendor(ctx, moduleDir)
-		}
-		return nil
+		return false, nil
 	}
 
 	if err := runModTidy(ctx, moduleDir); err != nil {
-		return err
+		return false, err
 	}
-	if opts.Vendor && vendoringActive(ctx, moduleDir) {
-		return syncVendor(ctx, moduleDir)
-	}
-	return nil
+	return true, nil
 }
 
 func validateRuleFiles(ctx context.Context, ruleFiles []string) error {
@@ -520,6 +532,14 @@ func updatePinnedProjects(
 		return nil, walkErr
 	}
 
+	vs := pinVendorState(ctx, opts, toolFiles, true)
+	if vs.workspace {
+		if err := updateWorkspaceToolFiles(ctx, toolFiles, prunedImports, opts, vs); err != nil {
+			return nil, err
+		}
+		return &PinResult{}, nil
+	}
+
 	for _, toolFile := range toolFiles {
 		if err := updateToolFile(ctx, toolFile, prunedImports[toolFile], opts); err != nil {
 			return nil, err
@@ -527,6 +547,27 @@ func updatePinnedProjects(
 	}
 
 	return &PinResult{}, nil
+}
+
+func updateWorkspaceToolFiles(
+	ctx context.Context,
+	toolFiles []string,
+	prunedImports map[string]map[string]bool,
+	opts PinOptions,
+	vs vendorState,
+) error {
+	anyTidied := false
+	for _, toolFile := range toolFiles {
+		tidied, err := updateToolFileModule(ctx, toolFile, prunedImports[toolFile], opts)
+		if err != nil {
+			return err
+		}
+		anyTidied = anyTidied || tidied
+	}
+	if opts.Vendor && vs.active() && (anyTidied || !vs.vendored) {
+		return syncVendor(ctx, vs.vendorRoot, true)
+	}
+	return nil
 }
 
 func generatePinnedProjects(ctx context.Context, moduleDirs []string, opts PinOptions) (*PinResult, error) {
@@ -572,6 +613,7 @@ func generatePinnedProjects(ctx context.Context, moduleDirs []string, opts PinOp
 		return &PinResult{AllDeps: deps}, nil
 	}
 
+	vs := pinVendorState(ctx, opts, moduleDirs, false)
 	// Generate otel.instrumentation.go file with imports for all matched rules.
 	f := generateOtelInstrumentationGo(imports, opts)
 	for _, moduleDir := range normalizeModuleDirs(moduleDirs) {
@@ -592,13 +634,19 @@ func generatePinnedProjects(ctx context.Context, moduleDirs []string, opts PinOp
 			return nil, syncErr
 		}
 
-		if opts.Vendor && vendoringActive(ctx, moduleDir) {
-			if vendorErr := syncVendor(ctx, moduleDir); vendorErr != nil {
+		if !vs.workspace && opts.Vendor && vendoringActive(ctx, moduleDir) {
+			if vendorErr := syncVendor(ctx, moduleDir, false); vendorErr != nil {
 				return nil, vendorErr
 			}
 		}
 
 		keepForDebug(ctx, path, "")
+	}
+
+	if vs.workspace && opts.Vendor && vs.active() {
+		if vendorErr := syncVendor(ctx, vs.vendorRoot, true); vendorErr != nil {
+			return nil, vendorErr
+		}
 	}
 
 	// Intentionally return an empty PinResult
@@ -622,8 +670,9 @@ type PinOptions struct {
 	// The list may hold duplicates and entries in any order; Pin normalizes it.
 	// If the list is empty, Pin finds the module directories with opts.Args.
 	ModuleDirs []string
-	// Vendor automatically runs go mod vendor after tidying when a vendor
-	// directory is active. Enabled by `otelc pin`, disabled by autoPin.
+	// Vendor automatically runs go mod vendor (or go work vendor in workspaces)
+	// after tidying when a vendor directory is active. Enabled by `otelc pin`,
+	// disabled by autoPin.
 	Vendor bool
 }
 
@@ -649,18 +698,35 @@ func Pin(ctx context.Context, opts PinOptions) (*PinResult, error) {
 	return result, err
 }
 
+func pinVendorState(ctx context.Context, opts PinOptions, paths []string, fromFiles bool) vendorState {
+	subcommand := opts.Subcommand
+	if subcommand == "" {
+		subcommand = subcmdBuild
+	}
+	dir := buildDir(subcommand, opts.Args)
+	if dir == "" && len(paths) > 0 {
+		if fromFiles {
+			dir = filepath.Dir(paths[0])
+		} else {
+			dir = paths[0]
+		}
+	}
+	return getVendorState(ctx, dir)
+}
+
 func resolvePinModuleDirs(ctx context.Context, opts *PinOptions) (context.Context, []string, error) {
 	subcommand := opts.Subcommand
 	if subcommand == "" {
 		subcommand = subcmdBuild
 	}
-	// Force -mod=mod when a tool file is missing or has unvendored imports so
-	// pin can resolve and tidy dependencies before running go mod vendor. When
-	// tool-file imports are already vendored, keep -mod=vendor as-is.
+	// Force -mod=mod (or -mod=readonly in go.work workspaces) when a tool file
+	// is missing or has unvendored imports so pin can resolve and tidy
+	// dependencies before running go mod vendor / go work vendor. When tool-file
+	// imports are already vendored, keep -mod=vendor as-is.
 	vs := getVendorState(ctx, buildDir(subcommand, opts.Args))
 	ctx = contextWithVendorState(ctx, vs)
-	if vs.needsModMod() {
-		args, err := forceModuleMode(ctx, subcommand, opts.Args)
+	if modFlag := vs.overrideModFlag(); modFlag != "" {
+		args, err := forceModuleMode(ctx, subcommand, opts.Args, modFlag)
 		if err != nil {
 			return ctx, nil, err
 		}
@@ -680,6 +746,8 @@ func pinLocked(ctx context.Context, opts PinOptions) (*PinResult, error) {
 		if err != nil {
 			return nil, err
 		}
+	} else {
+		ctx = contextWithVendorState(ctx, pinVendorState(ctx, opts, moduleDirs, false))
 	}
 
 	toolFiles, findToolErr := findToolFiles(moduleDirs)

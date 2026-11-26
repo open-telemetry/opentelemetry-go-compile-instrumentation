@@ -3124,8 +3124,10 @@ func TestWrapCompileImportError(t *testing.T) {
 	)
 	require.ErrorContains(t, vendorErr, "otelc pin")
 	require.ErrorContains(t, vendorErr, "go mod vendor")
+	require.ErrorContains(t, vendorErr, "go work vendor")
 
 	otherErr := wrapCompileImportError(errors.New("network timeout"), "example.com/pkg")
 	require.ErrorContains(t, otherErr, `resolving "example.com/pkg"`)
 	assert.NotContains(t, otherErr.Error(), "go mod vendor")
+	assert.NotContains(t, otherErr.Error(), "go work vendor")
 }

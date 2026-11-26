@@ -421,7 +421,8 @@ func wrapCompileImportError(err error, importPath string) error {
 	if strings.Contains(err.Error(), "import lookup disabled by -mod=vendor") {
 		return ex.Wrapf(
 			err,
-			"resolving %q (run 'otelc pin' or 'go mod vendor' to vendor missing instrumentation packages)",
+			"resolving %q (run 'otelc pin', 'go mod vendor', or 'go work vendor' for workspaces "+
+				"to vendor missing instrumentation packages)",
 			importPath,
 		)
 	}

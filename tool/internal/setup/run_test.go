@@ -131,7 +131,7 @@ func TestRunProgram(t *testing.T) {
 
 func TestBuildWithToolexec_Run(t *testing.T) {
 	t.Run("forwards only the build flags", func(t *testing.T) {
-		got := runBuildWithToolexec(t, []string{"go", "run", "-tags=a", ".", "-tags=b", "-C", "missing"}, false)
+		got := runBuildWithToolexec(t, []string{"go", "run", "-tags=a", ".", "-tags=b", "-C", "missing"}, "")
 
 		assert.Equal(t, "run", got.argv[1])
 		assert.Equal(t, []string{".", "-tags=b", "-C", "missing"}, got.argv[len(got.argv)-4:])
@@ -153,7 +153,7 @@ func TestBuildWithToolexec_Run(t *testing.T) {
 			Name:            "go",
 			SkipFlagParsing: true,
 			Action: func(ctx context.Context, c *cli.Command) error {
-				return buildWithToolexec(ctx, c, false)
+				return buildWithToolexec(ctx, c, "")
 			},
 		}
 		err := cmd.Run(t.Context(), []string{"go", "run", "."})
@@ -227,10 +227,10 @@ func TestSetup_RunPlansEquivalentBuild(t *testing.T) {
 func TestToolexecBuildArgs_Run(t *testing.T) {
 	const toolexec = "-toolexec=/usr/bin/otelc toolexec"
 	for _, tt := range []struct {
-		name     string
-		args     []string
-		vendored bool
-		want     []string
+		name        string
+		args        []string
+		overrideMod string
+		want        []string
 	}{
 		{
 			name: "flags before the package",
@@ -248,14 +248,20 @@ func TestToolexecBuildArgs_Run(t *testing.T) {
 			want: []string{"go", "run", toolexec, "-exec", "xprog", ".", "arg"},
 		},
 		{
-			name:     "rewrites -mod=vendor only in the build flags",
-			args:     []string{"run", "-mod=vendor", ".", "-mod=vendor"},
-			vendored: true,
-			want:     []string{"go", "run", toolexec, "-mod=mod", ".", "-mod=vendor"},
+			name:        "rewrites -mod=vendor to -mod=mod only in the build flags",
+			args:        []string{"run", "-mod=vendor", ".", "-mod=vendor"},
+			overrideMod: modMod,
+			want:        []string{"go", "run", toolexec, "-mod=mod", ".", "-mod=vendor"},
+		},
+		{
+			name:        "rewrites -mod=vendor to -mod=readonly only in the build flags",
+			args:        []string{"run", "-mod=vendor", ".", "-mod=vendor"},
+			overrideMod: modReadonly,
+			want:        []string{"go", "run", toolexec, "-mod=readonly", ".", "-mod=vendor"},
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := toolexecBuildArgs(tt.args, "/usr/bin/otelc", tt.vendored)
+			got, err := toolexecBuildArgs(tt.args, "/usr/bin/otelc", tt.overrideMod)
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
 		})
@@ -287,7 +293,7 @@ func TestToolexecBuildArgs_RunFileTargets(t *testing.T) {
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := toolexecBuildArgs(tt.args, "/usr/bin/otelc", false)
+			got, err := toolexecBuildArgs(tt.args, "/usr/bin/otelc", "")
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
 		})

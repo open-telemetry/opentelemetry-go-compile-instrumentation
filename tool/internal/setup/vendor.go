@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 
+	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
 
 	"go.opentelemetry.io/otelc/tool/ex"
@@ -29,12 +30,26 @@ const unversionedLocalReplaceVersion = "v0.0.0-00010101000000-000000000000"
 
 type vendorModules map[string]string
 
+type localModule struct {
+	dir  string
+	path string
+}
+
+type vendorTarget struct {
+	vendorRoot string
+	workFile   string
+	workspace  bool
+}
+
 type vendorState struct {
-	// vendored is true when a single-module vendor/modules.txt is active and
-	// all external tool-file imports are vendored, so -mod=vendor stays enabled.
+	// vendored is true when vendor/modules.txt is active (single-module or
+	// workspace) and all external tool-file imports are vendored, so
+	// -mod=vendor stays enabled.
 	vendored   bool
+	workspace  bool
 	queryDir   string
-	moduleRoot string
+	vendorRoot string
+	moduleDirs []string
 	modules    vendorModules
 }
 
@@ -84,7 +99,9 @@ func vendorStateFromContext(ctx context.Context, dir string) (vendorState, bool)
 	if absDir == "" {
 		return vendorState{}, false
 	}
-	if absDir == vs.queryDir || (vs.moduleRoot != "" && absDir == vs.moduleRoot) {
+	if absDir == vs.queryDir ||
+		(vs.vendorRoot != "" && absDir == resolveCanonicalPath(vs.vendorRoot)) ||
+		slices.Contains(vs.moduleDirs, absDir) {
 		return vs, true
 	}
 	return vendorState{}, false
@@ -99,18 +116,28 @@ func getVendorState(ctx context.Context, dir string) vendorState {
 }
 
 func (vs vendorState) active() bool {
-	return vs.moduleRoot != ""
+	return vs.vendorRoot != ""
 }
 
 func (vs vendorState) needsModMod() bool {
-	return vs.moduleRoot != "" && !vs.vendored
+	return vs.vendorRoot != "" && !vs.vendored && !vs.workspace
+}
+
+func (vs vendorState) overrideModFlag() string {
+	if vs.vendorRoot == "" || vs.vendored {
+		return ""
+	}
+	if vs.workspace {
+		return modReadonly
+	}
+	return modMod
 }
 
 func (vs vendorState) vendorDir() string {
-	if vs.moduleRoot == "" {
+	if vs.vendorRoot == "" {
 		return ""
 	}
-	return filepath.Join(vs.moduleRoot, vendorDirName)
+	return filepath.Join(vs.vendorRoot, vendorDirName)
 }
 
 func (vs vendorState) packageVersion(importPath, sourceFile string) string {
@@ -188,58 +215,173 @@ func isUnderDir(path, dir string) bool {
 	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-// resolveVendorModuleRoot resolves the single-module root for dir when
-// vendor/modules.txt is present. Returns "" outside a module, without
-// vendor/modules.txt, or inside a go.work workspace (Go forbids -mod=mod there).
-func resolveVendorModuleRoot(ctx context.Context, dir string) string {
+// resolveVendorTarget resolves the active vendor root (module root for
+// single-module projects, workspace root for go.work workspaces) when
+// vendor/modules.txt is present. Returns an empty vendorTarget outside a module
+// or workspace, or when vendor/modules.txt does not exist. In workspace mode,
+// Go ignores per-module vendor directories and only consults the workspace
+// root's vendor directory.
+func resolveVendorTarget(ctx context.Context, dir string) vendorTarget {
 	logger := util.LoggerFromContext(ctx)
 
-	root, workspace, err := pkgload.ModuleAndWorkspace(ctx, dir)
+	moduleDir, workFile, err := pkgload.ModuleAndWorkFile(ctx, dir)
 	if err != nil {
 		logger.WarnContext(ctx, "failed to resolve module/workspace state; building as non-vendored",
 			"dir", dir, "error", err)
-		return ""
+		return vendorTarget{}
 	}
-	if workspace || root == "" {
-		return ""
+	if workFile != "" {
+		wsRoot := filepath.Dir(workFile)
+		if !util.PathExists(filepath.Join(wsRoot, vendorDirName, modulesTxtFileName)) {
+			return vendorTarget{}
+		}
+		return vendorTarget{
+			vendorRoot: filepath.Clean(wsRoot),
+			workFile:   workFile,
+			workspace:  true,
+		}
 	}
-	if !util.PathExists(filepath.Join(root, vendorDirName, modulesTxtFileName)) {
-		return ""
+	if moduleDir == "" || !util.PathExists(filepath.Join(moduleDir, vendorDirName, modulesTxtFileName)) {
+		return vendorTarget{}
 	}
-	return filepath.Clean(root)
+	return vendorTarget{vendorRoot: filepath.Clean(moduleDir)}
 }
 
-// detectVendorState inspects dir to determine whether single-module vendoring
-// is active and whether all external tool-file imports are already vendored.
+type resolvedLocalModules struct {
+	mods          []localModule
+	dirs          []string
+	canonicalDirs []string
+}
+
+func resolveLocalModules(target vendorTarget) (resolvedLocalModules, error) {
+	var mods []localModule
+	if target.workspace {
+		var err error
+		mods, err = loadWorkspaceModules(target.workFile)
+		if err != nil {
+			return resolvedLocalModules{}, err
+		}
+	} else {
+		mods = loadSingleLocalModule(target.vendorRoot)
+	}
+	dirs := make([]string, 0, len(mods))
+	canonicalDirs := make([]string, 0, len(mods))
+	for _, m := range mods {
+		dirs = append(dirs, m.dir)
+		if canon := resolveAbsDir(m.dir); canon != "" {
+			canonicalDirs = append(canonicalDirs, canon)
+		}
+	}
+	return resolvedLocalModules{
+		mods:          mods,
+		dirs:          dirs,
+		canonicalDirs: canonicalDirs,
+	}, nil
+}
+
+func loadWorkspaceModules(workFile string) ([]localModule, error) {
+	data, err := os.ReadFile(workFile)
+	if err != nil {
+		return nil, ex.Wrapf(err, "reading go.work %s", workFile)
+	}
+	wf, err := modfile.ParseWork(workFile, data, nil)
+	if err != nil {
+		return nil, ex.Wrapf(err, "parsing go.work %s", workFile)
+	}
+	wsRoot := filepath.Dir(workFile)
+	seen := make(map[string]bool, len(wf.Use))
+	mods := make([]localModule, 0, len(wf.Use))
+	for _, u := range wf.Use {
+		dir := u.Path
+		if !filepath.IsAbs(dir) {
+			dir = filepath.Join(wsRoot, filepath.FromSlash(dir))
+		}
+		dir = filepath.Clean(dir)
+		canon := resolveCanonicalPath(dir)
+		if canon == "" || seen[canon] {
+			continue
+		}
+		seen[canon] = true
+		mf, modErr := parseGoMod(filepath.Join(dir, goModFileName))
+		if modErr != nil {
+			return nil, modErr
+		}
+		var modPath string
+		if mf.Module != nil {
+			modPath = mf.Module.Mod.Path
+		}
+		mods = append(mods, localModule{dir: dir, path: modPath})
+	}
+	return mods, nil
+}
+
+func loadSingleLocalModule(moduleDir string) []localModule {
+	mf, err := parseGoMod(filepath.Join(moduleDir, goModFileName))
+	if err != nil || mf.Module == nil {
+		return nil
+	}
+	return []localModule{{dir: moduleDir, path: mf.Module.Mod.Path}}
+}
+
+// detectVendorState inspects dir to determine whether single-module or workspace
+// vendoring is active and whether all external tool-file imports are already vendored.
 func detectVendorState(ctx context.Context, dir string) vendorState {
 	queryDir := resolveAbsDir(dir)
-	root := resolveVendorModuleRoot(ctx, dir)
-	if root == "" {
+	target := resolveVendorTarget(ctx, dir)
+	if target.vendorRoot == "" {
 		return vendorState{queryDir: queryDir}
 	}
 
-	modulesTxt := filepath.Join(root, vendorDirName, modulesTxtFileName)
+	logger := util.LoggerFromContext(ctx)
+	modulesTxt := filepath.Join(target.vendorRoot, vendorDirName, modulesTxtFileName)
 	vm, err := parseVendorModules(modulesTxt)
 	if err != nil {
-		util.LoggerFromContext(ctx).WarnContext(ctx, "failed to parse vendor/modules.txt",
+		logger.WarnContext(ctx, "failed to parse vendor/modules.txt",
 			"path", modulesTxt, "error", err)
-		return vendorState{queryDir: queryDir, moduleRoot: root}
+		return vendorState{
+			queryDir:   queryDir,
+			vendorRoot: target.vendorRoot,
+			workspace:  target.workspace,
+		}
 	}
 
-	toolFile, err := findToolFile(root)
-	vendored := err == nil && toolFile != "" && toolFileVendored(root, toolFile, vm)
+	resolved, modErr := resolveLocalModules(target)
+	if modErr != nil {
+		logger.WarnContext(ctx, "failed to resolve workspace modules",
+			"workFile", target.workFile, "error", modErr)
+		return vendorState{
+			queryDir:   queryDir,
+			vendorRoot: target.vendorRoot,
+			workspace:  target.workspace,
+			modules:    vm,
+		}
+	}
+
+	toolFiles, findErr := findToolFiles(resolved.dirs)
+	vendored := findErr == nil && len(toolFiles) > 0 && allToolFilesVendored(toolFiles, vm, resolved.mods)
 	return vendorState{
 		vendored:   vendored,
+		workspace:  target.workspace,
 		queryDir:   queryDir,
-		moduleRoot: root,
+		vendorRoot: target.vendorRoot,
+		moduleDirs: resolved.canonicalDirs,
 		modules:    vm,
 	}
 }
 
+func allToolFilesVendored(toolFiles []string, vm vendorModules, localMods []localModule) bool {
+	for _, tf := range toolFiles {
+		if !toolFileVendored(tf, vm, localMods) {
+			return false
+		}
+	}
+	return true
+}
+
 // toolFileVendored reports whether every external import declared in toolFile
-// is listed in vm. Packages belonging to root's own module are satisfied
-// without appearing in vendor/modules.txt.
-func toolFileVendored(root, toolFile string, vm vendorModules) bool {
+// is listed in vm. Packages belonging to localMods (the module itself or a
+// workspace use module) are satisfied without appearing in vendor/modules.txt.
+func toolFileVendored(toolFile string, vm vendorModules, localMods []localModule) bool {
 	f, parseErr := ast.NewAstParser().Parse(toolFile, parser.ImportsOnly)
 	if parseErr != nil {
 		return false
@@ -249,21 +391,25 @@ func toolFileVendored(root, toolFile string, vm vendorModules) bool {
 		return false
 	}
 
-	var mainModPath string
-	if mf, modErr := parseGoMod(filepath.Join(root, goModFileName)); modErr == nil && mf.Module != nil {
-		mainModPath = mf.Module.Mod.Path
-	}
-
 	for _, imp := range importPaths {
 		if _, ok := vm[imp]; ok {
 			continue
 		}
-		if isLocalModulePackage(root, mainModPath, imp) {
+		if isAnyLocalModulePackage(localMods, imp) {
 			continue
 		}
 		return false
 	}
 	return true
+}
+
+func isAnyLocalModulePackage(localMods []localModule, importPath string) bool {
+	for _, m := range localMods {
+		if isLocalModulePackage(m.dir, m.path, importPath) {
+			return true
+		}
+	}
+	return false
 }
 
 func isLocalModulePackage(root, mainModPath, importPath string) bool {
@@ -307,28 +453,54 @@ func buildDir(subcommand string, args []string) string {
 	return dir
 }
 
-// vendoringActive reports whether the main module of a build in dir vendors
-// its dependencies. dir is the directory the go command builds in, see
-// buildDir. Returns false in workspace mode: Go forbids -mod=mod there.
+// vendoringActive reports whether a build in dir has an active vendor/modules.txt
+// (either at the module root or at the go.work workspace root). dir is the
+// directory the go command builds in, see buildDir.
 func vendoringActive(ctx context.Context, dir string) bool {
 	if vs, ok := vendorStateFromContext(ctx, dir); ok {
 		return vs.active()
 	}
-	return resolveVendorModuleRoot(ctx, dir) != ""
+	return resolveVendorTarget(ctx, dir).vendorRoot != ""
 }
 
-func forceModuleMode(ctx context.Context, subcommand string, args []string) ([]string, error) {
-	util.LoggerFromContext(ctx).InfoContext(ctx, "vendored project detected; building with -mod=mod")
+func wrapWorkspaceVendorFallbackError(err error, vs vendorState) error {
+	if err == nil || !vs.workspace || !vs.active() || vs.vendored {
+		return err
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "GOPROXY=off") ||
+		strings.Contains(msg, "import lookup disabled") ||
+		strings.Contains(msg, "no required module provides") ||
+		strings.Contains(msg, "missing go.sum entry") {
+		return ex.Wrapf(
+			err,
+			"vendored workspace is missing pinned/vendored instrumentations "+
+				"(run 'otelc pin' to run 'go work vendor', or set GOWORK=off)",
+		)
+	}
+	return err
+}
 
-	if err := os.Setenv("GOFLAGS", forceModMod(os.Getenv("GOFLAGS"))); err != nil {
-		return nil, ex.Wrapf(err, "forcing module mode for vendored build")
+func forceModuleMode(ctx context.Context, subcommand string, args []string, modFlag string) ([]string, error) {
+	if modFlag == modReadonly {
+		util.LoggerFromContext(ctx).InfoContext(ctx, "vendored workspace detected; building with -mod=readonly")
+	} else {
+		util.LoggerFromContext(ctx).InfoContext(ctx, "vendored project detected; building with -mod=mod")
 	}
 
-	return rewriteModVendor(subcommand, args), nil
+	if err := os.Setenv("GOFLAGS", forceModFlag(os.Getenv("GOFLAGS"), modFlag)); err != nil {
+		return nil, ex.Wrapf(err, "forcing %s for vendored build", modFlag)
+	}
+
+	return rewriteModVendor(subcommand, args, modFlag), nil
 }
 
-// modMod forces module mode, so the build ignores the vendor directory.
-const modMod = "-mod=mod"
+const (
+	// modMod forces module mode, so a single-module build ignores the vendor directory.
+	modMod = "-mod=mod"
+	// modReadonly ignores the vendor directory in go.work workspaces, where Go forbids -mod=mod.
+	modReadonly = "-mod=readonly"
+)
 
 // isModFlag reports whether tok is a bare -mod/--mod flag; Go's flag parser
 // treats the double-dash form the same as the single-dash one. The value, if
@@ -349,15 +521,22 @@ func isModToken(tok string) bool {
 	return isModFlag(tok) || strings.HasPrefix(tok, "-mod=") || strings.HasPrefix(tok, "--mod=")
 }
 
-// forceModMod returns goflags adjusted so the build ignores the vendor
-// directory. GOFLAGS holds space-separated single tokens, so only the
+// forceModMod returns goflags adjusted with -mod=mod so single-module builds
+// ignore the vendor directory.
+func forceModMod(goflags string) string {
+	return forceModFlag(goflags, modMod)
+}
+
+// forceModFlag returns goflags adjusted so the build ignores the vendor
+// directory using targetMod (-mod=mod for single-module builds, -mod=readonly
+// for workspaces). GOFLAGS holds space-separated single tokens, so only the
 // -mod=value form (single- or double-dash: -mod=vendor, --mod=vendor) occurs
-// here. Every -mod=vendor/--mod=vendor is rewritten to -mod=mod (Go applies
+// here. Every -mod=vendor/--mod=vendor is rewritten to targetMod (Go applies
 // last-wins for repeated flags, so all occurrences must change); -mod=mod and
 // -mod=readonly (either dash form) are left as-is (both already ignore
-// vendoring, so we respect the user's intent). -mod=mod is appended only when
+// vendoring, so we respect the user's intent). targetMod is appended only when
 // no -mod/--mod token is present at all.
-func forceModMod(goflags string) string {
+func forceModFlag(goflags, targetMod string) string {
 	// SplitGoflags keeps quoted tokens (such as -tags='foo bar') intact, unlike
 	// strings.Fields which would split them on the inner space.
 	fields := util.SplitGoflags(goflags)
@@ -369,26 +548,26 @@ func forceModMod(goflags string) string {
 		// token in the output so an existing -mod choice is preserved verbatim.
 		switch tok := util.UnquoteGoflagsToken(f); {
 		case isModVendorToken(tok):
-			fields[i] = modMod
+			fields[i] = targetMod
 			hasMod = true
 		case isModToken(tok):
 			hasMod = true
 		}
 	}
 	if !hasMod {
-		fields = append(fields, modMod)
+		fields = append(fields, targetMod)
 	}
 	return strings.Join(fields, " ")
 }
 
 // rewriteModVendor returns a copy of args with an explicit -mod=vendor/
 // --mod=vendor (single token) or -mod vendor/--mod vendor (two tokens)
-// rewritten to module mode, leaving -mod=readonly and -mod=mod untouched. A
-// CLI flag beats GOFLAGS, so this neutralizes a vendor selection that setting
+// rewritten to targetMod, leaving -mod=readonly and -mod=mod untouched. A CLI
+// flag beats GOFLAGS, so this neutralizes a vendor selection that setting
 // GOFLAGS alone cannot override.
 // Only actual Go build flags are rewritten; test-binary arguments and test flag
 // values are preserved untouched.
-func rewriteModVendor(subcommand string, args []string) []string {
+func rewriteModVendor(subcommand string, args []string, targetMod string) []string {
 	if subcommand == "" {
 		subcommand = subcmdBuild
 	}
@@ -396,13 +575,16 @@ func rewriteModVendor(subcommand string, args []string) []string {
 	out := make([]string, len(args))
 	copy(out, args)
 
+	targetVal := strings.TrimPrefix(targetMod, "-mod=")
 	for i, a := range classified {
-		if a.Kind == ArgBuildFlag && a.FlagName == flagMod {
-			if a.HasValue && isModVendorToken(a.Raw) {
-				out[a.Index] = modMod
-			} else if !a.HasValue && i+1 < len(classified) && classified[i+1].Kind == ArgBuildFlagValue && classified[i+1].Raw == vendorDirName {
-				out[classified[i+1].Index] = "mod"
-			}
+		if a.Kind != ArgBuildFlag || a.FlagName != flagMod {
+			continue
+		}
+		if a.HasValue && isModVendorToken(a.Raw) {
+			out[a.Index] = targetMod
+		} else if !a.HasValue && i+1 < len(classified) &&
+			classified[i+1].Kind == ArgBuildFlagValue && classified[i+1].Raw == vendorDirName {
+			out[classified[i+1].Index] = targetVal
 		}
 	}
 	return out

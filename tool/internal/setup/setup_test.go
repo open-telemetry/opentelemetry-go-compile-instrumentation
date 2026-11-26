@@ -60,7 +60,7 @@ func TestToolexecInsertArg(t *testing.T) {
 
 func TestToolexecBuildArgs(t *testing.T) {
 	t.Run("inserts the quoted -toolexec ahead of the caller's args", func(t *testing.T) {
-		got, err := toolexecBuildArgs([]string{"build", "-o", "app", "./cmd"}, "/opt/my tools/otelc", false)
+		got, err := toolexecBuildArgs([]string{"build", "-o", "app", "./cmd"}, "/opt/my tools/otelc", "")
 		require.NoError(t, err)
 		assert.Equal(t, []string{
 			"go", "build",
@@ -86,16 +86,22 @@ func TestToolexecBuildArgs(t *testing.T) {
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := toolexecBuildArgs(tt.args, "/usr/bin/otelc", false, "-work")
+			got, err := toolexecBuildArgs(tt.args, "/usr/bin/otelc", "", "-work")
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
 		})
 	}
 
-	t.Run("neutralizes -mod=vendor when vendored", func(t *testing.T) {
-		got, err := toolexecBuildArgs([]string{"build", "-mod=vendor", "."}, "/usr/bin/otelc", true)
+	t.Run("neutralizes -mod=vendor when overriding mod mode", func(t *testing.T) {
+		got, err := toolexecBuildArgs([]string{"build", "-mod=vendor", "."}, "/usr/bin/otelc", modMod)
 		require.NoError(t, err)
 		assert.NotContains(t, got, "-mod=vendor")
+		assert.Contains(t, got, "-mod=mod")
+
+		gotReadonly, err := toolexecBuildArgs([]string{"build", "-mod=vendor", "."}, "/usr/bin/otelc", modReadonly)
+		require.NoError(t, err)
+		assert.NotContains(t, gotReadonly, "-mod=vendor")
+		assert.Contains(t, gotReadonly, "-mod=readonly")
 	})
 
 	t.Run("adds the generated runtime file for file targets", func(t *testing.T) {
@@ -106,7 +112,7 @@ func TestToolexecBuildArgs(t *testing.T) {
 		require.NoError(t, os.WriteFile(
 			filepath.Join(dir, otelcRuntimeFile), []byte("package main\n"), 0o644))
 
-		got, err := toolexecBuildArgs([]string{"build", "main.go"}, "/usr/bin/otelc", false)
+		got, err := toolexecBuildArgs([]string{"build", "main.go"}, "/usr/bin/otelc", "")
 		require.NoError(t, err)
 		assert.Contains(t, got, otelcRuntimeFile)
 	})
@@ -123,7 +129,7 @@ func TestToolexecBuildArgs(t *testing.T) {
 
 		for _, cdir := range [][]string{{"-C", "app"}, {"-C=app"}, {"-C", appDir}} {
 			args := append(append([]string{"build"}, cdir...), "main.go")
-			got, err := toolexecBuildArgs(args, "/usr/bin/otelc", false)
+			got, err := toolexecBuildArgs(args, "/usr/bin/otelc", "")
 			require.NoError(t, err)
 			assert.Equal(t, slices.Index(got, "main.go")+1, slices.Index(got, otelcRuntimeFile), "args %v", args)
 		}
@@ -142,7 +148,7 @@ func TestToolexecBuildArgs(t *testing.T) {
 		got, err := toolexecBuildArgs(
 			[]string{"test", "main.go", "main_test.go", "--", "custom.go"},
 			"/usr/bin/otelc",
-			false,
+			"",
 		)
 		require.NoError(t, err)
 		delimIdx := slices.Index(got, "--")
@@ -160,7 +166,7 @@ func TestToolexecBuildArgs(t *testing.T) {
 		require.NoError(t, os.WriteFile(
 			filepath.Join(dir, otelcRuntimeFile), []byte("package main\n"), 0o644))
 
-		got, err := toolexecBuildArgs([]string{"test", "main.go", "-args", "custom.go"}, "/usr/bin/otelc", false)
+		got, err := toolexecBuildArgs([]string{"test", "main.go", "-args", "custom.go"}, "/usr/bin/otelc", "")
 		require.NoError(t, err)
 		delimIdx := slices.Index(got, "-args")
 		require.Positive(t, delimIdx)
@@ -177,7 +183,7 @@ func TestToolexecBuildArgs(t *testing.T) {
 		require.NoError(t, os.WriteFile(
 			filepath.Join(dir, otelcRuntimeFile), []byte("package main\n"), 0o644))
 
-		got, err := toolexecBuildArgs([]string{"test", "main.go", "--args", "custom.go"}, "/usr/bin/otelc", false)
+		got, err := toolexecBuildArgs([]string{"test", "main.go", "--args", "custom.go"}, "/usr/bin/otelc", "")
 		require.NoError(t, err)
 		delimIdx := slices.Index(got, "--args")
 		require.Positive(t, delimIdx)
@@ -195,7 +201,7 @@ func TestToolexecBuildArgs(t *testing.T) {
 			filepath.Join(dir, otelcRuntimeFile), []byte("package main\n"), 0o644))
 
 		for _, delim := range []string{"--", "-args", "--args"} {
-			got, err := toolexecBuildArgs([]string{"test", delim, "custom.go"}, "/usr/bin/otelc", false)
+			got, err := toolexecBuildArgs([]string{"test", delim, "custom.go"}, "/usr/bin/otelc", "")
 			require.NoError(t, err)
 			assert.NotContains(
 				t,
@@ -215,7 +221,7 @@ func TestToolexecBuildArgs(t *testing.T) {
 		require.NoError(t, os.WriteFile(
 			filepath.Join(dir, otelcRuntimeFile), []byte("package main\n"), 0o644))
 
-		got, err := toolexecBuildArgs([]string{"build", "--", "main.go"}, "/usr/bin/otelc", false)
+		got, err := toolexecBuildArgs([]string{"build", "--", "main.go"}, "/usr/bin/otelc", "")
 		require.NoError(t, err)
 		delimIdx := slices.Index(got, "--")
 		require.Positive(t, delimIdx)
@@ -238,7 +244,7 @@ func TestToolexecBuildArgs(t *testing.T) {
 			got, err := toolexecBuildArgs(
 				[]string{"test", "main.go", "main_test.go", "-test.run", val},
 				"/usr/bin/otelc",
-				false,
+				"",
 			)
 			require.NoError(t, err)
 			runIdx := slices.Index(got, "-test.run")
@@ -248,7 +254,7 @@ func TestToolexecBuildArgs(t *testing.T) {
 			gotWithDelim, err := toolexecBuildArgs(
 				[]string{"test", "main.go", "main_test.go", "-test.run", val, "--", "custom.go"},
 				"/usr/bin/otelc",
-				false,
+				"",
 			)
 			require.NoError(t, err)
 			runIdx = slices.Index(gotWithDelim, "-test.run")
@@ -262,7 +268,7 @@ func TestToolexecBuildArgs(t *testing.T) {
 	})
 
 	t.Run("propagates the error when the path can't be quoted", func(t *testing.T) {
-		_, err := toolexecBuildArgs([]string{"build", "."}, `/home/it's "me"/otelc`, false)
+		_, err := toolexecBuildArgs([]string{"build", "."}, `/home/it's "me"/otelc`, "")
 		require.Error(t, err)
 	})
 }
@@ -302,12 +308,17 @@ type toolexecInvocation struct {
 	env  []string
 }
 
-func runBuildWithToolexec(t *testing.T, args []string, vendored bool) toolexecInvocation {
+func runBuildWithToolexec(t *testing.T, args []string, overrideMod string) toolexecInvocation {
 	t.Helper()
-	return runBuildWithToolexecContext(t.Context(), t, args, vendored)
+	return runBuildWithToolexecContext(t.Context(), t, args, overrideMod)
 }
 
-func runBuildWithToolexecContext(ctx context.Context, t *testing.T, args []string, vendored bool) toolexecInvocation {
+func runBuildWithToolexecContext(
+	ctx context.Context,
+	t *testing.T,
+	args []string,
+	overrideMod string,
+) toolexecInvocation {
 	t.Helper()
 
 	dir := t.TempDir()
@@ -327,7 +338,7 @@ func runBuildWithToolexecContext(ctx context.Context, t *testing.T, args []strin
 		Name:            "go",
 		SkipFlagParsing: true,
 		Action: func(ctx context.Context, c *cli.Command) error {
-			return buildWithToolexec(ctx, c, vendored)
+			return buildWithToolexec(ctx, c, overrideMod)
 		},
 	}
 	cmd := &cli.Command{
@@ -341,7 +352,7 @@ func runBuildWithToolexecContext(ctx context.Context, t *testing.T, args []strin
 
 func TestBuildWithToolexec(t *testing.T) {
 	t.Run("runs go without -work and with a -toolexec pointing at this executable", func(t *testing.T) {
-		got := runBuildWithToolexec(t, []string{"go", "build", "."}, false)
+		got := runBuildWithToolexec(t, []string{"go", "build", "."}, "")
 
 		require.NotEmpty(t, got.argv)
 		assert.Equal(t, "go", got.argv[0])
@@ -354,7 +365,7 @@ func TestBuildWithToolexec(t *testing.T) {
 	t.Run("tells nested otelc invocations which locks and work dir it holds", func(t *testing.T) {
 		clearNestedBuildEnv(t)
 		ctx := contextWithBuildLockHeld(t.Context(), []string{"held.lock"})
-		got := runBuildWithToolexecContext(ctx, t, []string{"go", "test", "."}, false)
+		got := runBuildWithToolexecContext(ctx, t, []string{"go", "test", "."}, "")
 
 		assert.Contains(t, got.env, util.EnvOtelcHeldBuildLocks+`=["held.lock"]`)
 		assert.Contains(t, got.env,
@@ -362,16 +373,16 @@ func TestBuildWithToolexec(t *testing.T) {
 	})
 
 	t.Run("keeps the work directory when the root debug flag is set", func(t *testing.T) {
-		got := runBuildWithToolexec(t, []string{"--debug", "go", "build", "."}, false)
+		got := runBuildWithToolexec(t, []string{"--debug", "go", "build", "."}, "")
 
 		assert.Contains(t, got.argv, "-work")
 	})
 
 	t.Run("passes -json on the command line when GOFLAGS asked for it", func(t *testing.T) {
-		assert.NotContains(t, runBuildWithToolexec(t, []string{"go", "test", "./..."}, false).argv, "-json")
+		assert.NotContains(t, runBuildWithToolexec(t, []string{"go", "test", "./..."}, "").argv, "-json")
 
 		ctx := ContextWithJSONOutput(t.Context())
-		got := runBuildWithToolexecContext(ctx, t, []string{"go", "test", "-json=false", "./..."}, false)
+		got := runBuildWithToolexecContext(ctx, t, []string{"go", "test", "-json=false", "./..."}, "")
 
 		// A -json=false of the user comes later and still wins.
 		require.Contains(t, got.argv, "-json")
@@ -379,11 +390,16 @@ func TestBuildWithToolexec(t *testing.T) {
 	})
 
 	t.Run("forwards build flags and neutralizes vendor mode", func(t *testing.T) {
-		got := runBuildWithToolexec(t, []string{"go", "build", "-race", "-mod=vendor", "."}, true)
+		got := runBuildWithToolexec(t, []string{"go", "build", "-race", "-mod=vendor", "."}, modMod)
 
 		assert.NotContains(t, got.argv, "-mod=vendor", "vendor mode is rewritten for the instrumented build")
+		assert.Contains(t, got.argv, "-mod=mod")
 		assert.Contains(t, strings.Join(got.env, "\n"), util.EnvOtelcBuildFlags+"=",
 			"context-affecting flags are forwarded to the toolexec child")
+
+		gotReadonly := runBuildWithToolexec(t, []string{"go", "build", "-race", "-mod=vendor", "."}, modReadonly)
+		assert.NotContains(t, gotReadonly.argv, "-mod=vendor")
+		assert.Contains(t, gotReadonly.argv, "-mod=readonly")
 	})
 
 	t.Run("does not build when the go cache cannot be prepared", func(t *testing.T) {
@@ -407,7 +423,7 @@ func TestBuildWithToolexec(t *testing.T) {
 			Name:            "go",
 			SkipFlagParsing: true,
 			Action: func(ctx context.Context, c *cli.Command) error {
-				return buildWithToolexec(ctx, c, false)
+				return buildWithToolexec(ctx, c, "")
 			},
 		}
 		err := cmd.Run(t.Context(), []string{"go", "build", "."})
@@ -436,7 +452,7 @@ func TestBuildWithToolexec(t *testing.T) {
 			Name:            "go",
 			SkipFlagParsing: true,
 			Action: func(ctx context.Context, c *cli.Command) error {
-				return buildWithToolexec(ctx, c, false)
+				return buildWithToolexec(ctx, c, "")
 			},
 		}
 		err := cmd.Run(t.Context(), []string{"go", "build", "."})
@@ -2165,14 +2181,14 @@ func TestRuntime(t *testing.T) {
 }
 `), 0o644))
 	for _, flags := range [][]string{{"-race", "--", "custom"}, {"-race", "-args", "custom"}, {"-race", "--args", "custom"}} {
-		args, err := toolexecBuildArgs(append([]string{"test", "main_test.go"}, flags...), "/usr/bin/otelc", false)
+		args, err := toolexecBuildArgs(append([]string{"test", "main_test.go"}, flags...), "/usr/bin/otelc", "")
 		require.NoError(t, err)
 		assert.Equal(t, slices.Index(args, "main_test.go")+1, slices.Index(args, otelcRuntimeFile))
 		assert.Less(t, slices.Index(args, otelcRuntimeFile), slices.Index(args, "-race"))
 	}
 	for _, flags := range [][]string{{"-run", "TestRuntime"}, {"-v", "--", "custom"}, {"-run", "TestRuntime", "-args", "custom"}} {
 		t.Run(strings.Join(flags, " "), func(t *testing.T) {
-			args, err := toolexecBuildArgs(append([]string{"test", "main_test.go"}, flags...), "/usr/bin/otelc", false)
+			args, err := toolexecBuildArgs(append([]string{"test", "main_test.go"}, flags...), "/usr/bin/otelc", "")
 			require.NoError(t, err)
 			assert.Equal(t, slices.Index(args, "main_test.go")+1, slices.Index(args, otelcRuntimeFile))
 			// Execute the generated file list without invoking the instrumentation wrapper.

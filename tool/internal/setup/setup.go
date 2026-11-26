@@ -56,7 +56,7 @@ type setupPhase struct {
 	ruleModuleRoots map[rule.InstRule]string
 	// graph caches the package graph loads setup shares between phases.
 	graph packageGraph
-	// vendor holds the single-module vendoring state and parsed vendor/modules.txt
+	// vendor holds the vendoring state and parsed vendor/modules.txt
 	// metadata for this build.
 	vendor vendorState
 }
@@ -579,16 +579,16 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 
 	logger := util.LoggerFromContext(ctx)
 
-	// Force -mod=mod when vendor/ exists without pinned and vendored
-	// instrumentation imports, so otelc edits to go.mod do not trip Go's vendor
-	// consistency check and vendor/ stays untouched. When tool-file imports are
-	// all vendored, preserve -mod=vendor for offline builds. Must run before
-	// isSetup() and getBuildPackages().
+	// Force -mod=mod (or -mod=readonly in go.work workspaces) when vendor/ exists
+	// without pinned and vendored instrumentation imports, so otelc edits to
+	// go.mod do not trip Go's vendor consistency check and vendor/ stays
+	// untouched. When tool-file imports are all vendored, preserve -mod=vendor
+	// for offline builds. Must run before isSetup() and getBuildPackages().
 	vs := getVendorState(ctx, buildDir(subcommand, args))
 	ctx = contextWithVendorState(ctx, vs)
-	if vs.needsModMod() {
+	if modFlag := vs.overrideModFlag(); modFlag != "" {
 		var modErr error
-		args, modErr = forceModuleMode(ctx, subcommand, args)
+		args, modErr = forceModuleMode(ctx, subcommand, args, modFlag)
 		if modErr != nil {
 			return modErr
 		}
@@ -610,6 +610,10 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		vendor:     vs,
 	}
 
+	return wrapWorkspaceVendorFallbackError(sp.run(ctx, subcommand, args), vs)
+}
+
+func (sp *setupPhase) run(ctx context.Context, subcommand string, args []string) error {
 	// Introduce additional hook code by generating otelc.runtime.go
 	// Use GetPackage to determine the build target directory
 	buildPkgs, allPkgs, err := getBuildPackages(ctx, subcommand, args)
@@ -938,7 +942,7 @@ func addBuildFlags(args []string, flags ...string) []string {
 // the caller's remaining arguments. Kept free of side effects so it can be
 // tested directly; buildWithToolexec cannot be, since it would spawn a go
 // build whose -toolexec target is the test binary itself.
-func toolexecBuildArgs(args []string, execPath string, vendored bool, goFlags ...string) ([]string, error) {
+func toolexecBuildArgs(args []string, execPath, overrideMod string, goFlags ...string) ([]string, error) {
 	insert, err := toolexecInsertArg(execPath)
 	if err != nil {
 		return nil, err
@@ -951,8 +955,8 @@ func toolexecBuildArgs(args []string, execPath string, vendored bool, goFlags ..
 	// Add the rest
 	subcommand := args[0]
 	restArgs := args[1:]
-	if vendored {
-		restArgs = rewriteModVendor(subcommand, restArgs)
+	if overrideMod != "" {
+		restArgs = rewriteModVendor(subcommand, restArgs, overrideMod)
 	}
 	if _, fileTargets, err2 := splitBuildTargets(subcommand, restArgs); err2 == nil && len(fileTargets) > 0 {
 		// add otelc.runtime.go manually to command line for file targets
@@ -1006,11 +1010,11 @@ func JSONOutputFromContext(ctx context.Context) bool {
 	return jsonOutput
 }
 
-// buildWithToolexec builds the project with the toolexec mode. vendored is
-// passed in by GoBuild: Setup already forced GOFLAGS=-mod=mod, but a CLI
-// -mod=vendor beats GOFLAGS, so it still has to be neutralized in the build
-// args and forwarded flags below.
-func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool, extraFlags ...string) error {
+// buildWithToolexec builds the project with the toolexec mode. overrideMod
+// is passed in by GoBuild: Setup already forced GOFLAGS=-mod=mod (or
+// -mod=readonly in workspaces), but a CLI -mod=vendor beats GOFLAGS, so it
+// still has to be neutralized in the build args and forwarded flags below.
+func buildWithToolexec(ctx context.Context, cmd *cli.Command, overrideMod string, extraFlags ...string) error {
 	args := cmd.Args().Slice()
 	logger := util.LoggerFromContext(ctx)
 
@@ -1030,7 +1034,7 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool, ext
 		goFlags = append(goFlags, flagJSON)
 	}
 	goFlags = append(goFlags, extraFlags...)
-	newArgs, err := toolexecBuildArgs(args, execPath, vendored, goFlags...)
+	newArgs, err := toolexecBuildArgs(args, execPath, overrideMod, goFlags...)
 	if err != nil {
 		return err
 	}
@@ -1055,8 +1059,8 @@ func buildWithToolexec(ctx context.Context, cmd *cli.Command, vendored bool, ext
 		return err
 	}
 	buildFlags := extractBuildFlags(subcommand, forwardArgs)
-	if vendored {
-		buildFlags = rewriteModVendor(subcommand, buildFlags)
+	if overrideMod != "" {
+		buildFlags = rewriteModVendor(subcommand, buildFlags, overrideMod)
 	}
 	buildFlags = append(buildFlags, nestedCoverFlags(util.SplitGoflags(os.Getenv("GOFLAGS")), buildFlags)...)
 	buildFlags = append(buildFlags, extraFlags...)
@@ -1159,13 +1163,14 @@ func runGoBuild(ctx context.Context, cmd *cli.Command, snapshot *setupSnapshot) 
 
 	statsEnabled := os.Getenv(util.EnvOtelcStats) != ""
 
-	// Setup forces GOFLAGS=-mod=mod when vendor/ exists without pinned and
-	// vendored instrumentation imports. forceMod is computed here too so
-	// buildWithToolexec rewrites an explicit CLI -mod=vendor only in that mode,
-	// preserving -mod=vendor when all tool-file imports are vendored.
+	// Setup forces GOFLAGS=-mod=mod (or -mod=readonly in go.work workspaces)
+	// when vendor/ exists without pinned and vendored instrumentation imports.
+	// overrideMod is computed here too so buildWithToolexec rewrites an explicit
+	// CLI -mod=vendor only in that mode, preserving -mod=vendor when all
+	// tool-file imports are vendored.
 	vs := getVendorState(ctx, buildDir(cmd.Args().First(), cmd.Args().Tail()))
 	ctx = contextWithVendorState(ctx, vs)
-	forceMod := vs.needsModMod()
+	overrideMod := vs.overrideModFlag()
 
 	setupStart := time.Now()
 	err := Setup(ctx, cmd)
@@ -1179,8 +1184,8 @@ func runGoBuild(ctx context.Context, cmd *cli.Command, snapshot *setupSnapshot) 
 
 	compile := func(ctx context.Context, extraFlags ...string) error {
 		buildStart := time.Now()
-		if buildErr := buildWithToolexec(ctx, cmd, forceMod, extraFlags...); buildErr != nil {
-			return buildErr
+		if buildErr := buildWithToolexec(ctx, cmd, overrideMod, extraFlags...); buildErr != nil {
+			return wrapWorkspaceVendorFallbackError(buildErr, vs)
 		}
 		if statsEnabled {
 			logger.InfoContext(ctx, "build stats", "duration", time.Since(buildStart))
