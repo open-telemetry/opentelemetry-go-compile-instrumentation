@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -22,9 +23,9 @@ import (
 )
 
 const (
-	debugLogFilename = "debug.log"
-	flagWorkDir      = "work-dir"
-	flagTimeout      = "timeout"
+	cmdToolexecName = "toolexec"
+	flagWorkDir     = "work-dir"
+	flagTimeout     = "timeout"
 	// envBuildTimeout is the user-facing env var for --timeout. It is
 	// distinct from util.EnvOtelcBuildDeadline, which carries the absolute
 	// deadline --timeout computes once resolved, not the duration itself.
@@ -260,7 +261,7 @@ func initLogger(ctx context.Context, cmd *cli.Command) (context.Context, error) 
 	// read-only module cache). Discover the dir from `otelc setup` rather than
 	// trusting cwd; skip filesystem setup when none is found instead of
 	// creating .otelc-build in an arbitrary location.
-	if cmd.Args().First() == "toolexec" && !cmd.IsSet(flagWorkDir) && os.Getenv(util.EnvOtelcWorkDir) == "" {
+	if cmd.Args().First() == cmdToolexecName && !cmd.IsSet(flagWorkDir) && os.Getenv(util.EnvOtelcWorkDir) == "" {
 		workDir = util.DiscoverWorkDir(workDir)
 		if workDir == "" {
 			return ctx, nil
@@ -284,24 +285,19 @@ func initLogger(ctx context.Context, cmd *cli.Command) (context.Context, error) 
 		return ctx, ex.Wrapf(err, "failed to create work directory %q", buildTempDir)
 	}
 
-	logFilename := filepath.Join(buildTempDir, debugLogFilename)
-	logFile, err := os.OpenFile(logFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return ctx, ex.Wrapf(err, "failed to open log file %q", logFilename)
-	}
+	logFilename := util.GetDebugLogFile()
 
 	level := slog.LevelInfo
 	if cmd.Bool("debug") {
 		level = slog.LevelDebug
 		if setErr := os.Setenv(util.EnvOtelcDebug, "1"); setErr != nil {
-			_ = logFile.Close()
 			return ctx, ex.Wrapf(setErr, "set %s", util.EnvOtelcDebug)
 		}
 	}
 
 	// Log timestamps and levels are omitted: they add noise when correlating
 	// with Go toolchain output and the log file is for human debugging only.
-	handler := slog.NewTextHandler(logFile, &slog.HandlerOptions{
+	opts := &slog.HandlerOptions{
 		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
 			if a.Key == slog.TimeKey || a.Key == slog.LevelKey {
 				return slog.Attr{}
@@ -309,13 +305,32 @@ func initLogger(ctx context.Context, cmd *cli.Command) (context.Context, error) 
 			return a
 		},
 		Level: level,
-	})
+	}
+
+	var handler slog.Handler
+	var logCloser io.Closer
+	if cmd.Args().First() == cmdToolexecName {
+		// One build spawns hundreds of toolexec processes, most of which
+		// emit no record at the enabled level. Open the log on the first
+		// record instead of paying for a file handle in every process.
+		lazy := &lazyLogFile{path: logFilename}
+		logCloser = lazy
+		handler = slog.NewTextHandler(lazy, opts)
+	} else {
+		logFile, openErr := os.OpenFile(logFilename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if openErr != nil {
+			return ctx, ex.Wrapf(openErr, "failed to open log file %q", logFilename)
+		}
+		handler = slog.NewTextHandler(logFile, opts)
+		logCloser = logFile
+	}
+
 	logger := slog.New(handler)
 	ctx = util.ContextWithLogger(ctx, logger)
 	// closeLogger is safe to call from the After hook: cli/v3 After is a defer
 	// closure that captures the ctx variable by reference, so the updated ctx
 	// from Before is visible when After runs.
-	ctx = util.ContextWithLogWriter(ctx, logFile)
+	ctx = util.ContextWithLogWriter(ctx, logCloser)
 
 	return ctx, nil
 }

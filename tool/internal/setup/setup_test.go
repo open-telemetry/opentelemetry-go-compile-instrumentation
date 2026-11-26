@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -40,6 +41,56 @@ func TestGoBuild_RejectsUnsupportedSubcommand(t *testing.T) {
 			require.Contains(t, err.Error(), "'go run'")
 		})
 	}
+}
+
+func TestTruncateDebugLog(t *testing.T) {
+	t.Run("ignores missing debug log", func(t *testing.T) {
+		t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+		require.NoError(t, truncateDebugLog())
+	})
+
+	t.Run("truncates existing debug log without disturbing append handles", func(t *testing.T) {
+		workDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, workDir)
+		require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+		logPath := util.GetDebugLogFile()
+		require.NoError(t, os.WriteFile(logPath, []byte("stale content\n"), 0o644))
+
+		appendHandle, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		require.NoError(t, err)
+		defer appendHandle.Close()
+
+		require.NoError(t, truncateDebugLog())
+
+		content, err := os.ReadFile(logPath)
+		require.NoError(t, err)
+		assert.Empty(t, content)
+
+		_, err = appendHandle.WriteString("fresh line\n")
+		require.NoError(t, err)
+
+		content, err = os.ReadFile(logPath)
+		require.NoError(t, err)
+		assert.Equal(t, "fresh line\n", string(content))
+	})
+
+	t.Run("preserves debug log when unlocked compile is enabled", func(t *testing.T) {
+		workDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, workDir)
+		t.Setenv(envUnlockedCompile, "1")
+		require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+		logPath := util.GetDebugLogFile()
+		want := "concurrent unlocked build log\n"
+		require.NoError(t, os.WriteFile(logPath, []byte(want), 0o644))
+
+		require.NoError(t, truncateDebugLog())
+
+		content, err := os.ReadFile(logPath)
+		require.NoError(t, err)
+		assert.Equal(t, want, string(content))
+	})
 }
 
 func TestToolexecInsertArg(t *testing.T) {
@@ -1994,6 +2045,55 @@ func TestRunGoBuild_CleansDebugArtifactsWhenDebugEnabled(t *testing.T) {
 	assert.NoDirExists(t, staleDir, "expected stale debug directory to be cleaned by runGoBuild")
 }
 
+func TestRunGoBuild_PreservesRecoveryLogsAfterTruncation(t *testing.T) {
+	setupTestModule(t, []string{"cmd"})
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	leaveInterruptedBuild(t, cwd)
+
+	logPath := util.GetDebugLogFile()
+	require.NoError(t, os.MkdirAll(filepath.Dir(logPath), 0o755))
+	require.NoError(t, os.WriteFile(logPath, []byte("stale content\n"), 0o644))
+
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	require.NoError(t, err)
+	defer logFile.Close()
+
+	ctx := util.ContextWithLogger(t.Context(), slog.New(slog.NewTextHandler(logFile, nil)))
+	cmd := &cli.Command{
+		Name:            "go",
+		SkipFlagParsing: true,
+		Action:          GoBuild,
+	}
+	_ = cmd.Run(ctx, []string{"go", "build", "./nonexistent_pkg"})
+
+	content, err := os.ReadFile(logPath)
+	require.NoError(t, err)
+	assert.NotContains(t, string(content), "stale content")
+	assert.Contains(t, string(content), "restoring the files of an interrupted build")
+}
+
+func TestRunGoBuild_UnlockedCompilePreservesDebugLog(t *testing.T) {
+	setupTestModule(t, []string{"cmd"})
+	t.Setenv(envUnlockedCompile, "1")
+
+	logPath := util.GetDebugLogFile()
+	require.NoError(t, os.MkdirAll(filepath.Dir(logPath), 0o755))
+	existing := "active unlocked build log\n"
+	require.NoError(t, os.WriteFile(logPath, []byte(existing), 0o644))
+
+	cmd := &cli.Command{
+		Name:            "go",
+		SkipFlagParsing: true,
+		Action:          GoBuild,
+	}
+	_ = cmd.Run(t.Context(), []string{"go", "build", "./nonexistent_pkg"})
+
+	content, err := os.ReadFile(logPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), existing)
+}
+
 func TestSetupDebugDir_EmptyPkgPath(t *testing.T) {
 	dir := setupDebugDir("")
 	assert.True(t, strings.HasSuffix(dir, "main"))
@@ -2551,4 +2651,30 @@ func TestSplitBuildTargets_DebugFlagValue(t *testing.T) {
 			require.ErrorContains(t, err, "requires a value")
 		})
 	}
+}
+
+func TestTruncateDebugLogAndNilRuleCount(t *testing.T) {
+	assert.Equal(t, 0, (*ruleIndex)(nil).ruleCount())
+
+	workDir := t.TempDir()
+	t.Setenv(util.EnvOtelcWorkDir, workDir)
+	t.Setenv(util.EnvOtelcInvocationDir, "")
+	t.Setenv(envUnlockedCompile, "")
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	require.NoError(t, truncateDebugLog())
+
+	logPath := util.GetDebugLogFile()
+	require.NoError(t, os.WriteFile(logPath, []byte("old-log"), 0o644))
+	t.Setenv(envUnlockedCompile, "1")
+	require.NoError(t, truncateDebugLog())
+	data, err := os.ReadFile(logPath)
+	require.NoError(t, err)
+	assert.Equal(t, "old-log", string(data))
+
+	t.Setenv(envUnlockedCompile, "")
+	require.NoError(t, truncateDebugLog())
+	data, err = os.ReadFile(logPath)
+	require.NoError(t, err)
+	assert.Empty(t, data)
 }

@@ -262,6 +262,7 @@ func TestGetBuildTempPaths(t *testing.T) {
 	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "pgo_profile"), GetPGOProfileFile())
 	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "injected_hash"), GetInjectedHashFile())
 	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "rules_digest"), GetRulesDigestFile())
+	assert.Equal(t, filepath.Join(workDir, BuildTempDir, DebugLogFilename), GetDebugLogFile())
 
 	// The per-process import file embeds the current PID.
 	want := filepath.Join(workDir, BuildTempDir, fmt.Sprintf("added_imports.%d.json", os.Getpid()))

@@ -62,7 +62,7 @@ func TestInitLogger(t *testing.T) {
 
 		gotCtx := <-ctxCh
 		gotWorkDir := os.Getenv(util.EnvOtelcWorkDir)
-		logPath := filepath.Join(gotWorkDir, util.BuildTempDir, debugLogFilename)
+		logPath := filepath.Join(gotWorkDir, util.BuildTempDir, util.DebugLogFilename)
 		if _, err := os.Stat(logPath); err != nil {
 			t.Fatalf("expected log file at %s: %v", logPath, err)
 		}
@@ -189,9 +189,14 @@ func TestInitLoggerToolexecWorkDir(t *testing.T) {
 		if got := os.Getenv(util.EnvOtelcWorkDir); got != module {
 			t.Fatalf("expected %s=%q, got %q", util.EnvOtelcWorkDir, module, got)
 		}
-		logPath := filepath.Join(module, util.BuildTempDir, debugLogFilename)
-		if _, err := os.Stat(logPath); err != nil {
-			t.Fatalf("expected log file at %s: %v", logPath, err)
+		buildDir := filepath.Join(module, util.BuildTempDir)
+		if _, err := os.Stat(buildDir); err != nil {
+			t.Fatalf("expected build temp dir at %s: %v", buildDir, err)
+		}
+		// A record-less toolexec run opens the log lazily and must not create it.
+		logPath := filepath.Join(buildDir, util.DebugLogFilename)
+		if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+			t.Fatalf("expected no %s from a record-less toolexec run, stat err: %v", util.DebugLogFilename, err)
 		}
 	})
 
