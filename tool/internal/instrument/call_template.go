@@ -387,6 +387,36 @@ func (d *callTemplateData) checkCallReceiver() error {
 	return nil
 }
 
+// newCallTemplateData builds the template data for one call site: the
+// declaring function, the innermost function (a literal when the call sits in
+// one) and the parts of the call itself.
+func (t *callTemplate) newCallTemplateData(
+	node dst.Expr, site callSite, enclosing *dst.FuncDecl, imports map[string]string,
+) *callTemplateData {
+	data := &callTemplateData{clone: site.clone}
+	if data.clone == nil {
+		data.clone = func(expr dst.Expr) dst.Expr { return util.AssertType[dst.Expr](dst.Clone(expr)) }
+	}
+	if enclosing != nil {
+		data.declaring = newFuncTemplateData(enclosing, nil, imports, "")
+		data.declaring.typeInfo = t.typeInfo
+		data.enclosing = data.declaring
+	}
+	if site.lit != nil {
+		data.enclosing = newFuncTemplateData(funcLitDecl(site.lit), nil, imports, "")
+		data.enclosing.typeInfo = t.typeInfo
+	}
+	if call, ok := unwrap(node).(*dst.CallExpr); ok {
+		data.isCall = true
+		data.callArgs = call.Args
+		data.callEllipsis = call.Ellipsis
+		if sel, isSel := call.Fun.(*dst.SelectorExpr); isSel && site.methodCall {
+			data.callRecv = sel.X
+		}
+	}
+	return data
+}
+
 // compileExpression executes the template with the given expression node as
 // the placeholder value, parses the result, and returns the transformed expression.
 // site describes node when it is a matched call site: it makes the receiver
@@ -417,28 +447,7 @@ func (d *callTemplateData) checkCallReceiver() error {
 func (t *callTemplate) compileExpression(
 	node dst.Expr, site callSite, enclosing *dst.FuncDecl, imports, ruleImports map[string]string,
 ) (dst.Expr, map[string]bool, error) {
-	data := &callTemplateData{clone: site.clone}
-	if data.clone == nil {
-		data.clone = func(expr dst.Expr) dst.Expr { return util.AssertType[dst.Expr](dst.Clone(expr)) }
-	}
-	if enclosing != nil {
-		data.declaring = newFuncTemplateData(enclosing, nil, imports, "")
-		data.declaring.typeInfo = t.typeInfo
-		data.enclosing = data.declaring
-	}
-	if site.lit != nil {
-		data.enclosing = newFuncTemplateData(funcLitDecl(site.lit), nil, imports, "")
-		data.enclosing.typeInfo = t.typeInfo
-	}
-	if call, ok := unwrap(node).(*dst.CallExpr); ok {
-		data.isCall = true
-		data.callArgs = call.Args
-		data.callEllipsis = call.Ellipsis
-		if sel, isSel := call.Fun.(*dst.SelectorExpr); isSel && site.methodCall {
-			data.callRecv = sel.X
-		}
-	}
-
+	data := t.newCallTemplateData(node, site, enclosing, imports)
 	renderData := renderingCallTemplateData{
 		callTemplateData: data,
 		rendered:         &renderedCallParts{args: make(map[int]bool)},
