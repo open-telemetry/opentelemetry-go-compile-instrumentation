@@ -21,6 +21,7 @@
   vulnerabilityAlerts: {
     enabled: true,
     automerge: true,
+    automergeSchedule: ['at any time'],
   },
   packageRules: [
     {
