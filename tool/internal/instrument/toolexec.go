@@ -277,7 +277,7 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	ip.buildUsesIgnoreDirective = anyRuleSetHasIgnoredCallFiles(allSet)
+	ip.buildUsesIgnoreDirective = rule.AnySetHasIgnoredCallFiles(allSet)
 
 	// Load the import name table, if one exists. A missing table is
 	// not fatal.
@@ -1379,20 +1379,62 @@ func markedToolVersion(rawOutput string) string {
 	return toolVersionLine(strings.TrimSpace(rawOutput), RulesDigest())
 }
 
-// RulesDigest returns a short hash of the matched rules setup stored plus the
-// active build tags and the hash of the packages rules inject, or "" when no
-// matched rules exist. It feeds the tool ID
-// otelc reports and the export memo's resolution scope.
-func RulesDigest() string {
-	content, err := os.ReadFile(util.GetMatchedRuleFile())
+// RulesDigest returns a short hash of the loaded rules and build inputs setup
+// stored in rules_digest, falling back to hashing matched.json, active build
+// tags, embedded GLS source, and injected_hash when rules_digest is absent.
+// It returns "" when neither rules_digest nor matched.json exists. It feeds the
+// tool ID otelc reports and the export memo's resolution scope.
+func readTrustedRulesDigest(readMatched func() ([]byte, error)) string {
+	raw, err := os.ReadFile(util.GetRulesDigestFile())
 	if err != nil {
+		return ""
+	}
+	const boundDigestFields = 2
+	fields := strings.Fields(string(raw))
+	switch len(fields) {
+	case 1:
+		return fields[0]
+	case boundDigestFields:
+		mBytes, mErr := readMatched()
+		if mErr != nil {
+			return ""
+		}
+		sum := sha256.Sum256(mBytes)
+		if hex.EncodeToString(sum[:8]) == fields[1] {
+			return fields[0]
+		}
+	}
+	return ""
+}
+
+func RulesDigest() string {
+	var content []byte
+	var matchedErr error
+	matchedLoaded := false
+	readMatched := func() ([]byte, error) {
+		if !matchedLoaded {
+			content, matchedErr = os.ReadFile(util.GetMatchedRuleFile())
+			matchedLoaded = true
+		}
+		return content, matchedErr
+	}
+
+	if trusted := readTrustedRulesDigest(readMatched); trusted != "" {
+		if tags := util.ActiveBuildTags(); len(tags) > 0 {
+			sum := sha256.Sum256([]byte(trusted + "\ntags=" + strings.Join(tags, ",")))
+			return hex.EncodeToString(sum[:8])
+		}
+		return trusted
+	}
+	mBytes, mErr := readMatched()
+	if mErr != nil {
 		return ""
 	}
 	var injected []byte
 	if inj, injErr := os.ReadFile(util.GetInjectedHashFile()); injErr == nil {
 		injected = inj
 	}
-	return rulesDigest(content, util.ActiveBuildTags(), toolruntime.RuntimeGLSSource, injected)
+	return rulesDigest(mBytes, util.ActiveBuildTags(), toolruntime.RuntimeGLSSource, injected)
 }
 
 // WithoutWorkDirPaths gives invocation-owned files stable names in cache

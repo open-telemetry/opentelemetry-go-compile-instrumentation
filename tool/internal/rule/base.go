@@ -382,6 +382,17 @@ func (irs *InstRuleSet) AllFuncRules() []*InstFuncRule {
 	return allRules(irs.FuncRules)
 }
 
+// AnySetHasIgnoredCallFiles reports whether any rule set in sets records a
+// //otelc:ignore comment above a call.
+func AnySetHasIgnoredCallFiles(sets []*InstRuleSet) bool {
+	for _, set := range sets {
+		if len(set.IgnoredCallFiles) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // AllStructRules returns all struct rules from the rule set as a flat slice,
 // ordered by the source file each rule matched.
 func (irs *InstRuleSet) AllStructRules() []*InstStructRule {

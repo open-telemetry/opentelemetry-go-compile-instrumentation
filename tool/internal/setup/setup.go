@@ -23,6 +23,7 @@ import (
 	"go.opentelemetry.io/otelc/tool/internal/instrument"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
+	toolruntime "go.opentelemetry.io/otelc/tool/internal/runtime"
 	"go.opentelemetry.io/otelc/tool/internal/session"
 	"go.opentelemetry.io/otelc/tool/util"
 	"golang.org/x/tools/go/packages"
@@ -54,6 +55,9 @@ type setupPhase struct {
 	// ruleModuleRoots keeps instrumentation rule ownership outside the rules
 	// themselves so setup can resolve module-local metadata for matched rules.
 	ruleModuleRoots map[rule.InstRule]string
+	// loadedRules holds all active rules loaded during loadRuleIndex,
+	// independent of which packages the current build target matched.
+	loadedRules []rule.InstRule
 	// graph caches the package graph loads setup shares between phases.
 	graph packageGraph
 }
@@ -657,6 +661,11 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 
 	sp.warnIfNoInstrumentationMatched(matched)
 
+	digestRes, err := sp.computeRulesDigest(ctx, matched, moduleDirs, toolruntime.RuntimeGLSSource)
+	if err != nil {
+		return ex.Wrapf(err, "computing rules digest")
+	}
+
 	// Generate otelc.runtime.go for all packages
 	if err = sp.generateRuntimePerPackage(ctx, buildPkgs, matched); err != nil {
 		return err
@@ -667,7 +676,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	if err = sp.store(mergeRuleSets(matched, deps)); err != nil {
 		return err
 	}
-	if err = sp.storeInjectedHash(ctx, matched); err != nil {
+	if err = sp.writeRulesDigest(digestRes); err != nil {
 		return err
 	}
 	sp.recordResolutionScope(ctx, moduleDirs)

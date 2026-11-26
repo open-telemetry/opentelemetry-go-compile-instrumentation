@@ -154,6 +154,13 @@ func GetInjectedHashFile() string {
 	return GetInvocationTemp(injectedHashFile)
 }
 
+// GetRulesDigestFile returns the path to the file that records the stable
+// digest of loaded rules and build inputs used in the -V=full tool ID.
+func GetRulesDigestFile() string {
+	const rulesDigestFile = "rules_digest"
+	return GetInvocationTemp(rulesDigestFile)
+}
+
 // GetAddedImportsFileForProcess returns the per-process import tracking file.
 // Each compile process writes to its own file to avoid inter-process race conditions.
 func GetAddedImportsFileForProcess() string {
