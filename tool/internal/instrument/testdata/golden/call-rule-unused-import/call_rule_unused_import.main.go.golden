@@ -1,0 +1,21 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+//line /golden/work/main.go:6
+import (
+	_ "go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/call-rule-unused-import/helpers/lib"
+
+	"go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/call-rule-unused-import/helpers/wrap"
+)
+
+// The lib.New call is the only use of the lib import in this file.
+//line /golden/work/main.go:9
+func newClient() traced {
+	return tracedOf(wrap.New("a")) /*line /golden/work/main.go:8*/
+}
+
+func main() {
+	println(newClient().IsTraced(), otherClient().Traced)
+}

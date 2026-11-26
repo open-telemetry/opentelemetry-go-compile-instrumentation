@@ -14,6 +14,7 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/imports"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -181,6 +182,10 @@ func (ip *instrumentPhase) instrumentFile(ctx context.Context, file string, rule
 	if DiffDebugEnabled() {
 		ip.diagnosticSource = file
 	}
+	// A rule can remove the last use of an import, for example a call rule
+	// that replaces the call. Record the import names that the file uses
+	// before any rule changes it.
+	usedNames := imports.QualifierNames(root)
 	result, changes, err := ip.applyRulesCapturingDiffs(ctx, rules, root)
 	if err != nil {
 		return false, err
@@ -207,6 +212,11 @@ func (ip *instrumentPhase) instrumentFile(ctx context.Context, file string, rule
 	// optimization for them before writing to file
 	if err = ip.optimizeTJumps(); err != nil {
 		return false, ex.Wrapf(err, "optimizing trampoline jumps for %s", file)
+	}
+	// Go rejects an unused import, so blank each import whose last use the
+	// rules removed.
+	for _, importPath := range imports.BlankUnused(ctx, root, usedNames, ip.importNames) {
+		ip.Debug("Blanked an import whose last use the rules removed", "file", file, "import", importPath)
 	}
 	// Mark the injected code, so stack traces and debuggers do not show it
 	// as lines of the original file, and restore the original positions

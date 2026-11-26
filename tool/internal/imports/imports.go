@@ -299,6 +299,76 @@ func selectorQualifiers(root *dst.File) map[string]bool {
 	return names
 }
 
+// QualifierNames returns the names that root uses as the qualifier of a
+// selector, such as fmt in fmt.Sprint, and that the parser did not resolve to
+// a declaration in root. Every use of an import is such a name.
+func QualifierNames(root *dst.File) map[string]bool {
+	names := make(map[string]bool)
+	dst.Inspect(root, func(n dst.Node) bool {
+		if sel, ok := n.(*dst.SelectorExpr); ok {
+			if ident, isIdent := sel.X.(*dst.Ident); isIdent && ident.Obj == nil {
+				names[ident.Name] = true
+			}
+		}
+		return true
+	})
+	return names
+}
+
+// BlankUnused blanks each import of root whose name is in usedBefore, but
+// that root no longer uses. usedBefore is the result of QualifierNames before
+// root was changed. BlankUnused returns the paths of the blanked imports.
+//
+// The blank import keeps the package in the build and its initialization
+// order the same. An import that root did not use before is not changed, so
+// the compiler still reports it. A blank or dot import binds no name that
+// qualifies a selector, so it is not changed either, and neither is the cgo
+// import "C".
+//
+// resolvedNames maps an import path to its package name; see parseFile.
+func BlankUnused(
+	ctx context.Context,
+	root *dst.File,
+	usedBefore map[string]bool,
+	resolvedNames map[string]string,
+	buildFlags ...string,
+) []string {
+	usedNow := QualifierNames(root)
+	lost := make(map[string]bool)
+	for name := range usedBefore {
+		if !usedNow[name] {
+			lost[name] = true
+		}
+	}
+	if len(lost) == 0 {
+		return nil
+	}
+
+	var blanked []string
+	for _, decl := range root.Decls {
+		genDecl, ok := decl.(*dst.GenDecl)
+		if !ok || genDecl.Tok != token.IMPORT {
+			continue
+		}
+		for _, spec := range genDecl.Specs {
+			importSpec, isImport := spec.(*dst.ImportSpec)
+			if !isImport || importSpec.Path == nil {
+				continue
+			}
+			importPath := strings.Trim(importSpec.Path.Value, `"`)
+			if importPath == "C" {
+				continue
+			}
+			if !lost[specAlias(ctx, importSpec, resolvedNames, buildFlags...)] {
+				continue
+			}
+			importSpec.Name = dst.NewIdent("_")
+			blanked = append(blanked, importPath)
+		}
+	}
+	return blanked
+}
+
 // unusedSpec returns an import of importPath in root whose name is not in
 // qualifiers, or nil if there is none. aliasOf returns the name that an
 // import binds. Blank and dot imports are never returned, nor is the cgo

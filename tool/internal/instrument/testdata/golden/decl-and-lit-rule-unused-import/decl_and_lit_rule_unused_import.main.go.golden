@@ -1,0 +1,24 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+//line /golden/work/main.go:6
+import (
+	_ "go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/decl-and-lit-rule-unused-import/helpers/lib"
+	_ "go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/decl-and-lit-rule-unused-import/helpers/transport"
+	"go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/decl-and-lit-rule-unused-import/helpers/wrap"
+)
+
+// The lib.Default call is the only use of the lib import.
+var Client = wrap.Default()
+
+// The transport.New call is the only use of the transport import.
+//
+//line /golden/work/main.go:16
+var Config = &wrap.Config{Transport: wrap.Transport()}
+
+//line /golden/work/main.go:18
+func main() {
+	println(Client.Traced, Config.Transport != nil)
+}

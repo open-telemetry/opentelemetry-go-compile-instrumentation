@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/dave/dst"
+	"github.com/dave/dst/decorator"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -758,6 +759,233 @@ func TestCollectImportPaths(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestQualifierNames(t *testing.T) {
+	root := parseSource(t, `package p
+
+import "fmt"
+
+var cfg struct{ Name string }
+
+func f(s fmt.Stringer) {
+	local := s
+	_ = local.String()
+	_ = cfg.Name
+	_ = other.Value
+}
+`)
+
+	// cfg and local are declared in the file. other is declared in another
+	// file of the package, so the parser leaves it unresolved.
+	assert.Equal(t, map[string]bool{"fmt": true, "other": true}, QualifierNames(root))
+}
+
+func TestBlankUnused(t *testing.T) {
+	resolvedNames := map[string]string{
+		"example.com/go-lib": "lib",
+		"example.com/lib":    "lib",
+		"example.com/wrap":   "wrap",
+	}
+	tests := []struct {
+		name string
+		// before is the file before the rules changed it, and after is the
+		// file the rules wrote.
+		before, after string
+		wantSpecs     []string
+		wantBlanked   []string
+	}{
+		{
+			name: "aliased import whose only use was removed is blanked",
+			before: `package p
+
+import l "example.com/lib"
+
+var _ = l.New()
+`,
+			after: `package p
+
+import (
+	l "example.com/lib"
+	"example.com/wrap"
+)
+
+var _ = wrap.New()
+`,
+			wantSpecs:   []string{"_ example.com/lib", " example.com/wrap"},
+			wantBlanked: []string{"example.com/lib"},
+		},
+		{
+			name: "unaliased import is blanked under its package name",
+			before: `package p
+
+import "example.com/go-lib"
+
+var _ = lib.New()
+`,
+			after: `package p
+
+import "example.com/go-lib"
+
+var _ = 1
+`,
+			wantSpecs:   []string{"_ example.com/go-lib"},
+			wantBlanked: []string{"example.com/go-lib"},
+		},
+		{
+			name: "import used elsewhere in the file is kept",
+			before: `package p
+
+import "example.com/lib"
+
+var _ = lib.New()
+
+var _ lib.Client
+`,
+			after: `package p
+
+import "example.com/lib"
+
+var _ = 1
+
+var _ lib.Client
+`,
+			wantSpecs: []string{" example.com/lib"},
+		},
+		{
+			name: "import the file did not use is kept so the compiler still reports it",
+			before: `package p
+
+import (
+	"example.com/lib"
+	"example.com/wrap"
+)
+
+// lib.New is only mentioned in a comment.
+var _ = wrap.New()
+`,
+			after: `package p
+
+import (
+	"example.com/lib"
+	"example.com/wrap"
+)
+
+// lib.New is only mentioned in a comment.
+var _ = 1
+`,
+			wantSpecs:   []string{" example.com/lib", "_ example.com/wrap"},
+			wantBlanked: []string{"example.com/wrap"},
+		},
+		{
+			name: "a local named like the import is not a use of it",
+			before: `package p
+
+import "example.com/lib"
+
+func f() { lib.New() }
+
+func g(lib fmt.Stringer) { lib.String() }
+`,
+			after: `package p
+
+import "example.com/lib"
+
+func f() { wrap.New() }
+
+func g(lib fmt.Stringer) { lib.String() }
+`,
+			wantSpecs:   []string{"_ example.com/lib"},
+			wantBlanked: []string{"example.com/lib"},
+		},
+		{
+			name: "blank, dot and cgo imports are not changed",
+			before: `package p
+
+import (
+	"C"
+	. "example.com/dot"
+	l "example.com/lib"
+	_ "example.com/side"
+)
+
+var _ = C.int(l.New())
+`,
+			after: `package p
+
+import (
+	"C"
+	. "example.com/dot"
+	l "example.com/lib"
+	_ "example.com/side"
+)
+
+var _ = 1
+`,
+			wantSpecs:   []string{" C", ". example.com/dot", "_ example.com/lib", "_ example.com/side"},
+			wantBlanked: []string{"example.com/lib"},
+		},
+		{
+			name: "of two imports of one path only the one that lost its use is blanked",
+			before: `package p
+
+import (
+	a "example.com/lib"
+	b "example.com/lib"
+)
+
+var _, _ = a.New(), b.New()
+`,
+			after: `package p
+
+import (
+	a "example.com/lib"
+	b "example.com/lib"
+)
+
+var _, _ = 1, b.New()
+`,
+			wantSpecs:   []string{"_ example.com/lib", "b example.com/lib"},
+			wantBlanked: []string{"example.com/lib"},
+		},
+		{
+			name: "no name lost leaves the file as it is",
+			before: `package p
+
+import "example.com/lib"
+
+var _ = lib.New()
+`,
+			after: `package p
+
+import "example.com/lib"
+
+var _ = lib.New(lib.Option())
+`,
+			wantSpecs: []string{" example.com/lib"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			usedBefore := QualifierNames(parseSource(t, tt.before))
+			after := parseSource(t, tt.after)
+
+			blanked := BlankUnused(t.Context(), after, usedBefore, resolvedNames)
+
+			assert.Equal(t, tt.wantBlanked, blanked)
+			assert.Equal(t, tt.wantSpecs, specsOf(after))
+		})
+	}
+}
+
+// parseSource parses src with object resolution, as otelc parses the files
+// it instruments.
+func parseSource(t *testing.T, src string) *dst.File {
+	t.Helper()
+	root, err := decorator.Parse(src)
+	require.NoError(t, err)
+	return root
 }
 
 // useIdent returns `var _ = name.X`, a declaration that uses name as the
