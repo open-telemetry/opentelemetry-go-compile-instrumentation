@@ -122,3 +122,17 @@ func syncDeps(ctx context.Context, moduleDir string) error {
 
 	return nil
 }
+
+func syncVendor(ctx context.Context, moduleDir string) error {
+	logger := util.LoggerFromContext(ctx)
+	_, _ = fmt.Fprintf(
+		os.Stderr,
+		"Warning: running go mod vendor in %s; any manual edits in vendor/ will be overwritten\n",
+		moduleDir,
+	)
+	logger.WarnContext(ctx, "running go mod vendor; manual edits in vendor/ will be overwritten", "dir", moduleDir)
+	if err := util.RunCmdInDir(ctx, moduleDir, "go", "mod", "vendor"); err != nil {
+		return ex.Wrapf(err, "running go mod vendor in %s", moduleDir)
+	}
+	return nil
+}

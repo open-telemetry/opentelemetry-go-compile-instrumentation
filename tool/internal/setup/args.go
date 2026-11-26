@@ -158,6 +158,27 @@ func isBuildContextBoolFlag(name string) bool {
 	}
 }
 
+// stripDirFlags returns a copy of flags with -C/--C directory flags removed,
+// for callers that set packages.Config.Dir explicitly.
+func stripDirFlags(flags []string) []string {
+	if len(flags) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(flags))
+	for i := 0; i < len(flags); i++ {
+		f := flags[i]
+		if f == "-C" || f == "--C" {
+			i++
+			continue
+		}
+		if strings.HasPrefix(f, "-C=") || strings.HasPrefix(f, "--C=") {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
 // flagName returns the flag name of arg in single-dash form, without a joined value.
 func flagName(arg string) string {
 	name, _, _ := strings.Cut(arg, "=")

@@ -266,6 +266,11 @@ func (sp *setupPhase) matchInjectedDeps(
 				return nil, nil
 			}
 			if len(injected) > 0 {
+				for _, dep := range injected {
+					if dep.Version == "" && len(dep.Sources) > 0 {
+						dep.Version = sp.vendor.packageVersion(dep.ImportPath, dep.Sources[0])
+					}
+				}
 				sp.Info("Matching dependencies otelc injects into the build", "count", len(injected))
 			}
 			return injected, nil
@@ -280,7 +285,7 @@ func (sp *setupPhase) matchInjectedDeps(
 				if idx != nil {
 					moduleDirs = idx.moduleDirs
 				}
-				if err = resolveRulePaths(ctx, more, moduleDirs); err != nil {
+				if err = resolveRulePaths(ctx, more, moduleDirs, buildFlags...); err != nil {
 					return nil, ex.Wrapf(err, "resolving injected rule paths")
 				}
 			}

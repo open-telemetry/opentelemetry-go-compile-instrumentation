@@ -17,6 +17,7 @@ import (
 	"github.com/dave/dst"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/tools/go/packages"
 )
 
 func TestFindToolFile(t *testing.T) {
@@ -954,4 +955,50 @@ func TestResolveConfigsWithFallback(t *testing.T) {
 	require.NotNil(t, cfgs["example.com/bar"])
 	require.NoError(t, cfgs["example.com/bar"].Error)
 	require.NotEmpty(t, cfgs["example.com/bar"].RuleFiles)
+}
+
+func TestResolveConfigDirs_VendoredEmptyModuleDir(t *testing.T) {
+	vendorPkgRoot := filepath.Join(t.TempDir(), "vendor", "example.com", "inst")
+	subDir := filepath.Join(vendorPkgRoot, "net", "http")
+
+	tests := []struct {
+		name       string
+		pkg        *packages.Package
+		importPath string
+		wantDirs   configDirs
+		wantOK     bool
+	}{
+		{
+			name:       "nil module fails",
+			pkg:        &packages.Package{Dir: vendorPkgRoot},
+			importPath: "example.com/inst",
+		},
+		{
+			name:       "empty module dir and empty pkg dir fails",
+			pkg:        &packages.Package{Module: &packages.Module{Path: "example.com/inst"}},
+			importPath: "example.com/inst",
+		},
+		{
+			name:       "exact module root inside vendor",
+			pkg:        &packages.Package{Dir: vendorPkgRoot, Module: &packages.Module{Path: "example.com/inst"}},
+			importPath: "example.com/inst",
+			wantDirs:   configDirs{modDir: vendorPkgRoot, pkgDir: vendorPkgRoot},
+			wantOK:     true,
+		},
+		{
+			name:       "subpackage inside vendor strips relative suffix",
+			pkg:        &packages.Package{Dir: subDir, Module: &packages.Module{Path: "example.com/inst"}},
+			importPath: "example.com/inst/net/http",
+			wantDirs:   configDirs{modDir: vendorPkgRoot, pkgDir: subDir},
+			wantOK:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dirs, ok := resolveConfigDirs(tt.pkg, tt.importPath)
+			assert.Equal(t, tt.wantOK, ok)
+			assert.Equal(t, tt.wantDirs, dirs)
+		})
+	}
 }

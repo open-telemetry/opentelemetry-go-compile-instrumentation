@@ -374,7 +374,7 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 			archives, err = ip.compileExportFiles(ctx, importPath, buildFlags...)
 			restore()
 			if err != nil {
-				return ex.Wrapf(err, "resolving %q", importPath)
+				return wrapCompileImportError(err, importPath)
 			}
 			memo.Store(importPath, archives, nil)
 		}
@@ -415,6 +415,17 @@ func (ip *instrumentPhase) compileExportFiles(
 		return ip.resolveAddedImport(ctx, importPath, buildFlags...)
 	}
 	return pkgload.ResolveExportFiles(ctx, importPath, buildFlags...)
+}
+
+func wrapCompileImportError(err error, importPath string) error {
+	if strings.Contains(err.Error(), "import lookup disabled by -mod=vendor") {
+		return ex.Wrapf(
+			err,
+			"resolving %q (run 'otelc pin' or 'go mod vendor' to vendor missing instrumentation packages)",
+			importPath,
+		)
+	}
+	return ex.Wrapf(err, "resolving %q", importPath)
 }
 
 // pgoBuildFlags returns the -pgo flag that makes a nested go list compile the

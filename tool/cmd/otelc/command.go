@@ -64,6 +64,7 @@ var commandPin = cli.Command{
 			Generate: nil,
 			Validate: cmd.Bool("validate"),
 			Args:     cmd.Args().Slice(),
+			Vendor:   true,
 		}
 		if cmd.IsSet("generate") {
 			generate := cmd.Bool("generate")

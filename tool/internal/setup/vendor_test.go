@@ -6,6 +6,7 @@ package setup
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -94,6 +95,7 @@ func TestPrepareVendoredBuildInBuildDir(t *testing.T) {
 		t.Helper()
 		require.NoError(t, os.MkdirAll(filepath.Join(dir, "vendor"), 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module m\n\ngo 1.25.0\n"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0o644))
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "vendor", "modules.txt"), []byte(""), 0o644))
 	}
 
@@ -104,11 +106,11 @@ func TestPrepareVendoredBuildInBuildDir(t *testing.T) {
 		t.Setenv(util.EnvOtelcWorkDir, root)
 		t.Setenv("GOFLAGS", "")
 
-		args := []string{"-C", "app", "-mod=vendor", "."}
-		got, err := prepareVendoredBuild(t.Context(), discardLogger(), subcmdBuild, args)
+		opts := PinOptions{Args: []string{"-C", "app", "-mod=vendor", "."}}
+		_, _, err := resolvePinModuleDirs(t.Context(), &opts)
 		require.NoError(t, err)
 
-		assert.Equal(t, []string{"-C", "app", "-mod=mod", "."}, got)
+		assert.Equal(t, []string{"-C", "app", "-mod=mod", "."}, opts.Args)
 		assert.Equal(t, modMod, os.Getenv("GOFLAGS"))
 	})
 
@@ -119,11 +121,11 @@ func TestPrepareVendoredBuildInBuildDir(t *testing.T) {
 		t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
 		t.Setenv("GOFLAGS", "")
 
-		args := []string{"-mod=vendor", "."}
-		got, err := prepareVendoredBuild(t.Context(), discardLogger(), subcmdBuild, args)
+		opts := PinOptions{Args: []string{"-mod=vendor", "."}}
+		_, _, err := resolvePinModuleDirs(t.Context(), &opts)
 		require.NoError(t, err)
 
-		assert.Equal(t, []string{"-mod=mod", "."}, got)
+		assert.Equal(t, []string{"-mod=mod", "."}, opts.Args)
 		assert.Equal(t, modMod, os.Getenv("GOFLAGS"))
 	})
 }
@@ -377,4 +379,217 @@ func TestSetupLockedForcesModuleModeForVendoredBuildDir(t *testing.T) {
 	require.Error(t, err)
 
 	assert.Equal(t, modMod, os.Getenv("GOFLAGS"))
+}
+
+func TestParseVendorModules(t *testing.T) {
+	dir := t.TempDir()
+	modulesTxt := filepath.Join(dir, "modules.txt")
+	content := strings.Join([]string{
+		"# github.com/gin-gonic/gin v1.10.0",
+		"## explicit; go 1.21",
+		"github.com/gin-gonic/gin",
+		"github.com/gin-gonic/gin/render",
+		"# example.com/replaced v1.0.0 => example.com/fork v1.4.2",
+		"## explicit; go 1.21",
+		"example.com/replaced",
+		"# example.com/localver v1.2.3 => ../localver",
+		"## explicit; go 1.21",
+		"example.com/localver",
+		"# example.com/unversioned v0.0.0-00010101000000-000000000000 => ../unversioned",
+		"## explicit; go 1.21",
+		"example.com/unversioned",
+		"# example.com/bare => ../bare",
+		"## explicit; go 1.21",
+		"example.com/bare",
+		"",
+	}, "\n")
+	require.NoError(t, os.WriteFile(modulesTxt, []byte(content), 0o644))
+
+	vm, err := parseVendorModules(modulesTxt)
+	require.NoError(t, err)
+
+	assert.Contains(t, vm, "github.com/gin-gonic/gin")
+	assert.Contains(t, vm, "github.com/gin-gonic/gin/render")
+	assert.Contains(t, vm, "example.com/bare")
+	assert.NotContains(t, vm, "github.com/gin-gonic/gin/binding")
+
+	assert.Equal(t, "v1.10.0", vm["github.com/gin-gonic/gin"])
+	assert.Equal(t, "v1.10.0", vm["github.com/gin-gonic/gin/render"])
+	assert.Equal(t, "v1.4.2", vm["example.com/replaced"])
+	assert.Equal(t, "v1.2.3", vm["example.com/localver"])
+	assert.Empty(t, vm["example.com/unversioned"])
+	assert.Empty(t, vm["example.com/bare"])
+}
+
+func TestDetectVendorState(t *testing.T) {
+	t.Setenv("GOWORK", "off")
+
+	const (
+		depModules  = "# example.com/dep v1.0.0\nexample.com/dep\n"
+		instModules = "# example.com/inst v1.0.0\nexample.com/inst\n"
+	)
+
+	tests := []struct {
+		name         string
+		noVendor     bool
+		modulesTxt   string
+		toolFile     string
+		toolImports  string
+		setup        func(t *testing.T, root string)
+		wantActive   bool
+		wantVendored bool
+	}{
+		{
+			name:     "no vendor dir",
+			noVendor: true,
+		},
+		{
+			name:       "vendor without tool file forces module mode",
+			modulesTxt: depModules,
+			wantActive: true,
+		},
+		{
+			name:        "tool file with unvendored import forces module mode",
+			modulesTxt:  depModules,
+			toolFile:    toolFileCanonical,
+			toolImports: `"example.com/missing"`,
+			wantActive:  true,
+		},
+		{
+			name:         "canonical tool file with vendored imports preserves vendor mode",
+			modulesTxt:   instModules,
+			toolFile:     toolFileCanonical,
+			toolImports:  `"example.com/inst"`,
+			wantActive:   true,
+			wantVendored: true,
+		},
+		{
+			name:         "alias tool file with vendored imports preserves vendor mode",
+			modulesTxt:   instModules,
+			toolFile:     toolFileAlias,
+			toolImports:  `"example.com/inst"`,
+			wantActive:   true,
+			wantVendored: true,
+		},
+		{
+			name:        "local same-module package is allowed in vendor mode",
+			modulesTxt:  instModules,
+			toolFile:    toolFileCanonical,
+			toolImports: "\"example.com/inst\"\n\t_ \"example.com/app/internal/hooks\"",
+			setup: func(t *testing.T, root string) {
+				t.Helper()
+				require.NoError(t, os.MkdirAll(filepath.Join(root, "internal", "hooks"), 0o755))
+			},
+			wantActive:   true,
+			wantVendored: true,
+		},
+		{
+			name:        "missing same-module package forces module mode",
+			modulesTxt:  instModules,
+			toolFile:    toolFileCanonical,
+			toolImports: `"example.com/app/doesnotexist"`,
+			wantActive:  true,
+		},
+		{
+			name:        "nested submodule under main module prefix forces module mode when unvendored",
+			modulesTxt:  instModules,
+			toolFile:    toolFileCanonical,
+			toolImports: `"example.com/app/hooks"`,
+			setup: func(t *testing.T, root string) {
+				t.Helper()
+				sub := filepath.Join(root, "hooks")
+				require.NoError(t, os.MkdirAll(sub, 0o755))
+				require.NoError(t, os.WriteFile(
+					filepath.Join(sub, "go.mod"),
+					[]byte("module example.com/app/hooks\n\ngo 1.25.0\n"),
+					0o644,
+				))
+			},
+			wantActive: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			require.NoError(t, os.WriteFile(
+				filepath.Join(root, "go.mod"),
+				[]byte("module example.com/app\n\ngo 1.25.0\n"),
+				0o644,
+			))
+			if !tt.noVendor {
+				require.NoError(t, os.MkdirAll(filepath.Join(root, "vendor"), 0o755))
+				require.NoError(t, os.WriteFile(
+					filepath.Join(root, "vendor", "modules.txt"),
+					[]byte(tt.modulesTxt),
+					0o644,
+				))
+			}
+			if tt.setup != nil {
+				tt.setup(t, root)
+			}
+			if tt.toolFile != "" {
+				src := "//go:build tools\n\npackage tools\n\nimport (\n\t_ " + tt.toolImports + "\n)\n"
+				require.NoError(t, os.WriteFile(filepath.Join(root, tt.toolFile), []byte(src), 0o644))
+			}
+
+			vs := detectVendorState(t.Context(), root)
+			assert.Equal(t, tt.wantActive, vs.active())
+			assert.Equal(t, tt.wantVendored, vs.vendored)
+			assert.Equal(t, tt.wantActive && !tt.wantVendored, vs.needsModMod())
+		})
+	}
+}
+
+func TestSetupLockedPreservesModVendorWhenPinnedAndVendored(t *testing.T) {
+	t.Setenv("GOWORK", "off")
+
+	root := t.TempDir()
+	app := filepath.Join(root, "app")
+	require.NoError(t, os.MkdirAll(filepath.Join(app, "vendor"), 0o755))
+	require.NoError(
+		t,
+		os.WriteFile(filepath.Join(app, "go.mod"), []byte("module example.com/app\n\ngo 1.25.0\n"), 0o644),
+	)
+	require.NoError(t, os.WriteFile(
+		filepath.Join(app, "vendor", "modules.txt"),
+		[]byte("# example.com/inst v1.0.0\nexample.com/inst\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(app, toolFileCanonical),
+		[]byte("//go:build tools\n\npackage tools\n\nimport _ \"example.com/inst\"\n"),
+		0o644,
+	))
+	t.Chdir(root)
+	t.Setenv(util.EnvOtelcWorkDir, root)
+	t.Setenv("GOFLAGS", "-mod=vendor")
+
+	cmd := &cli.Command{Name: "go", SkipFlagParsing: true, Action: setupLocked}
+	err := cmd.Run(t.Context(), []string{"go", "build", "-C", "app", "./missing"})
+	require.Error(t, err)
+
+	assert.Equal(t, "-mod=vendor", os.Getenv("GOFLAGS"))
+}
+
+func TestGetVendorState_ReusesContext(t *testing.T) {
+	root := t.TempDir()
+	vendorFile := filepath.Join(root, "vendor", "example.com", "pkg", "pkg.go")
+	cached := vendorState{
+		vendored:   true,
+		queryDir:   filepath.Clean(root),
+		moduleRoot: filepath.Clean(root),
+		modules:    vendorModules{"example.com/pkg": "v1.2.3"},
+	}
+	ctx := contextWithVendorState(t.Context(), cached)
+
+	got := getVendorState(ctx, root)
+	assert.True(t, got.vendored)
+	assert.Equal(t, "v1.2.3", got.packageVersion("example.com/pkg", vendorFile))
+	assert.True(t, vendoringActive(ctx, root))
+
+	// A different directory does not return the cached state for root.
+	other := t.TempDir()
+	_, ok := vendorStateFromContext(ctx, other)
+	assert.False(t, ok)
 }

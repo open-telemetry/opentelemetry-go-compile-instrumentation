@@ -28,11 +28,6 @@ import (
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
-// discardLogger returns a logger that drops all output, keeping test logs quiet.
-func discardLogger() *slog.Logger {
-	return slog.New(slog.DiscardHandler)
-}
-
 func TestRemoveImports(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
@@ -1433,16 +1428,21 @@ func TestPrepareVendoredBuild_NotVendored(t *testing.T) {
 		[]byte("module example.com/test\n\ngo 1.25\n"),
 		0o644,
 	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "main.go"),
+		[]byte("package test\n"),
+		0o644,
+	))
 	t.Chdir(dir)
 	t.Setenv(util.EnvOtelcWorkDir, dir)
 	t.Setenv("GOFLAGS", "")
 
-	args := []string{"build", "-mod=vendor", "./..."}
-	got, err := prepareVendoredBuild(t.Context(), discardLogger(), subcmdBuild, args)
+	opts := PinOptions{Args: []string{"-mod=vendor", "."}}
+	_, _, err := resolvePinModuleDirs(t.Context(), &opts)
 	require.NoError(t, err)
 
 	// Unchanged: not a vendored project, so no rewriting happens.
-	assert.Equal(t, args, got)
+	assert.Equal(t, []string{"-mod=vendor", "."}, opts.Args)
 	assert.Empty(t, os.Getenv("GOFLAGS"))
 }
 
@@ -1454,6 +1454,11 @@ func TestPrepareVendoredBuild_Vendored(t *testing.T) {
 	require.NoError(t, os.WriteFile(
 		filepath.Join(dir, "go.mod"),
 		[]byte("module example.com/test\n\ngo 1.25\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "main.go"),
+		[]byte("package test\n"),
 		0o644,
 	))
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "vendor"), 0o755))
@@ -1469,11 +1474,11 @@ func TestPrepareVendoredBuild_Vendored(t *testing.T) {
 	// stray ambient go.work would otherwise suppress vendoring detection.
 	t.Setenv("GOWORK", "off")
 
-	args := []string{"build", "-mod=vendor", "./..."}
-	got, err := prepareVendoredBuild(t.Context(), discardLogger(), subcmdBuild, args)
+	opts := PinOptions{Args: []string{"-mod=vendor", "."}}
+	_, _, err := resolvePinModuleDirs(t.Context(), &opts)
 	require.NoError(t, err)
 
-	assert.Equal(t, []string{"build", "-mod=mod", "./..."}, got)
+	assert.Equal(t, []string{"-mod=mod", "."}, opts.Args)
 	assert.Contains(t, os.Getenv("GOFLAGS"), "-mod=mod")
 }
 
@@ -1782,21 +1787,21 @@ func newModuleDir(t *testing.T) string {
 }
 
 func TestPrepareVendoredBuild(t *testing.T) {
-	// With no vendored module active, prepareVendoredBuild returns the args
+	// With no vendored module active, resolvePinModuleDirs returns the args
 	// unchanged and does not force module mode.
 	dir := newModuleDir(t)
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "main.go"),
+		[]byte("package vend\n"),
+		0o644,
+	))
 	t.Chdir(dir)
 	t.Setenv(util.EnvOtelcWorkDir, dir)
 
-	args := []string{"build", "./..."}
-	got, err := prepareVendoredBuild(
-		context.Background(),
-		util.LoggerFromContext(context.Background()),
-		subcmdBuild,
-		args,
-	)
+	opts := PinOptions{Args: []string{"."}}
+	_, _, err := resolvePinModuleDirs(context.Background(), &opts)
 	require.NoError(t, err)
-	assert.Equal(t, args, got)
+	assert.Equal(t, []string{"."}, opts.Args)
 }
 
 func TestPinLocked_GetBuildPackagesError(t *testing.T) {
@@ -1936,4 +1941,82 @@ func TestUpdateToolFile_RemoveImportsError(t *testing.T) {
 
 	err := updateToolFile(t.Context(), toolFile, map[string]bool{"foo": true}, PinOptions{})
 	require.Error(t, err)
+}
+
+func TestUpdateToolFile_AutoVendorsStaleVendorDir(t *testing.T) {
+	t.Setenv("GOWORK", "off")
+	t.Setenv("GOFLAGS", "")
+
+	root := t.TempDir()
+	depDir := filepath.Join(root, "dep")
+	otelcDir := filepath.Join(root, "otelc")
+	appDir := filepath.Join(root, "app")
+	require.NoError(t, os.MkdirAll(depDir, 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(otelcDir, "tool", "cmd", "otelc"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(appDir, "vendor"), 0o755))
+
+	require.NoError(
+		t,
+		os.WriteFile(filepath.Join(depDir, "go.mod"), []byte("module example.com/dep\n\ngo 1.25.0\n"), 0o644),
+	)
+	require.NoError(t, os.WriteFile(filepath.Join(depDir, "dep.go"), []byte("package dep\n"), 0o644))
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(otelcDir, "go.mod"),
+		[]byte("module go.opentelemetry.io/otelc\n\ngo 1.25.0\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(otelcDir, "tool", "cmd", "otelc", "main.go"),
+		[]byte("package main\n\nfunc main() {}\n"),
+		0o644,
+	))
+
+	goModContent := `module example.com/app
+
+go 1.25.0
+
+tool go.opentelemetry.io/otelc/tool/cmd/otelc
+
+require (
+	example.com/dep v1.0.0
+	go.opentelemetry.io/otelc v0.0.0
+)
+
+replace (
+	example.com/dep v1.0.0 => ../dep
+	go.opentelemetry.io/otelc => ../otelc
+)
+`
+	require.NoError(t, os.WriteFile(filepath.Join(appDir, "go.mod"), []byte(goModContent), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(appDir, "go.sum"), []byte(""), 0o644))
+	require.NoError(
+		t,
+		os.WriteFile(filepath.Join(appDir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644),
+	)
+
+	toolFile := filepath.Join(appDir, toolFileCanonical)
+	require.NoError(t, os.WriteFile(
+		toolFile,
+		[]byte("//go:build tools\n\npackage tools\n\nimport _ \"example.com/dep\"\n"),
+		0o644,
+	))
+	// Stale vendor/modules.txt missing example.com/dep.
+	modulesTxt := filepath.Join(appDir, "vendor", "modules.txt")
+	require.NoError(t, os.WriteFile(modulesTxt, []byte(""), 0o644))
+
+	// Without Vendor: true (autoPin), vendor/modules.txt stays untouched.
+	require.NoError(t, updateToolFile(t.Context(), toolFile, nil, PinOptions{Vendor: false}))
+	before, err := os.ReadFile(modulesTxt)
+	require.NoError(t, err)
+	assert.Empty(t, string(before))
+
+	// With Vendor: true (otelc pin), warning is emitted and go mod vendor runs.
+	readStderr := captureStderr(t)
+	require.NoError(t, updateToolFile(t.Context(), toolFile, nil, PinOptions{Vendor: true}))
+	assert.Contains(t, readStderr(), "manual edits in vendor/ will be overwritten")
+
+	after, err := os.ReadFile(modulesTxt)
+	require.NoError(t, err)
+	assert.Contains(t, string(after), "example.com/dep")
 }

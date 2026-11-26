@@ -669,3 +669,27 @@ func main() {
 		})
 	}
 }
+
+func TestStripDirFlags(t *testing.T) {
+	tests := []struct {
+		name  string
+		flags []string
+		want  []string
+	}{
+		{name: "empty", flags: nil, want: nil},
+		{
+			name:  "separate -C",
+			flags: []string{"-tags", "foo", "-C", "app", "-mod=vendor"},
+			want:  []string{"-tags", "foo", "-mod=vendor"},
+		},
+		{name: "separate --C", flags: []string{"--C", "app", "-mod=vendor"}, want: []string{"-mod=vendor"}},
+		{name: "joined -C=", flags: []string{"-C=app", "-trimpath"}, want: []string{"-trimpath"}},
+		{name: "joined --C=", flags: []string{"--C=app", "-race"}, want: []string{"-race"}},
+		{name: "dangling -C", flags: []string{"-race", "-C"}, want: []string{"-race"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, stripDirFlags(tt.flags))
+		})
+	}
+}

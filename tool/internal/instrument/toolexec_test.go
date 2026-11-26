@@ -3116,3 +3116,16 @@ func TestDeterministicLoadFailureOnRealGoList(t *testing.T) {
 	assert.True(t, pkgload.IsDeterministicLoadFailure(failed["example.com/p/missing"]),
 		"a missing package must be stored: %v", failed["example.com/p/missing"])
 }
+
+func TestWrapCompileImportError(t *testing.T) {
+	vendorErr := wrapCompileImportError(
+		errors.New("import lookup disabled by -mod=vendor"),
+		"go.opentelemetry.io/otelc/pkg/hook",
+	)
+	require.ErrorContains(t, vendorErr, "otelc pin")
+	require.ErrorContains(t, vendorErr, "go mod vendor")
+
+	otherErr := wrapCompileImportError(errors.New("network timeout"), "example.com/pkg")
+	require.ErrorContains(t, otherErr, `resolving "example.com/pkg"`)
+	assert.NotContains(t, otherErr.Error(), "go mod vendor")
+}

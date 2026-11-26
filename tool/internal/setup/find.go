@@ -270,6 +270,8 @@ func findDeps(ctx context.Context, subcommand string, cmdArgs []string) ([]*Depe
 		seen = make(map[string]bool)
 	)
 
+	vs := getVendorState(ctx, buildDir(subcommand, cmdArgs))
+
 	for _, cmd := range buildPlan {
 		if dir, ok := parseCdDir(cmd); ok {
 			currentDir = dir
@@ -281,6 +283,9 @@ func findDeps(ctx context.Context, subcommand string, cmdArgs []string) ([]*Depe
 			dep, err1 := findGoSources(ctx, args, currentDir, cgoObjDirs)
 			if err1 != nil {
 				return nil, err1
+			}
+			if dep.Version == "" && len(dep.Sources) > 0 {
+				dep.Version = vs.packageVersion(dep.ImportPath, dep.Sources[0])
 			}
 			key := dep.ImportPath + "\x00" + strings.Join(dep.Sources, "\x00")
 			if seen[key] {
