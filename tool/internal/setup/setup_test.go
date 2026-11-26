@@ -42,6 +42,39 @@ func TestGoBuild_RejectsUnsupportedSubcommand(t *testing.T) {
 	}
 }
 
+func TestTruncateDebugLog(t *testing.T) {
+	t.Run("ignores missing debug log", func(t *testing.T) {
+		t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+		require.NoError(t, truncateDebugLog())
+	})
+
+	t.Run("truncates existing debug log without disturbing append handles", func(t *testing.T) {
+		workDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, workDir)
+		require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+		logPath := util.GetDebugLogFile()
+		require.NoError(t, os.WriteFile(logPath, []byte("stale content\n"), 0o644))
+
+		appendHandle, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		require.NoError(t, err)
+		defer appendHandle.Close()
+
+		require.NoError(t, truncateDebugLog())
+
+		content, err := os.ReadFile(logPath)
+		require.NoError(t, err)
+		assert.Empty(t, content)
+
+		_, err = appendHandle.WriteString("fresh line\n")
+		require.NoError(t, err)
+
+		content, err = os.ReadFile(logPath)
+		require.NoError(t, err)
+		assert.Equal(t, "fresh line\n", string(content))
+	})
+}
+
 func TestToolexecInsertArg(t *testing.T) {
 	t.Run("builds the -toolexec flag for a normal path", func(t *testing.T) {
 		insert, err := toolexecInsertArg("/usr/local/bin/otelc")

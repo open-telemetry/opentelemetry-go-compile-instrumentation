@@ -275,7 +275,7 @@ func (sp *setupPhase) runMatch(
 		if fr, ok := r.(*rule.InstFileRule); ok {
 			set.AddFileRule(fr)
 			sp.reportDecision("", r, "")
-			sp.Info("Match file rule", "rule", fr, "dep", dep)
+			sp.Debug("Match file rule", "rule", fr, "dep", dep)
 			continue
 		}
 		// We can't decide whether the rule is applicable yet, add it to the
@@ -562,7 +562,7 @@ func (sp *setupPhase) applyCallLitMatches(
 		case *rule.InstCallRule:
 			if _, ok := found.calls[qualifiedName{importPath: rt.ImportPath, name: rt.FuncName}]; ok {
 				env.set.AddCallRule(source, rt)
-				sp.Info("Match call rule", "rule", rt, "dep", env.dep)
+				sp.Debug("Match call rule", "rule", rt, "dep", env.dep)
 				sp.reportDecision(source, rt, "")
 			} else {
 				sp.reportDecision(source, rt, "call_not_found")
@@ -570,7 +570,7 @@ func (sp *setupPhase) applyCallLitMatches(
 		case *rule.InstLitRule:
 			if _, ok := found.literals[qualifiedName{importPath: rt.ImportPath, name: rt.TypeName}]; ok {
 				env.set.AddLitRule(source, rt)
-				sp.Info("Match literal rule", "rule", rt, "dep", env.dep)
+				sp.Debug("Match literal rule", "rule", rt, "dep", env.dep)
 				sp.reportDecision(source, rt, "")
 			} else {
 				sp.reportDecision(source, rt, "literal_not_found")
@@ -798,7 +798,7 @@ func (sp *setupPhase) matchOneRule(
 		}
 		if ok {
 			set.AddFuncRule(source, rt)
-			sp.Info("Match func rule", "rule", rt, "dep", dep)
+			sp.Debug("Match func rule", "rule", rt, "dep", dep)
 		}
 	case *rule.InstStructRule:
 		structType := ast.FindStructType(tree, rt.Struct)
@@ -806,7 +806,7 @@ func (sp *setupPhase) matchOneRule(
 		if structType != nil {
 			reason = ""
 			set.AddStructRule(source, rt)
-			sp.Info("Match struct rule", "rule", rt, "dep", dep)
+			sp.Debug("Match struct rule", "rule", rt, "dep", dep)
 		}
 	case *rule.InstRawRule:
 		_, ok, err := ast.FindFuncDeclReporting(tree, rt, sp.resolvedNames, rejection)
@@ -815,7 +815,7 @@ func (sp *setupPhase) matchOneRule(
 		}
 		if ok {
 			set.AddRawRule(source, rt)
-			sp.Info("Match raw rule", "rule", rt, "dep", dep)
+			sp.Debug("Match raw rule", "rule", rt, "dep", dep)
 		}
 	case *rule.InstCallRule:
 		reason = sp.matchCallRule(tree, source, rt, set, dep)
@@ -826,14 +826,14 @@ func (sp *setupPhase) matchOneRule(
 		if ast.FileHasDirective(tree, rt.Directive) {
 			reason = ""
 			set.AddDirectiveRule(source, rt)
-			sp.Info("Match directive rule", "rule", rt, "dep", dep)
+			sp.Debug("Match directive rule", "rule", rt, "dep", dep)
 		}
 	case *rule.InstDeclRule:
 		reason = "declaration_not_found"
 		if ast.FindNamedDecl(tree, rt.Identifier, rt.Kind) != nil {
 			reason = ""
 			set.AddDeclRule(source, rt)
-			sp.Info("Match decl rule", "rule", rt, "dep", dep)
+			sp.Debug("Match decl rule", "rule", rt, "dep", dep)
 		}
 	case *rule.InstFileRule:
 		// Skip as it's already processed
@@ -863,7 +863,7 @@ func (sp *setupPhase) matchCallRule(
 		return "import_not_found"
 	}
 	set.AddCallRule(source, r)
-	sp.Info("Match call rule", "rule", r, "dep", dep)
+	sp.Debug("Match call rule", "rule", r, "dep", dep)
 	return ""
 }
 
@@ -881,7 +881,7 @@ func (sp *setupPhase) matchLitRule(
 		return "import_not_found"
 	}
 	set.AddLitRule(source, r)
-	sp.Info("Match literal rule", "rule", r, "dep", dep)
+	sp.Debug("Match literal rule", "rule", r, "dep", dep)
 	return ""
 }
 
@@ -1111,13 +1111,26 @@ func (idx *ruleIndex) isEmpty() bool {
 	return idx == nil || (len(idx.exactRules) == 0 && len(idx.globRules) == 0)
 }
 
+// ruleCount returns the total number of rules the index holds, across both
+// the exact-target and glob tiers.
+func (idx *ruleIndex) ruleCount() int {
+	if idx == nil {
+		return 0
+	}
+	n := len(idx.globRules)
+	for _, rules := range idx.exactRules {
+		n += len(rules)
+	}
+	return n
+}
+
 func (sp *setupPhase) loadRuleIndex(ctx context.Context, moduleDirs []string) (*ruleIndex, error) {
 	allRules, err := sp.loadRules(ctx, moduleDirs)
 	if err != nil {
 		return nil, err
 	}
 	sp.loadedRules = allRules
-	sp.Info("Found available rules", "rules", allRules)
+	sp.Debug("Found available rules", "rules", allRules)
 	if len(allRules) == 0 {
 		return &ruleIndex{moduleDirs: moduleDirs}, nil
 	}
