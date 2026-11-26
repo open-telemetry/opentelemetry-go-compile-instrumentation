@@ -19,6 +19,8 @@ import (
 
 const instrumentationMetadataFilename = "metadata.yaml"
 
+var errNoParentGoMod = ex.New("no parent go.mod found")
+
 // selectedConfigurationMetadata is the metadata handoff to application
 // configuration validation. Module roots are absolute paths and sorted.
 type selectedConfigurationMetadata struct {
@@ -177,7 +179,7 @@ func moduleRootForPackage(packageDir string) (string, error) {
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "", ex.New("no parent go.mod found")
+			return "", errNoParentGoMod
 		}
 	}
 }

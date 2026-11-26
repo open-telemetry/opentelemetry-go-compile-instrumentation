@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"maps"
 	"os"
@@ -506,12 +507,7 @@ func loadCustomRuleFile(
 	return grouped, nil
 }
 
-func loadCustomRules(ctx context.Context, ruleConfig, otelcVersion string) ([]rule.InstRule, error) {
-	rules, _, err := loadCustomRulesWithModuleRoots(ctx, ruleConfig, otelcVersion)
-	return rules, err
-}
-
-func loadCustomRulesWithModuleRoots(
+func loadCustomRules(
 	ctx context.Context,
 	ruleConfig, otelcVersion string,
 ) ([]rule.InstRule, map[rule.InstRule]string, error) {
@@ -536,7 +532,10 @@ func loadCustomRulesWithModuleRoots(
 		for _, file := range files {
 			key := ruleFileKey(file)
 			if _, known := fileModuleRoots[key]; !known {
-				fileModuleRoots[key] = customRuleModuleRoot(file)
+				fileModuleRoots[key], err = customRuleModuleRoot(file)
+				if err != nil {
+					return nil, nil, ex.Wrapf(err, "locating module root for custom rule %s", file)
+				}
 			}
 			grouped, loaded := loadedFiles[key]
 			if !loaded {
@@ -562,16 +561,19 @@ func loadCustomRulesWithModuleRoots(
 	return result, ruleModuleRoots, nil
 }
 
-func customRuleModuleRoot(file string) string {
-	moduleRoot, err := moduleRootForPackage(filepath.Dir(file))
-	if err != nil {
-		return ""
+func customRuleModuleRoot(file string) (string, error) {
+	ruleDirectory := filepath.Dir(ruleFileKey(file))
+	moduleRoot, err := moduleRootForPackage(ruleDirectory)
+	if errors.Is(err, errNoParentGoMod) {
+		moduleRoot = ruleDirectory
+	} else if err != nil {
+		return "", err
 	}
 	absolute, err := filepath.Abs(moduleRoot)
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return absolute
+	return absolute, nil
 }
 
 func recordCustomRuleModuleRoots(
@@ -702,23 +704,12 @@ func (sp *setupPhase) loadRules(ctx context.Context, moduleDirs []string) ([]rul
 }
 
 func (sp *setupPhase) loadCustomRules(ctx context.Context, ruleConfig string) ([]rule.InstRule, error) {
-	rules, moduleRoots, err := loadCustomRulesWithModuleRoots(ctx, ruleConfig, util.Version)
+	rules, moduleRoots, err := loadCustomRules(ctx, ruleConfig, util.Version)
 	if err != nil {
 		return nil, err
 	}
 	for instRule, moduleRoot := range moduleRoots {
 		sp.recordRuleModuleRoot(instRule, moduleRoot)
-	}
-	if sp.instrumentationConfigPath == "" {
-		return rules, nil
-	}
-	for _, instRule := range rules {
-		if _, ok := moduleRoots[instRule]; !ok {
-			return nil, ex.Newf(
-				"custom rule %q is not located inside a Go module; application configuration validation requires custom rule module ownership",
-				instRule.GetName(),
-			)
-		}
 	}
 	return rules, nil
 }

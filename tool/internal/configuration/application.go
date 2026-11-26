@@ -331,7 +331,15 @@ func applicationDefaultValue(defaultValue, typeName string) (any, error) {
 	case booleanType:
 		return strconv.ParseBool(defaultValue)
 	case integerType:
-		return strconv.ParseInt(defaultValue, 10, 64)
+		value, err := strconv.ParseInt(defaultValue, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		nativeValue := int(value)
+		if int64(nativeValue) == value {
+			return nativeValue, nil
+		}
+		return value, nil
 	case mapType, listType, structuredListType:
 		var value any
 		if err := yaml.Unmarshal([]byte(defaultValue), &value); err != nil {
@@ -472,6 +480,16 @@ func parseAndValidateSelectedApplicationConfiguration(
 	selectedDevelopment map[string]any,
 	selected map[string]Entry,
 ) (*otelconfx.OpenTelemetryConfiguration, map[string]any, error) {
+	sourceDocument := selectedApplicationSourceDocument(application.Document, selectedDevelopment, selected)
+	if err := validateYAMLFields(
+		sourceDocument,
+		reflect.TypeFor[otelconfx.OpenTelemetryConfiguration](),
+		application.Source,
+		"",
+	); err != nil {
+		return nil, nil, explainDeprecatedApplicationField(err, application, selected)
+	}
+
 	var root map[string]any
 	if err := application.Document.Decode(&root); err != nil {
 		return nil, nil, ex.Wrapf(err, "decode application configuration %s", application.Source)
@@ -487,14 +505,6 @@ func parseAndValidateSelectedApplicationConfiguration(
 	document, err := parseSingleYAMLDocument(data, application.Source)
 	if err != nil {
 		return nil, nil, err
-	}
-	if err = validateYAMLFields(
-		document,
-		reflect.TypeFor[otelconfx.OpenTelemetryConfiguration](),
-		application.Source,
-		"",
-	); err != nil {
-		return nil, nil, explainDeprecatedApplicationField(err, application, selected)
 	}
 	parsed, err := otelconfx.ParseYAML(data)
 	if err != nil {
@@ -517,6 +527,92 @@ func parseAndValidateSelectedApplicationConfiguration(
 		}
 	}
 	return parsed, normalized, nil
+}
+
+// selectedApplicationSourceDocument returns a source-preserving view of the
+// application document with unselected development options removed. Field
+// validation uses this view so errors report positions from the user's YAML,
+// while the normalized document passed to otelconf/x remains independent.
+func selectedApplicationSourceDocument(
+	source *yaml.Node,
+	selectedDevelopment map[string]any,
+	selected map[string]Entry,
+) *yaml.Node {
+	result := cloneYAMLNode(source)
+	if result == nil || result.Kind != yaml.MappingNode {
+		return result
+	}
+	for i := 0; i+1 < len(result.Content); i += yamlMappingPairSize {
+		key := result.Content[i]
+		if key.Kind != yaml.ScalarNode || key.Value != "instrumentation/development" {
+			continue
+		}
+		result.Content[i+1] = filterSelectedYAMLNode(
+			source.Content[i+1],
+			selectedDevelopment,
+			"",
+			selected,
+		)
+		break
+	}
+	return result
+}
+
+func filterSelectedYAMLNode(
+	source *yaml.Node,
+	selectedValue any,
+	path string,
+	selected map[string]Entry,
+) *yaml.Node {
+	if source == nil {
+		return nil
+	}
+	if source.Kind == yaml.AliasNode {
+		filtered := *source
+		filtered.Alias = filterSelectedYAMLNode(source.Alias, selectedValue, path, selected)
+		return &filtered
+	}
+	values, ok := selectedValue.(map[string]any)
+	if source.Kind != yaml.MappingNode || !ok {
+		return cloneYAMLNode(source)
+	}
+	filtered := *source
+	filtered.Content = make([]*yaml.Node, 0, len(source.Content))
+	for i := 0; i+1 < len(source.Content); i += yamlMappingPairSize {
+		key := source.Content[i]
+		if key.Kind != yaml.ScalarNode {
+			continue
+		}
+		value, exists := values[key.Value]
+		if !exists {
+			continue
+		}
+		childPath := key.Value
+		if path != "" {
+			childPath = path + "." + key.Value
+		}
+		filtered.Content = append(filtered.Content, cloneYAMLNode(key))
+		if _, isOption := selected[childPath]; isOption {
+			filtered.Content = append(filtered.Content, cloneYAMLNode(source.Content[i+1]))
+			continue
+		}
+		filtered.Content = append(filtered.Content, filterSelectedYAMLNode(
+			source.Content[i+1], value, childPath, selected,
+		))
+	}
+	return &filtered
+}
+
+func cloneYAMLNode(source *yaml.Node) *yaml.Node {
+	if source == nil {
+		return nil
+	}
+	cloned := *source
+	cloned.Content = make([]*yaml.Node, len(source.Content))
+	for i, child := range source.Content {
+		cloned.Content[i] = cloneYAMLNode(child)
+	}
+	return &cloned
 }
 
 func validateSelectedApplicationValues(
@@ -825,14 +921,31 @@ func validateYAMLMappingFields(node *yaml.Node, target reflect.Type, source, pat
 }
 
 func validateYAMLStructFields(node *yaml.Node, target reflect.Type, source, path string) error {
-	fields := yamlStructFields(target)
+	fieldSet, fieldSetErr := yamlStructFields(target)
+	if fieldSetErr != nil {
+		return ex.Wrapf(fieldSetErr, "inspect YAML fields for %s", target)
+	}
 	for i := 0; i+1 < len(node.Content); i += yamlMappingPairSize {
 		key := node.Content[i]
 		if key.Kind != yaml.ScalarNode || key.Tag != yamlStringTag {
 			continue // rejectDuplicateYAMLKeys reports this with source location.
 		}
-		fieldType, ok := fields[key.Value]
+		fieldType, ok := fieldSet.fields[key.Value]
 		if !ok {
+			if fieldSet.inlineMap != nil {
+				if err := validateYAMLFields(
+					node.Content[i+1],
+					fieldSet.inlineMap.Elem(),
+					source,
+					joinYAMLPath(path, key.Value),
+				); err != nil {
+					return err
+				}
+				continue
+			}
+			if fieldSet.inlineUnmarshaler {
+				continue
+			}
 			return &unsupportedApplicationFieldError{
 				Source: source,
 				Path:   joinYAMLPath(path, key.Value),
@@ -902,7 +1015,10 @@ func validateApplicationRootFields(node *yaml.Node, target reflect.Type, source 
 	if node == nil || node.Kind != yaml.MappingNode {
 		return ex.Newf("%s: application configuration must be a mapping", source)
 	}
-	fields := yamlStructFields(target)
+	fieldSet, fieldSetErr := yamlStructFields(target)
+	if fieldSetErr != nil {
+		return ex.Wrapf(fieldSetErr, "inspect YAML fields for %s", target)
+	}
 	for i := 0; i+1 < len(node.Content); i += yamlMappingPairSize {
 		key := node.Content[i]
 		if key.Kind != yaml.ScalarNode || key.Tag != yamlStringTag {
@@ -913,8 +1029,22 @@ func validateApplicationRootFields(node *yaml.Node, target reflect.Type, source 
 			// otelconf/x, so unknown or invalid unselected options can be ignored.
 			continue
 		}
-		fieldType, ok := fields[key.Value]
+		fieldType, ok := fieldSet.fields[key.Value]
 		if !ok {
+			if fieldSet.inlineMap != nil {
+				if err := validateYAMLFields(
+					node.Content[i+1],
+					fieldSet.inlineMap.Elem(),
+					source,
+					key.Value,
+				); err != nil {
+					return err
+				}
+				continue
+			}
+			if fieldSet.inlineUnmarshaler {
+				continue
+			}
 			return ex.Newf(
 				"%s:%d:%d: unsupported application configuration field %q",
 				source,
@@ -930,27 +1060,127 @@ func validateApplicationRootFields(node *yaml.Node, target reflect.Type, source 
 	return nil
 }
 
-func yamlStructFields(target reflect.Type) map[string]reflect.Type {
-	fields := make(map[string]reflect.Type, target.NumField())
-	for field := range target.Fields() {
-		if !field.IsExported() {
-			continue
-		}
-		tag := field.Tag.Get("yaml")
-		name, _, _ := strings.Cut(tag, ",")
-		if name == "-" {
-			continue
-		}
-		if name == "" {
-			if field.Anonymous && field.Type.Kind() == reflect.Struct {
-				maps.Copy(fields, yamlStructFields(field.Type))
-				continue
-			}
-			name = strings.ToLower(field.Name[:1]) + field.Name[1:]
-		}
-		fields[name] = field.Type
+type yamlStructFieldSet struct {
+	fields            map[string]reflect.Type
+	fieldOrder        []string
+	inlineMap         reflect.Type
+	inlineUnmarshaler bool
+}
+
+func yamlStructFields(target reflect.Type) (yamlStructFieldSet, error) {
+	target = dereferenceYAMLType(target)
+	if target.Kind() != reflect.Struct {
+		return yamlStructFieldSet{}, nil
 	}
-	return fields
+	fieldSet := yamlStructFieldSet{fields: make(map[string]reflect.Type, target.NumField())}
+	for field := range target.Fields() {
+		if field.PkgPath != "" && !field.Anonymous {
+			continue
+		}
+		fieldInfo, tagErr := yamlStructFieldTag(field, target)
+		if tagErr != nil {
+			return yamlStructFieldSet{}, tagErr
+		}
+		if fieldInfo.skip {
+			continue
+		}
+		if fieldInfo.inline {
+			if inlineErr := mergeYAMLInlineField(&fieldSet, field.Type, target); inlineErr != nil {
+				return yamlStructFieldSet{}, inlineErr
+			}
+			continue
+		}
+		if fieldInfo.name == "" {
+			fieldInfo.name = strings.ToLower(field.Name)
+		}
+		if _, duplicate := fieldSet.fields[fieldInfo.name]; duplicate {
+			return yamlStructFieldSet{}, ex.Newf("duplicated key %q in YAML struct %s", fieldInfo.name, target)
+		}
+		fieldSet.fields[fieldInfo.name] = field.Type
+		fieldSet.fieldOrder = append(fieldSet.fieldOrder, fieldInfo.name)
+	}
+	return fieldSet, nil
+}
+
+type yamlStructFieldTagInfo struct {
+	name   string
+	inline bool
+	skip   bool
+}
+
+func yamlStructFieldTag(field reflect.StructField, target reflect.Type) (yamlStructFieldTagInfo, error) {
+	tag := field.Tag.Get("yaml")
+	if tag == "" && !strings.Contains(string(field.Tag), ":") {
+		tag = string(field.Tag)
+	}
+	if tag == "-" {
+		return yamlStructFieldTagInfo{skip: true}, nil
+	}
+	parts := strings.Split(tag, ",")
+	inline := false
+	for _, flag := range parts[1:] {
+		switch flag {
+		case "omitempty", "flow":
+		case "inline":
+			inline = true
+		default:
+			return yamlStructFieldTagInfo{}, ex.Newf(
+				"unsupported flag %q in YAML tag %q of type %s",
+				flag,
+				tag,
+				target,
+			)
+		}
+	}
+	return yamlStructFieldTagInfo{name: parts[0], inline: inline}, nil
+}
+
+func mergeYAMLInlineField(fieldSet *yamlStructFieldSet, fieldType, target reflect.Type) error {
+	if fieldType.Kind() == reflect.Map {
+		if fieldSet.inlineMap != nil {
+			return ex.Newf("multiple inline maps in YAML struct %s", target)
+		}
+		if fieldType.Key() != reflect.TypeFor[string]() {
+			return ex.Newf("inline map in YAML struct %s must have string keys", target)
+		}
+		fieldSet.inlineMap = fieldType
+		return nil
+	}
+	if fieldType.Kind() == reflect.Struct || fieldType.Kind() == reflect.Pointer {
+		inlineType := dereferenceYAMLType(fieldType)
+		if inlineType.Kind() != reflect.Struct {
+			return ex.Newf("inline field in YAML struct %s must be a struct or map", target)
+		}
+		if reflect.PointerTo(inlineType).Implements(reflect.TypeFor[yaml.Unmarshaler]()) {
+			fieldSet.inlineUnmarshaler = true
+			return nil
+		}
+		inlineFields, err := yamlStructFields(inlineType)
+		if err != nil {
+			return err
+		}
+		return mergeYAMLInlineStruct(fieldSet, inlineFields, target)
+	}
+	return ex.Newf("inline field in YAML struct %s must be a struct or map", target)
+}
+
+func mergeYAMLInlineStruct(fieldSet *yamlStructFieldSet, inlineFields yamlStructFieldSet, target reflect.Type) error {
+	for _, key := range inlineFields.fieldOrder {
+		fieldType := inlineFields.fields[key]
+		if _, duplicate := fieldSet.fields[key]; duplicate {
+			return ex.Newf("duplicated key %q in YAML struct %s", key, target)
+		}
+		fieldSet.fields[key] = fieldType
+		fieldSet.fieldOrder = append(fieldSet.fieldOrder, key)
+	}
+	if inlineFields.inlineMap != nil {
+		if fieldSet.inlineMap != nil {
+			return ex.Newf("multiple inline maps in YAML struct %s", target)
+		}
+		fieldSet.inlineMap = inlineFields.inlineMap
+	}
+	fieldSet.inlineUnmarshaler = fieldSet.inlineUnmarshaler || inlineFields.inlineUnmarshaler
+	return nil
 }
 
 func validateFileFormat(fileFormat string) error {

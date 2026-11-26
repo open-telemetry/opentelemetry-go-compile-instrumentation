@@ -5,6 +5,7 @@ package configuration
 
 import (
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -106,7 +107,7 @@ instrumentation/development:
     default: "010"
 `,
 			option:       "go.sample.limit",
-			want:         int64(10),
+			want:         int(10),
 			wantSnapshot: `{"go.sample.limit":10}`,
 		},
 		{
@@ -131,6 +132,58 @@ instrumentation/development:
 			assert.Equal(t, test.want, validated.ResolvedValues[test.option])
 			assert.NotContains(t, validated.Values, test.option)
 			assert.JSONEq(t, test.wantSnapshot, string(validated.Snapshot))
+		})
+	}
+}
+
+func TestApplicationIntegerDefaultMatchesSuppliedYAMLValue(t *testing.T) {
+	defaultApplication, err := ParseApplicationConfiguration([]byte(`file_format: "1.2"
+instrumentation/development:
+  go:
+    sample: {}
+`), "default.yaml")
+	require.NoError(t, err)
+	suppliedApplication, err := ParseApplicationConfiguration([]byte(`file_format: "1.2"
+instrumentation/development:
+  go:
+    sample:
+      limit: 10
+`), "supplied.yaml")
+	require.NoError(t, err)
+	definition := Entry{Name: "go.sample.limit", Type: integerType, Default: new("010")}
+
+	defaultResult, err := ValidateApplicationOptions(defaultApplication, []Entry{definition}, nil)
+	require.NoError(t, err)
+	suppliedResult, err := ValidateApplicationOptions(suppliedApplication, []Entry{definition}, nil)
+	require.NoError(t, err)
+
+	assert.Equal(t, int(10), defaultResult.ResolvedValues[definition.Name])
+	assert.Equal(t, reflect.TypeFor[int](), reflect.TypeOf(defaultResult.ResolvedValues[definition.Name]))
+	assert.Equal(t, suppliedResult.Values[definition.Name], defaultResult.ResolvedValues[definition.Name])
+	assert.Equal(
+		t,
+		reflect.TypeOf(suppliedResult.Values[definition.Name]),
+		reflect.TypeOf(defaultResult.ResolvedValues[definition.Name]),
+	)
+	assert.Equal(t, suppliedResult.Snapshot, defaultResult.Snapshot)
+	assert.Equal(t, suppliedResult.Identity, defaultResult.Identity)
+}
+
+func TestApplicationIntegerDefaultUsesInt64WhenNativeIntCannotRepresentIt(t *testing.T) {
+	for _, value := range []string{"-9223372036854775808", "9223372036854775807"} {
+		t.Run(value, func(t *testing.T) {
+			got, err := applicationDefaultValue(value, integerType)
+			require.NoError(t, err)
+			parsed, err := strconv.ParseInt(value, 10, 64)
+			require.NoError(t, err)
+			native := int(parsed)
+			if int64(native) == parsed {
+				assert.Equal(t, native, got)
+				assert.Equal(t, reflect.TypeFor[int](), reflect.TypeOf(got))
+			} else {
+				assert.Equal(t, parsed, got)
+				assert.Equal(t, reflect.TypeFor[int64](), reflect.TypeOf(got))
+			}
 		})
 	}
 }
@@ -846,6 +899,61 @@ func TestValidateApplicationOptionsRejectsSelectedUnsupportedPath(t *testing.T) 
 	require.ErrorContains(t, err, "unsupported instrumentation configuration path")
 }
 
+func TestValidateApplicationOptionsReportsOriginalSDKFieldLocation(t *testing.T) {
+	var document yaml.Node
+	require.NoError(t, yaml.Unmarshal([]byte(`file_format: "1.2"
+
+resource:
+  unknown_sdk_field: true
+
+instrumentation/development:
+  go:
+    sample:
+      enabled: true
+`), &document))
+	application := ApplicationConfiguration{Source: "app.yaml", Document: document.Content[0]}
+	_, _, err := parseAndValidateSelectedApplicationConfiguration(
+		application,
+		map[string]any{"go": map[string]any{"sample": map[string]any{"enabled": true}}},
+		map[string]Entry{"go.sample.enabled": {Name: "go.sample.enabled", Type: booleanType}},
+	)
+	require.ErrorContains(t, err, `app.yaml:4:3: unsupported field "unknown_sdk_field"`)
+	require.ErrorContains(t, err, "resource.unknown_sdk_field")
+}
+
+func TestSelectedApplicationSourceDocumentFiltersWithOriginalNodes(t *testing.T) {
+	var document yaml.Node
+	require.NoError(t, yaml.Unmarshal([]byte(`file_format: "1.2"
+instrumentation/development:
+  defaults: &options
+    sample:
+      enabled: true
+    ignored:
+      stale: true
+  go: *options
+`), &document))
+	selectedDevelopment := map[string]any{"go": map[string]any{"sample": map[string]any{"enabled": true}}}
+	selected := map[string]Entry{"go.sample.enabled": {Name: "go.sample.enabled", Type: booleanType}}
+
+	sourceDocument := selectedApplicationSourceDocument(document.Content[0], selectedDevelopment, selected)
+	sourceRoot, err := yamlNodeMapping(document.Content[0], "app.yaml")
+	require.NoError(t, err)
+	filteredRoot, err := yamlNodeMapping(sourceDocument, "app.yaml")
+	require.NoError(t, err)
+	originalDevelopment, err := yamlNodeMapping(sourceRoot["instrumentation/development"], "app.yaml")
+	require.NoError(t, err)
+	filteredDevelopment, err := yamlNodeMapping(filteredRoot["instrumentation/development"], "app.yaml")
+	require.NoError(t, err)
+	originalGo, err := yamlNodeMapping(originalDevelopment["go"].Alias, "app.yaml")
+	require.NoError(t, err)
+	filteredGo, err := yamlNodeMapping(filteredDevelopment["go"].Alias, "app.yaml")
+	require.NoError(t, err)
+
+	assert.Contains(t, originalGo, "ignored")
+	assert.NotContains(t, filteredGo, "ignored")
+	assert.Equal(t, originalGo["sample"].Line, filteredGo["sample"].Line)
+}
+
 func TestApplicationDefaultValueRejectsMalformedYAML(t *testing.T) {
 	_, err := applicationDefaultValue("[", listType)
 	require.Error(t, err)
@@ -1017,11 +1125,14 @@ func TestValidateYAMLFieldsHandlesUnsupportedShapes(t *testing.T) {
 	type config struct {
 		Embedded
 	}
-	var embeddedNode yaml.Node
-	require.NoError(t, yaml.Unmarshal([]byte("value: true\n"), &embeddedNode))
+	var embeddedNode, inlineNode yaml.Node
+	require.NoError(t, yaml.Unmarshal([]byte("embedded:\n  value: true\n"), &embeddedNode))
 	require.NoError(t, validateYAMLFields(embeddedNode.Content[0], reflect.TypeFor[config](), "app.yaml", ""))
+	require.NoError(t, yaml.Unmarshal([]byte("value: true\n"), &inlineNode))
 	var unknownNode yaml.Node
 	require.NoError(t, yaml.Unmarshal([]byte("unknown: true\n"), &unknownNode))
+	require.ErrorContains(t, validateYAMLFields(
+		inlineNode.Content[0], reflect.TypeFor[config](), "app.yaml", ""), "unsupported field")
 	require.ErrorContains(t, validateYAMLFields(
 		unknownNode.Content[0], reflect.TypeFor[config](), "app.yaml", ""), "unsupported field")
 
@@ -1068,14 +1179,73 @@ func TestApplicationValidationHelperBranches(t *testing.T) {
 }
 
 func TestYAMLStructFieldsSkipsUnexportedAndIgnoredFields(t *testing.T) {
-	fields := yamlStructFields(reflect.TypeFor[struct {
+	fieldSet, err := yamlStructFields(reflect.TypeFor[struct {
 		Visible string `yaml:"visible"`
 		Ignored string `yaml:"-"`
 		hidden  string
 	}]())
-	assert.Contains(t, fields, "visible")
-	assert.NotContains(t, fields, "Ignored")
-	assert.NotContains(t, fields, "hidden")
+	require.NoError(t, err)
+	assert.Contains(t, fieldSet.fields, "visible")
+	assert.NotContains(t, fieldSet.fields, "Ignored")
+	assert.NotContains(t, fieldSet.fields, "hidden")
+}
+
+func TestValidateYAMLFieldsMatchesYAMLV3StructFieldSemantics(t *testing.T) {
+	type Embedded struct {
+		Value string `yaml:"value"`
+	}
+	type inlineConfig struct {
+		Embedded `yaml:",inline"`
+	}
+	type pointerInlineConfig struct {
+		*Embedded `yaml:",inline"`
+	}
+	type mapInlineConfig struct {
+		Known  string            `yaml:"known"`
+		Extras map[string]string `yaml:",inline"`
+	}
+	type nestedMapInlineConfig struct {
+		Extras map[string]Embedded `yaml:",inline"`
+	}
+
+	for _, test := range []struct {
+		name   string
+		data   string
+		typeOf reflect.Type
+		want   string
+	}{
+		{name: "lowercases the full untagged acronym name", data: "url: value\n", typeOf: reflect.TypeFor[struct{ URL string }]()},
+		{name: "flattens only explicitly inline structs", data: "value: item\n", typeOf: reflect.TypeFor[inlineConfig]()},
+		{name: "supports pointers to inline structs", data: "value: item\n", typeOf: reflect.TypeFor[pointerInlineConfig]()},
+		{name: "accepts unknown fields through an inline map", data: "known: item\nextra: value\n", typeOf: reflect.TypeFor[mapInlineConfig]()},
+		{name: "validates values in inline maps", data: "extra:\n  unknown: true\n", typeOf: reflect.TypeFor[nestedMapInlineConfig](), want: "unsupported field"},
+		{name: "rejects acronym with lowercased first letter only", data: "uRL: value\n", typeOf: reflect.TypeFor[struct{ URL string }](), want: "unsupported field"},
+		{name: "rejects untagged embedded-field flattening", data: "value: item\n", typeOf: reflect.TypeFor[struct{ Embedded }](), want: "unsupported field"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var document yaml.Node
+			require.NoError(t, yaml.Unmarshal([]byte(test.data), &document))
+			err := validateYAMLFields(document.Content[0], test.typeOf, "app.yaml", "")
+			if test.want == "" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, test.want)
+			}
+		})
+	}
+
+	type DuplicateInline struct {
+		Value    string   `yaml:"value"`
+		Embedded Embedded `yaml:",inline"`
+	}
+	_, err := yamlStructFields(reflect.TypeFor[DuplicateInline]())
+	require.ErrorContains(t, err, "duplicated key")
+
+	type InvalidInlineMap struct {
+		Values map[int]string `yaml:",inline"`
+	}
+	_, err = yamlStructFields(reflect.TypeFor[InvalidInlineMap]())
+	require.ErrorContains(t, err, "must have string keys")
 }
 
 func TestValidateApplicationRootFieldsHandlesNilAndInvalidKeys(t *testing.T) {
