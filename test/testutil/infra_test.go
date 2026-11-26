@@ -99,7 +99,7 @@ func TestRegisterReleaseBuild_GoroutineSafety(t *testing.T) {
 	require.Equal(t, 0, buildRefsCount(tmpDir), "final ref count must be 0")
 }
 
-func TestRegisterReleaseBuild_ParallelSubtests(t *testing.T) {
+func TestRegisterReleaseBuild_ConcurrentGoroutines(t *testing.T) {
 	tmpDir := t.TempDir()
 	appBin := "app"
 	binPath := filepath.Join(tmpDir, appBin)
@@ -110,27 +110,38 @@ func TestRegisterReleaseBuild_ParallelSubtests(t *testing.T) {
 	require.NoError(t, os.Mkdir(buildDir, 0o755))
 	require.NoError(t, os.WriteFile(lockFile, []byte("lock"), 0o644))
 
-	const numSubtests = 4
+	const numConsumers = 4
 	var startBarrier sync.WaitGroup
-	startBarrier.Add(numSubtests)
+	startBarrier.Add(numConsumers)
 
-	for i := 0; i < numSubtests; i++ {
-		t.Run("parallel-consumer", func(t *testing.T) {
-			t.Parallel()
+	var doneBarrier sync.WaitGroup
+	doneBarrier.Add(numConsumers)
+
+	for i := 0; i < numConsumers; i++ {
+		go func() {
+			defer doneBarrier.Done()
 
 			registerBuild(tmpDir)
-			t.Cleanup(func() {
-				releaseBuild(tmpDir, appBin)
-			})
+			defer releaseBuild(tmpDir, appBin)
 
 			startBarrier.Done()
 			startBarrier.Wait()
 
-			// While any parallel test is running, buildDir and binary must be preserved
+			// While any concurrent consumer is active, buildDir and binary must be preserved
 			require.GreaterOrEqual(t, buildRefsCount(tmpDir), 1)
 			require.DirExists(t, buildDir)
 			require.FileExists(t, binPath)
 			require.FileExists(t, lockFile)
-		})
+		}()
 	}
+
+	doneBarrier.Wait()
+
+	require.Equal(t, 0, buildRefsCount(tmpDir), "all references should be released")
+	_, err := os.Stat(binPath)
+	require.True(t, os.IsNotExist(err), "binary should be removed after all consumers complete")
+	_, err = os.Stat(buildDir)
+	require.True(t, os.IsNotExist(err), ".otelc-build should be removed after all consumers complete")
+	_, err = os.Stat(lockFile)
+	require.True(t, os.IsNotExist(err), ".otelc-build.lock should be removed after all consumers complete")
 }
