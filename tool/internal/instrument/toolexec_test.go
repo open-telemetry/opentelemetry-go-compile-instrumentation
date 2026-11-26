@@ -80,13 +80,15 @@ func TestIndexedCandidatesKeepExactMatching(t *testing.T) {
 		{"main", []string{filepath.Join(dir, "unrelated.go")}, -1},
 		{"example.com/cgo", []string{filepath.Join(dir, "new.cgo1.go")}, 3},
 	} {
-		assert.False(t, compileindex.Excludes(tt.path))
+		res, ok := compileindex.Lookup(tt.path)
+		require.True(t, ok && !res.Excluded, tt.path)
+		assert.True(t, res.BuildUsesIgnoreDirective)
 		args := append([]string{"compile", "-p", tt.path}, tt.files...)
-		got := ip.match(loaded, args)
+		got := ip.match(res.Sets, args)
 		if tt.wantIndex < 0 {
 			assert.Nil(t, got)
 		} else {
-			assert.Same(t, loaded[tt.wantIndex], got)
+			assert.Equal(t, loaded[tt.wantIndex], got)
 		}
 	}
 }
@@ -165,6 +167,48 @@ func TestInterceptCompileDefersImportCfg(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, args, got)
 	})
+}
+
+func TestInterceptCompileShardFallback(t *testing.T) {
+	indexedCompile(t)
+	dir := t.TempDir()
+	src := filepath.Join(dir, "lib.go")
+	require.NoError(t, os.WriteFile(src, []byte("package lib\n"), 0o644))
+
+	normal := rule.NewInstRuleSet("example.com/lib")
+	normal.AddFuncRule(src, &rule.InstFuncRule{Func: "Target"})
+	testSet := rule.NewInstRuleSet("example.com/lib")
+	testSet.IsTest = true
+	testSet.AddFuncRule(src, &rule.InstFuncRule{Func: "Target"})
+	other := rule.NewInstRuleSet("example.com/other")
+	other.AddIgnoredCallFile(filepath.Join(dir, "ignored.go"))
+
+	data, err := json.Marshal([]*rule.InstRuleSet{normal, testSet, other})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), data, 0o644))
+	require.NoError(t, compileindex.Store())
+
+	// Normal compile matches via shard and reaches importcfg parsing.
+	res, ok := compileindex.Lookup("example.com/lib")
+	require.True(t, ok)
+	assert.False(t, res.Excluded)
+	assert.Len(t, res.Sets, 2)
+
+	args := []string{
+		"compile", "-p", "example.com/lib", "-o", filepath.Join(dir, "_pkg_.a"),
+		"-importcfg", filepath.Join(dir, "missing.importcfg"),
+		src,
+	}
+	ctx := util.ContextWithLogger(t.Context(), slog.Default())
+	_, err = interceptCompile(ctx, args)
+	require.ErrorContains(t, err, "importcfg")
+
+	// Removing shards falls back cleanly to matched.json.
+	require.NoError(t, os.RemoveAll(util.GetInvocationTemp("packages")))
+	_, ok = compileindex.Lookup("example.com/lib")
+	assert.False(t, ok)
+	_, err = interceptCompile(ctx, args)
+	require.ErrorContains(t, err, "importcfg")
 }
 
 func TestPGOBuildFlags(t *testing.T) {
