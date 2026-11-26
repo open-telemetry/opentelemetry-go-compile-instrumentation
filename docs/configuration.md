@@ -80,9 +80,9 @@ mode with a warm cache in the other.
 
 `otelc` uses advisory file locks to protect state during setup and build execution. Understanding what each lock coordinates helps distinguish expected contention from build failures:
 
-- **Work-directory lock (`.otelc-build.lock`):** Protects the `.otelc-build` directory, intermediate overlays, and generated build artifacts. When the work directory is located at the module root, this and the module lock share the same underlying path.
-- **Module lock (`go.mod.lock`):** Protects `go.mod`, `go.sum`, and temporary tool requirements during setup and teardown. Because `otelc` temporarily mutates module files, invocations targeting the same Go module contend on the module lock even if distinct `--work-dir` directories are provided.
-- **Workspace lock (`go.work.lock`):** In Go workspace mode (`go.work`), coordinates updates to `go.work.sum` across member modules.
+- **Work-directory lock:** `.otelc-build.lock` in the work directory protects the `.otelc-build` directory and generated build artifacts. When the work directory is located at the module root, this and the module lock share the same underlying path.
+- **Module lock:** `.otelc-build.lock` in the module root protects `go.mod`, `go.sum`, and temporary tool requirements during setup and teardown. Because `otelc` temporarily mutates module files, invocations targeting the same Go module contend on this lock even if distinct `--work-dir` directories are provided.
+- **Workspace lock:** In Go workspace mode, `.otelc-build.lock` in the `go.work` directory coordinates updates to `go.work.sum` across member modules.
 
 In standard mode (`OTELC_UNLOCKED_COMPILE=0`), `otelc` holds these locks across the setup phase, the invoked Go compiler subprocess, and cleanup. Note that while `otelc` serializes separate command invocations targeting the same module, Go itself compiles packages in parallel within each subprocess using its configured worker threads (`GOMAXPROCS`).
 
