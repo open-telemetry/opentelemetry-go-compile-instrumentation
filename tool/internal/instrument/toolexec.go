@@ -257,18 +257,26 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 	}
 
 	// Setup's optional index can rule out a package without decoding either
-	// artifact. Candidates and stale/missing index data keep the exact loader,
-	// including its build-global ignored-call flag and file/test/cgo matching.
-	if compileindex.Excludes(util.FindFlagValue(args, "-p")) {
-		return args, nil
+	// artifact, and for candidates can load only that package's shard instead
+	// of decoding the entire build's matched.json. Missing or stale index/shard
+	// data falls back to the full loader.
+	var allSet []*rule.InstRuleSet
+	var err error
+	pkgPath := util.FindFlagValue(args, "-p")
+	if res, ok := compileindex.Lookup(pkgPath); ok {
+		if res.Excluded {
+			return args, nil
+		}
+		ip.Debug("Load package rule shard", "package", pkgPath)
+		allSet = res.Sets
+		ip.buildUsesIgnoreDirective = res.BuildUsesIgnoreDirective
+	} else {
+		allSet, err = ip.load()
+		if err != nil {
+			return nil, err
+		}
+		ip.buildUsesIgnoreDirective = rule.AnySetHasIgnoredCallFiles(allSet)
 	}
-
-	// Load matched hook rules from setup phase
-	allSet, err := ip.load()
-	if err != nil {
-		return nil, err
-	}
-	ip.buildUsesIgnoreDirective = rule.AnySetHasIgnoredCallFiles(allSet)
 
 	// Load the import name table, if one exists. A missing table is
 	// not fatal.
