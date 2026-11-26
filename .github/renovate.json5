@@ -73,6 +73,20 @@
       ],
       separateMultipleMajor: true,
     },
+    {
+      matchManagers: [
+        'gomod',
+      ],
+      matchUpdateTypes: [
+        'major',
+      ],
+      matchPackageNames: [
+        '!github.com/stretchr/testify',
+        '!go.opentelemetry.io/**',
+      ],
+      dependencyDashboardApproval: true,
+      dependencyDashboardCategory: 'Instrumentation Targets',
+    },
   ],
   labels: [
     'dependencies',
