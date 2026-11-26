@@ -29,6 +29,7 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/buildserver"
 	"go.opentelemetry.io/otelc/tool/internal/compileindex"
 	"go.opentelemetry.io/otelc/tool/internal/imports"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
@@ -123,6 +124,14 @@ type instrumentPhase struct {
 	// Rules whose application required globals, recorded in application order
 	// so writeGlobals can attribute the generated globals file to its contributors.
 	globalsContributors []string
+	// pgoProfile holds the build's PGO profile when supplied by the build
+	// server, avoiding a disk read in pgoBuildFlags.
+	pgoProfile       string
+	pgoProfileLoaded bool
+	// nested is true when this compile runs inside a nested `go list -export`
+	// spawned by an outer otelc process (as passed to Toolexec before
+	// EnableNestedToolexec mutates EnvOtelcNestedToolexec in-process).
+	nested bool
 }
 
 func (ip *instrumentPhase) Info(msg string, args ...any)  { ip.logger.Info(msg, args...) }
@@ -241,7 +250,41 @@ func (ip *instrumentPhase) ensurePackageName(matched *rule.InstRuleSet) error {
 	return nil
 }
 
+func (ip *instrumentPhase) loadCompileRuleSets(
+	ctx context.Context,
+	pkgPath string,
+) ([]*rule.InstRuleSet, bool, error) {
+	if resp := ip.loadCompileStateFromServer(ctx, pkgPath); resp != nil {
+		return resp.RuleSets, !resp.Matched, nil
+	}
+	var allSet []*rule.InstRuleSet
+	var err error
+	if res, ok := compileindex.Lookup(pkgPath); ok {
+		if res.Excluded {
+			return nil, true, nil
+		}
+		ip.Debug("Load package rule shard", "package", pkgPath)
+		allSet = res.Sets
+		ip.buildUsesIgnoreDirective = res.BuildUsesIgnoreDirective
+	} else {
+		allSet, err = ip.load()
+		if err != nil {
+			return nil, false, err
+		}
+		ip.buildUsesIgnoreDirective = rule.AnySetHasIgnoredCallFiles(allSet)
+	}
+	ip.importNames, err = loadImportNames()
+	if err != nil {
+		return nil, false, err
+	}
+	return allSet, false, nil
+}
+
 func interceptCompile(ctx context.Context, args []string) ([]string, error) {
+	return interceptCompileWithNested(ctx, args, false)
+}
+
+func interceptCompileWithNested(ctx context.Context, args []string, nested bool) ([]string, error) {
 	// Read compilation output directory
 	target := util.FindFlagValue(args, "-o")
 	util.Assert(target != "", "missing -o flag value")
@@ -254,35 +297,12 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 		workDir:          filepath.Dir(target),
 		compileArgs:      args,
 		importConfigPath: importCfgPath,
+		nested:           nested,
 	}
 
-	// Setup's optional index can rule out a package without decoding either
-	// artifact, and for candidates can load only that package's shard instead
-	// of decoding the entire build's matched.json. Missing or stale index/shard
-	// data falls back to the full loader.
-	var allSet []*rule.InstRuleSet
-	var err error
-	pkgPath := util.FindFlagValue(args, "-p")
-	if res, ok := compileindex.Lookup(pkgPath); ok {
-		if res.Excluded {
-			return args, nil
-		}
-		ip.Debug("Load package rule shard", "package", pkgPath)
-		allSet = res.Sets
-		ip.buildUsesIgnoreDirective = res.BuildUsesIgnoreDirective
-	} else {
-		allSet, err = ip.load()
-		if err != nil {
-			return nil, err
-		}
-		ip.buildUsesIgnoreDirective = rule.AnySetHasIgnoredCallFiles(allSet)
-	}
-
-	// Load the import name table, if one exists. A missing table is
-	// not fatal.
-	ip.importNames, err = loadImportNames()
-	if err != nil {
-		return nil, err
+	allSet, excluded, err := ip.loadCompileRuleSets(ctx, util.FindFlagValue(args, "-p"))
+	if err != nil || excluded {
+		return args, err
 	}
 
 	// Check if the current compile command matches the rules.
@@ -305,8 +325,7 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 
 	ip.Debug("Instrument package", "rules", matched, "args", args)
 	// Okay, this package should be instrumented.
-	err = ip.instrument(ctx, matched)
-	if err != nil {
+	if err = ip.instrument(ctx, matched); err != nil {
 		return nil, ex.Wrapf(err, "instrumenting package %s", matched.ModulePath)
 	}
 
@@ -355,43 +374,41 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 		)
 	}()
 	var updated bool
-	for _, importPath := range newImports {
-		if importPath == unsafePackageName || importPath == "C" {
-			// unsafe is built-in, C is the cgo pseudo-package; neither has an archive file
-			continue
-		}
+	missing := ip.missingImports(newImports)
+	if len(missing) == 0 {
+		return nil
+	}
+	candidates = len(missing)
 
-		if _, exists := ip.importConfig.PackageFile[importPath]; exists {
-			// Already have this import
-			continue
-		}
-		candidates++
-
-		// A memo entry exists only after a resolution of this import
-		// succeeded, so skipping the chain check on a hit cannot hide a
-		// cycle. No single-flight lock here: this compile may run under a
-		// link that holds it.
-		archives, _, hit := memo.Lookup(importPath, ip.importConfig.PackageFile)
-		if hit && archives != nil {
-			memoHits++
-		} else {
-			restore, err := ip.enterNestedResolution(importPath)
-			if err != nil {
-				return err
+	serverUpdated, serverErr := ip.resolveImportsViaServer(ctx, missing, len(pgoFlags) > 0, &memoHits, &goListCalls)
+	switch {
+	case serverErr == nil:
+		updated = serverUpdated
+	case !errors.Is(serverErr, buildserver.ErrUnavailable):
+		return serverErr
+	default:
+		for _, importPath := range missing {
+			// A memo entry exists only after a resolution of this import
+			// succeeded, so skipping the chain check on a hit cannot hide a
+			// cycle. No single-flight lock here: this compile may run under a
+			// link that holds it.
+			archives, _, hit := memo.Lookup(importPath, ip.importConfig.PackageFile)
+			if hit && archives != nil {
+				memoHits++
+			} else {
+				restore, nestErr := ip.enterNestedResolution(importPath)
+				if nestErr != nil {
+					return nestErr
+				}
+				goListCalls++
+				archives, nestErr = ip.compileExportFiles(ctx, importPath, buildFlags...)
+				restore()
+				if nestErr != nil {
+					return ex.Wrapf(nestErr, "resolving %q", importPath)
+				}
+				memo.Store(importPath, archives, nil)
 			}
-			goListCalls++
-			archives, err = ip.compileExportFiles(ctx, importPath, buildFlags...)
-			restore()
-			if err != nil {
-				return ex.Wrapf(err, "resolving %q", importPath)
-			}
-			memo.Store(importPath, archives, nil)
-		}
-
-		for pkg, archive := range archives {
-			if _, exists := ip.importConfig.PackageFile[pkg]; !exists {
-				ip.Debug("Adding import to importcfg", "package", pkg, "archive", archive)
-				ip.importConfig.PackageFile[pkg] = archive
+			if ip.mergeImportArchives(archives) {
 				updated = true
 			}
 		}
@@ -416,6 +433,36 @@ func (ip *instrumentPhase) updateImportConfig(ctx context.Context, newImports ma
 	return nil
 }
 
+// missingImports returns the sorted, deduplicated rule-added imports not yet
+// present in importConfig.PackageFile.
+func (ip *instrumentPhase) missingImports(newImports map[string]string) []string {
+	missing := make([]string, 0, len(newImports))
+	for _, importPath := range newImports {
+		if importPath == unsafePackageName || importPath == "C" {
+			// unsafe is built-in, C is the cgo pseudo-package; neither has an archive file
+			continue
+		}
+		if _, exists := ip.importConfig.PackageFile[importPath]; exists {
+			continue
+		}
+		missing = append(missing, importPath)
+	}
+	slices.Sort(missing)
+	return slices.Compact(missing)
+}
+
+func (ip *instrumentPhase) mergeImportArchives(archives map[string]string) bool {
+	var updated bool
+	for pkg, archive := range archives {
+		if _, exists := ip.importConfig.PackageFile[pkg]; !exists {
+			ip.Debug("Adding import to importcfg", "package", pkg, "archive", archive)
+			ip.importConfig.PackageFile[pkg] = archive
+			updated = true
+		}
+	}
+	return updated
+}
+
 // compileExportFiles resolves an import a rule added to this compile.
 func (ip *instrumentPhase) compileExportFiles(
 	ctx context.Context, importPath string, buildFlags ...string,
@@ -430,6 +477,15 @@ func (ip *instrumentPhase) compileExportFiles(
 // added imports with the profile whose path storePGOProfile recorded during
 // setup, when this compile uses one.
 func (ip *instrumentPhase) pgoBuildFlags() ([]string, error) {
+	if ip.pgoProfileLoaded {
+		if !util.IsLinkCommandWithArgs(ip.compileArgs) && util.FindFlagValue(ip.compileArgs, "-pgoprofile") == "" {
+			return nil, nil
+		}
+		if ip.pgoProfile == "" {
+			return nil, nil
+		}
+		return []string{"-pgo=" + ip.pgoProfile}, nil
+	}
 	return pgoBuildFlagsFor(ip.compileArgs)
 }
 
@@ -474,6 +530,33 @@ type resolution struct {
 // close onto a waiting package within two levels; anything past this bound is
 // an adversarial rule set evading cycle detection.
 const maxResolutionChain = 32
+
+// validateResolutionChain validates that none of the added imports form a
+// cycle or exceed maxResolutionChain against EnvOtelcNestedResolving, and
+// returns the encoded chain to propagate to the build server's nested go list.
+func (ip *instrumentPhase) validateResolutionChain(added []string) (string, error) {
+	prev := os.Getenv(util.EnvOtelcNestedResolving)
+	base := parseResolutionChain(prev)
+	pkg := util.FindFlagValue(ip.compileArgs, "-p")
+	var lastEncoded string
+	for _, imp := range added {
+		chain := append(slices.Clone(base), resolution{pkg: pkg, added: imp})
+		for _, r := range chain {
+			if r.pkg == imp {
+				return "", ex.Newf("rules add an import cycle: %s", describeResolutionChain(chain))
+			}
+		}
+		if len(chain) > maxResolutionChain {
+			return "", ex.Newf(
+				"rules add imports nested deeper than %d: %s",
+				maxResolutionChain,
+				describeResolutionChain(chain),
+			)
+		}
+		lastEncoded = encodeResolutionChain(chain)
+	}
+	return lastEncoded, nil
+}
 
 // enterNestedResolution records, for the nested build about to resolve added,
 // that the package being compiled waits on it. It fails when added is a
@@ -746,10 +829,21 @@ type exportClosureResolver func(
 	ctx context.Context, roots []string, buildFlags ...string,
 ) (map[string]map[string]string, map[string]error, error)
 
+type linkResolveResult struct {
+	closures    map[string]map[string]string
+	failed      map[string]error
+	cacheHits   int
+	goListCalls int
+}
+
+type linkClosureResolver func(
+	ctx context.Context, roots []string, buildFlags ...string,
+) (linkResolveResult, error)
+
 // linkResolution carries the state of one link's rule-added import recovery
 // across its passes.
 type linkResolution struct {
-	resolve    exportClosureResolver
+	resolve    linkClosureResolver
 	memo       *session.Memo
 	buildFlags []string
 	// failed holds the candidates already found unresolvable during this
@@ -768,6 +862,21 @@ type linkResolution struct {
 // same session that needs the same imports reads them instead of running go
 // list again. It reports whether the import config changed.
 func resolveRuleAddedImports(ctx context.Context, linkArgs []string, linkConfig *imports.ImportConfig) (bool, error) {
+	if client := buildserver.ClientFromEnv(); client != nil {
+		return resolveRuleAddedImportsCore(ctx, linkArgs, linkConfig, func(
+			ctx context.Context, roots []string, buildFlags ...string,
+		) (linkResolveResult, error) {
+			usePGO := slices.ContainsFunc(buildFlags, func(f string) bool {
+				return strings.HasPrefix(f, "-pgo=")
+			})
+			res, err := resolveLinkExportsViaServer(ctx, client, roots, usePGO, linkConfig.PackageFile)
+			if errors.Is(err, buildserver.ErrUnavailable) {
+				closures, failed, fallbackErr := pkgload.ResolveExportClosures(ctx, roots, buildFlags...)
+				return linkResolveResult{closures: closures, failed: failed, goListCalls: 1}, fallbackErr
+			}
+			return res, err
+		})
+	}
 	return resolveRuleAddedImportsWith(ctx, linkArgs, linkConfig, pkgload.ResolveExportClosures)
 }
 
@@ -778,6 +887,20 @@ func resolveRuleAddedImportsWith(
 	linkArgs []string,
 	linkConfig *imports.ImportConfig,
 	resolve exportClosureResolver,
+) (bool, error) {
+	return resolveRuleAddedImportsCore(ctx, linkArgs, linkConfig, func(
+		ctx context.Context, roots []string, buildFlags ...string,
+	) (linkResolveResult, error) {
+		closures, failed, err := resolve(ctx, roots, buildFlags...)
+		return linkResolveResult{closures: closures, failed: failed, goListCalls: 1}, err
+	})
+}
+
+func resolveRuleAddedImportsCore(
+	ctx context.Context,
+	linkArgs []string,
+	linkConfig *imports.ImportConfig,
+	resolve linkClosureResolver,
 ) (bool, error) {
 	pgoFlags, err := pgoBuildFlagsFor(linkArgs)
 	if err != nil {
@@ -979,19 +1102,19 @@ func (lr *linkResolution) resolveBatch(
 	ctx context.Context,
 	roots []string,
 ) (map[string]map[string]string, map[string]error, error) {
-	var resolved map[string]map[string]string
-	var resolveFailed map[string]error
+	var res linkResolveResult
 	err := session.WithLoadSlot(ctx, func(ctx context.Context) error {
 		var loadErr error
-		resolved, resolveFailed, loadErr = lr.resolve(ctx, roots, lr.buildFlags...)
+		res, loadErr = lr.resolve(ctx, roots, lr.buildFlags...)
 		return loadErr
 	})
-	lr.goListCalls++
+	lr.memoHits += res.cacheHits
+	lr.goListCalls += res.goListCalls
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return nil, nil, ctxErr
 	}
 	if err == nil {
-		return resolved, resolveFailed, nil
+		return res.closures, res.failed, nil
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
 		!pkgload.IsLoadFailure(err) {
@@ -1001,8 +1124,8 @@ func (lr *linkResolution) resolveBatch(
 		return nil, map[string]error{roots[0]: err}, nil
 	}
 
-	resolved = make(map[string]map[string]string, len(roots))
-	resolveFailed = make(map[string]error)
+	resolved := make(map[string]map[string]string, len(roots))
+	resolveFailed := make(map[string]error)
 	const halves = 2
 	mid := len(roots) / halves
 	for _, half := range [][]string{roots[:mid], roots[mid:]} {
@@ -1384,15 +1507,10 @@ func rulesDigest(content []byte, tags []string, glsSource, injectedHash []byte) 
 // markedToolVersion turns a tool's raw `-V=full` output into the line otelc
 // reports in its place: the version with an otelc marker, plus the current
 // matched-rules hash when one exists.
-func markedToolVersion(rawOutput string) string {
-	return toolVersionLine(strings.TrimSpace(rawOutput), RulesDigest())
+func markedToolVersion(ctx context.Context, rawOutput string) string {
+	return toolVersionLine(strings.TrimSpace(rawOutput), RulesDigestWithContext(ctx))
 }
 
-// RulesDigest returns a short hash of the loaded rules and build inputs setup
-// stored in rules_digest, falling back to hashing matched.json, active build
-// tags, embedded GLS source, and injected_hash when rules_digest is absent.
-// It returns "" when neither rules_digest nor matched.json exists. It feeds the
-// tool ID otelc reports and the export memo's resolution scope.
 func readTrustedRulesDigest(readMatched func() ([]byte, error)) string {
 	raw, err := os.ReadFile(util.GetRulesDigestFile())
 	if err != nil {
@@ -1416,7 +1534,39 @@ func readTrustedRulesDigest(readMatched func() ([]byte, error)) string {
 	return ""
 }
 
+// RulesDigest returns a short hash of the loaded rules and build inputs setup
+// stored in rules_digest, falling back to hashing matched.json, active build
+// tags, embedded GLS source, and injected_hash when rules_digest is absent.
+// It returns "" when neither rules_digest nor matched.json exists. It feeds the
+// tool ID otelc reports and the export memo's resolution scope.
 func RulesDigest() string {
+	return RulesDigestWithContext(context.Background())
+}
+
+// RulesDigestWithContext is RulesDigest with an explicit context for the
+// build server lookup.
+func RulesDigestWithContext(ctx context.Context) string {
+	if client := buildserver.ClientFromEnv(); client != nil {
+		if id, err := client.ToolID(ctx); err == nil {
+			return id
+		}
+	}
+	return RulesDigestFromDisk()
+}
+
+// RulesDigestFromDisk reads the rules digest directly from the invocation
+// directory, bypassing any inherited build server.
+func RulesDigestFromDisk() string {
+	return RulesDigestFromDiskForFlags(util.GetBuildFlags())
+}
+
+// RulesDigestFromDiskForFlags reads the rules digest directly from the
+// invocation directory using buildFlags (combined with GOFLAGS) to compute the
+// effective build tags. Callers outside a toolexec subprocess (where
+// OTELC_BUILD_FLAGS is only in the child env) use this so their ToolID matches
+// a disk-fallback toolexec process identically.
+func RulesDigestFromDiskForFlags(buildFlags []string) string {
+	tags := util.UserBuildTags(util.SplitGoflags(os.Getenv("GOFLAGS")), buildFlags)
 	var content []byte
 	var matchedErr error
 	matchedLoaded := false
@@ -1429,7 +1579,7 @@ func RulesDigest() string {
 	}
 
 	if trusted := readTrustedRulesDigest(readMatched); trusted != "" {
-		if tags := util.ActiveBuildTags(); len(tags) > 0 {
+		if len(tags) > 0 {
 			sum := sha256.Sum256([]byte(trusted + "\ntags=" + strings.Join(tags, ",")))
 			return hex.EncodeToString(sum[:8])
 		}
@@ -1443,7 +1593,7 @@ func RulesDigest() string {
 	if inj, injErr := os.ReadFile(util.GetInjectedHashFile()); injErr == nil {
 		injected = inj
 	}
-	return rulesDigest(mBytes, util.ActiveBuildTags(), toolruntime.RuntimeGLSSource, injected)
+	return rulesDigest(mBytes, tags, toolruntime.RuntimeGLSSource, injected)
 }
 
 // WithoutWorkDirPaths gives invocation-owned files stable names in cache
@@ -1471,7 +1621,7 @@ func interceptToolVersion(ctx context.Context, args []string) error {
 	}
 
 	// The line goes to stdout: it is the answer go itself is waiting for.
-	_, err = os.Stdout.WriteString(markedToolVersion(string(out)) + "\n")
+	_, err = os.Stdout.WriteString(markedToolVersion(ctx, string(out)) + "\n")
 	if err != nil {
 		return ex.Wrapf(err, "writing tool version")
 	}
@@ -1514,7 +1664,7 @@ func Toolexec(ctx context.Context, args []string, nested bool) error {
 	case !nested:
 		args, err = interceptToolCommand(ctx, args)
 	case util.IsCompileCommandWithArgs(args):
-		args, err = interceptCompile(ctx, args)
+		args, err = interceptCompileWithNested(ctx, args, true)
 	}
 	if err != nil {
 		return err
@@ -1589,6 +1739,17 @@ func nestedToolexecGoflagsToken(execPath string) (string, error) {
 //nolint:gochecknoglobals // test seam
 var executablePath = os.Executable
 
+// NestedToolexecGoflags returns the GOFLAGS value needed by nested go commands
+// (such as `go list -export`) so they run through execPath as -toolexec and
+// strip unpatterned -gcflags.
+func NestedToolexecGoflags(execPath, currentGoflags string) (string, error) {
+	toolexecFlag, err := nestedToolexecGoflagsToken(execPath)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(util.StripUnpatternedGcflagsFromGoflags(currentGoflags) + " " + toolexecFlag), nil
+}
+
 // EnableNestedToolexec points GOFLAGS at this executable in nested mode, so go
 // commands this process spawns (e.g. `go list -export`) run through otelc,
 // instrument compiles the same way and share this build's cache keys. Any
@@ -1611,11 +1772,10 @@ func EnableNestedToolexec() error {
 	if err != nil {
 		return ex.Wrapf(err, "resolving otelc executable path")
 	}
-	toolexecFlag, err := nestedToolexecGoflagsToken(execPath)
+	goflags, err := NestedToolexecGoflags(execPath, os.Getenv("GOFLAGS"))
 	if err != nil {
 		return err
 	}
-	goflags := strings.TrimSpace(util.StripUnpatternedGcflagsFromGoflags(os.Getenv("GOFLAGS")) + " " + toolexecFlag)
 	if err = os.Setenv("GOFLAGS", goflags); err != nil {
 		return ex.Wrapf(err, "setting GOFLAGS for nested go commands")
 	}

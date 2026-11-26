@@ -59,6 +59,16 @@ const (
 	// processes of one session run at once. A positive integer sets the
 	// bound, 0 removes it, and anything else falls back to runtime.NumCPU().
 	EnvOtelcMaxParallelLoads = "OTELC_MAX_PARALLEL_LOADS"
+	// EnvOtelcBuildServer carries the address of the in-memory build server
+	// started by `otelc go` ("unix:<path>" or "tcp:<host:port>").
+	EnvOtelcBuildServer = "OTELC_BUILD_SERVER"
+	// EnvOtelcBuildServerAuth carries the bearer secret required by a TCP
+	// build server listener.
+	EnvOtelcBuildServerAuth = "OTELC_BUILD_SERVER_AUTH"
+	// EnvOtelcBuildServerDir carries the cleaned invocation directory that owns
+	// the build server, so a toolexec running against a different invocation
+	// directory ignores an inherited server.
+	EnvOtelcBuildServerDir = "OTELC_BUILD_SERVER_DIR"
 	// EnvOtelcBuildDeadline carries the absolute deadline (RFC 3339, nanosecond
 	// precision) that --timeout/OTELC_BUILD_TIMEOUT computed for the whole
 	// build, set once by the outermost `otelc go` and inherited by every
