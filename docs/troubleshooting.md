@@ -310,7 +310,7 @@ downloaded, or the module proxy is unreachable. Run `go mod download` and try ag
 
 #### `otelc: another invocation holds the build lock; waiting for it to finish (lock: ...)`
 
-This is normal contention between concurrent `otelc` invocations targeting the same module or work directory. Invocations wait and retry automatically every 200 ms until the active process completes its setup, compilation, and restoration phases. If the wait persists unexpectedly, check whether another build, editor language server/linter, or background test run is holding the lock.
+This is normal contention between concurrent `otelc` invocations targeting the same module or work directory. The message is printed once when an invocation discovers a held lock; it then waits until the active process completes its setup, compilation, and restoration phases. If the wait persists unexpectedly, check whether another build, editor language server/linter, or background test run is holding the lock.
 
 #### `build lock ... is held by a parent otelc invocation that waits for this one...`
 
@@ -318,7 +318,7 @@ This occurs when a child `otelc` command is invoked from within a process alread
 
 #### `otelc: still waiting for build lock ... An otelc command started under another otelc command ... must get the OTELC_HELD_BUILD_LOCKS environment variable...`
 
-When `otelc` starts an execution, it tracks held locks via the `OTELC_HELD_BUILD_LOCKS` environment variable so nested child commands can acquire distinct numbered sibling locks instead of waiting indefinitely on their parent. If a test runner or custom script spawns a child process with a scrubbed or explicitly cleared environment, the child will fail to detect the parent's lock ownership and wait indefinitely. Ensure parent environment variables are forwarded to nested `otelc` invocations.
+When `otelc` starts an execution, it exports `OTELC_HELD_BUILD_LOCKS` so nested child commands acquire distinct numbered sibling locks instead of waiting indefinitely on their parent, and `OTELC_PARENT_WORK_DIRS` so child commands cannot inadvertently reuse the parent's work directory. If a test runner or custom script spawns a child process with a scrubbed or explicitly filtered environment, the child will fail to detect the parent's lock ownership and wait indefinitely. Launchers that filter the environment must preserve both `OTELC_HELD_BUILD_LOCKS` and `OTELC_PARENT_WORK_DIRS`.
 
 ## Hook and Instrumentation Limitations
 
