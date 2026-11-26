@@ -662,8 +662,13 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	// Write the matched ruleset to matched.json for further instrument phase
-	if err = sp.store(matched); err != nil {
+	// Write the matched ruleset to matched.json for further instrument phase,
+	// with one rule set for each package compile.
+	stored, err := mergeRuleSets(matched, deps)
+	if err != nil {
+		return err
+	}
+	if err = sp.store(stored); err != nil {
 		return err
 	}
 	if err = sp.storeInjectedHash(ctx, matched); err != nil {
