@@ -4,6 +4,7 @@
 package ast
 
 import (
+	goast "go/ast"
 	"go/token"
 	"regexp"
 	"strconv"
@@ -175,6 +176,36 @@ func ResolvedImportAliasMap(file *dst.File, resolvedNames map[string]string) map
 	return importAliasMap(file, resolvedNames, false)
 }
 
+// GoASTImportAliasMap is the go/ast counterpart of ImportAliasMap. It returns
+// the local-identifier -> import-path map and the set of all imported paths in
+// file (including blank and dot imports), avoiding DST decoration when only
+// import inspection is needed.
+func GoASTImportAliasMap(file *goast.File, resolvedNames map[string]string) (map[string]string, map[string]bool) {
+	if file == nil {
+		return nil, nil
+	}
+	aliases := make(map[string]string, len(file.Imports))
+	imported := make(map[string]bool, len(file.Imports))
+	for _, imp := range file.Imports {
+		if imp.Path == nil {
+			continue
+		}
+		var explicitName string
+		if imp.Name != nil {
+			explicitName = imp.Name.Name
+		}
+		entry, ok := parseImportEntry(imp.Path.Value, explicitName, resolvedNames, true)
+		if !ok {
+			continue
+		}
+		imported[entry.path] = true
+		if entry.alias != "" {
+			aliases[entry.alias] = entry.path
+		}
+	}
+	return aliases, imported
+}
+
 // FileImports reports whether file imports the package at path, with any
 // import name. It returns false when file is nil.
 func FileImports(file *dst.File, path string) bool {
@@ -213,6 +244,40 @@ func importSpecs(file *dst.File) []*dst.ImportSpec {
 	return specs
 }
 
+type importEntry struct {
+	path  string
+	alias string
+}
+
+func parseImportEntry(
+	rawPath, explicitName string,
+	resolvedNames map[string]string,
+	allowGuess bool,
+) (importEntry, bool) {
+	path, err := strconv.Unquote(rawPath)
+	if err != nil {
+		return importEntry{}, false
+	}
+	alias := defaultImportAlias(path)
+	name, resolved := resolvedNames[path]
+	if resolved && name != "" {
+		alias = name
+	}
+	if explicitName != "" {
+		alias = explicitName
+		resolved = true
+	}
+	if !allowGuess && !resolved {
+		return importEntry{path: path}, true
+	}
+	// Blank and dot imports don't introduce a qualified identifier that a
+	// type reference could use, so they can't participate in matching.
+	if alias == "" || alias == "_" || alias == "." {
+		return importEntry{path: path}, true
+	}
+	return importEntry{path: path, alias: alias}, true
+}
+
 func importAliasMap(file *dst.File, resolvedNames map[string]string, allowGuess bool) map[string]string {
 	if file == nil {
 		return nil
@@ -224,28 +289,15 @@ func importAliasMap(file *dst.File, resolvedNames map[string]string, allowGuess 
 		if imp.Path == nil {
 			continue
 		}
-		path, err := strconv.Unquote(imp.Path.Value)
-		if err != nil {
-			continue
-		}
-		alias := defaultImportAlias(path)
-		name, resolved := resolvedNames[path]
-		if resolved && name != "" {
-			alias = name
-		}
+		var explicitName string
 		if imp.Name != nil {
-			alias = imp.Name.Name
-			resolved = true
+			explicitName = imp.Name.Name
 		}
-		if !allowGuess && !resolved {
+		entry, ok := parseImportEntry(imp.Path.Value, explicitName, resolvedNames, allowGuess)
+		if !ok || entry.alias == "" {
 			continue
 		}
-		// Blank and dot imports don't introduce a qualified identifier that a
-		// type reference could use, so they can't participate in matching.
-		if alias == "" || alias == "_" || alias == "." {
-			continue
-		}
-		aliases[alias] = path
+		aliases[entry.alias] = entry.path
 	}
 	return aliases
 }

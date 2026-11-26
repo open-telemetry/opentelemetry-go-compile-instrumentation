@@ -109,9 +109,12 @@ For example, a function exists but its argument types differ from the rule:
 Records describe individual decisions, not a package-wide verdict. A rule can fail
 in one file and match another. An omitted `source` means a package-level decision.
 `matched: true` omits `reason`; in setup it means eligibility, not an applied change.
-Function call and literal rules are eligible in every file passing `where` that imports
-the rule's package, and method call rules in every file passing `where`; their join
-points are resolved during instrumentation. Use the `.diff` reports to inspect changes.
+Function call and struct literal rules are pre-filtered in setup: they require the
+rule's package to be imported and the matching call or composite literal to appear in
+the file (unless another code-injecting rule already matched the file or package, in
+which case any file passing `where` that imports the package stays eligible). Method
+call rules are eligible in every file passing `where`; final join points are resolved
+during instrumentation. Use the `.diff` reports to inspect changes.
 
 The initial closed set of rejection codes is:
 
@@ -126,7 +129,9 @@ The initial closed set of rejection codes is:
 | `struct_not_found` | The requested struct was absent. |
 | `directive_not_found` | The requested directive was absent. |
 | `declaration_not_found` | No named declaration of the requested kind existed. |
-| `import_not_found` | The file did not import the package of a function call or literal rule. |
+| `import_not_found` | The package (omitted `source`) or file did not import the package of a function call or literal rule. |
+| `call_not_found` | The file imported the package, but contained no matching function call. |
+| `literal_not_found` | The file imported the package, but contained no matching struct literal. |
 | `ignored` | An `otelc:ignore` directive suppressed instrumentation, of the file, the function, or every matching call site. |
 | `no_joinpoint` | A call, literal, or directive rule found nothing to instrument in this file. |
 

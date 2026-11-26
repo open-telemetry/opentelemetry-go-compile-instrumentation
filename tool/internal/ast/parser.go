@@ -240,6 +240,24 @@ func ParseFileFast(filePath string) (*dst.File, error) {
 	return NewAstParser().Parse(filePath, parser.SkipObjectResolution|parser.ParseComments)
 }
 
+// ParseBytesFast parses Go source bytes into a dst.File with comments as node
+// decorations, avoiding re-reading the file from disk when the caller already
+// has its bytes.
+func ParseBytesFast(filePath string, src []byte) (*dst.File, error) {
+	ap := NewAstParser()
+	astFile, err := parser.ParseFile(
+		ap.fset, filepath.Base(filePath), src, parser.SkipObjectResolution|parser.ParseComments,
+	)
+	if err != nil {
+		return nil, ex.Wrapf(err, "failed to parse file %s", filePath)
+	}
+	dstFile, err := ap.dec.DecorateFile(astFile)
+	if err != nil {
+		return nil, ex.Wrapf(err, "failed to decorate file %s", filePath)
+	}
+	return dstFile, nil
+}
+
 // ParseFile parses the AST from a file. Use this standard version if you need to
 // write the AST back to a file, otherwise use ParseFileFast for better performance.
 func ParseFile(filePath string) (*dst.File, error) {
