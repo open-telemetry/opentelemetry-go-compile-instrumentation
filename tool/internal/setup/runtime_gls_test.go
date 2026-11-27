@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -172,15 +173,18 @@ func TestRuntimeGLSInjectedHashIsWorkDirIndependent(t *testing.T) {
 			filepath.Join(runtimeSrc, "proc.go"),
 		},
 	}}
-	sp := &setupPhase{logger: slog.New(slog.DiscardHandler)}
-
 	hashIn := func(workDir string) string {
 		t.Helper()
 		t.Setenv(util.EnvOtelcWorkDir, workDir)
 		sets := matchRuntimeGLS(deps)
-		hash, err := sp.injectedHash(t.Context(), sets)
+		var loaded []rule.InstRule
+		for _, s := range sets {
+			loaded = slices.AppendSeq(loaded, s.AllRules())
+		}
+		sp := &setupPhase{logger: slog.New(slog.DiscardHandler), loadedRules: loaded}
+		res, err := sp.computeRulesDigest(t.Context(), sets, nil, toolruntime.RuntimeGLSSource)
 		require.NoError(t, err)
-		return hash
+		return res.injected
 	}
 
 	firstHash := hashIn(t.TempDir())

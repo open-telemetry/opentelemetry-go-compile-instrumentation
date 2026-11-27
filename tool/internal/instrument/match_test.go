@@ -76,28 +76,6 @@ func TestMatchPicksRuleSetOfSameCompileKind(t *testing.T) {
 	})
 }
 
-func TestAnyRuleSetHasIgnoredCallFiles(t *testing.T) {
-	t.Run("empty set", func(t *testing.T) {
-		assert.False(t, anyRuleSetHasIgnoredCallFiles(nil))
-	})
-	t.Run("no rule set has one", func(t *testing.T) {
-		allSet := []*rule.InstRuleSet{
-			rule.NewInstRuleSet("example.com/a"),
-			rule.NewInstRuleSet("example.com/b"),
-		}
-		assert.False(t, anyRuleSetHasIgnoredCallFiles(allSet))
-	})
-	t.Run("one rule set has one, not necessarily the caller's own", func(t *testing.T) {
-		other := rule.NewInstRuleSet("example.com/other")
-		other.AddIgnoredCallFile(filepath.Join(t.TempDir(), "other.go"))
-		allSet := []*rule.InstRuleSet{
-			rule.NewInstRuleSet("example.com/mine"),
-			other,
-		}
-		assert.True(t, anyRuleSetHasIgnoredCallFiles(allSet))
-	})
-}
-
 func TestAddIgnoredCallFilesToMap(t *testing.T) {
 	t.Run("adds a nil entry for a file with no rule of its own", func(t *testing.T) {
 		file2rules := make(map[string][]rule.InstRule)

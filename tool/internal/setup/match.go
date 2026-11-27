@@ -675,6 +675,7 @@ func (sp *setupPhase) loadRuleIndex(ctx context.Context, moduleDirs []string) (*
 	if err != nil {
 		return nil, err
 	}
+	sp.loadedRules = allRules
 	sp.Info("Found available rules", "rules", allRules)
 	if len(allRules) == 0 {
 		return &ruleIndex{moduleDirs: moduleDirs}, nil

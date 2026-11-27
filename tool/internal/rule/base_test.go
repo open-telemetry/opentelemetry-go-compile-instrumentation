@@ -367,3 +367,25 @@ func TestInstRuleSetMergeIntoSetWithoutMaps(t *testing.T) {
 	require.Len(t, irs.FuncRules[file], 1)
 	assert.Equal(t, "hook", irs.FuncRules[file][0].Name)
 }
+
+func TestAnySetHasIgnoredCallFiles(t *testing.T) {
+	t.Run("empty set", func(t *testing.T) {
+		assert.False(t, AnySetHasIgnoredCallFiles(nil))
+	})
+	t.Run("no rule set has one", func(t *testing.T) {
+		allSet := []*InstRuleSet{
+			NewInstRuleSet("example.com/a"),
+			NewInstRuleSet("example.com/b"),
+		}
+		assert.False(t, AnySetHasIgnoredCallFiles(allSet))
+	})
+	t.Run("one rule set has one, not necessarily the caller's own", func(t *testing.T) {
+		other := NewInstRuleSet("example.com/other")
+		other.AddIgnoredCallFile(filepath.Join(t.TempDir(), "other.go"))
+		allSet := []*InstRuleSet{
+			NewInstRuleSet("example.com/mine"),
+			other,
+		}
+		assert.True(t, AnySetHasIgnoredCallFiles(allSet))
+	})
+}
