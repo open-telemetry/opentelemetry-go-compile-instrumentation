@@ -1,0 +1,18 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+//line /golden/work/main.go:6
+import (
+	_ "go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/call-rule-shared-alias-unused-import/helpers/lib"
+
+	__otelc_lib "go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/call-rule-shared-alias-unused-import/helpers/lib"
+)
+
+// The A and B calls are the only uses of the lib import in this file.
+//line /golden/work/main.go:9
+func main() {
+	__otelc_lib.A()
+	/*line /golden/work/main.go:11*/ __otelc_lib.B() /*line /golden/work/main.go:11*/
+}
