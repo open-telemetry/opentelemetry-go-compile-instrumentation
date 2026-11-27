@@ -336,6 +336,15 @@ func IsInterfaceType(t dst.Expr) bool {
 	return ok && ident.Name == "any"
 }
 
+// IsEmptyInterfaceType reports whether t is an empty interface type
+// (interface{} or the predeclared any identifier).
+func IsEmptyInterfaceType(t dst.Expr) bool {
+	if iface, ok := t.(*dst.InterfaceType); ok {
+		return iface.Methods == nil || len(iface.Methods.List) == 0
+	}
+	return IsInterfaceType(t)
+}
+
 func IsEllipsis(t dst.Expr) bool {
 	_, ok := t.(*dst.Ellipsis)
 	return ok

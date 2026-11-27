@@ -1071,6 +1071,20 @@ func TestIsInterfaceType(t *testing.T) {
 	assert.False(t, IsInterfaceType(Ident("string")))
 }
 
+func TestIsEmptyInterfaceType(t *testing.T) {
+	assert.True(t, IsEmptyInterfaceType(InterfaceType()))
+	assert.True(t, IsEmptyInterfaceType(Ident("any")))
+	nonEmpty := &dst.InterfaceType{
+		Methods: &dst.FieldList{
+			List: []*dst.Field{Field("Close", &dst.FuncType{
+				Results: &dst.FieldList{List: []*dst.Field{Field("", Ident("error"))}},
+			})},
+		},
+	}
+	assert.False(t, IsEmptyInterfaceType(nonEmpty))
+	assert.False(t, IsEmptyInterfaceType(Ident("string")))
+}
+
 func TestIsEllipsis(t *testing.T) {
 	assert.True(t, IsEllipsis(Ellipsis(Ident("int"))))
 	assert.False(t, IsEllipsis(Ident("int")))

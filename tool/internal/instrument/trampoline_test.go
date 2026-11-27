@@ -1824,3 +1824,40 @@ func TestMatchBaseType_HookContext(t *testing.T) {
 	assert.False(t, matchBaseType("OtelHookContext", "string"))
 	assert.False(t, matchBaseType("string", "OtelHookContext"))
 }
+
+func TestAddHookDecl_PreservesNonEmptyInterfaceTypes(t *testing.T) {
+	hookDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(hookDir, "hook.go"),
+		[]byte("package hooks\n\n"+
+			"func BeforeClose(ctx HookContext, c interface{ Tag() string }) {}\n\n"+
+			"func AfterOpen(ctx HookContext, c interface{ Tag() string }) {}\n"),
+		0o600,
+	))
+
+	root := parseFile(t, "package lib\n\n"+
+		"func Close(c interface{ Tag() string }) {}\n\n"+
+		"func Open() interface{ Tag() string } { return nil }\n")
+	ip := newTestPhase()
+
+	applyHookRule(t, ip, root, "Close", &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "hook_close"},
+		Func:         "Close",
+		Before:       "BeforeClose",
+		Path:         "example.com/app/hooks",
+		ResolvedPath: hookDir,
+	})
+	applyHookRule(t, ip, root, "Open", &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{Name: "hook_open"},
+		Func:         "Open",
+		After:        "AfterOpen",
+		Path:         "example.com/app/hooks",
+		ResolvedPath: hookDir,
+	})
+
+	src := renderFile(t, root)
+	beforeStub := hookLinkName("example.com/app/hooks", "BeforeClose")
+	afterStub := hookLinkName("example.com/app/hooks", "AfterOpen")
+	assert.Contains(t, src, "func "+beforeStub+"(hookContext OtelHookContext, param0 interface{ Tag() string })")
+	assert.Contains(t, src, "func "+afterStub+"(hookContext OtelHookContext, arg0 interface{ Tag() string })")
+}

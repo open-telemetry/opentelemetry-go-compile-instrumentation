@@ -506,7 +506,7 @@ func validateVariadicHookParam(idx int, targetType, hookType dst.Expr, genericTy
 	hookVariadic := ast.IsEllipsis(hookType)
 	targetAnyElement := hasAnyElement(targetType)
 	if targetVariadic {
-		if ast.IsInterfaceType(hookType) {
+		if ast.IsEmptyInterfaceType(hookType) {
 			if containsTypeParameter(targetType, genericTypes) {
 				return nil
 			}
@@ -526,18 +526,27 @@ func validateVariadicHookParam(idx int, targetType, hookType dst.Expr, genericTy
 // checkHookDecl checks if the hook function declaration is correct, i.e. if they
 // have correct signature (parameter count and types)
 func (ip *instrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, targetParams *dst.FieldList, before bool) error {
+	return ip.checkHookDeclForRule(context.Background(), hookDeclContext{funcDecl: hookFunc}, targetParams, before)
+}
+
+func (ip *instrumentPhase) checkHookDeclForRule(
+	ctx context.Context,
+	hook hookDeclContext,
+	targetParams *dst.FieldList,
+	before bool,
+) error {
 	// TargetFunc:  func A(a int, b string) (ret string)
 	// BeforeTramp: func B(a *int, b *string) (ctx *HookContext, skip bool)
 	// BeforeHook:  func C(ctx *HookContext, a int, b string)
 	if before {
-		return ip.checkBeforeHookDecl(hookFunc, targetParams)
+		return ip.checkBeforeHookDecl(ctx, hook, targetParams)
 	}
 
 	// TargetFunc:  func A(a int, b string) (ret string)
 	// AfterTramp:  func B(ctx *HookContext, ret *string)
 	// AfterHook:   func C(ctx *HookContext, ret string)
 	afterTrampParams := ast.SplitMultiNameFields(ip.afterTrampFunc.Type.Params)
-	afterHookParams := ast.SplitMultiNameFields(hookFunc.Type.Params)
+	afterHookParams := ast.SplitMultiNameFields(hook.funcDecl.Type.Params)
 
 	if len(afterHookParams.List) != len(afterTrampParams.List) {
 		return ex.Newf("hook func signature mismatch, expected %d params, got %d",
@@ -547,8 +556,9 @@ func (ip *instrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, targetParams *d
 	// All params must match (first is HookContext, rest are dereferenced)
 	// (interface{} or any in hook accepts any type, used for generics)
 	for i, trampField := range afterTrampParams.List {
+		hookType := afterHookParams.List[i].Type
 		trampBase := trampParamTypeName(trampField.Type)
-		hookBase := baseTypeName(afterHookParams.List[i].Type)
+		hookBase := baseTypeName(hookType)
 		if !matchBaseType(trampBase, hookBase) {
 			expected := trampBase
 			if expected == trampolineHookContextType {
@@ -557,13 +567,30 @@ func (ip *instrumentPhase) checkHookDecl(hookFunc *dst.FuncDecl, targetParams *d
 			return ex.Newf("hook func param %d type mismatch, expected %s, got %s",
 				i, expected, hookBase)
 		}
+		if i > 0 {
+			if err := ip.checkParamInterfaceMethodSets(ctx, interfaceCheckSlot{
+				hook:        hook,
+				hookIdx:     i,
+				targetIdx:   i,
+				before:      false,
+				errParamIdx: i,
+				trampBase:   trampBase,
+				hookBase:    hookBase,
+			}, trampField.Type, nil, hookType); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
 
-func (ip *instrumentPhase) checkBeforeHookDecl(hookFunc *dst.FuncDecl, targetParams *dst.FieldList) error {
+func (ip *instrumentPhase) checkBeforeHookDecl(
+	ctx context.Context,
+	hook hookDeclContext,
+	targetParams *dst.FieldList,
+) error {
 	beforeTrampParams := ast.SplitMultiNameFields(ip.beforeTrampFunc.Type.Params)
-	beforeHookParams := ast.SplitMultiNameFields(hookFunc.Type.Params)
+	beforeHookParams := ast.SplitMultiNameFields(hook.funcDecl.Type.Params)
 
 	if len(beforeHookParams.List) != len(beforeTrampParams.List)+1 {
 		return ex.Newf("hook func signature mismatch, expected %d params, got %d",
@@ -602,6 +629,17 @@ func (ip *instrumentPhase) checkBeforeHookDecl(hookFunc *dst.FuncDecl, targetPar
 		if !matchBaseType(trampBase, hookBase) {
 			return ex.Newf("hook func param %d type mismatch, expected %s, got %s",
 				i+1, trampBase, hookBase)
+		}
+		if err := ip.checkParamInterfaceMethodSets(ctx, interfaceCheckSlot{
+			hook:        hook,
+			hookIdx:     i + 1,
+			targetIdx:   i,
+			before:      true,
+			errParamIdx: i + 1,
+			trampBase:   trampBase,
+			hookBase:    hookBase,
+		}, trampField.Type, targetParams, hookType); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -956,7 +994,11 @@ func (ip *instrumentPhase) buildTrampSignature(before bool) {
 	}
 }
 
-func (ip *instrumentPhase) buildHookSignature(t *rule.InstFuncRule, before bool) (*dst.FieldList, error) {
+func (ip *instrumentPhase) buildHookSignature(
+	ctx context.Context,
+	t *rule.InstFuncRule,
+	before bool,
+) (*dst.FieldList, error) {
 	// TargetFunc: func A(a int, b string) (ret string)
 	// BeforeHook: func B(ctx *HookContext, a int, b string)
 	// AfterHook:  func C(ctx *HookContext, ret string)
@@ -981,26 +1023,29 @@ func (ip *instrumentPhase) buildHookSignature(t *rule.InstFuncRule, before bool)
 		field.Type = replaceTypeParamsWithAny(field.Type, genericTypes)
 	}
 	// Get the hook function declaration
-	hookFunc, err := ip.getHookFunc(t, before)
+	hookFile, hookFunc, err := ip.resolveHookDeclAndFile(t, before)
 	if err != nil {
 		return nil, err
 	}
+	hook := hookDeclContext{rule: t, file: hookFile, funcDecl: hookFunc}
 	// Check if the hook function declaration is correct
-	err = ip.checkHookDecl(hookFunc, targetParams, before)
+	err = ip.checkHookDeclForRule(ctx, hook, targetParams, before)
 	if err != nil {
 		return nil, err
 	}
-	// If a hook function's signature includes a parameter of type interface{},
-	// we must treat it as the definitive type, overriding the preliminary type
-	// inferred from the trampoline function. This is because the trampoline
-	// inherits its type from the target function, which may contain unexported
-	// types. The hook function uses interface{} to accommodate these otherwise
-	// inaccessible types.
+	// If a hook function's signature includes an empty interface parameter
+	// (interface{}, any, or an anonymous interface embedding only empty
+	// interfaces), we must treat it as the definitive type, overriding the
+	// preliminary type inferred from the trampoline function. This is because
+	// the trampoline inherits its type from the target function, which may
+	// contain unexported types. Non-empty anonymous interfaces keep their method
+	// set so the linkname stub preserves the iface ABI instead of decaying to
+	// eface (interface{}).
 	hookParamTypes := ast.SplitMultiNameFields(hookFunc.Type.Params)
 	util.Assert(len(hookParamTypes.List) == len(paramTypes.List), "sanity check")
 	for i, field := range hookParamTypes.List {
 		switch {
-		case ast.IsInterfaceType(field.Type):
+		case ip.isEmptyHookInterface(ctx, hook, i, field.Type):
 			paramTypes.List[i].Type = ast.InterfaceType()
 		case targetParams != nil && i > 0 &&
 			needsAnySliceConversion(targetParams.List[i-1].Type, field.Type):
@@ -1603,9 +1648,9 @@ func replaceTypeParamsWithAny(t dst.Expr, typeParams *dst.FieldList) dst.Expr {
 	return t
 }
 
-func (ip *instrumentPhase) callHookFunc(t *rule.InstFuncRule, before bool) error {
+func (ip *instrumentPhase) callHookFunc(ctx context.Context, t *rule.InstFuncRule, before bool) error {
 	// Build hook function signature and check if it is correct
-	paramTypes, err := ip.buildHookSignature(t, before)
+	paramTypes, err := ip.buildHookSignature(ctx, t, before)
 	if err != nil {
 		return err
 	}
@@ -1630,7 +1675,7 @@ func (ip *instrumentPhase) callHookFunc(t *rule.InstFuncRule, before bool) error
 	return nil
 }
 
-func (ip *instrumentPhase) createTrampoline(t *rule.InstFuncRule) error {
+func (ip *instrumentPhase) createTrampoline(ctx context.Context, t *rule.InstFuncRule) error {
 	// Ensure unsafe package is imported since we use //go:linkname directives
 	ip.ensureUnsafeImport()
 	// Materialize various declarations from template file, no one wants to see
@@ -1652,14 +1697,14 @@ func (ip *instrumentPhase) createTrampoline(t *rule.InstFuncRule) error {
 	// Generate calls to real hook functions
 	if t.Before != "" {
 		ip.buildTrampSignature(trampolineBefore)
-		err = ip.callHookFunc(t, trampolineBefore)
+		err = ip.callHookFunc(ctx, t, trampolineBefore)
 		if err != nil {
 			return err
 		}
 	}
 	if t.After != "" {
 		ip.buildTrampSignature(trampolineAfter)
-		err = ip.callHookFunc(t, trampolineAfter)
+		err = ip.callHookFunc(ctx, t, trampolineAfter)
 		if err != nil {
 			return err
 		}

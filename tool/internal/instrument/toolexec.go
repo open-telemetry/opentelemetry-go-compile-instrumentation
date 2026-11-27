@@ -103,6 +103,9 @@ type instrumentPhase struct {
 	// rules (one file implementing dozens of before/after pairs), so caching
 	// by file avoids re-parsing it once per rule.
 	parsedHookFiles map[string]*dst.File
+	// hookPkgTypes caches resolved go/types packages for hook packages that
+	// use embedded interfaces in hook parameters, keyed by rule path.
+	hookPkgTypes map[string]*hookPackageTypeInfo
 	// buildUsesIgnoreDirective is true when some package in this build has a
 	// //otelc:ignore comment above a call, found during setup.
 	buildUsesIgnoreDirective bool
