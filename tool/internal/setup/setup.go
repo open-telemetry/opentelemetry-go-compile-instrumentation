@@ -5,8 +5,10 @@ package setup
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	gobuild "go/build"
+	"io/fs"
 	"log/slog"
 	"maps"
 	"os"
@@ -89,6 +91,17 @@ func cleanupDebugArtifacts() error {
 		return nil
 	}
 	return instrument.CleanupDebugArtifacts()
+}
+
+func truncateDebugLog() error {
+	if unlockedCompileEnabled() {
+		return nil
+	}
+	err := os.Truncate(util.GetDebugLogFile(), 0)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 // keepForDebug copies the file to the build temp directory for debugging.
@@ -521,6 +534,11 @@ func (sp *setupPhase) matchAllDeps(
 	matched = append(matched, injected...)
 
 	matched = append(matched, matchRuntimeGLS(deps)...)
+
+	// Compact Info summary for the per-(file, rule) Debug matching records:
+	// one line to gauge the setup shape without the full per-item log.
+	sp.Info("Matched rules to dependencies",
+		"dependencies", len(deps), "rules", idx.ruleCount(), "ruleSets", len(matched))
 	return matched, nil
 }
 
@@ -568,14 +586,20 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	subcommand := subcmdBuild
 	if cmd.Name == "go" {
 		subcommand, args = goSubcommand(cmd.Args().Slice())
-	} else if cleanErr := cleanupOwnedSession(); cleanErr != nil {
-		return ex.Wrapf(cleanErr, "cleaning the session directory")
-	} else if err := cleanupDebugArtifacts(); err != nil {
-		// Clean up debug artifacts from previous runs for standalone `otelc setup`,
-		// as it prepares the environment for a subsequent toolexec build.
-		// For `otelc go ...`, runGoBuild already performed this cleanup at its
-		// lifecycle boundary before invoking Setup.
-		return ex.Wrapf(err, "cleaning debug artifacts")
+	} else {
+		if err := truncateDebugLog(); err != nil {
+			return ex.Wrapf(err, "truncating debug log")
+		}
+		if cleanErr := cleanupOwnedSession(); cleanErr != nil {
+			return ex.Wrapf(cleanErr, "cleaning the session directory")
+		}
+		if err := cleanupDebugArtifacts(); err != nil {
+			// Clean up debug artifacts from previous runs for standalone `otelc setup`,
+			// as it prepares the environment for a subsequent toolexec build.
+			// For `otelc go ...`, runGoBuild already performed this cleanup at its
+			// lifecycle boundary before invoking Setup.
+			return ex.Wrapf(err, "cleaning debug artifacts")
+		}
 	}
 
 	logger := util.LoggerFromContext(ctx)
@@ -1154,6 +1178,9 @@ func runGoBuildLocked(
 	snapshot *setupSnapshot,
 	cleanErr *error,
 ) (func(context.Context) error, error) {
+	if err := truncateDebugLog(); err != nil {
+		return nil, ex.Wrapf(err, "truncating debug log")
+	}
 	if err := restoreInterruptedBuild(ctx); err != nil {
 		return nil, err
 	}

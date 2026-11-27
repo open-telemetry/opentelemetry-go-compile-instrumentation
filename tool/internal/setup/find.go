@@ -288,7 +288,7 @@ func findDeps(ctx context.Context, subcommand string, cmdArgs []string) ([]*Depe
 			}
 			seen[key] = true
 			deps = append(deps, dep)
-			logger.InfoContext(ctx, "Found dependency", "dep", dep)
+			logger.DebugContext(ctx, "Found dependency", "dep", dep)
 		} else if util.IsCgoCommand(cmd) && currentDir != "" {
 			objDir := util.FindFlagValue(args, "-objdir")
 			util.Assert(objDir != "", "sanity check")

@@ -32,8 +32,12 @@ type setupSnapshot struct {
 	overlayFile   string
 }
 
+func unlockedCompileEnabled() bool {
+	return os.Getenv(envUnlockedCompile) == "1"
+}
+
 func canBuildUnlocked(ctx context.Context, cmd *cli.Command, vendored bool) bool {
-	if os.Getenv(envUnlockedCompile) != "1" || vendored || cmd.Bool("debug") || util.InheritedSession() {
+	if !unlockedCompileEnabled() || vendored || cmd.Bool("debug") || util.InheritedSession() {
 		return false
 	}
 	args := cmd.Args().Slice()

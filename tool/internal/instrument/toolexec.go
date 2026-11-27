@@ -295,7 +295,7 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 		return nil, err
 	}
 
-	ip.Info("Instrument package", "rules", matched, "args", args)
+	ip.Debug("Instrument package", "rules", matched, "args", args)
 	// Okay, this package should be instrumented.
 	err = ip.instrument(ctx, matched)
 	if err != nil {
@@ -308,7 +308,7 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 	if reqLang := matched.MaxRequiredLang(); reqLang != "" {
 		ip.compileArgs = raiseLangFlag(ip.compileArgs, reqLang)
 	}
-	ip.Info("Run instrumented command", "args", ip.compileArgs)
+	ip.Debug("Run instrumented command", "args", ip.compileArgs)
 
 	return ip.compileArgs, nil
 }
