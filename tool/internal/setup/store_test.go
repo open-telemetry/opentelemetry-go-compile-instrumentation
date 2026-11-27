@@ -145,7 +145,7 @@ func TestStoreResolvedNames_WriteError(t *testing.T) {
 	sp := newTestSetupPhase()
 	sp.resolvedNames = map[string]string{"example.com/a": "a"}
 
-	err := sp.storeResolvedNames()
+	_, err := sp.storeResolvedNames()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to write import names")
 }

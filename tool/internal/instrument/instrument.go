@@ -4,9 +4,11 @@
 package instrument
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
 
@@ -165,11 +167,98 @@ func rsetHasMethodCallRule(rset *rule.InstRuleSet) bool {
 	return false
 }
 
+func callLitSymbolName(r rule.InstRule) (string, bool) {
+	switch rt := r.(type) {
+	case *rule.InstCallRule:
+		return rt.FuncName, rt.MethodCall == "" && rt.FuncName != ""
+	case *rule.InstLitRule:
+		return rt.TypeName, rt.TypeName != ""
+	default:
+		return "", false
+	}
+}
+
+func canFastSkipCallLit(file string, rules []rule.InstRule) (bool, []byte) {
+	if len(rules) == 0 {
+		return false, nil
+	}
+	names := make([]string, 0, len(rules))
+	for _, r := range rules {
+		name, ok := callLitSymbolName(r)
+		if !ok {
+			return false, nil
+		}
+		names = append(names, name)
+	}
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		return false, nil
+	}
+	if bytes.Contains(raw, []byte("otelc:")) {
+		return false, raw
+	}
+	for _, name := range names {
+		if bytes.Contains(raw, []byte(name)) {
+			return false, raw
+		}
+	}
+	return true, nil
+}
+
+func validateCallLitRule(r rule.InstRule) error {
+	switch rt := r.(type) {
+	case *rule.InstCallRule:
+		if len(rt.AppendArgs) > 0 {
+			if _, err := parseAppendArgs(rt.AppendArgs); err != nil {
+				return err
+			}
+		}
+		if rt.Replace != "" {
+			if _, err := newCallTemplate(rt.Replace); err != nil {
+				return err
+			}
+		}
+	case *rule.InstLitRule:
+		if _, err := newLitFieldSetters(rt, nil); err != nil {
+			return err
+		}
+		if rt.Pointer != "" {
+			if _, err := newCallTemplate(rt.Pointer); err != nil {
+				return ex.Wrapf(err, "failed to compile pointer template for %s", rt.StructLiteral)
+			}
+		}
+		if rt.Value != "" {
+			if _, err := newCallTemplate(rt.Value); err != nil {
+				return ex.Wrapf(err, "failed to compile value template for %s", rt.StructLiteral)
+			}
+		}
+	}
+	return nil
+}
+
 // instrumentFile applies rules to a single file and reports whether any of
 // them requires a globals file.
 func (ip *instrumentPhase) instrumentFile(ctx context.Context, file string, rules []rule.InstRule) (bool, error) {
+	var root *dst.File
+	var err error
+	if !DiffDebugEnabled() {
+		skip, raw := canFastSkipCallLit(file, rules)
+		if skip {
+			for _, r := range rules {
+				if err = validateCallLitRule(r); err != nil {
+					return false, err
+				}
+			}
+			return false, nil
+		}
+		if raw != nil {
+			root, err = ip.parseFileBytes(file, raw)
+		}
+	}
 	// Group rules by file, then parse the target file once
-	root, err := ip.parseFile(file)
+	if root == nil && err == nil {
+		root, err = ip.parseFile(file)
+	}
 	if err != nil {
 		return false, ex.Wrapf(err, "parsing file %s", file)
 	}

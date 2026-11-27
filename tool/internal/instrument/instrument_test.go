@@ -897,3 +897,252 @@ func G(b *Buffer) { _, _ = b.Write(nil) }
 	require.NoError(t, err)
 	assert.Contains(t, string(written), "(b.Write(nil))")
 }
+
+func TestInstrumentFileFastSkip(t *testing.T) {
+	writeSrc := func(t *testing.T, dir, name, content string) string {
+		t.Helper()
+		p := filepath.Join(dir, name)
+		require.NoError(t, os.WriteFile(p, []byte(content), 0o644))
+		return p
+	}
+
+	newIP := func(t *testing.T, workDir string) *instrumentPhase {
+		t.Helper()
+		return &instrumentPhase{
+			logger:      slog.Default(),
+			workDir:     workDir,
+			compileArgs: []string{"compile", "-p", "example.com/pkg", "-o", filepath.Join(workDir, "_pkg_.a")},
+		}
+	}
+
+	callRule := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap-get"},
+		FunctionCall: "net/http.Get",
+		ImportPath:   "net/http",
+		FuncName:     "Get",
+		Replace:      "wrap({{ . }})",
+	}
+	litRule := &rule.InstLitRule{
+		InstBaseRule:  rule.InstBaseRule{Name: "mark-transport"},
+		StructLiteral: "net/http.Transport",
+		ImportPath:    "net/http",
+		TypeName:      "Transport",
+	}
+
+	t.Run("fast-skips non-matching call and literal rules", func(t *testing.T) {
+		workDir := t.TempDir()
+		src := writeSrc(t, workDir, "plain.go", "package pkg\n\nfunc Hello() int { return 1 }\n")
+		ip := newIP(t, workDir)
+
+		needsGlobals, err := ip.instrumentFile(t.Context(), src, []rule.InstRule{callRule, litRule})
+		require.NoError(t, err)
+		assert.False(t, needsGlobals)
+		assert.Nil(t, ip.target, "fast-skipped file must not be parsed")
+	})
+
+	t.Run("does not fast-skip when OTELC_DEBUG=1", func(t *testing.T) {
+		workDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, workDir)
+		t.Setenv(util.EnvOtelcDebug, "1")
+		require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+		src := writeSrc(t, workDir, "plain.go", "package pkg\n\nfunc Hello() int { return 1 }\n")
+		ip := newIP(t, workDir)
+
+		diffDir := ip.debugArtifactDir()
+		require.NoError(t, os.MkdirAll(diffDir, 0o755))
+		staleDiff := filepath.Join(diffDir, "plain.go.diff")
+		require.NoError(t, os.WriteFile(staleDiff, []byte("stale"), 0o644))
+
+		needsGlobals, err := ip.instrumentFile(t.Context(), src, []rule.InstRule{callRule, litRule})
+		require.NoError(t, err)
+		assert.False(t, needsGlobals)
+		assert.NotNil(t, ip.target, "debug mode must parse file to record no_joinpoint")
+		assert.NoFileExists(t, staleDiff)
+		decisions, err := os.ReadFile(filepath.Join(diffDir, "plain.go.matches.jsonl"))
+		require.NoError(t, err)
+		assert.Contains(t, string(decisions), `"no_joinpoint"`)
+	})
+
+	t.Run("does not skip when FuncName appears", func(t *testing.T) {
+		workDir := t.TempDir()
+		src := writeSrc(t, workDir, "has_get.go", "package pkg\n\nfunc Get() int { return 1 }\n")
+		ip := newIP(t, workDir)
+
+		needsGlobals, err := ip.instrumentFile(t.Context(), src, []rule.InstRule{callRule})
+		require.NoError(t, err)
+		assert.False(t, needsGlobals)
+		assert.NotNil(t, ip.target)
+	})
+
+	t.Run("does not skip when TypeName appears", func(t *testing.T) {
+		workDir := t.TempDir()
+		src := writeSrc(t, workDir, "has_type.go", "package pkg\n\ntype Transport struct{}\n")
+		ip := newIP(t, workDir)
+
+		needsGlobals, err := ip.instrumentFile(t.Context(), src, []rule.InstRule{litRule})
+		require.NoError(t, err)
+		assert.False(t, needsGlobals)
+		assert.NotNil(t, ip.target)
+	})
+
+	t.Run("does not skip when otelc directive appears", func(t *testing.T) {
+		workDir := t.TempDir()
+		src := writeSrc(t, workDir, "directive.go", "//otelc:ignore\npackage pkg\n\nfunc Hello() {}\n")
+		ip := newIP(t, workDir)
+
+		needsGlobals, err := ip.instrumentFile(t.Context(), src, []rule.InstRule{callRule})
+		require.NoError(t, err)
+		assert.False(t, needsGlobals)
+		assert.NotNil(t, ip.target)
+	})
+
+	t.Run("does not skip method_call rule", func(t *testing.T) {
+		workDir := t.TempDir()
+		src := writeSrc(t, workDir, "method.go", "package pkg\n\nfunc Hello() {}\n")
+		ip := newIP(t, workDir)
+		methodRule := &rule.InstCallRule{
+			InstBaseRule: rule.InstBaseRule{Name: "method-rule"},
+			MethodCall:   "database/sql.DB.Query",
+			ImportPath:   "database/sql",
+			FuncName:     "Query",
+			RecvType:     "DB",
+		}
+
+		needsGlobals, err := ip.instrumentFile(t.Context(), src, []rule.InstRule{methodRule})
+		require.NoError(t, err)
+		assert.False(t, needsGlobals)
+		assert.NotNil(t, ip.target)
+	})
+
+	t.Run("does not skip func rule", func(t *testing.T) {
+		workDir := t.TempDir()
+		src := writeSrc(t, workDir, "funcrule.go", "package pkg\n\nfunc Other() {}\n")
+		ip := newIP(t, workDir)
+		funcRule := &rule.InstFuncRule{
+			InstBaseRule: rule.InstBaseRule{Name: "func-rule"},
+			Func:         "Missing",
+		}
+
+		needsGlobals, err := ip.instrumentFile(t.Context(), src, []rule.InstRule{funcRule})
+		require.ErrorContains(t, err, "can not find function Missing")
+		assert.False(t, needsGlobals)
+		assert.NotNil(t, ip.target)
+	})
+
+	t.Run("validates invalid append_args even when target symbol is absent", func(t *testing.T) {
+		workDir := t.TempDir()
+		src := writeSrc(t, workDir, "plain.go", "package pkg\n\nfunc Hello() int { return 1 }\n")
+		ip := newIP(t, workDir)
+		invalidAppendRule := &rule.InstCallRule{
+			InstBaseRule: rule.InstBaseRule{Name: "bad-append"},
+			FunctionCall: "net/http.Get",
+			ImportPath:   "net/http",
+			FuncName:     "Get",
+			AppendArgs:   []string{"func("},
+		}
+
+		needsGlobals, err := ip.instrumentFile(t.Context(), src, []rule.InstRule{invalidAppendRule})
+		require.ErrorContains(t, err, "failed to parse append_args entry")
+		assert.False(t, needsGlobals)
+	})
+
+	t.Run("validates invalid replace template even when target symbol is absent", func(t *testing.T) {
+		workDir := t.TempDir()
+		src := writeSrc(t, workDir, "plain.go", "package pkg\n\nfunc Hello() int { return 1 }\n")
+		ip := newIP(t, workDir)
+		invalidReplaceRule := &rule.InstCallRule{
+			InstBaseRule: rule.InstBaseRule{Name: "bad-replace"},
+			FunctionCall: "net/http.Get",
+			ImportPath:   "net/http",
+			FuncName:     "Get",
+			Replace:      "wrap({{ . )",
+		}
+
+		needsGlobals, err := ip.instrumentFile(t.Context(), src, []rule.InstRule{invalidReplaceRule})
+		require.Error(t, err)
+		assert.False(t, needsGlobals)
+	})
+
+	t.Run("validates invalid lit rule even when target symbol is absent", func(t *testing.T) {
+		workDir := t.TempDir()
+		src := writeSrc(t, workDir, "plain.go", "package pkg\n\nfunc Hello() int { return 1 }\n")
+		ip := newIP(t, workDir)
+		invalidLitRule := &rule.InstLitRule{
+			InstBaseRule:  rule.InstBaseRule{Name: "bad-lit"},
+			StructLiteral: "net/http.Transport",
+			ImportPath:    "net/http",
+			TypeName:      "Transport",
+			Field: []*rule.InstLitField{
+				{Name: "Timeout", Value: "func("},
+			},
+		}
+
+		needsGlobals, err := ip.instrumentFile(t.Context(), src, []rule.InstRule{invalidLitRule})
+		require.ErrorContains(t, err, "failed to parse value")
+		assert.False(t, needsGlobals)
+
+		invalidPtrLit := &rule.InstLitRule{
+			InstBaseRule:  rule.InstBaseRule{Name: "bad-lit-ptr"},
+			StructLiteral: "net/http.Transport",
+			ImportPath:    "net/http",
+			TypeName:      "Transport",
+			Pointer:       "wrap({{ . )",
+		}
+		_, err = ip.instrumentFile(t.Context(), src, []rule.InstRule{invalidPtrLit})
+		require.ErrorContains(t, err, "failed to compile pointer template")
+
+		invalidValLit := &rule.InstLitRule{
+			InstBaseRule:  rule.InstBaseRule{Name: "bad-lit-val"},
+			StructLiteral: "net/http.Transport",
+			ImportPath:    "net/http",
+			TypeName:      "Transport",
+			Value:         "wrap({{ . )",
+		}
+		_, err = ip.instrumentFile(t.Context(), src, []rule.InstRule{invalidValLit})
+		require.ErrorContains(t, err, "failed to compile value template")
+	})
+}
+
+func BenchmarkInstrumentFile_CallRuleNoMatch(b *testing.B) {
+	workDir := b.TempDir()
+	var sb strings.Builder
+	sb.WriteString("package pkg\n\n")
+	for range 100 {
+		sb.WriteString("func Helper() int { return 42 }\n")
+	}
+	src := filepath.Join(workDir, "no_match.go")
+	if err := os.WriteFile(src, []byte(sb.String()), 0o644); err != nil {
+		b.Fatal(err)
+	}
+
+	rules := []rule.InstRule{
+		&rule.InstCallRule{
+			InstBaseRule: rule.InstBaseRule{Name: "wrap-get"},
+			FunctionCall: "net/http.Get",
+			ImportPath:   "net/http",
+			FuncName:     "Get",
+			Replace:      "wrap({{ . }})",
+		},
+		&rule.InstLitRule{
+			InstBaseRule:  rule.InstBaseRule{Name: "mark-transport"},
+			StructLiteral: "net/http.Transport",
+			ImportPath:    "net/http",
+			TypeName:      "Transport",
+		},
+	}
+
+	ip := &instrumentPhase{
+		logger:      slog.Default(),
+		workDir:     workDir,
+		compileArgs: []string{"compile", "-p", "example.com/pkg", "-o", filepath.Join(workDir, "_pkg_.a")},
+	}
+
+	for b.Loop() {
+		ip.target = nil
+		ip.parser = nil
+		if _, err := ip.instrumentFile(b.Context(), src, rules); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

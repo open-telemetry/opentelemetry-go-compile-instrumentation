@@ -399,6 +399,16 @@ func (ip *instrumentPhase) writeInstrumented(root *dst.File, oldFile string, cha
 func (ip *instrumentPhase) parseFile(file string) (*dst.File, error) {
 	ip.parser = ast.NewAstParser()
 	root, err := ip.parser.Parse(file, parser.ParseComments)
+	return ip.finishParseFile(file, root, err)
+}
+
+func (ip *instrumentPhase) parseFileBytes(filePath string, src []byte) (*dst.File, error) {
+	ip.parser = ast.NewAstParser()
+	root, err := ip.parser.ParseBytes(filePath, src, parser.ParseComments)
+	return ip.finishParseFile(filePath, root, err)
+}
+
+func (ip *instrumentPhase) finishParseFile(file string, root *dst.File, err error) (*dst.File, error) {
 	if err != nil {
 		return nil, ex.Wrapf(err, "parsing source file %s", file)
 	}

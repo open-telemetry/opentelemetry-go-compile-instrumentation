@@ -442,3 +442,19 @@ func TestParseBytesFast(t *testing.T) {
 	_, err = ParseBytesFast("broken.go", []byte("package broken\nfunc ("))
 	require.Error(t, err)
 }
+
+func TestParseBytes(t *testing.T) {
+	p := NewAstParser()
+	file, err := p.ParseBytes("/tmp/example.go", []byte("package main\n\nfunc Foo() {}\n"), parser.ParseComments)
+	require.NoError(t, err)
+	assert.True(t, p.Parsed(file))
+	fn := FindFuncDeclWithoutRecv(file, "Foo")
+	require.NotNil(t, fn)
+	pos, ok := p.OriginalPosition(fn)
+	require.True(t, ok)
+	assert.Equal(t, "example.go", pos.Filename)
+
+	_, err = p.ParseBytes("nonexistent.go", nil, parser.ParseComments)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse file nonexistent.go")
+}

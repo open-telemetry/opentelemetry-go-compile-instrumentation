@@ -38,17 +38,30 @@ func NewAstParser() *AstParser {
 	}
 }
 
-// ParseFile parses the AST from a file.
+// Parse parses the AST from a file.
 func (ap *AstParser) Parse(filePath string, mode parser.Mode) (*dst.File, error) {
 	util.Assert(ap.fset != nil, "fset is not initialized")
 
-	name := filepath.Base(filePath)
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, ex.Wrapf(err, "failed to open file %s", filePath)
 	}
 	defer file.Close()
-	astFile, err := parser.ParseFile(ap.fset, name, file, mode)
+	return ap.parse(filePath, file, mode)
+}
+
+// ParseBytes parses the AST from in-memory source bytes.
+func (ap *AstParser) ParseBytes(filePath string, src []byte, mode parser.Mode) (*dst.File, error) {
+	util.Assert(ap.fset != nil, "fset is not initialized")
+	if src == nil {
+		src = []byte{}
+	}
+	return ap.parse(filePath, src, mode)
+}
+
+func (ap *AstParser) parse(filePath string, src any, mode parser.Mode) (*dst.File, error) {
+	name := filepath.Base(filePath)
+	astFile, err := parser.ParseFile(ap.fset, name, src, mode)
 	if err != nil {
 		return nil, ex.Wrapf(err, "failed to parse file %s", filePath)
 	}
