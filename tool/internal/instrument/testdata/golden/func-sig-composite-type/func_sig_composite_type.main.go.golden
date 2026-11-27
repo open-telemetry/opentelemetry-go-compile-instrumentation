@@ -1,0 +1,170 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+//line /<generated>:1
+import _ "unsafe"
+
+//line /golden/work/main.go:6
+func Func1(p1 []byte, p2 map[string]any) (_unnamedRetVal_2153428811_0 chan struct{}, _unnamedRetVal_2153428811_1 error) {
+	/*line /<generated>:1*/ if hookContext2153428811, _ := OtelBeforeTrampoline_Func12153428811(&p1, &p2); false {
+	} else {
+		defer OtelAfterTrampoline_Func12153428811(hookContext2153428811, &_unnamedRetVal_2153428811_0, &_unnamedRetVal_2153428811_1)
+	}
+	/*line /golden/work/main.go:7*/ println("Hello, World!")
+	return nil, nil
+}
+
+//line /golden/work/main.go:11
+func main() { Func1([]byte("hello"), nil) }
+
+//line /<generated>:1
+type HookContextImpl2153428811 struct {
+	params      []interface{}
+	returnVals  []interface{}
+	skipCall    bool
+	data        interface{}
+	funcName    string
+	packageName string
+}
+
+func (c *HookContextImpl2153428811) SetSkipCall(skip bool)    { c.skipCall = skip }
+func (c *HookContextImpl2153428811) IsSkipCall() bool         { return c.skipCall }
+func (c *HookContextImpl2153428811) SetData(data interface{}) { c.data = data }
+func (c *HookContextImpl2153428811) GetData() interface{}     { return c.data }
+func (c *HookContextImpl2153428811) GetKeyData(key string) interface{} {
+	if m, ok := c.data.(map[string]interface{}); ok {
+		return m[key]
+	}
+	return nil
+}
+
+func (c *HookContextImpl2153428811) SetKeyData(key string, val interface{}) {
+	m, ok := c.data.(map[string]interface{})
+	if !ok || m == nil {
+		m = make(map[string]interface{})
+		c.data = m
+	}
+	m[key] = val
+}
+
+func (c *HookContextImpl2153428811) HasKeyData(key string) bool {
+	if m, ok := c.data.(map[string]interface{}); ok {
+		_, ok := m[key]
+		return ok
+	}
+	return false
+}
+
+func (c *HookContextImpl2153428811) GetParam(idx int) interface{} {
+	switch idx {
+	case 0:
+		return *(c.params[0].(*[]byte))
+	case 1:
+		return *(c.params[1].(*map[string]any))
+	}
+	return nil
+}
+
+func (c *HookContextImpl2153428811) SetParam(idx int, val interface{}) {
+	switch idx {
+	case 0:
+		if val == nil {
+			*(c.params[0].(*[]byte)) = *new([]byte)
+		} else {
+			*(c.params[0].(*[]byte)) = val.([]byte)
+		}
+	case 1:
+		if val == nil {
+			*(c.params[1].(*map[string]any)) = *new(map[string]any)
+		} else {
+			*(c.params[1].(*map[string]any)) = val.(map[string]any)
+		}
+	}
+}
+
+func (c *HookContextImpl2153428811) GetReturnVal(idx int) interface{} {
+	switch idx {
+	case 0:
+		return *(c.returnVals[0].(*chan struct{}))
+	case 1:
+		return *(c.returnVals[1].(*error))
+	}
+	return nil
+}
+
+func (c *HookContextImpl2153428811) SetReturnVal(idx int, val interface{}) {
+	switch idx {
+	case 0:
+		if val == nil {
+			*(c.returnVals[0].(*chan struct{})) = *new(chan struct{})
+		} else {
+			*(c.returnVals[0].(*chan struct{})) = val.(chan struct{})
+		}
+	case 1:
+		if val == nil {
+			*(c.returnVals[1].(*error)) = *new(error)
+		} else {
+			*(c.returnVals[1].(*error)) = val.(error)
+		}
+	}
+}
+func (c *HookContextImpl2153428811) GetParamCount() int     { return len(c.params) }
+func (c *HookContextImpl2153428811) GetReturnValCount() int { return len(c.returnVals) }
+func (c *HookContextImpl2153428811) GetFuncName() string    { return c.funcName }
+func (c *HookContextImpl2153428811) GetPackageName() string { return c.packageName }
+
+// Trampoline Template
+func OtelBeforeTrampoline_Func12153428811(param0 *[]byte, param1 *map[string]any) (hookContext *HookContextImpl2153428811, skipCall bool) {
+	defer func() {
+		if err := recover(); err != nil {
+			println("failed to exec Before hook", "H1Before")
+			switch e := err.(type) {
+			case error:
+				println(e.Error())
+			case interface{ String() string }:
+				println(e.String())
+			case string:
+				println(e)
+			}
+			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
+			if fetchStack != nil && printStack != nil {
+				printStack(fetchStack())
+			}
+		}
+	}()
+	if otelc_hook_2581935710_H1Before != nil {
+		otelc_hook_2581935710_H1Before(nil, *param0, *param1)
+	}
+	return nil, false
+}
+
+func OtelAfterTrampoline_Func12153428811(hookContext OtelHookContext, arg0 *chan struct{}, arg1 *error) {
+	defer func() {
+		if err := recover(); err != nil {
+			println("failed to exec After hook", "H1After")
+			switch e := err.(type) {
+			case error:
+				println(e.Error())
+			case interface{ String() string }:
+				println(e.String())
+			case string:
+				println(e)
+			}
+			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
+			if fetchStack != nil && printStack != nil {
+				printStack(fetchStack())
+			}
+		}
+	}()
+	if otelc_hook_2581935710_H1After != nil {
+		otelc_hook_2581935710_H1After(nil, *arg0, *arg1)
+	}
+}
+
+//go:linkname otelc_hook_2581935710_H1Before testdata.H1Before
+func otelc_hook_2581935710_H1Before(hookContext OtelHookContext, param0 []byte, param1 map[string]any)
+
+//go:linkname otelc_hook_2581935710_H1After testdata.H1After
+func otelc_hook_2581935710_H1After(hookContext OtelHookContext, arg0 chan struct{}, arg1 error)

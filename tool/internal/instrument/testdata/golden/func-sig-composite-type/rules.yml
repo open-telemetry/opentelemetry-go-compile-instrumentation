@@ -1,0 +1,9 @@
+func_sig_composite_hook:
+  target: main
+  func: Func1
+  signature:
+    args: ["[]byte", "map[string]any"]
+    returns: ["chan struct{}", error]
+  before: H1Before
+  after: H1After
+  path: testdata

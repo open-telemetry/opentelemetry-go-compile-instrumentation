@@ -192,7 +192,7 @@ func TestFindFuncDeclForRule(t *testing.T) {
 	t.Run("returns error for invalid filter type", func(t *testing.T) {
 		r := &rule.InstFuncRule{
 			Func:  "TopLevel",
-			Param: "[]invalid",
+			Param: "[]",
 		}
 
 		fn, ok, err := FindFuncDecl(file, r, nil)
@@ -808,13 +808,13 @@ func TestFuncDeclMatchesFilters_InvalidTypeReturnsError(t *testing.T) {
 		[]*dst.Field{field(ident("error"))},
 	)
 
-	_, err := funcDeclMatchesFilters(decl, &rule.InstFuncRule{Result: "[]invalid"}, nil, nil)
+	_, err := funcDeclMatchesFilters(decl, &rule.InstFuncRule{Result: "[]"}, nil, nil)
 	require.Error(t, err)
 
-	_, err = funcDeclMatchesFilters(decl, &rule.InstFuncRule{LastResult: "[]invalid"}, nil, nil)
+	_, err = funcDeclMatchesFilters(decl, &rule.InstFuncRule{LastResult: "[]"}, nil, nil)
 	require.Error(t, err)
 
-	_, err = funcDeclMatchesFilters(decl, &rule.InstFuncRule{Param: "[]invalid"}, nil, nil)
+	_, err = funcDeclMatchesFilters(decl, &rule.InstFuncRule{Param: "[]"}, nil, nil)
 	require.Error(t, err)
 }
 
@@ -1018,17 +1018,17 @@ func TestFuncDeclMatchesFilters_SignatureParseError(t *testing.T) {
 	)
 
 	_, err := funcDeclMatchesFilters(decl, &rule.InstFuncRule{
-		Signature: &rule.FuncSignature{Args: []string{"[]invalid"}},
+		Signature: &rule.FuncSignature{Args: []string{"[]"}},
 	}, nil, nil)
 	require.Error(t, err)
 
 	_, err = funcDeclMatchesFilters(decl, &rule.InstFuncRule{
-		SignatureContains: &rule.FuncSignature{Args: []string{"[]invalid"}},
+		SignatureContains: &rule.FuncSignature{Args: []string{"[]"}},
 	}, nil, nil)
 	require.Error(t, err)
 
 	_, err = funcDeclMatchesFilters(decl, &rule.InstFuncRule{
-		SignatureContains: &rule.FuncSignature{Returns: []string{"[]invalid"}},
+		SignatureContains: &rule.FuncSignature{Returns: []string{"[]"}},
 	}, nil, nil)
 	require.Error(t, err)
 }
@@ -1334,6 +1334,70 @@ func (T) M() {}
 			require.NoError(t, findErr)
 			assert.Equal(t, tt.reason == "", found)
 			assert.Equal(t, tt.reason == "", decl != nil)
+		})
+	}
+}
+
+// TestFuncDeclMatchesFilters_CompositeFilters checks that a filter can name a
+// composite type itself, as in param: []byte, and that it still tells such
+// types apart from each other and from their element types.
+func TestFuncDeclMatchesFilters_CompositeFilters(t *testing.T) {
+	decl := makeFuncDecl(
+		[]*dst.Field{
+			field(&dst.ArrayType{Elt: ident("byte")}),
+			field(&dst.MapType{Key: ident("string"), Value: ident("any")}),
+			field(&dst.ChanType{Dir: dst.SEND | dst.RECV, Value: &dst.StructType{Fields: &dst.FieldList{}}}),
+			field(&dst.Ellipsis{Elt: ident("string")}),
+		},
+		[]*dst.Field{field(&dst.StarExpr{X: &dst.ArrayType{Elt: ident("error")}})},
+	)
+
+	tests := []struct {
+		name string
+		rule *rule.InstFuncRule
+		want bool
+	}{
+		{"param slice", &rule.InstFuncRule{Param: "[]byte"}, true},
+		{"param other slice", &rule.InstFuncRule{Param: "[]int"}, false},
+		{"param map", &rule.InstFuncRule{Param: "map[string]any"}, true},
+		{"param map with other value", &rule.InstFuncRule{Param: "map[string]int"}, false},
+		{"param chan of empty struct", &rule.InstFuncRule{Param: "chan struct{}"}, true},
+		{"param receive-only chan", &rule.InstFuncRule{Param: "<-chan struct{}"}, false},
+		{"param variadic", &rule.InstFuncRule{Param: "...string"}, true},
+		{"param slice of the variadic element", &rule.InstFuncRule{Param: "[]string"}, false},
+		{"result pointer to slice", &rule.InstFuncRule{Result: "*[]error"}, true},
+		{"last result pointer to slice", &rule.InstFuncRule{LastResult: "*[]error"}, true},
+		{"last result slice", &rule.InstFuncRule{LastResult: "[]error"}, false},
+		{
+			"signature_contains slice",
+			&rule.InstFuncRule{SignatureContains: &rule.FuncSignature{Args: []string{"int", "[]byte"}}},
+			true,
+		},
+		{
+			"signature_contains none present",
+			&rule.InstFuncRule{SignatureContains: &rule.FuncSignature{Args: []string{"[]int"}}},
+			false,
+		},
+		{
+			"exact signature",
+			&rule.InstFuncRule{Signature: &rule.FuncSignature{
+				Args:    []string{"[]byte", "map[string]any", "chan struct{}", "...string"},
+				Returns: []string{"*[]error"},
+			}},
+			true,
+		},
+		{
+			"exact signature with a different slice",
+			&rule.InstFuncRule{Signature: &rule.FuncSignature{
+				Args:    []string{"[]string", "map[string]any", "chan struct{}", "...string"},
+				Returns: []string{"*[]error"},
+			}},
+			false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, mustMatch(t, decl, tt.rule))
 		})
 	}
 }

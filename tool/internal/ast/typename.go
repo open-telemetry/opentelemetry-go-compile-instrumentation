@@ -16,7 +16,7 @@ import (
 
 // typeNameRe parses type-name strings of the form [*][pkg.]Name.
 // It handles identifiers, qualified identifiers, and pointers to those.
-// Limitations: does not handle chan, func, map, slice, or interface literals.
+// Composite forms such as []byte or map[string]any are read by parseTypeExpr.
 var typeNameRe = regexp.MustCompile(
 	`\A(\*)?\s*(?:([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*)\.)?([A-Za-z_][A-Za-z0-9_]*)\z`,
 )
@@ -26,14 +26,22 @@ type parsedTypeName struct {
 	importPath string // package qualifier (e.g. "context"), empty for builtins
 	name       string // leaf name (e.g. "Context", "error", "int")
 	pointer    bool   // whether the type is a pointer
+
+	// composite is set instead of the fields above when the name is a slice,
+	// array, map, chan, func or other composite type, such as []byte.
+	composite *typeExpr
 }
 
-// parseTypeName parses a string like "error", "int", "context.Context", or
-// "*http.Request" into a parsedTypeName.
+// parseTypeName parses a string like "error", "int", "context.Context",
+// "*http.Request" or "[]byte" into a parsedTypeName.
 func parseTypeName(s string) (parsedTypeName, error) {
 	m := typeNameRe.FindStringSubmatch(s)
-	if m == nil {
-		return parsedTypeName{}, ex.Newf("invalid type name %q", s)
+	if m == nil || (m[2] == "" && isTypeKeyword(m[3])) || strings.HasPrefix(m[2], ".") {
+		composite, ok := parseTypeExpr(s)
+		if !ok {
+			return parsedTypeName{}, ex.Newf("invalid type name %q", s)
+		}
+		return parsedTypeName{composite: composite}, nil
 	}
 	return parsedTypeName{pointer: m[1] == "*", importPath: m[2], name: m[3]}, nil
 }
@@ -45,6 +53,9 @@ func parseTypeName(s string) (parsedTypeName, error) {
 // tests that have no backing *dst.File, in which case matching falls back to
 // comparing against importPath's last segment.
 func (t parsedTypeName) matches(node dst.Expr, imports map[string]string) bool {
+	if t.composite != nil {
+		return t.composite.matches(node, imports)
+	}
 	switch n := node.(type) {
 	case *dst.Ident:
 		return !t.pointer && t.importPath == n.Path && t.name == n.Name
@@ -85,12 +96,13 @@ func (t parsedTypeName) matches(node dst.Expr, imports map[string]string) bool {
 
 	case *dst.InterfaceType:
 		// Only the empty interface matches "any".
-		return len(n.Methods.List) == 0 && t.importPath == "" && t.name == "any"
+		return len(n.Methods.List) == 0 && t.importPath == "" && t.name == nameAny
 
 	case *dst.ArrayType, *dst.ChanType, *dst.MapType, *dst.FuncType, *dst.Ellipsis:
-		// Composite and variadic types cannot satisfy a plain type-name filter.
+		// A plain name cannot satisfy a composite or variadic type.
 		// "Contains" applies to the parameter/result list, not to nested
-		// element types: []string is not string.
+		// element types: []string is not string. A filter that names the
+		// composite itself, such as []string, takes the composite path above.
 		return false
 
 	default:
@@ -141,7 +153,7 @@ func ParseInterfaceName(name string) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	if tn.pointer {
+	if tn.pointer || tn.composite != nil {
 		return "", "", ex.Newf("%q is not an interface type", name)
 	}
 	return tn.importPath, tn.name, nil
