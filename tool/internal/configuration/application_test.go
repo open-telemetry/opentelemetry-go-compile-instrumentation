@@ -286,6 +286,16 @@ func TestParseApplicationConfigurationRejectsInvalidDocuments(t *testing.T) {
 			want: "duplicate key \"file_format\"",
 		},
 		{
+			name: "cyclic sequence alias",
+			data: "file_format: '1.2'\na: &x [*x]\n",
+			want: "app.yaml:2:",
+		},
+		{
+			name: "cyclic mapping alias",
+			data: "file_format: '1.2'\na: &x {nested: *x}\n",
+			want: "cyclic YAML alias",
+		},
+		{
 			name: "multiple documents",
 			data: "file_format: '1.2'\n---\nfile_format: '1.2'\n",
 			want: "single YAML document",
@@ -381,6 +391,18 @@ func TestParseApplicationConfigurationRejectsNullInstrumentationSection(t *testi
 		"app.yaml",
 	)
 	require.ErrorContains(t, err, "instrumentation/development must be an object")
+}
+
+func TestParseApplicationConfigurationAllowsSharedAcyclicAlias(t *testing.T) {
+	app, err := ParseApplicationConfiguration([]byte(`file_format: "1.2"
+instrumentation/development:
+  go:
+    sample: &options
+      enabled: true
+  ignored: *options
+`), "app.yaml")
+	require.NoError(t, err)
+	assert.NotEmpty(t, app.Instrumentation)
 }
 
 func TestValidateApplicationOptions(t *testing.T) {
@@ -487,6 +509,66 @@ instrumentation/development:
 		err,
 		`unknown, removed, or renamed option for selected Go instrumentation "go.selected.unknown"`,
 	)
+}
+
+func TestValidateApplicationOptionsRejectsDottedPathSegments(t *testing.T) {
+	tests := []struct {
+		name       string
+		data       string
+		definition Entry
+		lineColumn string
+	}{
+		{
+			name: "general option",
+			data: `file_format: "1.2"
+instrumentation/development:
+  general:
+    sanitization.url.sensitive_query_parameters: [token]
+`,
+			definition: Entry{
+				Name: "general.sanitization.url.sensitive_query_parameters",
+				Type: listType,
+			},
+			lineColumn: "app.yaml:4:5",
+		},
+		{
+			name: "Go option",
+			data: `file_format: "1.2"
+instrumentation/development:
+  go:
+    sample:
+      nested.enabled: true
+`,
+			definition: Entry{Name: "go.sample.nested.enabled", Type: booleanType},
+			lineColumn: "app.yaml:5:7",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			app, err := ParseApplicationConfiguration([]byte(test.data), "app.yaml")
+			require.NoError(t, err)
+
+			_, err = ValidateApplicationOptions(app, []Entry{test.definition}, nil)
+
+			require.ErrorContains(t, err, test.lineColumn)
+			require.ErrorContains(t, err, "use nested YAML mappings")
+		})
+	}
+}
+
+func TestValidateApplicationPathSegmentsAllowsDotsInsideMapOption(t *testing.T) {
+	app, err := ParseApplicationConfiguration([]byte(`file_format: "1.2"
+instrumentation/development:
+  go:
+    sample:
+      labels:
+        resource.key: value
+`), "app.yaml")
+	require.NoError(t, err)
+
+	validated, err := ValidateApplicationOptions(app, []Entry{{Name: "go.sample.labels", Type: mapType}}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"resource.key": "value"}, validated.Values["go.sample.labels"])
 }
 
 func TestValidateApplicationOptionsReportsMissingMetadataForUnresolvedGoOption(t *testing.T) {

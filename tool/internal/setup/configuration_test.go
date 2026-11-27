@@ -264,14 +264,24 @@ func TestModuleRootForPackageInVendorReportsMissingOwner(t *testing.T) {
 	require.ErrorContains(t, err, "no module of vendor/modules.txt owns package")
 }
 
-func TestModuleRootForPackageInVendorReportsMissingModulesFile(t *testing.T) {
+func TestModuleRootForPackageTreatsVendorWithoutModulesFileAsDirectory(t *testing.T) {
 	moduleDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(moduleDir, "go.mod"), []byte("module example.com/test\n"), 0o644))
 	vendorDir := filepath.Join(moduleDir, vendorDirName)
 	packageDir := filepath.Join(vendorDir, "example.com", "dependency")
 	require.NoError(t, os.MkdirAll(packageDir, 0o755))
 
+	got, err := moduleRootForPackage(packageDir)
+	require.NoError(t, err)
+	assert.Equal(t, moduleDir, got)
+}
+
+func TestModuleRootForPackageWithoutParentModuleInOrdinaryVendorDirectory(t *testing.T) {
+	packageDir := filepath.Join(t.TempDir(), vendorDirName, "standalone")
+	require.NoError(t, os.MkdirAll(packageDir, 0o755))
+
 	_, err := moduleRootForPackage(packageDir)
-	require.ErrorContains(t, err, "reading the vendor/modules.txt")
+	require.ErrorIs(t, err, errNoParentGoMod)
 }
 
 func TestSetInstrumentationConfigPath(t *testing.T) {

@@ -4,6 +4,7 @@
 package rule
 
 import (
+	"encoding/json"
 	"fmt"
 	"go/version"
 	"iter"
@@ -247,6 +248,75 @@ func (irs *InstRuleSet) AddIgnoredCallFile(file string) {
 
 func (irs *InstRuleSet) AddFileRule(rule *InstFileRule) {
 	irs.FileRules = append(irs.FileRules, rule)
+}
+
+// Merge adds the rules of other to irs, after the rules irs already has. Both
+// sets must be for the same package compile. Merge adds a rule only once for a
+// file, so a rule that both sets have is applied once.
+func (irs *InstRuleSet) Merge(other *InstRuleSet) {
+	util.Assert(irs.ModulePath == other.ModulePath && irs.IsTest == other.IsTest,
+		"rule sets of different compiles cannot be merged")
+	if irs.PackageName == "" {
+		irs.PackageName = other.PackageName
+	}
+	if irs.CgoFileMap == nil && len(other.CgoFileMap) > 0 {
+		irs.CgoFileMap = make(map[string]string, len(other.CgoFileMap))
+	}
+	for file, cgoFile := range other.CgoFileMap {
+		if _, ok := irs.CgoFileMap[file]; !ok {
+			irs.CgoFileMap[file] = cgoFile
+		}
+	}
+
+	irs.RawRules = mergeRuleMap(irs.RawRules, other.RawRules)
+	irs.FuncRules = mergeRuleMap(irs.FuncRules, other.FuncRules)
+	irs.StructRules = mergeRuleMap(irs.StructRules, other.StructRules)
+	irs.CallRules = mergeRuleMap(irs.CallRules, other.CallRules)
+	irs.LitRules = mergeRuleMap(irs.LitRules, other.LitRules)
+	irs.DirectiveRules = mergeRuleMap(irs.DirectiveRules, other.DirectiveRules)
+	irs.DeclRules = mergeRuleMap(irs.DeclRules, other.DeclRules)
+	irs.FileRules = appendNewRules(irs.FileRules, other.FileRules)
+	for _, file := range other.IgnoredCallFiles {
+		if !slices.Contains(irs.IgnoredCallFiles, file) {
+			irs.IgnoredCallFiles = append(irs.IgnoredCallFiles, file)
+		}
+	}
+}
+
+// mergeRuleMap adds the rules of src to dst, file by file, and returns dst.
+func mergeRuleMap[T InstRule](dst, src map[string][]T) map[string][]T {
+	if dst == nil && len(src) > 0 {
+		dst = make(map[string][]T, len(src))
+	}
+	for file, rules := range src {
+		dst[file] = appendNewRules(dst[file], rules)
+	}
+	return dst
+}
+
+// appendNewRules appends to dst the rules of src that dst does not have.
+// Two rules are the same when their JSON encodings are equal, because the
+// instrument phase reads the rules from that encoding.
+func appendNewRules[T InstRule](dst, src []T) []T {
+	seen := make(map[string]bool, len(dst)+len(src))
+	key := func(r T) string {
+		data, err := json.Marshal(r)
+		// Setup writes the same rules to matched.json, so they always encode.
+		util.Assert(err == nil, "encoding a rule")
+		return string(data)
+	}
+	for _, r := range dst {
+		seen[key(r)] = true
+	}
+	for _, r := range src {
+		k := key(r)
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		dst = append(dst, r)
+	}
+	return dst
 }
 
 // AllRules returns every rule in the set in a stable order. Rule maps are

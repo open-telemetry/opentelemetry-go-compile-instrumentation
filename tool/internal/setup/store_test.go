@@ -361,6 +361,53 @@ func TestSetupPhaseInjectedHash(t *testing.T) {
 	require.ErrorContains(t, err, "added.go", "a missing add_file source must fail the hash")
 }
 
+func TestSetupPhaseInjectedHashFuncRulePath(t *testing.T) {
+	modDir := t.TempDir()
+	writeFile := func(name, content string) {
+		t.Helper()
+		path := filepath.Join(modDir, name)
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+	}
+	writeFile("go.mod", "module example.com/m\n\ngo 1.25.0\n")
+	writeFile("hooks/hook.go",
+		"package hooks\n\nimport \"example.com/m/helper\"\n\nfunc Before() string { return helper.Tag }\n")
+	writeFile("helper/helper.go", "package helper\n\nconst Tag = \"v1\"\n")
+	t.Chdir(modDir)
+
+	set := rule.NewInstRuleSet("example.com/m/dep")
+	set.AddFuncRule(fakeSrcFile("dep.go"), &rule.InstFuncRule{
+		Func:   "Work",
+		Before: "Before",
+		Path:   "example.com/m/hooks",
+	})
+	set.AddFuncRule(fakeSrcFile("dep.go"), &rule.InstFuncRule{
+		Func:   "InternalWork",
+		Before: "InternalBefore",
+		Path:   util.InternalPath,
+	})
+	matched := []*rule.InstRuleSet{set}
+
+	sp := newTestSetupPhase()
+	hash := func() string {
+		t.Helper()
+		h, err := sp.injectedHash(t.Context(), matched)
+		require.NoError(t, err)
+		return h
+	}
+
+	first := hash()
+	writeFile(
+		"hooks/hook.go",
+		"package hooks\n\nimport \"example.com/m/helper\"\n\nfunc Before() string { return helper.Tag + \"-edited\" }\n",
+	)
+	second := hash()
+	assert.NotEqual(t, first, second, "editing a func_rule hook package must change the injected hash")
+
+	writeFile("helper/helper.go", "package helper\n\nconst Tag = \"v2\"\n")
+	assert.NotEqual(t, second, hash(), "editing a dependency of a func_rule hook package must change the injected hash")
+}
+
 // TestStoreInjectedHashSkipsUnloadableImports covers rule imports that do not
 // load from the main module: a package that does not exist, a package that
 // imports one that does not exist, and a package of a module that is in the

@@ -175,7 +175,13 @@ func moduleRootForPackage(packageDir string) (string, error) {
 			return "", err
 		}
 		if filepath.Base(dir) == vendorDirName {
-			return vendorOwnerModuleRoot(dir, packageDir)
+			_, modulesErr := os.Stat(filepath.Join(dir, "modules.txt"))
+			switch {
+			case modulesErr == nil:
+				return vendorOwnerModuleRoot(dir, packageDir)
+			case !errors.Is(modulesErr, os.ErrNotExist):
+				return "", modulesErr
+			}
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {

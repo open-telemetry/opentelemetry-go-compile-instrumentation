@@ -144,6 +144,10 @@ unselected instrumentation is warned about and ignored. Selected modules
 without `metadata.yaml` are reported when the supplied configuration cannot be
 validated without their metadata.
 
+Represent option paths with nested YAML mappings rather than literal dotted
+keys. Dotted keys at an option-path level are rejected to avoid ambiguity;
+dots remain valid as data inside a declared map-valued option.
+
 There is no implicit configuration-file discovery. Supplying the flag more than
 once is an error; conflicting file sources are never resolved by precedence.
 See the [configuration metadata reference](../tool/internal/configuration/README.md)

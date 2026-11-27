@@ -658,6 +658,38 @@ instrumentation/development:
 	}
 }
 
+func TestLoadCustomRulesFromOrdinaryVendorDirectory(t *testing.T) {
+	for _, withApplicationConfiguration := range []bool{false, true} {
+		name := "without application configuration"
+		if withApplicationConfiguration {
+			name = "with application configuration"
+		}
+		t.Run(name, func(t *testing.T) {
+			ruleDir := filepath.Join(t.TempDir(), vendorDirName)
+			require.NoError(t, os.MkdirAll(ruleDir, 0o755))
+			ruleFile := filepath.Join(ruleDir, "rules.otelc.yaml")
+			require.NoError(t, os.WriteFile(ruleFile, []byte(`custom:
+  target: main
+  func: Example
+  raw: "_ = 1"
+`), 0o644))
+
+			t.Setenv(util.EnvOtelcRules, "")
+			sp := newTestSetupPhase()
+			sp.ruleConfig = ruleFile
+			if withApplicationConfiguration {
+				sp.instrumentationConfigPath = filepath.Join(t.TempDir(), "instrumentation.yaml")
+			}
+
+			rules, err := sp.loadRules(t.Context(), nil)
+
+			require.NoError(t, err)
+			require.Len(t, rules, 1)
+			assert.Equal(t, filepath.Dir(ruleFileKey(ruleFile)), sp.ruleModuleRoots[rules[0]])
+		})
+	}
+}
+
 func TestCustomRuleMetadataSelection(t *testing.T) {
 	for _, tc := range []struct {
 		name             string

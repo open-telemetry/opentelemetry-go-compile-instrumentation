@@ -259,6 +259,9 @@ func ValidateApplicationOptions(
 	allDefinitions := make(map[string]Entry, len(catalog)+len(selected))
 	maps.Copy(allDefinitions, catalog)
 	maps.Copy(allDefinitions, selected)
+	if err = validateApplicationPathSegments(application, allDefinitions); err != nil {
+		return ValidatedApplicationConfiguration{}, err
+	}
 	optionValues := application.ApplicationOptionValues(allDefinitions)
 	filteredDevelopment, warnings, err := filterSelectedApplicationOptions(
 		application,
@@ -826,6 +829,91 @@ func collectApplicationOptionValues(value any, path string, definitions map[stri
 	values[path] = value
 }
 
+// validateApplicationPathSegments rejects dotted keys used as path segments
+// below general and go. Option paths are represented by nested YAML mappings;
+// interpreting a literal dotted key as multiple segments can make source-node
+// filtering disagree with the flattened option path and silently drop a value.
+// Once a definition identifies a complete option, its value is opaque here so
+// dots in map-valued options remain ordinary data.
+func validateApplicationPathSegments(
+	application ApplicationConfiguration,
+	definitions map[string]Entry,
+) error {
+	root, err := yamlNodeMapping(application.Document, application.Source)
+	if err != nil {
+		return err
+	}
+	development := root["instrumentation/development"]
+	for development != nil && development.Kind == yaml.AliasNode {
+		development = development.Alias
+	}
+	sections, err := yamlNodeMapping(development, application.Source)
+	if err != nil {
+		if development == nil {
+			return nil
+		}
+		return err
+	}
+	for _, section := range []string{generalConfigurationSection, goConfigurationSection} {
+		if err = validateApplicationPathNode(
+			sections[section], section, application.Source, definitions, make(map[*yaml.Node]struct{}),
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateApplicationPathNode(
+	node *yaml.Node,
+	path, source string,
+	definitions map[string]Entry,
+	active map[*yaml.Node]struct{},
+) error {
+	if node == nil {
+		return nil
+	}
+	if _, found := active[node]; found {
+		return ex.Newf("%s:%d:%d: %s: cyclic YAML alias", source, node.Line, node.Column, path)
+	}
+	active[node] = struct{}{}
+	defer delete(active, node)
+	if node.Kind == yaml.AliasNode {
+		return validateApplicationPathNode(node.Alias, path, source, definitions, active)
+	}
+	if node.Kind != yaml.MappingNode {
+		return nil
+	}
+	if _, isOptionValue := definitions[path]; isOptionValue {
+		return nil
+	}
+	for i := 0; i+1 < len(node.Content); i += yamlMappingPairSize {
+		key := node.Content[i]
+		if key.Kind != yaml.ScalarNode || key.Tag != yamlStringTag {
+			continue
+		}
+		if strings.Contains(key.Value, ".") {
+			return ex.Newf(
+				"%s:%d:%d: configuration path key %q contains a dot; use nested YAML mappings",
+				source,
+				key.Line,
+				key.Column,
+				key.Value,
+			)
+		}
+		childPath := joinYAMLPath(path, key.Value)
+		if _, isOptionValue := definitions[childPath]; isOptionValue {
+			continue
+		}
+		if err := validateApplicationPathNode(
+			node.Content[i+1], childPath, source, definitions, active,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func parseSingleYAMLDocument(data []byte, source string) (*yaml.Node, error) {
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	var root yaml.Node
@@ -845,11 +933,24 @@ func parseSingleYAMLDocument(data []byte, source string) (*yaml.Node, error) {
 }
 
 func rejectDuplicateYAMLKeys(node *yaml.Node, source, path string) error {
+	return rejectDuplicateYAMLKeysOnPath(node, source, path, make(map[*yaml.Node]struct{}))
+}
+
+func rejectDuplicateYAMLKeysOnPath(
+	node *yaml.Node,
+	source, path string,
+	active map[*yaml.Node]struct{},
+) error {
 	if node == nil {
 		return nil
 	}
+	if _, found := active[node]; found {
+		return ex.Newf("%s:%d:%d: %s: cyclic YAML alias", source, node.Line, node.Column, path)
+	}
+	active[node] = struct{}{}
+	defer delete(active, node)
 	if node.Kind == yaml.AliasNode {
-		return rejectDuplicateYAMLKeys(node.Alias, source, path)
+		return rejectDuplicateYAMLKeysOnPath(node.Alias, source, path, active)
 	}
 	if node.Kind == yaml.MappingNode {
 		seen := make(map[string]*yaml.Node, len(node.Content)/yamlMappingPairSize)
@@ -871,7 +972,7 @@ func rejectDuplicateYAMLKeys(node *yaml.Node, source, path string) error {
 			}
 			seen[key.Value] = key
 			childPath := joinYAMLPath(path, key.Value)
-			if err := rejectDuplicateYAMLKeys(node.Content[i+1], source, childPath); err != nil {
+			if err := rejectDuplicateYAMLKeysOnPath(node.Content[i+1], source, childPath, active); err != nil {
 				return err
 			}
 		}
@@ -879,7 +980,7 @@ func rejectDuplicateYAMLKeys(node *yaml.Node, source, path string) error {
 	}
 	if node.Kind == yaml.SequenceNode {
 		for i, child := range node.Content {
-			if err := rejectDuplicateYAMLKeys(child, source, fmt.Sprintf("%s[%d]", path, i)); err != nil {
+			if err := rejectDuplicateYAMLKeysOnPath(child, source, fmt.Sprintf("%s[%d]", path, i), active); err != nil {
 				return err
 			}
 		}

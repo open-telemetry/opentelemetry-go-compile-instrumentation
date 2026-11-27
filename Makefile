@@ -94,6 +94,9 @@ checkmake: $(CHECKMAKE) ## Build checkmake from .tools
 
 # Dynamic variables
 GOOS ?= $(shell go env GOOS)
+# Newest release or pre-release tag reachable from HEAD (e.g. v1.3.0 or
+# v1.3.0-rc1), excluding pkg/* module tags. Falls back to v0.0.0 when no
+# matching tag exists.
 VERSION := $(shell git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo "v0.0.0")
 COMMIT_HASH := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME := $(shell date -u '+%Y-%m-%d')
@@ -407,8 +410,12 @@ benchmark/threshold: build ## Enforce absolute otelc overhead ceiling (fails if 
 
 ##@ Testing
 
-test: ## Run all tests (unit + integration)
-test: test-unit test-integration
+test: ## Run all tests (workflows + unit + integration)
+test: test-workflows test-unit test-integration
+
+.PHONY: test-workflows
+test-workflows: ## Test GitHub Actions workflow definitions
+	@GOWORK=off go -C .tools test -count=1 ./workflows
 
 test-unit: test-unit/tool test-unit/pkg test-unit/demo test-unit/helper ## Run all unit tests (tool + pkg + demo + test helpers)
 
