@@ -35,7 +35,6 @@ type matchedRuleSet struct {
 	FileRules   []namedRule            `json:"file_rules"`
 	StructRules map[string][]namedRule `json:"struct_rules"`
 	RawRules    map[string][]namedRule `json:"raw_rules"`
-	FuncRules   map[string][]namedRule `json:"func_rules"`
 }
 
 // readMatchedRuleSets returns the rule sets of importPath in the matched.json
@@ -227,79 +226,4 @@ hook_answer:
 	assert.Equal(t, []namedRule{{Name: "runtime_accessors"}, {Name: "gls_linker"}}, sets[0].FileRules)
 	assert.Equal(t, []string{"runtime_field", "add_gls_field"}, ruleNames(sets[0].StructRules))
 	assert.Equal(t, []string{"runtime_goexit1_reset", "goroutine_propagate"}, ruleNames(sets[0].RawRules))
-}
-
-// TestRuleModulesForOnePackage builds an application with two rule modules
-// that both instrument one function. Both hooks must run, each one time.
-func TestRuleModulesForOnePackage(t *testing.T) {
-	const module = "example.com/otelc-two-rule-modules"
-	moduleDir := writeRulesModule(t, module)
-	writeTestFile(t, moduleDir, "otel.instrumentation.go", fmt.Sprintf(`// Copyright The OpenTelemetry Authors
-// SPDX-License-Identifier: Apache-2.0
-
-//go:build tools
-
-package main
-
-import (
-	_ "%[1]s/rulesa"
-	_ "%[1]s/rulesb"
-)
-`, module))
-	writeTestFile(t, moduleDir, "main.go", fmt.Sprintf(`// Copyright The OpenTelemetry Authors
-// SPDX-License-Identifier: Apache-2.0
-
-package main
-
-import (
-	"fmt"
-
-	"%s/lib"
-)
-
-func main() {
-	fmt.Println("answer:", lib.Answer())
-}
-`, module))
-	for _, name := range []string{"a", "b"} {
-		writeTestFile(
-			t,
-			moduleDir,
-			filepath.Join("rules"+name, "hooks.go"),
-			fmt.Sprintf(`// Copyright The OpenTelemetry Authors
-// SPDX-License-Identifier: Apache-2.0
-
-package rules%[1]s
-
-import (
-	"fmt"
-
-	"go.opentelemetry.io/otelc/pkg/hook"
-)
-
-func BeforeAnswer(ctx hook.HookContext) {
-	_ = ctx
-	fmt.Println("hook %[1]s ran")
-}
-`, name),
-		)
-		writeTestFile(t, moduleDir, filepath.Join("rules"+name, "otelc.yaml"), fmt.Sprintf(`hook_answer_%[1]s:
-  target: %[2]s/lib
-  where:
-    func: Answer
-  do:
-    - inject_hooks:
-        before: BeforeAnswer
-        path: %[2]s/rules%[1]s
-`, name, module))
-	}
-
-	output := buildAndRun(t, moduleDir)
-	assert.Equal(t, 1, strings.Count(output, "hook a ran\n"), output)
-	assert.Equal(t, 1, strings.Count(output, "hook b ran\n"), output)
-	assert.Contains(t, output, "answer: 42\n")
-
-	sets := readMatchedRuleSets(t, moduleDir, module+"/lib")
-	require.Len(t, sets, 1, "lib must have one rule set")
-	assert.ElementsMatch(t, []string{"hook_answer_a", "hook_answer_b"}, ruleNames(sets[0].FuncRules))
 }

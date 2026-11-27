@@ -25,7 +25,7 @@ type compileKey struct {
 // several packages with one import path, such as its main packages, and each
 // of them has its own set. deps holds the compiles of the build plan, and the
 // sets of an import path that deps has more than once are kept as they are.
-func mergeRuleSets(matched []*rule.InstRuleSet, deps []*Dependency) ([]*rule.InstRuleSet, error) {
+func mergeRuleSets(matched []*rule.InstRuleSet, deps []*Dependency) []*rule.InstRuleSet {
 	groups := make(map[compileKey][]*rule.InstRuleSet, len(matched))
 	for _, set := range matched {
 		key := compileKey{importPath: set.ModulePath, isTest: set.IsTest}
@@ -50,11 +50,9 @@ func mergeRuleSets(matched []*rule.InstRuleSet, deps []*Dependency) ([]*rule.Ins
 		one := rule.NewInstRuleSet(set.ModulePath)
 		one.IsTest = set.IsTest
 		for _, member := range group {
-			if err := one.Merge(member); err != nil {
-				return nil, err
-			}
+			one.Merge(member)
 		}
 		merged = append(merged, one)
 	}
-	return merged, nil
+	return merged
 }

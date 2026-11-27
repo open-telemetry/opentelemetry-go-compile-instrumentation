@@ -43,8 +43,7 @@ func TestMergeRuleSetsKeepsRuntimeGLSWithRuntimeRules(t *testing.T) {
 	matched := append([]*rule.InstRuleSet{appSet, userSet}, matchRuntimeGLS(deps)...)
 	require.Len(t, matched, 3)
 
-	merged, err := mergeRuleSets(matched, deps)
-	require.NoError(t, err)
+	merged := mergeRuleSets(matched, deps)
 
 	require.Len(t, merged, 2, "runtime must have one rule set")
 	assert.Same(t, appSet, merged[0])
@@ -82,7 +81,7 @@ func TestMergeRuleSetsMergesSetsOfOnePackage(t *testing.T) {
 		Path:         "example.com/shared",
 	}
 
-	// Two rule modules for one package, both with the same file rule.
+	// Two sets for one package compile, both with the same file rule.
 	setA := rule.NewInstRuleSet("example.com/lib")
 	setA.SetPackageName("lib")
 	setA.AddFuncRule(libFile, hookRule("hook_a", "example.com/a"))
@@ -93,8 +92,7 @@ func TestMergeRuleSetsMergesSetsOfOnePackage(t *testing.T) {
 	sharedCopy := *shared
 	setB.AddFileRule(&sharedCopy)
 
-	merged, err := mergeRuleSets([]*rule.InstRuleSet{setA, setB}, deps)
-	require.NoError(t, err)
+	merged := mergeRuleSets([]*rule.InstRuleSet{setA, setB}, deps)
 
 	require.Len(t, merged, 1)
 	funcRules := merged[0].FuncRules[libFile]
@@ -133,8 +131,7 @@ func TestMergeRuleSetsKeepsSetsOfDifferentCompiles(t *testing.T) {
 		withFuncRule("example.com/lib", libFile, true),
 	}
 
-	merged, err := mergeRuleSets(matched, deps)
-	require.NoError(t, err)
+	merged := mergeRuleSets(matched, deps)
 
 	require.Len(t, merged, len(matched))
 	for i := range matched {
@@ -158,8 +155,7 @@ func TestMergeRuleSetsLeavesSingleSetsUnchanged(t *testing.T) {
 	before, err := json.Marshal(matched)
 	require.NoError(t, err)
 
-	merged, err := mergeRuleSets(matched, deps)
-	require.NoError(t, err)
+	merged := mergeRuleSets(matched, deps)
 
 	require.Len(t, merged, len(matched))
 	for i := range matched {
