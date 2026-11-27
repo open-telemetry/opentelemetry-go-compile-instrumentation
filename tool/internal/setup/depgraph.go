@@ -19,8 +19,7 @@ import (
 // the package itself share their imports. A package that go/packages loaded
 // with errors can import anything.
 //
-// add must not run at the same time as reaches. reaches is safe for
-// concurrent use.
+// add and reaches are safe for concurrent use.
 type importGraph struct {
 	mu sync.Mutex
 	// imports maps an import path to the import paths it imports.
@@ -72,9 +71,11 @@ func (g *importGraph) add(pkgs []*packages.Package) {
 }
 
 // reaches reports whether the compile of dep can use the types of the package
-// pkgPath. It reports true when the graph does not know dep.
+// pkgPath. It reports true when pkgPath is the import path of dep, and when
+// the graph does not know dep. A main package compiles with -p main, so its
+// own types are in package main, a path that the graph does not hold.
 func (g *importGraph) reaches(dep *Dependency, pkgPath string) bool {
-	if g == nil {
+	if g == nil || dep.ImportPath == pkgPath {
 		return true
 	}
 	g.mu.Lock()

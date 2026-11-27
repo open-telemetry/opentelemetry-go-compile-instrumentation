@@ -39,6 +39,13 @@ wrap_g_do:
   do:
     - wrap_call:
         replace: "({{ . }} + 1000)"
+wrap_local_do:
+  target: main
+  where:
+    method_call: main.*Local.Do
+  do:
+    - wrap_call:
+        replace: "({{ . }} + 1000)"
 `,
 	"p/p.go": `package p
 
@@ -186,8 +193,14 @@ import (
 	"example.com/otelc-mcdeps/viaret"
 )
 
+// Local is a type of the main package, which compiles with -p main.
+type Local struct{ n int }
+
+func (l *Local) Do() int { return l.n }
+
 func main() {
 	fmt.Println("main:", p.New(12).Do())
+	fmt.Println("local:", (&Local{n: 13}).Do())
 	fmt.Println("self:", p.Self())
 	fmt.Println("viaret:", viaret.Run(), viaret.RunG())
 	fmt.Println("promoted:", promoted.Run())
@@ -202,9 +215,10 @@ func main() {
 }
 
 // TestMethodCallRulesFollowPackageDependencies builds and tests an application
-// whose method_call rules target "**". Setup adds the rules only to the
-// packages that depend on the package of the receiver type. Every call the
-// rules match must still be wrapped, in the build and in the tests.
+// whose method_call rules target "**", plus one rule for a type of the main
+// package. Setup adds the rules only to the packages that depend on the
+// package of the receiver type. Every call the rules match must still be
+// wrapped, in the build and in the tests.
 func TestMethodCallRulesFollowPackageDependencies(t *testing.T) {
 	otelcPath, err := testutil.OtelcPath()
 	require.NoError(t, err)
@@ -225,6 +239,7 @@ func TestMethodCallRulesFollowPackageDependencies(t *testing.T) {
 	out, err := exec.CommandContext(t.Context(), bin).CombinedOutput()
 	require.NoError(t, err, "running %s:\n%s", bin, out)
 	assert.Equal(t, `main: 1012
+local: 1013
 self: 1001
 viaret: 1002 1003
 promoted: 1004

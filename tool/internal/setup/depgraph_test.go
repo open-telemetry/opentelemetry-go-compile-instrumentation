@@ -67,6 +67,15 @@ func TestImportGraphReaches(t *testing.T) {
 	t.Run("a package nothing imports", func(t *testing.T) {
 		assert.False(t, g.reaches(tests[0].dep, "example.com/missing"))
 	})
+
+	// The graph holds the main package as example.com/cmd, but its compile
+	// and its types use the path main.
+	t.Run("a type of the main package", func(t *testing.T) {
+		mainDep := &Dependency{ImportPath: "main", Sources: []string{file("main.go")}}
+		assert.True(t, g.reaches(mainDep, "main"))
+		unrelatedDep := &Dependency{ImportPath: "example.com/unrelated", Sources: []string{file("unrelated.go")}}
+		assert.False(t, g.reaches(unrelatedDep, "main"))
+	})
 }
 
 func TestImportGraphReachesThroughTestVariant(t *testing.T) {
