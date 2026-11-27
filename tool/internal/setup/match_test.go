@@ -3228,8 +3228,11 @@ func TestRunMatch_MethodCallDependencyPruning(t *testing.T) {
 			wantMatch: true,
 		},
 		{
-			name:      "direct importer matches",
-			dep:       &Dependency{ImportPath: "example.com/clients", Sources: []string{doSource("clients.go", "clients")}},
+			name: "direct importer matches",
+			dep: &Dependency{
+				ImportPath: "example.com/clients",
+				Sources:    []string{doSource("clients.go", "clients")},
+			},
 			wantMatch: true,
 		},
 		{
@@ -3238,18 +3241,27 @@ func TestRunMatch_MethodCallDependencyPruning(t *testing.T) {
 			wantMatch: true,
 		},
 		{
-			name:      "unrelated package is pruned",
-			dep:       &Dependency{ImportPath: "example.com/unrelated", Sources: []string{doSource("unrelated.go", "unrelated")}},
+			name: "unrelated package is pruned",
+			dep: &Dependency{
+				ImportPath: "example.com/unrelated",
+				Sources:    []string{doSource("unrelated.go", "unrelated")},
+			},
 			wantMatch: false,
 		},
 		{
-			name:      "incomplete transitive dependency falls back conservatively",
-			dep:       &Dependency{ImportPath: "example.com/broken", Sources: []string{doSource("broken.go", "broken")}},
+			name: "incomplete transitive dependency falls back conservatively",
+			dep: &Dependency{
+				ImportPath: "example.com/broken",
+				Sources:    []string{doSource("broken.go", "broken")},
+			},
 			wantMatch: true,
 		},
 		{
-			name:      "unknown package falls back conservatively",
-			dep:       &Dependency{ImportPath: "example.com/unknown", Sources: []string{doSource("unknown.go", "unknown")}},
+			name: "unknown package falls back conservatively",
+			dep: &Dependency{
+				ImportPath: "example.com/unknown",
+				Sources:    []string{doSource("unknown.go", "unknown")},
+			},
 			wantMatch: true,
 		},
 		{
@@ -3318,7 +3330,11 @@ wrap_do:
   method_call: "net/http.*Client.Do"
   replace: "Wrapper({{ . }})"
 `)
-	httpSrc := writeGoSource(t, "client.go", "package http\n\nfunc (c *Client) Do(r any) {}\nfunc use(c *Client) { c.Do(nil) }\n")
+	httpSrc := writeGoSource(
+		t,
+		"client.go",
+		"package http\n\nfunc (c *Client) Do(r any) {}\nfunc use(c *Client) { c.Do(nil) }\n",
+	)
 	appSrc := writeGoSource(t, "app.go", "package app\n\nfunc run(c any) { _ = getClient().Do(c) }\n")
 	unrelatedSrc := writeGoSource(t, "u.go", "package unrelated\n\nfunc noop() { c.Do(nil) }\n")
 

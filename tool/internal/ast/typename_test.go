@@ -794,17 +794,24 @@ func TestMatchesTypeName_UnsupportedNodeDoesNotMatch(t *testing.T) {
 func TestFileCallSelectors(t *testing.T) {
 	src := `package main
 
+import "example.com/pkg"
+
 func helper() {}
 
-type genericClient struct{}
+func genericFn[T any](v T) {}
 
-func (genericClient) GenericDo[T any](v T) {}
+type client interface {
+	Do(any)
+	Uninvoked()
+}
 
-func run(c genericClient) {
+func run(c client) {
 	helper()
+	genericFn[int](1)
 	c.Do(nil)
 	(getClient().Nested().Send)()
-	c.GenericDo[int](1)
+	pkg.GenericDo[int](1)
+	pkg.GenericPair[int, string](1, "a")
 	var fn func()
 	_ = c.Uninvoked
 	if fn != nil {
@@ -820,7 +827,9 @@ func run(c genericClient) {
 	assert.True(t, selectors["Nested"])
 	assert.True(t, selectors["Send"])
 	assert.True(t, selectors["GenericDo"])
+	assert.True(t, selectors["GenericPair"])
 	assert.False(t, selectors["helper"])
+	assert.False(t, selectors["genericFn"])
 	assert.False(t, selectors["Uninvoked"])
 	assert.Nil(t, FileCallSelectors(nil))
 }
