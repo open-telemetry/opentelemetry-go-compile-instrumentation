@@ -9,6 +9,7 @@ on:
       - ".github/actions/**/action.yaml"
       - ".tools/go.mod"
       - ".tools/go.sum"
+      - ".tools/workflows/**"
       - "Makefile"
   push:
     branches:
@@ -21,6 +22,7 @@ on:
       - ".github/actions/**/action.yaml"
       - ".tools/go.mod"
       - ".tools/go.sum"
+      - ".tools/workflows/**"
       - "Makefile"
 
 permissions:
@@ -38,4 +40,4 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - run: make lint/action
+      - run: make lint/action test-workflows
