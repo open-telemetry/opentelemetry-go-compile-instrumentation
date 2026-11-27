@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -19,6 +20,43 @@ const (
 	otelcBinName = "otelc"
 	appBinName   = "app"
 )
+
+var (
+	appDirMu   sync.Mutex
+	appDirRefs = make(map[string]int)
+)
+
+// registerBuild registers a build reference for appDir so concurrent tests
+// sharing the same test app directory do not delete build artifacts while
+// sibling tests are still executing.
+func registerBuild(appDir string) {
+	appDirMu.Lock()
+	defer appDirMu.Unlock()
+	appDirRefs[appDir]++
+}
+
+// releaseBuild decrements the build reference count for appDir. Only when
+// all tests using appDir have finished is the build directory cleaned up.
+func releaseBuild(appDir, output string) {
+	appDirMu.Lock()
+	defer appDirMu.Unlock()
+	appDirRefs[appDir]--
+	if appDirRefs[appDir] <= 0 {
+		delete(appDirRefs, appDir)
+		_ = os.Remove(filepath.Join(appDir, output))
+		_ = os.RemoveAll(filepath.Join(appDir, ".otelc-build"))
+		// Left behind only when the otelc subprocess was killed mid-run
+		// (release removes it on every normal exit).
+		_ = os.Remove(filepath.Join(appDir, ".otelc-build.lock"))
+	}
+}
+
+// buildRefsCount returns the current reference count for appDir (used in tests).
+func buildRefsCount(appDir string) int {
+	appDirMu.Lock()
+	defer appDirMu.Unlock()
+	return appDirRefs[appDir]
+}
 
 // -----------------------------------------------------------------------------
 // E2E Test Infrastructure
@@ -109,18 +147,16 @@ func Build(t *testing.T, appsDir, app string, args ...string) {
 		appsDir, err = appsPath()
 		require.NoError(t, err)
 	}
-	appDir := filepath.Join(appsDir, app)
+	appDir := filepath.Clean(filepath.Join(appsDir, app))
+
+	registerBuild(appDir)
+	t.Cleanup(func() {
+		releaseBuild(appDir, output)
+	})
 
 	cmd := newCmd(t.Context(), appDir, env, args...)
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(out))
-	t.Cleanup(func() {
-		_ = os.Remove(filepath.Join(appDir, output))
-		_ = os.RemoveAll(filepath.Join(appDir, ".otelc-build"))
-		// Left behind only when the otelc subprocess was killed mid-run
-		// (release removes it on every normal exit).
-		_ = os.Remove(filepath.Join(appDir, ".otelc-build.lock"))
-	})
 }
 
 // Run runs the application and returns the output. It waits for the
