@@ -1130,6 +1130,17 @@ func GoBuild(ctx context.Context, cmd *cli.Command) (err error) {
 }
 
 func runGoBuild(ctx context.Context, cmd *cli.Command, snapshot *setupSnapshot) (func(context.Context) error, error) {
+	var cleanErr error
+	compile, buildErr := runGoBuildLocked(ctx, cmd, snapshot, &cleanErr)
+	return compile, ex.Join(buildErr, cleanErr)
+}
+
+func runGoBuildLocked(
+	ctx context.Context,
+	cmd *cli.Command,
+	snapshot *setupSnapshot,
+	cleanErr *error,
+) (func(context.Context) error, error) {
 	if err := restoreInterruptedBuild(ctx); err != nil {
 		return nil, err
 	}
@@ -1154,8 +1165,8 @@ func runGoBuild(ctx context.Context, cmd *cli.Command, snapshot *setupSnapshot) 
 		// Restore backed-up go.mod/go.sum but keep .otelc-build/ for debugging.
 		// Users can run `otelc cleanup` to remove it explicitly. Deferred
 		// inside the locked body so the restore always runs under the lock.
-		if cleanErr := Cleanup(ctx, false); cleanErr != nil {
-			logger.DebugContext(ctx, "cleanup failed", "error", cleanErr)
+		if err := Cleanup(ctx, false); err != nil {
+			*cleanErr = err
 		}
 	}()
 
