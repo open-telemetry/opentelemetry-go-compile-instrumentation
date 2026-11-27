@@ -11,7 +11,6 @@ import (
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
-	"go.opentelemetry.io/otelc/tool/util"
 )
 
 // applyDirectiveRule finds all functions and function literals annotated with
@@ -45,7 +44,9 @@ func (ip *instrumentPhase) applyDirectiveRule(
 
 	for _, match := range matches {
 		funcDecl, name := ip.directiveTarget(match)
-		util.Assert(funcDecl.Body != nil, "function must have a body")
+		if err = requireFuncBody(r.Name, funcDecl); err != nil {
+			return false, err
+		}
 		var (
 			snippet string
 			stmts   []dst.Stmt //nolint:prealloc // Slice allocated by `p.ParseSnippet`

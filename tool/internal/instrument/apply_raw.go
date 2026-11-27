@@ -185,7 +185,9 @@ func insertRaw(
 	aliases rawAliasContext,
 ) error {
 	util.Assert(decl.Name.Name == r.Func, "sanity check")
-	util.Assert(decl.Body != nil, "function must have a body")
+	if err := requireFuncBody(r.Name, decl); err != nil {
+		return err
+	}
 
 	// Rename the unnamed return values so that the raw code can reference them
 	renameReturnValues(decl)

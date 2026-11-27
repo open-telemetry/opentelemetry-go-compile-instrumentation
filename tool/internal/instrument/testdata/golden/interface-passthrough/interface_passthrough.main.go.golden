@@ -96,8 +96,13 @@ func OtelBeforeTrampoline_InterfacePassthrough3881633898(param0 *interface{}) (h
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec Before hook", "H15InterfaceBefore")
-			if e, ok := err.(error); ok {
+			switch e := err.(type) {
+			case error:
 				println(e.Error())
+			case interface{ String() string }:
+				println(e.String())
+			case string:
+				println(e)
 			}
 			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
 			if fetchStack != nil && printStack != nil {
@@ -115,8 +120,13 @@ func OtelAfterTrampoline_InterfacePassthrough3881633898(hookContext OtelHookCont
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "H15InterfaceAfter")
-			if e, ok := err.(error); ok {
+			switch e := err.(type) {
+			case error:
 				println(e.Error())
+			case interface{ String() string }:
+				println(e.String())
+			case string:
+				println(e)
 			}
 			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
 			if fetchStack != nil && printStack != nil {

@@ -110,8 +110,13 @@ func OtelBeforeTrampoline_ForcedFunc191951179(param0 *string) (hookContext *Hook
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec Before hook", "HBefore")
-			if e, ok := err.(error); ok {
+			switch e := err.(type) {
+			case error:
 				println(e.Error())
+			case interface{ String() string }:
+				println(e.String())
+			case string:
+				println(e)
 			}
 			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
 			if fetchStack != nil && printStack != nil {
@@ -129,8 +134,13 @@ func OtelAfterTrampoline_ForcedFunc191951179(hookContext OtelHookContext) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "HAfter")
-			if e, ok := err.(error); ok {
+			switch e := err.(type) {
+			case error:
 				println(e.Error())
+			case interface{ String() string }:
+				println(e.String())
+			case string:
+				println(e)
 			}
 			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
 			if fetchStack != nil && printStack != nil {
