@@ -61,7 +61,7 @@ func writeResolutionScope(ctx context.Context, buildDir string, moduleDirs []str
 		sum := sha256.Sum256(content)
 		_, _ = h.Write([]byte(path + "=" + hex.EncodeToString(sum[:]) + "\x00"))
 	}
-	_, _ = h.Write([]byte("otelc=" + util.Version + "\x00rules=" + instrument.RulesDigest() + "\x00"))
+	_, _ = h.Write([]byte("otelc=" + util.Version + "\x00rules=" + instrument.RulesDigestFromDisk() + "\x00"))
 	hashWorkspace := func(label, dir string) error {
 		goWork, err := resolvedGoWork(ctx, dir)
 		if err != nil {
