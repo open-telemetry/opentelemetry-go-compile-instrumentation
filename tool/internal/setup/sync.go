@@ -9,6 +9,7 @@ import (
 	goversion "go/version"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
@@ -123,16 +124,25 @@ func syncDeps(ctx context.Context, moduleDir string) error {
 	return nil
 }
 
-func syncVendor(ctx context.Context, moduleDir string) error {
+func syncVendor(ctx context.Context, dir string, workspace bool) error {
 	logger := util.LoggerFromContext(ctx)
+	args := []string{"go", "mod", vendorDirName}
+	if workspace {
+		args = []string{"go", "work", vendorDirName}
+	}
+	subcmd := strings.Join(args, " ")
+	vendorPath := filepath.Join(dir, vendorDirName)
 	_, _ = fmt.Fprintf(
 		os.Stderr,
-		"Warning: running go mod vendor in %s; any manual edits in vendor/ will be overwritten\n",
-		moduleDir,
+		"Warning: running %s in %s (%s); any manual edits in vendor/ will be overwritten\n",
+		subcmd,
+		dir,
+		vendorPath,
 	)
-	logger.WarnContext(ctx, "running go mod vendor; manual edits in vendor/ will be overwritten", "dir", moduleDir)
-	if err := util.RunCmdInDir(ctx, moduleDir, "go", "mod", "vendor"); err != nil {
-		return ex.Wrapf(err, "running go mod vendor in %s", moduleDir)
+	logger.WarnContext(ctx, "running "+subcmd+"; manual edits in vendor/ will be overwritten",
+		"dir", dir, "vendor", vendorPath)
+	if err := util.RunCmdInDir(ctx, dir, args...); err != nil {
+		return ex.Wrapf(err, "running %s in %s", subcmd, dir)
 	}
 	return nil
 }

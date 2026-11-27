@@ -254,6 +254,22 @@ func collectImports(toolFile string, f *dst.File, seenImports map[string]bool) (
 	return importPaths, nil
 }
 
+func collectWalkRootDirs(ctx context.Context, toolFiles []string) []string {
+	rootDirs := make([]string, 0, len(toolFiles)+1)
+	for _, f := range toolFiles {
+		d := filepath.Dir(f)
+		if !slices.Contains(rootDirs, d) {
+			rootDirs = append(rootDirs, d)
+		}
+	}
+	if vs, ok := ctx.Value(vendorStateKey{}).(vendorState); ok && vs.workspace && vs.vendorRoot != "" {
+		if !slices.Contains(rootDirs, vs.vendorRoot) {
+			rootDirs = append(rootDirs, vs.vendorRoot)
+		}
+	}
+	return rootDirs
+}
+
 // walkInstrumentation walks the instrumentation tool files and calls the visitor function for each.
 func walkInstrumentation(ctx context.Context, toolFiles []string, visit instrumentationVisitor) error {
 	queue := append([]string(nil), toolFiles...)
@@ -263,13 +279,7 @@ func walkInstrumentation(ctx context.Context, toolFiles []string, visit instrume
 		seenToolFiles[toolFile] = true
 	}
 
-	rootDirs := make([]string, 0, len(toolFiles))
-	for _, f := range toolFiles {
-		d := filepath.Dir(f)
-		if !slices.Contains(rootDirs, d) {
-			rootDirs = append(rootDirs, d)
-		}
-	}
+	rootDirs := collectWalkRootDirs(ctx, toolFiles)
 
 	p := ast.NewAstParser()
 	for len(queue) > 0 {

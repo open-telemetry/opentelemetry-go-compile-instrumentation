@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
+	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -48,16 +49,26 @@ func TestVendoringActive(t *testing.T) {
 		// the build is treated as not vendored.
 		assert.False(t, vendoringActive(t.Context(), filepath.Join(t.TempDir(), "missing")))
 	})
-	t.Run("vendor present but in a workspace", func(t *testing.T) {
+	t.Run("workspace vendor present at workspace root", func(t *testing.T) {
 		root := writeVendoredModule(t)
 		require.NoError(t, os.WriteFile(
 			filepath.Join(root, "go.work"),
 			[]byte("go 1.25.0\n\nuse .\n"),
 			0o644,
 		))
-		// -mod=mod is forbidden in workspace mode, so a leftover vendor/modules.txt
-		// must not make this report true.
-		assert.False(t, vendoringActive(t.Context(), root))
+		t.Setenv("GOWORK", "")
+		assert.True(t, vendoringActive(t.Context(), root))
+	})
+	t.Run("per-module vendor ignored when workspace has no root vendor", func(t *testing.T) {
+		ws := t.TempDir()
+		mod := filepath.Join(ws, "app")
+		require.NoError(t, os.MkdirAll(filepath.Join(mod, "vendor"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(mod, "go.mod"), []byte("module m\n\ngo 1.25.0\n"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(mod, "vendor", "modules.txt"), []byte(""), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(ws, "go.work"), []byte("go 1.25.0\n\nuse ./app\n"), 0o644))
+		t.Setenv("GOWORK", "")
+		assert.False(t, vendoringActive(t.Context(), ws))
+		assert.False(t, vendoringActive(t.Context(), mod))
 	})
 }
 
@@ -353,9 +364,29 @@ func TestRewriteModVendor(t *testing.T) {
 			if subcmd == "" {
 				subcmd = subcmdBuild
 			}
-			assert.Equal(t, tt.want, rewriteModVendor(subcmd, tt.args))
+			assert.Equal(t, tt.want, rewriteModVendor(subcmd, tt.args, modMod))
 		})
 	}
+
+	t.Run("rewrites to -mod=readonly when requested", func(t *testing.T) {
+		assert.Equal(
+			t,
+			[]string{"build", "-mod=readonly", "./..."},
+			rewriteModVendor(subcmdBuild, []string{"build", "-mod=vendor", "./..."}, modReadonly),
+		)
+		assert.Equal(
+			t,
+			[]string{"build", "-mod", "readonly", "./..."},
+			rewriteModVendor(subcmdBuild, []string{"build", "-mod", "vendor", "./..."}, modReadonly),
+		)
+	})
+}
+
+func TestForceModFlag_Readonly(t *testing.T) {
+	assert.Equal(t, "-mod=readonly", forceModFlag("", modReadonly))
+	assert.Equal(t, "-trimpath -mod=readonly", forceModFlag("-trimpath -mod=vendor", modReadonly))
+	assert.Equal(t, "-mod=readonly", forceModFlag("--mod=vendor", modReadonly))
+	assert.Equal(t, "-mod=readonly", forceModFlag("-mod=readonly", modReadonly))
 }
 
 func TestSetupLockedForcesModuleModeForVendoredBuildDir(t *testing.T) {
@@ -379,6 +410,29 @@ func TestSetupLockedForcesModuleModeForVendoredBuildDir(t *testing.T) {
 	require.Error(t, err)
 
 	assert.Equal(t, modMod, os.Getenv("GOFLAGS"))
+}
+
+func TestSetupLockedForcesReadonlyForUnvendoredWorkspace(t *testing.T) {
+	ws := t.TempDir()
+	app := filepath.Join(ws, "app")
+	require.NoError(t, os.MkdirAll(app, 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(ws, "vendor"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(ws, "go.work"), []byte("go 1.25.0\n\nuse ./app\n"), 0o644))
+	require.NoError(
+		t,
+		os.WriteFile(filepath.Join(app, "go.mod"), []byte("module example.com/app\n\ngo 1.25.0\n"), 0o644),
+	)
+	require.NoError(t, os.WriteFile(filepath.Join(ws, "vendor", "modules.txt"), []byte("## workspace\n"), 0o644))
+	t.Chdir(ws)
+	t.Setenv(util.EnvOtelcWorkDir, ws)
+	t.Setenv("GOWORK", "")
+	t.Setenv("GOFLAGS", "-mod=vendor")
+
+	cmd := &cli.Command{Name: "go", SkipFlagParsing: true, Action: setupLocked}
+	err := cmd.Run(t.Context(), []string{"go", "build", "./app/missing"})
+	require.Error(t, err)
+
+	assert.Equal(t, modReadonly, os.Getenv("GOFLAGS"))
 }
 
 func TestParseVendorModules(t *testing.T) {
@@ -595,14 +649,249 @@ func TestSetupLockedPreservesModVendorWhenPinnedAndVendored(t *testing.T) {
 	assert.Equal(t, "-mod=vendor", os.Getenv("GOFLAGS"))
 }
 
+func TestSetupLockedPreservesModVendorForVendoredWorkspace(t *testing.T) {
+	ws := t.TempDir()
+	app := filepath.Join(ws, "app")
+	require.NoError(t, os.MkdirAll(app, 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(ws, "vendor"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(ws, "go.work"), []byte("go 1.25.0\n\nuse ./app\n"), 0o644))
+	require.NoError(
+		t,
+		os.WriteFile(filepath.Join(app, "go.mod"), []byte("module example.com/app\n\ngo 1.25.0\n"), 0o644),
+	)
+	require.NoError(t, os.WriteFile(
+		filepath.Join(ws, "vendor", "modules.txt"),
+		[]byte("## workspace\n# example.com/inst v1.0.0\nexample.com/inst\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(app, toolFileCanonical),
+		[]byte("//go:build tools\n\npackage tools\n\nimport _ \"example.com/inst\"\n"),
+		0o644,
+	))
+	t.Chdir(ws)
+	t.Setenv(util.EnvOtelcWorkDir, ws)
+	t.Setenv("GOWORK", "")
+	t.Setenv("GOFLAGS", "-mod=vendor")
+
+	cmd := &cli.Command{Name: "go", SkipFlagParsing: true, Action: setupLocked}
+	err := cmd.Run(t.Context(), []string{"go", "build", "./app/missing"})
+	require.Error(t, err)
+
+	assert.Equal(t, "-mod=vendor", os.Getenv("GOFLAGS"))
+}
+
+func TestDetectVendorState_Workspace(t *testing.T) {
+	t.Setenv("GOWORK", "")
+
+	const instModules = "## workspace\n# example.com/inst v1.0.0\nexample.com/inst\n"
+
+	writeWorkspace := func(t *testing.T, withRootVendor bool, modulesTxt string) (string, string, string) {
+		t.Helper()
+		ws := t.TempDir()
+		modA := filepath.Join(ws, "modA")
+		modB := filepath.Join(ws, "modB")
+		require.NoError(t, os.MkdirAll(modA, 0o755))
+		require.NoError(t, os.MkdirAll(modB, 0o755))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(ws, "go.work"),
+			[]byte("go 1.25.0\n\nuse (\n\t./modA\n\t./modB\n)\n"),
+			0o644,
+		))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(modA, "go.mod"),
+			[]byte("module example.com/modA\n\ngo 1.25.0\n"),
+			0o644,
+		))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(modB, "go.mod"),
+			[]byte("module example.com/modB\n\ngo 1.25.0\n"),
+			0o644,
+		))
+		if withRootVendor {
+			require.NoError(t, os.MkdirAll(filepath.Join(ws, "vendor"), 0o755))
+			require.NoError(t, os.WriteFile(
+				filepath.Join(ws, "vendor", "modules.txt"),
+				[]byte(modulesTxt),
+				0o644,
+			))
+		}
+		return ws, modA, modB
+	}
+
+	t.Run("workspace without vendor dir", func(t *testing.T) {
+		ws, modA, _ := writeWorkspace(t, false, "")
+		vs := detectVendorState(t.Context(), ws)
+		assert.False(t, vs.active())
+		assert.Empty(t, vs.overrideModFlag())
+		assert.False(t, detectVendorState(t.Context(), modA).active())
+	})
+
+	t.Run("workspace vendor without tool files forces readonly", func(t *testing.T) {
+		ws, modA, _ := writeWorkspace(t, true, instModules)
+		for _, dir := range []string{ws, modA} {
+			vs := detectVendorState(t.Context(), dir)
+			assert.True(t, vs.active())
+			assert.True(t, vs.workspace)
+			assert.False(t, vs.vendored)
+			assert.False(t, vs.needsModMod())
+			assert.Equal(t, modReadonly, vs.overrideModFlag())
+		}
+	})
+
+	t.Run("single tool file with vendored and sibling workspace imports preserves vendor mode", func(t *testing.T) {
+		ws, modA, modB := writeWorkspace(t, true, instModules)
+		require.NoError(t, os.MkdirAll(filepath.Join(modB, "hooks"), 0o755))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(modA, toolFileCanonical),
+			[]byte(
+				"//go:build tools\n\npackage tools\n\nimport (\n\t_ \"example.com/inst\"\n\t_ \"example.com/modB/hooks\"\n)\n",
+			),
+			0o644,
+		))
+
+		vs := detectVendorState(t.Context(), ws)
+		assert.True(t, vs.active())
+		assert.True(t, vs.workspace)
+		assert.True(t, vs.vendored)
+		assert.Empty(t, vs.overrideModFlag())
+		assert.Equal(t, filepath.Join(ws, "vendor"), vs.vendorDir())
+		assert.Equal(
+			t,
+			"v1.0.0",
+			vs.packageVersion("example.com/inst", filepath.Join(ws, "vendor", "example.com", "inst", "inst.go")),
+		)
+	})
+
+	t.Run("multiple tool files all vendored preserves vendor mode", func(t *testing.T) {
+		_, modA, modB := writeWorkspace(t, true, instModules+"# example.com/inst2 v2.0.0\nexample.com/inst2\n")
+		require.NoError(t, os.WriteFile(
+			filepath.Join(modA, toolFileCanonical),
+			[]byte("//go:build tools\n\npackage tools\n\nimport _ \"example.com/inst\"\n"),
+			0o644,
+		))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(modB, toolFileAlias),
+			[]byte("//go:build tools\n\npackage tools\n\nimport _ \"example.com/inst2\"\n"),
+			0o644,
+		))
+
+		vs := detectVendorState(t.Context(), modA)
+		assert.True(t, vs.active())
+		assert.True(t, vs.vendored)
+		assert.Empty(t, vs.overrideModFlag())
+	})
+
+	t.Run("unvendored import in second workspace module forces readonly", func(t *testing.T) {
+		ws, modA, modB := writeWorkspace(t, true, instModules)
+		require.NoError(t, os.WriteFile(
+			filepath.Join(modA, toolFileCanonical),
+			[]byte("//go:build tools\n\npackage tools\n\nimport _ \"example.com/inst\"\n"),
+			0o644,
+		))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(modB, toolFileCanonical),
+			[]byte("//go:build tools\n\npackage tools\n\nimport _ \"example.com/missing\"\n"),
+			0o644,
+		))
+
+		vs := detectVendorState(t.Context(), ws)
+		assert.True(t, vs.active())
+		assert.True(t, vs.workspace)
+		assert.False(t, vs.vendored)
+		assert.Equal(t, modReadonly, vs.overrideModFlag())
+	})
+
+	t.Run("nested non-workspace submodule forces readonly when unvendored", func(t *testing.T) {
+		ws, modA, _ := writeWorkspace(t, true, instModules)
+		sub := filepath.Join(modA, "nested")
+		require.NoError(t, os.MkdirAll(sub, 0o755))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(sub, "go.mod"),
+			[]byte("module example.com/modA/nested\n\ngo 1.25.0\n"),
+			0o644,
+		))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(modA, toolFileCanonical),
+			[]byte("//go:build tools\n\npackage tools\n\nimport _ \"example.com/modA/nested\"\n"),
+			0o644,
+		))
+
+		vs := detectVendorState(t.Context(), ws)
+		assert.True(t, vs.active())
+		assert.False(t, vs.vendored)
+		assert.Equal(t, modReadonly, vs.overrideModFlag())
+	})
+
+	t.Run("sibling use module outside workspace dir", func(t *testing.T) {
+		base := t.TempDir()
+		ws := filepath.Join(base, "ws")
+		sibling := filepath.Join(base, "sibling")
+		require.NoError(t, os.MkdirAll(filepath.Join(ws, "vendor"), 0o755))
+		require.NoError(t, os.MkdirAll(sibling, 0o755))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(ws, "go.work"),
+			[]byte("go 1.25.0\n\nuse ../sibling\n"),
+			0o644,
+		))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(sibling, "go.mod"),
+			[]byte("module example.com/sibling\n\ngo 1.25.0\n"),
+			0o644,
+		))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(sibling, toolFileCanonical),
+			[]byte("//go:build tools\n\npackage tools\n\nimport _ \"example.com/inst\"\n"),
+			0o644,
+		))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(ws, "vendor", "modules.txt"),
+			[]byte(instModules),
+			0o644,
+		))
+
+		vs := detectVendorState(t.Context(), ws)
+		assert.True(t, vs.active())
+		assert.True(t, vs.vendored)
+		ctx := contextWithVendorState(t.Context(), vs)
+		_, ok := vendorStateFromContext(ctx, sibling)
+		assert.True(t, ok, "context cache should hit for workspace use module outside workspace root")
+	})
+}
+
+func TestWrapWorkspaceVendorFallbackError(t *testing.T) {
+	wsVS := vendorState{workspace: true, vendorRoot: "/ws", vendored: false}
+	lookupErr := assert.AnError
+	assert.Equal(t, lookupErr, wrapWorkspaceVendorFallbackError(lookupErr, wsVS))
+
+	goproxyErr := wrapWorkspaceVendorFallbackError(
+		os.ErrNotExist,
+		vendorState{workspace: true, vendorRoot: "/ws", vendored: true},
+	)
+	require.ErrorIs(t, goproxyErr, os.ErrNotExist)
+	assert.NotContains(t, goproxyErr.Error(), "go work vendor")
+
+	wrapped := wrapWorkspaceVendorFallbackError(
+		ex.New("module lookup disabled by GOPROXY=off"),
+		wsVS,
+	)
+	require.ErrorContains(t, wrapped, "otelc pin")
+	require.ErrorContains(t, wrapped, "go work vendor")
+	require.ErrorContains(t, wrapped, "GOWORK=off")
+}
+
 func TestGetVendorState_ReusesContext(t *testing.T) {
 	root := t.TempDir()
 	canonRoot := resolveAbsDir(root)
+	modA := filepath.Join(root, "modA")
+	canonModA := resolveAbsDir(modA)
 	vendorFile := filepath.Join(root, "vendor", "example.com", "pkg", "pkg.go")
 	cached := vendorState{
 		vendored:   true,
+		workspace:  true,
 		queryDir:   canonRoot,
-		moduleRoot: canonRoot,
+		vendorRoot: canonRoot,
+		moduleDirs: []string{canonModA},
 		modules:    vendorModules{"example.com/pkg": "v1.2.3"},
 	}
 	ctx := contextWithVendorState(t.Context(), cached)
@@ -611,6 +900,9 @@ func TestGetVendorState_ReusesContext(t *testing.T) {
 	assert.True(t, got.vendored)
 	assert.Equal(t, "v1.2.3", got.packageVersion("example.com/pkg", vendorFile))
 	assert.True(t, vendoringActive(ctx, root))
+
+	_, okModA := vendorStateFromContext(ctx, modA)
+	assert.True(t, okModA)
 
 	// A different directory does not return the cached state for root.
 	other := t.TempDir()

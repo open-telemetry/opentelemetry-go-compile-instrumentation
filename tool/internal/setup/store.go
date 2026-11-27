@@ -35,6 +35,11 @@ func resolveRulePaths(
 	buildFlags ...string,
 ) error {
 	dirs := normalizeModuleDirs(moduleDirs)
+	if vs, ok := ctx.Value(vendorStateKey{}).(vendorState); ok && vs.workspace && vs.vendorRoot != "" {
+		if !slices.Contains(dirs, vs.vendorRoot) {
+			dirs = append(dirs, vs.vendorRoot)
+		}
+	}
 	pending := collectPendingRulePaths(matched)
 	forwarded, flagErr := forwardRulePathFlags(buildFlags)
 	if flagErr != nil {

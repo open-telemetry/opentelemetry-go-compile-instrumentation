@@ -2036,8 +2036,139 @@ replace (
 	require.NoError(t, err)
 	assert.Contains(t, string(afterTidy), "example.com/dep")
 
-	// syncVendor surfaces an error when go mod vendor fails.
-	require.ErrorContains(t, syncVendor(t.Context(), t.TempDir()), "running go mod vendor")
+	// syncVendor surfaces an error when go mod vendor / go work vendor fails.
+	require.ErrorContains(t, syncVendor(t.Context(), t.TempDir(), false), "running go mod vendor")
+	require.ErrorContains(t, syncVendor(t.Context(), t.TempDir(), true), "running go work vendor")
+}
+
+func TestPrepareVendoredBuild_Workspace(t *testing.T) {
+	t.Setenv("GOWORK", "")
+
+	ws := t.TempDir()
+	app := filepath.Join(ws, "app")
+	require.NoError(t, os.MkdirAll(app, 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(ws, "vendor"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(ws, "go.work"), []byte("go 1.25.0\n\nuse ./app\n"), 0o644))
+	require.NoError(
+		t,
+		os.WriteFile(filepath.Join(app, "go.mod"), []byte("module example.com/app\n\ngo 1.25.0\n"), 0o644),
+	)
+	require.NoError(t, os.WriteFile(filepath.Join(app, "main.go"), []byte("package main\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(ws, "vendor", "modules.txt"), []byte("## workspace\n"), 0o644))
+	t.Chdir(ws)
+	t.Setenv(util.EnvOtelcWorkDir, ws)
+	t.Setenv("GOFLAGS", "")
+
+	opts := PinOptions{Args: []string{"-mod=vendor", "./app"}}
+	_, moduleDirs, err := resolvePinModuleDirs(t.Context(), &opts)
+	require.NoError(t, err)
+	require.Len(t, moduleDirs, 1)
+
+	assert.Equal(t, []string{"-mod=readonly", "./app"}, opts.Args)
+	assert.Equal(t, modReadonly, os.Getenv("GOFLAGS"))
+}
+
+func TestUpdatePinnedProjects_WorkspaceAutoVendorsOnce(t *testing.T) {
+	t.Setenv("GOWORK", "")
+	t.Setenv("GOFLAGS", "")
+
+	root := t.TempDir()
+	depDir := filepath.Join(root, "dep")
+	otelcDir := filepath.Join(root, "otelc")
+	ws := filepath.Join(root, "ws")
+	appA := filepath.Join(ws, "appA")
+	appB := filepath.Join(ws, "appB")
+	for _, d := range []string{
+		depDir,
+		filepath.Join(otelcDir, "tool", "cmd", "otelc"),
+		filepath.Join(ws, "vendor"),
+		appA,
+		appB,
+	} {
+		require.NoError(t, os.MkdirAll(d, 0o755))
+	}
+
+	require.NoError(
+		t,
+		os.WriteFile(filepath.Join(depDir, "go.mod"), []byte("module example.com/dep\n\ngo 1.25.0\n"), 0o644),
+	)
+	require.NoError(t, os.WriteFile(filepath.Join(depDir, "dep.go"), []byte("package dep\n"), 0o644))
+	require.NoError(
+		t,
+		os.WriteFile(filepath.Join(depDir, "otelc.yml"), []byte("version: \"v1.0.0\"\n"), 0o644),
+	)
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(otelcDir, "go.mod"),
+		[]byte("module go.opentelemetry.io/otelc\n\ngo 1.25.0\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(otelcDir, "tool", "cmd", "otelc", "main.go"),
+		[]byte("package main\n\nfunc main() {}\n"),
+		0o644,
+	))
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(ws, "go.work"),
+		[]byte("go 1.25.0\n\nuse (\n\t./appA\n\t./appB\n)\n"),
+		0o644,
+	))
+	for _, mod := range []struct {
+		dir  string
+		name string
+	}{
+		{appA, "example.com/appA"},
+		{appB, "example.com/appB"},
+	} {
+		goModContent := "module " + mod.name + "\n\ngo 1.25.0\n\n" +
+			"tool go.opentelemetry.io/otelc/tool/cmd/otelc\n\n" +
+			"require (\n\texample.com/dep v1.0.0\n\tgo.opentelemetry.io/otelc v0.0.0\n)\n\n" +
+			"replace (\n\texample.com/dep v1.0.0 => ../../dep\n\tgo.opentelemetry.io/otelc => ../../otelc\n)\n"
+		require.NoError(t, os.WriteFile(filepath.Join(mod.dir, "go.mod"), []byte(goModContent), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(mod.dir, "go.sum"), []byte(""), 0o644))
+		require.NoError(
+			t,
+			os.WriteFile(filepath.Join(mod.dir, "main.go"), []byte("package main\nfunc main() {}\n"), 0o644),
+		)
+		require.NoError(t, os.WriteFile(
+			filepath.Join(mod.dir, toolFileCanonical),
+			[]byte("//go:build tools\n\npackage tools\n\nimport _ \"example.com/dep\"\n"),
+			0o644,
+		))
+	}
+
+	modulesTxt := filepath.Join(ws, "vendor", "modules.txt")
+	require.NoError(t, os.WriteFile(modulesTxt, []byte("## workspace\n"), 0o644))
+
+	t.Chdir(ws)
+	t.Setenv(util.EnvOtelcWorkDir, ws)
+
+	readStderr := captureStderr(t)
+	_, err := pinLocked(t.Context(), PinOptions{
+		Prune:  true,
+		Vendor: true,
+		Args:   []string{"./appA", "./appB"},
+	})
+	require.NoError(t, err)
+
+	stderr := readStderr()
+	assert.Equal(t, 1, strings.Count(stderr, "running go work vendor"), "go work vendor should run once for workspace")
+	assert.Contains(t, stderr, filepath.Join(ws, "vendor"))
+
+	after, err := os.ReadFile(modulesTxt)
+	require.NoError(t, err)
+	assert.Contains(t, string(after), "example.com/dep")
+
+	// Second run is idempotent: go work vendor must not re-run when in sync.
+	readStderr2 := captureStderr(t)
+	_, err = pinLocked(t.Context(), PinOptions{
+		Prune:  true,
+		Vendor: true,
+		Args:   []string{"./appA", "./appB"},
+	})
+	require.NoError(t, err)
+	assert.NotContains(t, readStderr2(), "go work vendor")
 }
 
 func TestPin_GeneratesToolFileAndAutoVendors(t *testing.T) {

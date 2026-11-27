@@ -185,16 +185,16 @@ replaces those below it; there is no merging.
 
 ## Vendored Projects
 
-`otelc` handles single-module projects with a `vendor/` directory in two ways:
+`otelc` handles both single-module projects and Go workspaces (`go.work`) with a `vendor/` directory in two ways:
 
-- **Offline vendored builds (`-mod=vendor` preserved):** When `otel.instrumentation.go` (or `otelc.tool.go`) exists and all of its external imports are present in `vendor/modules.txt`, `otelc` keeps `-mod=vendor`, does not mutate `go.mod` or `GOFLAGS`, and reads instrumentation rules and dependency versions directly from `vendor/` (allowing `GOPROXY=off` builds with an empty module cache). Run `otelc pin` to pin and run `go mod vendor` automatically (emitting a warning before overwriting `vendor/`).
-- **Zero-config fallback (`-mod=mod`):** If no tool file exists or any external tool-file import is missing from `vendor/modules.txt`, `otelc` forces `-mod=mod` for the build so `vendor/` is left untouched.
+- **Offline vendored builds (`-mod=vendor` preserved):** When `otel.instrumentation.go` (or `otelc.tool.go`) exists and all of its external imports are present in `vendor/modules.txt`, `otelc` keeps `-mod=vendor`, does not mutate `go.mod` or `GOFLAGS`, and reads instrumentation rules and dependency versions directly from `vendor/` (allowing `GOPROXY=off` builds with an empty module cache). Run `otelc pin` to pin and run `go mod vendor` (or `go work vendor` once at the workspace root) automatically, emitting a warning before overwriting `vendor/`.
+- **Fallback mode (`-mod=mod` / `-mod=readonly`):** If no tool file exists or any external tool-file import is missing from `vendor/modules.txt`, `otelc` leaves `vendor/` untouched by forcing `-mod=mod` for single-module projects or `-mod=readonly` for `go.work` workspaces (where Go forbids `-mod=mod`). Under `-mod=readonly`, dependencies must be resolvable via `go.mod` (cached or locally `replace`d); offline builds missing pinned instrumentations fail with a hint to run `otelc pin` or set `GOWORK=off`.
 
 Cases to be aware of:
 
-- **Module-root tool files and `metadata.yaml`:** `go mod vendor` only copies non-Go files (`otel.instrumentation.go`, `metadata.yaml`, `*.otelc.yml`) from directories of imported packages. If an instrumentation module places `otel.instrumentation.go` or `metadata.yaml` at its module root `mod/` while applications only import a subpackage `mod/pkg`, `go mod vendor` drops the parent directory's files. Keep one module per imported instrumentation package, or ensure the package directory itself is imported.
-- **`add_file` sources (`//go:build ignore`):** `go mod vendor` skips files tagged `//go:build ignore` unless matched by `//go:embed`. See [File Addition Rule](rules.md#6-file-addition-rule).
-- **Go workspaces (`go.work`):** Workspace vendoring (`go work vendor`) is not yet supported.
+- **Module-root tool files and `metadata.yaml`:** `go mod vendor` and `go work vendor` only copy non-Go files (`otel.instrumentation.go`, `metadata.yaml`, `*.otelc.yml`) from directories of imported packages. If an instrumentation module places `otel.instrumentation.go` or `metadata.yaml` at its module root `mod/` while applications only import a subpackage `mod/pkg`, vendoring drops the parent directory's files. Keep one module per imported instrumentation package, or ensure the package directory itself is imported.
+- **`add_file` sources (`//go:build ignore`):** `go mod vendor` and `go work vendor` skip files tagged `//go:build ignore` unless matched by `//go:embed`. See [File Addition Rule](rules.md#6-file-addition-rule).
+- **Go workspaces (`go.work`):** Workspace vendoring places `vendor/` and `vendor/modules.txt` at the `go.work` root directory; Go ignores per-module `vendor/` directories when workspace mode is active. Tool-file imports targeting packages in workspace `use` modules are resolved directly on disk without appearing in `vendor/modules.txt`, whereas non-workspace nested submodules must be vendored. Because `go mod tidy` runs per module and ignores `go.work`, pinning a module that imports sibling `use` modules without `replace` directives in `go.mod` requires `go.mod` and `go.sum` to be up to date first (or local `replace` directives).
 
 ## Errors and Diagnostics
 
