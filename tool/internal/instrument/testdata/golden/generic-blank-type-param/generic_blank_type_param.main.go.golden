@@ -110,8 +110,13 @@ func OtelBeforeTrampoline_Key2475612500[K comparable, _ignoredTypeParam_24756125
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec Before hook", "KeyBefore")
-			if e, ok := err.(error); ok {
+			switch e := err.(type) {
+			case error:
 				println(e.Error())
+			case interface{ String() string }:
+				println(e.String())
+			case string:
+				println(e)
 			}
 			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
 			if fetchStack != nil && printStack != nil {
@@ -129,8 +134,13 @@ func OtelAfterTrampoline_Key2475612500[K comparable, _ignoredTypeParam_247561250
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "KeyAfter")
-			if e, ok := err.(error); ok {
+			switch e := err.(type) {
+			case error:
 				println(e.Error())
+			case interface{ String() string }:
+				println(e.String())
+			case string:
+				println(e)
 			}
 			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
 			if fetchStack != nil && printStack != nil {
@@ -229,8 +239,13 @@ func OtelBeforeTrampoline_Len2080245203[_ignoredTypeParam_2080245203_0 comparabl
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec Before hook", "LenBefore")
-			if e, ok := err.(error); ok {
+			switch e := err.(type) {
+			case error:
 				println(e.Error())
+			case interface{ String() string }:
+				println(e.String())
+			case string:
+				println(e)
 			}
 			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
 			if fetchStack != nil && printStack != nil {
@@ -248,8 +263,13 @@ func OtelAfterTrampoline_Len2080245203[_ignoredTypeParam_2080245203_0 comparable
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "LenAfter")
-			if e, ok := err.(error); ok {
+			switch e := err.(type) {
+			case error:
 				println(e.Error())
+			case interface{ String() string }:
+				println(e.String())
+			case string:
+				println(e)
 			}
 			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
 			if fetchStack != nil && printStack != nil {

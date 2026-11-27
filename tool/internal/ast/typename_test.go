@@ -30,8 +30,9 @@ func TestParseTypeName(t *testing.T) {
 		{input: "*T", wantName: "T", wantPtr: true},
 		{input: "example.com/pkg.Type", wantImport: "example.com/pkg", wantName: "Type"},
 		{input: "", wantErr: true},
-		{input: "[]string", wantErr: true},
-		{input: "map[string]int", wantErr: true},
+		{input: "[]", wantErr: true},
+		{input: "map", wantErr: true},
+		{input: "chan", wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -761,7 +762,7 @@ func TestFieldListContainsType(t *testing.T) {
 	assert.False(t, mustContains(t, nil, "error"))
 	assert.False(t, mustContains(t, &dst.FieldList{}, "error"))
 
-	_, err := fieldListContainsType(fields, "[]invalid", nil)
+	_, err := fieldListContainsType(fields, "[]", nil)
 	assert.Error(t, err)
 }
 
@@ -779,7 +780,7 @@ func TestMatchesTypeName(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, matched)
 
-	_, err = MatchesTypeName(ctxType, "[]invalid", nil)
+	_, err = MatchesTypeName(ctxType, "[]", nil)
 	assert.Error(t, err)
 }
 

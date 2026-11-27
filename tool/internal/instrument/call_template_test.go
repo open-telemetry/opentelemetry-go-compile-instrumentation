@@ -189,13 +189,13 @@ func TestCallTemplateData_Receiver(t *testing.T) {
 }
 
 func TestCallTemplateData_FuncReturnOfType(t *testing.T) {
-	t.Run("no enclosing function errors", func(t *testing.T) {
+	t.Run("no enclosing function gives no match", func(t *testing.T) {
 		d := &callTemplateData{}
 
-		_, err := d.FuncReturnOfType("error")
+		ret, err := d.FuncReturnOfType("error")
 
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "no enclosing function is available")
+		require.NoError(t, err)
+		assert.Empty(t, ret)
 	})
 
 	t.Run("delegates to enclosing function", func(t *testing.T) {
@@ -377,16 +377,18 @@ func TestCompileExpression_FuncArgumentOfType_SkipsUnsupportedParamTypes(t *test
 	assert.Equal(t, "ctx", argIdent.Name)
 }
 
-func TestCompileExpression_FuncArgumentOfType_NoEnclosingFuncErrors(t *testing.T) {
-	tmpl, err := newCallTemplate(`traced({{ .FuncArgumentOfType "context.Context" }})`)
+func TestCompileExpression_FuncArgumentOfType_NoEnclosingFuncMatchesNothing(t *testing.T) {
+	tmpl, err := newCallTemplate(`traced({{ .FuncArgumentOfType "context.Context" }}{{ . }})`)
 	require.NoError(t, err)
 
 	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
 
-	_, _, err = tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
+	result, _, err := tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no enclosing function is available")
+	require.NoError(t, err)
+	resultCall, ok := result.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", result)
+	require.Len(t, resultCall.Args, 1, "only the wrapped call is left")
 }
 
 func TestCompileExpression_FuncReturnOfType_Found(t *testing.T) {
@@ -407,16 +409,134 @@ func TestCompileExpression_FuncReturnOfType_Found(t *testing.T) {
 	assert.Equal(t, "err", argIdent.Name)
 }
 
-func TestCompileExpression_FuncReturnOfType_NoEnclosingFuncErrors(t *testing.T) {
-	tmpl, err := newCallTemplate(`traced({{ .FuncReturnOfType "error" }})`)
+func TestCompileExpression_FuncReturnOfType_NoEnclosingFuncMatchesNothing(t *testing.T) {
+	tmpl, err := newCallTemplate(`traced({{ .FuncReturnOfType "error" }}{{ . }})`)
 	require.NoError(t, err)
 
 	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
 
-	_, _, err = tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
+	result, _, err := tmpl.compileExpression(originalCall, callSite{}, nil, nil, nil)
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no enclosing function is available")
+	require.NoError(t, err)
+	resultCall, ok := result.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", result)
+	require.Len(t, resultCall.Args, 1, "only the wrapped call is left")
+}
+
+func TestCallTemplateData_ThatImplementsWithoutEnclosingFunc(t *testing.T) {
+	d := &callTemplateData{}
+
+	arg, err := d.FuncArgumentThatImplements("context.Context")
+	require.NoError(t, err)
+	assert.Empty(t, arg)
+
+	ret, err := d.FuncReturnThatImplements("error")
+	require.NoError(t, err)
+	assert.Empty(t, ret)
+}
+
+// funcLitSite returns the call site of a call inside the first function
+// literal of src, along with the literal.
+func funcLitSite(t *testing.T, src string) (callSite, *dst.FuncDecl) {
+	t.Helper()
+	file := parseFile(t, src)
+	var lit *dst.FuncLit
+	dst.Inspect(file, func(node dst.Node) bool {
+		if l, ok := node.(*dst.FuncLit); ok && lit == nil {
+			lit = l
+		}
+		return true
+	})
+	require.NotNil(t, lit, "source has no function literal")
+	var decl *dst.FuncDecl
+	for _, d := range file.Decls {
+		if fd, ok := d.(*dst.FuncDecl); ok {
+			decl = fd
+		}
+	}
+	return callSite{lit: lit}, decl
+}
+
+func TestCompileExpression_FuncLiteralOverridesDeclaration(t *testing.T) {
+	site, decl := funcLitSite(t, `package main
+
+import "context"
+
+func Outer(ctx context.Context) {
+	_ = func(inner context.Context, n int) {}
+}
+`)
+	tmpl, err := newCallTemplate(
+		`traced({{ .FuncArgumentOfType "context.Context" }}, {{ .FuncArgumentCount }}, "{{ .FuncName }}", {{ . }})`)
+	require.NoError(t, err)
+	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
+
+	result, _, err := tmpl.compileExpression(originalCall, site, decl, nil, nil)
+
+	require.NoError(t, err)
+	resultCall, ok := result.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", result)
+	require.Len(t, resultCall.Args, 4)
+	assert.Equal(t, "inner", resultCall.Args[0].(*dst.Ident).Name)
+	assert.Equal(t, "2", resultCall.Args[1].(*dst.BasicLit).Value)
+	assert.Equal(t, `""`, resultCall.Args[2].(*dst.BasicLit).Value)
+}
+
+func TestCompileExpression_FuncLiteralWithoutDeclaration(t *testing.T) {
+	site, _ := funcLitSite(t, `package main
+
+import "context"
+
+var handler = func(ctx context.Context) {}
+`)
+	tmpl, err := newCallTemplate(`traced({{ .FuncArgument 0 }}, {{ . }})`)
+	require.NoError(t, err)
+	originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
+
+	result, _, err := tmpl.compileExpression(originalCall, site, nil, nil, nil)
+
+	require.NoError(t, err)
+	resultCall, ok := result.(*dst.CallExpr)
+	require.True(t, ok, "expected *dst.CallExpr, got %T", result)
+	assert.Equal(t, "ctx", resultCall.Args[0].(*dst.Ident).Name)
+}
+
+func TestCallTemplateData_ReceiverInFuncLiteral(t *testing.T) {
+	t.Run("a literal in a method uses the method receiver", func(t *testing.T) {
+		site, decl := funcLitSite(t, `package main
+
+type T struct{}
+
+func (t *T) Run() {
+	_ = func() {}
+}
+`)
+		tmpl, err := newCallTemplate(`traced({{ .Receiver }}, {{ . }})`)
+		require.NoError(t, err)
+		originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
+
+		result, _, err := tmpl.compileExpression(originalCall, site, decl, nil, nil)
+
+		require.NoError(t, err)
+		assert.Equal(t, "t", result.(*dst.CallExpr).Args[0].(*dst.Ident).Name)
+	})
+
+	t.Run("a literal in a plain function has no receiver", func(t *testing.T) {
+		site, decl := funcLitSite(t, `package main
+
+func Run() {
+	_ = func() {}
+}
+`)
+		tmpl, err := newCallTemplate(`traced({{ .Receiver }}, {{ . }})`)
+		require.NoError(t, err)
+		originalCall := &dst.CallExpr{Fun: &dst.Ident{Name: "funcCall"}}
+
+		_, _, err = tmpl.compileExpression(originalCall, site, decl, nil, nil)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no receiver")
+	})
 }
 
 func TestCompileExpression_CallArgumentIsWrappedCallNotEnclosingFunc(t *testing.T) {

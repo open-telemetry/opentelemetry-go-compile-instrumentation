@@ -64,7 +64,10 @@ jobs:
       - name: Find previous tag
         id: previous_tag
         run: |
-          PREVIOUS_TAG=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo "")
+          # Newest final-release tag reachable from HEAD, for example v1.3.0 but
+          # not v1.3.0-rc1. An empty value makes generate-notes pick the previous
+          # release on its own.
+          PREVIOUS_TAG=$(git tag --list --merged HEAD 'v[0-9]*' --sort=-v:refname 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)
           echo "previous_tag=${PREVIOUS_TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Generate release notes
@@ -109,16 +112,20 @@ jobs:
             PR_TITLE="release: ${VERSION}"
             PR_BODY="This is a release PR for **${VERSION}**. Review and edit the release notes in \`.github/release-notes.md\`."
           fi
+          # Write the body to a file instead of a GITHUB_OUTPUT heredoc, so
+          # input values can never truncate the output block.
+          BODY_FILE="${RUNNER_TEMP}/release-pr-body.md"
+          printf '%b\n' "${PR_BODY}" > "${BODY_FILE}"
           {
             echo "commit_msg=${COMMIT_MSG}"
             echo "pr_title=${PR_TITLE}"
-            echo "pr_body<<EOF"
-            echo -e "${PR_BODY}"
-            echo "EOF"
+            echo "body_file=${BODY_FILE}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Generate GitHub App token
         id: app-token
+        # The client-id var gates App mode. When it is unset, the step is
+        # skipped by design and the workflow falls back to github.token.
         if: vars.OTELBOT_GO_COMPILE_INSTRUMENTATION_CLIENT_ID != ''
         continue-on-error: true
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510  # v3.3.0
@@ -126,8 +133,19 @@ jobs:
           client-id: ${{ vars.OTELBOT_GO_COMPILE_INSTRUMENTATION_CLIENT_ID }}
           private-key: ${{ secrets.OTELBOT_GO_COMPILE_INSTRUMENTATION_PRIVATE_KEY }}
           permission-contents: write
+          # This workflow creates PRs, so it needs pull-requests: write. The
+          # release.yml copy only requests contents: write. Keep the copies
+          # intentionally different and update both together on a SHA bump.
           permission-pull-requests: write
 
+      - name: Warn on App token failure
+        if: steps.app-token.outcome == 'failure'
+        run: echo "::warning::GitHub App token generation failed, falling back to github.token. Check the OTELBOT secrets."
+
+      # By default, create-pull-request uses the workflow-triggering user as
+      # author and github-actions[bot] as committer, regardless of which token
+      # wins. Pass explicit author or committer inputs to pin the identity
+      # instead.
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@3ffccacd46053766916f087ce41d627c0b8cf2d1  # v8.1.3
         with:
@@ -135,7 +153,7 @@ jobs:
           branch: release/${{ inputs.version }}
           base: ${{ inputs.target_branch }}
           title: ${{ steps.metadata.outputs.pr_title }}
-          body: ${{ steps.metadata.outputs.pr_body }}
+          body-path: ${{ steps.metadata.outputs.body_file }}
           commit-message: ${{ steps.metadata.outputs.commit_msg }}
           add-paths: .github/release-notes.md
           labels: scope:chore

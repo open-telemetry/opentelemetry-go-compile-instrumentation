@@ -151,7 +151,7 @@ func TestFuncTemplateData_FuncArgumentOfTypeInvalidType(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo(a int) {}")
 	data := newFuncTemplateData(funcDecl, nil, nil, "h1")
 
-	_, err := data.FuncArgumentOfType("[]invalid")
+	_, err := data.FuncArgumentOfType("[]")
 	require.Error(t, err)
 }
 
@@ -181,7 +181,7 @@ func TestFuncTemplateData_FuncReturnOfTypeInvalidType(t *testing.T) {
 	funcDecl := parseFunc(t, "package main\nfunc Foo() (int, error) { return 0, nil }")
 	data := newFuncTemplateData(funcDecl, nil, nil, "h1")
 
-	_, err := data.FuncReturnOfType("[]invalid")
+	_, err := data.FuncReturnOfType("[]")
 	require.Error(t, err)
 }
 
@@ -251,4 +251,34 @@ func TestFuncTemplateData_DirectiveArgsEmpty(t *testing.T) {
 
 	assert.Empty(t, data.DirectiveArgs())
 	assert.Empty(t, data.DirectiveArg("span.name"))
+}
+
+func TestFuncTemplateData_FuncArgumentOfTypeComposite(t *testing.T) {
+	funcDecl := parseFunc(t, "package main\nfunc Foo(n int, body []byte, opts map[string]any) {}")
+	data := newFuncTemplateData(funcDecl, nil, nil, "h1")
+
+	v, err := data.FuncArgumentOfType("[]byte")
+	require.NoError(t, err)
+	assert.Equal(t, "body", v)
+
+	v, err = data.FuncArgumentOfType("map[string]any")
+	require.NoError(t, err)
+	assert.Equal(t, "opts", v)
+
+	v, err = data.FuncArgumentOfType("[]string")
+	require.NoError(t, err)
+	assert.Empty(t, v)
+}
+
+func TestFuncTemplateData_FuncReturnOfTypeComposite(t *testing.T) {
+	funcDecl := parseFunc(t, "package main\nfunc Foo() ([]byte, error) { return nil, nil }")
+	data := newFuncTemplateData(funcDecl, nil, nil, "h1")
+
+	v, err := data.FuncReturnOfType("[]byte")
+	require.NoError(t, err)
+	assert.Equal(t, "_unnamedRetVal_h1_0", v)
+
+	v, err = data.FuncReturnOfType("[]int")
+	require.NoError(t, err)
+	assert.Empty(t, v)
 }

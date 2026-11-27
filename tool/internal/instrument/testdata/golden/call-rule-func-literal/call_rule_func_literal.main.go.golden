@@ -1,0 +1,47 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+//line /golden/work/main.go:6
+import (
+	"context"
+	"fmt"
+)
+
+// A literal outside any function declaration.
+var handler = func(ctx context.Context) {
+	(func() (int, error) {
+		println("ctx:", ctx != nil)
+		return fmt.Println("package-level literal")
+	})() /*line /golden/work/main.go:13*/
+}
+
+// The literal has no context, the declaration has one.
+func Outer(ctx context.Context) {
+	run := func() {
+		fmt.Println("literal without ctx")
+	}
+	run()
+	(func() (int, error) {
+		println("ctx:", ctx != nil)
+		return fmt.Println("declaration")
+	})() /*line /golden/work/main.go:22*/
+}
+
+// The literal has its own context, the declaration has none.
+func NoCtx() {
+	run := func(c context.Context) {
+		(func() (int, error) {
+			println("ctx:", c != nil)
+			return fmt.Println("literal with ctx")
+		})() /*line /golden/work/main.go:28*/
+	}
+	run(context.Background())
+}
+
+func main() {
+	handler(context.Background())
+	Outer(context.Background())
+	NoCtx()
+}

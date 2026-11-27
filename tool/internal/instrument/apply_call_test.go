@@ -86,10 +86,10 @@ func B() {
 `)
 
 	var enclosingNames []string
-	walkCallsWithEnclosingFunc(root, func(_ *dst.CallExpr, enclosing *dst.FuncDecl) bool {
+	walkCallsWithEnclosingFunc(root, func(_ *dst.CallExpr, enclosing callEnclosure) bool {
 		name := "<none>"
-		if enclosing != nil {
-			name = enclosing.Name.Name
+		if enclosing.funcDecl != nil {
+			name = enclosing.funcDecl.Name.Name
 		}
 		enclosingNames = append(enclosingNames, name)
 		return true
@@ -110,7 +110,7 @@ func A() {
 `)
 
 	visited := 0
-	walkCallsWithEnclosingFunc(root, func(_ *dst.CallExpr, _ *dst.FuncDecl) bool {
+	walkCallsWithEnclosingFunc(root, func(_ *dst.CallExpr, _ callEnclosure) bool {
 		visited++
 		return false
 	})
@@ -133,8 +133,8 @@ func B() {
 `)
 
 	var visited []string
-	walkCallsWithEnclosingFunc(root, func(_ *dst.CallExpr, enclosing *dst.FuncDecl) bool {
-		visited = append(visited, enclosing.Name.Name)
+	walkCallsWithEnclosingFunc(root, func(_ *dst.CallExpr, enclosing callEnclosure) bool {
+		visited = append(visited, enclosing.funcDecl.Name.Name)
 		return false
 	})
 
@@ -849,6 +849,245 @@ var resp, _ = http.Get("url")
 	require.Error(t, err)
 	require.False(t, modified, "a rule that matched nothing or failed must not report a change")
 	assert.Contains(t, err.Error(), "no enclosing function is available")
+}
+
+const ctxConditionalReplace = `{{- $ctx := .FuncArgumentOfType "context.Context" -}}
+{{- if $ctx -}}
+traced.Call({{ $ctx }}, {{ .CallArgument 0 }})
+{{- else -}}
+{{ . }}
+{{- end -}}`
+
+func TestWalkCallsWithEnclosingFunc_ReportsInnermostFuncLit(t *testing.T) {
+	root := parseFile(t, `package main
+
+import "fmt"
+
+var pkg = func() { fmt.Println("pkg") }
+
+var plain = fmt.Sprint("plain")
+
+func A() {
+	fmt.Println("a")
+	func() {
+		fmt.Println("lit")
+		func(x int) {
+			fmt.Println("nested")
+		}(1)
+		fmt.Println("after nested")
+	}()
+}
+`)
+
+	type visit struct {
+		arg      string
+		decl     string
+		litParam int
+	}
+	var visits []visit
+	walkCallsWithEnclosingFunc(root, func(call *dst.CallExpr, enclosing callEnclosure) bool {
+		if len(call.Args) != 1 {
+			return true
+		}
+		basic, ok := call.Args[0].(*dst.BasicLit)
+		if !ok || basic.Kind != token.STRING {
+			return true
+		}
+		v := visit{arg: basic.Value, litParam: -1}
+		if enclosing.funcDecl != nil {
+			v.decl = enclosing.funcDecl.Name.Name
+		}
+		if enclosing.lit != nil {
+			v.litParam = len(enclosing.lit.Type.Params.List)
+		}
+		visits = append(visits, v)
+		return true
+	})
+
+	assert.Equal(t, []visit{
+		{arg: `"pkg"`, decl: "", litParam: 0},
+		{arg: `"plain"`, decl: "", litParam: -1},
+		{arg: `"a"`, decl: "A", litParam: -1},
+		{arg: `"lit"`, decl: "A", litParam: 0},
+		{arg: `"nested"`, decl: "A", litParam: 1},
+		{arg: `"after nested"`, decl: "A", litParam: 0},
+	}, visits)
+}
+
+func TestApplyCallRule_FuncLiteral(t *testing.T) {
+	newRule := func(replace string) *rule.InstCallRule {
+		r := httpGetRule(replace)
+		r.Imports = map[string]string{"traced": "fmt"}
+		return r
+	}
+	apply := func(t *testing.T, source, replace string) (string, error) {
+		t.Helper()
+		root := parseFile(t, source)
+		_, err := newTestPhase().applyCallRule(context.Background(), newRule(replace), root)
+		return renderFile(t, root), err
+	}
+
+	t.Run("literal outside any function uses its own parameters", func(t *testing.T) {
+		out, err := apply(t, `package main
+
+import (
+	"context"
+	"net/http"
+)
+
+var handler = func(ctx context.Context) {
+	http.Get("url")
+}
+`, ctxConditionalReplace)
+
+		require.NoError(t, err)
+		assert.Contains(t, out, `traced.Call(ctx, "url")`)
+	})
+
+	t.Run("literal outside any function without a match keeps the call", func(t *testing.T) {
+		out, err := apply(t, `package main
+
+import "net/http"
+
+var handler = func(name string) {
+	http.Get("url")
+}
+`, ctxConditionalReplace)
+
+		require.NoError(t, err)
+		assert.Contains(t, out, `http.Get("url")`)
+		assert.NotContains(t, out, "traced.Call")
+	})
+
+	t.Run("literal in a function without context", func(t *testing.T) {
+		out, err := apply(t, `package main
+
+import (
+	"context"
+	"net/http"
+)
+
+func Run() {
+	h := func(ctx context.Context) { http.Get("url") }
+	h(context.Background())
+}
+`, ctxConditionalReplace)
+
+		require.NoError(t, err)
+		assert.Contains(t, out, `traced.Call(ctx, "url")`)
+	})
+
+	t.Run("literal parameters win over the declaration", func(t *testing.T) {
+		out, err := apply(t, `package main
+
+import (
+	"context"
+	"net/http"
+)
+
+func Run(ctx context.Context) {
+	g := func(ctx2 context.Context) { http.Get("url") }
+	g(ctx)
+}
+`, ctxConditionalReplace)
+
+		require.NoError(t, err)
+		assert.Contains(t, out, `traced.Call(ctx2, "url")`)
+	})
+
+	t.Run("literal without context does not borrow the declaration context", func(t *testing.T) {
+		out, err := apply(t, `package main
+
+import (
+	"context"
+	"net/http"
+)
+
+func Run(ctx context.Context) {
+	g := func() { http.Get("url") }
+	g()
+	http.Get("outer")
+}
+`, ctxConditionalReplace)
+
+		require.NoError(t, err)
+		assert.Contains(t, out, `http.Get("url")`)
+		assert.Contains(t, out, `traced.Call(ctx, "outer")`)
+	})
+
+	t.Run("nested literals use the innermost one", func(t *testing.T) {
+		out, err := apply(t, `package main
+
+import (
+	"context"
+	"net/http"
+)
+
+func Run(a context.Context) {
+	func(b context.Context) {
+		func(c context.Context) { http.Get("deep") }(b)
+		http.Get("middle")
+	}(a)
+}
+`, ctxConditionalReplace)
+
+		require.NoError(t, err)
+		assert.Contains(t, out, `traced.Call(c, "deep")`)
+		assert.Contains(t, out, `traced.Call(b, "middle")`)
+	})
+
+	t.Run("call outside every function matches nothing", func(t *testing.T) {
+		out, err := apply(t, `package main
+
+import "net/http"
+
+var resp, _ = http.Get("url")
+`, ctxConditionalReplace)
+
+		require.NoError(t, err)
+		assert.Contains(t, out, `http.Get("url")`)
+		assert.NotContains(t, out, "traced.Call")
+	})
+
+	t.Run("positional helpers read the literal", func(t *testing.T) {
+		out, err := apply(t, `package main
+
+import "net/http"
+
+var handler = func(name string, n int) {
+	http.Get("url")
+}
+`, `traced.Call({{ .FuncArgument 1 }}, {{ .FuncArgumentCount }}, "{{ .FuncName }}", {{ . }})`)
+
+		require.NoError(t, err)
+		assert.Contains(t, out, `traced.Call(n, 2, "", http.Get("url"))`)
+	})
+
+	t.Run("positional helpers still fail outside every function", func(t *testing.T) {
+		_, err := apply(t, `package main
+
+import "net/http"
+
+var resp, _ = http.Get("url")
+`, `traced.Call({{ .FuncArgument 0 }}, {{ . }})`)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no enclosing function is available")
+	})
+
+	t.Run("a literal parameter named like a rule alias is rejected", func(t *testing.T) {
+		_, err := apply(t, `package main
+
+import "net/http"
+
+var handler = func(traced string) {
+	http.Get("url")
+}
+`, `traced.Call({{ . }})`)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "rule import alias conflict")
+	})
 }
 
 // findFuncDeclInFile returns the top-level function declaration named name.
