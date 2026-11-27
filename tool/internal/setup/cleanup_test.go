@@ -6,6 +6,7 @@ package setup
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -485,4 +486,62 @@ func TestRunGoBuildStopsWhenInterruptedBuildCannotBeRestored(t *testing.T) {
 	after, readErr := os.ReadFile(goMod)
 	require.NoError(t, readErr)
 	assert.Equal(t, string(before), string(after))
+}
+
+func TestCleanup_ReturnsRevertErrorWhenKeepingBuildDir(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	goMod := filepath.Join(tmp, "go.mod")
+	otherFile := filepath.Join(tmp, "other.txt")
+	mustWriteFile(t, goMod, "module example.com/app\n")
+	mustWriteFile(t, otherFile, "keep me\n")
+
+	dying := newStateManager()
+	require.NoError(t, dying.Track(goMod))
+	require.NoError(t, dying.Track(otherFile))
+	require.NoError(t, os.Remove(filepath.Join(util.GetBuildTemp(stateDir), stateSnapshotPath(otherFile))))
+
+	origStderr := os.Stderr
+	r, w, pipeErr := os.Pipe()
+	require.NoError(t, pipeErr)
+	os.Stderr = w                             //nolint:reassign // capture cleanup warning emitted to stderr
+	defer func() { os.Stderr = origStderr }() //nolint:reassign // restore original os.Stderr
+
+	cleanupErr := Cleanup(t.Context(), false)
+	require.NoError(t, w.Close())
+	stderrBytes, readErr := io.ReadAll(r)
+	require.NoError(t, readErr)
+
+	require.Error(t, cleanupErr)
+	assert.Contains(t, string(stderrBytes), "state could not be fully reverted")
+	assert.True(t, util.PathExists(util.GetBuildTemp(stateFileName)),
+		"manifest must survive a failed revert")
+}
+
+func TestRunGoBuildReturnsErrorWhenRestoreFails(t *testing.T) {
+	setupTestModule(t, nil)
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	goMod := filepath.Join(cwd, "go.mod")
+	snapshotFile := filepath.Join(util.GetBuildTemp(stateDir), stateSnapshotPath(goMod))
+
+	origRunBuildCmd := runBuildCmd
+	t.Cleanup(func() { runBuildCmd = origRunBuildCmd })
+	runBuildCmd = func(_ context.Context, _ []string, _ ...string) error {
+		return os.Remove(snapshotFile)
+	}
+
+	cmd := &cli.Command{
+		Name:            "go",
+		SkipFlagParsing: true,
+		Action: func(ctx context.Context, c *cli.Command) error {
+			// Exercise the locked fallback path (snapshot == nil) where Cleanup(ctx, false) runs before return.
+			_, buildErr := runGoBuild(ctx, c, nil)
+			return buildErr
+		},
+	}
+	err = cmd.Run(t.Context(), []string{"go", "build", "."})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reverting modified project files")
 }
