@@ -47,6 +47,7 @@ func (ip *instrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule
 	})
 
 	modified := false
+	usedAliases := make(map[string]bool)
 	// Walk matched in reverse. dst.Inspect visits a literal before the literals
 	// nested inside it, so the reverse order edits the innermost literal first
 	// and an enclosing literal always wraps a finished subtree.
@@ -67,26 +68,32 @@ func (ip *instrumentPhase) applyLitRule(ctx context.Context, r *rule.InstLitRule
 		if shadowErr := checkRuleAliasShadowingAt(valueAliases, enclosing, lit); shadowErr != nil {
 			return false, shadowErr
 		}
-		litModified, setErr := ip.setLitFields(lit, enclosing, setters, r)
+		litModified, fieldAliases, setErr := ip.setLitFields(lit, enclosing, setters, r)
 		if setErr != nil {
 			return false, setErr
 		}
-		modified = modified || litModified
+		if litModified {
+			modified = true
+			mergeNamesInto(usedAliases, fieldAliases)
+		}
 	}
 
 	if pointerTmpl != nil || valueTmpl != nil {
-		wrapped, wrapErr := wrapLiterals(root, matched, pointerTmpl, valueTmpl, r.Imports)
+		wrapped, wrapAliases, wrapErr := wrapLiterals(root, matched, pointerTmpl, valueTmpl, r.Imports)
 		if wrapErr != nil {
 			return false, ex.Wrapf(wrapErr, "failed to wrap literal of %s", r.StructLiteral)
 		}
-		modified = modified || wrapped
+		if wrapped {
+			modified = true
+			mergeNamesInto(usedAliases, wrapAliases)
+		}
 	}
 
 	if !modified {
 		return false, nil
 	}
 
-	if err = ip.addRuleImports(ctx, root, usedRuleImports(root, r.Imports), r.Name); err != nil {
+	if err = ip.addRuleImports(ctx, root, selectedRuleImports(r.Imports, usedAliases), r.Name); err != nil {
 		return false, err
 	}
 	ip.Info("Apply literal rule", "rule", r)
@@ -181,13 +188,14 @@ func litFieldValueRuleAliases(r *rule.InstLitRule, setters []*litFieldSetter) ma
 
 // wrapLiterals replaces each matched literal with its wrap_literal template:
 // pointer for &T{...} (the whole & expression) and value for T{...}. A form
-// without a template is left alone. It reports whether root changed.
+// without a template is left alone. It reports whether root changed and returns
+// the rule import aliases used by the injected wrappers.
 func wrapLiterals(
 	root *dst.File,
 	matched []litWithEnclosingFunc,
 	pointer, value *callTemplate,
 	ruleImports map[string]string,
-) (bool, error) {
+) (bool, map[string]bool, error) {
 	enclosingOf := make(map[*dst.CompositeLit]*dst.FuncDecl, len(matched))
 	for _, m := range matched {
 		enclosingOf[m.lit] = m.enclosing
@@ -205,6 +213,7 @@ func wrapLiterals(
 	})
 
 	changed := false
+	emittedAliases := make(map[string]bool)
 	var wrapErr error
 	// Post-order: a nested literal is wrapped before the literal around it,
 	// and a replacement is never walked again, so it cannot match twice.
@@ -239,11 +248,12 @@ func wrapLiterals(
 			wrapErr = err
 			return false
 		}
+		mergeNamesInto(emittedAliases, usedAliases)
 		cursor.Replace(wrapped)
 		changed = true
 		return true
 	})
-	return changed, wrapErr
+	return changed, emittedAliases, wrapErr
 }
 
 // matchesLitRule reports whether a composite literal builds the rule's type.
@@ -292,14 +302,16 @@ func hasPositionalElements(lit *dst.CompositeLit) bool {
 // setLitFields applies each setter to the literal, overriding fields already
 // present in place and prepending the rest. The literal's own elements are
 // otherwise left untouched. enclosing is the function containing the literal,
-// or nil for a package-level literal. It reports whether the literal changed.
+// or nil for a package-level literal. It reports whether the literal changed and
+// returns the rule import aliases referenced by injected field expressions.
 func (ip *instrumentPhase) setLitFields(
 	lit *dst.CompositeLit,
 	enclosing *dst.FuncDecl,
 	setters []*litFieldSetter,
 	r *rule.InstLitRule,
-) (bool, error) {
+) (bool, map[string]bool, error) {
 	changed := false
+	emittedAliases := make(map[string]bool)
 	var prepend []dst.Expr
 	for _, setter := range setters {
 		util.Assert(setter.value != nil || setter.wrap != nil, "field setter has neither value nor wrap")
@@ -307,6 +319,7 @@ func (ip *instrumentPhase) setLitFields(
 		if existing := findKeyedElement(lit, setter.name); existing != nil {
 			if setter.wrap == nil {
 				existing.Value = util.AssertType[dst.Expr](dst.Clone(setter.value))
+				mergeNamesInto(emittedAliases, injectedRuleAliases(r.Imports, setter.value))
 				changed = true
 				continue
 			}
@@ -324,12 +337,13 @@ func (ip *instrumentPhase) setLitFields(
 				err = checkRuleAliasShadowingAt(usedAliases, enclosing, lit)
 			}
 			if err != nil {
-				return false, ex.Wrapf(err, "failed to wrap field %q of %s", setter.name, r.StructLiteral)
+				return false, nil, ex.Wrapf(err, "failed to wrap field %q of %s", setter.name, r.StructLiteral)
 			}
 			// wrapped holds the literal's own expression, so cloning it would
 			// detach any literal nested in that expression from the tree.
 			// compileExpression already returns a fresh tree, and the old value
 			// leaves the tree in the same assignment, so no node is reused.
+			mergeNamesInto(emittedAliases, usedAliases)
 			existing.Value = wrapped
 			changed = true
 			continue
@@ -341,6 +355,7 @@ func (ip *instrumentPhase) setLitFields(
 				"rule", r.Name, "type", r.StructLiteral, "field", setter.name)
 			continue
 		}
+		mergeNamesInto(emittedAliases, injectedRuleAliases(r.Imports, setter.value))
 		prepend = append(prepend, &dst.KeyValueExpr{
 			Key:   &dst.Ident{Name: setter.name},
 			Value: util.AssertType[dst.Expr](dst.Clone(setter.value)),
@@ -350,7 +365,7 @@ func (ip *instrumentPhase) setLitFields(
 		lit.Elts = append(prepend, lit.Elts...)
 		changed = true
 	}
-	return changed, nil
+	return changed, emittedAliases, nil
 }
 
 // findKeyedElement returns the literal's element keyed by name, or nil.

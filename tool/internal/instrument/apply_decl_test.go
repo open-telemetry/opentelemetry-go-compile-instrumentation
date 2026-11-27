@@ -658,3 +658,26 @@ func TestParseValueExpr(t *testing.T) {
 		assert.Contains(t, err.Error(), "expected 1 value, got 2")
 	})
 }
+
+func TestApplyDeclRule_UnrelatedSelectorsDoNotSelectUnusedImport(t *testing.T) {
+	file := parseTestFile(t, `package main
+
+import traced "strings"
+
+var X = traced.TrimSpace("a")
+`)
+	r := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "wrap_x",
+			Imports: map[string]string{"traced": "fmt"},
+		},
+		Kind:       "var",
+		Identifier: "X",
+		Wrap:       "wrap({{ . }})",
+	}
+
+	err := newTestPhase().applyDeclRule(context.Background(), r, file)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, countImportSpecs(file))
+}

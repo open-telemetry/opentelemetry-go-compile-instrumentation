@@ -32,6 +32,8 @@ type funcTemplateData struct {
 
 	retsCollected bool
 	rets          []string
+
+	returnedIdents map[string]bool
 }
 
 // newFuncTemplateData builds the template data for funcDecl. directiveArgs
@@ -88,6 +90,29 @@ func (d *funcTemplateData) arguments() []string {
 	return d.args
 }
 
+func (d *funcTemplateData) recordTargetIdent(name string) string {
+	if name == "" {
+		return ""
+	}
+	if d.returnedIdents == nil {
+		d.returnedIdents = make(map[string]bool)
+	}
+	d.returnedIdents[name] = true
+	return name
+}
+
+func (d *funcTemplateData) hasOverlap(aliases map[string]bool) bool {
+	if d == nil || len(d.returnedIdents) == 0 || len(aliases) == 0 {
+		return false
+	}
+	for alias := range aliases {
+		if d.returnedIdents[alias] {
+			return true
+		}
+	}
+	return false
+}
+
 // Receiver returns the identifier of the target method's receiver, or an
 // error if the target is a plain function with no receiver. Template usage:
 // {{.Receiver}}
@@ -95,7 +120,7 @@ func (d *funcTemplateData) Receiver() (string, error) {
 	if !ast.HasReceiver(d.funcDecl) {
 		return "", ex.Newf("Receiver: function %s has no receiver", d.funcDecl.Name.Name)
 	}
-	return d.fullArguments()[0], nil
+	return d.recordTargetIdent(d.fullArguments()[0]), nil
 }
 
 func (d *funcTemplateData) returns() []string {
@@ -113,7 +138,7 @@ func (d *funcTemplateData) FuncArgument(idx int) (string, error) {
 	if idx < 0 || idx >= len(args) {
 		return "", ex.Newf("FuncArgument index %d out of range [0, %d)", idx, len(args))
 	}
-	return args[idx], nil
+	return d.recordTargetIdent(args[idx]), nil
 }
 
 // FuncReturn returns the identifier of the idx-th (0-indexed) return value.
@@ -123,7 +148,7 @@ func (d *funcTemplateData) FuncReturn(idx int) (string, error) {
 	if idx < 0 || idx >= len(rets) {
 		return "", ex.Newf("FuncReturn index %d out of range [0, %d)", idx, len(rets))
 	}
-	return rets[idx], nil
+	return d.recordTargetIdent(rets[idx]), nil
 }
 
 // FuncArgumentCount returns the number of parameters, excluding the
@@ -150,7 +175,7 @@ func (d *funcTemplateData) FuncArgumentOfType(typeStr string) (string, error) {
 			return "", err
 		}
 		if matched {
-			return args[idx], nil
+			return d.recordTargetIdent(args[idx]), nil
 		}
 		idx += len(field.Names)
 	}
@@ -172,7 +197,7 @@ func (d *funcTemplateData) FuncReturnOfType(typeStr string) (string, error) {
 			return "", err
 		}
 		if matched {
-			return rets[idx], nil
+			return d.recordTargetIdent(rets[idx]), nil
 		}
 		idx += len(field.Names)
 	}
@@ -193,7 +218,7 @@ func (d *funcTemplateData) FuncArgumentThatImplements(iface string) (string, err
 	if err != nil || idx < 0 {
 		return "", err
 	}
-	return args[idx], nil
+	return d.recordTargetIdent(args[idx]), nil
 }
 
 // FuncReturnThatImplements returns the identifier of the first return value
@@ -209,7 +234,7 @@ func (d *funcTemplateData) FuncReturnThatImplements(iface string) (string, error
 	if err != nil || idx < 0 {
 		return "", err
 	}
-	return rets[idx], nil
+	return d.recordTargetIdent(rets[idx]), nil
 }
 
 // DirectiveArgs returns the key:value arguments parsed from the directive
@@ -229,4 +254,48 @@ func (d *funcTemplateData) DirectiveArg(key string) string {
 		}
 	}
 	return ""
+}
+
+// maskedFuncTemplateData substitutes target-derived identifier helpers with a
+// placeholder so re-rendering can identify rule aliases written by the template
+// itself without counting matching parameter, receiver, or return names.
+type maskedFuncTemplateData struct {
+	*funcTemplateData
+
+	placeholder string
+}
+
+func (m *maskedFuncTemplateData) maskTargetIdent(val string, err error) (string, error) {
+	if err != nil || val == "" {
+		return val, err
+	}
+	return m.placeholder, nil
+}
+
+func (m *maskedFuncTemplateData) Receiver() (string, error) {
+	return m.maskTargetIdent(m.funcTemplateData.Receiver())
+}
+
+func (m *maskedFuncTemplateData) FuncArgument(idx int) (string, error) {
+	return m.maskTargetIdent(m.funcTemplateData.FuncArgument(idx))
+}
+
+func (m *maskedFuncTemplateData) FuncReturn(idx int) (string, error) {
+	return m.maskTargetIdent(m.funcTemplateData.FuncReturn(idx))
+}
+
+func (m *maskedFuncTemplateData) FuncArgumentOfType(typeStr string) (string, error) {
+	return m.maskTargetIdent(m.funcTemplateData.FuncArgumentOfType(typeStr))
+}
+
+func (m *maskedFuncTemplateData) FuncReturnOfType(typeStr string) (string, error) {
+	return m.maskTargetIdent(m.funcTemplateData.FuncReturnOfType(typeStr))
+}
+
+func (m *maskedFuncTemplateData) FuncArgumentThatImplements(iface string) (string, error) {
+	return m.maskTargetIdent(m.funcTemplateData.FuncArgumentThatImplements(iface))
+}
+
+func (m *maskedFuncTemplateData) FuncReturnThatImplements(iface string) (string, error) {
+	return m.maskTargetIdent(m.funcTemplateData.FuncReturnThatImplements(iface))
 }

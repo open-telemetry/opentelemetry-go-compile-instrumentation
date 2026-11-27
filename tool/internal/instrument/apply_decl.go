@@ -66,17 +66,20 @@ func (ip *instrumentPhase) applyDeclRule(ctx context.Context, r *rule.InstDeclRu
 	// Validate and apply the rewrite before touching imports: a rule that
 	// fails here (unparsable wrap/replace expression, tuple-valued
 	// initializer) must not leave an import spec in root.Decls behind it.
+	var (
+		usedAliases map[string]bool
+		err         error
+	)
 	if r.Wrap != "" {
-		if err := wrapDeclValue(spec, r.Wrap, nameIdx); err != nil {
-			return err
-		}
+		usedAliases, err = wrapDeclValueWithImports(spec, r.Wrap, nameIdx, r.Imports)
 	} else {
-		if err := replaceDeclValue(spec, r.Replace, nameIdx); err != nil {
-			return err
-		}
+		usedAliases, err = replaceDeclValue(spec, r.Replace, nameIdx, r.Imports)
+	}
+	if err != nil {
+		return err
 	}
 
-	if err := ip.addRuleImports(ctx, root, usedRuleImports(root, r.Imports), r.Name); err != nil {
+	if err = ip.addRuleImports(ctx, root, selectedRuleImports(r.Imports, usedAliases), r.Name); err != nil {
 		return err
 	}
 
@@ -131,11 +134,14 @@ func rejectIotaCascade(root *dst.File, spec *dst.ValueSpec, identifier string) e
 }
 
 // replaceDeclValue assigns the parsed replacement expression to the initializer
-// of the name at nameIdx, leaving every sibling name in the spec untouched.
-func replaceDeclValue(spec *dst.ValueSpec, replace string, nameIdx int) error {
+// of the name at nameIdx, leaving every sibling name in the spec untouched, and
+// returns the rule import aliases referenced by the replacement expression.
+func replaceDeclValue(
+	spec *dst.ValueSpec, replace string, nameIdx int, ruleImports map[string]string,
+) (map[string]bool, error) {
 	expr, err := parseValueExpr(replace)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	switch {
@@ -145,39 +151,44 @@ func replaceDeclValue(spec *dst.ValueSpec, replace string, nameIdx int) error {
 		// A single name with no initializer gains one: var X T -> var X T = expr.
 		spec.Values = []dst.Expr{util.AssertType[dst.Expr](dst.Clone(expr))}
 	default:
-		return declArityError(spec, nameIdx)
+		return nil, declArityError(spec, nameIdx)
 	}
 
-	return nil
+	return injectedRuleAliases(ruleImports, expr), nil
 }
 
 // wrapDeclValue wraps the initializer of the name at nameIdx using the given
-// template, leaving every sibling name in the spec untouched. Returns an error
-// if spec has no initializers, since wrap requires an existing value to
-// substitute into {{ . }}.
+// template, leaving every sibling name in the spec untouched.
 func wrapDeclValue(spec *dst.ValueSpec, templateStr string, nameIdx int) error {
+	_, err := wrapDeclValueWithImports(spec, templateStr, nameIdx, nil)
+	return err
+}
+
+func wrapDeclValueWithImports(
+	spec *dst.ValueSpec, templateStr string, nameIdx int, ruleImports map[string]string,
+) (map[string]bool, error) {
 	if len(spec.Values) == 0 {
-		return ex.Newf(
+		return nil, ex.Newf(
 			"wrap requires an existing initializer but the declaration has none",
 		)
 	}
 	if len(spec.Values) != len(spec.Names) {
-		return declArityError(spec, nameIdx)
+		return nil, declArityError(spec, nameIdx)
 	}
 
 	tmpl, err := newCallTemplate(templateStr)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Package-level var/const initializers have no enclosing function.
-	wrapped, _, err := tmpl.compileExpression(spec.Values[nameIdx], callSite{}, nil, nil, nil)
+	wrapped, usedAliases, err := tmpl.compileExpression(spec.Values[nameIdx], callSite{}, nil, nil, ruleImports)
 	if err != nil {
-		return ex.Wrapf(err, "failed to wrap expression at index %d", nameIdx)
+		return nil, ex.Wrapf(err, "failed to wrap expression at index %d", nameIdx)
 	}
 	spec.Values[nameIdx] = util.AssertType[dst.Expr](dst.Clone(wrapped))
 
-	return nil
+	return usedAliases, nil
 }
 
 // declArityError reports a declaration whose initializers cannot be attributed

@@ -1827,3 +1827,104 @@ func TestCompileExpression_EvaluationCheckSkippedWithOnlyOriginalCall(t *testing
 	require.NoError(t, err)
 	assert.Equal(t, `pair(log.Info(a()), log.Info(a()))`, renderResult(t, result))
 }
+
+func TestCompileExpression_TargetNamesExcludedFromRuleAliases(t *testing.T) {
+	src := `package main
+
+type sink struct{}
+
+func (s sink) Method(v any) {}
+
+func (traced sink) WrapMethod() {
+	outer := func(arg sink, rcv sink) {
+		_ = http.Get("url")
+	}
+	outer(traced, traced)
+}
+
+func Run(traced sink) (res sink) {
+	_ = http.Get("url")
+	return res
+}
+`
+	root, err := toolast.NewAstParser().ParseSource(src)
+	require.NoError(t, err)
+	runDecl := findFuncDeclInFile(t, root, "Run")
+	wrapMethodDecl := findFuncDeclInFile(t, root, "WrapMethod")
+
+	var nestedLit *dst.FuncLit
+	dst.Inspect(wrapMethodDecl, func(n dst.Node) bool {
+		if fl, ok := n.(*dst.FuncLit); ok {
+			nestedLit = fl
+			return false
+		}
+		return true
+	})
+	require.NotNil(t, nestedLit)
+
+	ruleImports := map[string]string{"traced": "fmt"}
+
+	t.Run("enclosing FuncArgument does not count as rule alias", func(t *testing.T) {
+		tmpl, tmplErr := newCallTemplate(`{{ .FuncArgument 0 }}.Method({{ . }})`)
+		require.NoError(t, tmplErr)
+
+		_, aliases, compErr := tmpl.compileExpression(
+			mustParseCall(t, `http.Get("url")`),
+			callSite{},
+			runDecl,
+			nil,
+			ruleImports,
+		)
+
+		require.NoError(t, compErr)
+		assert.Empty(t, aliases)
+	})
+
+	t.Run("enclosing FuncArgumentOfType does not count as rule alias", func(t *testing.T) {
+		tmpl, tmplErr := newCallTemplate(`{{ .FuncArgumentOfType "sink" }}.Method({{ . }})`)
+		require.NoError(t, tmplErr)
+
+		_, aliases, compErr := tmpl.compileExpression(
+			mustParseCall(t, `http.Get("url")`),
+			callSite{},
+			runDecl,
+			nil,
+			ruleImports,
+		)
+
+		require.NoError(t, compErr)
+		assert.Empty(t, aliases)
+	})
+
+	t.Run("enclosing Receiver from declaring method in closure does not count as rule alias", func(t *testing.T) {
+		tmpl, tmplErr := newCallTemplate(`{{ .Receiver }}.Method({{ . }})`)
+		require.NoError(t, tmplErr)
+
+		_, aliases, compErr := tmpl.compileExpression(
+			mustParseCall(t, `http.Get("url")`),
+			callSite{lit: nestedLit},
+			wrapMethodDecl,
+			nil,
+			ruleImports,
+		)
+
+		require.NoError(t, compErr)
+		assert.Empty(t, aliases)
+	})
+
+	t.Run("rule alias written alongside target name is still reported", func(t *testing.T) {
+		tmpl, tmplErr := newCallTemplate(`traced.Sprintf("%v", {{ .FuncArgument 0 }}.Method({{ . }}))`)
+		require.NoError(t, tmplErr)
+
+		_, aliases, compErr := tmpl.compileExpression(
+			mustParseCall(t, `http.Get("url")`),
+			callSite{},
+			runDecl,
+			nil,
+			ruleImports,
+		)
+
+		require.NoError(t, compErr)
+		assert.Equal(t, map[string]bool{"traced": true}, aliases)
+	})
+}

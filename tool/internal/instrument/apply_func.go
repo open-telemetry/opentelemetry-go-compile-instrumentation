@@ -447,9 +447,9 @@ func (ip *instrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFun
 	}
 
 	// Apply imports for every matching rule, including ones de-duplicated below:
-	// two rules with the same content identity may still declare different
-	// imports, and skipping them could drop an import the hook code needs.
-	if err = ip.addRuleImports(ctx, root, usedRuleImports(root, rule.Imports), rule.Name); err != nil {
+	// hook rules inject only trampoline calls, so only blank ("_") and dot (".")
+	// imports can apply to the target file.
+	if err = ip.addRuleImports(ctx, root, selectedRuleImports(rule.Imports, nil), rule.Name); err != nil {
 		return false, err
 	}
 

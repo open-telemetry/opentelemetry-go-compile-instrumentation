@@ -34,14 +34,15 @@ import (
 func (ip *instrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRule, root *dst.File) (bool, error) {
 	importAliases := ip.importAliasMap(root)
 
-	appendModified, err := ip.applyCallAppendArgs(ctx, r, root, importAliases)
+	appendModified, appendAliases, err := ip.applyCallAppendArgs(ctx, r, root, importAliases)
 	if err != nil {
 		return false, err
 	}
 
 	replaceModified := false
+	var replaceAliases map[string]bool
 	if r.Replace != "" {
-		replaceModified, err = ip.applyCallReplace(ctx, r, root, importAliases)
+		replaceModified, replaceAliases, err = ip.applyCallReplace(ctx, r, root, importAliases)
 		if err != nil {
 			return false, err
 		}
@@ -51,7 +52,10 @@ func (ip *instrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRu
 		return false, nil
 	}
 
-	if err = ip.addRuleImports(ctx, root, usedRuleImports(root, r.Imports), r.Name); err != nil {
+	usedAliases := make(map[string]bool, len(appendAliases)+len(replaceAliases))
+	mergeNamesInto(usedAliases, appendAliases)
+	mergeNamesInto(usedAliases, replaceAliases)
+	if err = ip.addRuleImports(ctx, root, selectedRuleImports(r.Imports, usedAliases), r.Name); err != nil {
 		return false, err
 	}
 	ip.Info("Apply call rule", "rule", r)
@@ -142,10 +146,10 @@ func (ip *instrumentPhase) applyCallReplace(
 	r *rule.InstCallRule,
 	root *dst.File,
 	importAliases map[string]string,
-) (bool, error) {
+) (bool, map[string]bool, error) {
 	tmpl, err := newCallTemplate(r.Replace)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	tmpl.typeInfo = ip.fileTypes()
 
@@ -177,12 +181,13 @@ func (ip *instrumentPhase) applyCallReplace(
 		return true
 	})
 	if wrapError != nil {
-		return false, wrapError
+		return false, nil, wrapError
 	}
 	if len(candidates) == 0 {
-		return false, nil
+		return false, nil, nil
 	}
 
+	emittedAliases := make(map[string]bool)
 	// Wrap children before their parents. Compiling a template clones the
 	// original call (or its arguments/receiver), so precomputing an outer
 	// replacement would retain stale, uninstrumented copies of nested calls.
@@ -218,15 +223,16 @@ func (ip *instrumentPhase) applyCallReplace(
 			wrapError = ip.withCallPosition(wrapErr, r, call)
 			return false
 		}
+		mergeNamesInto(emittedAliases, usedAliases)
 		cursor.Replace(ip.cloneWithPositions(wrapped))
 		return true
 	})
 
 	if wrapError != nil {
-		return false, wrapError
+		return false, nil, wrapError
 	}
 
-	return true, nil
+	return true, emittedAliases, nil
 }
 
 // cloneWithPositions returns a dst.Clone copy of expr. dst.Clone gives the
@@ -276,16 +282,16 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 	r *rule.InstCallRule,
 	root *dst.File,
 	importAliases map[string]string,
-) (bool, error) {
+) (bool, map[string]bool, error) {
 	if len(r.AppendArgs) == 0 {
-		return false, nil
+		return false, nil, nil
 	}
 
 	newArgs, err := parseAppendArgs(r.AppendArgs)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
-	usedAliases := appendArgsRuleAliases(r, newArgs)
+	shadowAliases := appendArgsRuleAliases(r, newArgs, true)
 
 	stmts := ast.CallEnclosingStmts(root)
 	var matchingCalls []*dst.CallExpr
@@ -299,29 +305,37 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 			ip.Debug("Skip call site due to //otelc:ignore", "rule", r.Name)
 			return true
 		}
-		if shadowErr = enclosing.checkShadowing(usedAliases, call); shadowErr != nil {
+		if shadowErr = enclosing.checkShadowing(shadowAliases, call); shadowErr != nil {
 			return false
 		}
 		matchingCalls = append(matchingCalls, call)
 		return true
 	})
 	if shadowErr != nil {
-		return false, shadowErr
+		return false, nil, shadowErr
 	}
 	modified := false
+	hasEllipsis := false
 	for _, call := range matchingCalls {
 		callArgs := make([]dst.Expr, len(newArgs))
 		for i, arg := range newArgs {
 			callArgs[i] = util.AssertType[dst.Expr](dst.Clone(arg))
 		}
+		isEllipsis := call.Ellipsis
 		ok, appendErr := appendParsedCallArgs(call, r, callArgs)
 		if appendErr != nil {
-			return false, appendErr
+			return false, nil, appendErr
 		}
-		modified = modified || ok
+		if ok {
+			modified = true
+			hasEllipsis = hasEllipsis || isEllipsis
+		}
+	}
+	if !modified {
+		return false, nil, nil
 	}
 
-	return modified, nil
+	return true, appendArgsRuleAliases(r, newArgs, hasEllipsis), nil
 }
 
 // appendCallArgs appends the expressions from r.AppendArgs to the call's argument list.
@@ -336,13 +350,13 @@ func appendCallArgs(call *dst.CallExpr, r *rule.InstCallRule) (bool, error) {
 }
 
 // appendArgsRuleAliases returns the aliases of r's imports that the appended
-// arguments and the variadic type use as a qualifier.
-func appendArgsRuleAliases(r *rule.InstCallRule, newArgs []dst.Expr) map[string]bool {
+// arguments and (when includeVariadic is true) variadic type use as a qualifier.
+func appendArgsRuleAliases(r *rule.InstCallRule, newArgs []dst.Expr, includeVariadic bool) map[string]bool {
 	nodes := make([]dst.Node, 0, len(newArgs)+1)
 	for _, arg := range newArgs {
 		nodes = append(nodes, arg)
 	}
-	if r.VariadicType != "" {
+	if includeVariadic && r.VariadicType != "" {
 		// A parse error is reported when the type is used.
 		if varType, err := parseGoTypeExpression(r.VariadicType); err == nil {
 			nodes = append(nodes, varType)

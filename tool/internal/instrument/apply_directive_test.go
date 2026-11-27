@@ -888,3 +888,86 @@ func callArgs(t *testing.T, stmt dst.Stmt) []string {
 	}
 	return args
 }
+
+func TestApplyDirectiveRule_UnrelatedSelectorsAndTargetNamesExcluded(t *testing.T) {
+	t.Run("unrelated file alias not selected", func(t *testing.T) {
+		root, err := ast.NewAstParser().ParseSource(`package main
+
+import traced "strings"
+
+func helper() string { return traced.TrimSpace("a") }
+
+//otelc:test
+func foo() {}
+`)
+		require.NoError(t, err)
+		r := &rule.InstDirectiveRule{
+			InstBaseRule: rule.InstBaseRule{
+				Name:    "test_directive",
+				Imports: map[string]string{"traced": "fmt"},
+			},
+			Directive: "otelc:test",
+			Template:  `_ = 1`,
+		}
+
+		modified, err := newTestPhase().applyDirectiveRule(context.Background(), r, root)
+
+		require.NoError(t, err)
+		assert.True(t, modified)
+		assert.Equal(t, 1, countImportSpecs(root))
+	})
+
+	t.Run("FuncArgument naming rule alias is not flagged or imported", func(t *testing.T) {
+		root, err := ast.NewAstParser().ParseSource(`package main
+
+type sink struct{}
+
+func (sink) Method() {}
+
+//otelc:test
+func foo(traced sink) {}
+`)
+		require.NoError(t, err)
+		r := &rule.InstDirectiveRule{
+			InstBaseRule: rule.InstBaseRule{
+				Name:    "test_directive",
+				Imports: map[string]string{"traced": "fmt"},
+			},
+			Directive: "otelc:test",
+			Template:  `{{ .FuncArgument 0 }}.Method()`,
+		}
+
+		modified, err := newTestPhase().applyDirectiveRule(context.Background(), r, root)
+
+		require.NoError(t, err)
+		assert.True(t, modified)
+		assert.Zero(t, countImportSpecs(root))
+	})
+
+	t.Run("explicit rule alias alongside FuncArgument still reports conflict", func(t *testing.T) {
+		root, err := ast.NewAstParser().ParseSource(`package main
+
+type sink struct{}
+
+func (sink) Method() {}
+
+//otelc:test
+func foo(traced sink) {}
+`)
+		require.NoError(t, err)
+		r := &rule.InstDirectiveRule{
+			InstBaseRule: rule.InstBaseRule{
+				Name:    "test_directive",
+				Imports: map[string]string{"traced": "fmt"},
+			},
+			Directive: "otelc:test",
+			Template:  "{{ .FuncArgument 0 }}.Method()\ntraced.Println()",
+		}
+
+		modified, err := newTestPhase().applyDirectiveRule(context.Background(), r, root)
+
+		require.Error(t, err)
+		assert.False(t, modified)
+		assert.Contains(t, err.Error(), "rule import alias conflict")
+	})
+}
