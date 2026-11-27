@@ -310,7 +310,7 @@ downloaded, or the module proxy is unreachable. Run `go mod download` and try ag
 
 #### `otelc: another invocation holds the build lock; waiting for it to finish (lock: ...)`
 
-This is normal contention between concurrent `otelc` invocations targeting the same module or work directory. The message is printed once when an invocation discovers a held lock; it then waits until the active process completes its setup, compilation, and restoration phases. If the wait persists unexpectedly, check whether another build, editor language server/linter, or background test run is holding the lock.
+This is normal contention between concurrent `otelc` invocations targeting the same module or work directory, or between modules that share a `go.work` directory (which contend for the workspace lock). The message is printed once when an invocation discovers a held lock; it then waits until the lock becomes free. By default (`OTELC_UNLOCKED_COMPILE=0`), the holder keeps the lock across setup, compilation, and restoration; with [`OTELC_UNLOCKED_COMPILE=1`](configuration.md#experimental-concurrent-compilation), an eligible build releases the module lock after setup, before compilation begins. If the wait persists unexpectedly, check whether another build, editor language server/linter, or background test run is holding the lock.
 
 #### `build lock ... is held by a parent otelc invocation that waits for this one...`
 
