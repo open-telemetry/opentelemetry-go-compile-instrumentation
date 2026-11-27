@@ -168,6 +168,19 @@ type otelYAMLConfig struct {
 
 const yamlSelectionIndent = 2
 
+func isEmptyOtelYAMLDocument(document *yaml.Node) bool {
+	if document == nil || document.Kind != yaml.DocumentNode || len(document.Content) != 1 {
+		return false
+	}
+	root := document.Content[0]
+	return root != nil &&
+		root.Kind == yaml.ScalarNode &&
+		root.Tag == "!!null" &&
+		root.Value == "" &&
+		root.Style == 0 &&
+		root.Anchor == ""
+}
+
 func loadOtelYAMLImports(path string) (map[string]bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -188,7 +201,7 @@ func loadOtelYAMLImports(path string) (map[string]bool, error) {
 			}
 			return nil, ex.Wrapf(err, "parsing %s", path)
 		}
-		if len(extra.Content) > 0 {
+		if !isEmptyOtelYAMLDocument(&extra) {
 			return nil, ex.Newf("%s: multiple YAML documents are not allowed", path)
 		}
 	}
@@ -237,7 +250,7 @@ func readOtelYAMLDocuments(path string) ([]yaml.Node, error) {
 			}
 			return nil, ex.Wrapf(err, "parsing %s", path)
 		}
-		if len(documents) > 0 && len(document.Content) > 0 {
+		if len(documents) > 0 && !isEmptyOtelYAMLDocument(&document) {
 			return nil, ex.Newf("%s: multiple YAML documents are not allowed", path)
 		}
 		documents = append(documents, document)
@@ -635,35 +648,18 @@ func updatePinnedProjects(
 	toolFiles []string,
 	opts PinOptions,
 ) (*PinResult, error) {
-	prunedImports := make(map[string]map[string]bool, len(toolFiles))
-
-	walkErr := walkInstrumentationPerRoot(ctx, toolFiles,
-		func(v *instrumentationVisit) (bool, error) {
-			reason, invalid, classifyErr := invalidInstrumentationReason(ctx, v, opts.Validate)
-			if classifyErr != nil {
-				return false, classifyErr
-			}
-			if !invalid {
-				return true, nil
-			}
-			warnInvalidInstrumentationImport(ctx, v, reason)
-			// Only root tool files own their imports; nested tool files are read-only.
-			if opts.Prune && slices.Contains(toolFiles, v.ToolFile) {
-				if prunedImports[v.ToolFile] == nil {
-					prunedImports[v.ToolFile] = make(map[string]bool)
-				}
-				prunedImports[v.ToolFile][v.Config.ImportPath] = true
-			}
-			return false, nil
-		},
-	)
-	if walkErr != nil {
-		return nil, walkErr
+	invalidImports, collectErr := collectInvalidInstrumentationImports(ctx, toolFiles, opts.Validate)
+	if collectErr != nil {
+		return nil, collectErr
 	}
 
 	for _, toolFile := range toolFiles {
-		if err := updateToolFile(ctx, toolFile, prunedImports[toolFile], opts); err != nil {
-			return nil, err
+		prunedImports := invalidImports[toolFile]
+		if !opts.Prune {
+			prunedImports = nil
+		}
+		if updateErr := updateToolFile(ctx, toolFile, prunedImports, opts); updateErr != nil {
+			return nil, updateErr
 		}
 	}
 
@@ -821,7 +817,7 @@ func materializeYAMLConfigs(ctx context.Context, configs []modulePinConfig, opts
 	return toolFiles, nil
 }
 
-func invalidInstrumentationImports(
+func collectInvalidInstrumentationImports(
 	ctx context.Context,
 	toolFiles []string,
 	validate bool,
@@ -836,12 +832,13 @@ func invalidInstrumentationImports(
 			return true, nil
 		}
 		warnInvalidInstrumentationImport(ctx, v, reason)
-		if slices.Contains(toolFiles, v.ToolFile) {
-			if invalid[v.ToolFile] == nil {
-				invalid[v.ToolFile] = make(map[string]bool)
-			}
-			invalid[v.ToolFile][v.Config.ImportPath] = true
+		if !slices.Contains(toolFiles, v.ToolFile) {
+			return false, nil
 		}
+		if invalid[v.ToolFile] == nil {
+			invalid[v.ToolFile] = make(map[string]bool)
+		}
+		invalid[v.ToolFile][v.Config.ImportPath] = true
 		return false, nil
 	})
 	return invalid, err
@@ -867,7 +864,7 @@ func processYAMLConfigs(ctx context.Context, configs []modulePinConfig, opts Pin
 	for i := range states {
 		states[i].toolFile = toolFiles[i]
 	}
-	invalid, err := invalidInstrumentationImports(ctx, toolFiles, opts.Validate)
+	invalid, err := collectInvalidInstrumentationImports(ctx, toolFiles, opts.Validate)
 	if err != nil {
 		return rollbackYAMLManager(manager, opts.AutoPin, err)
 	}

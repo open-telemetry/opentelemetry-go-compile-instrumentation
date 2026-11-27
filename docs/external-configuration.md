@@ -58,6 +58,9 @@ dependencies. A no-op prune leaves the YAML file byte-for-byte unchanged; prunin
 remaining entries, their order, and comments.
 Use `--prune=false` to leave invalid selections in the file after they are reported; `--validate`
 also checks that selected packages' rule files parse and meet their declared `otelc` version.
+If standalone `otelc pin` is interrupted, run `otelc cleanup` to restore its tracked
+module files; the next standalone pin also attempts to restore interrupted state
+automatically.
 
 A Go tool file takes precedence over YAML in the same module. Explicit selections from participating
 modules are combined. If any module in the invocation has an explicit selection, manifest-based

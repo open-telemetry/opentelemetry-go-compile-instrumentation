@@ -344,8 +344,13 @@ func TestLoadOtelYAMLImports(t *testing.T) {
 		{name: "empty selection", content: "instrumentations: []\n"},
 		{
 			name:    "trailing empty documents",
-			content: "instrumentations: [example.com/foo]\n---\n# trailing comment\n---\n",
+			content: "instrumentations: [example.com/foo]\n---\n# first trailing comment\n---\n# second trailing comment\n---\n",
 			want:    map[string]bool{"example.com/foo": true},
+		},
+		{
+			name:    "empty document before populated document",
+			content: "instrumentations: []\n---\n# empty\n---\ninstrumentations: [example.com/foo]\n",
+			wantErr: "multiple YAML documents",
 		},
 		{
 			name:    "unknown field",
@@ -365,6 +370,21 @@ func TestLoadOtelYAMLImports(t *testing.T) {
 		{
 			name:    "second null document",
 			content: "instrumentations: []\n---\nnull\n",
+			wantErr: "multiple YAML documents",
+		},
+		{
+			name:    "second empty mapping",
+			content: "instrumentations: []\n---\n{}\n",
+			wantErr: "multiple YAML documents",
+		},
+		{
+			name:    "second quoted empty string",
+			content: "instrumentations: []\n---\n\"\"\n",
+			wantErr: "multiple YAML documents",
+		},
+		{
+			name:    "second explicitly tagged empty null",
+			content: "instrumentations: []\n---\n!!null \"\"\n",
 			wantErr: "multiple YAML documents",
 		},
 		{
@@ -400,7 +420,9 @@ instrumentations:
   - example.com/stale # remove stale
   - 'example.com/a' # inline a
 ---
-# trailing empty document comment
+# first trailing empty document comment
+---
+# second trailing empty document comment
 `)
 	require.NoError(t, os.WriteFile(path, original, 0o640))
 
@@ -422,7 +444,8 @@ instrumentations:
 	require.NoError(t, err)
 	assert.Contains(t, string(pruned), "# selection comment")
 	assert.Contains(t, string(pruned), "# keep z comment")
-	assert.Contains(t, string(pruned), "# trailing empty document comment")
+	assert.Contains(t, string(pruned), "# first trailing empty document comment")
+	assert.Contains(t, string(pruned), "# second trailing empty document comment")
 	assert.Contains(t, string(pruned), `- "example.com/z" # inline z`)
 	assert.Contains(t, string(pruned), "- 'example.com/a' # inline a")
 	assert.NotContains(t, string(pruned), "example.com/stale")
@@ -434,6 +457,44 @@ instrumentations:
 	imports, err := loadOtelYAMLImports(path)
 	require.NoError(t, err)
 	assert.Equal(t, map[string]bool{"example.com/a": true, "example.com/z": true}, imports)
+	documents, err := readOtelYAMLDocuments(path)
+	require.NoError(t, err)
+	require.Len(t, documents, 3)
+	assert.True(t, isEmptyOtelYAMLDocument(&documents[1]))
+	assert.True(t, isEmptyOtelYAMLDocument(&documents[2]))
+}
+
+func TestWriteOtelYAMLImportsRejectsPopulatedAdditionalDocuments(t *testing.T) {
+	tests := []struct {
+		name     string
+		trailing string
+		wantErr  string
+	}{
+		{name: "null", trailing: "null", wantErr: "multiple YAML documents"},
+		{name: "empty mapping", trailing: "{}", wantErr: "multiple YAML documents"},
+		{name: "quoted empty string", trailing: `""`, wantErr: "multiple YAML documents"},
+		{name: "explicitly tagged empty null", trailing: `!!null ""`, wantErr: "multiple YAML documents"},
+		{
+			name:     "populated document after empty document",
+			trailing: "# empty\n---\ninstrumentations: []",
+			wantErr:  "multiple YAML documents",
+		},
+		{name: "malformed document", trailing: "instrumentations: [", wantErr: "parsing"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), instrumentationYAMLCanonical)
+			original := []byte("instrumentations: []\n---\n" + test.trailing + "\n")
+			require.NoError(t, os.WriteFile(path, original, 0o644))
+
+			err := writeOtelYAMLImports(path, map[string]bool{"example.com/invalid": true})
+
+			require.ErrorContains(t, err, test.wantErr)
+			unchanged, readErr := os.ReadFile(path)
+			require.NoError(t, readErr)
+			assert.Equal(t, original, unchanged)
+		})
+	}
 }
 
 func TestDiscoverPinConfigsCombinesSelectionsAcrossModules(t *testing.T) {
@@ -567,6 +628,11 @@ func TestPinLockedYAMLValidationPrunesInvalidRuleFile(t *testing.T) {
 
 	invalidDir := t.TempDir()
 	writeInstrumentationModule(t, invalidDir, "example.com/invalid", true, nil)
+	require.NoError(t, os.WriteFile(
+		filepath.Join(invalidDir, "invalid.otelc.yml"),
+		[]byte("broken: [\n"),
+		0o644,
+	))
 	root := filepath.Join(tmp, "root")
 	yamlPath := writeYAMLSelectionModule(t, root, "example.com/root", invalidDir)
 

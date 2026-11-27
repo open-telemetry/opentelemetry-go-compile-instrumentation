@@ -3,7 +3,11 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+
+	_ "example.com/uninstrumented"
+)
 
 func CustomTarget() {
 	fmt.Println("custom target called")
