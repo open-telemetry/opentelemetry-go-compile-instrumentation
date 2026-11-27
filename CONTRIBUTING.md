@@ -211,6 +211,7 @@ This repository requires using one of the following commit types:
 - `doc` or `docs` for documentation changes
 - `feat` for introduction of new features
 - `fix` for bug fixes
+- `perf` for performance improvements
 - `release` when cutting a new release
 - `refactor` for code changes that do not add new features or fix bugs
 - `test` for changes to tests or test infrastructure
@@ -243,6 +244,10 @@ Here are some examples for the various supported commit types:
     this.
   - :white_check_mark: `fix: SEGFAULT on when cross-compiling on linux/arm64 platforms`
   - :x: `fix: check pointer for nil before dereferencing it`
+- `perf`:
+  - :information_source: What performance improvement is being made?
+  - :white_check_mark: `perf(tool): cache parsed ASTs across instrumentation phases`
+  - :x: `perf: make code faster`
 - `release`:
   - :information_source: What version is this commit preparing for?
   - :white_check_mark: `release: v1.2.3`
