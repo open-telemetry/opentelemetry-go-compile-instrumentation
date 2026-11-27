@@ -79,11 +79,11 @@ func stripGenericTypes(recvTypeExpr dst.Expr) string {
 	return ""
 }
 
-// findFuncDecl finds the declaration named funcName with receiver recv. When
-// reason is non-nil and a declaration has the name but not the receiver, it
-// is set to "receiver_mismatch".
-func findFuncDecl(root *dst.File, funcName, recv string, reason *string) *dst.FuncDecl {
-	decls := findFuncDecls(root, func(funcDecl *dst.FuncDecl) bool {
+// findFuncDeclsNamed finds every declaration named funcName with receiver recv.
+// When reason is non-nil and a declaration has the name but not the receiver,
+// it is set to "receiver_mismatch".
+func findFuncDeclsNamed(root *dst.File, funcName, recv string, reason *string) []*dst.FuncDecl {
+	return findFuncDecls(root, func(funcDecl *dst.FuncDecl) bool {
 		if reason != nil && funcDecl.Name.Name == funcName {
 			*reason = "receiver_mismatch"
 		}
@@ -115,11 +115,6 @@ func findFuncDecl(root *dst.File, funcName, recv string, reason *string) *dst.Fu
 
 		return baseType == recv && name == funcName
 	})
-
-	if len(decls) == 0 {
-		return nil
-	}
-	return decls[0]
 }
 
 // FindFuncDecl finds the function declaration targeted by r, including
@@ -142,9 +137,25 @@ func FindFuncDecl[R rule.InstFuncRule | rule.InstRawRule | rule.FilterDef](
 
 // FindFuncDeclReporting uses the same matcher and optionally reports its rejection reason.
 // An empty reason means the declaration matched. Errors remain build errors.
+// When several declarations match, the first one is returned.
 func FindFuncDeclReporting[R rule.InstFuncRule | rule.InstRawRule | rule.FilterDef](
 	root *dst.File, r *R, resolvedNames map[string]string, reason *string,
 ) (*dst.FuncDecl, bool, error) {
+	decls, err := FindFuncDeclsReporting(root, r, resolvedNames, reason)
+	if err != nil || len(decls) == 0 {
+		return nil, false, err
+	}
+	return decls[0], true, nil
+}
+
+// FindFuncDeclsReporting returns every declaration of root that r targets, in
+// source order. A file can declare the same function name more than once only
+// for init, which Go allows any number of times per package.
+//
+// It reports its rejection reason like FindFuncDeclReporting does.
+func FindFuncDeclsReporting[R rule.InstFuncRule | rule.InstRawRule | rule.FilterDef](
+	root *dst.File, r *R, resolvedNames map[string]string, reason *string,
+) ([]*dst.FuncDecl, error) {
 	var (
 		funcName string
 		recv     string
@@ -176,29 +187,32 @@ func FindFuncDeclReporting[R rule.InstFuncRule | rule.InstRawRule | rule.FilterD
 	if reason != nil {
 		*reason = "function_not_found"
 	}
-	funcDecl := findFuncDecl(root, funcName, recv, reason)
-	if funcDecl == nil {
-		return nil, false, nil
+	named := findFuncDeclsNamed(root, funcName, recv, reason)
+	if len(named) == 0 {
+		return nil, nil
 	}
 
 	if reason != nil {
 		*reason = ""
 	}
 	if funcRule == nil {
-		return funcDecl, true, nil
+		return named, nil
 	}
 
-	ok, err := funcDeclMatchesFilters(funcDecl, funcRule, root, resolvedNames)
-	if err != nil {
-		return nil, false, err
-	}
-	if !ok {
-		if reason != nil {
-			*reason = "signature_mismatch"
+	matched := make([]*dst.FuncDecl, 0, len(named))
+	for _, funcDecl := range named {
+		ok, err := funcDeclMatchesFilters(funcDecl, funcRule, root, resolvedNames)
+		if err != nil {
+			return nil, err
 		}
-		return nil, false, nil
+		if ok {
+			matched = append(matched, funcDecl)
+		}
 	}
-	return funcDecl, true, nil
+	if len(matched) == 0 && reason != nil {
+		*reason = "signature_mismatch"
+	}
+	return matched, nil
 }
 
 func listFuncDecls(root *dst.File) []*dst.FuncDecl {

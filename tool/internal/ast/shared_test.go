@@ -1278,7 +1278,7 @@ func (r pkg.T) Method() error { return nil }
 	// Both the function name and the receiver base name are the ones this
 	// declaration would match on if the shape were recognised, so returning nil
 	// can only come from the guard rather than from a name mismatch.
-	assert.Nil(t, findFuncDecl(file, "Method", "T", nil),
+	assert.Empty(t, findFuncDeclsNamed(file, "Method", "T", nil),
 		"an unrecognized receiver should be a no match, not a build abort")
 }
 
@@ -1400,4 +1400,28 @@ func TestFuncDeclMatchesFilters_CompositeFilters(t *testing.T) {
 			assert.Equal(t, tt.want, mustMatch(t, decl, tt.rule))
 		})
 	}
+}
+
+func TestFindFuncDeclsReportingReturnsEveryInit(t *testing.T) {
+	src := `package main
+
+func init() { println("a") }
+
+func Run() {}
+
+func init() { println("b") }
+`
+	file, err := NewAstParser().ParseSource(src)
+	require.NoError(t, err)
+
+	decls, err := FindFuncDeclsReporting(file, &rule.InstRawRule{Func: "init"}, nil, nil)
+	require.NoError(t, err)
+	require.Len(t, decls, 2)
+	assert.Same(t, decls[0], file.Decls[0])
+	assert.Same(t, decls[1], file.Decls[2])
+
+	first, ok, err := FindFuncDecl(file, &rule.InstRawRule{Func: "init"}, nil)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Same(t, decls[0], first)
 }
