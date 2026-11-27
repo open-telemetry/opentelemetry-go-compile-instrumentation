@@ -6,6 +6,7 @@
 - [Enabling Debug Output](#enabling-debug-output)
 - [Inspecting Build Artifacts](#inspecting-build-artifacts)
 - [Common Errors](#common-errors)
+  - [Build lock contention and nested invocation waits](#build-lock-contention-and-nested-invocation-waits)
 - [Hook and Instrumentation Limitations](#hook-and-instrumentation-limitations)
 - [Getting Help](#getting-help)
 
@@ -304,6 +305,22 @@ Errors from `pkgload` (for example, `"failed to resolve package name for ..."` o
 `"no packages found for ..."`) mean `otelc` could not load a Go package during setup. These
 are fatal. Common causes: the package is not in the module graph, the module is not
 downloaded, or the module proxy is unreachable. Run `go mod download` and try again.
+
+### Build lock contention and nested invocation waits
+
+`otelc` uses advisory file locks to synchronize access to shared module and build files. During concurrent builds or nested executions, you may encounter one of the following messages:
+
+#### `otelc: another invocation holds the build lock; waiting for it to finish (lock: ...)`
+
+This is normal contention between concurrent `otelc` invocations targeting the same module or work directory, or between modules that share a `go.work` directory (which contend for the workspace lock). The message is printed once when an invocation discovers a held lock; it then waits until the lock becomes free. By default (`OTELC_UNLOCKED_COMPILE=0`), the holder keeps the lock across setup, compilation, and restoration; with [`OTELC_UNLOCKED_COMPILE=1`](configuration.md#experimental-concurrent-compilation), an eligible build releases the module lock after setup, before compilation begins. If the wait persists unexpectedly, check whether another build, editor language server/linter, or background test run is holding the lock.
+
+#### `build lock ... is held by a parent otelc invocation that waits for this one...`
+
+This occurs when a child `otelc` command is invoked from within a process already running under `otelc` (such as an integration test running `otelc go build`) and attempts to reuse the parent's work directory. A child command cannot share the parent's work directory without overwriting active `.otelc-build` state. To resolve this, supply a dedicated `--work-dir` for the nested invocation.
+
+#### `otelc: still waiting for build lock ... An otelc command started under another otelc command ... must get the OTELC_HELD_BUILD_LOCKS environment variable...`
+
+When `otelc` starts an execution, it exports `OTELC_HELD_BUILD_LOCKS` so nested child commands acquire distinct numbered sibling locks instead of waiting indefinitely on their parent, and `OTELC_PARENT_WORK_DIRS` so child commands cannot inadvertently reuse the parent's work directory. If a test runner or custom script spawns a child process with a scrubbed or explicitly filtered environment, the child will fail to detect the parent's lock ownership and wait indefinitely. Launchers that filter the environment must preserve both `OTELC_HELD_BUILD_LOCKS` and `OTELC_PARENT_WORK_DIRS`.
 
 ## Hook and Instrumentation Limitations
 
