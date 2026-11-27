@@ -44,7 +44,11 @@ mostly maintained there.
 1. `otelc setup` collects every import a rule can add, per target package, and writes them to
    `.otelc-build/overlay.json` as an `otelc.imports.go` blank-import file in the package
    directory, merged with any `-overlay` the user passed. `otelc go build/test` passes
-   `-overlay` itself.
+   `-overlay` itself. When the build names `.go` files (`go build main.go`), the go command
+   compiles only those files and ignores a new file in the directory. For these builds setup
+   puts the imports into the generated `otelc.runtime.go` instead, which `otelc go` already
+   adds to the file list (`toolexecBuildArgs`). In drop-in mode the user adds
+   `otelc.runtime.go` to the file list.
 2. Rules must not add an import to a package in the module cache that the package does not
    already import. Setup fails with an error naming the rule, the package and the import.
    Rules that need code from another package reach it with `//go:linkname`, which the contrib
@@ -65,7 +69,9 @@ mostly maintained there.
 1. The contrib otel rules add no imports to module cache packages (linkname refactor of
    `otel/init` and `otel/sdk/trace`, [opentelemetry-go-compile-contrib#56](https://github.com/open-telemetry/opentelemetry-go-compile-contrib/pull/56)). No behavior change.
 2. `//otelc:ignore` uses linkname. Setup writes the overlay and `otelc go` passes it. Toolexec
-   resolution stays as a fallback, so drop-in builds without `-overlay` keep working.
+   resolution stays as a fallback, so drop-in builds without `-overlay` keep working on
+   toolchains where the nested `go list -export` still works. On Go 1.28 that fallback
+   already fails, so drop-in builds there need `-overlay` from this step on.
 3. `fix(tool)!:` remove toolexec resolution. Drop-in builds need `-overlay`.
 
 ## Consequences
