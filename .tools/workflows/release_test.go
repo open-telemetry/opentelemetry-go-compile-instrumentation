@@ -133,6 +133,43 @@ func TestReleasePreparePullRequestConfiguration(t *testing.T) {
 	}
 }
 
+// TestReleasePrepareCommitIdentityComment pins the comment above Create Pull
+// Request so it documents the actual peter-evans/create-pull-request defaults:
+// workflow-triggering user as author and github-actions[bot] as committer.
+func TestReleasePrepareCommitIdentityComment(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("../../.github/workflows", "release-prepare.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	stepIdx := strings.Index(content, "- name: Create Pull Request")
+	if stepIdx == -1 {
+		t.Fatal("release-prepare.yml: missing Create Pull Request step")
+	}
+	// Check the comment block immediately preceding the step.
+	before := content[:stepIdx]
+	lines := strings.Split(strings.TrimRight(before, " \t\r\n"), "\n")
+	var commentLines []string
+	for i := len(lines) - 1; i >= 0; i-- {
+		trimmed := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(trimmed, "#") {
+			commentLines = append([]string{strings.TrimSpace(strings.TrimPrefix(trimmed, "#"))}, commentLines...)
+		} else {
+			break
+		}
+	}
+	comment := strings.Join(commentLines, " ")
+	if comment == "" {
+		t.Fatal("release-prepare.yml: expected a commit identity comment immediately before Create Pull Request")
+	}
+	if !strings.Contains(comment, "workflow-triggering user as author") {
+		t.Errorf("Create Pull Request comment must document the workflow-triggering user as default author; got %q", comment)
+	}
+	if !strings.Contains(comment, "github-actions[bot] as committer") {
+		t.Errorf("Create Pull Request comment must document github-actions[bot] as default committer; got %q", comment)
+	}
+}
+
 // TestReleasePrepareMetadataAvoidsHeredoc pins the metadata step to file-based
 // output. The pr_body<<EOF heredoc broke whenever a value could contain a
 // literal EOF line.
@@ -190,7 +227,8 @@ func TestReleaseCheckoutDoesNotPersistCredentials(t *testing.T) {
 }
 
 // TestReleaseTagPushUsesExplicitToken pins the tag push: it must authenticate
-// with an explicit token URL instead of persisted checkout credentials.
+// with an explicit token URL derived from GITHUB_SERVER_URL instead of
+// persisted checkout credentials or a hardcoded github.com host.
 func TestReleaseTagPushUsesExplicitToken(t *testing.T) {
 	step := findStep(t, "release.yml", "release", "Create and push tags")
 	run, ok := runOf(step)
@@ -202,6 +240,41 @@ func TestReleaseTagPushUsesExplicitToken(t *testing.T) {
 	}
 	if !strings.Contains(run.Run.Value, "${APP_TOKEN:-${GITHUB_TOKEN}}") {
 		t.Error("Create and push tags must fall back from APP_TOKEN to GITHUB_TOKEN for the push")
+	}
+	if !strings.Contains(run.Run.Value, "${GITHUB_SERVER_URL#https://}") {
+		t.Error("Create and push tags must derive the git host from ${GITHUB_SERVER_URL#https://}")
+	}
+	if strings.Contains(run.Run.Value, "@github.com/") {
+		t.Error("Create and push tags must not hardcode github.com in the push URL")
+	}
+}
+
+// TestMakefileVersionAllowsPreReleasesAndExcludesPkgTags pins Makefile VERSION
+// so pre-release/RC tags (e.g. v1.3.0-rc1) are preserved while pkg/* module
+// tags are excluded.
+func TestMakefileVersionAllowsPreReleasesAndExcludesPkgTags(t *testing.T) {
+	data, err := os.ReadFile("../../Makefile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var versionLine string
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if strings.HasPrefix(line, "VERSION :=") {
+			versionLine = line
+			break
+		}
+	}
+	if versionLine == "" {
+		t.Fatal("Makefile: missing VERSION := definition")
+	}
+	if !strings.Contains(versionLine, "git describe --tags --abbrev=0 --match 'v[0-9]*'") {
+		t.Errorf("Makefile VERSION must use git describe --tags --abbrev=0 --match 'v[0-9]*' so RC tags are preserved and pkg/* tags are excluded; got %q", versionLine)
+	}
+	if !strings.Contains(versionLine, `echo "v0.0.0"`) {
+		t.Errorf("Makefile VERSION must fall back to v0.0.0; got %q", versionLine)
+	}
+	if strings.Contains(versionLine, `^v[0-9]+\.[0-9]+\.[0-9]+$`) {
+		t.Errorf("Makefile VERSION must not filter out pre-release/RC tags; got %q", versionLine)
 	}
 }
 
