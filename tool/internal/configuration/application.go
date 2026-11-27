@@ -72,7 +72,7 @@ func ParseApplicationConfiguration(data []byte, source string) (ApplicationConfi
 	if err != nil {
 		return ApplicationConfiguration{}, err
 	}
-	if err = rejectDuplicateYAMLKeys(root, source, ""); err != nil {
+	if err = rejectDuplicateYAMLKeys(root, source); err != nil {
 		return ApplicationConfiguration{}, err
 	}
 	if !hasYAMLField(root, "file_format") {
@@ -784,6 +784,9 @@ func indexInstrumentationLocations(root *yaml.Node, source string, locations map
 		return
 	}
 	section := fields["instrumentation/development"]
+	for section != nil && section.Kind == yaml.AliasNode {
+		section = section.Alias
+	}
 	if section == nil || section.Kind != yaml.MappingNode {
 		return
 	}
@@ -791,25 +794,60 @@ func indexInstrumentationLocations(root *yaml.Node, source string, locations map
 		key := section.Content[i]
 		if key.Value == "general" || key.Value == "go" {
 			indexYAMLNodeLocations(section.Content[i+1], key.Value, source, locations)
+		} else {
+			path := joinYAMLPath("instrumentation/development", key.Value)
+			indexYAMLNodeLocations(section.Content[i+1], path, source, locations)
 		}
 	}
 }
 
 func indexYAMLNodeLocations(node *yaml.Node, path, source string, locations map[string]SourceLocation) {
+	indexYAMLNodeLocationsOnPath(node, path, source, locations, make(map[*yaml.Node]struct{}))
+}
+
+func indexYAMLNodeLocationsOnPath(
+	node *yaml.Node,
+	path, source string,
+	locations map[string]SourceLocation,
+	active map[*yaml.Node]struct{},
+) {
 	if node == nil {
 		return
 	}
 	locations[path] = SourceLocation{File: source, Line: node.Line, Column: node.Column}
+	indexYAMLNodeLocationContents(node, path, source, locations, active)
+}
+
+func indexYAMLNodeLocationContents(
+	node *yaml.Node,
+	path, source string,
+	locations map[string]SourceLocation,
+	active map[*yaml.Node]struct{},
+) {
+	if node == nil {
+		return
+	}
+	if _, found := active[node]; found {
+		return
+	}
+	active[node] = struct{}{}
+	defer delete(active, node)
+	if node.Kind == yaml.AliasNode {
+		indexYAMLNodeLocationContents(node.Alias, path, source, locations, active)
+		return
+	}
 	if node.Kind == yaml.MappingNode {
 		for i := 0; i+1 < len(node.Content); i += yamlMappingPairSize {
 			key := node.Content[i]
-			indexYAMLNodeLocations(node.Content[i+1], joinYAMLPath(path, key.Value), source, locations)
+			indexYAMLNodeLocationsOnPath(
+				node.Content[i+1], joinYAMLPath(path, key.Value), source, locations, active,
+			)
 		}
 		return
 	}
 	if node.Kind == yaml.SequenceNode {
 		for i, child := range node.Content {
-			indexYAMLNodeLocations(child, fmt.Sprintf("%s[%d]", path, i), source, locations)
+			indexYAMLNodeLocationsOnPath(child, fmt.Sprintf("%s[%d]", path, i), source, locations, active)
 		}
 	}
 }
@@ -932,8 +970,8 @@ func parseSingleYAMLDocument(data []byte, source string) (*yaml.Node, error) {
 	return root.Content[0], nil
 }
 
-func rejectDuplicateYAMLKeys(node *yaml.Node, source, path string) error {
-	return rejectDuplicateYAMLKeysOnPath(node, source, path, make(map[*yaml.Node]struct{}))
+func rejectDuplicateYAMLKeys(node *yaml.Node, source string) error {
+	return rejectDuplicateYAMLKeysOnPath(node, source, "", make(map[*yaml.Node]struct{}))
 }
 
 func rejectDuplicateYAMLKeysOnPath(

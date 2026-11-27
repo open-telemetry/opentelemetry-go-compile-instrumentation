@@ -271,9 +271,10 @@ instrumentation/development:
 
 func TestParseApplicationConfigurationRejectsInvalidDocuments(t *testing.T) {
 	tests := []struct {
-		name string
-		data string
-		want string
+		name     string
+		data     string
+		want     string
+		location string
 	}{
 		{
 			name: "non-mapping document",
@@ -286,14 +287,16 @@ func TestParseApplicationConfigurationRejectsInvalidDocuments(t *testing.T) {
 			want: "duplicate key \"file_format\"",
 		},
 		{
-			name: "cyclic sequence alias",
-			data: "file_format: '1.2'\na: &x [*x]\n",
-			want: "app.yaml:2:",
+			name:     "cyclic sequence alias",
+			data:     "file_format: '1.2'\na: &x [*x]\n",
+			want:     "cyclic YAML alias",
+			location: "app.yaml:2:",
 		},
 		{
-			name: "cyclic mapping alias",
-			data: "file_format: '1.2'\na: &x {nested: *x}\n",
-			want: "cyclic YAML alias",
+			name:     "cyclic mapping alias",
+			data:     "file_format: '1.2'\na: &x {nested: *x}\n",
+			want:     "cyclic YAML alias",
+			location: "app.yaml:2:",
 		},
 		{
 			name: "multiple documents",
@@ -325,8 +328,23 @@ func TestParseApplicationConfigurationRejectsInvalidDocuments(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := ParseApplicationConfiguration([]byte(test.data), "app.yaml")
 			require.ErrorContains(t, err, test.want)
+			if test.location != "" {
+				require.ErrorContains(t, err, test.location)
+			}
 		})
 	}
+}
+
+func TestParseApplicationConfigurationRejectsCycleInsideCollectionValue(t *testing.T) {
+	_, err := ParseApplicationConfiguration([]byte(`file_format: "1.2"
+instrumentation/development:
+  go:
+    sample:
+      labels: &labels
+        self: *labels
+`), "app.yaml")
+	require.ErrorContains(t, err, "cyclic YAML alias")
+	require.ErrorContains(t, err, "instrumentation/development/go.sample.labels")
 }
 
 func TestValidateApplicationConfigurationFileFormatAndPinnedParser(t *testing.T) {
@@ -403,6 +421,26 @@ instrumentation/development:
 `), "app.yaml")
 	require.NoError(t, err)
 	assert.NotEmpty(t, app.Instrumentation)
+}
+
+func TestValidateApplicationOptionsReportsAliasedOptionLocation(t *testing.T) {
+	app, err := ParseApplicationConfiguration([]byte(`file_format: "1.2"
+instrumentation/development:
+  go:
+    selected: &settings
+      enabled: true
+    alias: *settings
+`), "app.yaml")
+	require.NoError(t, err)
+
+	validated, err := ValidateApplicationOptions(app, []Entry{
+		{Name: "go.selected.enabled", Type: booleanType},
+		{Name: "go.alias.enabled", Type: booleanType, Deprecated: true},
+	}, nil)
+	require.NoError(t, err)
+	require.Len(t, validated.Warnings, 1)
+	assert.Equal(t, "go.alias.enabled", validated.Warnings[0].Path)
+	assert.Equal(t, SourceLocation{File: "app.yaml", Line: 5, Column: 16}, validated.Warnings[0].Location)
 }
 
 func TestValidateApplicationOptions(t *testing.T) {
@@ -540,6 +578,18 @@ instrumentation/development:
       nested.enabled: true
 `,
 			definition: Entry{Name: "go.sample.nested.enabled", Type: booleanType},
+			lineColumn: "app.yaml:5:7",
+		},
+		{
+			name: "dotted key through an alias",
+			data: `file_format: "1.2"
+instrumentation/development:
+  go:
+    defaults: &options
+      nested.enabled: true
+    sample: *options
+`,
+			definition: Entry{Name: "go.defaults", Type: mapType},
 			lineColumn: "app.yaml:5:7",
 		},
 	}
@@ -957,16 +1007,19 @@ instrumentation/development:
 	require.NoError(t, err)
 	require.Len(t, validated.Warnings, 1)
 	assert.Contains(t, validated.Warnings[0].Message, "only validates general and Go")
+	assert.Equal(t, "app.yaml", validated.Warnings[0].Location.File)
+	assert.Positive(t, validated.Warnings[0].Location.Line)
+	assert.Positive(t, validated.Warnings[0].Location.Column)
 }
 
 func TestValidateApplicationOptionsRejectsUnsupportedSectionPath(t *testing.T) {
-	application := ApplicationConfiguration{
-		Source:          "app.yaml",
-		Instrumentation: map[string]any{"go": true},
-		SourceLocations: map[string]SourceLocation{"go": {File: "app.yaml", Line: 2, Column: 3}},
-	}
+	application, err := ParseApplicationConfiguration([]byte(`file_format: "1.2"
+instrumentation/development:
+  go: true
+`), "app.yaml")
+	require.NoError(t, err)
 
-	_, err := ValidateApplicationOptions(application, nil, nil)
+	_, err = ValidateApplicationOptions(application, nil, nil)
 	require.ErrorContains(t, err, "unsupported instrumentation configuration path")
 }
 
@@ -987,14 +1040,19 @@ instrumentation/development:
 }
 
 func TestValidateApplicationOptionsRejectsSelectedUnsupportedPath(t *testing.T) {
-	application := ApplicationConfiguration{
-		Source:          "app.yaml",
-		Instrumentation: map[string]any{"go": true},
-		SourceLocations: map[string]SourceLocation{"go": {File: "app.yaml", Line: 2, Column: 3}},
-	}
+	application, err := ParseApplicationConfiguration([]byte(`file_format: "1.2"
+instrumentation/development:
+  go: true
+`), "app.yaml")
+	require.NoError(t, err)
 
-	_, err := ValidateApplicationOptions(application, []Entry{{Name: "go", Type: booleanType}}, nil)
+	_, err = ValidateApplicationOptions(application, []Entry{{Name: "go", Type: booleanType}}, nil)
 	require.ErrorContains(t, err, "unsupported instrumentation configuration path")
+}
+
+func TestValidateApplicationOptionsRequiresParsedSourceDocument(t *testing.T) {
+	_, err := ValidateApplicationOptions(ApplicationConfiguration{Source: "app.yaml"}, nil, nil)
+	require.ErrorContains(t, err, "app.yaml: application configuration must be a mapping")
 }
 
 func TestValidateApplicationOptionsReportsOriginalSDKFieldLocation(t *testing.T) {
@@ -1223,24 +1281,24 @@ func TestParseAndValidateSelectedConfigurationRejectsMalformedDocuments(t *testi
 }
 
 func TestRejectDuplicateYAMLKeysHandlesAliasesAndNonStringKeys(t *testing.T) {
-	require.NoError(t, rejectDuplicateYAMLKeys(nil, "app.yaml", ""))
+	require.NoError(t, rejectDuplicateYAMLKeys(nil, "app.yaml"))
 	var document yaml.Node
 	require.NoError(t, yaml.Unmarshal([]byte("base: &base\n  value: true\ncopy: *base\n"), &document))
-	require.NoError(t, rejectDuplicateYAMLKeys(document.Content[0], "app.yaml", ""))
+	require.NoError(t, rejectDuplicateYAMLKeys(document.Content[0], "app.yaml"))
 
 	var nestedDuplicate yaml.Node
 	require.NoError(t, yaml.Unmarshal([]byte("items:\n  - value: true\n    value: false\n"), &nestedDuplicate))
-	require.ErrorContains(t, rejectDuplicateYAMLKeys(nestedDuplicate.Content[0], "app.yaml", ""), "duplicate key")
+	require.ErrorContains(t, rejectDuplicateYAMLKeys(nestedDuplicate.Content[0], "app.yaml"), "duplicate key")
 
 	var sequenceDuplicate yaml.Node
 	require.NoError(t, yaml.Unmarshal([]byte("items:\n  - value: true\n"), &sequenceDuplicate))
-	require.NoError(t, rejectDuplicateYAMLKeys(sequenceDuplicate.Content[0], "app.yaml", ""))
+	require.NoError(t, rejectDuplicateYAMLKeys(sequenceDuplicate.Content[0], "app.yaml"))
 
 	nonStringKey := &yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{
 		{Kind: yaml.SequenceNode, Content: []*yaml.Node{{Kind: yaml.ScalarNode, Value: "key"}}},
 		{Kind: yaml.ScalarNode, Value: "value"},
 	}}
-	require.ErrorContains(t, rejectDuplicateYAMLKeys(nonStringKey, "app.yaml", ""), "mapping keys must be strings")
+	require.ErrorContains(t, rejectDuplicateYAMLKeys(nonStringKey, "app.yaml"), "mapping keys must be strings")
 }
 
 func TestValidateYAMLFieldsHandlesUnsupportedShapes(t *testing.T) {
