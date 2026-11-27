@@ -149,7 +149,7 @@ jobs:
               # Push with an explicit token instead of persisted checkout
               # credentials, so no token lingers in .git/config.
               local push_token="${APP_TOKEN:-${GITHUB_TOKEN}}"
-              git push "https://x-access-token:${push_token}@github.com/${GITHUB_REPOSITORY}.git" "${tag}"
+              git push "https://x-access-token:${push_token}@${GITHUB_SERVER_URL#https://}/${GITHUB_REPOSITORY}.git" "${tag}"
             fi
           }
 
