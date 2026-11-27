@@ -1196,6 +1196,10 @@ For example, suppose variable `w` has the static type `io.Writer` and holds a `*
 
 To instrument a method, write the rule against the concrete type, and call that method through a variable of the concrete type, not through an interface.
 
+**Packages that get the rule:**
+
+A package can only hold a value of a type when it depends on the package of that type, or is that package. otelc adds a `method_call` rule only to those packages, even when the target is `"**"`. A package reaches the type through any chain of imports, for example a function of another package that returns the type, a type alias, or a struct that embeds the type.
+
 **Examples:**
 
 #### Example 1: Wrapping Standard Library Calls

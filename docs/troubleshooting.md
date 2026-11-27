@@ -110,8 +110,9 @@ Records describe individual decisions, not a package-wide verdict. A rule can fa
 in one file and match another. An omitted `source` means a package-level decision.
 `matched: true` omits `reason`; in setup it means eligibility, not an applied change.
 Function call and literal rules are eligible in every file passing `where` that imports
-the rule's package, and method call rules in every file passing `where`; their join
-points are resolved during instrumentation. Use the `.diff` reports to inspect changes.
+the rule's package, and method call rules in every file passing `where` of a package that
+depends on the package of the receiver type; their join points are resolved during
+instrumentation. Use the `.diff` reports to inspect changes.
 
 The initial closed set of rejection codes is:
 
@@ -127,6 +128,7 @@ The initial closed set of rejection codes is:
 | `directive_not_found` | The requested directive was absent. |
 | `declaration_not_found` | No named declaration of the requested kind existed. |
 | `import_not_found` | The file did not import the package of a function call or literal rule. |
+| `receiver_not_in_deps` | The package does not depend on the package of a method call rule's receiver type. |
 | `ignored` | An `otelc:ignore` directive suppressed instrumentation, of the file, the function, or every matching call site. |
 | `no_joinpoint` | A call, literal, or directive rule found nothing to instrument in this file. |
 

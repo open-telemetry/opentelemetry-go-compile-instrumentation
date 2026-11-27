@@ -4,6 +4,7 @@
 package rule
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -366,4 +367,30 @@ func TestInstRuleSetMergeIntoSetWithoutMaps(t *testing.T) {
 	assert.Equal(t, map[string]string{file: "a.cgo1.go"}, irs.CgoFileMap)
 	require.Len(t, irs.FuncRules[file], 1)
 	assert.Equal(t, "hook", irs.FuncRules[file][0].Name)
+}
+
+func TestInstRuleSetStoresEachCallRuleOnce(t *testing.T) {
+	dir := t.TempDir()
+	r := &InstCallRule{
+		InstBaseRule: InstBaseRule{Name: "wrap_do", Target: NewTarget("**")},
+		MethodCall:   "net/http.*Client.Do",
+		Replace:      "{{ . }}",
+	}
+	require.NoError(t, r.parseSelector())
+	set := NewInstRuleSet("example.com/lib")
+	files := []string{filepath.Join(dir, "a.go"), filepath.Join(dir, "b.go"), filepath.Join(dir, "c.go")}
+	for _, file := range files {
+		set.AddCallRule(file, r)
+	}
+
+	data, err := json.Marshal(set)
+	require.NoError(t, err)
+	assert.Equal(t, 1, strings.Count(string(data), `"method_call":"net/http.*Client.Do"`))
+
+	var decoded InstRuleSet
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	for _, file := range files {
+		require.Len(t, decoded.CallRules[file], 1)
+		assert.Equal(t, *r, *decoded.CallRules[file][0])
+	}
 }

@@ -110,7 +110,7 @@ type InstRuleSet struct {
 	RawRules       map[string][]*InstRawRule       `json:"raw_rules"`
 	FuncRules      map[string][]*InstFuncRule      `json:"func_rules"`
 	StructRules    map[string][]*InstStructRule    `json:"struct_rules"`
-	CallRules      map[string][]*InstCallRule      `json:"call_rules"`
+	CallRules      CallRulesByFile                 `json:"call_rules"`
 	LitRules       map[string][]*InstLitRule       `json:"lit_rules"`
 	DirectiveRules map[string][]*InstDirectiveRule `json:"directive_rules"`
 	DeclRules      map[string][]*InstDeclRule      `json:"decl_rules"`
@@ -131,7 +131,7 @@ func NewInstRuleSet(importPath string) *InstRuleSet {
 		RawRules:       make(map[string][]*InstRawRule),
 		FuncRules:      make(map[string][]*InstFuncRule),
 		StructRules:    make(map[string][]*InstStructRule),
-		CallRules:      make(map[string][]*InstCallRule),
+		CallRules:      make(CallRulesByFile),
 		LitRules:       make(map[string][]*InstLitRule),
 		DirectiveRules: make(map[string][]*InstDirectiveRule),
 		DeclRules:      make(map[string][]*InstDeclRule),

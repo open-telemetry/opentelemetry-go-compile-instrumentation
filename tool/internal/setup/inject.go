@@ -249,9 +249,19 @@ func (sp *setupPhase) matchInjectedDeps(
 		known[dep.ImportPath] = true
 	}
 
+	// The graph of the build packages does not hold the injected packages,
+	// so each load adds its packages to it for canCallMethod.
+	graphLoad := sp.graphLoader(buildFlags)
+	load := func(ctx context.Context, paths []string) ([]*packages.Package, error) {
+		pkgs, err := graphLoad(ctx, paths)
+		if err == nil && sp.imports != nil {
+			sp.imports.add(pkgs)
+		}
+		return pkgs, err
+	}
 	pass := injectionPass{
 		load: func(ctx context.Context, hookPaths []string, known map[string]bool) ([]*Dependency, error) {
-			injected, err := injectedDepsFrom(ctx, hookPaths, known, sp.graphLoader(buildFlags))
+			injected, err := injectedDepsFrom(ctx, hookPaths, known, load)
 			if err != nil {
 				// Completing the plan is an improvement on it, not a
 				// precondition for building, so a closure that will not resolve

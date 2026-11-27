@@ -56,6 +56,9 @@ type setupPhase struct {
 	ruleModuleRoots map[rule.InstRule]string
 	// graph caches the package graph loads setup shares between phases.
 	graph packageGraph
+	// imports holds the imports of every package setup loaded. A nil graph
+	// knows no package.
+	imports *importGraph
 }
 
 func (sp *setupPhase) getBuildContext() *gobuild.Context {
@@ -622,6 +625,8 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 	sp.buildPackages = buildPkgs
 	sp.resolvedNames = pkgload.CollectPackageNames(allPkgs)
 	sp.testPackages = testPackages(buildPkgs, allPkgs)
+	sp.imports = &importGraph{}
+	sp.imports.add(allPkgs)
 
 	// Find the module directories for the build packages
 	moduleDirs, findModErr := pkgload.FindModuleDirs(ctx, buildPkgs)

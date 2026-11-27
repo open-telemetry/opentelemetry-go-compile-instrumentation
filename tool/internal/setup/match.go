@@ -184,6 +184,10 @@ func (sp *setupPhase) runMatch(
 			}
 			continue
 		}
+		if !sp.canCallMethod(dep, r) {
+			sp.reportDecision("", r, "receiver_not_in_deps")
+			continue
+		}
 		filteredRules = append(filteredRules, r)
 	}
 
@@ -403,14 +407,27 @@ func (sp *setupPhase) matchOneRule(
 	return nil
 }
 
+// canCallMethod reports whether dep can call the method of r, when r is a
+// method_call rule. A package can only hold a value of the receiver type when
+// it depends on the package of that type, or is that package. Any other rule
+// can apply to dep.
+func (sp *setupPhase) canCallMethod(dep *Dependency, r rule.InstRule) bool {
+	cr, ok := r.(*rule.InstCallRule)
+	if !ok || cr.MethodCall == "" {
+		return true
+	}
+	return sp.imports.reaches(dep, cr.ImportPath)
+}
+
 // matchCallRule adds the call rule r to source in set. It returns the reason
 // when r cannot change source, and "" otherwise.
 //
 // A function_call rule changes only a call written as pkg.Func(), where pkg is
 // an import of the rule's package, so a file without that import has nothing
 // to change. A method_call rule can match a value whose type comes from a
-// package the file does not import, so it is added to every file. The calls
-// themselves are found during the instrument phase.
+// package the file does not import, so it is added to every file of a package
+// that canCallMethod accepts. The calls themselves are found during the
+// instrument phase.
 func (sp *setupPhase) matchCallRule(
 	tree *dst.File,
 	source string,
