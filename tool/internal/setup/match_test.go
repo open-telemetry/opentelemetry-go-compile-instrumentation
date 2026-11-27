@@ -2477,7 +2477,7 @@ func TestPreciseMatching_MatchOneRuleError(t *testing.T) {
 	badRule := &rule.InstFuncRule{
 		InstBaseRule: rule.InstBaseRule{Name: "bad", Target: rule.NewTarget("example.com/s")},
 		Func:         "Foo",
-		Signature:    &rule.FuncSignature{Args: []string{"[]invalid"}},
+		Signature:    &rule.FuncSignature{Args: []string{"[]"}},
 	}
 
 	sp := newTestSetupPhase()

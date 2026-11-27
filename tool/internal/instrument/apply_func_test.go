@@ -753,7 +753,7 @@ func TestInstrumentFile_FindFuncDeclErrorIsWrapped(t *testing.T) {
 	funcRule := &rule.InstFuncRule{
 		InstBaseRule: rule.InstBaseRule{Name: "bad-filter"},
 		Func:         "Target",
-		Param:        "[]invalid",
+		Param:        "[]",
 	}
 
 	ip := newTestPhase()
