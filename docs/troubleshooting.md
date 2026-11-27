@@ -260,6 +260,18 @@ Without `--debug`, Go removes the directory as usual.
 
 ## Common Errors
 
+### YAML instrumentation selection errors
+
+`otel.instrumentation.yml` or `otel.instrumentation.yaml` must contain one mapping with an
+`instrumentations` sequence of non-empty Go import paths. Unknown fields, malformed YAML, and
+additional populated YAML documents are errors. Empty trailing document separators are allowed.
+Correct the YAML syntax or remove the extra document; `--prune=false` does not bypass parsing or
+schema validation.
+
+Standalone `otelc pin` restores tracked files if a previous invocation was interrupted. To restore
+them manually, run `otelc cleanup`. Cleanup removes build artifacts after a successful restore; if
+restoration fails, it keeps the snapshots and prints their recovery location.
+
 ### `no command provided. Only 'go build', 'go install', 'go run' and 'go test' are supported`
 
 `otelc go` was called without a subcommand, or with a subcommand other than `build`,

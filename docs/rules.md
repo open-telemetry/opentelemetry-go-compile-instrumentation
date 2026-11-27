@@ -513,7 +513,10 @@ invalid_where_file_shape:
 
 ## Loading Rules
 
-Rules are normally distributed through instrumentation packages and enabled using `otel.instrumentation.go` (or `otelc.tool.go`) files.
+Rules are normally distributed through instrumentation packages and enabled using
+`otel.instrumentation.go` (or `otelc.tool.go`) files. A module may also select
+instrumentation packages with `otel.instrumentation.yml` or
+`otel.instrumentation.yaml`; see [External Configuration Sources](external-configuration.md#yaml-selection).
 
 For development and debugging, rules may also be loaded directly using the `--rules` (or `OTELC_RULES` environment variable) flag.
 
@@ -523,19 +526,22 @@ When multiple rule sources are present, `otelc` resolves them using the followin
 
 1. `OTELC_RULES` environment variable
 2. `--rules` flag
-3. `otel.instrumentation.go` / `otelc.tool.go`
-4. Default embedded rules.
+3. Module-local instrumentation selection: `otel.instrumentation.go`, `otelc.tool.go`, or YAML selection
+4. Manifest-based automatic discovery.
 
-Only the highest-precedence source that is present is used.
+The first two sources are global overrides. If neither is set, selections from all
+participating modules are combined. Within a module, a Go tool file takes precedence
+over YAML. Manifest-based discovery is used only when no module has an explicit
+selection.
 
 For example:
 
 - If `OTELC_RULES` is set, all other rule sources are ignored.
 - If `--rules` is provided, discovery through tool files is skipped.
-- If an `otel.instrumentation.go` (or `otelc.tool.go`) file exists, embedded
-  rules are not used.
-- Default embedded rules are only used when no higher-precedence rule source is
-  available.
+- If a tool file exists in a module, YAML selection in that same module is ignored;
+  selections in other modules still participate.
+- Manifest-based automatic discovery is used only when no module-local tool file or
+  YAML selection is present.
 
 For task-oriented guidance on choosing between these sources and verifying your
 configuration, see [Configuration and Fine-Tuning](configuration.md). For the full

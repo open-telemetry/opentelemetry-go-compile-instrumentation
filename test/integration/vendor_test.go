@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"go.opentelemetry.io/otelc/test/testutil"
@@ -47,6 +48,48 @@ func TestVendoredBuild(t *testing.T) {
 	after, err := os.ReadFile(modulesTxt)
 	require.NoError(t, err)
 	require.Equal(t, before, after, "otelc must not modify the vendor directory")
+}
+
+func TestYAMLSelectionVendoredBuild(t *testing.T) {
+	app := copyTestApp(t, "vendored")
+	appsDir := filepath.Dir(app)
+	appName := filepath.Base(app)
+
+	goMod(t, app, "vendor")
+	modulesTxt := filepath.Join(app, "vendor", "modules.txt")
+	beforeVendor, err := os.ReadFile(modulesTxt)
+	require.NoError(t, err)
+	goModPath := filepath.Join(app, "go.mod")
+	beforeMod, err := os.ReadFile(goModPath)
+	require.NoError(t, err)
+	goSumPath := filepath.Join(app, "go.sum")
+	beforeSum, err := os.ReadFile(goSumPath)
+	require.NoError(t, err)
+
+	toolFile := filepath.Join(app, toolFileCanonical)
+	require.NoError(t, os.Remove(toolFile))
+	yamlPath := filepath.Join(app, "otel.instrumentation.yml")
+	yamlContent := []byte("instrumentations:\n  - go.opentelemetry.io/otelc/test/apps/vendored/hooks\n")
+	require.NoError(t, os.WriteFile(yamlPath, yamlContent, 0o644))
+
+	testutil.Build(t, appsDir, appName, "go", "build")
+	output := testutil.Run(t, appsDir, appName, nil)
+	require.Contains(t, output, "vendored hook executed")
+	require.Contains(t, output, "rate limit: 1")
+
+	afterYAML, err := os.ReadFile(yamlPath)
+	require.NoError(t, err)
+	assert.Equal(t, yamlContent, afterYAML)
+	afterMod, err := os.ReadFile(goModPath)
+	require.NoError(t, err)
+	assert.Equal(t, beforeMod, afterMod)
+	afterSum, err := os.ReadFile(goSumPath)
+	require.NoError(t, err)
+	assert.Equal(t, beforeSum, afterSum)
+	afterVendor, err := os.ReadFile(modulesTxt)
+	require.NoError(t, err)
+	assert.Equal(t, beforeVendor, afterVendor)
+	assert.NoFileExists(t, toolFile)
 }
 
 func goMod(t *testing.T, dir string, args ...string) {

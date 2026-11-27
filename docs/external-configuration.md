@@ -1,8 +1,8 @@
 # Instrumentation Configuration Sources
 
-This document describes the `otel.instrumentation.go` mechanism for declaring which
-instrumentation packages a project uses. It covers the tool file format, how per-package rule
-files are discovered, the full resolution protocol, and the rule-source precedence model.
+This document describes module-local Go tool files and YAML selection files for declaring which
+instrumentation packages a project uses. It covers both formats, how per-package rule files are
+discovered, the full resolution protocol, and rule-source precedence.
 
 For a quick introduction, see [Managing Instrumentations](getting-started.md#managing-instrumentations)
 in the Getting Started guide and [Loading Rules](rules.md#loading-rules) in the rules
@@ -15,6 +15,7 @@ reference. This document is the authoritative protocol specification.
   - [Naming](#naming)
   - [Format](#format)
   - [Module scope](#module-scope)
+- [YAML selection](#yaml-selection)
 - [Per-Package Rule Files](#per-package-rule-files)
 - [Discovery and Resolution Protocol](#discovery-and-resolution-protocol)
 - [Rule Source Precedence](#rule-source-precedence)
@@ -32,6 +33,38 @@ The tool file mechanism gives you explicit, source-controlled control. You decla
 instrumentation packages to enable using the standard Go `tools.go` pattern. `otelc` reads
 the imports in that file, resolves each one as a Go package, and loads the rule files found
 there.
+
+### YAML selection
+
+For CI/CD workflows or modules that should not persist a Go tool file, a module may provide
+`otel.instrumentation.yml` or `otel.instrumentation.yaml`:
+
+```yaml
+instrumentations:
+  - go.opentelemetry.io/otelc-contrib/instrumentation/net/http/otelchttp/client
+```
+
+The file is a single YAML mapping with only an `instrumentations` sequence of Go import paths.
+Unknown fields, empty import paths, malformed YAML, and additional populated YAML documents are
+errors. Empty files and empty selections are allowed; an explicit empty selection selects no
+instrumentations from that module.
+There is no schema-version key: older `otelc` versions reject unknown top-level fields, so adding
+one requires an explicit compatibility decision.
+
+AutoPin materializes this selection as a temporary Go tool file and restores module files after the
+build. Standalone `otelc pin` validates the selection and, with the default `--prune` setting,
+removes invalid imports from YAML without leaving a generated tool file or changing module
+dependencies. A no-op prune leaves the YAML file byte-for-byte unchanged; pruning preserves the
+remaining entries, their order, and comments.
+Use `--prune=false` to leave invalid selections in the file after they are reported; `--validate`
+also checks that selected packages' rule files parse and meet their declared `otelc` version.
+If standalone `otelc pin` is interrupted, run `otelc cleanup` to restore its tracked
+module files; the next standalone pin also attempts to restore interrupted state
+automatically.
+
+A Go tool file takes precedence over YAML in the same module. Explicit selections from participating
+modules are combined. If any module in the invocation has an explicit selection, manifest-based
+automatic discovery is not added for unconfigured modules.
 
 This approach mirrors how [DataDog Orchestrion](https://github.com/DataDog/orchestrion)
 manages its instrumentation configuration with `orchestrion.tool.go`, and it realizes the
@@ -113,9 +146,8 @@ package directory. `otelc` recognizes the following filenames:
 | `*.otelc.yml` | `http.otelc.yml` |
 | `*.otelc.yaml` | `http.otelc.yaml` |
 
-> [!NOTE]
-> Some older design documents refer to `otel.instrumentation.yml`. That name is aspirational;
-> the tool only reads the four `*.otelc.yml` / `otelc.yml` patterns listed above.
+These rule files are distinct from a module-root `otel.instrumentation.yml`, which selects
+instrumentation packages but does not itself define instrumentation rules.
 
 Rule files are discovered in the **package directory** (not the module root), and the walk
 skips any subdirectory that contains its own `go.mod` — so sub-modules are not accidentally
@@ -179,13 +211,22 @@ files. Packages outside that reachable set are never loaded.
 ## Rule Source Precedence
 
 The full precedence model is documented in [Rule Sources and Precedence](configuration.md#rule-sources-and-precedence).
-In short: `OTELC_RULES` > `--rules` > tool files > embedded defaults. Each source entirely
-replaces those below it; there is no merging.
+In short: `OTELC_RULES` > `--rules` > module-local selection > manifest-based automatic discovery.
+Within a module, a tool file takes precedence over instrumentation YAML. Explicit selections from
+participating modules are combined; manifest defaults apply only when none are configured.
 
 ## Errors and Diagnostics
 
 **Both config file names present in the same module.** Only one is allowed. Remove
 `otelc.tool.go` and keep `otel.instrumentation.go`.
+
+**Both YAML selection file names present in a module without a Go tool file.** Only one is allowed;
+keep either `otel.instrumentation.yml` or `otel.instrumentation.yaml`. If a Go tool file exists,
+it takes precedence and the YAML files in that module are not read.
+
+**Malformed YAML selection.** Use a single mapping with an `instrumentations` sequence containing
+non-empty import paths. Remove unknown fields and any additional populated YAML documents.
+Use `--prune=false` if you want to inspect invalid selections without rewriting the YAML file.
 
 **Non-blank import in the tool file.** Every import must use the blank identifier
 (`_ "path"`). Named or dot imports are rejected at load time.

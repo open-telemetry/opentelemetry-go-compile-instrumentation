@@ -264,10 +264,14 @@ configuration:
 
 - `otel.instrumentation.go` (or the compatibility alias `otelc.tool.go`),
   which declares instrumentation packages through Go imports;
-- `.otel.yml`, which provides module-local instrumentation configuration;
+- `otel.instrumentation.yml` (or the `.yaml` alias), which provides a module-local list of
+  instrumentation package imports when no Go tool file is present in that module;
 - `--rules`, which allows an explicit rule set to be supplied at build time.
 
-All rule files use the same schema described in the
+Go tool files and YAML selections from participating modules are combined. A Go tool file takes
+precedence over YAML in the same module, and an explicit module-local selection suppresses
+manifest-based automatic discovery for unconfigured modules in that build. The YAML file selects
+package imports; it does not define rules. Per-package rule files use the schema described in the
 [instrumentation packages](#instrumentation-packages) section.
 
 ### Clean-Room Usage

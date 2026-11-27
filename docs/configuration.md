@@ -88,7 +88,7 @@ they ship a library themselves, or because they need reproducible, auditable bui
 declare exactly which instrumentations to enable either at **build-time** or at **run-time**.
 
 - **Build-Time Selection**: See [External Configuration Sources](external-configuration.md)
-for the `otel.instrumentation.go` mechanism that makes this explicit and source-controlled.
+for module-local Go and YAML selection files.
 
 ### Runtime selection without rebuilding
 
@@ -126,13 +126,15 @@ OTEL_GO_DISABLED_INSTRUMENTATIONS=nethttp ./myapp
    paths. When set, all other sources are ignored.
 2. **`--rules` flag** — same format as `OTELC_RULES`. Takes effect when `OTELC_RULES` is not
    set.
-3. **Tool files** (`otel.instrumentation.go` / `otelc.tool.go`) — when the project declares
-   instrumentations explicitly. See [External Configuration Sources](external-configuration.md).
-4. **Manifest-based automatic discovery** — dynamically discovers rules for dependencies matching the
-   instrumentation manifest when no explicit tool file or `--rules` flag is provided.
+3. **Module-local instrumentation selection** — an `otel.instrumentation.go` / `otelc.tool.go`
+   tool file, or `otel.instrumentation.yml` / `otel.instrumentation.yaml` when no tool file exists
+   in that module. See [External Configuration Sources](external-configuration.md).
+4. **Manifest-based automatic discovery** — used when no module-local tool file or YAML selection
+   is present in the build.
 
-Each source entirely replaces those below it. There is no merging: when `--rules` is provided,
-tool files and manifest discovery are not consulted.
+`OTELC_RULES` and `--rules` replace module-local selection and manifest discovery. Within a module,
+a tool file takes precedence over YAML. Explicit selections from participating modules are combined;
+manifest-based defaults are used only when no module has an explicit selection.
 
 ### Using `--rules` for development and debugging
 
