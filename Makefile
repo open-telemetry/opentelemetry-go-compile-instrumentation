@@ -94,9 +94,10 @@ checkmake: $(CHECKMAKE) ## Build checkmake from .tools
 
 # Dynamic variables
 GOOS ?= $(shell go env GOOS)
-# Newest final-release tag reachable from HEAD, for example v1.3.0 but not
-# v1.3.0-rc1 or pkg/v0.1.0. Falls back to v0.0.0 when no such tag exists.
-VERSION := $(shell V="$$(git tag --list --merged HEAD 'v[0-9]*' --sort=-v:refname 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$$' | head -n1)"; if [ -n "$$V" ]; then echo "$$V"; else echo "v0.0.0"; fi)
+# Newest release or pre-release tag reachable from HEAD (e.g. v1.3.0 or
+# v1.3.0-rc1), excluding pkg/* module tags. Falls back to v0.0.0 when no
+# matching tag exists.
+VERSION := $(shell git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo "v0.0.0")
 COMMIT_HASH := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME := $(shell date -u '+%Y-%m-%d')
 MODULE_PATH = go.opentelemetry.io/otelc
