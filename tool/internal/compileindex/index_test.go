@@ -7,6 +7,8 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -168,6 +170,166 @@ func TestStoreFromArtifactsMatchesStore(t *testing.T) {
 	require.Error(t, StoreFromArtifacts(matched, names, []*rule.InstRuleSet{nil}))
 }
 
+func TestLookupAndBuildUsesIgnoreDirective(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+
+	normal := rule.NewInstRuleSet("example.com/lib")
+	testSet := rule.NewInstRuleSet("example.com/lib")
+	testSet.IsTest = true
+	other := rule.NewInstRuleSet("example.com/other")
+	other.AddIgnoredCallFile(filepath.Join(t.TempDir(), "other.go"))
+
+	sets := []*rule.InstRuleSet{normal, testSet, other}
+	matched, err := json.Marshal(sets)
+	require.NoError(t, err)
+	names := []byte(`{}`)
+	require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), matched, 0o644))
+	require.NoError(t, os.WriteFile(util.GetImportNamesFile(), names, 0o644))
+	require.NoError(t, StoreFromArtifacts(matched, names, sets))
+
+	// Candidate package without IgnoredCallFiles still sees buildUsesIgnore=true,
+	// and its shard contains both normal and test variants.
+	got, ok := Lookup("example.com/lib")
+	require.True(t, ok)
+	assert.False(t, got.Excluded)
+	assert.True(t, got.BuildUsesIgnoreDirective)
+	require.Len(t, got.Sets, 2)
+	assert.False(t, got.Sets[0].IsTest)
+	assert.True(t, got.Sets[1].IsTest)
+
+	got, ok = Lookup("example.com/unmatched")
+	require.True(t, ok)
+	assert.True(t, got.Excluded)
+}
+
+func TestLookupFallsBackOnCorruptOrStaleArtifacts(t *testing.T) {
+	setup := func(t *testing.T) {
+		t.Helper()
+		t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+		require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+		sets := []*rule.InstRuleSet{rule.NewInstRuleSet("example.com/lib")}
+		matched, err := json.Marshal(sets)
+		require.NoError(t, err)
+		names := []byte(`{}`)
+		require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), matched, 0o644))
+		require.NoError(t, os.WriteFile(util.GetImportNamesFile(), names, 0o644))
+		require.NoError(t, StoreFromArtifacts(matched, names, sets))
+	}
+
+	mutateShard := func(t *testing.T, fn func(*shardDocument)) {
+		t.Helper()
+		shardPath := shardFilename("example.com/lib")
+		raw, err := os.ReadFile(shardPath)
+		require.NoError(t, err)
+		var shard shardDocument
+		require.NoError(t, json.Unmarshal(raw, &shard))
+		fn(&shard)
+		updated, err := json.Marshal(shard)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(shardPath, updated, 0o644))
+	}
+
+	t.Run("missing shard", func(t *testing.T) {
+		setup(t)
+		require.NoError(t, os.Remove(shardFilename("example.com/lib")))
+		_, ok := Lookup("example.com/lib")
+		assert.False(t, ok)
+	})
+
+	t.Run("corrupt shard", func(t *testing.T) {
+		setup(t)
+		require.NoError(t, os.WriteFile(shardFilename("example.com/lib"), []byte("corrupt"), 0o644))
+		_, ok := Lookup("example.com/lib")
+		assert.False(t, ok)
+	})
+
+	t.Run("tampered sets with stale digest", func(t *testing.T) {
+		setup(t)
+		mutateShard(t, func(shard *shardDocument) {
+			shard.Sets = []byte("[]")
+		})
+		_, ok := Lookup("example.com/lib")
+		assert.False(t, ok)
+	})
+
+	t.Run("mismatched matched_sha256 with valid digest", func(t *testing.T) {
+		setup(t)
+		mutateShard(t, func(shard *shardDocument) {
+			shard.MatchedHash[0] ^= 0xff
+			shard.Digest = sha256.Sum256(shard.Sets)
+		})
+		_, ok := Lookup("example.com/lib")
+		assert.False(t, ok)
+	})
+
+	t.Run("wrong module_path in shard sets", func(t *testing.T) {
+		setup(t)
+		wrongSets, err := json.Marshal([]*rule.InstRuleSet{rule.NewInstRuleSet("example.com/other")})
+		require.NoError(t, err)
+		mutateShard(t, func(shard *shardDocument) {
+			shard.Sets = wrongSets
+			shard.Digest = sha256.Sum256(shard.Sets)
+		})
+		_, ok := Lookup("example.com/lib")
+		assert.False(t, ok)
+	})
+
+	t.Run("modified matched.json", func(t *testing.T) {
+		setup(t)
+		updated, err := json.Marshal([]*rule.InstRuleSet{rule.NewInstRuleSet("example.com/new")})
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), updated, 0o644))
+		_, ok := Lookup("example.com/lib")
+		assert.False(t, ok)
+	})
+
+	t.Run("re-store cleans stale shards", func(t *testing.T) {
+		setup(t)
+		stalePath := shardFilename("example.com/lib")
+		assert.FileExists(t, stalePath)
+
+		sets := []*rule.InstRuleSet{rule.NewInstRuleSet("example.com/other")}
+		matched, err := json.Marshal(sets)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), matched, 0o644))
+		require.NoError(t, StoreFromArtifacts(matched, []byte(`{}`), sets))
+
+		assert.NoFileExists(t, stalePath)
+		assert.FileExists(t, shardFilename("example.com/other"))
+	})
+
+	t.Run("non-array shard sets with valid digest", func(t *testing.T) {
+		setup(t)
+		mutateShard(t, func(shard *shardDocument) {
+			shard.Sets = []byte("42")
+			shard.Digest = sha256.Sum256(shard.Sets)
+		})
+		_, ok := Lookup("example.com/lib")
+		assert.False(t, ok)
+	})
+
+	t.Run("StoreFromArtifacts rejects nil set and unwritable shard dir", func(t *testing.T) {
+		setup(t)
+		require.Error(t, StoreFromArtifacts([]byte("[]"), []byte(`{}`), []*rule.InstRuleSet{nil}))
+
+		badWorkDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, badWorkDir)
+		require.NoError(t, os.WriteFile(util.GetBuildTempDir(), []byte("file"), 0o644))
+		require.Error(t, StoreFromArtifacts([]byte("[]"), []byte(`{}`), nil))
+
+		if runtime.GOOS != "windows" && os.Geteuid() != 0 {
+			roWorkDir := t.TempDir()
+			t.Setenv(util.EnvOtelcWorkDir, roWorkDir)
+			buildDir := util.GetBuildTempDir()
+			require.NoError(t, os.MkdirAll(buildDir, 0o755))
+			require.NoError(t, os.Chmod(buildDir, 0o555))
+			t.Cleanup(func() { _ = os.Chmod(buildDir, 0o755) })
+			require.Error(t, StoreFromArtifacts([]byte("[]"), []byte(`{}`), nil))
+		}
+	})
+}
+
 func BenchmarkCompileIndexExcludes(b *testing.B) {
 	b.Setenv(util.EnvOtelcWorkDir, b.TempDir())
 	if err := os.MkdirAll(util.GetBuildTempDir(), 0o755); err != nil {
@@ -196,4 +358,61 @@ func BenchmarkCompileIndexExcludes(b *testing.B) {
 			b.Fatal("expected package to be excluded")
 		}
 	}
+}
+
+func BenchmarkLoadPackageRules(b *testing.B) {
+	b.Setenv(util.EnvOtelcWorkDir, b.TempDir())
+	if err := os.MkdirAll(util.GetBuildTempDir(), 0o755); err != nil {
+		b.Fatal(err)
+	}
+	srcRoot := b.TempDir()
+	sets := make([]*rule.InstRuleSet, 0, 100)
+	for i := range 100 {
+		pkg := "example.com/pkg/" + string(rune('a'+i/26)) + string(rune('a'+i%26))
+		rs := rule.NewInstRuleSet(pkg)
+		rs.AddFuncRule(filepath.Join(srcRoot, pkg, "file.go"), &rule.InstFuncRule{
+			InstBaseRule: rule.InstBaseRule{Name: "rule-" + pkg},
+			Func:         "Handle",
+		})
+		sets = append(sets, rs)
+	}
+	matched, err := json.Marshal(sets)
+	if err != nil {
+		b.Fatal(err)
+	}
+	names := []byte(`{}`)
+	if err = os.WriteFile(util.GetMatchedRuleFile(), matched, 0o644); err != nil {
+		b.Fatal(err)
+	}
+	if err = os.WriteFile(util.GetImportNamesFile(), names, 0o644); err != nil {
+		b.Fatal(err)
+	}
+	if err = StoreFromArtifacts(matched, names, sets); err != nil {
+		b.Fatal(err)
+	}
+
+	target := sets[50].ModulePath
+
+	b.Run("shard", func(b *testing.B) {
+		for b.Loop() {
+			got, ok := Lookup(target)
+			if !ok || got.Excluded || len(got.Sets) != 1 {
+				b.Fatalf("unexpected shard load result: ok=%v excluded=%v len=%d", ok, got.Excluded, len(got.Sets))
+			}
+		}
+	})
+
+	b.Run("full_matched_json", func(b *testing.B) {
+		matchedPath := util.GetMatchedRuleFile()
+		for b.Loop() {
+			data, readErr := os.ReadFile(matchedPath)
+			if readErr != nil {
+				b.Fatal(readErr)
+			}
+			var all []*rule.InstRuleSet
+			if jsonErr := json.Unmarshal(data, &all); jsonErr != nil {
+				b.Fatal(jsonErr)
+			}
+		}
+	})
 }
