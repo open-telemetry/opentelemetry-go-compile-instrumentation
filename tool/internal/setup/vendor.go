@@ -4,13 +4,293 @@
 package setup
 
 import (
+	"bufio"
 	"context"
+	"go/parser"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
+	"golang.org/x/mod/semver"
+
+	"go.opentelemetry.io/otelc/tool/ex"
+	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/util"
 )
+
+const modulesTxtFileName = "modules.txt"
+
+// unversionedLocalReplaceVersion is the pseudo-version Go writes to
+// vendor/modules.txt when go.mod replaces a module with a local path without
+// specifying a version on the left-hand side of "=>".
+const unversionedLocalReplaceVersion = "v0.0.0-00010101000000-000000000000"
+
+type vendorModules map[string]string
+
+type vendorState struct {
+	// vendored is true when a single-module vendor/modules.txt is active and
+	// all external tool-file imports are vendored, so -mod=vendor stays enabled.
+	vendored   bool
+	queryDir   string
+	moduleRoot string
+	modules    vendorModules
+}
+
+type vendorStateKey struct{}
+
+func resolveAbsDir(dir string) string {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+	return resolveCanonicalPath(abs)
+}
+
+func resolveCanonicalPath(p string) string {
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs
+	} else {
+		p = filepath.Clean(p)
+	}
+	var suffix []string
+	for cur := p; ; {
+		if resolved, err := filepath.EvalSymlinks(cur); err == nil {
+			for _, elem := range slices.Backward(suffix) {
+				resolved = filepath.Join(resolved, elem)
+			}
+			return resolved
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return p
+		}
+		suffix = append(suffix, filepath.Base(cur))
+		cur = parent
+	}
+}
+
+func contextWithVendorState(ctx context.Context, vs vendorState) context.Context {
+	return context.WithValue(ctx, vendorStateKey{}, vs)
+}
+
+func vendorStateFromContext(ctx context.Context, dir string) (vendorState, bool) {
+	vs, ok := ctx.Value(vendorStateKey{}).(vendorState)
+	if !ok {
+		return vendorState{}, false
+	}
+	absDir := resolveAbsDir(dir)
+	if absDir == "" {
+		return vendorState{}, false
+	}
+	if absDir == vs.queryDir || (vs.moduleRoot != "" && absDir == vs.moduleRoot) {
+		return vs, true
+	}
+	return vendorState{}, false
+}
+
+// getVendorState returns the vendorState cached on ctx for dir, or computes it.
+func getVendorState(ctx context.Context, dir string) vendorState {
+	if vs, ok := vendorStateFromContext(ctx, dir); ok {
+		return vs
+	}
+	return detectVendorState(ctx, dir)
+}
+
+func (vs vendorState) active() bool {
+	return vs.moduleRoot != ""
+}
+
+func (vs vendorState) needsModMod() bool {
+	return vs.moduleRoot != "" && !vs.vendored
+}
+
+func (vs vendorState) vendorDir() string {
+	if vs.moduleRoot == "" {
+		return ""
+	}
+	return filepath.Join(vs.moduleRoot, vendorDirName)
+}
+
+func (vs vendorState) packageVersion(importPath, sourceFile string) string {
+	if len(vs.modules) == 0 || sourceFile == "" || !isUnderDir(sourceFile, vs.vendorDir()) {
+		return ""
+	}
+	return vs.modules[importPath]
+}
+
+// parseVendorModules parses a Go vendor/modules.txt manifest and maps every
+// listed package import path to its resolved module version (or "" for
+// unversioned local replacements).
+func parseVendorModules(path string) (vendorModules, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	vm := make(vendorModules)
+	currentVersion := ""
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "##") {
+			continue
+		}
+		if rest, ok := strings.CutPrefix(line, "# "); ok {
+			currentVersion = parseVendorModuleHeaderVersion(rest)
+			continue
+		}
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		vm[line] = currentVersion
+	}
+	if err = scanner.Err(); err != nil {
+		return nil, err
+	}
+	return vm, nil
+}
+
+// parseVendorModuleHeaderVersion extracts the effective semantic version from
+// the body of a "# <module>[ <version>][ => <replacement>]" header line in
+// vendor/modules.txt.
+func parseVendorModuleHeaderVersion(header string) string {
+	const minVersionFields = 2
+	lhs, rhs, hasReplace := strings.Cut(header, " => ")
+	lhsVersion := ""
+	if lhsFields := strings.Fields(lhs); len(lhsFields) >= minVersionFields && semver.IsValid(lhsFields[1]) {
+		if lhsFields[1] != unversionedLocalReplaceVersion {
+			lhsVersion = lhsFields[1]
+		}
+	}
+	if !hasReplace {
+		return lhsVersion
+	}
+	// Versioned module replacement: "# mod v1.0.0 => fork v1.2.0"
+	if rhsFields := strings.Fields(rhs); len(rhsFields) >= minVersionFields && semver.IsValid(rhsFields[1]) {
+		return rhsFields[1]
+	}
+	// Local path replacement: "# mod v1.0.0 => ../local"
+	return lhsVersion
+}
+
+// isUnderDir reports whether path resides inside dir.
+func isUnderDir(path, dir string) bool {
+	if path == "" || dir == "" {
+		return false
+	}
+	rel, err := filepath.Rel(resolveCanonicalPath(dir), resolveCanonicalPath(path))
+	if err != nil {
+		return false
+	}
+	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// resolveVendorModuleRoot resolves the single-module root for dir when
+// vendor/modules.txt is present. Returns "" outside a module, without
+// vendor/modules.txt, or inside a go.work workspace (Go forbids -mod=mod there).
+func resolveVendorModuleRoot(ctx context.Context, dir string) string {
+	logger := util.LoggerFromContext(ctx)
+
+	root, workspace, err := pkgload.ModuleAndWorkspace(ctx, dir)
+	if err != nil {
+		logger.WarnContext(ctx, "failed to resolve module/workspace state; building as non-vendored",
+			"dir", dir, "error", err)
+		return ""
+	}
+	if workspace || root == "" {
+		return ""
+	}
+	if !util.PathExists(filepath.Join(root, vendorDirName, modulesTxtFileName)) {
+		return ""
+	}
+	return filepath.Clean(root)
+}
+
+// detectVendorState inspects dir to determine whether single-module vendoring
+// is active and whether all external tool-file imports are already vendored.
+func detectVendorState(ctx context.Context, dir string) vendorState {
+	queryDir := resolveAbsDir(dir)
+	root := resolveVendorModuleRoot(ctx, dir)
+	if root == "" {
+		return vendorState{queryDir: queryDir}
+	}
+
+	modulesTxt := filepath.Join(root, vendorDirName, modulesTxtFileName)
+	vm, err := parseVendorModules(modulesTxt)
+	if err != nil {
+		util.LoggerFromContext(ctx).WarnContext(ctx, "failed to parse vendor/modules.txt",
+			"path", modulesTxt, "error", err)
+		return vendorState{queryDir: queryDir, moduleRoot: root}
+	}
+
+	toolFile, err := findToolFile(root)
+	vendored := err == nil && toolFile != "" && toolFileVendored(root, toolFile, vm)
+	return vendorState{
+		vendored:   vendored,
+		queryDir:   queryDir,
+		moduleRoot: root,
+		modules:    vm,
+	}
+}
+
+// toolFileVendored reports whether every external import declared in toolFile
+// is listed in vm. Packages belonging to root's own module are satisfied
+// without appearing in vendor/modules.txt.
+func toolFileVendored(root, toolFile string, vm vendorModules) bool {
+	f, parseErr := ast.NewAstParser().Parse(toolFile, parser.ImportsOnly)
+	if parseErr != nil {
+		return false
+	}
+	importPaths, collectErr := collectImports(toolFile, f, make(map[string]bool))
+	if collectErr != nil {
+		return false
+	}
+
+	var mainModPath string
+	if mf, modErr := parseGoMod(filepath.Join(root, goModFileName)); modErr == nil && mf.Module != nil {
+		mainModPath = mf.Module.Mod.Path
+	}
+
+	for _, imp := range importPaths {
+		if _, ok := vm[imp]; ok {
+			continue
+		}
+		if isLocalModulePackage(root, mainModPath, imp) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func isLocalModulePackage(root, mainModPath, importPath string) bool {
+	if mainModPath == "" {
+		return false
+	}
+	if importPath == mainModPath {
+		return true
+	}
+	rel, ok := strings.CutPrefix(importPath, mainModPath+"/")
+	if !ok {
+		return false
+	}
+	pkgDir := filepath.Join(root, filepath.FromSlash(rel))
+	if !util.PathExists(pkgDir) {
+		return false
+	}
+	// If pkgDir or any ancestor below root has its own go.mod, the package
+	// belongs to a nested submodule (not root's module) and must be vendored.
+	cleanRoot := filepath.Clean(root)
+	for cur := filepath.Clean(pkgDir); cur != cleanRoot && cur != filepath.Dir(cur); cur = filepath.Dir(cur) {
+		if util.PathExists(filepath.Join(cur, goModFileName)) {
+			return false
+		}
+	}
+	return true
+}
 
 // buildDir returns the directory that the go command runs a build with args
 // in: the -C directory when args set one, or else "", which runs a command in
@@ -29,27 +309,22 @@ func buildDir(subcommand string, args []string) string {
 
 // vendoringActive reports whether the main module of a build in dir vendors
 // its dependencies. dir is the directory the go command builds in, see
-// buildDir. It resolves the module via a single go env GOMOD/GOWORK call
-// rather than `go list`, which would fail the vendor consistency check while
-// go.mod is mid-edit, then checks for vendor/modules.txt. Returns false in
-// workspace mode: Go forbids -mod=mod there, so forcing it would turn a build
-// that worked into a hard failure.
+// buildDir. Returns false in workspace mode: Go forbids -mod=mod there.
 func vendoringActive(ctx context.Context, dir string) bool {
-	logger := util.LoggerFromContext(ctx)
+	if vs, ok := vendorStateFromContext(ctx, dir); ok {
+		return vs.active()
+	}
+	return resolveVendorModuleRoot(ctx, dir) != ""
+}
 
-	root, workspace, err := pkgload.ModuleAndWorkspace(ctx, dir)
-	if err != nil {
-		logger.WarnContext(ctx, "failed to resolve module/workspace state; building as non-vendored",
-			"dir", dir, "error", err)
-		return false
+func forceModuleMode(ctx context.Context, subcommand string, args []string) ([]string, error) {
+	util.LoggerFromContext(ctx).InfoContext(ctx, "vendored project detected; building with -mod=mod")
+
+	if err := os.Setenv("GOFLAGS", forceModMod(os.Getenv("GOFLAGS"))); err != nil {
+		return nil, ex.Wrapf(err, "forcing module mode for vendored build")
 	}
-	if workspace {
-		return false
-	}
-	if root == "" {
-		return false
-	}
-	return util.PathExists(filepath.Join(root, vendorDirName, "modules.txt"))
+
+	return rewriteModVendor(subcommand, args), nil
 }
 
 // modMod forces module mode, so the build ignores the vendor directory.

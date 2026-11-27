@@ -669,3 +669,73 @@ func main() {
 		})
 	}
 }
+
+func TestForwardRulePathFlags(t *testing.T) {
+	base := t.TempDir()
+	sub := filepath.Join(base, "app", "cmd")
+	t.Chdir(base)
+
+	tests := []struct {
+		name  string
+		flags []string
+		want  []string
+	}{
+		{name: "empty", flags: nil, want: nil},
+		{
+			name:  "separate -C stripped",
+			flags: []string{"-tags", "foo", "-C", "app", "-mod=vendor"},
+			want:  []string{"-tags", "foo", "-mod=vendor"},
+		},
+		{name: "separate --C stripped", flags: []string{"--C", "app", "-mod=vendor"}, want: []string{"-mod=vendor"}},
+		{name: "joined -C= stripped", flags: []string{"-C=app", "-trimpath"}, want: []string{"-trimpath"}},
+		{name: "joined --C= stripped", flags: []string{"--C=app", "-race"}, want: []string{"-race"}},
+		{name: "dangling -C stripped", flags: []string{"-race", "-C"}, want: []string{"-race"}},
+		{
+			name:  "relative -overlay and -modfile resolved against -C build dir",
+			flags: []string{"-C", filepath.Join("app", "cmd"), "-overlay", "overlay.json", "-modfile=alt.mod"},
+			want: []string{
+				"-overlay",
+				filepath.Join(sub, "overlay.json"),
+				"-modfile=" + filepath.Join(sub, "alt.mod"),
+			},
+		},
+		{
+			name: "double-dash joined --overlay and separated --modfile",
+			flags: []string{
+				"--C=" + filepath.Join("app", "cmd"),
+				"--overlay=overlay.json",
+				"--modfile",
+				"alt.mod",
+			},
+			want: []string{
+				"--overlay=" + filepath.Join(sub, "overlay.json"),
+				"--modfile",
+				filepath.Join(sub, "alt.mod"),
+			},
+		},
+		{
+			name:  "absolute and empty overlay preserved",
+			flags: []string{"-C", "app", "-overlay=" + filepath.Join(base, "abs.json"), "-modfile="},
+			want:  []string{"-overlay=" + filepath.Join(base, "abs.json"), "-modfile="},
+		},
+		{
+			name:  "value of -tags resembling -C or -overlay preserved",
+			flags: []string{"-tags", "-C", "-trimpath", "-tags", "-overlay"},
+			want:  []string{"-tags", "-C", "-trimpath", "-tags", "-overlay"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := forwardRulePathFlags(tt.flags)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestForwardRulePathFlags_MissingWorkingDir(t *testing.T) {
+	chdirRemovedDir(t)
+
+	_, err := forwardRulePathFlags([]string{"-overlay", "overlay.json"})
+	require.Error(t, err)
+}
