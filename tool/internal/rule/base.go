@@ -13,7 +13,6 @@ import (
 	"slices"
 	"strings"
 
-	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/util"
 )
 
@@ -254,7 +253,7 @@ func (irs *InstRuleSet) AddFileRule(rule *InstFileRule) {
 // Merge adds the rules of other to irs, after the rules irs already has. Both
 // sets must be for the same package compile. Merge adds a rule only once for a
 // file, so a rule that both sets have is applied once.
-func (irs *InstRuleSet) Merge(other *InstRuleSet) error {
+func (irs *InstRuleSet) Merge(other *InstRuleSet) {
 	util.Assert(irs.ModulePath == other.ModulePath && irs.IsTest == other.IsTest,
 		"rule sets of different compiles cannot be merged")
 	if irs.PackageName == "" {
@@ -269,85 +268,55 @@ func (irs *InstRuleSet) Merge(other *InstRuleSet) error {
 		}
 	}
 
-	var err error
-	if irs.RawRules, err = mergeRuleMap(irs.RawRules, other.RawRules); err != nil {
-		return err
-	}
-	if irs.FuncRules, err = mergeRuleMap(irs.FuncRules, other.FuncRules); err != nil {
-		return err
-	}
-	if irs.StructRules, err = mergeRuleMap(irs.StructRules, other.StructRules); err != nil {
-		return err
-	}
-	if irs.CallRules, err = mergeRuleMap(irs.CallRules, other.CallRules); err != nil {
-		return err
-	}
-	if irs.LitRules, err = mergeRuleMap(irs.LitRules, other.LitRules); err != nil {
-		return err
-	}
-	if irs.DirectiveRules, err = mergeRuleMap(irs.DirectiveRules, other.DirectiveRules); err != nil {
-		return err
-	}
-	if irs.DeclRules, err = mergeRuleMap(irs.DeclRules, other.DeclRules); err != nil {
-		return err
-	}
-	if irs.FileRules, err = appendNewRules(irs.FileRules, other.FileRules); err != nil {
-		return err
-	}
+	irs.RawRules = mergeRuleMap(irs.RawRules, other.RawRules)
+	irs.FuncRules = mergeRuleMap(irs.FuncRules, other.FuncRules)
+	irs.StructRules = mergeRuleMap(irs.StructRules, other.StructRules)
+	irs.CallRules = mergeRuleMap(irs.CallRules, other.CallRules)
+	irs.LitRules = mergeRuleMap(irs.LitRules, other.LitRules)
+	irs.DirectiveRules = mergeRuleMap(irs.DirectiveRules, other.DirectiveRules)
+	irs.DeclRules = mergeRuleMap(irs.DeclRules, other.DeclRules)
+	irs.FileRules = appendNewRules(irs.FileRules, other.FileRules)
 	for _, file := range other.IgnoredCallFiles {
 		if !slices.Contains(irs.IgnoredCallFiles, file) {
 			irs.IgnoredCallFiles = append(irs.IgnoredCallFiles, file)
 		}
 	}
-	return nil
 }
 
 // mergeRuleMap adds the rules of src to dst, file by file, and returns dst.
-func mergeRuleMap[T InstRule](dst, src map[string][]T) (map[string][]T, error) {
+func mergeRuleMap[T InstRule](dst, src map[string][]T) map[string][]T {
 	if dst == nil && len(src) > 0 {
 		dst = make(map[string][]T, len(src))
 	}
 	for file, rules := range src {
-		merged, err := appendNewRules(dst[file], rules)
-		if err != nil {
-			return nil, err
-		}
-		dst[file] = merged
+		dst[file] = appendNewRules(dst[file], rules)
 	}
-	return dst, nil
+	return dst
 }
 
 // appendNewRules appends to dst the rules of src that dst does not have.
 // Two rules are the same when their JSON encodings are equal, because the
 // instrument phase reads the rules from that encoding.
-func appendNewRules[T InstRule](dst, src []T) ([]T, error) {
+func appendNewRules[T InstRule](dst, src []T) []T {
 	seen := make(map[string]bool, len(dst)+len(src))
-	key := func(r T) (string, error) {
+	key := func(r T) string {
 		data, err := json.Marshal(r)
-		if err != nil {
-			return "", ex.Wrapf(err, "encoding rule %q", r.GetName())
-		}
-		return string(data), nil
+		// Setup writes the same rules to matched.json, so they always encode.
+		util.Assert(err == nil, "encoding a rule")
+		return string(data)
 	}
 	for _, r := range dst {
-		k, err := key(r)
-		if err != nil {
-			return nil, err
-		}
-		seen[k] = true
+		seen[key(r)] = true
 	}
 	for _, r := range src {
-		k, err := key(r)
-		if err != nil {
-			return nil, err
-		}
+		k := key(r)
 		if seen[k] {
 			continue
 		}
 		seen[k] = true
 		dst = append(dst, r)
 	}
-	return dst, nil
+	return dst
 }
 
 // AllRules returns every rule in the set in a stable order. Rule maps are

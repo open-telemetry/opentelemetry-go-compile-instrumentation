@@ -328,8 +328,8 @@ func TestInstRuleSetMerge(t *testing.T) {
 	second.AddIgnoredCallFile(fileB)
 
 	merged := NewInstRuleSet("example.com/lib")
-	require.NoError(t, merged.Merge(first))
-	require.NoError(t, merged.Merge(second))
+	merged.Merge(first)
+	merged.Merge(second)
 
 	assert.Equal(t, "lib", merged.PackageName)
 	assert.Equal(t, map[string]string{cgoFile: "c.cgo1.go"}, merged.CgoFileMap)
@@ -360,7 +360,7 @@ func TestInstRuleSetMergeIntoSetWithoutMaps(t *testing.T) {
 	other.AddFuncRule(file, &InstFuncRule{InstBaseRule: InstBaseRule{Name: "hook"}, Func: "F"})
 
 	irs := &InstRuleSet{ModulePath: "example.com/lib", PackageName: "kept"}
-	require.NoError(t, irs.Merge(other))
+	irs.Merge(other)
 
 	assert.Equal(t, "kept", irs.PackageName, "a package name the set has is kept")
 	assert.Equal(t, map[string]string{file: "a.cgo1.go"}, irs.CgoFileMap)
