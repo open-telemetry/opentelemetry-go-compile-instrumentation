@@ -5,12 +5,17 @@ package instrument
 
 import (
 	"go/token"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/dave/dst"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
 func TestAddRuleImports(t *testing.T) {
@@ -228,6 +233,107 @@ func TestAddRuleImports(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestInstrumentBlanksImportsTheRulesNoLongerUse checks that an import whose
+// last use a rule removed is blanked, and that every other import is kept as
+// it is.
+func TestInstrumentBlanksImportsTheRulesNoLongerUse(t *testing.T) {
+	src := t.TempDir()
+	files := map[string]string{
+		// The Clone call is the only use of strings.
+		"only_use.go": `package p
+
+import "strings"
+
+func A(s string) string { return strings.Clone(s) }
+`,
+		// strings is still used after the Clone call is replaced.
+		"other_use.go": `package p
+
+import "strings"
+
+var _ = strings.ToUpper
+
+func B(s string) string { return strings.Clone(s) }
+`,
+		// The code of the getenv rule uses strings in place of the Clone call.
+		"rule_use.go": `package p
+
+import (
+	"os"
+	"strings"
+)
+
+func C(s string) string { return strings.Clone(s) + os.Getenv("HOME") }
+`,
+		// os is not used before the rules run, so the compiler must still
+		// report it.
+		"own_unused.go": `package p
+
+import (
+	"os"
+	"strings"
+)
+
+func D(s string) string { return strings.Clone(s) }
+`,
+		// The case list of the type switch still uses strings, although the
+		// guard variable has the same name.
+		"type_switch.go": `package p
+
+import "strings"
+
+func E(s string) string { return strings.Clone(s) }
+
+func keep(v any) {
+	switch strings := v.(type) {
+	case *strings.Builder:
+		_ = strings
+	}
+}
+`,
+	}
+	cloneRule := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "replace_clone", Imports: map[string]string{"fmt": "fmt"}},
+		FunctionCall: "strings.Clone",
+		ImportPath:   "strings",
+		FuncName:     "Clone",
+		Replace:      "fmt.Sprint({{ .CallArguments }})",
+	}
+	getenvRule := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "trim_getenv", Imports: map[string]string{"strings": "strings"}},
+		FunctionCall: "os.Getenv",
+		ImportPath:   "os",
+		FuncName:     "Getenv",
+		Replace:      "strings.TrimSpace({{ . }})",
+	}
+	rset := rule.NewInstRuleSet("example.com/p")
+	rset.PackageName = "p"
+	ip := newTestPhase()
+	ip.workDir = t.TempDir()
+	ip.importNames = map[string]string{"fmt": "fmt", "os": "os", "strings": "strings"}
+	ip.compileArgs = []string{"compile", "-p", "example.com/p"}
+	for name, content := range files {
+		path := filepath.Join(src, name)
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+		rset.AddCallRule(path, cloneRule)
+		rset.AddCallRule(path, getenvRule)
+		ip.compileArgs = append(ip.compileArgs, path)
+	}
+
+	require.NoError(t, ip.instrument(t.Context(), rset))
+
+	imports := func(name string) []string {
+		root, err := ast.ParseFile(filepath.Join(ip.workDir, name))
+		require.NoError(t, err)
+		return fileImports(root)
+	}
+	assert.ElementsMatch(t, []string{"_ strings", " fmt"}, imports("only_use.go"))
+	assert.ElementsMatch(t, []string{" strings", " fmt"}, imports("other_use.go"))
+	assert.ElementsMatch(t, []string{" os", " strings", " fmt"}, imports("rule_use.go"))
+	assert.ElementsMatch(t, []string{" os", "_ strings", " fmt"}, imports("own_unused.go"))
+	assert.ElementsMatch(t, []string{" strings", " fmt"}, imports("type_switch.go"))
 }
 
 func TestUpdateImportConfigForFile(t *testing.T) {

@@ -1,0 +1,23 @@
+# assign_value and set_fields replace an expression that holds the only use of
+# an import in the file, so the import is blanked.
+assign_client:
+  target: main
+  where:
+    kind: var
+    identifier: Client
+  do:
+    - assign_value:
+        replace: "wrap.Default()"
+  imports:
+    wrap: go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/decl-and-lit-rule-unused-import/helpers/wrap
+set_transport:
+  target: main
+  where:
+    struct_literal: go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/decl-and-lit-rule-unused-import/helpers/wrap.Config
+  do:
+    - set_fields:
+        field:
+          - name: Transport
+            value: "wrap.Transport()"
+  imports:
+    wrap: go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/decl-and-lit-rule-unused-import/helpers/wrap

@@ -1,0 +1,12 @@
+# The template drops the matched call. In main.go, the call is the only use of
+# the lib import, so the import is blanked. other.go uses lib elsewhere and
+# keeps its import.
+wrap_new:
+  target: main
+  where:
+    function_call: go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/call-rule-unused-import/helpers/lib.New
+  do:
+    - wrap_call:
+        replace: "wrap.New({{ .CallArguments }})"
+  imports:
+    wrap: go.opentelemetry.io/otelc/tool/internal/instrument/testdata/golden/call-rule-unused-import/helpers/wrap
