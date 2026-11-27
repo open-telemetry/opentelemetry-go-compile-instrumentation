@@ -199,9 +199,44 @@ func (sp *setupPhase) storeInjectedHash(ctx context.Context, matched []*rule.Ins
 }
 
 // injectedHash returns a hash of the imports the matched rules declare, the
-// source files of their add_file rules, and the dependencies of both.
+// source files of their add_file rules, the hook packages of their func rules,
+// and the dependencies of all of them.
 func (sp *setupPhase) injectedHash(ctx context.Context, matched []*rule.InstRuleSet) (string, error) {
 	h := sha256.New()
+	paths, err := sp.collectInjectedPaths(h, matched)
+	if err != nil {
+		return "", err
+	}
+	if len(paths) == 0 {
+		return hex.EncodeToString(h.Sum(nil)[:8]), nil
+	}
+	pkgs, unloadable, err := sp.loadInjectedPackages(ctx, paths)
+	if err != nil {
+		return "", err
+	}
+	// A rule import that does not load from the main module never reaches
+	// a cached compile: a compile that adds it resolves it with the same
+	// go list and fails, and the link skips it. Its path still goes into
+	// the hash, so the hash changes once it loads.
+	if len(unloadable) > 0 {
+		slices.Sort(unloadable)
+		sp.Info("Leaving rule imports that do not load out of the injected package hash",
+			"imports", unloadable)
+		for _, path := range unloadable {
+			_, _ = fmt.Fprintf(h, "%s unloadable\n", path)
+		}
+	}
+	goroot, err := pkgload.GOROOT(ctx, sp.buildFlags)
+	if err != nil {
+		return "", err
+	}
+	if err = hashPackages(h, goroot, pkgs); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)[:8]), nil
+}
+
+func (sp *setupPhase) collectInjectedPaths(h io.Writer, matched []*rule.InstRuleSet) ([]string, error) {
 	var paths []string
 	for _, set := range matched {
 		paths = appendRuleImports(paths, set.RawRules)
@@ -211,50 +246,29 @@ func (sp *setupPhase) injectedHash(ctx context.Context, matched []*rule.InstRule
 		paths = appendRuleImports(paths, set.LitRules)
 		paths = appendRuleImports(paths, set.DirectiveRules)
 		paths = appendRuleImports(paths, set.DeclRules)
+		for _, r := range set.AllFuncRules() {
+			if r.Path != "" && r.Path != util.InternalPath {
+				paths = append(paths, r.Path)
+			}
+		}
 		for _, r := range set.FileRules {
 			paths = slices.AppendSeq(paths, maps.Values(r.Imports))
 			srcImports, err := sp.fileRuleSourceImports(r)
 			if err != nil {
-				return "", err
+				return nil, err
 			}
 			paths = append(paths, srcImports...)
 			// An add_file source is often excluded from its own package with
 			// //go:build ignore, so the package hash below does not cover it.
 			if r.ResolvedPath != "" && r.File != "" {
 				if err = hashFileAs(h, filepath.Join(r.ResolvedPath, r.File)); err != nil {
-					return "", err
+					return nil, err
 				}
 			}
 		}
 	}
 	slices.Sort(paths)
-	paths = slices.Compact(paths)
-	if len(paths) > 0 {
-		pkgs, unloadable, err := sp.loadInjectedPackages(ctx, paths)
-		if err != nil {
-			return "", err
-		}
-		// A rule import that does not load from the main module never reaches
-		// a cached compile: a compile that adds it resolves it with the same
-		// go list and fails, and the link skips it. Its path still goes into
-		// the hash, so the hash changes once it loads.
-		if len(unloadable) > 0 {
-			slices.Sort(unloadable)
-			sp.Info("Leaving rule imports that do not load out of the injected package hash",
-				"imports", unloadable)
-			for _, path := range unloadable {
-				_, _ = fmt.Fprintf(h, "%s unloadable\n", path)
-			}
-		}
-		goroot, err := pkgload.GOROOT(ctx, sp.buildFlags)
-		if err != nil {
-			return "", err
-		}
-		if err = hashPackages(h, goroot, pkgs); err != nil {
-			return "", err
-		}
-	}
-	return hex.EncodeToString(h.Sum(nil)[:8]), nil
+	return slices.Compact(paths), nil
 }
 
 // loadInjectedPackages loads the rule imports in roots and returns the ones
