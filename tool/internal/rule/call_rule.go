@@ -4,8 +4,11 @@
 package rule
 
 import (
+	"bytes"
 	"encoding/json"
+	"maps"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/valyala/fasttemplate"
@@ -218,5 +221,82 @@ func (r *InstCallRule) UnmarshalJSON(data []byte) error {
 		}
 	}
 
+	return nil
+}
+
+// CallRulesByFile maps a source file to its call rules. Setup adds one call
+// rule to many files: a method_call rule goes to every file of a package. The
+// JSON form of the map holds each rule only once, and the files refer to the
+// rules by their index.
+type CallRulesByFile map[string][]*InstCallRule
+
+// MarshalJSON implements json.Marshaler. Rules with the same JSON encoding are
+// stored once.
+func (m CallRulesByFile) MarshalJSON() ([]byte, error) {
+	if m == nil {
+		return []byte("null"), nil
+	}
+	if len(m) == 0 {
+		return []byte("{}"), nil
+	}
+	var out struct {
+		Rules []json.RawMessage `json:"rules"`
+		Files map[string][]int  `json:"files"`
+	}
+	out.Files = make(map[string][]int, len(m))
+	byRule := make(map[*InstCallRule]int)
+	byEncoding := make(map[string]int)
+	for _, file := range slices.Sorted(maps.Keys(m)) {
+		indexes := make([]int, 0, len(m[file]))
+		for _, r := range m[file] {
+			index, ok := byRule[r]
+			if !ok {
+				data, err := json.Marshal(r)
+				if err != nil {
+					return nil, ex.Wrapf(err, "encoding call rule %q", r.GetName())
+				}
+				index, ok = byEncoding[string(data)]
+				if !ok {
+					index = len(out.Rules)
+					out.Rules = append(out.Rules, data)
+					byEncoding[string(data)] = index
+				}
+				byRule[r] = index
+			}
+			indexes = append(indexes, index)
+		}
+		out.Files[file] = indexes
+	}
+	return json.Marshal(out)
+}
+
+// UnmarshalJSON implements json.Unmarshaler. The files that refer to one rule
+// share one *InstCallRule.
+func (m *CallRulesByFile) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		*m = nil
+		return nil
+	}
+	var in struct {
+		Rules []*InstCallRule  `json:"rules"`
+		Files map[string][]int `json:"files"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&in); err != nil {
+		return ex.Wrapf(err, "decoding call rules")
+	}
+	rules := make(CallRulesByFile, len(in.Files))
+	for file, indexes := range in.Files {
+		list := make([]*InstCallRule, 0, len(indexes))
+		for _, index := range indexes {
+			if index < 0 || index >= len(in.Rules) || in.Rules[index] == nil {
+				return ex.Newf("call rules of %s refer to rule %d of %d", file, index, len(in.Rules))
+			}
+			list = append(list, in.Rules[index])
+		}
+		rules[file] = list
+	}
+	*m = rules
 	return nil
 }

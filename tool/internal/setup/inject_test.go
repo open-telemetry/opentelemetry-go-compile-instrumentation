@@ -15,6 +15,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/tools/go/packages"
 
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
@@ -358,6 +359,72 @@ ruleDep2:
 			assert.Equal(t, 1, strings.Count(logOutput, "Found available rules"), "rules must only be indexed once")
 		})
 	}
+}
+
+// The packages otelc injects are not in the graph of the build packages. Their
+// own load adds them, so a method_call rule is dropped for an injected package
+// that does not depend on the receiver package, and kept for one that does.
+func TestMatchInjectedDeps_MethodCallRuleNeedsReceiverPackage(t *testing.T) {
+	t.Setenv("OTELC_RULES", "")
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "go.mod"), "module example.com/repro\n\ngo 1.25.0\n")
+	mustWriteFile(t, filepath.Join(dir, "app", "app.go"), "package app\n\nfunc Run() {}\n")
+	mustWriteFile(t, filepath.Join(dir, "hook", "hook.go"), `package hook
+
+import (
+	_ "example.com/repro/plain"
+	_ "example.com/repro/user"
+)
+
+func Hook() {}
+`)
+	mustWriteFile(t, filepath.Join(dir, "clients", "clients.go"),
+		"package clients\n\ntype Client struct{}\n\nfunc (*Client) Do() {}\n")
+	mustWriteFile(t, filepath.Join(dir, "user", "user.go"),
+		"package user\n\nimport \"example.com/repro/clients\"\n\nfunc Run() { (&clients.Client{}).Do() }\n")
+	mustWriteFile(t, filepath.Join(dir, "plain", "plain.go"),
+		"package plain\n\ntype T struct{}\n\nfunc (*T) Do() {}\n\nfunc Run() { (&T{}).Do() }\n")
+	ruleFile := filepath.Join(dir, "rules.yaml")
+	mustWriteFile(t, ruleFile, `ruleApp:
+  target: example.com/repro/app
+  func: Run
+  before: Hook
+  path: example.com/repro/hook
+wrapDo:
+  target: "**"
+  where:
+    method_call: example.com/repro/clients.*Client.Do
+  do:
+    - wrap_call:
+        replace: "{{ . }}"
+`)
+
+	sp := &setupPhase{logger: slog.New(slog.DiscardHandler), ruleConfig: ruleFile, imports: &importGraph{}}
+	appDep := &Dependency{
+		ImportPath: "example.com/repro/app",
+		Sources:    []string{filepath.Join(dir, "app", "app.go")},
+		CgoFiles:   map[string]string{},
+	}
+	sp.imports.add([]*packages.Package{{PkgPath: appDep.ImportPath, GoFiles: appDep.Sources}})
+	idx, err := sp.loadRuleIndex(t.Context(), []string{dir})
+	require.NoError(t, err)
+	matched, err := sp.matchDeps(t.Context(), []*Dependency{appDep}, idx)
+	require.NoError(t, err)
+	require.Len(t, matched, 1)
+	assert.Empty(t, matched[0].CallRules, "app does not depend on clients")
+
+	injected, err := sp.matchInjectedDeps(t.Context(), matched, []*Dependency{appDep}, idx, []string{"-C", dir})
+	require.NoError(t, err)
+	withCallRules := make([]string, 0, len(injected))
+	for _, set := range injected {
+		if len(set.CallRules) > 0 {
+			withCallRules = append(withCallRules, set.ModulePath)
+		}
+	}
+	// hook depends on clients through user. plain has its own Do method.
+	assert.ElementsMatch(t, []string{
+		"example.com/repro/clients", "example.com/repro/hook", "example.com/repro/user",
+	}, withCallRules)
 }
 
 func TestRunInjectionPasses_Errors(t *testing.T) {

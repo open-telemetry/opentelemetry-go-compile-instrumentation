@@ -1021,6 +1021,59 @@ func TestPreciseMatching_MethodCallRuleAddedToAllFiles(t *testing.T) {
 	require.Contains(t, result.CallRules, noImportFile)
 }
 
+// A package can only call a method of a type when it depends on the package
+// of the type, so runMatch drops a method_call rule for any other package.
+// Other rules for the same package are kept.
+func TestRunMatch_MethodCallRuleNeedsReceiverPackage(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	t.Setenv(util.EnvOtelcDebug, "1")
+	userFile := writeGoSource(t, "user.go", "package user\n\nfunc Run() { client().Do(nil) }\n")
+	otherFile := writeGoSource(t, "other.go", "package other\n\nfunc Run() { client().Do(nil) }\n")
+	clientsPkg := &packages.Package{PkgPath: "example.com/clients"}
+	sp := newTestSetupPhase()
+	sp.imports = &importGraph{}
+	sp.imports.add([]*packages.Package{
+		{
+			PkgPath: "example.com/user",
+			GoFiles: []string{userFile},
+			Imports: map[string]*packages.Package{"example.com/clients": clientsPkg},
+		},
+		{PkgPath: "example.com/other", GoFiles: []string{otherFile}},
+	})
+
+	glob := rule.NewTarget("**")
+	methodRule := &rule.InstCallRule{
+		InstBaseRule: rule.InstBaseRule{Name: "wrap-client-do", Target: glob},
+		MethodCall:   "example.com/clients.*Client.Do",
+		ImportPath:   "example.com/clients",
+		RecvType:     "*Client",
+		FuncName:     "Do",
+		Replace:      "{{ . }}",
+	}
+	funcRule := &rule.InstFuncRule{InstBaseRule: rule.InstBaseRule{Name: "hook-run", Target: glob}, Func: "Run"}
+	globRules := []targetRule{
+		{target: &methodRule.Target, rule: methodRule},
+		{target: &funcRule.Target, rule: funcRule},
+	}
+
+	userDep := &Dependency{ImportPath: "example.com/user", Sources: []string{userFile}}
+	userSet, err := sp.runMatch(t.Context(), userDep, nil, globRules)
+	require.NoError(t, err)
+	assert.Len(t, userSet.CallRules[userFile], 1)
+	assert.Len(t, userSet.FuncRules[userFile], 1)
+
+	otherDep := &Dependency{ImportPath: "example.com/other", Sources: []string{otherFile}}
+	otherSet, err := sp.runMatch(t.Context(), otherDep, nil, globRules)
+	require.NoError(t, err)
+	assert.Empty(t, otherSet.CallRules)
+	assert.Len(t, otherSet.FuncRules[otherFile], 1, "only the method_call rule is dropped")
+
+	data, err := os.ReadFile(filepath.Join(setupDebugDir(otherDep.ImportPath), "setup.matches.jsonl"))
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"rule":"wrap-client-do"`)
+	assert.Contains(t, string(data), `"reason":"receiver_not_in_deps"`)
+}
+
 func TestPreciseMatching_LitRuleAddedToFilesThatImportItsPackage(t *testing.T) {
 	litFile := writeGoSource(
 		t,

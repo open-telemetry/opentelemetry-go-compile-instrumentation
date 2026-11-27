@@ -5,6 +5,7 @@ package rule
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -490,6 +491,84 @@ func TestParseMethodCall(t *testing.T) {
 			assert.Equal(t, tt.wantImportPath, importPath)
 			assert.Equal(t, tt.wantRecvType, recvType)
 			assert.Equal(t, tt.wantFuncName, funcName)
+		})
+	}
+}
+
+func TestCallRulesByFileJSON(t *testing.T) {
+	dir := t.TempDir()
+	fileA := filepath.Join(dir, "a.go")
+	fileB := filepath.Join(dir, "b.go")
+	methodRule, err := NewInstCallRule([]byte(`
+target: "**"
+method_call: net/http.*Client.Do
+replace: "{{ . }}"
+`), "wrap_do")
+	require.NoError(t, err)
+	funcRule, err := NewInstCallRule([]byte(`
+target: "**"
+function_call: net/http.Get
+replace: "{{ . }}"
+`), "wrap_get")
+	require.NoError(t, err)
+	copyOfMethodRule := *methodRule
+
+	rules := CallRulesByFile{
+		fileA: {methodRule, funcRule},
+		// A copy with the same content is stored once too.
+		fileB: {&copyOfMethodRule},
+	}
+	data, err := json.Marshal(rules)
+	require.NoError(t, err)
+
+	var form struct {
+		Rules []json.RawMessage `json:"rules"`
+		Files map[string][]int  `json:"files"`
+	}
+	require.NoError(t, json.Unmarshal(data, &form))
+	assert.Len(t, form.Rules, 2, "each rule must be stored once")
+	assert.Equal(t, map[string][]int{fileA: {0, 1}, fileB: {0}}, form.Files)
+
+	again, err := json.Marshal(rules)
+	require.NoError(t, err)
+	assert.Equal(t, string(data), string(again), "the encoding must not change between runs")
+
+	var decoded CallRulesByFile
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	require.Len(t, decoded[fileA], 2)
+	require.Len(t, decoded[fileB], 1)
+	assert.Equal(t, *methodRule, *decoded[fileA][0])
+	assert.Equal(t, *funcRule, *decoded[fileA][1])
+	assert.Same(t, decoded[fileA][0], decoded[fileB][0], "files that refer to one rule share it")
+	assert.Equal(t, "Do", decoded[fileB][0].FuncName)
+}
+
+func TestCallRulesByFileJSONEmpty(t *testing.T) {
+	data, err := json.Marshal(CallRulesByFile{})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{}`, string(data))
+	var decoded CallRulesByFile
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	assert.NotNil(t, decoded)
+	assert.Empty(t, decoded)
+
+	data, err = json.Marshal(CallRulesByFile(nil))
+	require.NoError(t, err)
+	assert.Equal(t, "null", string(data))
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	assert.Nil(t, decoded)
+}
+
+func TestCallRulesByFileJSONErrors(t *testing.T) {
+	for name, data := range map[string]string{
+		"index out of range":  `{"rules":[],"files":{"/a.go":[0]}}`,
+		"negative index":      `{"rules":[{"function_call":"net/http.Get","replace":"{{ . }}"}],"files":{"/a.go":[-1]}}`,
+		"null rule":           `{"rules":[null],"files":{"/a.go":[0]}}`,
+		"rules keyed by file": `{"/a.go":[{"function_call":"net/http.Get","replace":"{{ . }}"}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var decoded CallRulesByFile
+			require.Error(t, json.Unmarshal([]byte(data), &decoded))
 		})
 	}
 }
