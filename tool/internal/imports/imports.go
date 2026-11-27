@@ -319,6 +319,13 @@ func QualifierNames(root *dst.File) map[string]bool {
 // that root no longer uses. usedBefore is the result of QualifierNames before
 // root was changed. BlankUnused returns the paths of the blanked imports.
 //
+// A qualifier that the parser resolved to a local is still a use here. The
+// parser does not always resolve a name to the same declaration as the
+// compiler: in the case list of a type switch, it resolves the name of the
+// guard variable to the guard, and the compiler resolves it to the package.
+// When a local has the name of the import, the import is not blanked, so the
+// compiler reports it if it is unused.
+//
 // The blank import keeps the package in the build and its initialization
 // order the same. An import that root did not use before is not changed, so
 // the compiler still reports it. A blank or dot import binds no name that
@@ -333,7 +340,7 @@ func BlankUnused(
 	resolvedNames map[string]string,
 	buildFlags ...string,
 ) []string {
-	usedNow := QualifierNames(root)
+	usedNow := selectorQualifiers(root)
 	lost := make(map[string]bool)
 	for name := range usedBefore {
 		if !usedNow[name] {

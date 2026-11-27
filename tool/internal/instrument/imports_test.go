@@ -278,6 +278,21 @@ import (
 
 func D(s string) string { return strings.Clone(s) }
 `,
+		// The case list of the type switch still uses strings, although the
+		// guard variable has the same name.
+		"type_switch.go": `package p
+
+import "strings"
+
+func E(s string) string { return strings.Clone(s) }
+
+func keep(v any) {
+	switch strings := v.(type) {
+	case *strings.Builder:
+		_ = strings
+	}
+}
+`,
 	}
 	cloneRule := &rule.InstCallRule{
 		InstBaseRule: rule.InstBaseRule{Name: "replace_clone", Imports: map[string]string{"fmt": "fmt"}},
@@ -318,6 +333,7 @@ func D(s string) string { return strings.Clone(s) }
 	assert.ElementsMatch(t, []string{" strings", " fmt"}, imports("other_use.go"))
 	assert.ElementsMatch(t, []string{" os", " strings", " fmt"}, imports("rule_use.go"))
 	assert.ElementsMatch(t, []string{" os", "_ strings", " fmt"}, imports("own_unused.go"))
+	assert.ElementsMatch(t, []string{" strings", " fmt"}, imports("type_switch.go"))
 }
 
 func TestUpdateImportConfigForFile(t *testing.T) {

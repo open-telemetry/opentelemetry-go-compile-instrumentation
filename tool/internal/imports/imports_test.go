@@ -878,7 +878,7 @@ var _ = 1
 			wantBlanked: []string{"example.com/wrap"},
 		},
 		{
-			name: "a local named like the import is not a use of it",
+			name: "import is kept while a local named like it is still used",
 			before: `package p
 
 import "example.com/lib"
@@ -895,8 +895,39 @@ func f() { wrap.New() }
 
 func g(lib fmt.Stringer) { lib.String() }
 `,
-			wantSpecs:   []string{"_ example.com/lib"},
-			wantBlanked: []string{"example.com/lib"},
+			wantSpecs: []string{" example.com/lib"},
+		},
+		{
+			// The parser resolves lib in the case list to the guard variable,
+			// but the compiler resolves it to the package.
+			name: "import used in the case list of a type switch with a guard of its name is kept",
+			before: `package p
+
+import "example.com/lib"
+
+var _ = lib.New()
+
+func f(v any) {
+	switch lib := v.(type) {
+	case *lib.Client:
+		_ = lib
+	}
+}
+`,
+			after: `package p
+
+import "example.com/lib"
+
+var _ = 1
+
+func f(v any) {
+	switch lib := v.(type) {
+	case *lib.Client:
+		_ = lib
+	}
+}
+`,
+			wantSpecs: []string{" example.com/lib"},
 		},
 		{
 			name: "blank, dot and cgo imports are not changed",
