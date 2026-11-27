@@ -433,3 +433,12 @@ func TestRenderFile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(buf), "func Bar()")
 }
+
+func TestParseBytesFast(t *testing.T) {
+	file, err := ParseBytesFast("sample.go", []byte("package sample\n\n// doc\nfunc Hello() {}\n"))
+	require.NoError(t, err)
+	assert.Equal(t, "sample", file.Name.Name)
+
+	_, err = ParseBytesFast("broken.go", []byte("package broken\nfunc ("))
+	require.Error(t, err)
+}
