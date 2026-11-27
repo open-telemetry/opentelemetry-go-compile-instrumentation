@@ -108,7 +108,7 @@ Field notes:
 
   The injected code uses the aliases as written. When the instrumented file already imports a path under another alias, otelc imports the path again under the rule's alias. If the file no longer uses its own import of that path after the rule is applied, otelc renames that import to the rule's alias instead. The build fails when a parameter, result, or local variable at the place where the code is injected has the same name as an alias that the code uses, or when a declaration in the file does. A dot import is the exception: the file must dot-import the path itself.
 
-  When the rules remove the last use of another import of the file, for example a `wrap_call` template that drops the matched call, otelc blanks that import (`_ "path"`), so the package stays in the build. An import that the file did not use before the rules ran is left as it is.
+  When the rules remove the last use of another import of the file, for example a `wrap_call` template that drops the matched call, otelc blanks that import (`_ "path"`), so the package stays in the build. An import that the file did not use before the rules ran is left as it is. A dot import is never blanked, so the build still fails when the rules remove its last use.
 
 #### Added-import cycles
 
