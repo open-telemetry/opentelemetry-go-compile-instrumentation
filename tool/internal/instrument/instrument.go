@@ -234,7 +234,7 @@ func (ip *instrumentPhase) instrument(ctx context.Context, rset *rule.InstRuleSe
 	}
 	// Run the type-check once, before any file in the package is rewritten,
 	// and only when a rule needs it.
-	if rsetHasMethodCallRule(rset) || rsetUsesImplements(rset) {
+	if rsetHasMethodCallRule(rset) || rsetUsesImplements(rset) || ip.rsetHasEmbeddedInterfaceHook(rset) {
 		ip.ensureMethodCallInfo(ctx)
 	}
 
