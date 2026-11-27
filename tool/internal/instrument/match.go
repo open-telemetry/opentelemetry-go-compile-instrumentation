@@ -65,7 +65,8 @@ func loadImportNames() (map[string]string, error) {
 	return names, nil
 }
 
-// match matches the rules with the compile command.
+// match matches the rules with the compile command. Setup writes one rule
+// set for each package compile, so match returns the first set that matches.
 func (ip *instrumentPhase) match(allSet []*rule.InstRuleSet, args []string) *rule.InstRuleSet {
 	// Several packages can share an import path, such as every main package
 	// of a build, so a rule set only matches a compile that holds the files

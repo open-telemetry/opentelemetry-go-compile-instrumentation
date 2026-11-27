@@ -294,3 +294,76 @@ func TestInstRuleSet_MaxRequiredLang(t *testing.T) {
 	irs.AddRawRule(fileA, &InstRawRule{Func: "Baz", Raw: "_ = 3", Lang: "go1.16"})
 	assert.Equal(t, "go1.21", irs.MaxRequiredLang())
 }
+
+func TestInstRuleSetMerge(t *testing.T) {
+	dir := t.TempDir()
+	fileA := filepath.Join(dir, "a.go")
+	fileB := filepath.Join(dir, "b.go")
+	cgoFile := filepath.Join(dir, "c.go")
+	base := func(name string) InstBaseRule {
+		return InstBaseRule{Name: name, Target: NewTarget("example.com/lib")}
+	}
+
+	first := NewInstRuleSet("example.com/lib")
+	first.SetPackageName("lib")
+	first.AddStructRule(fileA, &InstStructRule{InstBaseRule: base("first_field"), Struct: "S"})
+	first.AddFuncRule(fileA, &InstFuncRule{InstBaseRule: base("first_hook"), Func: "F", Before: "BeforeF"})
+	first.AddFileRule(&InstFileRule{InstBaseRule: base("first_file"), File: "first.go", Path: "example.com/a"})
+	first.AddIgnoredCallFile(fileA)
+
+	second := NewInstRuleSet("example.com/lib")
+	second.SetPackageName("lib")
+	second.SetCgoFileMap(map[string]string{cgoFile: "c.cgo1.go"})
+	// The same rule as in first, in another object: it must not be added again.
+	second.AddStructRule(fileA, &InstStructRule{InstBaseRule: base("first_field"), Struct: "S"})
+	second.AddStructRule(fileA, &InstStructRule{InstBaseRule: base("second_field"), Struct: "S"})
+	second.AddRawRule(fileB, &InstRawRule{InstBaseRule: base("second_raw"), Func: "G", Raw: "_ = 1"})
+	second.AddCallRule(fileB, &InstCallRule{InstBaseRule: base("second_call"), FunctionCall: "net/http.Get"})
+	second.AddLitRule(fileB, &InstLitRule{InstBaseRule: base("second_lit"), StructLiteral: "net/http.Client"})
+	second.AddDirectiveRule(fileB, &InstDirectiveRule{InstBaseRule: base("second_directive"), Directive: "d"})
+	second.AddDeclRule(fileB, &InstDeclRule{InstBaseRule: base("second_decl"), Kind: "var", Identifier: "v"})
+	second.AddFileRule(&InstFileRule{InstBaseRule: base("first_file"), File: "first.go", Path: "example.com/a"})
+	second.AddFileRule(&InstFileRule{InstBaseRule: base("second_file"), File: "second.go", Path: "example.com/b"})
+	second.AddIgnoredCallFile(fileA)
+	second.AddIgnoredCallFile(fileB)
+
+	merged := NewInstRuleSet("example.com/lib")
+	merged.Merge(first)
+	merged.Merge(second)
+
+	assert.Equal(t, "lib", merged.PackageName)
+	assert.Equal(t, map[string]string{cgoFile: "c.cgo1.go"}, merged.CgoFileMap)
+	require.Len(t, merged.StructRules[fileA], 2, "a rule both sets have must be kept once")
+	assert.Equal(t, "first_field", merged.StructRules[fileA][0].Name)
+	assert.Equal(t, "second_field", merged.StructRules[fileA][1].Name)
+	assert.Len(t, merged.FuncRules[fileA], 1)
+	assert.Len(t, merged.RawRules[fileB], 1)
+	assert.Len(t, merged.CallRules[fileB], 1)
+	assert.Len(t, merged.LitRules[fileB], 1)
+	assert.Len(t, merged.DirectiveRules[fileB], 1)
+	assert.Len(t, merged.DeclRules[fileB], 1)
+	require.Len(t, merged.FileRules, 2, "a file rule both sets have must be kept once")
+	assert.Equal(t, "first_file", merged.FileRules[0].Name)
+	assert.Equal(t, "second_file", merged.FileRules[1].Name)
+	assert.Equal(t, []string{fileA, fileB}, merged.IgnoredCallFiles)
+
+	// Merge does not change the sets it merges.
+	assert.Len(t, first.StructRules[fileA], 1)
+	assert.Len(t, first.FileRules, 1)
+}
+
+func TestInstRuleSetMergeIntoSetWithoutMaps(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "a.go")
+	other := NewInstRuleSet("example.com/lib")
+	other.SetPackageName("lib")
+	other.SetCgoFileMap(map[string]string{file: "a.cgo1.go"})
+	other.AddFuncRule(file, &InstFuncRule{InstBaseRule: InstBaseRule{Name: "hook"}, Func: "F"})
+
+	irs := &InstRuleSet{ModulePath: "example.com/lib", PackageName: "kept"}
+	irs.Merge(other)
+
+	assert.Equal(t, "kept", irs.PackageName, "a package name the set has is kept")
+	assert.Equal(t, map[string]string{file: "a.cgo1.go"}, irs.CgoFileMap)
+	require.Len(t, irs.FuncRules[file], 1)
+	assert.Equal(t, "hook", irs.FuncRules[file][0].Name)
+}
