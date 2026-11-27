@@ -31,6 +31,7 @@ var (
 		"docs":     "scope:chore",
 		"feat":     "scope:feat",
 		"fix":      "scope:fix",
+		"perf":     "scope:perf",
 		"release":  "scope:chore",
 		"refactor": "scope:refactor",
 		"test":     "scope:chore",
