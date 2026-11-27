@@ -28,9 +28,18 @@ import (
 
 // resolveRulePaths resolves the import paths referenced by function and file rules
 // to absolute filesystem paths.
-func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDirs []string) error {
+func resolveRulePaths(
+	ctx context.Context,
+	matched []*rule.InstRuleSet,
+	moduleDirs []string,
+	buildFlags ...string,
+) error {
 	dirs := normalizeModuleDirs(moduleDirs)
 	pending := collectPendingRulePaths(matched)
+	forwarded, flagErr := forwardRulePathFlags(buildFlags)
+	if flagErr != nil {
+		return flagErr
+	}
 
 	resolved := make(map[string]string, len(pending))
 	var lastErr error
@@ -41,9 +50,10 @@ func resolveRulePaths(ctx context.Context, matched []*rule.InstRuleSet, moduleDi
 		}
 
 		pkgs, loadErr := packages.Load(&packages.Config{
-			Mode:    packages.NeedName | packages.NeedFiles,
-			Context: ctx,
-			Dir:     moduleDir,
+			Mode:       packages.NeedName | packages.NeedFiles,
+			Context:    ctx,
+			Dir:        moduleDir,
+			BuildFlags: forwarded,
 		}, pending...)
 		if loadErr != nil {
 			lastErr = loadErr

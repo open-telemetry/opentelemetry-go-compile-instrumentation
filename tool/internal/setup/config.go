@@ -113,26 +113,15 @@ func resolveInstrumentationConfigs(
 			ImportPath: importPath,
 		}
 
-		if pkg.Module == nil || pkg.Module.Dir == "" {
+		dirs, ok := resolveConfigDirs(pkg, importPath)
+		if !ok {
 			cfgs[importPath].Error = ex.Newf("package %s is not part of a module", importPath)
 			continue
 		}
-
-		modDir := pkg.Module.Dir
-		cfgs[importPath].ModuleDir = modDir
-		// A tools-only instrumentation package (its only .go file carries
-		// //go:build tools) has no buildable Go files, so packages.Load reports
-		// "build constraints exclude all Go files" and PackageDir returns the
-		// directory from go list. If that is empty too, derive the dir from the
-		// module path + import-path suffix (correct even under replace
-		// directives). The walk only needs the directory, not a compilable package.
-		pkgDir := pkgload.PackageDir(pkg)
-		if pkgDir == "" {
-			pkgDir = filepath.Join(modDir, filepath.FromSlash(strings.TrimPrefix(importPath, pkg.Module.Path)))
-		}
+		cfgs[importPath].ModuleDir = dirs.modDir
 
 		// Always look for tool file in the module directory
-		toolFile, findErr := findToolFile(modDir)
+		toolFile, findErr := findToolFile(dirs.modDir)
 		if findErr != nil {
 			cfgs[importPath].Error = ex.Wrapf(
 				findErr,
@@ -142,7 +131,7 @@ func resolveInstrumentationConfigs(
 			continue
 		}
 
-		ruleFiles, walkErr := rulesFromDir(pkgDir, true)
+		ruleFiles, walkErr := rulesFromDir(dirs.pkgDir, true)
 		if walkErr != nil {
 			cfgs[importPath].Error = ex.Wrapf(walkErr, "walking instrumentation package %s", importPath)
 			continue
@@ -173,6 +162,48 @@ func resolveInstrumentationConfigs(
 	}
 
 	return cfgs, nil
+}
+
+type configDirs struct {
+	modDir string
+	pkgDir string
+}
+
+// resolveConfigDirs resolves the module root directory and package directory
+// for pkg. Under -mod=vendor, packages.Load returns pkg.Module != nil with
+// pkg.Module.Dir == "" because vendored dependencies do not keep standalone
+// go.mod files inside vendor/. In that case, derive the module root from
+// pkgDir by stripping the import path suffix relative to pkg.Module.Path.
+func resolveConfigDirs(pkg *packages.Package, importPath string) (configDirs, bool) {
+	if pkg.Module == nil {
+		return configDirs{}, false
+	}
+	pkgDir := pkgload.PackageDir(pkg)
+	if pkg.Module.Dir != "" {
+		modDir := pkg.Module.Dir
+		if pkgDir == "" {
+			// A tools-only instrumentation package (its only .go file carries
+			// //go:build tools) has no buildable Go files, so packages.Load reports
+			// "build constraints exclude all Go files" and PackageDir returns the
+			// directory from go list. If that is empty too, derive the dir from the
+			// module path + import-path suffix (correct even under replace
+			// directives). The walk only needs the directory, not a compilable package.
+			pkgDir = filepath.Join(modDir, filepath.FromSlash(strings.TrimPrefix(importPath, pkg.Module.Path)))
+		}
+		return configDirs{modDir: modDir, pkgDir: pkgDir}, true
+	}
+	if pkgDir == "" {
+		return configDirs{}, false
+	}
+	cleanPkgDir := filepath.Clean(pkgDir)
+	modDir := cleanPkgDir
+	if rel, ok := strings.CutPrefix(importPath, pkg.Module.Path+"/"); ok {
+		suffix := string(filepath.Separator) + filepath.FromSlash(rel)
+		if trimmed, found := strings.CutSuffix(cleanPkgDir, suffix); found {
+			modDir = trimmed
+		}
+	}
+	return configDirs{modDir: modDir, pkgDir: cleanPkgDir}, true
 }
 
 type instrumentationVisit struct {

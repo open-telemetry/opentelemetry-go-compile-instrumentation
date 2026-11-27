@@ -1125,3 +1125,52 @@ func captureOutput(t *testing.T, out **os.File) func() string {
 		return string(data)
 	}
 }
+
+func TestFindDeps_VendoredModuleVersion(t *testing.T) {
+	t.Setenv("GOWORK", "off")
+	t.Setenv("GOFLAGS", "-mod=vendor")
+
+	root := t.TempDir()
+	depDir := filepath.Join(root, "dep")
+	appDir := filepath.Join(root, "app")
+	require.NoError(t, os.MkdirAll(depDir, 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(appDir, util.BuildTempDir), 0o755))
+	t.Setenv(util.EnvOtelcWorkDir, appDir)
+
+	require.NoError(
+		t,
+		os.WriteFile(filepath.Join(depDir, "go.mod"), []byte("module example.com/dep\n\ngo 1.25.0\n"), 0o644),
+	)
+	require.NoError(t, os.WriteFile(filepath.Join(depDir, "dep.go"), []byte("package dep\n\nfunc Hello() {}\n"), 0o644))
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(appDir, "go.mod"),
+		[]byte(
+			"module example.com/app\n\ngo 1.25.0\n\nrequire example.com/dep v1.2.3\n\nreplace example.com/dep v1.2.3 => ../dep\n",
+		),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(appDir, "main.go"),
+		[]byte("package main\n\nimport \"example.com/dep\"\n\nfunc main() { dep.Hello() }\n"),
+		0o644,
+	))
+
+	cmd := exec.CommandContext(t.Context(), "go", "mod", "vendor")
+	cmd.Dir = appDir
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(out))
+
+	deps, err := findDeps(t.Context(), subcmdBuild, []string{"-C", appDir, "."})
+	require.NoError(t, err)
+
+	var found *Dependency
+	for _, dep := range deps {
+		if dep.ImportPath == "example.com/dep" {
+			found = dep
+			break
+		}
+	}
+	require.NotNil(t, found)
+	assert.Equal(t, "v1.2.3", found.Version)
+}

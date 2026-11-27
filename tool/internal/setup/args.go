@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"path/filepath"
 	"strings"
 )
 
@@ -156,6 +157,42 @@ func isBuildContextBoolFlag(name string) bool {
 	default:
 		return false
 	}
+}
+
+// forwardRulePathFlags returns a copy of flags suitable for packages.Load calls
+// whose Dir is overridden to a module root: -C/--C flags are stripped, and
+// relative -overlay/-modfile paths are resolved against the -C build directory
+// (or cwd when -C is unset).
+func forwardRulePathFlags(flags []string) ([]string, error) {
+	if len(flags) == 0 {
+		return nil, nil
+	}
+	baseDir, err := buildCommandDir(flags)
+	if err != nil {
+		return nil, err
+	}
+	resolveRel := func(val string) string {
+		if val != "" && !filepath.IsAbs(val) {
+			return filepath.Join(baseDir, val)
+		}
+		return val
+	}
+
+	out := make([]string, 0, len(flags))
+	for _, a := range classifyArgs(subcmdBuild, flags) {
+		switch {
+		case a.FlagName == "-C" && (a.Kind == ArgBuildFlag || a.Kind == ArgBuildFlagValue):
+			continue
+		case a.Kind == ArgBuildFlagValue && (a.FlagName == flagOverlay || a.FlagName == flagModfile):
+			out = append(out, resolveRel(a.Raw))
+		case a.Kind == ArgBuildFlag && a.HasValue && (a.FlagName == flagOverlay || a.FlagName == flagModfile):
+			name, _, _ := strings.Cut(a.Raw, "=")
+			out = append(out, name+"="+resolveRel(a.Value))
+		default:
+			out = append(out, a.Raw)
+		}
+	}
+	return out, nil
 }
 
 // flagName returns the flag name of arg in single-dash form, without a joined value.

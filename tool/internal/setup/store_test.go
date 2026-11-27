@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -629,4 +630,68 @@ func TestHashPackages(t *testing.T) {
 	// A file hashed by content must be readable.
 	gone := &packages.Package{PkgPath: "example.com/gone", GoFiles: []string{filepath.Join(t.TempDir(), "gone.go")}}
 	require.ErrorContains(t, hashPackages(io.Discard, goroot, []*packages.Package{gone}), "gone.go")
+}
+
+func TestResolveRulePaths_RelativeOverlayAndModfileWithChangeDir(t *testing.T) {
+	root := resolveAbsDir(t.TempDir())
+	appDir := filepath.Join(root, "app")
+	cmdDir := filepath.Join(appDir, "cmd")
+	hooksDir := filepath.Join(appDir, "hooks")
+	require.NoError(t, os.MkdirAll(cmdDir, 0o755))
+	require.NoError(t, os.MkdirAll(hooksDir, 0o755))
+
+	// Put a mismatched module name in app/go.mod so resolution succeeds only
+	// when -modfile=alt.mod resolves relative to app/cmd.
+	require.NoError(t, os.WriteFile(
+		filepath.Join(appDir, "go.mod"),
+		[]byte("module example.com/wrong\n\ngo 1.25.0\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(cmdDir, "alt.mod"),
+		[]byte("module example.com/app\n\ngo 1.25.0\n"),
+		0o644,
+	))
+	require.NoError(
+		t,
+		os.WriteFile(filepath.Join(cmdDir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644),
+	)
+	// Supply hooks/hook.go solely through the overlay relative to app/cmd.
+	require.NoError(t, os.WriteFile(filepath.Join(cmdDir, "overlay_hook.go"), []byte("package hooks\n"), 0o644))
+	overlayJSON := `{"Replace":{` +
+		strconv.Quote(filepath.Join(hooksDir, "hook.go")) + `:` +
+		strconv.Quote(filepath.Join(cmdDir, "overlay_hook.go")) + `}}`
+	require.NoError(t, os.WriteFile(filepath.Join(cmdDir, "overlay.json"), []byte(overlayJSON), 0o644))
+
+	rs := &rule.InstRuleSet{
+		FuncRules: map[string][]*rule.InstFuncRule{
+			"f": {{Path: "example.com/app/hooks"}},
+		},
+	}
+
+	t.Chdir(root)
+	err := resolveRulePaths(
+		t.Context(),
+		[]*rule.InstRuleSet{rs},
+		[]string{appDir},
+		"-C",
+		filepath.Join("app", "cmd"),
+		"-overlay",
+		"overlay.json",
+		"-modfile=alt.mod",
+	)
+	require.NoError(t, err)
+	assert.Equal(t, hooksDir, rs.AllFuncRules()[0].ResolvedPath)
+}
+
+func TestResolveRulePaths_MissingWorkingDir(t *testing.T) {
+	chdirRemovedDir(t)
+
+	rs := &rule.InstRuleSet{
+		FuncRules: map[string][]*rule.InstFuncRule{
+			"f": {{Path: "example.com/app/hooks"}},
+		},
+	}
+	err := resolveRulePaths(t.Context(), []*rule.InstRuleSet{rs}, []string{t.TempDir()}, "-overlay", "overlay.json")
+	require.Error(t, err)
 }

@@ -18,6 +18,7 @@ reference. This document is the authoritative protocol specification.
 - [Per-Package Rule Files](#per-package-rule-files)
 - [Discovery and Resolution Protocol](#discovery-and-resolution-protocol)
 - [Rule Source Precedence](#rule-source-precedence)
+- [Vendored Projects](#vendored-projects)
 - [Errors and Diagnostics](#errors-and-diagnostics)
 - [Composing Instrumentation Packages](#composing-instrumentation-packages)
 - [See Also](#see-also)
@@ -181,6 +182,19 @@ files. Packages outside that reachable set are never loaded.
 The full precedence model is documented in [Rule Sources and Precedence](configuration.md#rule-sources-and-precedence).
 In short: `OTELC_RULES` > `--rules` > tool files > embedded defaults. Each source entirely
 replaces those below it; there is no merging.
+
+## Vendored Projects
+
+`otelc` handles single-module projects with a `vendor/` directory in two ways:
+
+- **Offline vendored builds (`-mod=vendor` preserved):** When `otel.instrumentation.go` (or `otelc.tool.go`) exists and all of its external imports are present in `vendor/modules.txt`, `otelc` keeps `-mod=vendor`, does not mutate `go.mod` or `GOFLAGS`, and reads instrumentation rules and dependency versions directly from `vendor/` (allowing `GOPROXY=off` builds with an empty module cache). Run `otelc pin` to pin and run `go mod vendor` automatically (emitting a warning before overwriting `vendor/`).
+- **Zero-config fallback (`-mod=mod`):** If no tool file exists or any external tool-file import is missing from `vendor/modules.txt`, `otelc` forces `-mod=mod` for the build so `vendor/` is left untouched.
+
+Cases to be aware of:
+
+- **Module-root tool files and `metadata.yaml`:** `go mod vendor` only copies non-Go files (`otel.instrumentation.go`, `metadata.yaml`, `*.otelc.yml`) from directories of imported packages. If an instrumentation module places `otel.instrumentation.go` or `metadata.yaml` at its module root `mod/` while applications only import a subpackage `mod/pkg`, `go mod vendor` drops the parent directory's files. Keep one module per imported instrumentation package, or ensure the package directory itself is imported.
+- **`add_file` sources (`//go:build ignore`):** `go mod vendor` skips files tagged `//go:build ignore` unless matched by `//go:embed`. See [File Addition Rule](rules.md#6-file-addition-rule).
+- **Go workspaces (`go.work`):** Workspace vendoring (`go work vendor`) is not yet supported.
 
 ## Errors and Diagnostics
 

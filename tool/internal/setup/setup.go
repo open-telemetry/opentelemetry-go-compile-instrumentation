@@ -56,6 +56,9 @@ type setupPhase struct {
 	ruleModuleRoots map[rule.InstRule]string
 	// graph caches the package graph loads setup shares between phases.
 	graph packageGraph
+	// vendor holds the single-module vendoring state and parsed vendor/modules.txt
+	// metadata for this build.
+	vendor vendorState
 }
 
 func (sp *setupPhase) getBuildContext() *gobuild.Context {
@@ -496,7 +499,7 @@ func (sp *setupPhase) matchAllDeps(
 
 	// Resolve rule import paths before matching injected dependencies so add_file
 	// sources can be located and parsed for dependencies that must enter the build graph.
-	if err = resolveRulePaths(ctx, matched, moduleDirs); err != nil {
+	if err = resolveRulePaths(ctx, matched, moduleDirs, buildFlags...); err != nil {
 		return nil, ex.Wrapf(err, "resolving rule paths")
 	}
 
@@ -542,7 +545,10 @@ func (sp *setupPhase) buildDeps(
 	subcommand string,
 	args []string,
 ) ([]*Dependency, error) {
-	if sp.ruleConfig == "" && os.Getenv(util.EnvOtelcRules) == "" {
+	// When instrumentation imports are already pinned and vendored, skip autoPin
+	// so otelc does not edit go.mod, run go mod tidy (which fails offline), or
+	// break vendor/modules.txt consistency. Rules are still loaded read-only.
+	if !sp.vendor.vendored && sp.ruleConfig == "" && os.Getenv(util.EnvOtelcRules) == "" {
 		pinResult, err := autoPin(ctx, moduleDirs, subcommand, args)
 		if err != nil {
 			return nil, err
@@ -573,29 +579,21 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 
 	logger := util.LoggerFromContext(ctx)
 
-	// Vendored projects fail the vendor consistency check: setup edits go.mod
-	// for the injected hook modules but not vendor/modules.txt. Force module
-	// mode so both build phases resolve dependency sources from the module cache
-	// (matching versions and paths) instead of vendor/, leaving the user's
-	// vendor directory untouched. This must run before isSetup() and
-	// getBuildPackages() below so a cached-setup `otelc go build` still sets
-	// GOFLAGS for the later buildWithToolexec, and before the findDeps dry run
-	// further down. Computed here rather than threaded in because Setup is also
-	// a standalone command action (otelc setup).
-	if vendoringActive(ctx, buildDir(subcommand, args)) {
-		logger.InfoContext(ctx, "vendored project detected; building with -mod=mod")
-		// Mutates GOFLAGS process-wide with no restore. Fine for the one-shot
-		// CLI; a second in-process GoBuild would inherit this -mod=mod.
-		if err := os.Setenv("GOFLAGS", forceModMod(os.Getenv("GOFLAGS"))); err != nil {
-			return ex.Wrapf(err, "forcing module mode for vendored build")
+	// Force -mod=mod when vendor/ exists without pinned and vendored
+	// instrumentation imports, so otelc edits to go.mod do not trip Go's vendor
+	// consistency check and vendor/ stays untouched. When tool-file imports are
+	// all vendored, preserve -mod=vendor for offline builds. Must run before
+	// isSetup() and getBuildPackages().
+	vs := getVendorState(ctx, buildDir(subcommand, args))
+	ctx = contextWithVendorState(ctx, vs)
+	if vs.needsModMod() {
+		var modErr error
+		args, modErr = forceModuleMode(ctx, subcommand, args)
+		if modErr != nil {
+			return modErr
 		}
-
-		// A CLI -mod=vendor beats the GOFLAGS=-mod=mod forced above, so the Phase-1
-		// build-plan dry run (both the auto-pin and the direct findDeps fallback
-		// below call it) would still resolve vendor/ paths without an @version;
-		// rewrite it to module mode when vendoring is active so both build phases
-		// agree on where the dependency source lives.
-		args = rewriteModVendor(subcommand, args)
+	} else if vs.vendored {
+		logger.InfoContext(ctx, "vendored project with pinned instrumentations detected; preserving -mod=vendor")
 	}
 
 	if isSetup() {
@@ -609,6 +607,7 @@ func setupLocked(ctx context.Context, cmd *cli.Command) error {
 		buildFlags: extractBuildFlags(subcommand, args),
 		pgo:        pgoValue(subcommand, args),
 		testMode:   subcommand == subcmdTest,
+		vendor:     vs,
 	}
 
 	// Introduce additional hook code by generating otelc.runtime.go
@@ -1160,11 +1159,13 @@ func runGoBuild(ctx context.Context, cmd *cli.Command, snapshot *setupSnapshot) 
 
 	statsEnabled := os.Getenv(util.EnvOtelcStats) != ""
 
-	// Setup forces GOFLAGS=-mod=mod for a vendored project (needed for both
-	// entry points, otelc setup and otelc go build). vendored is still computed
-	// here too so buildWithToolexec can rewrite an explicit CLI -mod=vendor,
-	// which beats GOFLAGS.
-	vendored := vendoringActive(ctx, buildDir(cmd.Args().First(), cmd.Args().Tail()))
+	// Setup forces GOFLAGS=-mod=mod when vendor/ exists without pinned and
+	// vendored instrumentation imports. forceMod is computed here too so
+	// buildWithToolexec rewrites an explicit CLI -mod=vendor only in that mode,
+	// preserving -mod=vendor when all tool-file imports are vendored.
+	vs := getVendorState(ctx, buildDir(cmd.Args().First(), cmd.Args().Tail()))
+	ctx = contextWithVendorState(ctx, vs)
+	forceMod := vs.needsModMod()
 
 	setupStart := time.Now()
 	err := Setup(ctx, cmd)
@@ -1178,7 +1179,7 @@ func runGoBuild(ctx context.Context, cmd *cli.Command, snapshot *setupSnapshot) 
 
 	compile := func(ctx context.Context, extraFlags ...string) error {
 		buildStart := time.Now()
-		if buildErr := buildWithToolexec(ctx, cmd, vendored, extraFlags...); buildErr != nil {
+		if buildErr := buildWithToolexec(ctx, cmd, forceMod, extraFlags...); buildErr != nil {
 			return buildErr
 		}
 		if statsEnabled {
@@ -1188,7 +1189,7 @@ func runGoBuild(ctx context.Context, cmd *cli.Command, snapshot *setupSnapshot) 
 		return nil
 	}
 
-	if snapshot == nil || !canBuildUnlocked(ctx, cmd, vendored) {
+	if snapshot == nil || !canBuildUnlocked(ctx, cmd, vs.active()) {
 		return nil, compile(ctx)
 	}
 	state, _ := stateManagerFromContext(ctx)
