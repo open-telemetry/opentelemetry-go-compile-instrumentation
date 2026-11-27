@@ -963,7 +963,7 @@ Currently supported replace string features:
 
 | Placeholder                             | Replaced with                                                                                                    |
 | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `{{.FuncName}}`                         | The name of the enclosing function, or "" for a function literal                                                 |
+| `{{.FuncName}}`                         | The name of the annotated function                                                                               |
 | `{{.FuncArgument N}}`                   | The identifier of the N-th (0-indexed) parameter of the enclosing function, excluding the receiver               |
 | `{{.FuncReturn N}}`                     | The identifier of the N-th (0-indexed) return value of the enclosing function                                    |
 | `{{.FuncArgumentCount}}`                | The number of parameters of the enclosing function, excluding the receiver                                       |
@@ -980,31 +980,9 @@ Currently supported replace string features:
 
 These resolve against two different things: `Func*`/`Receiver` placeholders describe the **enclosing function** (the innermost function declaration or function literal that contains the matched call site), while `Call*` placeholders describe **the matched call expression itself** — e.g. for `fmt.Println("hello", name)`, `{{.CallArgument 0}}` is the literal `"hello"`, not one of the enclosing function's parameters. In the same way, in `func (s *Server) Handle(log *Logger) { log.Info("x") }`, `{{.Receiver}}` is `s` and `{{.CallReceiver}}` is `log`.
 
-At a call site with no enclosing function (e.g. a package-level variable initializer), `{{.FuncArgumentOfType}}`, `{{.FuncReturnOfType}}`, `{{.FuncArgumentThatImplements}}` and `{{.FuncReturnThatImplements}}` return "", as when nothing matches. The other `Func*` placeholders and `{{.Receiver}}` fail the build there with a descriptive error. `{{.Receiver}}` additionally fails the build if the enclosing function is not a method (has no receiver). `Call*` placeholders don't need an enclosing function, but only work when the wrapped expression is itself a function call — using one on a non-call expression (e.g. a decl rule's `wrap` applied to `var x = 5`) also fails the build with a descriptive error. `{{.CallReceiver}}` additionally requires a call matched by `method_call`: a `function_call` rule that uses it fails to load, and a decl or literal `wrap`, which has no `method_call`, fails the build.
+When the call is inside a function literal, the `Func*` placeholders describe that literal, not the function declaration around it. A literal has no name, so `{{.FuncName}}` is `""` there, and `{{.Receiver}}` is the receiver of the method that contains the literal. A literal can also sit outside every function declaration, e.g. `var handler = func(ctx context.Context) { ... }`, and its parameters are available the same way.
 
-**Function literals:**
-
-When the matched call is in a function literal, the enclosing function is the innermost literal around the call, not the function declaration that holds the literal. A literal outside any declaration, such as `var handler = func(ctx context.Context) { ... }`, is an enclosing function too.
-
-- The `Func*` placeholders read the parameters and results of the literal only. They do not read those of an outer function, even when the literal has none that matches.
-- `{{.FuncName}}` is "" and `{{.Receiver}}` fails the build, because a literal has no name and no receiver. A directive on a function literal works the same way.
-
-For example, `{{ .FuncArgumentOfType "context.Context" }}` resolves as follows:
-
-```go
-var handler = func(ctx context.Context) {
-    http.Get(url) // ctx
-}
-
-func outer(ctx context.Context) {
-    run(func(inner context.Context) {
-        http.Get(url) // inner
-    })
-    go func() {
-        http.Get(url) // ""
-    }()
-}
-```
+A call site with no enclosing function or function literal (e.g. a package-level variable initializer such as `var resp, _ = http.Get(url)`) gives `""` for `{{.FuncArgumentOfType}}`, `{{.FuncReturnOfType}}`, `{{.FuncArgumentThatImplements}}` and `{{.FuncReturnThatImplements}}`, as when nothing matches, so a template can test the result and fall back to `{{ . }}`. The other `Func*` placeholders and `{{.Receiver}}` fail the build there with a descriptive error. `{{.Receiver}}` additionally fails the build if the enclosing function is not a method (has no receiver). `Call*` placeholders don't need an enclosing function, but only work when the wrapped expression is itself a function call — using one on a non-call expression (e.g. a decl rule's `wrap` applied to `var x = 5`) also fails the build with a descriptive error. `{{.CallReceiver}}` additionally requires a call matched by `method_call`: a `function_call` rule that uses it fails to load, and a decl or literal `wrap`, which has no `method_call`, fails the build.
 
 `{{.CallReceiver}}` renders the receiver as written at the call site. It does not add the `&` or `*` that Go adds for a method call, and it names the outer value for a method promoted from an embedded field. `{{.CallArguments}}` renders an empty string for a call without arguments, so a template that puts another argument after it breaks on such calls (`info({{.CallArguments}}, extra)` becomes `info(, extra)`). Guard it with `{{ if .CallArgumentCount }}`…`{{ end }}`. When the call spreads its last argument (`log.Info(msg, fields...)`), the rendered list ends with `...`, so it must be the last argument of the call in the template.
 

@@ -409,6 +409,18 @@ func (ip *instrumentPhase) parseFile(file string) (*dst.File, error) {
 	return root, nil
 }
 
+// requireFuncBody returns an error when funcDecl has no body. A function
+// declared without one, such as an assembly routine or a stub that is bound
+// with //go:linkname, has no statements to put a trampoline jump or injected
+// code into.
+func requireFuncBody(ruleName string, funcDecl *dst.FuncDecl) error {
+	if funcDecl.Body != nil {
+		return nil
+	}
+	return ex.Newf("rule %q cannot instrument function %s: it is declared without a body",
+		ruleName, funcDecl.Name.Name)
+}
+
 // applyFuncRule instruments the function targeted by rule and reports whether a
 // trampoline was actually inserted (true) or the rule was skipped (false). The
 // bool lets the caller avoid writing an otelc.globals.go file for a package
@@ -429,6 +441,9 @@ func (ip *instrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFun
 		}
 		ip.Debug("Skip func rule due to //otelc:ignore", "func", rule.Func, "rule", rule.Name)
 		return false, nil
+	}
+	if err = requireFuncBody(rule.Name, funcDecl); err != nil {
+		return false, err
 	}
 
 	// Apply imports for every matching rule, including ones de-duplicated below:

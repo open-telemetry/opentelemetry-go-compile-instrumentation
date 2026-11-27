@@ -101,8 +101,13 @@ func OtelAfterTrampoline_UnderscoreReturnFunc2035128499(hookContext OtelHookCont
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "H12UnderscoreReturnAfter")
-			if e, ok := err.(error); ok {
+			switch e := err.(type) {
+			case error:
 				println(e.Error())
+			case interface{ String() string }:
+				println(e.String())
+			case string:
+				println(e)
 			}
 			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
 			if fetchStack != nil && printStack != nil {

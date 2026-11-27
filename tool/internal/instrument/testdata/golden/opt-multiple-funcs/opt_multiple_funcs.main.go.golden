@@ -89,8 +89,13 @@ func OtelBeforeTrampoline_OptBad2498065262() (hookContext *HookContextImpl249806
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec Before hook", "H6Before")
-			if e, ok := err.(error); ok {
+			switch e := err.(type) {
+			case error:
 				println(e.Error())
+			case interface{ String() string }:
+				println(e.String())
+			case string:
+				println(e)
 			}
 			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
 			if fetchStack != nil && printStack != nil {
@@ -179,8 +184,13 @@ func OtelBeforeTrampoline_OptBad2619637533() (hookContext *HookContextImpl619637
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec Before hook", "H7Before")
-			if e, ok := err.(error); ok {
+			switch e := err.(type) {
+			case error:
 				println(e.Error())
+			case interface{ String() string }:
+				println(e.String())
+			case string:
+				println(e)
 			}
 			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
 			if fetchStack != nil && printStack != nil {
@@ -202,8 +212,13 @@ func OtelAfterTrampoline_OptBad2619637533(hookContext OtelHookContext) {
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec After hook", "H7After")
-			if e, ok := err.(error); ok {
+			switch e := err.(type) {
+			case error:
 				println(e.Error())
+			case interface{ String() string }:
+				println(e.String())
+			case string:
+				println(e)
 			}
 			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
 			if fetchStack != nil && printStack != nil {
@@ -284,8 +299,13 @@ func OtelBeforeTrampoline_OptGood2195172342() (hookContext *HookContextImpl21951
 	defer func() {
 		if err := recover(); err != nil {
 			println("failed to exec Before hook", "H5Before")
-			if e, ok := err.(error); ok {
+			switch e := err.(type) {
+			case error:
 				println(e.Error())
+			case interface{ String() string }:
+				println(e.String())
+			case string:
+				println(e)
 			}
 			fetchStack, printStack := OtelGetStackImpl, OtelPrintStackImpl
 			if fetchStack != nil && printStack != nil {

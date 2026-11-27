@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/dave/dst"
@@ -58,70 +59,76 @@ func (ip *instrumentPhase) applyCallRule(ctx context.Context, r *rule.InstCallRu
 	return true, nil
 }
 
-// callEnclosing describes the code around a call.
-type callEnclosing struct {
-	// fn is the innermost function declaration or function literal that
-	// holds the call, as the view that funcLitDecl builds for a literal. It
-	// is nil when no function holds the call, e.g. in a package-level
-	// variable initializer.
-	fn *dst.FuncDecl
-	// decl is the top-level declaration that holds the call.
+// callEnclosure says which declaration and which function literal contain a
+// call.
+type callEnclosure struct {
+	// funcDecl is the top-level function declaration that contains the call.
+	// It is nil for a call in a package-level declaration, e.g. a variable
+	// initializer.
+	funcDecl *dst.FuncDecl
+	// decl is the top-level declaration that contains the call.
 	decl dst.Decl
+	// lit is the innermost function literal around the call, or nil when the
+	// call is not inside one. It can sit in funcDecl or in a package-level
+	// declaration.
+	lit *dst.FuncLit
 }
 
 // walkCallsWithEnclosingFunc visits every *dst.CallExpr in root and invokes fn
-// with the call and the code around it.
-func walkCallsWithEnclosingFunc(root *dst.File, fn func(call *dst.CallExpr, enclosing callEnclosing) bool) {
+// with the call and the declaration and function literal that contain it. A
+// call in a package-level variable initializer has no function declaration.
+func walkCallsWithEnclosingFunc(root *dst.File, fn func(call *dst.CallExpr, enclosing callEnclosure) bool) {
 	stopped := false
 	for _, decl := range root.Decls {
 		if stopped {
 			return
 		}
-		// funcs holds the functions around the visited node, innermost last.
-		var funcs []*dst.FuncDecl
-		if funcDecl, ok := decl.(*dst.FuncDecl); ok {
-			funcs = append(funcs, funcDecl)
-		}
-		dstutil.Apply(decl, func(cursor *dstutil.Cursor) bool {
+		funcDecl, _ := decl.(*dst.FuncDecl)
+		var path []dst.Node
+		dst.Inspect(decl, func(node dst.Node) bool {
 			if stopped {
 				return false
 			}
-			switch node := cursor.Node().(type) {
-			case *dst.FuncLit:
-				funcs = append(funcs, funcLitDecl(node))
-			case *dst.CallExpr:
-				enclosing := callEnclosing{decl: decl}
-				if len(funcs) > 0 {
-					enclosing.fn = funcs[len(funcs)-1]
-				}
-				if !fn(node, enclosing) {
+			if node == nil {
+				// dst.Inspect calls f(nil) after the children of a node
+				// for which f returned true.
+				path = path[:len(path)-1]
+				return false
+			}
+			if call, ok := node.(*dst.CallExpr); ok {
+				enclosing := callEnclosure{funcDecl: funcDecl, decl: decl, lit: innermostFuncLit(path)}
+				if !fn(call, enclosing) {
 					stopped = true
 					return false
 				}
 			}
+			path = append(path, node)
 			return true
-		}, func(cursor *dstutil.Cursor) bool {
-			if _, ok := cursor.Node().(*dst.FuncLit); ok {
-				funcs = funcs[:len(funcs)-1]
-			}
-			return !stopped
 		})
 	}
 }
 
-// checkCallRuleAliasShadowing reports an error when a rule alias would
-// resolve to a local instead of the import at call. A name bound in any scope
-// between the top-level declaration and call shadows the alias, including
-// the parameters of the function literals around call.
-func checkCallRuleAliasShadowing(aliases map[string]bool, enclosing callEnclosing, call *dst.CallExpr) error {
-	switch decl := enclosing.decl.(type) {
-	case *dst.FuncDecl:
-		return checkRuleAliasShadowingAt(aliases, decl, call)
-	case *dst.GenDecl:
-		return checkRuleAliasShadowingInDecl(aliases, decl, call)
-	default:
-		return nil
+// innermostFuncLit returns the last function literal on path, or nil.
+func innermostFuncLit(path []dst.Node) *dst.FuncLit {
+	for _, node := range slices.Backward(path) {
+		if lit, ok := node.(*dst.FuncLit); ok {
+			return lit
+		}
 	}
+	return nil
+}
+
+// checkShadowing reports an error when a local between the top of the
+// declaration and call shadows one of aliases, the rule aliases that the
+// code injected at call uses.
+func (e callEnclosure) checkShadowing(aliases map[string]bool, call dst.Node) error {
+	if e.funcDecl != nil {
+		return checkRuleAliasShadowingAt(aliases, e.funcDecl, call)
+	}
+	if genDecl, ok := e.decl.(*dst.GenDecl); ok {
+		return checkRuleAliasShadowingInDecl(aliases, genDecl, call)
+	}
+	return nil
 }
 
 // applyCallReplace applies replacement wrapping to all matching calls in root using a
@@ -147,12 +154,12 @@ func (ip *instrumentPhase) applyCallReplace(
 	// Match only original calls. Template-generated calls must not be matched
 	// again, even when a wrapper calls the same function as the target.
 	type candidate struct {
-		enclosing callEnclosing
+		enclosing callEnclosure
 		site      callSite
 	}
 	candidates := make(map[*dst.CallExpr]candidate)
 	var wrapError error
-	walkCallsWithEnclosingFunc(root, func(call *dst.CallExpr, enclosing callEnclosing) bool {
+	walkCallsWithEnclosingFunc(root, func(call *dst.CallExpr, enclosing callEnclosure) bool {
 		if !ip.matchesRule(ctx, call, r, importAliases) {
 			return true
 		}
@@ -165,6 +172,7 @@ func (ip *instrumentPhase) applyCallReplace(
 			methodCall: r.MethodCall != "",
 			deferred:   isGoOrDeferCall(stmts[call], call),
 			clone:      ip.cloneWithPositions,
+			lit:        enclosing.lit,
 		}}
 		return true
 	})
@@ -191,14 +199,14 @@ func (ip *instrumentPhase) applyCallReplace(
 		wrapped, usedAliases, wrapErr := tmpl.compileExpression(
 			call,
 			match.site,
-			match.enclosing.fn,
+			match.enclosing.funcDecl,
 			importAliases,
 			r.Imports,
 		)
 		if wrapErr == nil {
 			// The wrapper is injected at the call, so a local bound around
 			// the call would shadow the rule's imports in it.
-			wrapErr = checkCallRuleAliasShadowing(usedAliases, match.enclosing, call)
+			wrapErr = match.enclosing.checkShadowing(usedAliases, call)
 		}
 		if wrapErr == nil && match.site.deferred {
 			if _, isCall := wrapped.(*dst.CallExpr); !isCall {
@@ -282,7 +290,7 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 	stmts := ast.CallEnclosingStmts(root)
 	var matchingCalls []*dst.CallExpr
 	var shadowErr error
-	walkCallsWithEnclosingFunc(root, func(call *dst.CallExpr, enclosing callEnclosing) bool {
+	walkCallsWithEnclosingFunc(root, func(call *dst.CallExpr, enclosing callEnclosure) bool {
 		if !ip.matchesRule(ctx, call, r, importAliases) {
 			return true
 		}
@@ -291,7 +299,7 @@ func (ip *instrumentPhase) applyCallAppendArgs(
 			ip.Debug("Skip call site due to //otelc:ignore", "rule", r.Name)
 			return true
 		}
-		if shadowErr = checkCallRuleAliasShadowing(usedAliases, enclosing, call); shadowErr != nil {
+		if shadowErr = enclosing.checkShadowing(usedAliases, call); shadowErr != nil {
 			return false
 		}
 		matchingCalls = append(matchingCalls, call)
