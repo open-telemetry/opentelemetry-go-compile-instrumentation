@@ -1456,3 +1456,73 @@ func printlnFirstArgs(t *testing.T, fn *dst.FuncDecl) []string {
 	}
 	return args
 }
+
+// initBodyLens returns the number of statements in each init function of root.
+func initBodyLens(root *dst.File) []int {
+	var lens []int
+	for _, decl := range root.Decls {
+		if fn, ok := decl.(*dst.FuncDecl); ok && fn.Name.Name == "init" {
+			lens = append(lens, len(fn.Body.List))
+		}
+	}
+	return lens
+}
+
+func TestApplyRawRule_InjectsIntoEveryInit(t *testing.T) {
+	root := parseFile(t, `package main
+
+func init() { println("first") }
+
+func Run() {}
+
+func init() { println("second") }
+`)
+	r := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{Name: "every_init"},
+		Func:         "init",
+		Raw:          `println("injected")`,
+	}
+
+	require.NoError(t, newTestPhase().applyRawRule(context.Background(), r, root))
+
+	assert.Equal(t, []int{2, 2}, initBodyLens(root))
+}
+
+func TestApplyRawRule_PatternSkipsInitWithoutMatch(t *testing.T) {
+	root := parseFile(t, `package main
+
+func init() { println("first") }
+
+func init() { println("second") }
+`)
+	r := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{Name: "pattern_init"},
+		Func:         "init",
+		Raw:          `println("injected")`,
+		Pattern:      `^println\("second"\)$`,
+	}
+
+	require.NoError(t, newTestPhase().applyRawRule(context.Background(), r, root))
+
+	assert.Equal(t, []int{1, 2}, initBodyLens(root))
+}
+
+func TestApplyRawRule_PatternMatchingNoInitFails(t *testing.T) {
+	root := parseFile(t, `package main
+
+func init() { println("first") }
+
+func init() { println("second") }
+`)
+	r := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{Name: "pattern_none"},
+		Func:         "init",
+		Raw:          `println("injected")`,
+		Pattern:      `^println\("nope"\)$`,
+	}
+
+	err := newTestPhase().applyRawRule(context.Background(), r, root)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no statement matches the pattern")
+}

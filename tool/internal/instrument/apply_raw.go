@@ -5,6 +5,7 @@ package instrument
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -231,7 +232,7 @@ func insertRaw(
 			return insertErr
 		}
 		if !inserted {
-			return ex.Newf("no statement matches the pattern %s", r.Pattern)
+			return &noPatternMatchError{pattern: r.Pattern}
 		}
 
 		return nil
@@ -246,26 +247,67 @@ func insertRaw(
 	return nil
 }
 
-// applyRawRule injects the raw code into the target function at the beginning
-// of the function.
+// noPatternMatchError reports that no statement of a function matches the
+// pattern of a raw rule.
+type noPatternMatchError struct {
+	pattern string
+}
+
+func (e *noPatternMatchError) Error() string {
+	return "no statement matches the pattern " + e.pattern
+}
+
+// applyRawRule injects the raw code into every function the rule targets, at
+// the beginning of the function or at the position the rule's pattern selects.
+// A file can hold several declarations of the same name only for init, and the
+// rule applies to each of them. When the rule has a pattern, an init that has
+// no matching statement is left alone as long as another one has.
 func (ip *instrumentPhase) applyRawRule(ctx context.Context, rule *rule.InstRawRule, root *dst.File) error {
-	// Find the target function to be instrumented
+	// Find the target functions to be instrumented
 	var reason string
 	var rejection *string
 	if DiffDebugEnabled() {
 		rejection = &reason
 	}
-	funcDecl, ok, err := ast.FindFuncDeclReporting(root, rule, ip.importNames, rejection)
+	funcDecls, err := ast.FindFuncDeclsReporting(root, rule, ip.importNames, rejection)
 	if err != nil {
 		return err
 	}
-	if !ok {
+	if len(funcDecls) == 0 {
 		if rejection != nil {
 			ip.reportDecision(rule, reason)
 		}
 		return ex.Newf("can not find function %s", rule.Func)
 	}
 
+	applied := false
+	var patternErr error
+	for _, funcDecl := range funcDecls {
+		err = ip.applyRawRuleTo(ctx, rule, root, funcDecl)
+		var noMatch *noPatternMatchError
+		if errors.As(err, &noMatch) && len(funcDecls) > 1 {
+			patternErr = err
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		applied = true
+	}
+	if !applied {
+		return patternErr
+	}
+	ip.Info("Apply raw rule", "rule", rule)
+	return nil
+}
+
+// applyRawRuleTo injects the raw code of the rule into funcDecl.
+func (ip *instrumentPhase) applyRawRuleTo(
+	ctx context.Context,
+	rule *rule.InstRawRule,
+	root *dst.File,
+	funcDecl *dst.FuncDecl,
+) error {
 	// De-duplicate injection for the same application on this *dst.FuncDecl.
 	// Identity() omits Pattern, Placement, and Imports (those do not change
 	// template names), so the key includes them. The map is keyed by the
@@ -280,12 +322,12 @@ func (ip *instrumentPhase) applyRawRule(ctx context.Context, rule *rule.InstRawR
 	}
 
 	aliases := rawAliasContext{imports: ip.importAliasMap(root), typeInfo: ip.fileTypes()}
-	if err = insertRaw(ctx, rule, funcDecl, root, aliases); err != nil {
+	if err := insertRaw(ctx, rule, funcDecl, root, aliases); err != nil {
 		return err
 	}
 
 	// Handle imports if specified in the rule.
-	if err = ip.addRuleImports(ctx, root, usedRuleImports(root, rule.Imports), rule.Name); err != nil {
+	if err := ip.addRuleImports(ctx, root, usedRuleImports(root, rule.Imports), rule.Name); err != nil {
 		return err
 	}
 	if ip.appliedRawIdentities == nil {
@@ -295,7 +337,6 @@ func (ip *instrumentPhase) applyRawRule(ctx context.Context, rule *rule.InstRawR
 		ip.appliedRawIdentities[funcDecl] = make(map[string]struct{})
 	}
 	ip.appliedRawIdentities[funcDecl][key] = struct{}{}
-	ip.Info("Apply raw rule", "rule", rule)
 	return nil
 }
 
