@@ -19,7 +19,10 @@ import (
 
 const instrumentationMetadataFilename = "metadata.yaml"
 
-var errNoParentGoMod = ex.New("no parent go.mod found")
+var (
+	errNoParentGoMod   = ex.New("no parent go.mod found")
+	errNoVendoredOwner = ex.New("no module of vendor/modules.txt owns package")
+)
 
 // selectedConfigurationMetadata is the metadata handoff to application
 // configuration validation. Module roots are absolute paths and sorted.
@@ -213,5 +216,5 @@ func vendorOwnerModuleRoot(vendorDir, packageDir string) (string, error) {
 			return filepath.Join(vendorDir, filepath.FromSlash(modulePath)), nil
 		}
 	}
-	return "", ex.Newf("no module of vendor/modules.txt owns package %s", packageDir)
+	return "", ex.Wrapf(errNoVendoredOwner, "no module of vendor/modules.txt owns package %s", packageDir)
 }

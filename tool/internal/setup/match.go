@@ -564,7 +564,7 @@ func loadCustomRules(
 func customRuleModuleRoot(file string) (string, error) {
 	ruleDirectory := filepath.Dir(ruleFileKey(file))
 	moduleRoot, err := moduleRootForPackage(ruleDirectory)
-	if errors.Is(err, errNoParentGoMod) {
+	if errors.Is(err, errNoParentGoMod) || errors.Is(err, errNoVendoredOwner) {
 		moduleRoot = ruleDirectory
 	} else if err != nil {
 		return "", err

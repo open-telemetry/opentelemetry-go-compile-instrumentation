@@ -690,6 +690,144 @@ func TestLoadCustomRulesFromOrdinaryVendorDirectory(t *testing.T) {
 	}
 }
 
+func TestLoadCustomRulesFromUnlistedRealVendorDirectories(t *testing.T) {
+	for _, source := range []string{"rules flag", util.EnvOtelcRules} {
+		for _, input := range []string{"vendor rule file", "unlisted data directory", "vendor directory"} {
+			t.Run(source+"/"+input, func(t *testing.T) {
+				fixture := writeUnlistedVendorRuleFixture(t)
+				wantRoots := map[string]string{}
+				var ruleConfig string
+				switch input {
+				case "vendor rule file":
+					ruleConfig = fixture.vendorRuleFile
+					wantRoots["vendor_rule"] = filepath.Dir(ruleFileKey(fixture.vendorRuleFile))
+				case "unlisted data directory":
+					ruleConfig = fixture.dataDir
+					wantRoots["data_rule"] = filepath.Dir(ruleFileKey(fixture.dataRuleFile))
+				case "vendor directory":
+					ruleConfig = fixture.vendorDir
+					wantRoots["vendor_rule"] = filepath.Dir(ruleFileKey(fixture.vendorRuleFile))
+					wantRoots["data_rule"] = filepath.Dir(ruleFileKey(fixture.dataRuleFile))
+				}
+
+				t.Setenv(util.EnvOtelcRules, "")
+				sp := newTestSetupPhase()
+				sp.instrumentationConfigPath = filepath.Join(t.TempDir(), "application.yaml")
+				if source == util.EnvOtelcRules {
+					t.Setenv(util.EnvOtelcRules, ruleConfig)
+				} else {
+					sp.ruleConfig = ruleConfig
+				}
+
+				rules, err := sp.loadRules(t.Context(), nil)
+
+				require.NoError(t, err)
+				require.Len(t, rules, len(wantRoots))
+				for _, instRule := range rules {
+					assert.Equal(t, wantRoots[instRule.GetName()], sp.ruleModuleRoots[instRule])
+				}
+			})
+		}
+	}
+}
+
+func TestUnlistedVendorRuleMetadataIsDeferredUntilNeeded(t *testing.T) {
+	fixture := writeUnlistedVendorRuleFixture(t)
+	t.Setenv(util.EnvOtelcRules, "")
+	sp := newTestSetupPhase()
+	sp.instrumentationConfigPath = filepath.Join(t.TempDir(), "application.yaml")
+	sp.ruleConfig = fixture.vendorRuleFile
+
+	rules, err := sp.loadRules(t.Context(), nil)
+	require.NoError(t, err)
+	require.Len(t, rules, 1)
+	moduleRoot := filepath.Dir(ruleFileKey(fixture.vendorRuleFile))
+	assert.Equal(t, moduleRoot, sp.ruleModuleRoots[rules[0]])
+
+	matched := rule.NewInstRuleSet("example.com/app")
+	matched.AddFileRule(rules[0].(*rule.InstFileRule))
+	metadata, err := sp.validateSelectedConfigurationMetadata(
+		[]*rule.InstRuleSet{matched}, configuration.CatalogDefinitions,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []string{moduleRoot}, metadata.ModulesWithoutMetadata)
+
+	noOptions, err := configuration.ParseApplicationConfiguration([]byte("file_format: '1.2'\n"), "app.yaml")
+	require.NoError(t, err)
+	_, err = configuration.ValidateApplicationOptions(noOptions, nil, metadata.ModulesWithoutMetadata)
+	require.NoError(t, err)
+	withOption, err := configuration.ParseApplicationConfiguration([]byte(`file_format: "1.2"
+instrumentation/development:
+  go:
+    custom:
+      enabled: true
+`), "app.yaml")
+	require.NoError(t, err)
+	_, err = configuration.ValidateApplicationOptions(withOption, nil, metadata.ModulesWithoutMetadata)
+	require.ErrorContains(t, err, "selected instrumentation modules lack metadata.yaml")
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(moduleRoot, instrumentationMetadataFilename),
+		[]byte("configurations:\n  - ref: general.http.client.request_captured_headers\n"),
+		0o644,
+	))
+	metadata, err = sp.validateSelectedConfigurationMetadata(
+		[]*rule.InstRuleSet{matched}, configuration.CatalogDefinitions,
+	)
+	require.NoError(t, err)
+	require.Len(t, metadata.Definitions, 1)
+	assert.Empty(t, metadata.ModulesWithoutMetadata)
+}
+
+type unlistedVendorRuleFixture struct {
+	vendorDir      string
+	dataDir        string
+	vendorRuleFile string
+	dataRuleFile   string
+}
+
+func writeUnlistedVendorRuleFixture(t *testing.T) unlistedVendorRuleFixture {
+	t.Helper()
+	moduleRoot := t.TempDir()
+	vendorDir := filepath.Join(moduleRoot, vendorDirName)
+	listedPackageDir := filepath.Join(vendorDir, "example.com", "listed")
+	dataDir := filepath.Join(listedPackageDir, "data")
+	require.NoError(t, os.MkdirAll(dataDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(moduleRoot, "go.mod"),
+		[]byte("module example.com/app\n\ngo 1.26.0\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(vendorDir, "modules.txt"),
+		[]byte("# example.com/listed v1.0.0\n## explicit; go 1.26\nexample.com/listed\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(listedPackageDir, "listed.go"), []byte("package listed\n"), 0o644,
+	))
+
+	vendorRuleFile := filepath.Join(vendorDir, "rules.otelc.yaml")
+	dataRuleFile := filepath.Join(dataDir, "rules.otelc.yaml")
+	for file, name := range map[string]string{
+		vendorRuleFile: "vendor_rule",
+		dataRuleFile:   "data_rule",
+	} {
+		content := name + `:
+  target: main
+  file: hook.go
+  path: example.com/custom
+`
+		require.NoError(t, os.WriteFile(file, []byte(content), 0o644))
+	}
+	return unlistedVendorRuleFixture{
+		vendorDir:      vendorDir,
+		dataDir:        dataDir,
+		vendorRuleFile: vendorRuleFile,
+		dataRuleFile:   dataRuleFile,
+	}
+}
+
 func TestCustomRuleMetadataSelection(t *testing.T) {
 	for _, tc := range []struct {
 		name             string

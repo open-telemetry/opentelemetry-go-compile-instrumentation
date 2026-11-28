@@ -270,6 +270,19 @@ func TestModuleRootForPackageInVendorReportsMissingOwner(t *testing.T) {
 
 	_, err := moduleRootForPackage(packageDir)
 	require.ErrorContains(t, err, "no module of vendor/modules.txt owns package")
+	require.ErrorIs(t, err, errNoVendoredOwner)
+}
+
+func TestModuleRootForPackageInVendorPropagatesManifestReadErrors(t *testing.T) {
+	vendorDir := filepath.Join(t.TempDir(), vendorDirName)
+	packageDir := filepath.Join(vendorDir, "example.com", "dependency")
+	require.NoError(t, os.MkdirAll(packageDir, 0o755))
+	require.NoError(t, os.Mkdir(filepath.Join(vendorDir, "modules.txt"), 0o755))
+
+	_, err := moduleRootForPackage(packageDir)
+
+	require.ErrorContains(t, err, "reading the vendor/modules.txt")
+	require.NotErrorIs(t, err, errNoVendoredOwner)
 }
 
 func TestModuleRootForPackageTreatsVendorWithoutModulesFileAsDirectory(t *testing.T) {
