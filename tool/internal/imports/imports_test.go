@@ -111,7 +111,8 @@ func TestGetExisting(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := Existing(t.Context(), tt.root)
+			result, err := Existing(t.Context(), tt.root)
+			require.NoError(t, err)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -168,7 +169,8 @@ func TestCreateSpec(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			spec := createSpec(t.Context(), tt.alias, tt.importPath)
+			spec, err := createSpec(t.Context(), tt.alias, tt.importPath)
+			require.NoError(t, err)
 			require.NotNil(t, spec)
 			require.NotNil(t, spec.Path)
 
@@ -660,7 +662,8 @@ func TestFindNew(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := FindNew(t.Context(), tt.root, tt.ruleImports, nil)
+			result, err := FindNew(t.Context(), tt.root, tt.ruleImports, nil)
+			require.NoError(t, err)
 			assert.Equal(t, tt.expectedNew, result.NewImports)
 			assert.Equal(t, tt.expectedAliases, result.ExistingAliases)
 			assert.Equal(t, tt.expectedExplicit, result.ExplicitAliases)
@@ -684,7 +687,8 @@ func TestFindNew_MultiAliasSets(t *testing.T) {
 		},
 	}
 
-	result := FindNew(t.Context(), root, map[string]string{"a": "fmt"}, nil)
+	result, err := FindNew(t.Context(), root, map[string]string{"a": "fmt"}, nil)
+	require.NoError(t, err)
 
 	assert.Equal(t, map[string][]string{"fmt": {"a", "b"}}, result.ExistingAliasSets)
 	assert.Equal(t, "b", result.ExistingAliases["fmt"], "the last spec wins in the single-alias view")
@@ -791,4 +795,97 @@ func specsOf(root *dst.File) []string {
 		}
 	}
 	return specs
+}
+
+// missingImport is a package inside this module that does not exist, so go
+// list rejects it without a network lookup.
+const missingImport = "go.opentelemetry.io/otelc/tool/internal/imports/doesnotexist"
+
+func TestCreateSpec_UnresolvablePath(t *testing.T) {
+	spec, err := createSpec(t.Context(), "ghost", missingImport)
+	require.Error(t, err)
+	assert.Nil(t, spec)
+	assert.Contains(t, err.Error(), missingImport)
+	assert.Contains(t, err.Error(), "ghost")
+}
+
+func TestAddToFile_UnresolvablePath(t *testing.T) {
+	root := &dst.File{
+		Decls: []dst.Decl{
+			&dst.GenDecl{
+				Tok: token.IMPORT,
+				Specs: []dst.Spec{
+					&dst.ImportSpec{Path: &dst.BasicLit{Value: `"fmt"`}},
+				},
+			},
+		},
+	}
+
+	newImports := map[string]string{"ghost": missingImport, "strs": "strings"}
+	err := AddToFile(t.Context(), root, newImports, nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), missingImport)
+	genDecl, ok := root.Decls[0].(*dst.GenDecl)
+	require.True(t, ok)
+	assert.Len(t, genDecl.Specs, 1, "no import is added when one of them cannot be resolved")
+}
+
+func TestAddToFile_UnresolvablePathWithoutImportDecl(t *testing.T) {
+	root := &dst.File{}
+
+	err := AddToFile(t.Context(), root, map[string]string{"ghost": missingImport}, nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), missingImport)
+	assert.Empty(t, root.Decls, "no import declaration is created")
+}
+
+func TestParseFile_UnresolvableExistingImport(t *testing.T) {
+	// The table has no entry for the file's own import, so its name has to
+	// be looked up, and the lookup fails.
+	root := &dst.File{
+		Decls: []dst.Decl{
+			&dst.GenDecl{
+				Tok: token.IMPORT,
+				Specs: []dst.Spec{
+					&dst.ImportSpec{Path: &dst.BasicLit{Value: `"` + missingImport + `"`}},
+				},
+			},
+		},
+	}
+
+	_, err := Existing(t.Context(), root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), missingImport)
+
+	_, err = FindNew(t.Context(), root, map[string]string{"f": "fmt"}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), missingImport)
+
+	err = AddToFile(t.Context(), root, map[string]string{"f": "fmt"}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), missingImport)
+}
+
+func TestParseFile_ResolvedNamesSkipLookup(t *testing.T) {
+	// A name in the table is used as it is, so the same file resolves
+	// without a lookup.
+	root := &dst.File{
+		Decls: []dst.Decl{
+			&dst.GenDecl{
+				Tok: token.IMPORT,
+				Specs: []dst.Spec{
+					&dst.ImportSpec{Path: &dst.BasicLit{Value: `"` + missingImport + `"`}},
+				},
+			},
+		},
+	}
+
+	result, err := FindNew(t.Context(), root, map[string]string{"f": "fmt"},
+		map[string]string{missingImport: "ghost"})
+
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"f": "fmt"}, result.NewImports)
+	assert.Equal(t, "ghost", result.ExistingAliases[missingImport])
 }

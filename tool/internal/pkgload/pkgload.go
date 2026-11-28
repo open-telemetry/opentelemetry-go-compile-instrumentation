@@ -141,27 +141,28 @@ func loadDirFromBuildFlags(buildFlags []string) (string, []string, error) {
 }
 
 // ResolvePackageName returns the declared package name for an import path.
-// Panics via ex.Fatalf on failure (matches existing behavior during toolexec).
-func ResolvePackageName(ctx context.Context, importPath string, buildFlags ...string) string {
+// It fails when the package cannot be loaded, for example when no module in
+// the build provides it.
+func ResolvePackageName(ctx context.Context, importPath string, buildFlags ...string) (string, error) {
 	pkgs, err := LoadPackages(ctx, packages.NeedName, buildFlags, false, importPath)
 	if err != nil {
-		ex.Fatalf("failed to resolve package name for %s: %v", importPath, err)
+		return "", ex.Wrapf(err, "resolving the package name of %s", importPath)
 	}
 
 	if len(pkgs) == 0 {
-		ex.Fatalf("no packages found for %s", importPath)
+		return "", ex.Newf("no packages found for %s", importPath)
 	}
 
 	pkg := pkgs[0]
 	if len(pkg.Errors) > 0 {
-		ex.Fatalf("failed to resolve package name for %s: %v", importPath, pkg.Errors[0])
+		return "", ex.Wrapf(pkg.Errors[0], "resolving the package name of %s", importPath)
 	}
 
 	if pkg.Name == "" {
-		ex.Fatalf("empty package name for %s", importPath)
+		return "", ex.Newf("empty package name for %s", importPath)
 	}
 
-	return pkg.Name
+	return pkg.Name, nil
 }
 
 // ResolveExportFiles returns importPath -> exportFile for a package and all

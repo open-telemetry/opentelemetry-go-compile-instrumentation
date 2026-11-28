@@ -754,8 +754,11 @@ func suppressHooksCall(funcName, qualifier string) *dst.CallExpr {
 // under its own alias, which is reused, or import a different package whose
 // name is runtime (k8s.io/apimachinery/pkg/runtime, for example), in which
 // case runtime is imported under a reserved alias instead.
-func suppressHooksAlias(ctx context.Context, root *dst.File) string {
-	existing := imports.Existing(ctx, root)
+func suppressHooksAlias(ctx context.Context, root *dst.File) (string, error) {
+	existing, err := imports.Existing(ctx, root)
+	if err != nil {
+		return "", err
+	}
 	var own []string
 	for alias, path := range existing {
 		if path == suppressHooksPackage && alias != "_" && alias != "." {
@@ -764,12 +767,12 @@ func suppressHooksAlias(ctx context.Context, root *dst.File) string {
 	}
 	if len(own) > 0 {
 		slices.Sort(own)
-		return own[0]
+		return own[0], nil
 	}
 	if _, taken := existing[suppressHooksPackage]; taken {
-		return suppressHooksReservedAlias
+		return suppressHooksReservedAlias, nil
 	}
-	return suppressHooksPackage
+	return suppressHooksPackage, nil
 }
 
 func (ip *instrumentPhase) addHookDecl(t *rule.InstFuncRule, paramTypes *dst.FieldList, before bool) error {

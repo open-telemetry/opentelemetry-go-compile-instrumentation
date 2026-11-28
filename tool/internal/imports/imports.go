@@ -47,7 +47,7 @@ type Resolution struct {
 // user-specified aliases in the source file.
 func parseFile(
 	ctx context.Context, root *dst.File, resolvedNames map[string]string, buildFlags ...string,
-) importMapping {
+) (importMapping, error) {
 	maps := importMapping{
 		AliasToPath:   make(map[string]string),
 		PathToAlias:   make(map[string]string),
@@ -69,7 +69,10 @@ func parseFile(
 			if importSpec.Name != nil {
 				maps.ExplicitAlias[importPath] = true
 			}
-			alias := specAlias(ctx, importSpec, resolvedNames, buildFlags...)
+			alias, err := specAlias(ctx, importSpec, resolvedNames, buildFlags...)
+			if err != nil {
+				return importMapping{}, err
+			}
 
 			maps.AliasToPath[alias] = importPath
 			maps.PathToAlias[importPath] = alias
@@ -79,7 +82,7 @@ func parseFile(
 	for _, aliases := range maps.PathToAliases {
 		slices.Sort(aliases)
 	}
-	return maps
+	return maps, nil
 }
 
 // specAlias returns the name that spec binds in the file: its explicit alias,
@@ -87,13 +90,13 @@ func parseFile(
 // name is resolved.
 func specAlias(
 	ctx context.Context, spec *dst.ImportSpec, resolvedNames map[string]string, buildFlags ...string,
-) string {
+) (string, error) {
 	if spec.Name != nil {
-		return spec.Name.Name
+		return spec.Name.Name, nil
 	}
 	importPath := strings.Trim(spec.Path.Value, `"`)
 	if name, resolved := resolvedNames[importPath]; resolved {
-		return name
+		return name, nil
 	}
 	return pkgload.ResolvePackageName(ctx, importPath, buildFlags...)
 }
@@ -103,7 +106,7 @@ func specAlias(
 // resolvedNames maps an import path to its package name; see parseFile.
 func FindNew(
 	ctx context.Context, root *dst.File, ruleImports, resolvedNames map[string]string, buildFlags ...string,
-) Resolution {
+) (Resolution, error) {
 	result := Resolution{
 		NewImports:        make(map[string]string),
 		ExistingAliases:   make(map[string]string),
@@ -112,10 +115,13 @@ func FindNew(
 	}
 
 	if len(ruleImports) == 0 {
-		return result
+		return result, nil
 	}
 
-	existing := parseFile(ctx, root, resolvedNames, buildFlags...)
+	existing, err := parseFile(ctx, root, resolvedNames, buildFlags...)
+	if err != nil {
+		return Resolution{}, err
+	}
 	result.ExistingAliases = existing.PathToAlias
 	result.ExistingAliasSets = existing.PathToAliases
 	result.ExplicitAliases = existing.ExplicitAlias
@@ -136,22 +142,29 @@ func FindNew(
 		}
 	}
 
-	return result
+	return result, nil
 }
 
 // Existing returns a map of alias -> path for all imports in the file.
 // For imports without explicit aliases, the package name is used as the key.
-func Existing(ctx context.Context, root *dst.File, buildFlags ...string) map[string]string {
-	return parseFile(ctx, root, nil, buildFlags...).AliasToPath
+func Existing(ctx context.Context, root *dst.File, buildFlags ...string) (map[string]string, error) {
+	mapping, err := parseFile(ctx, root, nil, buildFlags...)
+	if err != nil {
+		return nil, err
+	}
+	return mapping.AliasToPath, nil
 }
 
 // createSpec creates an ImportSpec with proper alias handling.
-func createSpec(ctx context.Context, alias, importPath string, buildFlags ...string) *dst.ImportSpec {
+func createSpec(ctx context.Context, alias, importPath string, buildFlags ...string) (*dst.ImportSpec, error) {
 	spec := &dst.ImportSpec{
 		Path: &dst.BasicLit{Value: strconv.Quote(importPath)},
 	}
 
-	pkgName := pkgload.ResolvePackageName(ctx, importPath, buildFlags...)
+	pkgName, err := pkgload.ResolvePackageName(ctx, importPath, buildFlags...)
+	if err != nil {
+		return nil, ex.Wrapf(err, "importing %q as %s", importPath, alias)
+	}
 
 	// Set Name only if:
 	// 1. It's a blank import (alias == "_")
@@ -160,7 +173,7 @@ func createSpec(ctx context.Context, alias, importPath string, buildFlags ...str
 		spec.Name = dst.NewIdent(alias)
 	}
 
-	return spec
+	return spec, nil
 }
 
 // findFirstDecl returns the first import declaration in the file, or nil if none exist.
@@ -174,22 +187,12 @@ func findFirstDecl(root *dst.File) *dst.GenDecl {
 	return nil
 }
 
-// AddToFile adds import declarations to the AST file.
-// It checks for conflicts and reuses existing import blocks when possible.
-// resolvedNames maps an import path to its package name; see parseFile.
-func AddToFile(
-	ctx context.Context, root *dst.File, newImports, resolvedNames map[string]string, buildFlags ...string,
-) error {
-	if len(newImports) == 0 {
-		return nil
-	}
-
-	existingImports := parseFile(ctx, root, resolvedNames, buildFlags...).AliasToPath
-	fileNames := fileScopeNames(root)
-
-	// Check for conflicts: an alias that already imports another path, or an
-	// alias that a declaration in the file already uses. A path the file
-	// already imports under another alias is imported again under this one.
+// dropExistingAliases removes from newImports every alias the file already
+// imports with the same path, and reports a conflict for an alias that
+// already imports another path or that a declaration in the file already
+// uses. A path the file already imports under another alias is imported
+// again under the new one.
+func dropExistingAliases(newImports, existingImports map[string]string, fileNames map[string]bool) error {
 	for alias, newPath := range newImports {
 		if alias == "_" || alias == "." {
 			continue
@@ -206,6 +209,29 @@ func AddToFile(
 			return ex.Newf("import conflict: alias %q for %q is already declared in the file",
 				alias, newPath)
 		}
+	}
+	return nil
+}
+
+// AddToFile adds import declarations to the AST file.
+// It checks for conflicts and reuses existing import blocks when possible.
+// resolvedNames maps an import path to its package name; see parseFile.
+func AddToFile(
+	ctx context.Context, root *dst.File, newImports, resolvedNames map[string]string, buildFlags ...string,
+) error {
+	if len(newImports) == 0 {
+		return nil
+	}
+
+	existing, err := parseFile(ctx, root, resolvedNames, buildFlags...)
+	if err != nil {
+		return err
+	}
+	existingImports := existing.AliasToPath
+	fileNames := fileScopeNames(root)
+
+	if err = dropExistingAliases(newImports, existingImports, fileNames); err != nil {
+		return err
 	}
 
 	if len(newImports) == 0 {
@@ -230,12 +256,19 @@ func AddToFile(
 	// a path, for example when a rule assigns a new value. That import is
 	// renamed to the rule's alias, because Go rejects an unused import.
 	qualifiers := selectorQualifiers(root)
+	// parseFile above resolved the name of every import in the file, so a
+	// lookup here cannot fail on its own. The error is kept anyway.
+	var aliasErr error
 	aliasOf := func(spec *dst.ImportSpec) string {
-		return specAlias(ctx, spec, resolvedNames, buildFlags...)
+		name, nameErr := specAlias(ctx, spec, resolvedNames, buildFlags...)
+		if nameErr != nil && aliasErr == nil {
+			aliasErr = nameErr
+		}
+		return name
 	}
 	aliases = slices.DeleteFunc(aliases, func(alias string) bool {
 		importPath := newImports[alias]
-		if alias == "_" || alias == "." || !importedPaths[importPath] {
+		if aliasErr != nil || alias == "_" || alias == "." || !importedPaths[importPath] {
 			return false
 		}
 		spec := unusedSpec(root, importPath, qualifiers, aliasOf)
@@ -246,36 +279,40 @@ func AddToFile(
 		qualifiers[alias] = true // the renamed import is taken
 		return true
 	})
+	if aliasErr != nil {
+		return aliasErr
+	}
 	if len(aliases) == 0 {
 		return nil
 	}
 
-	newSpec := func(alias string) *dst.ImportSpec {
+	// Resolve every new spec first, so that one that cannot be resolved is
+	// reported before any import declaration is added.
+	newSpecs := make([]dst.Spec, 0, len(aliases))
+	for _, alias := range aliases {
 		importPath := newImports[alias]
 		if importedPaths[importPath] && alias != "_" && alias != "." {
-			return &dst.ImportSpec{
+			newSpecs = append(newSpecs, &dst.ImportSpec{
 				Name: dst.NewIdent(alias),
 				Path: &dst.BasicLit{Value: strconv.Quote(importPath)},
-			}
+			})
+			continue
 		}
-		return createSpec(ctx, alias, importPath, buildFlags...)
+		spec, specErr := createSpec(ctx, alias, importPath, buildFlags...)
+		if specErr != nil {
+			return specErr
+		}
+		newSpecs = append(newSpecs, spec)
 	}
 
 	importDecl := findFirstDecl(root)
 
 	if importDecl != nil {
-		for _, alias := range aliases {
-			importDecl.Specs = append(importDecl.Specs, newSpec(alias))
-		}
+		importDecl.Specs = append(importDecl.Specs, newSpecs...)
 	} else {
-		specs := make([]dst.Spec, 0, len(newImports))
-		for _, alias := range aliases {
-			specs = append(specs, newSpec(alias))
-		}
-
 		newImportDecl := &dst.GenDecl{
 			Tok:   token.IMPORT,
-			Specs: specs,
+			Specs: newSpecs,
 		}
 
 		root.Decls = append([]dst.Decl{newImportDecl}, root.Decls...)

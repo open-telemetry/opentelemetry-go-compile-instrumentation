@@ -49,7 +49,10 @@ func (ip *instrumentPhase) addRuleImports(
 		return nil
 	}
 
-	resolution := imports.FindNew(ctx, root, ruleImports, ip.importNames)
+	resolution, err := imports.FindNew(ctx, root, ruleImports, ip.importNames)
+	if err != nil {
+		return ex.Wrapf(err, "resolving imports for %s", ruleName)
+	}
 
 	// A dot import needs the file to dot-import the path itself: another
 	// alias for the path does not bring its identifiers into scope.
@@ -70,12 +73,12 @@ func (ip *instrumentPhase) addRuleImports(
 	}
 
 	// Add import declarations to the AST
-	if err := imports.AddToFile(ctx, root, resolution.NewImports, ip.importNames); err != nil {
+	if err = imports.AddToFile(ctx, root, resolution.NewImports, ip.importNames); err != nil {
 		return ex.Wrapf(err, "adding imports for %s", ruleName)
 	}
 
 	// Update importcfg for the build
-	if err := ip.updateImportConfig(ctx, resolution.NewImports); err != nil {
+	if err = ip.updateImportConfig(ctx, resolution.NewImports); err != nil {
 		return ex.Wrapf(err, "updating import config for %s", ruleName)
 	}
 
