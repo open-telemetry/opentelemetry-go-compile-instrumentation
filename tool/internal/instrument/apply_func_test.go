@@ -139,6 +139,38 @@ func Target(value string) error { return nil }
 	assert.Contains(t, err.Error(), "dot-import conflict")
 }
 
+func TestApplyFuncRule_UnusedImportWithFileSelectorDoesNotError(t *testing.T) {
+	root := parseFile(t, `package main
+
+import traced "strings"
+
+func Target(value string) error {
+	_ = traced.TrimSpace(value)
+	return nil
+}
+`)
+	r := &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "unused_alias",
+			Imports: map[string]string{"traced": "fmt"},
+		},
+		Func:   "Target",
+		Before: "BeforeTarget",
+		Path:   "example.com/hook",
+	}
+
+	ip := newTestPhase()
+	ip.appliedFuncIdentities = map[string]struct{}{r.Identity(): {}}
+
+	funcDecl, found, err := ast.FindFuncDecl(root, r, ip.importNames)
+	require.NoError(t, err)
+
+	_, err = ip.applyFuncRule(context.Background(), r, root, funcDecl, found)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, countImportSpecs(root))
+}
+
 // testHash stands in for InstFuncRule.Identity() in these unit tests, since
 // they exercise collectArguments/collectReturnValues without a real rule.
 const testHash = "42"

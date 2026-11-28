@@ -105,6 +105,11 @@ type callTemplateData struct {
 
 	// clone copies a part of the wrapped call into the template output.
 	clone func(dst.Expr) dst.Expr
+
+	// targetIdentMask, when non-empty, replaces target-derived identifier
+	// helpers (FuncArgument, FuncReturn, Receiver, ...) during a second pass
+	// that extracts rule aliases without counting matching target names.
+	targetIdentMask string
 }
 
 // callSite describes where the wrapped call sits.
@@ -132,6 +137,23 @@ func noEnclosingFuncErr() error {
 	return ex.Newf("no enclosing function is available at this position")
 }
 
+func (d *callTemplateData) maskTargetIdent(val string, err error) (string, error) {
+	if d.targetIdentMask == "" || err != nil || val == "" {
+		return val, err
+	}
+	return d.targetIdentMask, nil
+}
+
+func (d *callTemplateData) hasTargetIdentOverlap(aliases map[string]bool) bool {
+	return d.enclosing.hasOverlap(aliases) || d.declaring.hasOverlap(aliases)
+}
+
+func (d *callTemplateData) withTargetIdentMask(placeholder string) *callTemplateData {
+	masked := *d
+	masked.targetIdentMask = placeholder
+	return &masked
+}
+
 // FuncName returns the enclosing function's name, or "" when the innermost
 // function around the call is a function literal. Template usage:
 // {{.FuncName}}
@@ -149,7 +171,7 @@ func (d *callTemplateData) FuncArgument(idx int) (string, error) {
 	if d.enclosing == nil {
 		return "", noEnclosingFuncErr()
 	}
-	return d.enclosing.FuncArgument(idx)
+	return d.maskTargetIdent(d.enclosing.FuncArgument(idx))
 }
 
 // FuncReturn returns the identifier of the idx-th (0-indexed) return value of
@@ -158,7 +180,7 @@ func (d *callTemplateData) FuncReturn(idx int) (string, error) {
 	if d.enclosing == nil {
 		return "", noEnclosingFuncErr()
 	}
-	return d.enclosing.FuncReturn(idx)
+	return d.maskTargetIdent(d.enclosing.FuncReturn(idx))
 }
 
 // FuncArgumentCount returns the number of parameters of the enclosing
@@ -188,9 +210,9 @@ func (d *callTemplateData) Receiver() (string, error) {
 		return "", noEnclosingFuncErr()
 	}
 	if d.declaring != nil && d.declaring != d.enclosing && toolast.HasReceiver(d.declaring.funcDecl) {
-		return d.declaring.Receiver()
+		return d.maskTargetIdent(d.declaring.Receiver())
 	}
-	return d.enclosing.Receiver()
+	return d.maskTargetIdent(d.enclosing.Receiver())
 }
 
 // FuncArgumentOfType returns the identifier of the first parameter of the
@@ -201,7 +223,7 @@ func (d *callTemplateData) FuncArgumentOfType(typeStr string) (string, error) {
 	if d.enclosing == nil {
 		return "", nil
 	}
-	return d.enclosing.FuncArgumentOfType(typeStr)
+	return d.maskTargetIdent(d.enclosing.FuncArgumentOfType(typeStr))
 }
 
 // FuncReturnOfType returns the identifier of the first return value of the
@@ -211,7 +233,7 @@ func (d *callTemplateData) FuncReturnOfType(typeStr string) (string, error) {
 	if d.enclosing == nil {
 		return "", nil
 	}
-	return d.enclosing.FuncReturnOfType(typeStr)
+	return d.maskTargetIdent(d.enclosing.FuncReturnOfType(typeStr))
 }
 
 // FuncArgumentThatImplements returns the identifier of the first parameter of
@@ -222,7 +244,7 @@ func (d *callTemplateData) FuncArgumentThatImplements(iface string) (string, err
 	if d.enclosing == nil {
 		return "", nil
 	}
-	return d.enclosing.FuncArgumentThatImplements(iface)
+	return d.maskTargetIdent(d.enclosing.FuncArgumentThatImplements(iface))
 }
 
 // FuncReturnThatImplements returns the identifier of the first return value
@@ -233,7 +255,7 @@ func (d *callTemplateData) FuncReturnThatImplements(iface string) (string, error
 	if d.enclosing == nil {
 		return "", nil
 	}
-	return d.enclosing.FuncReturnThatImplements(iface)
+	return d.maskTargetIdent(d.enclosing.FuncReturnThatImplements(iface))
 }
 
 // renderingCallTemplateData wraps callTemplateData for use as text/template
@@ -444,6 +466,28 @@ func (t *callTemplate) newCallTemplateData(
 //  3. Collect the rule aliases that the parsed template code uses
 //  4. Replace the placeholders with the actual AST nodes, so the target's own
 //     code is not counted in step 3
+func (t *callTemplate) renderCallExpr(renderData renderingCallTemplateData) (string, *dst.ExprStmt, error) {
+	var sb strings.Builder
+	if err := t.template.Execute(&sb, renderData); err != nil {
+		return "", nil, ex.Wrapf(err, "failed to execute template")
+	}
+	userResult := sb.String()
+
+	stmts, err := toolast.NewAstParser().ParseSnippet(userResult)
+	if err != nil {
+		return "", nil, ex.Wrapf(err, "failed to parse generated code\nGenerated code:\n%s", userResult)
+	}
+	if len(stmts) != 1 {
+		return "", nil, ex.Newf("expected single expression statement, got %d statements", len(stmts))
+	}
+
+	exprStmt, ok := stmts[0].(*dst.ExprStmt)
+	if !ok {
+		return "", nil, ex.Newf("expected expression statement, got %T", stmts[0])
+	}
+	return userResult, exprStmt, nil
+}
+
 func (t *callTemplate) compileExpression(
 	node dst.Expr, site callSite, enclosing *dst.FuncDecl, imports, ruleImports map[string]string,
 ) (dst.Expr, map[string]bool, error) {
@@ -452,27 +496,12 @@ func (t *callTemplate) compileExpression(
 		callTemplateData: data,
 		rendered:         &renderedCallParts{args: make(map[int]bool)},
 	}
-	var sb strings.Builder
-	if err := t.template.Execute(&sb, renderData); err != nil {
-		return nil, nil, ex.Wrapf(err, "failed to execute template")
+	userResult, exprStmt, err := t.renderCallExpr(renderData)
+	if err != nil {
+		return nil, nil, err
 	}
-	userResult := sb.String()
 
 	placeholderRendered := strings.Contains(userResult, placeholderIdent)
-
-	stmts, err := toolast.NewAstParser().ParseSnippet(userResult)
-	if err != nil {
-		return nil, nil, ex.Wrapf(err, "failed to parse generated code\nGenerated code:\n%s", userResult)
-	}
-	if len(stmts) != 1 {
-		return nil, nil, ex.Newf("expected single expression statement, got %d statements", len(stmts))
-	}
-
-	exprStmt, ok := stmts[0].(*dst.ExprStmt)
-	if !ok {
-		return nil, nil, ex.Newf("expected expression statement, got %T", stmts[0])
-	}
-
 	rendered := renderData.rendered
 	if !placeholderRendered && len(rendered.args) == 0 && !rendered.receiver && !rendered.argumentList {
 		return nil, nil, ex.Newf(
@@ -482,6 +511,15 @@ func (t *callTemplate) compileExpression(
 	}
 
 	usedAliases := injectedRuleAliases(ruleImports, exprStmt.X)
+	if data.hasTargetIdentOverlap(usedAliases) {
+		maskedRenderData := renderingCallTemplateData{
+			callTemplateData: data.withTargetIdentMask(targetPlaceholderIdent(ruleImports)),
+			rendered:         &renderedCallParts{args: make(map[int]bool)},
+		}
+		if _, maskedStmt, maskErr := t.renderCallExpr(maskedRenderData); maskErr == nil {
+			usedAliases = injectedRuleAliases(ruleImports, maskedStmt.X)
+		}
+	}
 
 	if rendered.receiver || rendered.argumentList || len(rendered.args) > 0 {
 		if err = checkCallPartsEvaluation(exprStmt.X, data, site.deferred); err != nil {

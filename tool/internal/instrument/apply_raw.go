@@ -49,32 +49,6 @@ func renameReturnValues(funcDecl *dst.FuncDecl) {
 	}
 }
 
-// renderRawCode renders the shared function template variables (FuncName,
-// FuncArgument N, FuncReturn N, ...) in raw code injected by a raw rule. Raw
-// code that does not contain "{{" is returned unchanged. hash salts synthetic
-// argument/return names the same way InstRawRule.Identity salts other rules'
-// trampoline/template names.
-//
-// importAliases maps a use site's local identifier to its real import
-// path, for {{.FuncArgumentOfType}} and {{.FuncReturnOfType}}. Passing
-// nil forces those template functions to guess the package name, even
-// when the real name is known. typeInfo is for the ThatImplements helpers,
-// and nil makes them match the type name only.
-func renderRawCode(
-	raw string, decl *dst.FuncDecl, importAliases map[string]string, hash string, typeInfo *funcTypes,
-) (string, error) {
-	if !strings.Contains(raw, "{{") {
-		return raw, nil
-	}
-	tmpl, err := rule.ParseFuncTemplate(raw)
-	if err != nil {
-		return "", err
-	}
-	data := newFuncTemplateData(decl, nil, importAliases, hash)
-	data.typeInfo = typeInfo
-	return tmpl.Execute(data)
-}
-
 type insertPos struct {
 	pattern   *regexp.Regexp
 	placement string
@@ -184,38 +158,70 @@ func insertRaw(
 	root *dst.File,
 	aliases rawAliasContext,
 ) error {
+	_, err := insertRawCollecting(ctx, r, decl, root, aliases)
+	return err
+}
+
+// prepareRawStmts renders and parses the raw snippet into AST statements and
+// returns the rule import aliases used in the rendered code.
+func prepareRawStmts(
+	r *rule.InstRawRule,
+	decl *dst.FuncDecl,
+	aliases rawAliasContext,
+) ([]dst.Stmt, map[string]bool, error) {
+	if !strings.Contains(r.Raw, "{{") {
+		stmts, err := ast.NewAstParser().ParseSnippet(r.Raw)
+		if err != nil {
+			return nil, nil, err
+		}
+		return stmts, injectedStmtsRuleAliases(r.Imports, stmts), nil
+	}
+
+	tmpl, err := rule.ParseFuncTemplate(r.Raw)
+	if err != nil {
+		return nil, nil, ex.Wrapf(err, "rendering template for func %s", decl.Name.Name)
+	}
+	data := newFuncTemplateData(decl, nil, aliases.imports, r.Identity())
+	data.typeInfo = aliases.typeInfo
+	return renderFuncTemplateStmts(
+		tmpl,
+		data,
+		r.Imports,
+		func(e error) error { return ex.Wrapf(e, "rendering template for func %s", decl.Name.Name) },
+		func(e error) error { return e },
+	)
+}
+
+func insertRawCollecting(
+	ctx context.Context,
+	r *rule.InstRawRule,
+	decl *dst.FuncDecl,
+	root *dst.File,
+	aliases rawAliasContext,
+) (map[string]bool, error) {
 	util.Assert(decl.Name.Name == r.Func, "sanity check")
 	if err := requireFuncBody(r.Name, decl); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Rename the unnamed return values so that the raw code can reference them
 	renameReturnValues(decl)
 
-	raw, err := renderRawCode(r.Raw, decl, aliases.imports, r.Identity(), aliases.typeInfo)
+	stmts, ruleAliases, err := prepareRawStmts(r, decl, aliases)
 	if err != nil {
-		return ex.Wrapf(err, "rendering template for func %s", decl.Name.Name)
+		return nil, err
 	}
-
-	// Parse the raw code into AST statements
-	p := ast.NewAstParser()
-	stmts, err := p.ParseSnippet(raw)
-	if err != nil {
-		return err
-	}
-
-	ruleAliases := injectedStmtsRuleAliases(r.Imports, stmts)
 
 	// if specified, insert raw code at the position matched by the regex
 	if r.Pattern != "" {
 		restorer := decorator.NewRestorer()
 		if _, restoreErr := restorer.RestoreFile(root); restoreErr != nil {
-			return ex.Wrapf(restoreErr, "failed to restore the AST")
+			return nil, ex.Wrapf(restoreErr, "failed to restore the AST")
 		}
 
 		pattern, compileErr := regexp.Compile(r.Pattern)
 		if compileErr != nil {
-			return ex.Wrapf(compileErr, "invalid raw rule pattern %q", r.Pattern)
+			return nil, ex.Wrapf(compileErr, "invalid raw rule pattern %q", r.Pattern)
 		}
 		pos := insertPos{
 			pattern:   pattern,
@@ -228,22 +234,22 @@ func insertRaw(
 			ruleAliases: ruleAliases,
 		})
 		if insertErr != nil {
-			return insertErr
+			return nil, insertErr
 		}
 		if !inserted {
-			return ex.Newf("no statement matches the pattern %s", r.Pattern)
+			return nil, ex.Newf("no statement matches the pattern %s", r.Pattern)
 		}
 
-		return nil
+		return ruleAliases, nil
 	}
 
 	if err = checkRuleAliasShadowing(ruleAliases, decl); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Insert the raw code into target function body
 	decl.Body.List = append(stmts, decl.Body.List...)
-	return nil
+	return ruleAliases, nil
 }
 
 // applyRawRule injects the raw code into the target function at the beginning
@@ -280,12 +286,13 @@ func (ip *instrumentPhase) applyRawRule(ctx context.Context, rule *rule.InstRawR
 	}
 
 	aliases := rawAliasContext{imports: ip.importAliasMap(root), typeInfo: ip.fileTypes()}
-	if err = insertRaw(ctx, rule, funcDecl, root, aliases); err != nil {
+	usedAliases, err := insertRawCollecting(ctx, rule, funcDecl, root, aliases)
+	if err != nil {
 		return err
 	}
 
 	// Handle imports if specified in the rule.
-	if err = ip.addRuleImports(ctx, root, usedRuleImports(root, rule.Imports), rule.Name); err != nil {
+	if err = ip.addRuleImports(ctx, root, selectedRuleImports(rule.Imports, usedAliases), rule.Name); err != nil {
 		return err
 	}
 	if ip.appliedRawIdentities == nil {

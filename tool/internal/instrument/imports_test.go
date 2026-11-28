@@ -343,101 +343,41 @@ func TestInjectedRuleAliases_NoRuleImports(t *testing.T) {
 	assert.Empty(t, injectedRuleAliases(nil, expr))
 }
 
-// --- usedRuleImports tests ---
+// --- selectedRuleImports tests ---
 
-func TestUsedRuleImports_BlankAndDotAliasesAlwaysKept(t *testing.T) {
-	root := parseFile(t, `package main
-
-func f() {}
-`)
+func TestSelectedRuleImports_BlankAndDotAliasesAlwaysKept(t *testing.T) {
 	ruleImports := map[string]string{
 		"_": "example.com/sideeffect",
 		".": "example.com/dotimport",
 	}
 
-	used := usedRuleImports(root, ruleImports)
+	selected := selectedRuleImports(ruleImports, nil)
 
-	assert.Equal(t, ruleImports, used)
+	assert.Equal(t, ruleImports, selected)
 }
 
-func TestUsedRuleImports_OnlyReferencedAliasesKept(t *testing.T) {
-	root := parseFile(t, `package main
-
-func f() {
-	traced.Call()
-}
-`)
+func TestSelectedRuleImports_OnlyUsedAliasesKept(t *testing.T) {
 	ruleImports := map[string]string{
 		"traced":    "fmt",
 		"unrelated": "example.com/unrelated",
 	}
 
-	used := usedRuleImports(root, ruleImports)
+	selected := selectedRuleImports(ruleImports, map[string]bool{"traced": true})
 
-	assert.Equal(t, map[string]string{"traced": "fmt"}, used)
+	assert.Equal(t, map[string]string{"traced": "fmt"}, selected)
 }
 
-func TestUsedRuleImports_EmptyRuleImports(t *testing.T) {
-	root := parseFile(t, `package main
-
-func f() {}
-`)
-
-	used := usedRuleImports(root, nil)
-
-	assert.Nil(t, used)
+func TestSelectedRuleImports_EmptyRuleImports(t *testing.T) {
+	assert.Nil(t, selectedRuleImports(nil, map[string]bool{"traced": true}))
 }
 
-func TestUsedRuleImports_PlainIdentifierWithoutSelector(t *testing.T) {
-	root := parseFile(t, `package main
-
-func f() {
-	use(traced)
-}
-`)
+func TestSelectedRuleImports_UnusedAliasExcluded(t *testing.T) {
 	ruleImports := map[string]string{"traced": "fmt"}
 
-	used := usedRuleImports(root, ruleImports)
-
-	assert.Empty(t, used)
+	assert.Nil(t, selectedRuleImports(ruleImports, nil))
 }
 
-func TestUsedRuleImports_ChainedSelector(t *testing.T) {
-	root := parseFile(t, `package main
-
-func f() {
-	pkg.traced.Call()
-}
-`)
-	ruleImports := map[string]string{"traced": "fmt"}
-
-	used := usedRuleImports(root, ruleImports)
-
-	assert.Empty(t, used)
-}
-
-func TestUsedRuleImports_MultipleReferencesCountedOnce(t *testing.T) {
-	root := parseFile(t, `package main
-
-func f() {
-	traced.Call()
-	traced.Call()
-}
-`)
-	ruleImports := map[string]string{"traced": "fmt"}
-
-	used := usedRuleImports(root, ruleImports)
-
-	assert.Equal(t, map[string]string{"traced": "fmt"}, used)
-}
-
-func TestUsedRuleImports_MixedAliasKinds(t *testing.T) {
-	root := parseFile(t, `package main
-
-func f() {
-	traced.Call()
-}
-`)
+func TestSelectedRuleImports_MixedAliasKinds(t *testing.T) {
 	ruleImports := map[string]string{
 		"traced": "fmt",
 		"unused": "example.com/unused",
@@ -445,13 +385,13 @@ func f() {
 		".":      "example.com/dotimport",
 	}
 
-	used := usedRuleImports(root, ruleImports)
+	selected := selectedRuleImports(ruleImports, map[string]bool{"traced": true})
 
 	assert.Equal(t, map[string]string{
 		"traced": "fmt",
 		"_":      "example.com/sideeffect",
 		".":      "example.com/dotimport",
-	}, used)
+	}, selected)
 }
 
 func TestCheckRuleAliasShadowing_BodyLevelDeclReportsConflict(t *testing.T) {
@@ -684,6 +624,13 @@ func Other() {
 	assert.Panics(t, func() {
 		scopeNamesBetween(run, call)
 	})
+}
+
+func TestTargetPlaceholderIdent_AvoidsAliasCollision(t *testing.T) {
+	assert.Equal(t, "__otelcTargetIdent", targetPlaceholderIdent(nil))
+	assert.Equal(t, "__otelcTargetIdent0", targetPlaceholderIdent(map[string]string{
+		"__otelcTargetIdent": "example.com/pkg",
+	}))
 }
 
 // findCallInFunc returns the first Get selector call in fn.

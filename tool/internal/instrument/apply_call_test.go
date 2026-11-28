@@ -527,7 +527,7 @@ func TestApplyCallReplace_DoesNotRewriteOriginalCallArguments(t *testing.T) {
 	r := httpGetRule(`traced.Wrap({{ . }})`)
 	importAliases := map[string]string{"http": "net/http"}
 
-	modified, err := newTestPhase().applyCallReplace(t.Context(), r, root, importAliases)
+	modified, _, err := newTestPhase().applyCallReplace(t.Context(), r, root, importAliases)
 
 	require.NoError(t, err)
 	assert.True(t, modified)
@@ -1547,7 +1547,7 @@ func TestApplyCallAppendArgs_NoMatchReturnsFalse(t *testing.T) {
 
 	ip := newTestPhase()
 	importAliases := ast.ImportAliasMap(file, nil)
-	result, err := ip.applyCallAppendArgs(t.Context(), r, file, importAliases)
+	result, _, err := ip.applyCallAppendArgs(t.Context(), r, file, importAliases)
 
 	require.NoError(t, err)
 	assert.False(t, result, "applyCallAppendArgs must return false when no calls match")
@@ -3471,4 +3471,85 @@ func main() {
 	// Both original calls are instrumented once; the input is evaluated once.
 	// The arguments of a deferred call are evaluated before the body continues.
 	assert.Equal(t, "[input trace trace body]\n", strings.ReplaceAll(string(output), "\r\n", "\n"))
+}
+
+func TestApplyCallRule_UnrelatedFileAliasesAndTargetNamesExcluded(t *testing.T) {
+	t.Run("unused rule alias ignored despite matching import or local in file", func(t *testing.T) {
+		root := parseFile(t, `package main
+
+import (
+	"net/http"
+	traced "strings"
+)
+
+func helper() string {
+	local := traced.TrimSpace("a")
+	return local
+}
+
+func run() {
+	_, _ = http.Get("url")
+}
+`)
+		r := httpGetRule(`wrapper({{ . }})`)
+		r.Imports = map[string]string{"traced": "fmt"}
+
+		modified, err := newTestPhase().applyCallRule(t.Context(), r, root)
+
+		require.NoError(t, err)
+		require.True(t, modified)
+		assert.Equal(t, 2, countImportSpecs(root))
+	})
+
+	t.Run("enclosing FuncArgument naming rule alias does not trigger conflict or import", func(t *testing.T) {
+		root := parseFile(t, `package main
+
+import "net/http"
+
+type sink struct{}
+
+func (sink) Wrap(v any) any { return v }
+
+func Run(traced sink) {
+	_, _ = http.Get("url")
+}
+`)
+		r := httpGetRule(`{{ .FuncArgument 0 }}.Wrap({{ . }})`)
+		r.Imports = map[string]string{"traced": "fmt"}
+
+		modified, err := newTestPhase().applyCallRule(t.Context(), r, root)
+
+		require.NoError(t, err)
+		require.True(t, modified)
+		assert.Equal(t, 1, countImportSpecs(root))
+		assert.Contains(t, renderFile(t, root), `traced.Wrap(http.Get("url"))`)
+	})
+
+	t.Run("append_args variadic_type alias skipped when no ellipsis call matches", func(t *testing.T) {
+		root := parseFile(t, `package main
+
+import "net/http"
+
+func run() {
+	_, _ = http.Get("url")
+}
+`)
+		r := &rule.InstCallRule{
+			InstBaseRule: rule.InstBaseRule{
+				Name:    "append_plain",
+				Imports: map[string]string{"traced": "fmt"},
+			},
+			FunctionCall: "net/http.Get",
+			ImportPath:   "net/http",
+			FuncName:     "Get",
+			AppendArgs:   []string{"extra"},
+			VariadicType: "traced.Stringer",
+		}
+
+		modified, err := newTestPhase().applyCallRule(t.Context(), r, root)
+
+		require.NoError(t, err)
+		require.True(t, modified)
+		assert.Equal(t, 1, countImportSpecs(root))
+	})
 }

@@ -41,30 +41,29 @@ func (ip *instrumentPhase) applyDirectiveRule(
 	}
 
 	imports := ip.importAliasMap(root)
+	usedAliases := make(map[string]bool)
 
 	for _, match := range matches {
 		funcDecl, name := ip.directiveTarget(match)
 		if err = requireFuncBody(r.Name, funcDecl); err != nil {
 			return false, err
 		}
-		var (
-			snippet string
-			stmts   []dst.Stmt //nolint:prealloc // Slice allocated by `p.ParseSnippet`
-		)
 		data := newFuncTemplateData(funcDecl, match.Args, imports, r.Identity())
 		data.typeInfo = ip.fileTypes()
-		snippet, err = renderDirective(tmpl, data)
-		if err != nil {
-			return false, ex.Wrapf(err, "rendering template for func %s", name)
+		stmts, ruleAliases, renderErr := renderFuncTemplateStmts(
+			tmpl,
+			data,
+			r.Imports,
+			func(e error) error { return ex.Wrapf(e, "rendering template for func %s", name) },
+			func(e error) error { return ex.Wrapf(e, "parsing rendered template for func %s", name) },
+		)
+		if renderErr != nil {
+			return false, renderErr
 		}
-		p := ast.NewAstParser()
-		stmts, err = p.ParseSnippet(snippet)
-		if err != nil {
-			return false, ex.Wrapf(err, "parsing rendered template for func %s", name)
-		}
-		if err = checkDirectiveRuleAliases(injectedStmtsRuleAliases(r.Imports, stmts), match, funcDecl); err != nil {
+		if err = checkDirectiveRuleAliases(ruleAliases, match, funcDecl); err != nil {
 			return false, ex.Wrapf(err, "checking import aliases for func %s", name)
 		}
+		mergeNamesInto(usedAliases, ruleAliases)
 		funcDecl.Body.List = append(stmts, funcDecl.Body.List...)
 		ip.Info("Apply directive rule", "rule", r, "func", name)
 	}
@@ -72,7 +71,7 @@ func (ip *instrumentPhase) applyDirectiveRule(
 	if importErr := ip.addRuleImports(
 		ctx,
 		root,
-		usedRuleImports(root, r.Imports),
+		selectedRuleImports(r.Imports, usedAliases),
 		r.Name,
 	); importErr != nil {
 		return false, importErr

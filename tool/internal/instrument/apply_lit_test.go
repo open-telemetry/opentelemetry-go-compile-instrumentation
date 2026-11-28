@@ -787,6 +787,45 @@ func run(name string) *http.Transport {
 	assert.Equal(t, "myProxy", call.Args[1].(*dst.Ident).Name)
 }
 
+func TestApplyLitRule_UnrelatedSelectorsAndTargetNamesExcluded(t *testing.T) {
+	root := parseFile(t, `package main
+
+import "net/http"
+
+func helper() string {
+	return traced.TrimSpace("x")
+}
+
+func run(traced sink) *http.Transport {
+	return &http.Transport{Proxy: myProxy}
+}
+`)
+	r := transportRule(&rule.InstLitField{Name: "Proxy", Wrap: "{{ .FuncArgument 0 }}.Wrap({{ . }})"})
+	r.Pointer = "wraplog.Transport({{ . }})"
+	r.Imports = map[string]string{
+		"traced":  "strings",
+		"wraplog": "log",
+	}
+
+	modified, err := newTestPhase().applyLitRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	assert.True(t, modified)
+	var paths []string
+	for _, decl := range root.Decls {
+		genDecl, ok := decl.(*dst.GenDecl)
+		if !ok || genDecl.Tok != token.IMPORT {
+			continue
+		}
+		for _, spec := range genDecl.Specs {
+			if imp, isImp := spec.(*dst.ImportSpec); isImp {
+				paths = append(paths, imp.Path.Value)
+			}
+		}
+	}
+	assert.Equal(t, []string{`"net/http"`, `"log"`}, paths)
+}
+
 // litFromReturn returns the composite literal returned by the named
 // function's first (and only) return statement, unwrapping the leading "&".
 func litFromReturn(t *testing.T, root *dst.File, funcName string) *dst.CompositeLit {

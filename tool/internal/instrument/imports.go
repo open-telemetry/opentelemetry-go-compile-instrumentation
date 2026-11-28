@@ -7,6 +7,7 @@ import (
 	"context"
 	"go/token"
 	"slices"
+	"strconv"
 
 	"github.com/dave/dst"
 	"github.com/dave/dst/dstutil"
@@ -14,6 +15,7 @@ import (
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/imports"
+	"go.opentelemetry.io/otelc/tool/internal/rule"
 )
 
 // updateImportConfigForFile ensures all imports in the given file's AST are present in the importcfg.
@@ -401,44 +403,75 @@ func addLocalName(names map[string]bool, name *dst.Ident) {
 	}
 }
 
-// usedRuleImports returns the subset of ruleImports whose alias is actually
-// referenced somewhere in root. It must be called after the rule's generated
-// code has already been spliced into root.
-//
-// Blank ("_") and dot (".") aliases are always kept.
-func usedRuleImports(root *dst.File, ruleImports map[string]string) map[string]string {
+// selectedRuleImports returns the subset of ruleImports that addRuleImports
+// needs: every alias in usedAliases plus every blank ("_") and dot (".") alias
+// in ruleImports.
+func selectedRuleImports(ruleImports map[string]string, usedAliases map[string]bool) map[string]string {
 	if len(ruleImports) == 0 {
 		return nil
 	}
 
-	used := make(map[string]string, len(ruleImports))
-	unresolved := make(map[string]string, len(ruleImports))
+	selected := make(map[string]string, len(ruleImports))
 	for alias, path := range ruleImports {
-		if alias == "_" || alias == "." {
-			used[alias] = path
-			continue
+		if alias == "_" || alias == "." || usedAliases[alias] {
+			selected[alias] = path
 		}
-		unresolved[alias] = path
+	}
+	if len(selected) == 0 {
+		return nil
+	}
+	return selected
+}
+
+// targetPlaceholderIdent returns a Go identifier that stands in for
+// target-derived names during rule-alias extraction and does not collide with
+// any alias key in ruleImports.
+func targetPlaceholderIdent(ruleImports map[string]string) string {
+	const base = "__otelcTargetIdent"
+	candidate := base
+	for suffix := 0; ; suffix++ {
+		if _, conflict := ruleImports[candidate]; !conflict {
+			return candidate
+		}
+		candidate = base + strconv.Itoa(suffix)
+	}
+}
+
+// renderFuncTemplateStmts renders tmpl against data, parses the resulting
+// snippet into statements, and computes the rule aliases referenced by the
+// template's own code (excluding target-derived identifiers returned by data).
+func renderFuncTemplateStmts(
+	tmpl *rule.FuncTemplate,
+	data *funcTemplateData,
+	ruleImports map[string]string,
+	wrapRender func(error) error,
+	wrapParse func(error) error,
+) ([]dst.Stmt, map[string]bool, error) {
+	rendered, err := tmpl.Execute(data)
+	if err != nil {
+		return nil, nil, wrapRender(err)
+	}
+	p := ast.NewAstParser()
+	stmts, err := p.ParseSnippet(rendered)
+	if err != nil {
+		return nil, nil, wrapParse(err)
+	}
+	usedAliases := injectedStmtsRuleAliases(ruleImports, stmts)
+	if !data.hasOverlap(usedAliases) {
+		return stmts, usedAliases, nil
 	}
 
-	if len(unresolved) == 0 {
-		return used
+	masked := &maskedFuncTemplateData{
+		funcTemplateData: data,
+		placeholder:      targetPlaceholderIdent(ruleImports),
 	}
-
-	dst.Inspect(root, func(node dst.Node) bool {
-		sel, ok := node.(*dst.SelectorExpr)
-		if !ok {
-			return true
-		}
-		ident, identOk := sel.X.(*dst.Ident)
-		if !identOk {
-			return true
-		}
-		if path, importOk := unresolved[ident.Name]; importOk {
-			used[ident.Name] = path
-		}
-		return true
-	})
-
-	return used
+	maskedRendered, err := tmpl.Execute(masked)
+	if err != nil {
+		return nil, nil, wrapRender(err)
+	}
+	maskedStmts, err := p.ParseSnippet(maskedRendered)
+	if err != nil {
+		return nil, nil, wrapParse(err)
+	}
+	return stmts, injectedStmtsRuleAliases(ruleImports, maskedStmts), nil
 }

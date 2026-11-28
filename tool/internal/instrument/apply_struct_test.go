@@ -325,6 +325,30 @@ type S struct{}
 	assert.Contains(t, err.Error(), "dot-import conflict")
 }
 
+func TestApplyStructRule_UnrelatedSelectorsDoNotSelectUnusedImport(t *testing.T) {
+	root := parseFile(t, `package main
+
+import traced "strings"
+
+var _ = traced.TrimSpace("a")
+
+type S struct{}
+`)
+	r := &rule.InstStructRule{
+		InstBaseRule: rule.InstBaseRule{
+			Name:    "add_field",
+			Imports: map[string]string{"traced": "fmt"},
+		},
+		Struct:   "S",
+		NewField: []*rule.InstStructField{{Name: "Traced", Type: "bool"}},
+	}
+
+	err := newTestPhase().applyStructRule(context.Background(), r, root)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, countImportSpecs(root))
+}
+
 // findStructTypeInFile returns the named struct type declared at file scope.
 func findStructTypeInFile(t *testing.T, root *dst.File, name string) *dst.StructType {
 	t.Helper()

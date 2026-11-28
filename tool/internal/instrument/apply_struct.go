@@ -36,6 +36,7 @@ func (ip *instrumentPhase) applyStructRule(ctx context.Context, rule *rule.InstS
 		}
 	}
 
+	injectedNodes := make([]dst.Node, 0, len(rule.NewField))
 	for _, field := range rule.NewField {
 		if field.Name != ast.IdentIgnore && existingFields[field.Name] {
 			return ex.Newf("struct %q already has a field named %q", rule.Struct, field.Name)
@@ -44,6 +45,7 @@ func (ip *instrumentPhase) applyStructRule(ctx context.Context, rule *rule.InstS
 		if err != nil {
 			return ex.Wrapf(err, "failed to parse type %q for field %q", field.Type, field.Name)
 		}
+		injectedNodes = append(injectedNodes, typeExpr)
 		structType.Fields.List = append(structType.Fields.List, ast.Field(field.Name, typeExpr))
 		if field.Name != ast.IdentIgnore {
 			existingFields[field.Name] = true
@@ -51,7 +53,8 @@ func (ip *instrumentPhase) applyStructRule(ctx context.Context, rule *rule.InstS
 	}
 
 	// Handle imports if specified in the rule
-	if err := ip.addRuleImports(ctx, root, usedRuleImports(root, rule.Imports), rule.Name); err != nil {
+	usedAliases := injectedRuleAliases(rule.Imports, injectedNodes...)
+	if err := ip.addRuleImports(ctx, root, selectedRuleImports(rule.Imports, usedAliases), rule.Name); err != nil {
 		return err
 	}
 
