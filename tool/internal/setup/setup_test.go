@@ -42,6 +42,19 @@ func TestGoBuild_RejectsUnsupportedSubcommand(t *testing.T) {
 	}
 }
 
+func TestEnsureStateManager(t *testing.T) {
+	ctx := ensureStateManager(t.Context())
+	manager, found := stateManagerFromContext(ctx)
+	require.True(t, found)
+	require.NotNil(t, manager)
+
+	existing := newStateManager()
+	ctx = ensureStateManager(contextWithStateManager(t.Context(), existing))
+	got, found := stateManagerFromContext(ctx)
+	require.True(t, found)
+	assert.Same(t, existing, got)
+}
+
 func TestToolexecInsertArg(t *testing.T) {
 	t.Run("builds the -toolexec flag for a normal path", func(t *testing.T) {
 		insert, err := toolexecInsertArg("/usr/local/bin/otelc")
@@ -1893,6 +1906,29 @@ func TestSetup_RuleLoadError(t *testing.T) {
 	}
 	err := cmd.Run(t.Context(), []string{"setup", "."})
 	require.ErrorContains(t, err, "loading hook rules")
+}
+
+func TestSetup_RejectsInvalidApplicationConfigurationBeforeBuildDiscovery(t *testing.T) {
+	setupTestModule(t, []string{"cmd"})
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	configPath := filepath.Join(".", "invalid-instrumentation.yaml")
+	mustWriteFile(t, configPath, "file_format: [\n")
+
+	cmd := &cli.Command{
+		Name: "setup",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: FlagInstrumentationConfig},
+		},
+		Action: Setup,
+	}
+	err := cmd.Run(t.Context(), []string{
+		"setup",
+		"--" + FlagInstrumentationConfig,
+		configPath,
+		".",
+	})
+
+	require.ErrorContains(t, err, "parse application configuration")
 }
 
 func TestSetup_ResolveRulePathsError(t *testing.T) {

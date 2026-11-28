@@ -19,6 +19,10 @@ type upstreamSchema struct {
 	Type            yaml.Node                  `yaml:"type"`
 	Description     string                     `yaml:"description"`
 	DefaultBehavior string                     `yaml:"defaultBehavior"`
+	Minimum         *float64                   `yaml:"minimum"`
+	Maximum         *float64                   `yaml:"maximum"`
+	MinItems        *int                       `yaml:"minItems"`
+	MaxItems        *int                       `yaml:"maxItems"`
 	Properties      map[string]*upstreamSchema `yaml:"properties"`
 	Definitions     map[string]*upstreamSchema `yaml:"$defs"`
 	Items           *upstreamSchema            `yaml:"items"`
@@ -201,7 +205,7 @@ func applyGeneralCompatibilityOverrides(definitions map[string]Entry, data []byt
 			)
 		}
 		if entry.Description != "" || entry.Default != nil || len(entry.Examples) != 0 ||
-			entry.Schema != nil || entry.DefaultBehavior != "" {
+			entry.Schema != nil || entry.Validation != nil || entry.DefaultBehavior != "" {
 			return ex.Newf(
 				"%s: compatibility entries for current upstream paths may only set deprecated and replaced_by",
 				entry.Source,
@@ -269,10 +273,24 @@ func collectGeneralDefinitions(
 	default:
 		return ex.Newf("%s: unsupported upstream leaf type %q", path, typeName)
 	}
+	var validation *ValueConstraints
+	hasValidation := node.Minimum != nil || node.Maximum != nil || node.MinItems != nil || node.MaxItems != nil
+	if hasValidation || typeName == listType {
+		validation = &ValueConstraints{
+			Minimum:  node.Minimum,
+			Maximum:  node.Maximum,
+			MinItems: node.MinItems,
+			MaxItems: node.MaxItems,
+		}
+		if typeName == listType {
+			validation.ItemsType = stringType
+		}
+	}
 	entries[path] = Entry{
 		Name: path, Type: typeName,
 		Description:     strings.TrimSpace(node.Description),
 		DefaultBehavior: strings.TrimSpace(node.DefaultBehavior),
+		Validation:      validation,
 	}
 	return nil
 }

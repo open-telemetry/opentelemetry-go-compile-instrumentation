@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
+	"go.opentelemetry.io/otelc/tool/internal/configuration"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 	"go.yaml.in/yaml/v3"
@@ -535,6 +536,219 @@ func TestMultipleRuleFiles(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, rules, 1)
 	require.Equal(t, "h1", rules[0].GetName())
+}
+
+func TestLoadCustomRulesRecordsModuleOwnership(t *testing.T) {
+	for _, source := range []string{"rules flag", "OTELC_RULES"} {
+		t.Run(source, func(t *testing.T) {
+			moduleRoot := t.TempDir()
+			require.NoError(t, os.WriteFile(
+				filepath.Join(moduleRoot, "go.mod"),
+				[]byte("module example.com/custom\n\ngo 1.26\n"),
+				0o644,
+			))
+			ruleFile := filepath.Join(moduleRoot, "rules.otelc.yaml")
+			require.NoError(t, os.WriteFile(ruleFile, []byte(`custom:
+  target: main
+  file: hook.go
+  path: example.com/custom
+`), 0o644))
+
+			t.Setenv(util.EnvOtelcRules, "")
+			sp := newTestSetupPhase()
+			if source == "OTELC_RULES" {
+				t.Setenv(util.EnvOtelcRules, ruleFile)
+			} else {
+				sp.ruleConfig = ruleFile
+			}
+
+			rules, err := sp.loadRules(t.Context(), nil)
+			require.NoError(t, err)
+			require.Len(t, rules, 1)
+			resolvedModuleRoot := filepath.Dir(ruleFileKey(ruleFile))
+			assert.Equal(t, resolvedModuleRoot, sp.ruleModuleRoots[rules[0]])
+			matched := rule.NewInstRuleSet("example.com/app")
+			matched.AddFileRule(rules[0].(*rule.InstFileRule))
+			assert.Equal(
+				t,
+				[]string{resolvedModuleRoot},
+				sp.selectedConfigurationModuleRoots([]*rule.InstRuleSet{matched}),
+			)
+		})
+	}
+}
+
+func TestRecordCustomRuleModuleRootsSkipsEmptyRoot(t *testing.T) {
+	instRule := &rule.InstRawRule{}
+	ruleModuleRoots := make(map[rule.InstRule]string)
+	recordCustomRuleModuleRoots(ruleModuleRoots, map[string][]rule.InstRule{
+		"custom": {instRule},
+	}, "")
+	assert.Empty(t, ruleModuleRoots)
+}
+
+func TestLoadCustomRulesWithApplicationConfigurationAllowsStandaloneRules(t *testing.T) {
+	for _, source := range []string{"rules flag", "OTELC_RULES"} {
+		t.Run(source, func(t *testing.T) {
+			ruleFile := writeCustomRules(t, "rules.otelc.yaml", `custom:
+  target: main
+  file: hook.go
+  path: example.com/custom
+`)
+
+			t.Setenv(util.EnvOtelcRules, "")
+			sp := newTestSetupPhase()
+			sp.instrumentationConfigPath = filepath.Join(t.TempDir(), "instrumentation.yaml")
+			if source == "OTELC_RULES" {
+				t.Setenv(util.EnvOtelcRules, ruleFile)
+			} else {
+				sp.ruleConfig = ruleFile
+			}
+
+			rules, err := sp.loadRules(t.Context(), nil)
+			require.NoError(t, err)
+			require.Len(t, rules, 1)
+			moduleRoot := filepath.Dir(ruleFileKey(ruleFile))
+			assert.Equal(t, moduleRoot, sp.ruleModuleRoots[rules[0]])
+
+			require.NoError(t, os.WriteFile(
+				filepath.Join(moduleRoot, instrumentationMetadataFilename),
+				[]byte("configurations:\n  - ref: general.http.client.request_captured_headers\n"),
+				0o644,
+			))
+			matched := rule.NewInstRuleSet("example.com/app")
+			matched.AddFileRule(rules[0].(*rule.InstFileRule))
+			metadata, err := sp.validateSelectedConfigurationMetadata(
+				[]*rule.InstRuleSet{matched}, configuration.CatalogDefinitions,
+			)
+			require.NoError(t, err)
+			require.Len(t, metadata.Definitions, 1)
+			assert.Empty(t, metadata.ModulesWithoutMetadata)
+
+			require.NoError(t, os.Remove(filepath.Join(moduleRoot, instrumentationMetadataFilename)))
+			unmatchedMetadata, err := sp.validateSelectedConfigurationMetadata(
+				nil, configuration.CatalogDefinitions,
+			)
+			require.NoError(t, err)
+			assert.Empty(t, unmatchedMetadata.ModulesWithoutMetadata)
+
+			metadata, err = sp.validateSelectedConfigurationMetadata(
+				[]*rule.InstRuleSet{matched}, configuration.CatalogDefinitions,
+			)
+			require.NoError(t, err)
+			assert.Equal(t, []string{moduleRoot}, metadata.ModulesWithoutMetadata)
+
+			noOptions, err := configuration.ParseApplicationConfiguration(
+				[]byte("file_format: '1.2'\n"), "app.yaml",
+			)
+			require.NoError(t, err)
+			_, err = configuration.ValidateApplicationOptions(noOptions, nil, metadata.ModulesWithoutMetadata)
+			require.NoError(t, err)
+
+			withOption, err := configuration.ParseApplicationConfiguration([]byte(`file_format: "1.2"
+instrumentation/development:
+  go:
+    custom:
+      enabled: true
+`), "app.yaml")
+			require.NoError(t, err)
+			_, err = configuration.ValidateApplicationOptions(withOption, nil, metadata.ModulesWithoutMetadata)
+			require.ErrorContains(t, err, "selected instrumentation modules lack metadata.yaml")
+		})
+	}
+}
+
+func TestLoadCustomRulesFromOrdinaryVendorDirectory(t *testing.T) {
+	for _, withApplicationConfiguration := range []bool{false, true} {
+		name := "without application configuration"
+		if withApplicationConfiguration {
+			name = "with application configuration"
+		}
+		t.Run(name, func(t *testing.T) {
+			ruleDir := filepath.Join(t.TempDir(), vendorDirName)
+			require.NoError(t, os.MkdirAll(ruleDir, 0o755))
+			ruleFile := filepath.Join(ruleDir, "rules.otelc.yaml")
+			require.NoError(t, os.WriteFile(ruleFile, []byte(`custom:
+  target: main
+  func: Example
+  raw: "_ = 1"
+`), 0o644))
+
+			t.Setenv(util.EnvOtelcRules, "")
+			sp := newTestSetupPhase()
+			sp.ruleConfig = ruleFile
+			if withApplicationConfiguration {
+				sp.instrumentationConfigPath = filepath.Join(t.TempDir(), "instrumentation.yaml")
+			}
+
+			rules, err := sp.loadRules(t.Context(), nil)
+
+			require.NoError(t, err)
+			require.Len(t, rules, 1)
+			assert.Equal(t, filepath.Dir(ruleFileKey(ruleFile)), sp.ruleModuleRoots[rules[0]])
+		})
+	}
+}
+
+func TestCustomRuleMetadataSelection(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		metadata         string
+		wantDefinitions  int
+		wantMissingRoots bool
+	}{
+		{
+			name:            "resolves module metadata",
+			metadata:        "configurations:\n  - ref: general.http.client.request_captured_headers\n",
+			wantDefinitions: 1,
+		},
+		{
+			name:             "reports missing module metadata",
+			wantMissingRoots: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			moduleRoot := t.TempDir()
+			require.NoError(t, os.WriteFile(
+				filepath.Join(moduleRoot, "go.mod"),
+				[]byte("module example.com/custom\n\ngo 1.26\n"),
+				0o644,
+			))
+			if tc.metadata != "" {
+				require.NoError(t, os.WriteFile(
+					filepath.Join(moduleRoot, instrumentationMetadataFilename),
+					[]byte(tc.metadata),
+					0o644,
+				))
+			}
+			ruleFile := filepath.Join(moduleRoot, "rules.otelc.yaml")
+			require.NoError(t, os.WriteFile(ruleFile, []byte(`custom:
+  target: main
+  file: hook.go
+  path: example.com/custom
+`), 0o644))
+			moduleRoot = filepath.Dir(ruleFileKey(ruleFile))
+
+			sp := newTestSetupPhase()
+			sp.ruleConfig = ruleFile
+			rules, err := sp.loadRules(t.Context(), nil)
+			require.NoError(t, err)
+			require.Len(t, rules, 1)
+			matched := rule.NewInstRuleSet("example.com/app")
+			matched.AddFileRule(rules[0].(*rule.InstFileRule))
+
+			result, err := sp.validateSelectedConfigurationMetadata(
+				[]*rule.InstRuleSet{matched}, configuration.CatalogDefinitions,
+			)
+			require.NoError(t, err)
+			assert.Len(t, result.Definitions, tc.wantDefinitions)
+			if tc.wantMissingRoots {
+				assert.Equal(t, []string{moduleRoot}, result.ModulesWithoutMetadata)
+			} else {
+				assert.Empty(t, result.ModulesWithoutMetadata)
+			}
+		})
+	}
 }
 
 func TestLoadRules_InvalidVersionRange(t *testing.T) {
@@ -1537,7 +1751,7 @@ mangle:
 
 	p := writeCustomRules(t, "order.yaml", content)
 
-	rules, err := loadCustomRules(t.Context(), p, util.Version)
+	rules, _, err := loadCustomRules(t.Context(), p, util.Version)
 	require.NoError(t, err)
 	require.Len(t, rules, 3)
 
@@ -1589,28 +1803,28 @@ onlysecond:
 	}
 
 	t.Run("last file in the list wins", func(t *testing.T) {
-		rules, err := loadCustomRules(t.Context(), first+","+second, util.Version)
+		rules, _, err := loadCustomRules(t.Context(), first+","+second, util.Version)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"_ = 2"}, rawOf(t, rules, "dup"))
 		assert.ElementsMatch(t, []string{"dup", "onlyfirst", "onlysecond"}, ruleNames(rules))
 	})
 
 	t.Run("order of the list decides", func(t *testing.T) {
-		rules, err := loadCustomRules(t.Context(), second+","+first, util.Version)
+		rules, _, err := loadCustomRules(t.Context(), second+","+first, util.Version)
 		require.NoError(t, err)
 		assert.ElementsMatch(t, []string{"_ = 1", "_ = 11"}, rawOf(t, rules, "dup"))
 		assert.ElementsMatch(t, []string{"dup", "dup", "onlyfirst", "onlysecond"}, ruleNames(rules))
 	})
 
 	t.Run("a file given again later wins", func(t *testing.T) {
-		rules, err := loadCustomRules(t.Context(), first+","+second+","+first, util.Version)
+		rules, _, err := loadCustomRules(t.Context(), first+","+second+","+first, util.Version)
 		require.NoError(t, err)
 		assert.ElementsMatch(t, []string{"_ = 1", "_ = 11"}, rawOf(t, rules, "dup"))
 		assert.ElementsMatch(t, []string{"dup", "dup", "onlyfirst", "onlysecond"}, ruleNames(rules))
 	})
 
 	t.Run("a file found again through a directory wins", func(t *testing.T) {
-		rules, err := loadCustomRules(t.Context(), first+","+second+","+filepath.Dir(first), util.Version)
+		rules, _, err := loadCustomRules(t.Context(), first+","+second+","+filepath.Dir(first), util.Version)
 		require.NoError(t, err)
 		assert.ElementsMatch(t, []string{"_ = 1", "_ = 11"}, rawOf(t, rules, "dup"))
 	})
@@ -1640,7 +1854,7 @@ func TestLoadCustomRulesLoadsEachFileOnce(t *testing.T) {
 			logger := slog.New(slog.NewTextHandler(&output, nil))
 			ctx := util.ContextWithLogger(t.Context(), logger)
 
-			rules, err := loadCustomRules(ctx, ruleConfig, util.Version)
+			rules, _, err := loadCustomRules(ctx, ruleConfig, util.Version)
 			require.NoError(t, err)
 			assert.Equal(t, []string{"hook"}, ruleNames(rules))
 			assert.Equal(t, 1, strings.Count(output.String(), "no minimum otelc version"),
@@ -2766,7 +2980,7 @@ func TestLoadCustomRulesBrokenFile(t *testing.T) {
 			tc.write(t, path)
 
 			// Give the directory, so that the walk finds a broken symbolic link.
-			_, err := loadCustomRules(t.Context(), filepath.Dir(path), otelcVersion)
+			_, _, err := loadCustomRules(t.Context(), filepath.Dir(path), otelcVersion)
 			require.Error(t, err)
 			if tc.readErr {
 				require.ErrorContains(t, err, "failed to read "+path+" from -rules flag")
@@ -2806,7 +3020,7 @@ func TestLoadRulesFromToolFilesBrokenFile(t *testing.T) {
 
 func TestLoadCustomRulesStatError(t *testing.T) {
 	t.Setenv(util.EnvOtelcRules, "")
-	_, err := loadCustomRules(t.Context(), filepath.Join(t.TempDir(), "nope.yaml"), util.Version)
+	_, _, err := loadCustomRules(t.Context(), filepath.Join(t.TempDir(), "nope.yaml"), util.Version)
 	require.Error(t, err)
 }
 

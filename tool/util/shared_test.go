@@ -259,6 +259,16 @@ func TestGetBuildTempPaths(t *testing.T) {
 	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "foo.txt"), GetBuildTemp("foo.txt"))
 	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "matched.json"), GetMatchedRuleFile())
 	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "import_names.json"), GetImportNamesFile())
+	assert.Equal(
+		t,
+		filepath.Join(workDir, BuildTempDir, "application_configuration.json"),
+		GetApplicationConfigurationFile(),
+	)
+	assert.Equal(
+		t,
+		filepath.Join(workDir, BuildTempDir, "application_configuration_state.json"),
+		GetApplicationConfigurationStateFile(),
+	)
 	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "pgo_profile"), GetPGOProfileFile())
 	assert.Equal(t, filepath.Join(workDir, BuildTempDir, "injected_hash"), GetInjectedHashFile())
 
@@ -280,13 +290,15 @@ func TestInvocationPaths(t *testing.T) {
 		assert.Equal(t, base, GetInvocationDir())
 		assert.Equal(t, filepath.Join(base, "file.go"), GetInvocationTemp("file.go"))
 		for name, getter := range map[string]func() string{
-			"matched.json":      GetMatchedRuleFile,
-			"import_names.json": GetImportNamesFile,
-			"pgo_profile":       GetPGOProfileFile,
-			"injected_hash":     GetInjectedHashFile,
-			"resolution_scope":  GetResolutionScopeFile,
-			"setup_generation":  GetSetupGenerationFile,
-			SessionTempDir:      GetSessionDir,
+			"matched.json":                         GetMatchedRuleFile,
+			"import_names.json":                    GetImportNamesFile,
+			"application_configuration.json":       GetApplicationConfigurationFile,
+			"application_configuration_state.json": GetApplicationConfigurationStateFile,
+			"pgo_profile":                          GetPGOProfileFile,
+			"injected_hash":                        GetInjectedHashFile,
+			"resolution_scope":                     GetResolutionScopeFile,
+			"setup_generation":                     GetSetupGenerationFile,
+			SessionTempDir:                         GetSessionDir,
 			fmt.Sprintf("added_imports.%d.json", os.Getpid()): GetAddedImportsFileForProcess,
 		} {
 			assert.Equal(t, filepath.Join(base, name), getter())

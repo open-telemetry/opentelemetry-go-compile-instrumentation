@@ -1,0 +1,10 @@
+version: "v1.2.0"
+
+configuration_main:
+  target: main
+  where:
+    func: main
+  do:
+    - inject_hooks:
+        before: BeforeMain
+        path: go.opentelemetry.io/otelc/test/apps/configuration/hooks

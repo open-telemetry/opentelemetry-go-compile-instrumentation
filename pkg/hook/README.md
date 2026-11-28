@@ -14,6 +14,16 @@ The lifecycle and distribution of this interface follow a unique dual-representa
 
 Because Go interfaces are satisfied **structurally** (compile-time interface satisfaction without explicit declarations), any concrete `HookContextImpl` emitted by `otelc` must implement all methods of the `hook.HookContext` interface expected by the compiled instrumentation package.
 
+## Embedded Application Configuration
+
+`ConfigurationSnapshot()` returns the selected, normalized instrumentation
+configuration embedded by `otelc` as versioned JSON. It returns an empty
+string when the build has no resolved instrumentation values. The snapshot is
+available without opening the source configuration file or parsing YAML at
+runtime. Its current shape is `{"version":1,"values":{...}}`. Typed access
+from instrumentation rules is provided by the separate configuration-access
+API work.
+
 ## API Stability and Compatibility Policy
 
 Because `pkg/hook` can be imported by third-party and contrib instrumentation packages that are versioned and distributed independently from `otelc` itself, maintaining strict backward and forward compatibility is critical.
