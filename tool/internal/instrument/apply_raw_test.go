@@ -1596,6 +1596,23 @@ func Run(traced sink) {}
 	assert.Contains(t, err.Error(), "rule import alias conflict")
 }
 
+func TestApplyRawRule_InvalidTemplateReturnsError(t *testing.T) {
+	root := parseFile(t, `package main
+
+func Run() {}
+`)
+	r := &rule.InstRawRule{
+		InstBaseRule: rule.InstBaseRule{Name: "bad_template"},
+		Func:         "Run",
+		Raw:          "{{ .FuncName",
+	}
+
+	err := newTestPhase().applyRawRule(t.Context(), r, root)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "rendering template")
+}
+
 func printlnFirstArgs(t *testing.T, fn *dst.FuncDecl) []string {
 	t.Helper()
 	args := make([]string, 0, len(fn.Body.List))

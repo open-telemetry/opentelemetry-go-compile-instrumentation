@@ -626,6 +626,13 @@ func Other() {
 	})
 }
 
+func TestTargetPlaceholderIdent_AvoidsAliasCollision(t *testing.T) {
+	assert.Equal(t, "__otelcTargetIdent", targetPlaceholderIdent(nil))
+	assert.Equal(t, "__otelcTargetIdent0", targetPlaceholderIdent(map[string]string{
+		"__otelcTargetIdent": "example.com/pkg",
+	}))
+}
+
 // findCallInFunc returns the first Get selector call in fn.
 func findCallInFunc(t *testing.T, fn *dst.FuncDecl) *dst.CallExpr {
 	t.Helper()

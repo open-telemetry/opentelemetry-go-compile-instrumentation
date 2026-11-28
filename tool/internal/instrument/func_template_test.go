@@ -282,3 +282,44 @@ func TestFuncTemplateData_FuncReturnOfTypeComposite(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, v)
 }
+
+func TestMaskedFuncTemplateData_CoversAndMasksTargets(t *testing.T) {
+	funcDecl := parseFunc(t, `package main
+func Foo(a int, b error) (int, error) { return a, b }
+`)
+	data := newFuncTemplateData(funcDecl, nil, nil, "h1")
+	assert.Empty(t, data.recordTargetIdent(""))
+
+	masked := &maskedFuncTemplateData{
+		funcTemplateData: data,
+		placeholder:      "__otelcTargetIdent",
+	}
+
+	ret, err := masked.FuncReturn(0)
+	require.NoError(t, err)
+	assert.Equal(t, "__otelcTargetIdent", ret)
+
+	argByType, err := masked.FuncArgumentOfType("int")
+	require.NoError(t, err)
+	assert.Equal(t, "__otelcTargetIdent", argByType)
+
+	missingArgByType, err := masked.FuncArgumentOfType("string")
+	require.NoError(t, err)
+	assert.Empty(t, missingArgByType)
+
+	retByType, err := masked.FuncReturnOfType("error")
+	require.NoError(t, err)
+	assert.Equal(t, "__otelcTargetIdent", retByType)
+
+	missingRetByType, err := masked.FuncReturnOfType("string")
+	require.NoError(t, err)
+	assert.Empty(t, missingRetByType)
+
+	argImpl, err := masked.FuncArgumentThatImplements("error")
+	require.NoError(t, err)
+	assert.Equal(t, "__otelcTargetIdent", argImpl)
+
+	retImpl, err := masked.FuncReturnThatImplements("error")
+	require.NoError(t, err)
+	assert.Equal(t, "__otelcTargetIdent", retImpl)
+}

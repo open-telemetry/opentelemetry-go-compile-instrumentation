@@ -681,3 +681,21 @@ var X = traced.TrimSpace("a")
 	require.NoError(t, err)
 	assert.Equal(t, 1, countImportSpecs(file))
 }
+
+func TestApplyDeclRule_InvalidReplaceReturnsError(t *testing.T) {
+	file := parseTestFile(t, `package main
+
+var X = 1
+`)
+	r := &rule.InstDeclRule{
+		InstBaseRule: rule.InstBaseRule{Name: "bad_replace"},
+		Kind:         "var",
+		Identifier:   "X",
+		Replace:      "1, 2",
+	}
+
+	err := newTestPhase().applyDeclRule(context.Background(), r, file)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expected 1 value")
+}
