@@ -152,10 +152,29 @@ func TestResolvePackageName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.importPath, func(t *testing.T) {
-			result := ResolvePackageName(t.Context(), tt.importPath)
+			result, err := ResolvePackageName(t.Context(), tt.importPath)
+			require.NoError(t, err)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestResolvePackageNameFailure(t *testing.T) {
+	// A package inside this module that does not exist: go list reports it
+	// without a network lookup.
+	const missing = "go.opentelemetry.io/otelc/tool/internal/pkgload/doesnotexist"
+
+	name, err := ResolvePackageName(t.Context(), missing)
+	require.Error(t, err)
+	assert.Empty(t, name)
+	assert.Contains(t, err.Error(), missing)
+}
+
+func TestResolvePackageNameBadBuildFlags(t *testing.T) {
+	name, err := ResolvePackageName(t.Context(), "fmt", "-C", filepath.Join(t.TempDir(), "missing"))
+	require.Error(t, err)
+	assert.Empty(t, name)
+	assert.Contains(t, err.Error(), "fmt")
 }
 
 func TestResolveExportFiles(t *testing.T) {

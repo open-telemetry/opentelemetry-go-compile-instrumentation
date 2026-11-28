@@ -880,7 +880,10 @@ func (ip *instrumentPhase) applyIgnoredCallSites(ctx context.Context, root *dst.
 	// Calls in package runtime itself stay unqualified.
 	qualifier := ""
 	if !ip.isSuppressHooksPackage() {
-		qualifier = suppressHooksAlias(ctx, root)
+		var err error
+		if qualifier, err = suppressHooksAlias(ctx, root); err != nil {
+			return false, ex.Wrapf(err, "choosing the runtime import for //otelc:ignore")
+		}
 	}
 
 	bracketed := 0

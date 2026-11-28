@@ -729,3 +729,55 @@ func fileImports(root *dst.File) []string {
 	}
 	return specs
 }
+
+func TestAddRuleImports_UnresolvableImportNamesTheRule(t *testing.T) {
+	const missing = "go.opentelemetry.io/otelc/tool/internal/instrument/doesnotexist"
+	root := parseFile(t, `package main
+
+import "fmt"
+
+func run() { fmt.Println() }
+`)
+	before := countImportSpecs(root)
+
+	ip := newTestPhase()
+	err := ip.addRuleImports(t.Context(), root, map[string]string{"ghost": missing}, "needs_ghost")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "needs_ghost")
+	assert.Contains(t, err.Error(), missing)
+	assert.Equal(t, before, countImportSpecs(root), "nothing is imported")
+}
+
+func TestAddRuleImports_UnresolvableFileImportNamesTheRule(t *testing.T) {
+	const missing = "go.opentelemetry.io/otelc/tool/internal/instrument/doesnotexist"
+	root := parseFile(t, `package main
+
+import "`+missing+`"
+
+func run() {}
+`)
+
+	ip := newTestPhase()
+	err := ip.addRuleImports(t.Context(), root, map[string]string{"f": "fmt"}, "needs_fmt")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "needs_fmt")
+	assert.Contains(t, err.Error(), missing)
+}
+
+func TestSuppressHooksAlias_UnresolvableImport(t *testing.T) {
+	const missing = "go.opentelemetry.io/otelc/tool/internal/instrument/doesnotexist"
+	root := parseFile(t, `package main
+
+import "`+missing+`"
+
+func run() {}
+`)
+
+	alias, err := suppressHooksAlias(t.Context(), root)
+
+	require.Error(t, err)
+	assert.Empty(t, alias)
+	assert.Contains(t, err.Error(), missing)
+}

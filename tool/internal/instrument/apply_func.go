@@ -455,7 +455,9 @@ func (ip *instrumentPhase) applyFuncRule(ctx context.Context, rule *rule.InstFun
 
 	// Skip package runtime itself to avoid a self-import.
 	if ip.buildUsesIgnoreDirective && !ip.isSuppressHooksPackage() {
-		ip.suppressHooksQualifier = suppressHooksAlias(ctx, root)
+		if ip.suppressHooksQualifier, err = suppressHooksAlias(ctx, root); err != nil {
+			return false, ex.Wrapf(err, "choosing the runtime import for rule %s", rule.Name)
+		}
 		suppressImport := map[string]string{ip.suppressHooksQualifier: suppressHooksPackage}
 		if err = ip.addRuleImports(ctx, root, suppressImport, rule.Name); err != nil {
 			return false, err

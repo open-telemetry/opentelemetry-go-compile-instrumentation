@@ -3472,3 +3472,22 @@ func main() {
 	// The arguments of a deferred call are evaluated before the body continues.
 	assert.Equal(t, "[input trace trace body]\n", strings.ReplaceAll(string(output), "\r\n", "\n"))
 }
+
+func TestApplyIgnoredCallSites_UnresolvableImportIsReported(t *testing.T) {
+	const missing = "go.opentelemetry.io/otelc/tool/internal/instrument/doesnotexist"
+	root := parseFile(t, `package main
+
+import "`+missing+`"
+
+func Run() {
+	//otelc:ignore
+	println("ignored")
+}
+`)
+
+	changed, err := newTestPhase().applyIgnoredCallSites(context.Background(), root)
+
+	require.Error(t, err)
+	assert.False(t, changed)
+	assert.Contains(t, err.Error(), missing)
+}
