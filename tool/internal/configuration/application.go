@@ -22,10 +22,15 @@ import (
 )
 
 const (
-	generalConfigurationSection = "general"
-	goConfigurationSection      = "go"
-	minimumConfigurationParts   = 2
+	generalConfigurationSection    = "general"
+	goConfigurationSection         = "go"
+	minimumConfigurationParts      = 2
+	instrumentationDevelopmentPath = "instrumentation/development"
 )
+
+// SnapshotVersion is the wire version of the normalized JSON configuration
+// embedded in instrumented applications.
+const SnapshotVersion = 1
 
 // ApplicationConfiguration is the explicit source document retained until
 // setup classifies instrumentation options against matched-module metadata.
@@ -95,7 +100,7 @@ func ParseApplicationConfiguration(data []byte, source string) (ApplicationConfi
 		return ApplicationConfiguration{}, err
 	}
 	sdkValues := maps.Clone(rootValues)
-	delete(sdkValues, "instrumentation/development")
+	delete(sdkValues, instrumentationDevelopmentPath)
 	sdkBytes, err := yaml.Marshal(sdkValues)
 	if err != nil {
 		return ApplicationConfiguration{}, ex.Wrapf(err, "normalize SDK configuration in %s", source)
@@ -107,12 +112,14 @@ func ParseApplicationConfiguration(data []byte, source string) (ApplicationConfi
 	if err = validateFileFormat(sdkConfig.FileFormat); err != nil {
 		return ApplicationConfiguration{}, ex.Wrapf(err, "%s", source)
 	}
-	if applicationNode, ok := rootValues["instrumentation/development"]; ok {
+	if applicationNode, ok := rootValues[instrumentationDevelopmentPath]; ok {
 		if applicationNode.Kind != yaml.MappingNode {
-			return ApplicationConfiguration{}, ex.Newf("%s: instrumentation/development must be an object", source)
+			return ApplicationConfiguration{}, ex.Newf(
+				"%s: %s must be an object", source, instrumentationDevelopmentPath,
+			)
 		}
 		if err = applicationNode.Decode(&application.Instrumentation); err != nil {
-			return ApplicationConfiguration{}, ex.Wrapf(err, "decode instrumentation/development in %s", source)
+			return ApplicationConfiguration{}, ex.Wrapf(err, "decode %s in %s", instrumentationDevelopmentPath, source)
 		}
 	}
 	indexInstrumentationLocations(root, source, application.SourceLocations)
@@ -248,13 +255,33 @@ func ValidateApplicationOptions(
 	selectedDefinitions []Entry,
 	modulesWithoutMetadata []string,
 ) (ValidatedApplicationConfiguration, error) {
-	catalog, err := CatalogDefinitions()
-	if err != nil {
-		return ValidatedApplicationConfiguration{}, ex.Wrapf(err, "load pinned configuration catalog")
-	}
 	selected := make(map[string]Entry, len(selectedDefinitions))
 	for _, entry := range selectedDefinitions {
 		selected[entry.Name] = entry
+	}
+	if application.Document == nil {
+		if application.Source != "" {
+			return ValidatedApplicationConfiguration{}, ex.Newf(
+				"%s: application configuration must be a mapping", application.Source,
+			)
+		}
+		resolvedValues, resolveErr := resolveApplicationDefaults(selected, nil)
+		if resolveErr != nil {
+			return ValidatedApplicationConfiguration{}, resolveErr
+		}
+		snapshot, snapshotErr := applicationSnapshot(selected, resolvedValues)
+		if snapshotErr != nil {
+			return ValidatedApplicationConfiguration{}, snapshotErr
+		}
+		return ValidatedApplicationConfiguration{
+			ResolvedValues: resolvedValues,
+			Snapshot:       snapshot.Snapshot,
+			Identity:       snapshot.Identity,
+		}, nil
+	}
+	catalog, err := CatalogDefinitions()
+	if err != nil {
+		return ValidatedApplicationConfiguration{}, ex.Wrapf(err, "load pinned configuration catalog")
 	}
 	allDefinitions := make(map[string]Entry, len(catalog)+len(selected))
 	maps.Copy(allDefinitions, catalog)
@@ -289,32 +316,25 @@ func ValidateApplicationOptions(
 	if err != nil {
 		return ValidatedApplicationConfiguration{}, err
 	}
-	snapshot, err := json.Marshal(resolvedValues)
+	snapshot, err := applicationSnapshot(selected, resolvedValues)
 	if err != nil {
-		return ValidatedApplicationConfiguration{}, ex.Wrapf(err, "encode resolved application configuration")
-	}
-	identity, err := json.Marshal(struct {
-		Definitions map[string]Entry `json:"definitions"`
-		Values      map[string]any   `json:"values"`
-	}{
-		Definitions: configurationDefinitionIdentity(selected),
-		Values:      resolvedValues,
-	})
-	if err != nil {
-		return ValidatedApplicationConfiguration{}, ex.Wrapf(err, "encode application configuration identity")
+		return ValidatedApplicationConfiguration{}, err
 	}
 	return ValidatedApplicationConfiguration{
 		Parsed:         parsed,
 		Values:         values,
 		ResolvedValues: resolvedValues,
-		Snapshot:       snapshot,
-		Identity:       identity,
+		Snapshot:       snapshot.Snapshot,
+		Identity:       snapshot.Identity,
 		Warnings:       append(warnings, deprecatedWarnings...),
 	}, nil
 }
 
 func resolveApplicationDefaults(selected map[string]Entry, values map[string]any) (map[string]any, error) {
 	resolved := maps.Clone(values)
+	if resolved == nil {
+		resolved = make(map[string]any)
+	}
 	for path, entry := range selected {
 		if _, exists := resolved[path]; exists || entry.Default == nil {
 			continue
@@ -326,6 +346,106 @@ func resolveApplicationDefaults(selected map[string]Entry, values map[string]any
 		resolved[path] = value
 	}
 	return resolved, nil
+}
+
+type applicationSnapshotDocument struct {
+	Version int            `json:"version"`
+	Values  map[string]any `json:"values"`
+}
+
+type applicationSnapshotResult struct {
+	Snapshot []byte
+	Identity []byte
+}
+
+type applicationDefinitionIdentity struct {
+	Type       string                     `json:"type"`
+	Default    *string                    `json:"default,omitempty"`
+	Schema     *applicationSchemaIdentity `json:"schema,omitempty"`
+	Validation *ValueConstraints          `json:"validation,omitempty"`
+	Deprecated bool                       `json:"deprecated,omitempty"`
+	ReplacedBy *string                    `json:"replaced_by,omitempty"`
+}
+
+type applicationSchemaIdentity struct {
+	Type       string                                 `json:"type"`
+	Required   []string                               `json:"required,omitempty"`
+	Properties map[string]applicationPropertyIdentity `json:"properties"`
+}
+
+type applicationPropertyIdentity struct {
+	Type       string `json:"type"`
+	Default    any    `json:"default,omitempty"`
+	HasDefault bool   `json:"has_default,omitempty"`
+}
+
+// applicationSnapshot returns the runtime payload and cache identity from the
+// same normalized values. Source paths and descriptive metadata are excluded:
+// moving a metadata file or editing documentation does not change behavior.
+func applicationSnapshot(
+	selected map[string]Entry,
+	resolvedValues map[string]any,
+) (applicationSnapshotResult, error) {
+	var result applicationSnapshotResult
+	if len(resolvedValues) > 0 {
+		snapshot, err := json.Marshal(applicationSnapshotDocument{
+			Version: SnapshotVersion,
+			Values:  resolvedValues,
+		})
+		if err != nil {
+			return applicationSnapshotResult{}, ex.Wrapf(err, "encode resolved application configuration")
+		}
+		result.Snapshot = snapshot
+	}
+	if len(selected) == 0 && len(resolvedValues) == 0 {
+		return result, nil
+	}
+	identityDefinitions := make(map[string]applicationDefinitionIdentity, len(selected))
+	for name, entry := range selected {
+		identityDefinitions[name] = applicationDefinitionIdentity{
+			Type:       entry.Type,
+			Default:    entry.Default,
+			Schema:     applicationSchemaForIdentity(entry.Schema),
+			Validation: entry.Validation,
+			Deprecated: entry.Deprecated,
+			ReplacedBy: entry.ReplacedBy,
+		}
+	}
+	identity, err := json.Marshal(struct {
+		Version     int                                      `json:"version"`
+		Definitions map[string]applicationDefinitionIdentity `json:"definitions"`
+		Values      map[string]any                           `json:"values"`
+	}{
+		Version:     SnapshotVersion,
+		Definitions: identityDefinitions,
+		Values:      resolvedValues,
+	})
+	if err != nil {
+		return applicationSnapshotResult{}, ex.Wrapf(err, "encode application configuration identity")
+	}
+	result.Identity = identity
+	return result, nil
+}
+
+func applicationSchemaForIdentity(schema *Schema) *applicationSchemaIdentity {
+	if schema == nil {
+		return nil
+	}
+	required := slices.Clone(schema.Required)
+	slices.Sort(required)
+	properties := make(map[string]applicationPropertyIdentity, len(schema.Properties))
+	for name, property := range schema.Properties {
+		properties[name] = applicationPropertyIdentity{
+			Type:       property.Type,
+			Default:    property.Default,
+			HasDefault: property.hasDefault,
+		}
+	}
+	return &applicationSchemaIdentity{
+		Type:       schema.Type,
+		Required:   required,
+		Properties: properties,
+	}
 }
 
 func applicationDefaultValue(defaultValue, typeName string) (any, error) {
@@ -355,16 +475,6 @@ func applicationDefaultValue(defaultValue, typeName string) (any, error) {
 	default:
 		return nil, ex.Newf("unsupported application configuration default type %q", typeName)
 	}
-}
-
-func configurationDefinitionIdentity(selected map[string]Entry) map[string]Entry {
-	identity := make(map[string]Entry, len(selected))
-	for path, entry := range selected {
-		entry.Source = ""
-		entry.DefinitionSource = ""
-		identity[path] = entry
-	}
-	return identity
 }
 
 func filterSelectedApplicationOptions(
@@ -401,7 +511,7 @@ func filterSelectedApplicationOptions(
 		if section == generalConfigurationSection || section == goConfigurationSection || !hasApplicationValue(value) {
 			continue
 		}
-		path := joinYAMLPath("instrumentation/development", section)
+		path := joinYAMLPath(instrumentationDevelopmentPath, section)
 		warnings = append(warnings, ApplicationConfigurationWarning{
 			Path:     path,
 			Location: application.SourceLocations[path],
@@ -497,9 +607,9 @@ func parseAndValidateSelectedApplicationConfiguration(
 	if err := application.Document.Decode(&root); err != nil {
 		return nil, nil, ex.Wrapf(err, "decode application configuration %s", application.Source)
 	}
-	delete(root, "instrumentation/development")
+	delete(root, instrumentationDevelopmentPath)
 	if len(selectedDevelopment) > 0 {
-		root["instrumentation/development"] = selectedDevelopment
+		root[instrumentationDevelopmentPath] = selectedDevelopment
 	}
 	data, err := yaml.Marshal(root)
 	if err != nil {
@@ -524,7 +634,7 @@ func parseAndValidateSelectedApplicationConfiguration(
 		return nil, nil, err
 	}
 	var normalized map[string]any
-	if instrumentationNode := fields["instrumentation/development"]; instrumentationNode != nil {
+	if instrumentationNode := fields[instrumentationDevelopmentPath]; instrumentationNode != nil {
 		if err = instrumentationNode.Decode(&normalized); err != nil {
 			return nil, nil, ex.Wrapf(err, "decode selected instrumentation configuration %s", application.Source)
 		}
@@ -547,7 +657,7 @@ func selectedApplicationSourceDocument(
 	}
 	for i := 0; i+1 < len(result.Content); i += yamlMappingPairSize {
 		key := result.Content[i]
-		if key.Kind != yaml.ScalarNode || key.Value != "instrumentation/development" {
+		if key.Kind != yaml.ScalarNode || key.Value != instrumentationDevelopmentPath {
 			continue
 		}
 		result.Content[i+1] = filterSelectedYAMLNode(
@@ -783,7 +893,7 @@ func indexInstrumentationLocations(root *yaml.Node, source string, locations map
 	if err != nil {
 		return
 	}
-	section := fields["instrumentation/development"]
+	section := fields[instrumentationDevelopmentPath]
 	for section != nil && section.Kind == yaml.AliasNode {
 		section = section.Alias
 	}
@@ -795,7 +905,7 @@ func indexInstrumentationLocations(root *yaml.Node, source string, locations map
 		if key.Value == "general" || key.Value == "go" {
 			indexYAMLNodeLocations(section.Content[i+1], key.Value, source, locations)
 		} else {
-			path := joinYAMLPath("instrumentation/development", key.Value)
+			path := joinYAMLPath(instrumentationDevelopmentPath, key.Value)
 			indexYAMLNodeLocations(section.Content[i+1], path, source, locations)
 		}
 	}
@@ -881,7 +991,7 @@ func validateApplicationPathSegments(
 	if err != nil {
 		return err
 	}
-	development := root["instrumentation/development"]
+	development := root[instrumentationDevelopmentPath]
 	for development != nil && development.Kind == yaml.AliasNode {
 		development = development.Alias
 	}
@@ -894,7 +1004,11 @@ func validateApplicationPathSegments(
 	}
 	for _, section := range []string{generalConfigurationSection, goConfigurationSection} {
 		if err = validateApplicationPathNode(
-			sections[section], section, application.Source, definitions, make(map[*yaml.Node]struct{}),
+			sections[section], applicationPath{
+				option:     section,
+				diagnostic: joinYAMLPath(instrumentationDevelopmentPath, section),
+			},
+			application.Source, definitions, make(map[*yaml.Node]struct{}),
 		); err != nil {
 			return err
 		}
@@ -902,9 +1016,15 @@ func validateApplicationPathSegments(
 	return nil
 }
 
+type applicationPath struct {
+	option     string
+	diagnostic string
+}
+
 func validateApplicationPathNode(
 	node *yaml.Node,
-	path, source string,
+	path applicationPath,
+	source string,
 	definitions map[string]Entry,
 	active map[*yaml.Node]struct{},
 ) error {
@@ -912,7 +1032,7 @@ func validateApplicationPathNode(
 		return nil
 	}
 	if _, found := active[node]; found {
-		return ex.Newf("%s:%d:%d: %s: cyclic YAML alias", source, node.Line, node.Column, path)
+		return ex.Newf("%s:%d:%d: %s: cyclic YAML alias", source, node.Line, node.Column, path.diagnostic)
 	}
 	active[node] = struct{}{}
 	defer delete(active, node)
@@ -922,7 +1042,7 @@ func validateApplicationPathNode(
 	if node.Kind != yaml.MappingNode {
 		return nil
 	}
-	if _, isOptionValue := definitions[path]; isOptionValue {
+	if _, isOptionValue := definitions[path.option]; isOptionValue {
 		return nil
 	}
 	for i := 0; i+1 < len(node.Content); i += yamlMappingPairSize {
@@ -939,8 +1059,11 @@ func validateApplicationPathNode(
 				key.Value,
 			)
 		}
-		childPath := joinYAMLPath(path, key.Value)
-		if _, isOptionValue := definitions[childPath]; isOptionValue {
+		childPath := applicationPath{
+			option:     joinYAMLPath(path.option, key.Value),
+			diagnostic: joinYAMLPath(path.diagnostic, key.Value),
+		}
+		if _, isOptionValue := definitions[childPath.option]; isOptionValue {
 			continue
 		}
 		if err := validateApplicationPathNode(
@@ -1163,7 +1286,7 @@ func validateApplicationRootFields(node *yaml.Node, target reflect.Type, source 
 		if key.Kind != yaml.ScalarNode || key.Tag != yamlStringTag {
 			continue // rejectDuplicateYAMLKeys reports this with source location.
 		}
-		if key.Value == "instrumentation/development" {
+		if key.Value == instrumentationDevelopmentPath {
 			// Selected-only validation filters this subtree before parsing it with
 			// otelconf/x, so unknown or invalid unselected options can be ignored.
 			continue

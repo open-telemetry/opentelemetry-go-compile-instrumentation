@@ -164,9 +164,17 @@ instrumentation/development:
 
 func TestValidateAndStoreApplicationConfigurationWithoutFlag(t *testing.T) {
 	sp := newTestSetupPhase()
+	sp.configurationMetadata.Definitions = []configuration.Entry{{
+		Name:    "go.sample.enabled",
+		Type:    "boolean",
+		Default: new("true"),
+	}}
 
 	require.NoError(t, sp.validateAndStoreApplicationConfiguration())
 	assert.Empty(t, sp.validatedApplicationConfig.Values)
+	assert.Equal(t, true, sp.validatedApplicationConfig.ResolvedValues["go.sample.enabled"])
+	assert.JSONEq(t, `{"version":1,"values":{"go.sample.enabled":true}}`,
+		string(sp.validatedApplicationConfig.Snapshot))
 }
 
 func TestValidateAndStoreApplicationConfigurationReportsReadError(t *testing.T) {

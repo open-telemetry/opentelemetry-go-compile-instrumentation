@@ -111,10 +111,7 @@ func (sp *setupPhase) loadApplicationConfiguration() error {
 
 func (sp *setupPhase) validateAndStoreApplicationConfiguration() error {
 	sp.validatedApplicationConfig = configuration.ValidatedApplicationConfiguration{}
-	if sp.instrumentationConfigPath == "" {
-		return nil
-	}
-	if sp.applicationConfiguration.Document == nil {
+	if sp.instrumentationConfigPath != "" && sp.applicationConfiguration.Document == nil {
 		return ex.New("application configuration was not loaded before setup validation")
 	}
 	validated, err := configuration.ValidateApplicationOptions(
@@ -143,7 +140,7 @@ func (sp *setupPhase) validateAndStoreApplicationConfiguration() error {
 		)
 	}
 	sp.validatedApplicationConfig = validated
-	sp.Info("Validated application instrumentation configuration", "options", len(validated.Values))
+	sp.Info("Validated application instrumentation configuration", "options", len(validated.ResolvedValues))
 	return nil
 }
 

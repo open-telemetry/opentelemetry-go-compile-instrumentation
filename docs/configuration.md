@@ -136,8 +136,21 @@ separate runtime concern. Selected fields not represented by the pinned parser
 are rejected rather than silently discarded; unselected blocks are warned
 about and ignored.
 
-This option validates configuration during setup. Applying the validated values
-to instrumentation at runtime is a separate follow-up.
+Setup normalizes the selected option values and metadata defaults into a
+versioned JSON snapshot embedded in the application. Hooks can read the
+immutable snapshot through `hook.ConfigurationSnapshot()`; the application does
+not need the configuration file or a YAML parser at runtime. Selected metadata
+and resolved values participate in the Go build-cache identity, while source
+paths and process-start environment overrides do not. Changing a selected
+configuration value or behavioral metadata therefore rebuilds the affected
+instrumented output. Declared process-start overrides and typed rule accessors
+are handled by the follow-up configuration issues.
+
+The snapshot has a versioned shape, for example:
+
+```json
+{"version":1,"values":{"go.kafka.enabled":true}}
+```
 
 The file does not select or enable instrumentation. Configuration for
 unselected instrumentation is warned about and ignored. Selected modules

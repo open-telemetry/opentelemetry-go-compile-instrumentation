@@ -49,8 +49,122 @@ instrumentation/development:
 	assert.Equal(t, true, validated.Values["go.my_instrumentation.enabled"])
 	assert.Equal(t, []any{"x-request-id"}, validated.ResolvedValues["general.http.client.request_captured_headers"])
 	assert.Equal(t, true, validated.ResolvedValues["go.my_instrumentation.enabled"])
-	assert.NotEmpty(t, validated.Snapshot)
+	assert.JSONEq(
+		t,
+		`{"version":1,"values":{"general.http.client.request_captured_headers":["x-request-id"],"go.my_instrumentation.enabled":true}}`,
+		string(validated.Snapshot),
+	)
 	assert.NotEmpty(t, validated.Identity)
+}
+
+func TestValidateApplicationOptionsEmbedsSelectedDefaultsWithoutAFile(t *testing.T) {
+	validated, err := ValidateApplicationOptions(ApplicationConfiguration{}, []Entry{
+		{Name: "go.sample.enabled", Type: booleanType, Default: new("true")},
+		{Name: "go.sample.label", Type: stringType},
+	}, nil)
+	require.NoError(t, err)
+	assert.Nil(t, validated.Parsed)
+	assert.Empty(t, validated.Values)
+	assert.Equal(t, map[string]any{"go.sample.enabled": true}, validated.ResolvedValues)
+	assert.JSONEq(t, `{"version":1,"values":{"go.sample.enabled":true}}`, string(validated.Snapshot))
+	assert.NotEmpty(t, validated.Identity)
+}
+
+func TestValidateApplicationOptionsWithoutValuesDoesNotCreateRuntimeSnapshot(t *testing.T) {
+	validated, err := ValidateApplicationOptions(ApplicationConfiguration{}, []Entry{{
+		Name: "go.sample.enabled",
+		Type: booleanType,
+	}}, nil)
+	require.NoError(t, err)
+	assert.Empty(t, validated.Snapshot)
+	assert.NotEmpty(t, validated.Identity, "selected metadata still contributes to cache identity")
+}
+
+func TestApplicationSnapshotIdentityIncludesBehaviorMetadataOnly(t *testing.T) {
+	base := Entry{
+		Name:        "go.sample.values",
+		Type:        structuredListType,
+		Default:     new("[]"),
+		Description: "first description",
+		Examples:    []string{"one"},
+		Source:      "/first/module/metadata.yaml",
+		Schema: &Schema{
+			Type:     "object",
+			Required: []string{"id"},
+			Properties: map[string]Property{
+				"id": {Type: stringType, Description: "identifier", Example: "a"},
+			},
+		},
+	}
+	first, err := applicationSnapshot(
+		map[string]Entry{base.Name: base},
+		map[string]any{base.Name: []any{"x"}},
+	)
+	require.NoError(t, err)
+
+	changedProvenance := base
+	changedProvenance.Description = "updated description"
+	changedProvenance.Examples = []string{"two"}
+	changedProvenance.Source = "/different/location/metadata.yaml"
+	changedProvenance.Schema = &Schema{
+		Type:     "object",
+		Required: []string{"id"},
+		Properties: map[string]Property{
+			"id": {Type: stringType, Description: "renamed docs", Example: "b"},
+		},
+	}
+	second, err := applicationSnapshot(
+		map[string]Entry{changedProvenance.Name: changedProvenance},
+		map[string]any{changedProvenance.Name: []any{"x"}},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, first.Snapshot, second.Snapshot)
+	assert.Equal(t, first.Identity, second.Identity,
+		"description, examples, and source paths do not affect compiled behavior")
+
+	changedDefault := changedProvenance
+	changedDefault.Default = new("[different]")
+	third, err := applicationSnapshot(
+		map[string]Entry{changedDefault.Name: changedDefault},
+		map[string]any{changedDefault.Name: []any{"x"}},
+	)
+	require.NoError(t, err)
+	assert.NotEqual(t, second.Identity, third.Identity, "selected behavioral metadata invalidates the cache")
+
+	changedSchema := changedProvenance
+	changedSchema.Schema = &Schema{
+		Type:     "object",
+		Required: []string{"id", "name"},
+		Properties: map[string]Property{
+			"id":   {Type: stringType},
+			"name": {Type: stringType},
+		},
+	}
+	fourth, err := applicationSnapshot(
+		map[string]Entry{changedSchema.Name: changedSchema},
+		map[string]any{changedSchema.Name: []any{"x"}},
+	)
+	require.NoError(t, err)
+	assert.NotEqual(t, second.Identity, fourth.Identity, "selected schema changes invalidate the cache")
+}
+
+func TestApplicationSnapshotIdentityIgnoresProcessEnvironment(t *testing.T) {
+	app, err := ParseApplicationConfiguration([]byte(`file_format: "1.2"
+instrumentation/development:
+  go:
+    sample:
+      enabled: true
+`), "app.yaml")
+	require.NoError(t, err)
+	definition := []Entry{{Name: "go.sample.enabled", Type: booleanType}}
+	t.Setenv("OTEL_INSTRUMENTATION_GO_SAMPLE_ENABLED", "false")
+	first, err := ValidateApplicationOptions(app, definition, nil)
+	require.NoError(t, err)
+	t.Setenv("OTEL_INSTRUMENTATION_GO_SAMPLE_ENABLED", "true")
+	second, err := ValidateApplicationOptions(app, definition, nil)
+	require.NoError(t, err)
+	assert.Equal(t, first.Identity, second.Identity)
+	assert.Equal(t, first.Snapshot, second.Snapshot)
 }
 
 func TestValidateApplicationOptionsAppliesMetadataDefaults(t *testing.T) {
@@ -95,7 +209,7 @@ instrumentation/development:
 `,
 			option:       "go.sample.enabled",
 			want:         true,
-			wantSnapshot: `{"go.sample.enabled":true}`,
+			wantSnapshot: `{"version":1,"values":{"go.sample.enabled":true}}`,
 		},
 		{
 			name: "boolean letter spelling",
@@ -106,7 +220,7 @@ instrumentation/development:
 `,
 			option:       "go.sample.enabled",
 			want:         true,
-			wantSnapshot: `{"go.sample.enabled":true}`,
+			wantSnapshot: `{"version":1,"values":{"go.sample.enabled":true}}`,
 		},
 		{
 			name: "integer leading zero is decimal",
@@ -117,7 +231,7 @@ instrumentation/development:
 `,
 			option:       "go.sample.limit",
 			want:         int(10),
-			wantSnapshot: `{"go.sample.limit":10}`,
+			wantSnapshot: `{"version":1,"values":{"go.sample.limit":10}}`,
 		},
 		{
 			name: "string numeric spelling remains unchanged",
@@ -128,7 +242,7 @@ instrumentation/development:
 `,
 			option:       "go.sample.mode",
 			want:         "010",
-			wantSnapshot: `{"go.sample.mode":"010"}`,
+			wantSnapshot: `{"version":1,"values":{"go.sample.mode":"010"}}`,
 		},
 	}
 	for _, test := range tests {
@@ -344,7 +458,8 @@ instrumentation/development:
         self: *labels
 `), "app.yaml")
 	require.ErrorContains(t, err, "cyclic YAML alias")
-	require.ErrorContains(t, err, "instrumentation/development/go.sample.labels")
+	require.ErrorContains(t, err, "app.yaml:5:15:")
+	require.ErrorContains(t, err, "instrumentation/development.go.sample.labels.self")
 }
 
 func TestValidateApplicationConfigurationFileFormatAndPinnedParser(t *testing.T) {

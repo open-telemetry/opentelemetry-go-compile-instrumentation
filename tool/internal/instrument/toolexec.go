@@ -23,6 +23,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/dave/dst"
@@ -30,6 +31,7 @@ import (
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/compileindex"
+	"go.opentelemetry.io/otelc/tool/internal/configuration"
 	"go.opentelemetry.io/otelc/tool/internal/imports"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
@@ -665,6 +667,10 @@ func loadAddedImports(ctx context.Context) (map[string]string, error) {
 // interceptLink updates the link-time importcfg with packages added during compilation.
 func interceptLink(ctx context.Context, args []string) ([]string, error) {
 	logger := util.LoggerFromContext(ctx)
+	args, err := appendConfigurationSnapshotLinkerFlag(args)
+	if err != nil {
+		return nil, err
+	}
 
 	// Extract -importcfg flag for link
 	importCfgPath := util.FindFlagValue(args, "-importcfg")
@@ -729,6 +735,73 @@ func interceptLink(ctx context.Context, args []string) ([]string, error) {
 	// Cleanup happens at the start of the next build via CleanupImportTrackingFiles.
 
 	return args, nil
+}
+
+// appendConfigurationSnapshotLinkerFlag gives the normalized configuration
+// its own link action input. The snapshot is also part of RulesDigest, which
+// invalidates instrumented compile archives when selected configuration or
+// metadata changes.
+func appendConfigurationSnapshotLinkerFlag(args []string) ([]string, error) {
+	statePath := util.GetApplicationConfigurationStateFile()
+	snapshotPath := util.GetApplicationConfigurationFile()
+	state, err := os.ReadFile(statePath)
+	if os.IsNotExist(err) || errors.Is(err, syscall.ENOTDIR) {
+		_, snapshotErr := os.Stat(snapshotPath)
+		if os.IsNotExist(snapshotErr) || errors.Is(snapshotErr, syscall.ENOTDIR) {
+			return args, nil
+		}
+		if snapshotErr != nil {
+			return nil, ex.Wrapf(snapshotErr, "checking application configuration snapshot")
+		}
+		return nil, ex.New("application configuration snapshot state is missing")
+	}
+	if err != nil {
+		return nil, ex.Wrapf(err, "reading application configuration snapshot state")
+	}
+	snapshot, snapshotErr := os.ReadFile(snapshotPath)
+	if os.IsNotExist(snapshotErr) || errors.Is(snapshotErr, syscall.ENOTDIR) {
+		snapshot = nil
+	} else if snapshotErr != nil {
+		return nil, ex.Wrapf(snapshotErr, "reading application configuration snapshot")
+	}
+	present, err := configuration.VerifyApplicationSnapshotState(state, snapshot)
+	if err != nil {
+		return nil, err
+	}
+	if !present {
+		return args, nil
+	}
+	linkerVariable := util.ConfigurationSnapshotLinkerVariable
+	value := linkerVariable + "=" + string(snapshot)
+	updated := slices.Clone(args)
+	found := false
+	for i := 1; i < len(updated); i++ {
+		if updated[i] == "-X" && i+1 < len(updated) {
+			if name, _, ok := strings.Cut(updated[i+1], "="); ok && name == linkerVariable {
+				updated[i+1] = value
+				found = true
+				continue
+			}
+		}
+		if setting, ok := strings.CutPrefix(updated[i], "-X="); ok {
+			if name, _, hasSetting := strings.Cut(setting, "="); hasSetting && name == linkerVariable {
+				updated[i] = "-X=" + value
+				found = true
+			}
+		}
+	}
+	if found {
+		return updated, nil
+	}
+	// The Go linker stops parsing options at the main package archive. Keep
+	// the injected -X before that positional argument rather than appending it
+	// to the end of the command.
+	insertAt := len(updated)
+	if insertAt > 1 {
+		insertAt--
+	}
+	updated = slices.Insert(updated, insertAt, "-X", value)
+	return updated, nil
 }
 
 // exportClosureResolver resolves the export closures of rule-added imports;

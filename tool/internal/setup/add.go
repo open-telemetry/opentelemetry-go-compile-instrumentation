@@ -52,7 +52,11 @@ var requiredImports = map[string]string{
 	"unsafe":        "_",           // The golinkname tag depends on unsafe
 }
 
-func genImportDecl(funcRules []*rule.InstFuncRule, fileRules []*rule.InstFileRule) []dst.Decl {
+func genImportDecl(
+	funcRules []*rule.InstFuncRule,
+	fileRules []*rule.InstFileRule,
+	includeConfigurationSnapshot bool,
+) []dst.Decl {
 	var imports map[string]string
 	if len(funcRules) > 0 {
 		imports = maps.Clone(requiredImports) // clone required imports to avoid mutating the global map
@@ -68,6 +72,9 @@ func genImportDecl(funcRules []*rule.InstFuncRule, fileRules []*rule.InstFileRul
 		if m.Path != util.InternalPath {
 			imports[m.Path] = ast.IdentIgnore
 		}
+	}
+	if includeConfigurationSnapshot {
+		imports[util.ConfigurationSnapshotImportPath] = ast.IdentIgnore
 	}
 	importDecls := make([]dst.Decl, 0, len(imports))
 	// Sort the keys to ensure deterministic order
@@ -440,12 +447,13 @@ func (sp *setupPhase) addDeps(
 		return err
 	}
 
-	if len(funcRules) == 0 && len(fileRules) == 0 {
+	includeConfigurationSnapshot := len(sp.validatedApplicationConfig.Snapshot) > 0
+	if len(funcRules) == 0 && len(fileRules) == 0 && !includeConfigurationSnapshot {
 		return sp.removeRuntimeFile(ctx, pkg.dir)
 	}
 
 	// Add required imports.
-	importDecls := genImportDecl(funcRules, fileRules)
+	importDecls := genImportDecl(funcRules, fileRules, includeConfigurationSnapshot)
 
 	// Generate the variable declarations used by the runtime.
 	varDecls := genVarDecl(funcRules)

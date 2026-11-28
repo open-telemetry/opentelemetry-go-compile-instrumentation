@@ -108,10 +108,13 @@ validated while a selected module lacks metadata, setup reports the missing
 module roots. Configuration never changes instrumentation selection.
 
 When validation succeeds, selected values and metadata defaults are normalized
-into a deterministic snapshot retained by setup for the later embedding phase.
-Selected metadata and resolved values contribute to the build-cache identity.
-This PR validates configuration; applying it at runtime remains a separate
-follow-up and does not change the public hook API.
+into a deterministic, versioned JSON snapshot. Setup embeds that snapshot in
+the application through `hook.ConfigurationSnapshot()`; runtime does not read
+the source configuration file or parse YAML. Selected behavioral metadata and
+resolved values contribute to the build-cache identity. Source paths,
+diagnostic provenance, and process-start environment overrides do not. Typed
+rule accessors and runtime environment precedence are implemented by the
+follow-up configuration issues.
 
 ## Metadata discovery during setup
 

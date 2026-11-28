@@ -26,6 +26,7 @@ import (
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/ast"
 	"go.opentelemetry.io/otelc/tool/internal/compileindex"
+	"go.opentelemetry.io/otelc/tool/internal/configuration"
 	"go.opentelemetry.io/otelc/tool/internal/imports"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
@@ -1028,6 +1029,58 @@ func writeAddedImports(t *testing.T, packages map[string]string) {
 	data, err := json.Marshal(packages)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(util.GetBuildTempDir(), "added_imports.1.json"), data, 0o644))
+}
+
+func TestAppendConfigurationSnapshotLinkerFlag(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	snapshot := []byte(`{"version":1,"values":{"go.sample.enabled":true}}`)
+	require.NoError(t, os.WriteFile(util.GetApplicationConfigurationFile(), snapshot, 0o600))
+	state, err := configuration.EncodeApplicationSnapshotState(snapshot)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(util.GetApplicationConfigurationStateFile(), state, 0o600))
+
+	wantSetting := util.ConfigurationSnapshotLinkerVariable + "=" + string(snapshot)
+	got, err := appendConfigurationSnapshotLinkerFlag([]string{"/go/link", "-buildid", "id", "main.o"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"/go/link", "-buildid", "id", "-X", wantSetting, "main.o"}, got)
+
+	got, err = appendConfigurationSnapshotLinkerFlag([]string{
+		"/go/link", "-X", util.ConfigurationSnapshotLinkerVariable + `={"old":true}`,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"/go/link", "-X", wantSetting}, got)
+
+	got, err = appendConfigurationSnapshotLinkerFlag([]string{
+		"/go/link", "-X=" + util.ConfigurationSnapshotLinkerVariable + `={"old":true}`,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"/go/link", "-X=" + wantSetting}, got)
+}
+
+func TestAppendConfigurationSnapshotLinkerFlagRejectsCorruptSnapshot(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	state, err := configuration.EncodeApplicationSnapshotState(
+		[]byte(`{"version":1,"values":{"go.sample.enabled":true}}`),
+	)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(util.GetApplicationConfigurationStateFile(), state, 0o600))
+	require.NoError(t, os.WriteFile(util.GetApplicationConfigurationFile(), []byte("not JSON"), 0o600))
+	_, err = appendConfigurationSnapshotLinkerFlag([]string{"/go/link"})
+	require.ErrorContains(t, err, "decode application configuration snapshot")
+}
+
+func TestAppendConfigurationSnapshotLinkerFlagRejectsMissingState(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	require.NoError(t, os.WriteFile(
+		util.GetApplicationConfigurationFile(),
+		[]byte(`{"version":1,"values":{"go.sample.enabled":true}}`),
+		0o600,
+	))
+	_, err := appendConfigurationSnapshotLinkerFlag([]string{"/go/link"})
+	require.ErrorContains(t, err, "snapshot state is missing")
 }
 
 func TestInterceptLinkNoImportCfg(t *testing.T) {
