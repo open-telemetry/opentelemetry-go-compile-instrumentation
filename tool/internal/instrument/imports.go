@@ -73,12 +73,12 @@ func (ip *instrumentPhase) addRuleImports(
 	}
 
 	// Add import declarations to the AST
-	if err := imports.AddToFile(ctx, root, resolution.NewImports, ip.importNames); err != nil {
+	if err = imports.AddToFile(ctx, root, resolution.NewImports, ip.importNames); err != nil {
 		return ex.Wrapf(err, "adding imports for %s", ruleName)
 	}
 
 	// Update importcfg for the build
-	if err := ip.updateImportConfig(ctx, resolution.NewImports); err != nil {
+	if err = ip.updateImportConfig(ctx, resolution.NewImports); err != nil {
 		return ex.Wrapf(err, "updating import config for %s", ruleName)
 	}
 

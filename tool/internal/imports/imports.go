@@ -187,6 +187,32 @@ func findFirstDecl(root *dst.File) *dst.GenDecl {
 	return nil
 }
 
+// dropExistingAliases removes from newImports every alias the file already
+// imports with the same path, and reports a conflict for an alias that
+// already imports another path or that a declaration in the file already
+// uses. A path the file already imports under another alias is imported
+// again under the new one.
+func dropExistingAliases(newImports, existingImports map[string]string, fileNames map[string]bool) error {
+	for alias, newPath := range newImports {
+		if alias == "_" || alias == "." {
+			continue
+		}
+		if existingPath, exists := existingImports[alias]; exists {
+			if existingPath != newPath {
+				return ex.Newf("import conflict: alias %q already imports %q, cannot import %q",
+					alias, existingPath, newPath)
+			}
+			delete(newImports, alias)
+			continue
+		}
+		if fileNames[alias] {
+			return ex.Newf("import conflict: alias %q for %q is already declared in the file",
+				alias, newPath)
+		}
+	}
+	return nil
+}
+
 // AddToFile adds import declarations to the AST file.
 // It checks for conflicts and reuses existing import blocks when possible.
 // resolvedNames maps an import path to its package name; see parseFile.
@@ -204,25 +230,8 @@ func AddToFile(
 	existingImports := existing.AliasToPath
 	fileNames := fileScopeNames(root)
 
-	// Check for conflicts: an alias that already imports another path, or an
-	// alias that a declaration in the file already uses. A path the file
-	// already imports under another alias is imported again under this one.
-	for alias, newPath := range newImports {
-		if alias == "_" || alias == "." {
-			continue
-		}
-		if existingPath, exists := existingImports[alias]; exists {
-			if existingPath != newPath {
-				return ex.Newf("import conflict: alias %q already imports %q, cannot import %q",
-					alias, existingPath, newPath)
-			}
-			delete(newImports, alias)
-			continue
-		}
-		if fileNames[alias] {
-			return ex.Newf("import conflict: alias %q for %q is already declared in the file",
-				alias, newPath)
-		}
+	if err = dropExistingAliases(newImports, existingImports, fileNames); err != nil {
+		return err
 	}
 
 	if len(newImports) == 0 {
