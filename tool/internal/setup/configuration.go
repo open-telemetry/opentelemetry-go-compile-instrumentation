@@ -5,10 +5,12 @@ package setup
 
 import (
 	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/configuration"
@@ -16,6 +18,11 @@ import (
 )
 
 const instrumentationMetadataFilename = "metadata.yaml"
+
+var (
+	errNoParentGoMod   = ex.New("no parent go.mod found")
+	errNoVendoredOwner = ex.New("no module of vendor/modules.txt owns package")
+)
 
 // selectedConfigurationMetadata is the metadata handoff to application
 // configuration validation. Module roots are absolute paths and sorted.
@@ -88,6 +95,58 @@ func (sp *setupPhase) validateSelectedConfigurationMetadata(
 	return result, nil
 }
 
+func (sp *setupPhase) loadApplicationConfiguration() error {
+	sp.applicationConfiguration = configuration.ApplicationConfiguration{}
+	if sp.instrumentationConfigPath == "" {
+		return nil
+	}
+	data, err := os.ReadFile(sp.instrumentationConfigPath)
+	if err != nil {
+		return ex.Wrapf(err, "read application configuration %s", sp.instrumentationConfigPath)
+	}
+	application, err := configuration.ParseApplicationConfiguration(data, sp.instrumentationConfigPath)
+	if err != nil {
+		return ex.Wrapf(err, "parse application configuration")
+	}
+	sp.applicationConfiguration = application
+	return nil
+}
+
+func (sp *setupPhase) validateAndStoreApplicationConfiguration() error {
+	sp.validatedApplicationConfig = configuration.ValidatedApplicationConfiguration{}
+	if sp.instrumentationConfigPath != "" && sp.applicationConfiguration.Document == nil {
+		return ex.New("application configuration was not loaded before setup validation")
+	}
+	validated, err := configuration.ValidateApplicationOptions(
+		sp.applicationConfiguration,
+		sp.configurationMetadata.Definitions,
+		sp.configurationMetadata.ModulesWithoutMetadata,
+	)
+	if err != nil {
+		return ex.Wrapf(err, "validate application instrumentation configuration")
+	}
+	for _, warning := range validated.Warnings {
+		_, _ = fmt.Fprintf(
+			os.Stderr,
+			"Warning: %s:%d:%d: %s (%s)\n",
+			warning.Location.File,
+			warning.Location.Line,
+			warning.Location.Column,
+			warning.Message,
+			warning.Path,
+		)
+		sp.Warn(
+			warning.Message,
+			"configuration", warning.Path,
+			"file", warning.Location.File,
+			"line", warning.Location.Line,
+		)
+	}
+	sp.validatedApplicationConfig = validated
+	sp.Info("Validated application instrumentation configuration", "options", len(validated.ResolvedValues))
+	return nil
+}
+
 func (sp *setupPhase) selectedConfigurationModuleRoots(matched []*rule.InstRuleSet) []string {
 	moduleRoots := make(map[string]struct{})
 	for _, ruleset := range matched {
@@ -101,4 +160,61 @@ func (sp *setupPhase) selectedConfigurationModuleRoots(matched []*rule.InstRuleS
 		}
 	}
 	return slices.Sorted(maps.Keys(moduleRoots))
+}
+
+// moduleRootForPackage returns the root directory of the module that owns the
+// package in packageDir. In vendor/, go mod vendor does not copy dependency
+// go.mod files, so the owning module comes from vendor/modules.txt.
+func moduleRootForPackage(packageDir string) (string, error) {
+	for dir := filepath.Clean(packageDir); ; dir = filepath.Dir(dir) {
+		_, err := os.Stat(filepath.Join(dir, goModFileName))
+		switch {
+		case err == nil:
+			return dir, nil
+		case !errors.Is(err, os.ErrNotExist):
+			return "", err
+		}
+		if filepath.Base(dir) == vendorDirName {
+			_, modulesErr := os.Stat(filepath.Join(dir, "modules.txt"))
+			switch {
+			case modulesErr == nil:
+				return vendorOwnerModuleRoot(dir, packageDir)
+			case !errors.Is(modulesErr, os.ErrNotExist):
+				return "", modulesErr
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", errNoParentGoMod
+		}
+	}
+}
+
+// vendorOwnerModuleRoot returns the directory of the module that owns the
+// package in packageDir, using the module that lists it in vendor/modules.txt.
+func vendorOwnerModuleRoot(vendorDir, packageDir string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(vendorDir, "modules.txt"))
+	if err != nil {
+		return "", ex.Wrapf(err, "reading the vendor/modules.txt that has package %s", packageDir)
+	}
+	rel, err := filepath.Rel(vendorDir, packageDir)
+	if err != nil {
+		return "", ex.Wrapf(err, "locating package %s in %s", packageDir, vendorDir)
+	}
+	pkgPath := filepath.ToSlash(rel)
+	modulePath := ""
+	for line := range strings.SplitSeq(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if moduleLine, ok := strings.CutPrefix(line, "# "); ok {
+			fields := strings.Fields(moduleLine)
+			if len(fields) > 0 {
+				modulePath = fields[0]
+			}
+			continue
+		}
+		if line == pkgPath {
+			return filepath.Join(vendorDir, filepath.FromSlash(modulePath)), nil
+		}
+	}
+	return "", ex.Wrapf(errNoVendoredOwner, "no module of vendor/modules.txt owns package %s", packageDir)
 }

@@ -120,6 +120,7 @@ func cloneEntry(entry Entry) Entry {
 		clone.ReplacedBy = &value
 	}
 	clone.Examples = slices.Clone(entry.Examples)
+	clone.Validation = cloneValueConstraints(entry.Validation)
 	if entry.Schema != nil {
 		schema := *entry.Schema
 		schema.Required = slices.Clone(entry.Schema.Required)
@@ -128,6 +129,30 @@ func cloneEntry(entry Entry) Entry {
 		clone.Schema = &schema
 	}
 	return clone
+}
+
+func cloneValueConstraints(constraints *ValueConstraints) *ValueConstraints {
+	if constraints == nil {
+		return nil
+	}
+	clone := *constraints
+	if clone.Minimum != nil {
+		value := *clone.Minimum
+		clone.Minimum = &value
+	}
+	if clone.Maximum != nil {
+		value := *clone.Maximum
+		clone.Maximum = &value
+	}
+	if clone.MinItems != nil {
+		value := *clone.MinItems
+		clone.MinItems = &value
+	}
+	if clone.MaxItems != nil {
+		value := *clone.MaxItems
+		clone.MaxItems = &value
+	}
+	return &clone
 }
 
 func equivalent(left, right Entry) bool {
@@ -139,5 +164,6 @@ func equivalent(left, right Entry) bool {
 		left.DefaultBehavior == right.DefaultBehavior &&
 		left.Deprecated == right.Deprecated &&
 		reflect.DeepEqual(left.ReplacedBy, right.ReplacedBy) &&
+		reflect.DeepEqual(left.Validation, right.Validation) &&
 		reflect.DeepEqual(left.Schema, right.Schema)
 }

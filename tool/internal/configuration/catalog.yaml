@@ -26,6 +26,8 @@ definitions:
     name: general.code.semconv.version
     description: The target semantic convention version for this domain (e.g., 1).
     type: int
+    validation:
+      minimum: 0
     default_behavior: the latest stable version is used, or if no stable version is available and .experimental is true then
       the latest experimental version is used
   general.db.semconv.dual_emit:
@@ -47,6 +49,8 @@ definitions:
     name: general.db.semconv.version
     description: The target semantic convention version for this domain (e.g., 1).
     type: int
+    validation:
+      minimum: 0
     default_behavior: the latest stable version is used, or if no stable version is available and .experimental is true then
       the latest experimental version is used
   general.gen_ai.semconv.dual_emit:
@@ -68,6 +72,8 @@ definitions:
     name: general.gen_ai.semconv.version
     description: The target semantic convention version for this domain (e.g., 1).
     type: int
+    validation:
+      minimum: 0
     default_behavior: the latest stable version is used, or if no stable version is available and .experimental is true then
       the latest experimental version is used
   general.http.client.known_methods:
@@ -77,16 +83,25 @@ definitions:
       Known methods are case-sensitive.
       This is a full override of the default known methods, not a list of known methods in addition to the defaults.
     type: list
+    validation:
+      min_items: 0
+      items_type: string
     default_behavior: HTTP methods GET, HEAD, POST, PUT, DELETE, CONNECT, OPTIONS, TRACE, PATCH are known
   general.http.client.request_captured_headers:
     name: general.http.client.request_captured_headers
     description: Configure headers to capture for outbound http requests.
     type: list
+    validation:
+      min_items: 1
+      items_type: string
     default_behavior: no outbound request headers are captured
   general.http.client.response_captured_headers:
     name: general.http.client.response_captured_headers
     description: Configure headers to capture for inbound http responses.
     type: list
+    validation:
+      min_items: 1
+      items_type: string
     default_behavior: no inbound response headers are captured
   general.http.semconv.dual_emit:
     name: general.http.semconv.dual_emit
@@ -107,6 +122,8 @@ definitions:
     name: general.http.semconv.version
     description: The target semantic convention version for this domain (e.g., 1).
     type: int
+    validation:
+      minimum: 0
     default_behavior: the latest stable version is used, or if no stable version is available and .experimental is true then
       the latest experimental version is used
   general.http.server.known_methods:
@@ -116,16 +133,25 @@ definitions:
       Known methods are case-sensitive.
       This is a full override of the default known methods, not a list of known methods in addition to the defaults.
     type: list
+    validation:
+      min_items: 0
+      items_type: string
     default_behavior: HTTP methods GET, HEAD, POST, PUT, DELETE, CONNECT, OPTIONS, TRACE, PATCH are known
   general.http.server.request_captured_headers:
     name: general.http.server.request_captured_headers
     description: Configure headers to capture for inbound http requests.
     type: list
+    validation:
+      min_items: 1
+      items_type: string
     default_behavior: no request headers are captured
   general.http.server.response_captured_headers:
     name: general.http.server.response_captured_headers
     description: Configure headers to capture for outbound http responses.
     type: list
+    validation:
+      min_items: 1
+      items_type: string
     default_behavior: no response headers are captures
   general.messaging.semconv.dual_emit:
     name: general.messaging.semconv.dual_emit
@@ -146,6 +172,8 @@ definitions:
     name: general.messaging.semconv.version
     description: The target semantic convention version for this domain (e.g., 1).
     type: int
+    validation:
+      minimum: 0
     default_behavior: the latest stable version is used, or if no stable version is available and .experimental is true then
       the latest experimental version is used
   general.rpc.semconv.dual_emit:
@@ -167,6 +195,8 @@ definitions:
     name: general.rpc.semconv.version
     description: The target semantic convention version for this domain (e.g., 1).
     type: int
+    validation:
+      minimum: 0
     default_behavior: the latest stable version is used, or if no stable version is available and .experimental is true then
       the latest experimental version is used
   general.sanitization.url.sensitive_query_parameters:
@@ -177,6 +207,9 @@ definitions:
       This is a full override of the default sensitive query parameter keys, it is not a list of keys in addition to the defaults.
       Set to an empty array to disable query parameter redaction.
     type: list
+    validation:
+      min_items: 0
+      items_type: string
     default_behavior: the default sensitive query parameter list as defined by the url semantic conventions (https://github.com/open-telemetry/semantic-conventions/blob/main/docs/registry/attributes/url.md)
       is used
   general.stability_opt_in_list:

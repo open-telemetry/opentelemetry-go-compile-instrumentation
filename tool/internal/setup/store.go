@@ -19,12 +19,15 @@ import (
 
 	"go.opentelemetry.io/otelc/tool/ex"
 	"go.opentelemetry.io/otelc/tool/internal/compileindex"
+	"go.opentelemetry.io/otelc/tool/internal/configuration"
 	"go.opentelemetry.io/otelc/tool/internal/instrument"
 	"go.opentelemetry.io/otelc/tool/internal/pkgload"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 	"golang.org/x/tools/go/packages"
 )
+
+const applicationConfigurationSnapshotFileMode os.FileMode = 0o600
 
 // resolveRulePaths resolves the import paths referenced by function and file rules
 // to absolute filesystem paths.
@@ -149,8 +152,33 @@ func (sp *setupPhase) store(matched []*rule.InstRuleSet) error {
 	if err = sp.storePGOProfile(); err != nil {
 		return err
 	}
+	if err = sp.storeApplicationConfiguration(); err != nil {
+		return err
+	}
 	if err = compileindex.Store(); err != nil {
 		sp.Warn("Could not store optional compile index", "error", err)
+	}
+	return nil
+}
+
+func (sp *setupPhase) storeApplicationConfiguration() error {
+	path := util.GetApplicationConfigurationFile()
+	snapshot := sp.validatedApplicationConfig.Snapshot
+	state, err := configuration.EncodeApplicationSnapshotState(snapshot)
+	if err != nil {
+		return err
+	}
+	if len(snapshot) == 0 {
+		if removeErr := os.Remove(path); removeErr != nil && !os.IsNotExist(removeErr) {
+			return ex.Wrapf(removeErr, "removing stale application configuration snapshot %s", path)
+		}
+	} else if writeErr := util.WriteFileAtomic(path, snapshot, applicationConfigurationSnapshotFileMode); writeErr != nil {
+		return ex.Wrapf(writeErr, "writing application configuration snapshot %s", path)
+	}
+	if stateErr := util.WriteFileAtomic(
+		util.GetApplicationConfigurationStateFile(), state, applicationConfigurationSnapshotFileMode,
+	); stateErr != nil {
+		return ex.Wrapf(stateErr, "writing application configuration snapshot state")
 	}
 	return nil
 }
@@ -203,6 +231,16 @@ func (sp *setupPhase) storeInjectedHash(ctx context.Context, matched []*rule.Ins
 // and the dependencies of all of them.
 func (sp *setupPhase) injectedHash(ctx context.Context, matched []*rule.InstRuleSet) (string, error) {
 	h := sha256.New()
+	if identity := sp.validatedApplicationConfig.Identity; len(identity) > 0 {
+		_, _ = h.Write([]byte("application-configuration\n"))
+		_, _ = h.Write(identity)
+		_, _ = h.Write([]byte("\n"))
+	}
+	if snapshot := sp.validatedApplicationConfig.Snapshot; len(snapshot) > 0 {
+		_, _ = h.Write([]byte("embedded-application-configuration\n"))
+		_, _ = h.Write(snapshot)
+		_, _ = h.Write([]byte("\n"))
+	}
 	paths, err := sp.collectInjectedPaths(h, matched)
 	if err != nil {
 		return "", err

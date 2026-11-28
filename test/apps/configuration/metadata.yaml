@@ -1,0 +1,4 @@
+configurations:
+  - name: go.configuration.enabled
+    type: boolean
+    default: "false"

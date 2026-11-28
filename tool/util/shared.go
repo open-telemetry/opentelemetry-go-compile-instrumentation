@@ -71,14 +71,20 @@ const (
 	SessionOff = "off"
 	// SessionTempDir is the build temp entry an owning build uses as its
 	// session directory.
-	SessionTempDir   = "session"
-	BuildTempDir     = ".otelc-build"
-	BuildLockFile    = BuildTempDir + ".lock"
-	OtelcRoot        = "go.opentelemetry.io/otelc"
-	OtelcPkgRoot     = OtelcRoot + "/pkg"
-	OtelcInstRoot    = OtelcRoot + "/instrumentation"
-	OtelcToolCmdRoot = OtelcRoot + "/tool/cmd/otelc"
-	OtelcToolExe     = "otelc"
+	SessionTempDir = "session"
+	BuildTempDir   = ".otelc-build"
+	BuildLockFile  = BuildTempDir + ".lock"
+	// ConfigurationSnapshotImportPath is the hook package that exposes the
+	// normalized configuration snapshot embedded into an application.
+	ConfigurationSnapshotImportPath = "go.opentelemetry.io/otelc/pkg/hook"
+	// ConfigurationSnapshotLinkerVariable is populated by the linker's -X
+	// option when the build has a non-empty configuration snapshot.
+	ConfigurationSnapshotLinkerVariable = ConfigurationSnapshotImportPath + ".embeddedConfigurationSnapshot"
+	OtelcRoot                           = "go.opentelemetry.io/otelc"
+	OtelcPkgRoot                        = OtelcRoot + "/pkg"
+	OtelcInstRoot                       = OtelcRoot + "/instrumentation"
+	OtelcToolCmdRoot                    = OtelcRoot + "/tool/cmd/otelc"
+	OtelcToolExe                        = "otelc"
 	// InternalPath is a sentinel Path value for compiler-internal rules and
 	// synthetic files (e.g. runtime GLS context propagation) injected directly
 	// by otelc rather than loaded from an external Go package.
@@ -138,6 +144,20 @@ func GetMatchedRuleFile() string {
 func GetImportNamesFile() string {
 	const importNamesFile = "import_names.json"
 	return GetInvocationTemp(importNamesFile)
+}
+
+// GetApplicationConfigurationFile returns the invocation-local normalized
+// application configuration snapshot consumed by the link to embed it.
+func GetApplicationConfigurationFile() string {
+	const applicationConfigurationFile = "application_configuration.json"
+	return GetInvocationTemp(applicationConfigurationFile)
+}
+
+// GetApplicationConfigurationStateFile returns the invocation-local state that
+// tells toolexec whether an application snapshot is required and validates it.
+func GetApplicationConfigurationStateFile() string {
+	const applicationConfigurationStateFile = "application_configuration_state.json"
+	return GetInvocationTemp(applicationConfigurationStateFile)
 }
 
 // GetPGOProfileFile returns the path to the file that records the build's PGO

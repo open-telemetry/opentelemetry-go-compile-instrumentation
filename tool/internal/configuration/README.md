@@ -40,13 +40,15 @@ those resolved records.
 `general.*` is generated from OpenTelemetry Configuration **v1.2.0**, commit
 `3b04ae78576ec407854d734eb4da4f78a67f902c`, `schema/instrumentation.yaml`.
 `gen-config-catalog` fetches that immutable URL and verifies its SHA-256 before
-generation. The upstream schema is not embedded in the runtime package. Tests
-exercise generation with small in-memory schema fixtures and do not use the
-network.
+generation. It projects the value constraints needed by application validation
+into the catalog; the raw upstream schema is not embedded in the runtime
+package. Tests exercise generation with small in-memory schema fixtures and do
+not use the network.
 Names preserve property paths: `instrumentation/development` is the enclosing
 root, so `/development` is not added to each general leaf. The snapshot also
 retains upstream constraints for subsequent application-configuration validation;
-this metadata catalog projects leaf names, types, descriptions, and default behavior.
+the catalog projects leaf names, types, descriptions, defaults, and the supported
+value constraints.
 
 `general-compatibility.yaml` (owned by the generator under
 `tool/cmd/gen-config-catalog/`) records deprecated `general.*` paths. For a path
@@ -83,6 +85,37 @@ Resolving configuration metadata does not enable instrumentation or load user
 configuration values. Runtime environment-source precedence belongs to that
 separate loading step.
 
+## Application configuration validation
+
+`otelc --instrumentation-config <path>` reads one application configuration at
+setup. It does not search for a default file, and repeated uses of the flag are
+rejected. `otelconf/x` v0.27.0 parses the SDK model and selected
+instrumentation options; its environment substitutions are resolved during
+setup. Declared runtime environment overrides remain a separate follow-up.
+
+The application must use `file_format` major version 1 and a minor version no
+newer than the pinned OpenTelemetry Configuration v1.2.0 schema. Selected values
+in `instrumentation/development` are checked against module metadata and the
+upstream value constraints projected into the generated catalog.
+Selected fields omitted by the pinned `otelconf/x` model are rejected rather
+than silently discarded. This parser/schema compatibility boundary must be
+revisited when either pin changes.
+
+Values declared by selected module metadata are validated and returned in a
+normalized map for the later embedding phase. Configuration for unselected
+options is warned about and ignored. If a configured option cannot be
+validated while a selected module lacks metadata, setup reports the missing
+module roots. Configuration never changes instrumentation selection.
+
+When validation succeeds, selected values and metadata defaults are normalized
+into a deterministic, versioned JSON snapshot. Setup embeds that snapshot in
+the application through `hook.ConfigurationSnapshot()`; runtime does not read
+the source configuration file or parse YAML. Selected behavioral metadata and
+resolved values contribute to the build-cache identity. Source paths,
+diagnostic provenance, and process-start environment overrides do not. Typed
+rule accessors and runtime environment precedence are implemented by the
+follow-up configuration issues.
+
 ## Metadata discovery during setup
 
 Setup only considers metadata belonging to instrumentation modules whose rules
@@ -95,3 +128,11 @@ Missing metadata is not a setup error by itself. Setup returns resolved
 definitions and selected module roots without metadata to the application
 configuration validator, which can report a missing definition only when a
 supplied option needs one. Discovery does not select or enable instrumentation.
+
+When configuration includes an option that cannot be matched to selected
+metadata while one or more selected modules lack `metadata.yaml`, validation
+fails conservatively and names the missing module roots. A Go configuration
+group is considered selected when selected metadata declares at least one
+`go.<group>.*` option. Unknown options within such a group fail validation;
+other Go groups are warned about and ignored as unselected. Group ownership is
+derived from metadata paths rather than inferred from a Go module path.

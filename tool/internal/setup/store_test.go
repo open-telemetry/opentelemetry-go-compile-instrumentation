@@ -15,6 +15,7 @@ import (
 	"golang.org/x/tools/go/packages"
 
 	"go.opentelemetry.io/otelc/tool/internal/compileindex"
+	"go.opentelemetry.io/otelc/tool/internal/configuration"
 	"go.opentelemetry.io/otelc/tool/internal/rule"
 	"go.opentelemetry.io/otelc/tool/util"
 )
@@ -38,6 +39,43 @@ func TestSetupPhaseStore(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "[]", string(data))
 	assert.True(t, compileindex.Excludes("example.com/unmatched"))
+}
+
+func TestSetupPhaseStoreApplicationSnapshotAndClearsStaleSnapshot(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	sp := newTestSetupPhase()
+	sp.validatedApplicationConfig.Snapshot = []byte(`{"version":1,"values":{"go.sample.enabled":true}}`)
+	require.NoError(t, sp.store([]*rule.InstRuleSet{}))
+
+	stored, err := os.ReadFile(util.GetApplicationConfigurationFile())
+	require.NoError(t, err)
+	assert.Equal(t, sp.validatedApplicationConfig.Snapshot, stored)
+	state, err := os.ReadFile(util.GetApplicationConfigurationStateFile())
+	require.NoError(t, err)
+	present, err := configuration.VerifyApplicationSnapshotState(state, stored)
+	require.NoError(t, err)
+	assert.True(t, present)
+	info, err := os.Stat(util.GetApplicationConfigurationFile())
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+
+	sp.validatedApplicationConfig.Snapshot = nil
+	require.NoError(t, sp.store([]*rule.InstRuleSet{}))
+	assert.NoFileExists(t, util.GetApplicationConfigurationFile())
+	state, err = os.ReadFile(util.GetApplicationConfigurationStateFile())
+	require.NoError(t, err)
+	present, err = configuration.VerifyApplicationSnapshotState(state, nil)
+	require.NoError(t, err)
+	assert.False(t, present)
+}
+
+func TestSetupPhaseStoreRejectsInvalidApplicationSnapshot(t *testing.T) {
+	t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+	require.NoError(t, os.MkdirAll(util.GetBuildTempDir(), 0o755))
+	sp := newTestSetupPhase()
+	sp.validatedApplicationConfig.Snapshot = []byte("not JSON")
+	require.ErrorContains(t, sp.store([]*rule.InstRuleSet{}), "decode application configuration snapshot")
 }
 
 func TestSetupPhaseStoreIndexErrorIsNonfatal(t *testing.T) {
@@ -472,6 +510,23 @@ func TestStoreInjectedHashSkipsUnloadableImports(t *testing.T) {
 
 	writeFile("m/gone/gone.go", "package gone\n")
 	assert.NotEqual(t, third, hash(), "an import whose dependency starts to load must change the hash")
+}
+
+func TestInjectedHashIncludesApplicationConfigurationIdentity(t *testing.T) {
+	sp := newTestSetupPhase()
+
+	first, err := sp.injectedHash(t.Context(), nil)
+	require.NoError(t, err)
+
+	sp.validatedApplicationConfig.Identity = []byte(`{"values":{"go.sample.enabled":true}}`)
+	second, err := sp.injectedHash(t.Context(), nil)
+	require.NoError(t, err)
+	assert.NotEqual(t, first, second)
+
+	sp.validatedApplicationConfig.Identity = []byte(`{"values":{"go.sample.enabled":false}}`)
+	third, err := sp.injectedHash(t.Context(), nil)
+	require.NoError(t, err)
+	assert.NotEqual(t, second, third)
 }
 
 // TestLoadInjectedPackagesReturnsOtherErrors covers a load that fails for a
